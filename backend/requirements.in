@@ -9,7 +9,6 @@ fastapi[standard]
 fonttools
 honcho
 httpx
-jwt
 mypy
 modal>=1.4.0
 packaging

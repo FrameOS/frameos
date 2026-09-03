@@ -5,8 +5,10 @@ cold: each section says what that part of FrameOS *is* before it says what is
 missing from it. Reference material — principles, permission scopes, threat
 models, wire protocols, measurements — lives in the linked docs; this file only
 carries the work. **When an item ships, delete it.** Larger tracks keep their
-own files: architecture convergence in `docs/convergence-todo.md`, store
-content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`.
+own files: security findings in `docs/security-todo.md`, architecture
+convergence in `docs/convergence-todo.md`, store
+content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`,
+cloud billing in `cloud/docs/accounting-todo.md`.
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
 new Nim, every surface that shows a compiled scene warns and points at the
@@ -14,10 +16,10 @@ converter (scenes.frameos.net/nim-converter, the editor button, MCP
 `scene_convert`, the CLI), deploys install release binaries, and
 `last_successful_deploy.build_kind` records which frames still build from
 source (`docs/legacy-source-builds.md`). Deleting the source-build path is
-item 1 of `docs/convergence-todo.md` — no earlier than one release after
-2026-08-30, once `build_kind` shows a clean cycle; until then the legacy
-path keeps working when asked for. The "Both control planes" rule below
-stands.
+item 1 of `docs/convergence-todo.md` — not before October 2026, maybe much
+later or never; until then the legacy path keeps working when asked for,
+and hardening it (the unsandboxed Nim stage in `docs/security-todo.md`) is
+not a priority. The "Both control planes" rule below stands.
 
 Two rules that shape most entries:
 
@@ -37,36 +39,41 @@ Two rules that shape most entries:
 - **Verify on hardware** (docs/esp32-memory.md, 2026-08-24): the Weather
   scene renders on the 16 MB 13.3" (frame 529463b4) after a reboot with no
   `memory:oomAbort`; post-render idle PSRAM stays near the ~6.9 MB
-  baseline; the sky gradient shows no strip seams. Then the same on an
-  8 MB 13.3" (565 canvas), where the strips are the only thing that fits.
+  baseline; the sky gradient shows no strip seams. The 8 MB half is done:
+  the E1004 (565 canvas, strips are the only thing that fits) renders
+  Weather with an 873 KB PSRAM low-water mark since the transpiler fix
+  (#428, measured on the board 2026-09-01).
 - **Verify on hardware** (docs/esp32-memory.md, 2026-08-23): a 24 MP photo
   cover-rendered on the 16 MB 13.3" is sharp (no `render:degraded` in the
   log — the cover window keeps the plan at 2.9 MB inside the RGBX canvas's
-  ~5 MB headroom); the 7.3"
-  weather sky renders without bands (RGBX canvas now; boot line
-  `canvas: 800x480 rgbx`); the E1004 logs `canvas: 1200x1600 rgb565
-  (dithered stores)` and its gradients are band-free; after a text
-  render idle PSRAM should drop ~0.5 MB, not 1.6 MB; `render:degraded` and
-  `memory:oomAbort` appear in the cloud log when provoked (force the budget
-  low with an oversized photo); the leak-percent restart fires.
+  ~5 MB headroom); the 7.3" weather sky renders without bands (RGBX canvas
+  now; boot line `canvas: 800x480 rgbx`); the E1004's gradients are
+  band-free on its `canvas: 1200x1600 rgb565 (dithered stores)`; after a
+  text render idle PSRAM should drop ~0.5 MB, not 1.6 MB; `render:degraded`
+  and `memory:oomAbort` appear in the cloud log when provoked (force the
+  budget low with an oversized photo); the leak-percent restart fires.
+
+---
 
 ## Pre-release manual test sweep
 
 `docs/manual-testing-todo.md` collects every unticked manual checkbox and
-"needs hardware" note from PRs #362–#382, grouped by test bench. Work it
+"needs hardware" note from PRs #362 onward, grouped by test bench. Work it
 before the next release; delete it when empty.
 
 ---
 
 ## Frame privileges and FrameOS Remote
 
-Audited 2026-08-16, shipped 2026-08-29; `docs/buildroot-privileges.md` §4 is
-the reference. Generic Buildroot images (`raspberry-pi-64`, `raspberry-pi-5`)
-run `frameos.service` as the `frameos` user behind a hardened unit; root work
-goes through the privileged door (`frameos/src/frameos/privileged.nim`: enum
-verbs, validated arguments, a `.path`-triggered root oneshot); OTA re-verifies
-the minisign signature on the root side; the images ship no FrameOS Remote at
-all, and the remote lost its PTY verbs everywhere. Left:
+Audited 2026-08-16 and implemented in PR #415;
+`docs/buildroot-privileges.md` §4 is the reference. Generic Buildroot images
+(`raspberry-pi-64`, `raspberry-pi-5`) run `frameos.service` as the `frameos`
+user behind a hardened unit; root work goes through the privileged door
+(`frameos/src/frameos/privileged.nim`: enum verbs, validated arguments, a
+`.path`-triggered root oneshot); OTA re-verifies the minisign signature on the
+root side, refuses downgrades, and binds signed bytes to the requested
+version/target; the images ship no FrameOS Remote at all, and the remote lost
+its PTY verbs everywhere. Left:
 
 - **Verify on hardware** — nothing has rendered under the unprivileged unit
   yet. The checklist is in `docs/manual-testing-todo.md` ("Privilege
@@ -101,8 +108,13 @@ file's "Current gaps".
 
 ## Open questions (decisions, not code)
 
-- Billing mechanics — Stripe? bundled tiers vs per-service metering? Decide
-  before anything paid ships.
+- Billing — decided 2026-09-01: postpay AI metering plus a three-plan
+  ladder, double-entry ledger, one invoice a month
+  (`cloud/docs/accounting-todo.md` §0). Metering is live; nothing is
+  invoiced. The payment provider (§8.7 — Stripe or a merchant-of-record),
+  the invoicing entity (§8.15) and the plan numbers (§8.13) are parked
+  until there are users to invoice (decided 2026-09-03); the integration
+  is small once needed.
 - `store:publish` human review: always, only for the public store, or
   pre-review for risky (shell-app) scenes? Today it is automated moderation +
   badges + post-moderation only.
@@ -113,10 +125,12 @@ file's "Current gaps".
 - Asset-backup key recovery UX. The answer has to remain "we cannot read your
   photos".
 - One backend link per installation, or per organization/project?
-- Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico): serving them
-  means the cloud renders every frame for them — free cloud rendering forever,
-  for everyone. Decide before building; until then C3 boards stay out of the
-  cloud flasher.
+- Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico) — decided
+  2026-09-01: cloud rendering is a paid-plan entitlement, enforced as N
+  frames *and* a minimum refresh interval, none on the free tier
+  (`cloud/docs/accounting-todo.md` §0.2). C3 boards stay out of the cloud
+  flasher until that entitlement is enforced at frame creation — item 3 of
+  `docs/convergence-todo.md`.
 
 ---
 
@@ -160,13 +174,13 @@ Everything else parked:
   to `raspberry-pi-5` for free — widen `BR2_LINUX_KERNEL_INTREE_DTS_NAME` then.
   Pi 2 (BCM2836, ARMv7) is deliberately unsupported: it is the only Pi needing
   its own 32-bit `kernel7.img`, and Buildroot builds one kernel per image.
-- **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
-  `signup-notifications.ts`, `discord.ts`) — notifications go through PostHog
-  now. Held deliberately: the PostHog path has not had a live report to prove
-  itself on, and deleting the fallback first would mean finding out it does not
-  work by missing a report. Delete on the first real notification through the
-  new path. The privacy policy already omits Discord, so the env var stays
-  unset until then.
+- **Remove the scene-report Discord webhook** (`DISCORD_REPORTS_WEBHOOK_URL`,
+  `discord.ts`, used only by the store report route). Reports now also
+  capture a `store scene reported` PostHog event (the signup path already
+  moved: new-user messages come from a PostHog webhook on
+  `cloud user signed up`). Wire a PostHog webhook on the report event, watch
+  one real report arrive through it, then delete `discord.ts`, its test, the
+  env var and the `/admin` system check.
 - **A second transactional email provider.** Postmark is a single point of
   failure gating every login; its failure is visible (`/admin` live check, error
   tracking) but not survivable. Deferred not because it is hard but because
@@ -177,12 +191,6 @@ Everything else parked:
   The workspace advisory reads device metrics, so a frame too low on internal
   RAM to connect reports nothing and cannot be flagged. A frame already over the
   edge is visible over USB and nowhere else.
-- **quickts: parse TypeScript straight into QuickJS** — strip TS syntax at parse
-  time, so apps ship `.ts` source and both the transpiler pass and the
-  transpiled copy every runtime keeps disappear.
-- **ESP32: parse/transpile scenes at deploy time** — shelved. Cold-boot
-  transpile is only ~3.3 s and shipping readable TS source is a feature. Revisit
-  only if boot time or flash budget becomes a real constraint.
 - Fleet features: one cloud account administering many backends (installer /
   digital signage); a cloud-side "all my frames" dashboard.
 - Shared household access: invite a second account to a backend with a role
@@ -195,14 +203,9 @@ Everything else parked:
   key, cached) so users do not need per-service API keys.
 - ESP32 spill follow-ups: a proactive Content-Length trigger; a URL+ETag decode
   cache.
-- Publish a 16MB ESP32-C3 release asset. "Flash latest release" provisions a
-  XTEINK X4 from the 4MB no-OTA generic image today, which works but leaves
-  three quarters of the chip and OTA unused — the flasher warns about exactly
-  this. A `esp32-c3-16mb` asset in the release job removes the warning.
-- ESP32 board nice-to-haves: parallel firmware builds (shared
-  `generated_config.h` and nimcache serialise under the build lock), a portal
-  Wi-Fi scan list and AP password, mDNS advertisement, log persistence across
-  offline periods, firmware artifact GC, deep-sleep improvements.
+- ESP32 board nice-to-haves: a portal Wi-Fi scan list and AP password, mDNS
+  advertisement, log persistence across offline periods, deep-sleep
+  improvements.
 - ESP32 internal-RAM headroom, only if it gets tight again: move QuickJS
   allocations to PSRAM (`JS_NewRuntime2` with PSRAM-backed
   `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384`) and cJSON

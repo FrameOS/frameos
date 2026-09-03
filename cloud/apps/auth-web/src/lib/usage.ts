@@ -17,6 +17,7 @@
 import { and, eq, gt, or, sql } from "drizzle-orm";
 import {
   accountAiUsage,
+  accountMarginBasisPoints,
   readAccountPlan,
   readBillingSettings,
   utcDayWindow,
@@ -394,12 +395,11 @@ async function accountAiSummary(
   known?: AccountPlan | undefined,
 ) {
   try {
-    const [thisMonth, lastMonth, today, settings, plan] = await Promise.all([
+    const [thisMonth, lastMonth, today, settings] = await Promise.all([
       accountAiUsage(db, accountId, utcMonthWindow(now)),
       accountAiUsage(db, accountId, utcMonthWindow(now, -1)),
       accountAiUsage(db, accountId, utcDayWindow(now)),
       readBillingSettings(db),
-      known ?? readAccountPlan(db, accountId),
     ]);
     const [account] = await db.execute<{ ai_disabled_at: string | null }>(
       sql`select ai_disabled_at from accounts where id = ${accountId}`,
@@ -410,9 +410,12 @@ async function accountAiSummary(
       billable_micros: thisMonth.billableMicros.toString(),
       daily_cap_micros: settings.dailyCapMicros.toString(),
       enabled: !account?.ai_disabled_at,
-      margin_basis_points: plan.subscribed
-        ? plan.plan.marginBasisPoints
-        : settings.marginBasisPoints,
+      // The same function metering prices with — one definition (plans.ts).
+      // `known` is the caller's already-read plan; the margin lookup reads it
+      // again only when nobody handed one in.
+      margin_basis_points: known?.plan.fromTable
+        ? known.plan.marginBasisPoints
+        : await accountMarginBasisPoints(db, accountId, settings),
       metering_mode: settings.meteringMode as string,
       month_micros: thisMonth.chargeableMicros.toString(),
       own_key_only: thisMonth.ownKeyOnly,
@@ -443,6 +446,48 @@ async function accountAiSummary(
  * lines) goes in one statement. Cheap when under budget: callers gate on the
  * SUM above first.
  */
+// The chatty frame pays first: its own oldest lines go until the account is
+// back under budget (or the frame has nothing older than the lines it just
+// shipped). Only when that is not enough does the account-wide cull run —
+// otherwise one frame in a boot loop (or an unconfirmed frame from a leaked
+// image, before the hub started dropping those) would erase the quiet
+// frames' whole history to make room for its noise. Returns true when the
+// account is still over budget afterwards.
+export async function cullFrameLogsForFrameOverBudget(
+  db: FramesDatabase,
+  accountId: string,
+  frameId: string,
+): Promise<boolean> {
+  const { frameLogBytes } = await accountLimits(db, accountId);
+  const [totals] = await db
+    .select({
+      account: sql<number>`coalesce(sum(${frameLogs.sizeBytes}), 0)::float8`,
+      frame: sql<number>`coalesce(sum(${frameLogs.sizeBytes}) filter (where ${frameLogs.frameId} = ${frameId}), 0)::float8`,
+    })
+    .from(frameLogs)
+    .innerJoin(frames, eq(frames.id, frameLogs.frameId))
+    .where(eq(frames.accountId, accountId));
+  const accountBytes = Number(totals?.account ?? 0);
+  const frameBytes = Number(totals?.frame ?? 0);
+  if (accountBytes <= frameLogBytes) {
+    return false;
+  }
+  const allowance = Math.max(0, frameLogBytes - (accountBytes - frameBytes));
+  await db.execute(sql`
+    with ordered as (
+      select fl.id,
+             sum(fl.size_bytes) over (order by fl.id desc) as running
+      from ${frameLogs} fl
+      where fl.frame_id = ${frameId}
+    )
+    delete from ${frameLogs}
+    where id in (
+      select id from ordered where running > ${allowance}
+    )
+  `);
+  return accountBytes - Math.max(0, frameBytes - allowance) > frameLogBytes;
+}
+
 export async function cullFrameLogsOverBudget(
   db: FramesDatabase,
   accountId: string,

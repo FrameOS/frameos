@@ -8,12 +8,15 @@ import {
   parseClientKind,
   parseScopes,
   parseString,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
   safeLocalOrigin,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createSecretToken, hashSecret, hashUserCode } from "../../../../src/lib/secrets";
+
+// Device-flow metadata: a few strings and a scope list.
+const maxDeviceStartBodyBytes = 64 * 1024;
 
 export const runtime = "nodejs";
 
@@ -34,7 +37,11 @@ export async function POST(request: NextRequest) {
     return response;
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxDeviceStartBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const userCode = await generateUniqueUserCode(db);
   const deviceCode = createSecretToken("fc_device", 40);
   const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);

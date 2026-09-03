@@ -1,3 +1,70 @@
+import std/os
+
+when defined(posix) and not defined(frameosEmbedded) and not defined(frameosWasm):
+  import std/posix
+
+  proc secureTempFile(prefix: string): tuple[path: string, handle: File] =
+    ## std/posix_utils prefers Linux's mkostemp when Nim merely declares it;
+    ## that declaration is also visible on macOS even though libc does not
+    ## provide the symbol. Use portable POSIX mkstemp directly.
+    var pattern = prefix & "XXXXXX"
+    let fd = posix.mkstemp(pattern.cstring)
+    if fd < 0:
+      raiseOSError(OSErrorCode(errno))
+    if not open(result.handle, fd, fmReadWrite):
+      discard posix.close(fd)
+      raiseOSError(OSErrorCode(errno))
+    result.path = pattern
+
+proc writeFileAtomically*(path: string, content: string, private = false,
+                          groupReadableOnly = false) =
+  ## Replace a regular file without following the destination if it is a
+  ## symlink. The temporary file is created with mkstemp in the destination
+  ## directory, so its name cannot be pre-planted by an untrusted process and
+  ## the final rename is atomic. This matters when a root helper writes into a
+  ## sticky directory shared with the unprivileged runtime.
+  when defined(posix) and not defined(frameosEmbedded) and not defined(frameosWasm):
+    let parent = parentDir(path)
+    let prefix = parent / ("." & lastPathPart(path) & ".tmp.")
+    let (tempPath, handle) = secureTempFile(prefix)
+    var openHandle = handle
+    var isOpen = true
+    try:
+      setFilePermissions(tempPath,
+        if private: {fpUserRead, fpUserWrite}
+        elif groupReadableOnly: {fpUserRead, fpUserWrite, fpGroupRead}
+        else: {fpUserRead, fpUserWrite, fpGroupRead, fpOthersRead})
+      openHandle.write(content)
+      flushFile(openHandle)
+      close(openHandle)
+      isOpen = false
+      moveFile(tempPath, path)
+    except:
+      if isOpen:
+        try:
+          close(openHandle)
+        except CatchableError:
+          discard
+      if fileExists(tempPath) or symlinkExists(tempPath):
+        try:
+          removeFile(tempPath)
+        except CatchableError:
+          discard
+      raise
+  else:
+    # Embedded/WASM and Windows do not run the root door. Keep their small
+    # VFS-compatible implementation while still applying the final mode.
+    writeFile(path, content)
+    setFilePermissions(path,
+      if private: {fpUserRead, fpUserWrite}
+      elif groupReadableOnly: {fpUserRead, fpUserWrite, fpGroupRead}
+      else: {fpUserRead, fpUserWrite, fpGroupRead, fpOthersRead})
+
+proc writePrivateFile*(path: string, content: string) =
+  ## Atomic, symlink-safe replacement whose temporary inode is 0600 before
+  ## any secret bytes are written.
+  writeFileAtomically(path, content, private = true)
+
 proc blocksToBytes*(blocks, blockSize: int64): int64 =
   ## Block counts times a block size, in 64-bit arithmetic, always.
   ##
@@ -11,13 +78,11 @@ proc blocksToBytes*(blocks, blockSize: int64): int64 =
     return 0
   blocks * blockSize
 
-when defined(frameosEmbedded) or defined(frameosWasm):
+when defined(frameosEmbedded) or defined(frameosWasm) or not defined(posix):
   proc getAvailableDiskSpace*(path: string): int64 =
     ## No statvfs on the embedded VFS; callers treat -1 as "unknown".
     -1
 else:
-  import posix
-
   proc getAvailableDiskSpace*(path: string): int64 =
     let fd = open(path.cstring, O_RDONLY)
     if fd >= 0:

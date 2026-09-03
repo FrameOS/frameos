@@ -47,9 +47,8 @@ import { fetchTzSlice } from "./tz-slice";
 import { logWarn, reportError } from "./log";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
+  cullFrameLogsForFrameOverBudget,
   cullFrameLogsOverBudget,
-  frameLogBytesForAccount,
-  accountLimits,
 } from "./usage";
 
 type Database = ReturnType<typeof createDb>;
@@ -686,10 +685,13 @@ export function frameSummary(
     name: frame.name,
     scenes_checksum: frame.scenesChecksum,
     schedule: frame.schedule,
-    // Which service-settings groups this frame's assigned scenes declare —
-    // group NAMES only, never a field or a value. `[]` covers both "declares
-    // nothing" and the NULL column of a frame assigned scenes before the
-    // column existed; the device pull backfills that on its next poll.
+    // Which service-settings groups the owner has GRANTED to this frame's
+    // assigned scenes (the union over the frame's assignments; what the
+    // device pull ships) — group NAMES only, never a field or a value. `[]`
+    // covers both "nothing granted" and the NULL column of a frame assigned
+    // scenes before the column existed; the device pull backfills that on
+    // its next poll. What each scene DECLARES is per assignment, on
+    // GET /api/frames/{id}/scenes.
     service_setting_groups: readServiceSettingGroups(frame.serviceSettingGroups) ?? [],
     ...(linkedClient
       ? {
@@ -1000,39 +1002,86 @@ export async function enqueueServiceSettingsRefreshIfScoped(
   }
 }
 
-// Read frames.service_setting_groups. `undefined` means "never computed"
-// (a NULL column, or garbage from a hand-edited row) and tells the pull route
-// to compute and backfill it; an empty array means "computed, declares
-// nothing" and is NOT recomputed. Screened through deviceDeliverableFields so
-// a group retired from the deliverable list can never reappear from an old
-// row.
+// Read a jsonb list of service-settings group names — frames.service_setting_groups
+// (the granted union) or either per-assignment column. `undefined` means
+// "never computed" (a NULL column, or garbage from a hand-edited row) and,
+// on the frame row, tells the pull route to compute and backfill it; an
+// empty array means "computed, nothing" and is NOT recomputed. Screened
+// through deviceDeliverableFields so a group retired from the deliverable
+// list can never reappear from an old row, and de-duplicated.
 export function readServiceSettingGroups(
   value: unknown,
 ): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
-  return value.filter(
-    (entry): entry is string =>
-      typeof entry === "string" && deviceDeliverableFields.has(entry),
-  );
+  return [
+    ...new Set(
+      value.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && deviceDeliverableFields.has(entry),
+      ),
+    ),
+  ];
 }
 
 // The groups a set of interpreted scenes declare, in the shape the column
 // stores. Pure: callers that already hold the assembled scenes (the scene
 // assignment route) pass them straight in rather than re-reading anything.
+// A declaration is a REQUEST — the owner's per-assignment grant decides
+// what the device receives (grantedSettingsGroupsForAssignment).
 export function declaredServiceSettingGroups(scenes: unknown[]): string[] {
   return requiredSettingsForScenes(scenes as Record<string, unknown>[])
     .map((group) => group.key)
     .filter((key) => deviceDeliverableFields.has(key));
 }
 
-// Compute the groups from the frame's CURRENT assignments and persist them.
-// Only the backfill path (a NULL column on an old frame) pays for this: it
-// unzips every assigned scene, which is exactly why the column exists.
-// Returns [] when the scenes cannot be assembled at all (a pulled scene, a
-// yanked version) and persists nothing in that case, so the next request
-// retries instead of freezing "declares nothing" into the row.
+// What ONE assignment's scene may actually receive: the owner's grant,
+// narrowed to what the (current) version declares. A NULL grant is a row
+// from before grants existed (migration 0048) and reads as "everything it
+// declares" — the behaviour those frames were assigned under — until the
+// owner next saves the scene list and it becomes explicit. Pure.
+export function grantedSettingsGroupsForAssignment(assignment: {
+  declaredSettingsGroups: unknown;
+  grantedSettingsGroups: unknown;
+}): string[] {
+  const declared = readServiceSettingGroups(assignment.declaredSettingsGroups) ?? [];
+  const granted = readServiceSettingGroups(assignment.grantedSettingsGroups);
+  if (granted === undefined) {
+    return declared;
+  }
+  return granted.filter((group) => declared.includes(group));
+}
+
+// The union of the granted groups across a frame's assignments, in
+// assignment order and de-duplicated: what frames.service_setting_groups
+// holds and what the device pull answers with.
+export function grantedServiceSettingGroupsUnion(
+  assignments: readonly {
+    declaredSettingsGroups: unknown;
+    grantedSettingsGroups: unknown;
+  }[],
+): string[] {
+  const union: string[] = [];
+  for (const assignment of assignments) {
+    for (const group of grantedSettingsGroupsForAssignment(assignment)) {
+      if (!union.includes(group)) {
+        union.push(group);
+      }
+    }
+  }
+  return union;
+}
+
+// Compute the granted groups from the frame's CURRENT assignments and
+// persist them: each assignment's declared list (so a legacy row learns
+// what its scene asks for; its NULL grant stays NULL and keeps reading as
+// "all of it") and the frame row's granted union. Only the backfill path
+// (a NULL column on an old frame) pays for this: it unzips every assigned
+// scene, which is exactly why the column exists. Returns [] when the scenes
+// cannot be assembled at all (a pulled scene, a yanked version) and persists
+// nothing in that case, so the next request retries instead of freezing
+// "nothing" into the row.
 export async function computeAndStoreServiceSettingGroups(
   db: ReturnType<typeof createDb>,
   frameId: string,
@@ -1041,13 +1090,34 @@ export async function computeAndStoreServiceSettingGroups(
   if ("error" in built) {
     return [];
   }
-  const groups = declaredServiceSettingGroups(built.scenes);
+  return storeDeclaredSettingsGroups(db, frameId, built.assignments);
+}
+
+// Persist what a freshly assembled payload says each assignment declares
+// (grants untouched) and the frame row's granted union; returns the union.
+// Shared by the backfill above and by the re-push of an unpinned assignment
+// that may have moved to a newer version.
+export async function storeDeclaredSettingsGroups(
+  db: FramesDatabase,
+  frameId: string,
+  assignments: readonly AssignmentSettingsGroups[],
+): Promise<string[]> {
+  for (const assignment of assignments) {
+    await db
+      .update(frameSceneAssignments)
+      .set({
+        declaredSettingsGroups: assignment.declaredSettingsGroups,
+        updatedAt: new Date(),
+      })
+      .where(eq(frameSceneAssignments.id, assignment.id));
+  }
+  const groups = grantedServiceSettingGroupsUnion(assignments);
   await storeServiceSettingGroups(db, frameId, groups);
   return groups;
 }
 
 export async function storeServiceSettingGroups(
-  db: ReturnType<typeof createDb>,
+  db: FramesDatabase,
   frameId: string,
   groups: string[],
 ) {
@@ -1142,10 +1212,24 @@ export async function pinnedSceneVersion(
 // be answered per scene, not only for the set as a whole.
 export type SceneDeployState = { version: number; checksum: string };
 
+// One assignment's service-settings picture, as the payload build saw it:
+// what the version it assembled declares, and the grant the row carries
+// (raw jsonb — NULL for a legacy row; grantedSettingsGroupsForAssignment
+// resolves it).
+export type AssignmentSettingsGroups = {
+  id: string;
+  sceneId: string;
+  declaredSettingsGroups: string[];
+  grantedSettingsGroups: unknown;
+};
+
 // Build the interpreted-scene payload for a frame from its assignments. The
 // payload shape matches the device's uploaded-scenes path ({"scenes": […]});
 // the checksum lets the device and the fleet UI agree on sync state, and
-// sceneStates carries the same information per store scene.
+// sceneStates carries the same information per store scene. `assignments`
+// carries, per assignment, the settings groups the assembled version
+// declares — computed here because this is the one place the scene bytes
+// are already open.
 export async function buildScenesPayloadForFrame(
   db: FramesDatabase,
   frameId: string,
@@ -1155,11 +1239,14 @@ export async function buildScenesPayloadForFrame(
       checksum: string;
       sceneNames: string[];
       sceneStates: Record<string, SceneDeployState>;
+      assignments: AssignmentSettingsGroups[];
     }
   | { error: string }
 > {
   const assignments = await db
     .select({
+      grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+      id: frameSceneAssignments.id,
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
       sceneSlug: storeScenes.slug,
@@ -1174,6 +1261,7 @@ export async function buildScenesPayloadForFrame(
   const scenes: unknown[] = [];
   const sceneNames: string[] = [];
   const sceneStates: Record<string, SceneDeployState> = {};
+  const assignmentGroups: AssignmentSettingsGroups[] = [];
   let rawBytes = 0;
   for (const assignment of assignments) {
     if (assignment.sceneStatus !== "active") {
@@ -1244,6 +1332,12 @@ export async function buildScenesPayloadForFrame(
     });
     scenes.push(...stamped);
     sceneNames.push(assignment.sceneName);
+    assignmentGroups.push({
+      declaredSettingsGroups: declaredServiceSettingGroups(stamped),
+      grantedSettingsGroups: assignment.grantedSettingsGroups,
+      id: assignment.id,
+      sceneId: assignment.sceneId,
+    });
     // The digest of just this assignment's slice of the payload. Comparing
     // it against the copy stored at the last device-acked push is what lets
     // the workspace flag the one edited scene instead of all of them.
@@ -1260,7 +1354,13 @@ export async function buildScenesPayloadForFrame(
     return { error: "scenes_payload_too_large" };
   }
   const checksum = createHash("sha256").update(serialized).digest("hex");
-  return { checksum, sceneNames, sceneStates, scenes };
+  return {
+    assignments: assignmentGroups,
+    checksum,
+    sceneNames,
+    sceneStates,
+    scenes,
+  };
 }
 
 // Store one batch of shipped logs, enforcing the per-frame retention cap in
@@ -1309,14 +1409,17 @@ export async function storeFrameLogs(
           and(eq(frameLogs.frameId, frameId), lt(frameLogs.id, cutoff.id + 1)),
         );
     }
-    // Account byte budget: logs are telemetry, so over budget the OLDEST
-    // lines across the whole account are culled — never refused (a frame
-    // must not learn its logs bounced; usage.ts owns the budget).
+    // Account byte budget: logs are telemetry, so over budget old lines are
+    // culled — never refused (a frame must not learn its logs bounced;
+    // usage.ts owns the budget). The frame that overflowed loses its own
+    // oldest lines first; the account-wide cull is the fallback.
     if (accountId) {
-      const overBudget =
-        (await frameLogBytesForAccount(tx, accountId)) >
-        (await accountLimits(tx, accountId)).frameLogBytes;
-      if (overBudget) {
+      const stillOver = await cullFrameLogsForFrameOverBudget(
+        tx,
+        accountId,
+        frameId,
+      );
+      if (stillOver) {
         await cullFrameLogsOverBudget(tx, accountId);
       }
     }

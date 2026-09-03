@@ -5,20 +5,20 @@
 - Typical usage: run the backend service to manage frames, configure hardware-specific scenes, and deploy code or prebuilt scenes to devices over SSH.
 
 ## Cloud/backend parity (working rule)
-- There are TWO control planes for frames: the self-hosted backend (`backend/` + `frontend/`) and FrameOS Cloud (`cloud/` + `cloud-frontend/`). **Any frame-facing feature or fix must land on both, or explicitly note why it's one-sided** — unless the task says otherwise. When you touch frame panels, frame APIs, device verbs, or provisioning/flashing, check the other control plane before calling the work done. The current push is porting all ESP32 backend capabilities to the cloud (see `docs/todo.md`, "ESP32 backend→cloud parity").
+- There are TWO control planes for frames: the self-hosted backend (`backend/` + `frontend/`) and FrameOS Cloud (`cloud/` + `cloud-frontend/`). **Any frame-facing feature or fix must land on both, or explicitly note why it's one-sided** — unless the task says otherwise. When you touch frame panels, frame APIs, device verbs, or provisioning/flashing, check the other control plane before calling the work done. Neither plane builds ESP32 firmware: both flash the signed generic release image, provision over the USB console, and offer the release OTA (`docs/todo.md`, `embedded/esp32/README.md`).
 - The frame workspace UI is SHARED code (`frontend/src`), wrapped for cloud by `cloud-frontend/`. A fix that "doesn't show on cloud" is usually NOT a fork — check the `workspaceSurfaces` gating (`frontend/src/scenes/workspace/`) and remember the cloud serves a PREBUILT bundle: auth-web's predev rebuilds it via turbo (`scripts/build-frames-app.mjs`), but a long-running `pnpm dev` session keeps serving the bundle from its start.
 
 ## Cloud tests before you push (`verify` is the gate)
 
 - The cloud CI job named **`verify`** (`.github/workflows/cloud-ci.yml`) runs
-  `turbo run lint typecheck test build --filter='@frameos-cloud/*'` and then
+  `turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend` and then
   TWO integration suites against a real Postgres: `@frameos-cloud/auth-web`
   and `@frameos-cloud/frame-hub`. Run the same three locally from `cloud/`
   before pushing — a green `pnpm test` alone proves little, because the
   integration suites are where the interesting failures live:
 
   ```
-  pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*'
+  pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend
   pnpm --filter @frameos-cloud/auth-web test:integration
   pnpm --filter @frameos-cloud/frame-hub test:integration
   ```

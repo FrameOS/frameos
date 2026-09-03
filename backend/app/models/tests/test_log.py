@@ -133,10 +133,17 @@ async def test_process_log_bootup_updates_ip_frame_host(mock_pub, db, redis):
     db.add(frame)
     db.commit()
 
-    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"})
+    # A claimed address the request did not come from is ignored ...
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"}, ip="10.8.0.7")
+    assert db.get(Frame, frame.id).frame_host == "10.8.0.100"
 
-    updated = db.get(Frame, frame.id)
-    assert updated.frame_host == "10.8.0.204"
+    # ... the one it did come from is followed.
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"}, ip="10.8.0.204")
+    assert db.get(Frame, frame.id).frame_host == "10.8.0.204"
+
+    # Without a claimed address the observed peer is used.
+    await process_log(db, redis, frame, {"event": "bootup"}, ip="10.8.0.205")
+    assert db.get(Frame, frame.id).frame_host == "10.8.0.205"
 
 
 @pytest.mark.asyncio
@@ -187,17 +194,13 @@ async def test_process_log_bootup_does_not_override_stored_timezone(mock_pub, db
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
-async def test_process_log_embedded_bootup_records_boot_and_marks_generated_firmware_deployed(mock_pub, db, redis):
+async def test_process_log_embedded_bootup_marks_a_new_firmware_version_deployed(mock_pub, db, redis):
+    """The backend builds no ESP32 firmware any more: an embedded frame that
+    boots a FrameOS version the last recorded deploy did not know about has
+    just landed a release OTA, so that boot IS the deploy."""
     frame = await new_frame(db, redis, "EmbeddedBootFrame", "frame53.local", "server_host")
     frame.mode = "embedded"
-    frame.embedded = {
-        "platform": "esp32-s3",
-        "firmware": {
-            "status": "ready",
-            "completedAt": "2026-06-27T13:22:00+00:00",
-            "panel": "EPD_7in3e",
-        },
-    }
+    frame.embedded = {"platform": "esp32-s3"}
     frame.last_successful_deploy = {"frameos_version": "2026.6.15"}
     frame.last_successful_deploy_at = datetime(2026, 6, 13, 23, 41, 55)
     db.add(frame)
@@ -238,18 +241,13 @@ async def test_process_log_embedded_bootup_records_boot_and_marks_generated_firm
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
-async def test_process_log_embedded_bootup_does_not_mark_future_firmware_deployed(mock_pub, db, redis):
+async def test_process_log_embedded_bootup_does_not_remark_the_same_version(mock_pub, db, redis):
+    """A plain reboot (power cycle, restart, deep-sleep wake) reports the same
+    version the deploy snapshot already names — that is not a new deploy."""
     frame = await new_frame(db, redis, "EmbeddedBootFrame", "frame53.local", "server_host")
     frame.mode = "embedded"
-    frame.embedded = {
-        "platform": "esp32-s3",
-        "firmware": {
-            "status": "ready",
-            "completedAt": "2026-06-27T13:34:00+00:00",
-            "panel": "EPD_13in3e",
-        },
-    }
-    frame.last_successful_deploy = {"frameos_version": "2026.6.15"}
+    frame.embedded = {"platform": "esp32-s3"}
+    frame.last_successful_deploy = {"frameos_version": "2026.6.26"}
     frame.last_successful_deploy_at = datetime(2026, 6, 13, 23, 41, 55)
     db.add(frame)
     db.commit()
@@ -272,8 +270,43 @@ async def test_process_log_embedded_bootup_does_not_mark_future_firmware_deploye
 
     updated = db.get(Frame, frame.id)
     assert updated.embedded["lastBoot"]["frameosVersion"] == "2026.6.26"
-    assert updated.last_successful_deploy == {"frameos_version": "2026.6.15"}
+    assert updated.last_successful_deploy == {"frameos_version": "2026.6.26"}
     assert updated.last_successful_deploy_at == datetime(2026, 6, 13, 23, 41, 55)
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_embedded_bootup_without_a_previous_deploy_is_not_a_deploy(mock_pub, db, redis):
+    """A frame that has never deployed has no snapshot to update: the first
+    boot after a USB flash is recorded by the USB deploy flow, not here."""
+    frame = await new_frame(db, redis, "EmbeddedBootFrame", "frame53.local", "server_host")
+    frame.mode = "embedded"
+    frame.embedded = {"platform": "esp32-s3"}
+    frame.last_successful_deploy = None
+    frame.last_successful_deploy_at = None
+    db.add(frame)
+    db.commit()
+
+    boot_time = datetime(2026, 6, 27, 13, 23, 17)
+    await process_log(
+        db,
+        redis,
+        frame,
+        [
+            boot_time.replace(tzinfo=timezone.utc).timestamp(),
+            {
+                "event": "bootup",
+                "source": "esp32",
+                "ip": "10.8.0.232",
+                "version": "v2026.6.26-6-gdf4b4945-dirty",
+            },
+        ],
+    )
+
+    updated = db.get(Frame, frame.id)
+    assert updated.embedded["lastBoot"]["frameosVersion"] == "2026.6.26"
+    assert updated.last_successful_deploy is None
+    assert updated.last_successful_deploy_at is None
 
 
 @pytest.mark.asyncio

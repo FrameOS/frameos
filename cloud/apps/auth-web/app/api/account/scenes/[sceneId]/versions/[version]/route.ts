@@ -7,8 +7,9 @@ import { recordAuditEvent } from "../../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../../../src/lib/csrf";
 import {
+  defaultJsonBodyBytes,
   jsonError,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../../src/lib/rate-limit";
@@ -69,7 +70,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return jsonError("scene_not_found", 404);
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, defaultJsonBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   if (typeof body.yanked !== "boolean") {
     return jsonError("invalid_yanked", 400);
   }

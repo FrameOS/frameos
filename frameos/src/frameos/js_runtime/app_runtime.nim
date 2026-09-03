@@ -4,7 +4,6 @@ import pixie
 
 import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
-import frameos/js_runtime/source_map
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
@@ -15,18 +14,6 @@ import frameos/utils/system
 import frameos/js_runtime/burrito
 
 type
-  JsAppModule = ref object
-    ## One of the app's other files, loaded because something imported it.
-    ## Keeps the same transpiled output the main module keeps, for the same
-    ## reason: re-creating the interpreter must not re-transpile. The source
-    ## itself is not copied here; it is read from the runtime's `sources`.
-    name: string
-    allowJsx: bool
-    transpiled: bool
-    transpiledCode: string
-    map: SourceLineMap
-    mapBuilt: bool
-
   JsAppRuntime* = ref object
     category*: string
     outputType*: string
@@ -39,23 +26,10 @@ type
     ## on a frame the scene keeps these strings alive anyway, and a second
     ## copy of every helper file is memory an ESP32 does not have.
     sources*: JsonNode
-    modules: Table[string, JsAppModule]
-    ## Only .tsx/.jsx sources get the JSX transform, as in TypeScript itself.
-    allowJsx*: bool
     settingsKeys*: seq[string]
     js*: QuickJS
     ready*: bool
     initialized*: bool
-    # Transpiling is the most expensive thing a JS app does on a frame: 22
-    # seconds for the 36 KB app in the bundled Weather scene, on top of 7 for
-    # the 11 KB one. Evicting a runtime under memory pressure would otherwise
-    # pay that again on every render, so the result is kept — it is ~50 KB
-    # against ~29 s per render.
-    transpiled*: bool
-    transpiledCode*: string
-    transpiledMap*: SourceLineMap
-    transpiledMapBuilt*: bool
-    transpiledName*: string
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
@@ -83,9 +57,6 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
       jsAppEnvByCtx.del(runtime.js.context)
     if jsAppRuntimeByCtx.hasKey(runtime.js.context):
       jsAppRuntimeByCtx.del(runtime.js.context)
-    # The transpiler's source map is held in a global keyed by context, and
-    # for a large app it is a bigger object than the QuickJS runtime itself.
-    # Dropping the runtime without this recovers only the interpreter.
     clearJsSourceMaps(runtime.js.context)
   runtime.js.close()
   runtime.ready = false
@@ -128,9 +99,9 @@ proc releaseIdleJsAppRuntimes*() =
   ## interpreters the whole time, and a frame that sleeps for five minutes
   ## between renders sleeps holding all of them.
   ##
-  ## Cheap to undo: teardownJsRuntime keeps transpiledCode, so rebuilding
-  ## re-evaluates the module without re-transpiling — the expensive part, ~22 s
-  ## for the bundled Weather app.
+  ## Cheap to undo: rebuilding re-parses and re-evaluates the module, which
+  ## is a few milliseconds even for the bundled 36 KB Weather app now that
+  ## QuickJS parses the TypeScript itself.
   when defined(frameosEmbedded):
     for runtime in liveJsRuntimes:
       if runtime.ready and not jsRuntimeStack.contains(runtime):
@@ -766,8 +737,6 @@ proc newJsAppRuntime*(category: string, outputType: string, source: string,
     source: source,
     sourceName: mainName,
     sources: sources,
-    modules: initTable[string, JsAppModule](),
-    allowJsx: mainName.endsWith(".tsx") or mainName.endsWith(".jsx"),
     settingsKeys: settingsKeys,
     nextImageId: 0,
     images: initTable[int, Image](),
@@ -779,24 +748,6 @@ type
     configJson*: JsonNode
     runtime*: JsAppRuntime
 
-proc sourceMapForRuntime(runtime: JsAppRuntime): SourceLineMap {.gcsafe, raises: [].} =
-  ## This app's line map, built the first time an error needs one.
-  ##
-  ## Building it is ~45% of a transform — about 10 s of the 22 s a 36 KB app
-  ## cost on an ESP32-S3 — and it is read only to rewrite line numbers in an
-  ## error message. Both inputs are already retained (the original source and
-  ## the transpiled output), so deferring keeps nothing alive that was not.
-  if runtime.transpiledMapBuilt:
-    return runtime.transpiledMap
-  try:
-    runtime.transpiledMap = lineBasedSourceLineMap(
-      runtime.source, runtime.transpiledCode,
-      runtime.transpiledName, runtime.transpiledName)
-  except CatchableError, Defect:
-    runtime.transpiledMap = emptySourceLineMap(runtime.transpiledName, runtime.transpiledName)
-  runtime.transpiledMapBuilt = true
-  runtime.transpiledMap
-
 proc appFile(runtime: JsAppRuntime, name: string): string =
   ## Contents of one of the app's files, "" when absent.
   if runtime.sources.isNil or runtime.sources.kind != JObject:
@@ -806,18 +757,6 @@ proc appFile(runtime: JsAppRuntime, name: string): string =
 proc hasAppFile(sources: JsonNode, name: string): bool =
   not sources.isNil and sources.kind == JObject and sources.hasKey(name) and
     sources[name].kind == JString
-
-proc sourceMapForModule(runtime: JsAppRuntime, module: JsAppModule): SourceLineMap {.gcsafe, raises: [].} =
-  ## An imported file's line map, built lazily like the main module's.
-  if module.mapBuilt:
-    return module.map
-  try:
-    module.map = lineBasedSourceLineMap(runtime.appFile(module.name), module.transpiledCode,
-                                        module.name, module.name)
-  except CatchableError, Defect:
-    module.map = emptySourceLineMap(module.name, module.name)
-  module.mapBuilt = true
-  module.map
 
 const JsAppModuleExtensions = [".ts", ".tsx", ".js", ".jsx", ".json"]
 
@@ -937,21 +876,10 @@ proc loadAppJsonModule(ctx: ptr JSContext, name: string, text: string): ptr JSMo
   discard JS_SetModulePrivateValue(ctx, result, parsed)
 
 proc loadAppScriptModule(ctx: ptr JSContext, runtime: JsAppRuntime, name: string): ptr JSModuleDef =
-  var module = runtime.modules.getOrDefault(name)
-  if module.isNil:
-    module = JsAppModule(name: name, allowJsx: name.endsWith(".tsx") or name.endsWith(".jsx"))
-    runtime.modules[name] = module
-  if not module.transpiled:
-    try:
-      module.transpiledCode = transpileAppSource(runtime.appFile(name), name, module.allowJsx)
-    except CatchableError as error:
-      discard JS_ThrowSyntaxError(ctx, "%s", (name & ": " & error.msg).cstring)
-      return nil
-    module.transpiled = true
-  let loaded = module
-  registerJsSourceMapProvider(ctx, name,
-    proc(): SourceLineMap {.closure, gcsafe, raises: [].} = runtime.sourceMapForModule(loaded))
-  result = compileModule(ctx, module.transpiledCode, name)
+  # Straight from the scene JSON: no transpile, no copy, no source map. Error
+  # locations are already in this file's own lines. QuickJS keeps the compiled
+  # module in its loaded-modules list, so nothing is tracked here either.
+  result = compileModule(ctx, runtime.appFile(name), name, quicktsFlagsFor(name))
   if result == nil:
     rethrowNamingModule(ctx, name)
 
@@ -977,11 +905,6 @@ proc jsAppModuleLoader(ctx: ptr JSContext, moduleName: cstring, opaque: pointer)
   except CatchableError as error:
     discard JS_ThrowInternalError(ctx, "%s", ("Could not load module '" & name & "': " & error.msg).cstring)
     return nil
-
-proc mapAppErrorText(runtime: JsAppRuntime, ctx: ptr JSContext, text: string): string =
-  ## Rewrite locations in the main module, then in any imported module whose
-  ## map was registered while it loaded.
-  mapJsErrorText(ctx, text.mapJsErrorText(runtime.sourceMapForRuntime()))
 
 proc storeImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if image.isNil:
@@ -1318,51 +1241,24 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig) =
   # Named after the real file so `./helper` resolves beside it and error
   # locations read `app.ts:12:3`.
   let filename = runtime.sourceName
-  if not runtime.transpiled:
-    when defined(memProbe): memProbe("      prelude done, transpile src=" & $runtime.source.len & "B BEFORE")
-    # Erase types and stop: the module form goes to QuickJS as-is, and no line
-    # map is built here.
-    let transformed = transpileAppSource(runtime.source, filename, runtime.allowJsx)
-    when defined(memProbe): memProbe("      transpile AFTER code=" & $transformed.len & "B")
-    runtime.transpiledCode = transformed
-    runtime.transpiledName = filename
-    runtime.transpiledMapBuilt = false
-    runtime.transpiled = true
-  else:
-    when defined(memProbe): memProbe("      transpile CACHED code=" & $runtime.transpiledCode.len & "B")
+  when defined(memProbe): memProbe("      prelude done, module src=" & $runtime.source.len & "B BEFORE")
 
-  # Evaluate as a real ES module and publish its namespace where the prelude's
-  # __frameosExports() looks for it.
+  # Evaluate the source as a real ES module — TypeScript and JSX included,
+  # the bundled QuickJS parses both — and publish its namespace where the
+  # prelude's __frameosExports() looks for it. Nothing is generated, so error
+  # locations are the app's own lines and no line map is kept.
   let ctx = runtime.js.context
   var namespace: JSValue
   try:
-    namespace = runtime.js.evalModuleNamespace(runtime.transpiledCode, filename)
+    namespace = runtime.js.evalModuleNamespace(runtime.source, filename, quicktsFlagsFor(filename))
   except CatchableError as error:
-    # FrameOS used to run the JSX pass over every source, so an app could have
-    # JSX in a plain .ts file and work. TypeScript itself does not allow that
-    # — `<x>` is a type assertion in .ts — and the pass is the single most
-    # expensive stage on a frame, so it is now gated on the extension. Rather
-    # than break such an app, notice the syntax error it produces and retry
-    # with JSX enabled. The happy path never pays for this.
-    if not runtime.allowJsx and error.msg.contains("'<'"):
-      runtime.transpiledCode = transpileAppSource(runtime.source, filename, allowJsx = true)
-      runtime.transpiledMapBuilt = false
-      runtime.allowJsx = true
-      try:
-        namespace = runtime.js.evalModuleNamespace(runtime.transpiledCode, filename)
-      except CatchableError as retryError:
-        raise newException(JSException, runtime.mapAppErrorText(ctx, retryError.msg))
-    else:
-      raise newException(JSException, runtime.mapAppErrorText(ctx, error.msg))
+    raise newException(JSException, mapJsErrorText(ctx, error.msg))
   let globalObj = JS_GetGlobalObject(ctx)
   let installed = JS_SetPropertyStr(ctx, globalObj, "__frameosModule", namespace)
   JS_FreeValue(ctx, globalObj)
   if installed < 0:
     raise newException(JSException, "Could not install the app module: " & filename)
   when defined(memProbe): memProbe("      module eval AFTER")
-  registerJsSourceMapProvider(ctx, filename,
-    proc(): SourceLineMap {.closure, gcsafe, raises: [].} = runtime.sourceMapForRuntime())
-  when defined(memProbe): memProbe("      sourcemap registered")
   runtime.ready = true
 
 proc defaultImageWidth(owner: AppRoot, context: ExecutionContext, spec: JsonNode): int =
@@ -1399,11 +1295,14 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if data.startsWith("data:"):
       return decodeDataUrl(data)
     if data.startsWith("<svg") or data.startsWith("<?xml") or data.contains("<svg"):
-      let image = decodeSvgWithFallback(data, defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(
+        defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
+      let image = decodeSvgWithFallback(data, svgWidth, svgHeight)
       if image.isSome:
         return image.get()
-      # SVG has no dimensions probe; keep the unbounded fallback for it.
-      return decodeImageWithFallback(data)
+      # Bounded by the SVG's declared size (decodeImageWithDisplayBounds
+      # parses it), never rasterized at whatever viewBox it asks for.
+      return decodeImageWithDisplayBounds(data)
     return decodeImageWithDisplayBounds(data)
 
   if spec.kind == JObject and spec{"type"}.getStr() == "image":
@@ -1424,8 +1323,9 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
   of "image":
     if spec.hasKey("svg"):
       when defined(memProbe): memProbe("    svg decode src=" & $spec["svg"].getStr().len & "B BEFORE")
-      let svgWidth = defaultImageWidth(owner, context, spec)
-      let svgHeight = defaultImageHeight(owner, context, spec)
+      # The spec's width/height are scene-requested: bounded like a decode.
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(
+        defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
       # The same `intoTarget` handshake as the plain-canvas branch below: an
       # SVG panel is the common shape for a JS render app, and rasterizing it
       # into the target the planner offered is what keeps a full-size second
@@ -1463,12 +1363,10 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       return decodeDataUrl(spec["dataUrl"].getStr())
     if spec.hasKey("base64"):
       var decoded = spec["base64"].getStr().decode()
-      # SVG has no dimensions probe; everything else decodes bounded.
-      if decoded.len > 5 and (decoded.startsWith("<?xml") or decoded.startsWith("<svg")):
-        return decodeImageWithFallback(decoded)
+      # decodeImageWithDisplayBounds bounds an SVG by its declared size too.
       return decodeImageWithDisplayBounds(decoded)
-    let width = max(1, defaultImageWidth(owner, context, spec))
-    let height = max(1, defaultImageHeight(owner, context, spec))
+    let (width, height) = boundedRequestedDimensions(
+      defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
     # The consumer's half of `intoTarget`, for a JS app that asked for a plain
     # canvas: when the planner offered this node a target of exactly the size
     # we were about to allocate, draw into that instead. The JS drawing calls

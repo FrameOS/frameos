@@ -2,8 +2,23 @@
 // The worker loads the emscripten-built scene runtime (frameos.js/frameos.wasm)
 // and drives renders; this class owns the worker lifecycle, paints frames onto
 // a canvas, and exposes events/state as callbacks.
+import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
-import type { FrameOSScene, PreviewAssetEntry, PreviewAssetsInfo, PreviewFrame, SceneInfo } from './types'
+import type {
+  FrameOSScene,
+  PreviewAssetEntry,
+  PreviewAssetsInfo,
+  PreviewFrame,
+  PreviewRuntimeInfo,
+  SceneInfo,
+} from './types'
+
+/** What a render cost under a simulated device ceiling. */
+export interface DeviceMemoryUsage {
+  limitBytes: number
+  usedBytes: number
+  peakBytes: number
+}
 
 export interface FrameOSPreviewOptions {
   /** URL of the module worker script: `<assets>/preview-worker.js`. The
@@ -38,16 +53,26 @@ export interface FrameOSPreviewOptions {
   /** Set to false to run with an empty in-memory /srv/assets instead of the
    * browser's persistent folder. */
   browserAssets?: boolean
+  /** Run under a device's memory ceiling, so a scene too heavy for that
+   * device fails here instead of on hardware (see ./devices). Null or
+   * omitted renders with the browser's own memory. */
+  deviceLimits?: DeviceLimits | null
   /** Show frames the way an e-ink panel would: dithered to that panel's
    * inks or greys (see ./dither). Display only — the scene renders in full
    * colour either way. Null (the default) paints the frame as rendered. */
   panelPalette?: PanelPaletteKey | null
-  onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null) => void
+  onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
   onFrame?: (frame: PreviewFrame) => void
   onState?: (state: Record<string, unknown>) => void
   onLog?: (message: string) => void
   onSceneEvent?: (name: string, payload: Record<string, unknown>) => void
   onError?: (message: string) => void
+  /** The render ran out of memory under the simulated device ceiling. The
+   * runtime's heap is not recoverable afterwards (the same longjmp-and-reboot
+   * the firmware does), so the preview stops until it is re-created. */
+  onOutOfMemory?: (info: DeviceMemoryUsage & { refusedBytes: number }) => void
+  /** Memory used by the last render, while a device is simulated. */
+  onMemory?: (usage: DeviceMemoryUsage) => void
   /** The scene asked to render every `intervalMs` — faster than the 1 fps
    * throttle. Fires once per runtime start; call `setFastMode(true)` to let
    * the scene run at its own pace. */
@@ -81,6 +106,8 @@ export class FrameOSPreview {
   sceneInfo: SceneInfo | null = null
   /** How the runtime's /srv/assets is backed (set once `ready` fires). */
   assetsInfo: PreviewAssetsInfo | null = null
+  /** Which FrameOS version the runtime is (set once `ready` fires). */
+  runtimeInfo: PreviewRuntimeInfo = { version: null }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
@@ -115,6 +142,7 @@ export class FrameOSPreview {
       fastMode: this.fastMode,
       saveAssets: options.saveAssets === undefined ? true : options.saveAssets,
       browserAssets: options.browserAssets === undefined ? true : options.browserAssets,
+      deviceLimits: options.deviceLimits ?? null,
     })
   }
 
@@ -129,7 +157,8 @@ export class FrameOSPreview {
         if (this.sceneInfo?.currentSceneId) {
           this.currentSceneId = this.sceneInfo.currentSceneId
         }
-        this.options.onReady?.(msg.sceneInfo, this.assetsInfo)
+        this.runtimeInfo = { version: typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null }
+        this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
       case 'frame':
         this.pendingFrame = { width: msg.width, height: msg.height, buffer: msg.buffer }
@@ -146,6 +175,23 @@ export class FrameOSPreview {
       case 'sceneEvent':
         this.options.onSceneEvent?.(String(msg.name ?? ''), msg.payload ?? {})
         break
+      case 'memory':
+        this.options.onMemory?.({
+          limitBytes: Number(msg.limitBytes ?? 0),
+          usedBytes: Number(msg.usedBytes ?? 0),
+          peakBytes: Number(msg.peakBytes ?? 0),
+        })
+        break
+
+      case 'outOfMemory':
+        this.options.onOutOfMemory?.({
+          limitBytes: Number(msg.limitBytes ?? 0),
+          usedBytes: Number(msg.usedBytes ?? 0),
+          peakBytes: Number(msg.peakBytes ?? 0),
+          refusedBytes: Number(msg.refusedBytes ?? 0),
+        })
+        break
+
       case 'error':
         this.options.onError?.(String(msg.message ?? 'Unknown FrameOS preview error'))
         break

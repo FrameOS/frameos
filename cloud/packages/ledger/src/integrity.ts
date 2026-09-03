@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
+import { chargeableExpression, notAbsorbedSurfaceCondition } from "./account-usage";
+import { normalSideForType } from "./chart";
 import { postingRules } from "./rules";
-import type { LedgerExecutor, PostingRuleRegistry } from "./types";
+import type { LedgerAccountType, LedgerExecutor, PostingRuleRegistry } from "./types";
 
 // The invariants, as queries. Each one is both a test and a nightly check:
 // the suite proves the kernel upholds them on fresh data, the nightly job
@@ -12,6 +14,10 @@ export interface LedgerIntegrityViolation {
 }
 
 export interface LedgerIntegrityOptions {
+  // How many recent UTC days the cap check looks at. The gate is checked
+  // every night; a day that passed last week's check does not need
+  // re-judging against this week's cap, and an unbounded scan grows forever.
+  capWindowDays?: number | undefined;
   // The daily spend ceiling in force (payg_daily_cap_micros). Omitted means
   // "no cap configured", and the check is skipped rather than assumed to be
   // zero — a missing setting must not report every account as a violation.
@@ -20,6 +26,10 @@ export interface LedgerIntegrityOptions {
   // How far a customer's credit balance may go below zero before it counts
   // as a violation. Mirrors the payg_overdraft_micros setting.
   overdraftMicros?: bigint | undefined;
+  // The ceiling for account-days that ran entirely on the operator's shared
+  // key (shared_key_daily_cap_micros). Omitted means the same ceiling as
+  // everybody else's, which is also what the setting falls back to.
+  sharedKeyDailyCapMicros?: bigint | undefined;
   // How long an event may sit unposted before it is a problem rather than a
   // sweep still in flight.
   pendingEventGraceMs?: number | undefined;
@@ -40,6 +50,8 @@ export async function checkLedgerIntegrity(
     ...(await checkMeteringCompleteness(db, options)),
     ...(await checkReversalsMirror(db)),
     ...(await checkImmutabilityTriggers(db)),
+    ...(await checkDeferredSubscriptions(db)),
+    ...(await checkPricesCameFromTheTable(db, options)),
   ];
 }
 
@@ -66,29 +78,54 @@ export async function checkEntriesBalance(
   }));
 }
 
-// 2. The accounting equation, in its rawest form: across the whole book,
-//    debits equal credits. Every other statement of it (assets = liabilities
-//    + equity + revenue − contra − expenses) is this identity rearranged.
+// 2. The accounting equation: assets + expenses + contra-revenue equal
+//    liabilities + equity + revenue, each account signed by the side its
+//    TYPE says is normal. Summing raw debits against raw credits — what this
+//    check used to do — is guaranteed by check 1 and catches nothing on its
+//    own (§9.2 item 13). Signing by type instead catches the thing double
+//    entry cannot: an account whose `normal_side` disagrees with its type,
+//    which makes every balance and every report on it read backwards while
+//    every entry still balances perfectly.
 export async function checkAccountingEquation(
   db: LedgerExecutor,
 ): Promise<LedgerIntegrityViolation[]> {
+  const mislabelled = await db.execute<{
+    code: string;
+    normal_side: string;
+    type: string;
+  }>(sql`select code, type, normal_side from ledger_accounts`);
+  const wrongSide = mislabelled.filter(
+    (row) => normalSideForType(row.type as LedgerAccountType) !== row.normal_side,
+  );
+
   const rows = await db.execute<{
-    credits: string;
     currency: string;
-    debits: string;
+    debit_normal: string;
+    credit_normal: string;
   }>(sql`
-    select currency,
-           coalesce(sum(case when direction = 'debit' then amount_micros else 0 end), 0) as debits,
-           coalesce(sum(case when direction = 'credit' then amount_micros else 0 end), 0) as credits
-      from ledger_postings
-     group by currency
+    select p.currency,
+           coalesce(sum(case when a.type in ('asset', 'expense', 'contra_revenue')
+                             then case when p.direction = 'debit' then p.amount_micros else -p.amount_micros end
+                             else 0 end), 0) as debit_normal,
+           coalesce(sum(case when a.type in ('liability', 'equity', 'revenue')
+                             then case when p.direction = 'credit' then p.amount_micros else -p.amount_micros end
+                             else 0 end), 0) as credit_normal
+      from ledger_postings p
+      join ledger_accounts a on a.id = p.ledger_account_id
+     group by p.currency
   `);
-  return rows
-    .filter((row) => BigInt(row.debits) !== BigInt(row.credits))
-    .map((row) => ({
+  return [
+    ...wrongSide.map((row) => ({
       check: "accounting_equation",
-      detail: `${row.currency}: debits ${row.debits} do not equal credits ${row.credits}`,
-    }));
+      detail: `${row.code} is a ${row.type} account with normal side ${row.normal_side}; every balance on it reads backwards`,
+    })),
+    ...rows
+      .filter((row) => BigInt(row.debit_normal) !== BigInt(row.credit_normal))
+      .map((row) => ({
+        check: "accounting_equation",
+        detail: `${row.currency}: assets + expenses + contra (${row.debit_normal}) do not equal liabilities + equity + revenue (${row.credit_normal})`,
+      })),
+  ];
 }
 
 // 3. The cache is honest: ledger_balances equals the sum over postings, for
@@ -202,8 +239,18 @@ export async function checkCustomerCreditFloor(
 //     own-key accounts too — and those post nothing at all.
 //
 //     The tolerated overshoot is one turn's worth (`payg_overdraft_micros`):
-//     a turn's cost is unknown until it ends, so the last turn of a day can
-//     legitimately cross the line. Anything past that is the gate failing.
+//     the gate refuses at the cap, a turn's cost is unknown until it ends,
+//     and the runner stops a turn mid-flight once it reaches cap + overdraft
+//     — so anything past that is the gate failing. (Two turns started at
+//     once can each overshoot; at today's volume that is rare enough to
+//     read as an alert and look at, rather than a reason to reserve spend
+//     in flight.)
+//
+//     The amount is the SAME SQL the gate and the account page use,
+//     imported rather than copied: a second spelling of "what a turn is
+//     worth" is how the check and the gate drift apart (§9.2 item 7). Only
+//     the last `capWindowDays` days are looked at — the check runs nightly,
+//     and re-judging last year's days against this year's cap is noise.
 export async function checkDailyCapRespected(
   db: LedgerExecutor,
   options: LedgerIntegrityOptions = {},
@@ -212,42 +259,43 @@ export async function checkDailyCapRespected(
   if (cap === undefined || cap <= 0n) {
     return [];
   }
-  const ceiling = cap + (options.overdraftMicros ?? 0n);
+  const overdraft = options.overdraftMicros ?? 0n;
+  const ceiling = cap + overdraft;
+  // An account-day served entirely by the operator's shared key is judged
+  // against the shared key's own cap — the one the gate applied to it. A
+  // day with any billable turn in it is judged against the main cap, which
+  // is the larger of the two whenever the shared one is set at all.
+  const sharedCeiling = (options.sharedKeyDailyCapMicros ?? cap) + overdraft;
+  const now = options.now ?? new Date();
+  const windowDays = Math.max(1, options.capWindowDays ?? 7);
+  const since = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (windowDays - 1)),
+  );
   const rows = await db.execute<{
     account_id: string;
+    ceiling: string;
     day: string;
     spent: string;
   }>(sql`
     select account_id::text as account_id,
            to_char(date_trunc('day', occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as day,
-           sum(case
-                 when credential_source = 'account' then 0
-                 when price_micros > 0 then price_micros
-                 else round(
-                   round((input_tokens::numeric * coalesce(pricing->>'inputMicrosPerMtok', '0')::numeric
-                          + cached_input_tokens::numeric * coalesce(pricing->>'cachedInputMicrosPerMtok', '0')::numeric
-                          + output_tokens::numeric * coalesce(pricing->>'outputMicrosPerMtok', '0')::numeric)
-                         / 1000000)
-                   * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
-               end)::text as spent
+           sum(${chargeableExpression})::text as spent,
+           (case when bool_and(credential_source = 'shared')
+                 then ${sharedCeiling.toString()}::numeric
+                 else ${ceiling.toString()}::numeric end)::text as ceiling
       from ai_usage_records
      where account_id is not null
-       and surface is distinct from 'scene_convert'
+       and occurred_at >= ${since.toISOString()}::timestamptz
+       and ${notAbsorbedSurfaceCondition}
      group by 1, 2
-    having sum(case
-                 when credential_source = 'account' then 0
-                 when price_micros > 0 then price_micros
-                 else round(
-                   round((input_tokens::numeric * coalesce(pricing->>'inputMicrosPerMtok', '0')::numeric
-                          + cached_input_tokens::numeric * coalesce(pricing->>'cachedInputMicrosPerMtok', '0')::numeric
-                          + output_tokens::numeric * coalesce(pricing->>'outputMicrosPerMtok', '0')::numeric)
-                         / 1000000)
-                   * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
-               end) > ${ceiling.toString()}::numeric
+    having sum(${chargeableExpression}) >
+           case when bool_and(credential_source = 'shared')
+                then ${sharedCeiling.toString()}::numeric
+                else ${ceiling.toString()}::numeric end
   `);
   return rows.map((row) => ({
     check: "daily_cap_respected",
-    detail: `Account ${row.account_id} metered ${row.spent} micros on ${row.day}, past the ${ceiling.toString()} ceiling`,
+    detail: `Account ${row.account_id} metered ${row.spent} micros on ${row.day}, past the ${row.ceiling} ceiling`,
   }));
 }
 
@@ -301,6 +349,62 @@ export async function checkReversalsMirror(
   return rows.map((row) => ({
     check: "reversals_mirror",
     detail: `Entry ${row.entry_id} does not mirror the entry it reverses (${row.reverses})`,
+  }));
+}
+
+// 9. Deferred subscription revenue is exactly the periods we have charged
+//    and not yet recognised, net of what was refunded early. Nothing used to
+//    check this account at all, and the two ways it goes wrong are both
+//    silent: a period row that disappears (an account deleted while a
+//    cascade still reached it — §9.2 item 4) leaves a balance nothing will
+//    ever earn, and a recognition that ignores a refund drives it negative.
+export async function checkDeferredSubscriptions(
+  db: LedgerExecutor,
+): Promise<LedgerIntegrityViolation[]> {
+  const [row] = await db.execute<{ booked: string; deferred: string }>(sql`
+    select
+      (select coalesce(sum(case when p.direction = a.normal_side
+                                then p.amount_micros else -p.amount_micros end), 0)
+         from ledger_postings p
+         join ledger_accounts a on a.id = p.ledger_account_id
+        where a.code = 'liability:deferred:subscriptions') as deferred,
+      (select coalesce(sum(price_micros - refunded_micros - recognized_micros), 0)
+         from subscription_periods
+        where charged_at is not null and recognized_at is null) as booked
+  `);
+  if (!row || BigInt(row.deferred) === BigInt(row.booked)) {
+    return [];
+  }
+  return [
+    {
+      check: "deferred_subscriptions",
+      detail: `liability:deferred:subscriptions holds ${row.deferred} micros; the charged, unrecognised periods say ${row.booked}`,
+    },
+  ];
+}
+
+// 10. Every recent turn priced off the price table. A model the table does
+//     not know prices at a deliberately high fallback so its spend is never
+//     hidden — but "deliberately high" is still wrong, and until now the
+//     only trace of it was a field inside the pricing jsonb that nobody
+//     reads (§9.2 item 17). A new model id, a dated snapshot, a rename: each
+//     shows up here the night it first runs.
+export async function checkPricesCameFromTheTable(
+  db: LedgerExecutor,
+  options: LedgerIntegrityOptions = {},
+): Promise<LedgerIntegrityViolation[]> {
+  const now = options.now ?? new Date();
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const rows = await db.execute<{ count: string; model: string; source: string }>(sql`
+    select model, coalesce(pricing->>'priceSource', 'missing') as source, count(*) as count
+      from ai_usage_records
+     where created_at >= ${since.toISOString()}::timestamptz
+       and coalesce(pricing->>'priceSource', 'missing') <> 'table'
+     group by 1, 2
+  `);
+  return rows.map((row) => ({
+    check: "prices_from_table",
+    detail: `${row.count} turn(s) on ${row.model} priced from the ${row.source} price, not ai_model_prices — add a row for it`,
   }));
 }
 

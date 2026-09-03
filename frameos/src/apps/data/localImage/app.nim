@@ -35,7 +35,7 @@ type
 # Function to check if a file is an image
 proc isImage(file: string): bool =
   for ext in imageExtensions:
-    if file.toLower().endsWith(ext):
+    if file.toLowerAscii().endsWith(ext):
       return true
   return false
 
@@ -92,7 +92,7 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
 proc readExifHead*(path: string): string =
   ## First 256KB of a JPEG file: enough for the EXIF segment without
   ## re-reading whole multi-megabyte files.
-  let lowerPath = path.toLower()
+  let lowerPath = path.toLowerAscii()
   if not (lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")):
     return ""
   var file: File

@@ -49,6 +49,7 @@ proc defaultExec(program: string, args: seq[string], timeoutMs: int): tuple[rc: 
   (rc: res.exitCode, output: output)
 
 var execHook: PrivilegedExecHook = defaultExec
+var workerExitRequested = false
 
 proc setPrivilegedExecHookForTest*(hook: PrivilegedExecHook) =
   if hook == nil:
@@ -60,8 +61,17 @@ proc workerLog(message: string) =
   echo "FrameOS privileged: " & message
   flushFile(stdout)
 
+proc redactedExecArgs*(args: seq[string]): seq[string] =
+  ## nmcli accepts secrets as the value after either spelling below. Keep
+  ## process diagnostics useful without copying Wi-Fi credentials to the
+  ## root worker's journal.
+  result = args
+  for i in 1 ..< result.len:
+    if args[i - 1] in ["password", "802-11-wireless-security.psk"]:
+      result[i] = "<redacted>"
+
 proc exec(program: string, args: seq[string], timeoutMs = NmCommandTimeoutMs): tuple[rc: int, output: string] =
-  workerLog("> " & program & " " & $args)
+  workerLog("> " & program & " " & $redactedExecArgs(args))
   execHook(program, args, timeoutMs)
 
 proc resultOf(res: tuple[rc: int, output: string]): PrivilegedResult =
@@ -80,10 +90,11 @@ proc execReboot(args: JsonNode): PrivilegedResult =
   scheduleSystemReboot(delay)
   privilegedOk("reboot scheduled in " & $delay & "s")
 
-proc execApplySetup(args: JsonNode, driversOnly: bool): PrivilegedResult =
-  let setupResult =
-    if driversOnly: setupFrameOSDrivers()
-    else: setupFrameOS()
+proc execApplyDriverSetup(args: JsonNode): PrivilegedResult =
+  let contextProblem = privilegedBuildrootContextProblem(loadConfig().mode)
+  if contextProblem.len > 0:
+    return privilegedError(contextProblem)
+  let setupResult = setupFrameOSDrivers()
   let rebootIfRequired = args{"rebootIfRequired"}.getBool(false)
   var data = %*{"reboot_required": setupResult.rebootRequired, "rebooting": false}
   if setupResult.rebootRequired and rebootIfRequired:
@@ -137,17 +148,6 @@ proc execSyncClock(): PrivilegedResult =
 
 proc nmcli(args: seq[string], timeoutMs = NmCommandTimeoutMs): tuple[rc: int, output: string] =
   exec("nmcli", args, timeoutMs)
-
-proc execNmForget(role: string): PrivilegedResult =
-  let name =
-    if role == "hotspot": NmHotspotConnectionName
-    else: NmWifiConnectionName
-  # Deleting a connection that does not exist is a failure to nmcli but not
-  # to us: "forget" is idempotent.
-  let res = nmcli(@["connection", "delete", name])
-  if res.rc != 0 and "unknown connection" in res.output.toLowerAscii:
-    return privilegedOk("no such connection")
-  resultOf(res)
 
 proc execNmHotspotStart(args: JsonNode): PrivilegedResult =
   ## The add / modify / up sequence portal.nim runs for its setup hotspot.
@@ -220,8 +220,7 @@ proc executePrivilegedRequest*(request: PrivilegedRequest): PrivilegedResult =
   try:
     case request.verb
     of pvReboot: execReboot(request.args)
-    of pvApplySetup: execApplySetup(request.args, driversOnly = false)
-    of pvApplyDriverSetup: execApplySetup(request.args, driversOnly = true)
+    of pvApplyDriverSetup: execApplyDriverSetup(request.args)
     of pvInstallRelease: execInstallRelease(request.args)
     of pvSetHostname: execSetHostname(request.args)
     of pvSyncClock: execSyncClock()
@@ -235,11 +234,9 @@ proc executePrivilegedRequest*(request: PrivilegedRequest): PrivilegedResult =
     of pvNmRadioOn:
       discard exec("rfkill", @["unblock", "wifi"], timeoutMs = 10_000)
       resultOf(nmcli(@["radio", "wifi", "on"]))
-    of pvNmDeviceManaged: resultOf(nmcli(@["device", "set", argStr(request.args, "device"), "managed", "yes"]))
     of pvNmHotspotStart: execNmHotspotStart(request.args)
     of pvNmHotspotStop: execNmHotspotStop()
     of pvNmWifiConnect: execNmWifiConnect(request.args)
-    of pvNmForget: execNmForget(argStr(request.args, "connection"))
   except CatchableError as e:
     PrivilegedResult(ok: false, exitCode: 1, error: $request.verb & ": " & e.msg)
 
@@ -249,12 +246,13 @@ proc executePrivilegedRequest*(request: PrivilegedRequest): PrivilegedResult =
 
 proc restoreRuntimeOwnership() =
   ## Every verb runs as root, and several of them write into the runtime's
-  ## own directories: `install-release` and `apply-setup` leave
+  ## own directories: `install-release` and `apply-driver-setup` leave
   ## `state/upgrade-status.json`, log lines and setup output behind. Left
   ## root-owned, the next unprivileged write to that file fails with EACCES
   ## — which would break the *following* upgrade, not this one, and be a
-  ## puzzle to debug. Hand the runtime's directories back after every
-  ## request; it is a chown over a handful of small files.
+  ## puzzle to debug. Restore the split ownership model after every request:
+  ## writable contents go back to the runtime, while shared directory roots
+  ## and all code-loading paths stay owned by root.
   if not runningAsRoot():
     return
   try:
@@ -300,6 +298,12 @@ proc handleRequestFile*(path: string, resultsDir: string): bool =
   except CatchableError:
     discard
   workerLog("executing " & $request.verb & " (" & request.id & ")")
+  # install-release can switch /srv/frameos/current. Do not execute another
+  # queued install with this now-old worker's compiled version and trust
+  # assumptions; exit after answering so systemd starts the next request with
+  # the newly current, root-owned binary.
+  if request.verb == pvInstallRelease:
+    workerExitRequested = true
   let started = epochTime()
   let res = executePrivilegedRequest(request)
   workerLog($request.verb & " " & (if res.ok: "ok" else: "failed: " & res.error) &
@@ -317,6 +321,8 @@ proc drainPrivilegedQueue*(queueDir, resultsDir: string): int =
   for path in pendingPrivilegedRequestFiles(queueDir):
     discard handleRequestFile(path, resultsDir)
     inc result
+    if workerExitRequested:
+      break
 
 proc runPrivilegedWorker*(lingerMs = DefaultLingerMs): int =
   if not runningAsRoot():
@@ -324,6 +330,7 @@ proc runPrivilegedWorker*(lingerMs = DefaultLingerMs): int =
     return 1
   let queueDir = privilegedQueueDir()
   let resultsDir = privilegedResultsDir()
+  workerExitRequested = false
   if not dirExists(queueDir):
     workerLog("queue directory missing: " & queueDir)
     return 0
@@ -339,6 +346,8 @@ proc runPrivilegedWorker*(lingerMs = DefaultLingerMs): int =
     if n > 0:
       handled += n
       idleSince = epochTime()
+      if workerExitRequested:
+        break
     elif (epochTime() - idleSince) * 1000 >= lingerMs.float:
       break
     else:

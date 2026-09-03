@@ -14,7 +14,7 @@
 ## - install and enable the door's .path/.service units and the udev rule.
 ##
 ## Everything here runs as root: from the first-boot service, from the
-## privileged worker (`apply-setup`, `install-release`) or from a root
+## privileged worker (`apply-driver-setup`, `install-release`) or from a root
 ## runtime on a not-yet-migrated frame.
 
 import std/[os, strutils]
@@ -143,16 +143,20 @@ proc buildrootUserSetupScript*(user = BuildrootServiceUser, uid = BuildrootServi
   let group = etcDir / "group"
   let shadow = etcDir / "shadow"
   "set -e; " &
-    "if grep -q '^" & user & ":' " & shellQuote(group) & "; then :; " &
+    "if grep -q '^" & user & ":[^:]*:" & $gid & ":' " & shellQuote(group) & "; then :; " &
+    "elif grep -q '^" & user & ":' " & shellQuote(group) & "; then " &
+    "echo 'group " & user & " has the wrong gid (expected " & $gid & ")' >&2; exit 1; " &
     "elif grep -q '^[^:]*:[^:]*:" & $gid & ":' " & shellQuote(group) & "; then " &
     "echo 'gid " & $gid & " is taken by another group' >&2; exit 1; " &
     "else printf '%s\\n' " & shellQuote(buildrootGroupLine(user, gid)) & " >> " & shellQuote(group) & "; fi; " &
-    "if grep -q '^" & user & ":' " & shellQuote(passwd) & "; then :; " &
+    "if grep -q '^" & user & ":[^:]*:" & $uid & ":" & $gid & ":' " & shellQuote(passwd) & "; then :; " &
+    "elif grep -q '^" & user & ":' " & shellQuote(passwd) & "; then " &
+    "echo 'user " & user & " has the wrong uid/gid (expected " & $uid & ":" & $gid & ")' >&2; exit 1; " &
     "elif grep -q '^[^:]*:[^:]*:" & $uid & ":' " & shellQuote(passwd) & "; then " &
     "echo 'uid " & $uid & " is taken by another user' >&2; exit 1; " &
-    "else printf '%s\\n' " & shellQuote(buildrootPasswdLine(user, uid, gid)) & " >> " & shellQuote(passwd) & "; " &
+    "else printf '%s\\n' " & shellQuote(buildrootPasswdLine(user, uid, gid)) & " >> " & shellQuote(passwd) & "; fi; " &
     "if [ -f " & shellQuote(shadow) & " ] && ! grep -q '^" & user & ":' " & shellQuote(shadow) & "; then " &
-    "printf '%s\\n' " & shellQuote(buildrootShadowLine(user)) & " >> " & shellQuote(shadow) & "; fi; fi"
+    "printf '%s\\n' " & shellQuote(buildrootShadowLine(user)) & " >> " & shellQuote(shadow) & "; fi"
 
 proc buildrootOwnershipScript*(user = BuildrootServiceUser, installDir = "/srv/frameos",
                                assetsDir = "/srv/assets"): string =
@@ -162,14 +166,14 @@ proc buildrootOwnershipScript*(user = BuildrootServiceUser, installDir = "/srv/f
   ##   /srv/frameos/releases/<r>          root:USER  1775   sticky: USER may add
   ##                                                        files, not replace root's
   ##   /srv/frameos/releases/<r>/frameos  root:root  0755   what root executes
-  ##   /srv/frameos/releases/<r>/drivers  root:root         driver .so files
-  ##   /srv/frameos/releases/<r>/*.json*  USER:USER         frame.json, scenes, salt
+  ##   /srv/frameos/releases/<r>/{drivers,scenes,vendor} root:root
+  ##   /srv/frameos/releases/<r>/*.json*  USER:USER         frame.json, salt
   ##   /srv/frameos/current               root-owned symlink
-  ##   /srv/frameos/{state,logs,tmp,runtime,staging}  USER:USER
+  ##   /srv/frameos/{state,logs,tmp,runtime,staging}  root:USER 1770; contents USER
   ##   /srv/frameos/state/{NetworkManager,wpa_supplicant}  root 0700 (NM/wpa
   ##                                                        refuse other owners)
   ##   /srv/frameos/privileged            root:USER 0755; queue root:USER 1770;
-  ##                                      results USER:USER 0770
+  ##                                      results root:USER 2750
   ##
   ## /srv/assets is vfat (umask=000): chown is meaningless there and skipped.
   let d = shellQuote(installDir)
@@ -188,12 +192,14 @@ proc buildrootOwnershipScript*(user = BuildrootServiceUser, installDir = "/srv/f
       "find \"$r\" -mindepth 1 -maxdepth 1 -type f -name 'frame.json*' -exec chmod 0600 {} +; " &
       "[ -f \"$r/frameos\" ] && chown root:root \"$r/frameos\" && chmod 0755 \"$r/frameos\"; " &
       "[ -f \"$r/frameos.service\" ] && chown root:root \"$r/frameos.service\"; " &
-      "for sub in drivers vendor; do [ -d \"$r/$sub\" ] && chown -R root:root \"$r/$sub\"; done; " &
+      "for sub in drivers scenes vendor; do mkdir -p \"$r/$sub\"; chown -R root:root \"$r/$sub\"; done; " &
     "done; " &
     "[ -L " & d & "/current ] && chown -h root:root " & d & "/current; " &
-    "for p in logs tmp runtime staging privileged/results; do " &
-      "chown -R " & ug & " " & d & "/$p; chmod 0770 " & d & "/$p; done; " &
-    "chown " & ug & " " & d & "/state; chmod 0750 " & d & "/state; " &
+    "[ -d " & d & "/vendor ] && chown -R root:root " & d & "/vendor; " &
+    "for p in logs tmp runtime staging; do " &
+      "find " & d & "/$p -mindepth 1 -exec chown -h " & ug & " {} +; " &
+      "chown " & rg & " " & d & "/$p; chmod 1770 " & d & "/$p; done; " &
+    "chown " & rg & " " & d & "/state; chmod 1770 " & d & "/state; " &
     "find " & d & "/state -mindepth 1 " &
       "\\( -path " & d & "/state/NetworkManager -o -path " & d & "/state/wpa_supplicant \\) -prune -o " &
       "-exec chown -h " & ug & " {} +; " &
@@ -201,7 +207,9 @@ proc buildrootOwnershipScript*(user = BuildrootServiceUser, installDir = "/srv/f
       "/state/$p && chmod 0700 " & d & "/state/$p; done; " &
     "chown " & rg & " " & d & "/privileged; chmod 0755 " & d & "/privileged; " &
     "chown " & rg & " " & d & "/privileged/queue; chmod 1770 " & d & "/privileged/queue; " &
-    "chown " & ug & " " & d & "/privileged/results; chmod 0770 " & d & "/privileged/results; " &
+    "find " & d & "/privileged/results -mindepth 1 -exec chown -h root:" & u & " {} +; " &
+    "find " & d & "/privileged/results -mindepth 1 -type f -exec chmod 0640 {} +; " &
+    "chown " & rg & " " & d & "/privileged/results; chmod 2750 " & d & "/privileged/results; " &
     "true"
 
 # ---------------------------------------------------------------------------
@@ -213,8 +221,6 @@ proc ensureBuildrootServiceUser*(user = BuildrootServiceUser): bool =
   ## exists afterwards.
   if user == "root":
     return true
-  if commandSucceeds("grep -q '^" & user & ":' /etc/passwd"):
-    return true
   setupLog("FrameOS setup: privilege separation: creating user " & user &
     " (uid " & $BuildrootServiceUid & ")")
   withWritableMount("/etc/passwd"):
@@ -223,7 +229,9 @@ proc ensureBuildrootServiceUser*(user = BuildrootServiceUser): bool =
     if res.exitCode != 0:
       setupLog("FrameOS setup: privilege separation: could not create user " & user)
       return false
-  true
+  commandSucceeds("grep -q '^" & user & ":[^:]*:" & $BuildrootServiceUid & ":" &
+    $BuildrootServiceGid & ":' /etc/passwd") and
+    commandSucceeds("grep -q '^" & user & ":[^:]*:" & $BuildrootServiceGid & ":' /etc/group")
 
 proc applyBuildrootOwnership*(user = BuildrootServiceUser, installDir = "/srv/frameos") =
   ## Stamps the /srv/frameos layout. Safe to repeat; the image composer, the
@@ -231,8 +239,7 @@ proc applyBuildrootOwnership*(user = BuildrootServiceUser, installDir = "/srv/fr
   if user == "root":
     return
   setupLog("FrameOS setup: privilege separation: applying /srv/frameos ownership for " & user)
-  discard runSetupCommand(privilegedCommand("sh -c " & shellQuote(buildrootOwnershipScript(user, installDir))),
-    raiseOnError = false)
+  discard runSetupCommand(privilegedCommand("sh -c " & shellQuote(buildrootOwnershipScript(user, installDir))))
 
 proc installBuildrootPrivilegedUnits*(user: string) =
   ## Installs the door's units and the udev rule, enabling the .path only

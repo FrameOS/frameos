@@ -702,7 +702,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       let settings: Record<string, any> = {}
       try {
         if (isCloudMode()) {
-          const response = await apiFetch(`/api/settings`)
+          // reveal=1: the cloud masks secrets by default; the preview runs the
+          // scene in this browser and needs the real keys. Session-only.
+          const response = await apiFetch(`/api/settings?reveal=1`)
           if (response.ok) {
             settings = (await response.json()) ?? {}
           }

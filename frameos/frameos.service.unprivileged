@@ -10,8 +10,11 @@
 # carry the video/input/tty groups via 50-udev-default.rules. The same
 # step makes sure the privileged door's queue is writable by the runtime.
 Group=%I
-SupplementaryGroups=video input tty
-ExecStartPre=+/bin/sh -c 'for n in /dev/gpiochip* /dev/spidev* /dev/i2c-* /dev/vchiq /dev/fb* /dev/tty0 /dev/tty1 /sys/class/graphics/fbcon/cursor_blink /sys/class/graphics/fb0/blank; do [ -e "$n" ] || continue; chgrp %I "$n" 2>/dev/null; chmod g+rw "$n" 2>/dev/null; done; mkdir -p /srv/frameos/privileged/queue /srv/frameos/privileged/results /srv/frameos/staging /srv/frameos/runtime /srv/frameos/logs /srv/frameos/tmp /srv/frameos/state; chown root:%I /srv/frameos/privileged; chmod 0755 /srv/frameos/privileged; chown root:%I /srv/frameos/privileged/queue; chmod 1770 /srv/frameos/privileged/queue; chown %I:%I /srv/frameos/privileged/results /srv/frameos/staging /srv/frameos/runtime /srv/frameos/logs /srv/frameos/tmp /srv/frameos/state; chmod 0770 /srv/frameos/privileged/results; exit 0'
+SupplementaryGroups=video input
+ExecStartPre=+/bin/sh -c 'for n in /dev/gpiochip* /dev/spidev* /dev/i2c-* /dev/vchiq /dev/fb* /dev/tty0 /dev/tty1 /sys/class/graphics/fbcon/cursor_blink /sys/class/graphics/fb0/blank; do [ -e "$n" ] || continue; chgrp %I "$n" 2>/dev/null; chmod g+rw "$n" 2>/dev/null; done; mkdir -p /srv/frameos/privileged/queue /srv/frameos/privileged/results /srv/frameos/staging /srv/frameos/runtime /srv/frameos/logs /srv/frameos/tmp /srv/frameos/state; chown root:%I /srv/frameos/privileged /srv/frameos/privileged/queue /srv/frameos/privileged/results /srv/frameos/staging /srv/frameos/runtime /srv/frameos/logs /srv/frameos/tmp /srv/frameos/state; chmod 0755 /srv/frameos/privileged; chmod 1770 /srv/frameos/privileged/queue /srv/frameos/staging /srv/frameos/runtime /srv/frameos/logs /srv/frameos/tmp /srv/frameos/state; chmod 2750 /srv/frameos/privileged/results; exit 0'
+# The release root is writable for atomically replacing frame.json and scene
+# payloads. Do not let its optional scenes/ path become a library search path.
+Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/usr/lib:/usr/local/lib
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/srv/frameos /srv/assets

@@ -35,6 +35,10 @@ export interface BillingPlan {
   currency: string;
   description: string | null;
   entitlements: PlanEntitlements;
+  // False when this is the code-level fallback rather than a billing_plans
+  // row — the one case in which the deployment's global margin setting is
+  // still the margin (see accountMarginBasisPoints).
+  fromTable: boolean;
   marginBasisPoints: number;
   name: string;
   period: string;
@@ -46,6 +50,9 @@ export interface BillingPlan {
 export interface AccountPlan {
   // Set when the account cancelled: the plan runs to here and then stops.
   cancelAt: Date | null;
+  // Set when the account downgraded: `plan` runs to the end of the current
+  // period and this one takes over at the rollover.
+  nextPlanCode: string | null;
   plan: BillingPlan;
   // False when the account has no subscription row and is on the PAYG
   // fallback — the page says "Pay as you go" either way, but "did somebody
@@ -70,6 +77,7 @@ export const fallbackPaygPlan: BillingPlan = {
     frames: 50,
     privateSceneBytes: 100 * 1024 * 1024,
   },
+  fromTable: false,
   marginBasisPoints: 10_000,
   name: "Pay as you go",
   period: "month",
@@ -110,6 +118,7 @@ function toPlan(row: PlanRow): BillingPlan {
     currency: row.currency,
     description: row.description,
     entitlements: entitlementsFrom(row.entitlements),
+    fromTable: true,
     marginBasisPoints: row.marginBasisPoints,
     name: row.name,
     period: row.period,
@@ -152,6 +161,7 @@ export async function readAccountPlan(
   const [row] = await db
     .select({
       cancelAt: subscriptions.cancelAt,
+      nextPlanCode: subscriptions.nextPlanCode,
       plan: billingPlans,
       status: subscriptions.status,
     })
@@ -171,6 +181,7 @@ export async function readAccountPlan(
   if (expired) {
     return {
       cancelAt: null,
+      nextPlanCode: null,
       plan: (await readPlan(db, paygPlanCode)) ?? fallbackPaygPlan,
       status: "active",
       subscribed: false,
@@ -178,6 +189,7 @@ export async function readAccountPlan(
   }
   return {
     cancelAt: row.cancelAt,
+    nextPlanCode: row.nextPlanCode,
     plan: toPlan(row.plan),
     status: row.status,
     subscribed: true,
@@ -185,9 +197,16 @@ export async function readAccountPlan(
 }
 
 /**
- * The margin to price an account's turn at: their plan's, falling back to the
- * global `ai_margin_percent` for a deployment that has no plans (a
- * self-hoster, or this repo before migration 0045 runs).
+ * The margin to price an account's turn at: ONE number, the plan's. An
+ * account with no subscription row is on PAYG, so it prices at the PAYG
+ * row's margin — the same row the ladder on /account/ai shows, so what the
+ * page says and what the meter does cannot disagree.
+ *
+ * The global `ai_margin_percent` setting is the fallback for a deployment
+ * with no plan rows at all (a self-hoster, or this repo before migration
+ * 0045), and for a turn with no account behind it. It used to be what every
+ * un-enrolled account paid, which put the ladder upside down: the default
+ * (30%) was a better rate than Maker (50%) — §9.2 item 5.
  *
  * Callers pass `settings` when they already read it, which metering.ts does —
  * this must not become a second settings query on the hot path of every turn.
@@ -200,12 +219,8 @@ export async function accountMarginBasisPoints(
   if (!accountId) {
     return settings.marginBasisPoints;
   }
-  const { plan, subscribed } = await readAccountPlan(db, accountId);
-  // An account nobody put on a plan prices at the deployment's global margin,
-  // not at PAYG's 100%: flipping every existing account to double-price the
-  // day migration 0045 lands would be a price change disguised as a schema
-  // change. PAYG's own margin applies once somebody is deliberately on it.
-  return subscribed ? plan.marginBasisPoints : settings.marginBasisPoints;
+  const { plan } = await readAccountPlan(db, accountId);
+  return plan.fromTable ? plan.marginBasisPoints : settings.marginBasisPoints;
 }
 
 /** Convenience for callers with no settings in hand. */

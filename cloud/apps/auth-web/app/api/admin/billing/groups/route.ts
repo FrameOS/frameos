@@ -4,7 +4,7 @@ import {
   setAccountGroup,
 } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { getSuperadminContext, superadminRefusal } from "../../../../../src/lib/admin";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
@@ -38,12 +38,9 @@ export async function POST(request: NextRequest) {
   if (limited) {
     return limited;
   }
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ mutation: true });
   if (admin.kind !== "ok") {
-    return jsonError(
-      admin.kind === "forbidden" ? "forbidden" : "unauthenticated",
-      admin.kind === "forbidden" ? 403 : 401,
-    );
+    return superadminRefusal(admin);
   }
   const { db, response } = requireDatabase();
   if (!db) {

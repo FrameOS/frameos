@@ -1,16 +1,16 @@
-# Manual testing todo — pre-release sweep (compiled 2026-08-20)
+# Manual testing todo — pre-release sweep (compiled 2026-08-20, refreshed 2026-09-02)
 
 Everything below shipped with green automated suites but an unticked manual
-checkbox, or a "Not verified — needs hardware" note. PRs #374–#382 are all
-unreleased on top of v2026.8.31, so the hardware tests need firmware/images
-built from `main`. **Tick items as they pass; delete sections when empty;
-delete the file when done.**
+checkbox, or a "Not verified — needs hardware" note. Releases since
+v2026.8.31 carry most of it; anything merged after the last release needs
+firmware/images built from `main`. **Tick items as they pass; delete
+sections when empty; delete the file when done.**
 
-Suggested order: §1 first (pure browser), then one Pi session covering §2+§3
-(those tests share a bench), then one ESP32 session for §4, and schedule the
-release so §6 can be watched live. The riskiest untested surfaces are the
-E1004 panel init (never touched hardware) and the enrollment auto-confirm
-flow (changes first-boot behavior for every new user).
+Suggested order: §1 is done, so one Pi session covering §2+§3 (those tests
+share a bench), then one ESP32 session for §4. The riskiest untested
+surfaces left are the Pi-side items no bench has run since their PRs
+(DNSSEC-off enrollment from a composed SD card, scheduled reboot, the
+hardware-settings batch) and the battery ADC rounds of #426.
 
 ## 1. Browser only — cloud auth (no hardware, ~30 min)
 
@@ -68,20 +68,24 @@ flow (changes first-boot behavior for every new user).
   tick it in the SD image builder, boot the card → `ssh root@<frame>` works
   with that key. Older images log "Ignoring unknown key 'authorized_key'"
   and boot without it.
-- [ ] **ESP32 time zone (needs 2026.8.34 firmware):** set Europe/Brussels
-  from the cloud settings panel → weather scene hours match local time,
-  schedule entries fire in local time, `config` on the console shows it.
-- [ ] **First-boot cloud enrollment on a router that strips DNSSEC (PR #384):**
-  2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup failed with
-  `systemd-resolved: DNSSEC validation failed ... no-signature`; the 30 s
-  network check expired, the setup hotspot took over and the frame never
-  enrolled. Fixes: `DNSSEC=no` drop-in on the image, 90 s check window, and
-  the cloud-chosen display is now applied by `frameos set-display` (the
-  python3 patcher never ran — Buildroot ships no python3; the log said
-  `could not apply display device 'http.upload'`). Re-flash from `main`,
-  boot behind the GL-BE3600, confirm: enrolled within ~1 min, no hotspot,
-  `frame.json` carries the chosen device, postboot log shows
-  `Applied display device`.
+- [ ] **ESP32 time zone (#388 + #416, needs firmware built after
+  2026-08-30):** set Europe/Brussels from the cloud settings panel → weather
+  scene hours match local time (a code node's `format()` too), schedule
+  entries fire in local time, `config` on the console shows it.
+- [ ] **First-boot cloud enrollment on a router that strips DNSSEC (#384,
+  #420):** 2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup
+  failed with `systemd-resolved: DNSSEC validation failed ... no-signature`;
+  the 30 s network check expired, the setup hotspot took over and the frame
+  never enrolled. #384 added the `DNSSEC=no` drop-in, a 90 s window and
+  `frameos set-display` for the cloud-chosen display — but the drop-in was
+  only staged by the full base-image build, so SD cards composed from a
+  cached base kept validating (a Pi Zero W hit it again on 2026-08-30).
+  #420 stages it on both build paths and `frameos setup` retrofits it on
+  every deploy/OTA. The diagnosis is confirmed on the affected frame (the
+  drop-in applied by hand healed it); the fixed image is hardware-unverified.
+  Re-flash from `main`, boot behind the GL-BE3600, confirm: enrolled within
+  ~1 min, no hotspot, `frame.json` carries the chosen device, postboot log
+  shows `Applied display device`.
 - [ ] **Panel link code (#379):** boot an unclaimed frame in cloud mode with
   no claim code → the panel renders the link code + QR → complete the claim
   from an account, and confirm the code retires once connected.
@@ -136,7 +140,13 @@ Nothing below has run on hardware. Flash a **fresh generic
 - [ ] **The runtime cannot escalate.** As `frameos` on the device (`su -s
   /bin/sh frameos`): writing `/srv/frameos/current/frameos` fails, writing
   `/etc/systemd/system/frameos.service` fails, and a queue file with
-  `{"verb": "shell"}` is refused in the journal rather than run.
+  `{"id":"manual-shell","verb":"shell","args":{}}` is refused in the
+  journal rather than run. Also verify
+  `stat -c '%U:%G %a'` reports `root:frameos 1770` for `state`, `logs`,
+  `staging`, and `privileged/queue`, `root:frameos 2750` for
+  `privileged/results`, and that neither a hostile result-path symlink nor a
+  runtime-created `scenes/*.so` is followed by the root worker. After joining
+  Wi-Fi, confirm `journalctl -u frameos-privileged` does not contain the PSK.
 
 ## 3. Backend (self-hosted) bench
 
@@ -165,22 +175,65 @@ Nothing below has run on hardware. Flash a **fresh generic
   build `usb_api upload-scenes` answered `__FRAMEOS_USB_READY__` well after
   `render:done`. Re-check the full browser flow (flash → push scenes) once
   a release carries it.
-- [ ] **reTerminal E1004 first light (#375):** a real render on the E1004 —
-  the T133A01 init/tuning values came from the vendor driver via ESPHome and
-  have never touched hardware; failure mode is ghosting or a failed refresh,
-  not a brick.
-- [ ] **1200×1600 PSRAM low-water measurement (#375):** on the 8 MB board —
-  the 1.5 MiB reserve was sized at 800×480 and this is the number the PR
-  says to take first.
+- [x] **reTerminal E1004 first light (#375):** passed 2026-08-26 in #398,
+  debugged over serial on the board — the T133A01 refresh completes (CCSET
+  before DTM), a streamed 1.67 MB gallery PNG rendered and the panel
+  updated; the frame has run the Weather scene on a 15-minute cycle since.
+- [x] **1200×1600 PSRAM low-water measurement (#375):** taken in #428 on
+  2026-09-01 on the 8 MB board — low-water free PSRAM was 34 KB with the
+  transpiler's three token copies alive and 873 KB after the fix; the
+  1.5 MiB reserve stands.
+- [ ] **Battery ADC rounds (#426):** hardware-unverified. The misread is
+  intermittent (~9 of the E1004's ~400 daily on-battery samples read
+  ~2 V instead of ~3.95 V), so confirming it means watching
+  `batteryRawMillivolts` appear without `batteryMillivolts` moving for a
+  day or two on a frame on battery, and no spurious "critical" parking.
+- [ ] **Sleep-aware cloud side (#409):** the device half was captured over
+  three boots on the E1004; the hub half — the frame's `render`
+  announcement → a queued `image_get`, and command TTLs stretched past
+  `next_wake_at` — was not exercised before deploy. On a deep-sleeping
+  E1004: the fleet tile's image updates after a wake, and an `image_get`
+  queued mid-sleep survives the 15-minute nap instead of expiring.
 - [ ] **Scheduled reboot on ESP32 (#376):** same schedule-entry test as the
   Pi, on a board.
+- [ ] **WPA2 provisioning AP (#443):** erase Wi-Fi on a board → the portal
+  screen shows "Wi-Fi: FrameOS-XXXX" and a "Password:" line; a phone joins
+  with it (WPA2, no PMF prompt) and reaches the portal; `config` over USB
+  prints the same `ap_psk`; `set ap_psk ""` mints a new one at the next
+  portal start. Then confirm the backend's frame sync shows no "changed on
+  frame" for Wi-Fi password / admin password / API key after a deploy (the
+  device now answers `""` for them).
+- [ ] **Layout-matched release image (#442; release 2026.9.2 carries the
+  six images):** on the XTEINK X4 (16 MB C3), "Flash latest release" picks
+  `esp32-c3-16mb`, the "4MB layout / no OTA" warnings are gone, the board
+  boots and later takes an OTA; on a 13.3E6 (32 MB S3) the same with
+  `esp32-s3-32mb`.
+- [ ] **The backend flashes what the cloud flashes (needs firmware built
+  after 2026-09-03):** on a blank board, "Flash latest release" from the
+  self-hosted deploy drawer provisions everything — `status` shows the
+  hostname, `admin_auth: enabled`, and after the first settings sync the
+  `https:` line says `cert=yes key=yes` (with HTTPS enabled on the frame)
+  and the API answers on 8443; "Apply frame settings" under USB setup
+  replays the same plan on a board flashed by hand with esptool. Then
+  "Update over the air" / Full deploy: the log shows `ota:backend`
+  `downloading … verified`, the board reboots into the release, and a
+  second request answers `up-to-date`. Finally a board still on a
+  per-frame image from before this change must OTA onto the release image
+  from the new manifest (the legacy `sha256` field) and verify from then on.
+- [ ] **Cloud flasher picks the layout (follow-up to #447):** on a 16 MB
+  XIAO the cloud "Connect & flash" log says `Flash size 16MB: using the
+  esp32-s3-16mb image built for that layout`, the board boots, and its first
+  OTA check asks for `platform=esp32-s3-16mb`. On an 8 MB board it stays on
+  `esp32-s3-generic`. Also: "Flash latest release" / "Apply frame settings"
+  against a board still on 2026.9.2 firmware logs "does not know hostname
+  yet" and finishes instead of stopping there.
 - [ ] **Dual console — reTerminal E1002 over its CH340:** the cloud flasher
   on the "USB Single Serial" port must flash, see `frameos>` and provision
   (this board has no USB-Serial/JTAG port at all). Then on a XIAO ESP32-S3
   confirm the "USB JTAG/serial debug unit" path still provisions and that
   `usb_api` uploads/previews work there. Partial pass 2026-08-26: frame 59
   (13.3E6) answered `frameos>` + `status` over its CH343 "USB Single Serial"
-  port with a local build; opening that port through pyserial/WebSerial
+  port with a locally built image; opening that port through pyserial/WebSerial
   resets the chip (DTR/RTS auto-reset circuit), so open once with DTR/RTS
   low and keep the port open while waiting for the prompt.
 
@@ -198,6 +251,10 @@ Nothing below has run on hardware. Flash a **fresh generic
 - [x] **The release run is a test (#381):** `docker-publish-multi` has run
   twice since #381 (2026-08-20, both success) — `epyc-32` and the Depot
   esp32-ci path are validated.
+- [x] **First release after #442 + #444:** release 2026.9.2 (2026-09-03)
+  carries the six per-layout ESP32 images with signatures and the signed
+  wasm bundle. Still to eyeball: the npm publish downloaded the bundle and
+  the cloud preview shows "runtime 2026.9.2".
 
 ## Not on the list, deliberately
 

@@ -309,6 +309,10 @@ block test_write_setup_release_payload_updates_remote_frame_config:
     let runtimeConfigJson = readFile(frameosCurrent / "frame.json")
     let remoteConfigJson = readFile(remoteCurrent / "frame.json")
     doAssert remoteConfigJson == runtimeConfigJson
+    # frame.json holds the API key and service tokens: owner-only on both
+    # copies, including the remote one that existed (world-readable) before.
+    doAssert getFilePermissions(frameosCurrent / "frame.json") == {fpUserRead, fpUserWrite}
+    doAssert getFilePermissions(remoteCurrent / "frame.json") == {fpUserRead, fpUserWrite}
     let runtimeConfig = parseJson(runtimeConfigJson)
     let remoteConfig = parseJson(remoteConfigJson)
     let allScenes = parseJson(uncompress(readFile(frameosCurrent / "all_scenes.json.gz"), dataFormat = dfGzip))

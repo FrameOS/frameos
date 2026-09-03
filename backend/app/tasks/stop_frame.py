@@ -27,7 +27,7 @@ async def stop_frame_task(ctx: dict[str, Any], id: int):
             redis,
             frame,
             [
-                "sudo systemctl stop frameos.service || true",
+                "sudo -n systemctl stop frameos.service || true",
             ],
         )
         frame.status = 'stopped'

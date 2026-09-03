@@ -15,6 +15,10 @@ import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
+# Runtime verbs a scene's dispatch node must not reach. Keep in step with
+# schedulerRefusedEvents in scheduler.nim.
+const sceneRefusedDispatchEvents* = ["uploadScenes", "reboot", "restart", "reload"]
+
 const TRACING = false
 when defined(frameosEmbedded):
   const EmbeddedMaxCachedImageBytes = 1024 * 1024
@@ -400,9 +404,26 @@ proc evalCacheExpression(scene: InterpretedFrameScene, context: ExecutionContext
     })
     (false, newJNull())
 
+const MaxRunNodeDepth = 64
+  ## Producer inputs are resolved by recursion (an app's field wired from a
+  ## node wired from a node …), and the cycle check below only covers the
+  ## flow edges of ONE runNode call. A node whose input is (transitively) its
+  ## own output recursed until the stack blew — a scene error, not a crash.
+
 proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
   var currentNodeId: NodeId = nodeId
+
+  if asDataNode and nodeId in self.runNodeStack:
+    raise newException(Exception,
+      "Node " & $nodeId.int & " depends on itself: its input is produced by a node that is " &
+      "still resolving it (cycle through " & $self.runNodeStack.len & " node(s))")
+  if self.runNodeStack.len >= MaxRunNodeDepth:
+    raise newException(Exception,
+      "Node " & $nodeId.int & " is nested deeper than " & $MaxRunNodeDepth &
+      " levels of producers; refusing to resolve it")
+  self.runNodeStack.add(nodeId)
+  defer: self.runNodeStack.setLen(self.runNodeStack.len - 1)
 
   # Safety: cycle detection + hop budget
   var visited = initTable[NodeId, bool]()
@@ -800,6 +821,18 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "nodeId": currentNodeId.int,
           "eventName": eventName,
           "reason": "renderSelfDispatch"
+        })
+      elif eventName in sceneRefusedDispatchEvents:
+        # Scene code is untrusted (it may be anyone's store scene). A dispatch
+        # node may drive scenes and state; it may not replace the installed
+        # scene set (skipping every guard the push path applies) or take the
+        # runtime down on each render.
+        self.logger.log(%*{
+          "event": "interpreter:dispatch:ignored",
+          "sceneId": self.id.string,
+          "nodeId": currentNodeId.int,
+          "eventName": eventName,
+          "reason": "runtimeVerb"
         })
       else:
         sendEvent(eventName, finalPayload)

@@ -6,7 +6,7 @@ import {
   sweepUnpostedUsage,
 } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { authenticateJobToken } from "../../../../../src/lib/api-tokens";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { logInfo, reportError } from "../../../../../src/lib/log";
@@ -28,16 +28,24 @@ export const maxDuration = 300;
 // It runs here rather than as `tsx` on the server for a plain reason: the
 // release bundle is Next's standalone output and carries no tsx (which is
 // also why scripts/object-store-sweep.sh is bash). What ops has instead is
-// scripts/accounting-nightly.sh, which curls this with a superadmin API
-// token — an existing auth mechanism rather than a new shared secret.
+// scripts/accounting-nightly.sh, which curls this with a JOB token
+// (`fc_apijob_…`, access `billing_nightly`, minted by
+// scripts/accounting-service-account.sh on an account nobody can sign in
+// as). That token opens this route and nothing else: it satisfies no
+// readSession() gate, so it cannot read an account, post a journal entry or
+// reach any other /api/admin/* route. It used to be a superadmin's personal
+// token, which could do all of that from the ops box. No cookie session is
+// accepted here either — a person runs the sweep by running the script.
 //
 // Three things happen, in order:
 //   1. Sweep the usage records whose ledger entries never landed. Idempotent
 //      by turn id, so a night that already posted is a no-op.
 //   2. Run the subscription cycle: open the periods that are due, charge the
-//      ones that have started, recognize the ones that have ended. Idempotent
-//      on each period row, so a night that runs twice charges nobody twice
-//      and a night that never ran is caught up rather than skipped.
+//      ones that have started, earn what the running ones have served so
+//      far (daily recognition, §3.6), and close out the ones that have
+//      ended. Idempotent on each period row, so a night that runs twice
+//      charges nobody twice and a night that never ran is caught up rather
+//      than skipped.
 //   3. Run every invariant and report each violation. A violation is an
 //      alert, not a failure to fix automatically: books that disagree with
 //      themselves need a human, and quietly "correcting" them is how a
@@ -58,16 +66,17 @@ export async function POST(request: NextRequest) {
   if (limited) {
     return limited;
   }
-  const admin = await getSuperadminContext();
-  if (admin.kind !== "ok") {
-    return jsonError(
-      admin.kind === "forbidden" ? "forbidden" : "unauthenticated",
-      admin.kind === "forbidden" ? 403 : 401,
-    );
-  }
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
+  }
+  const job = await authenticateJobToken(
+    db,
+    request.headers.get("authorization"),
+    "billing_nightly",
+  );
+  if (!job) {
+    return jsonError("unauthenticated", 401);
   }
 
   const startedAt = Date.now();
@@ -87,6 +96,7 @@ export async function POST(request: NextRequest) {
   const violations = await checkLedgerIntegrity(db, {
     dailyCapMicros: settings.dailyCapMicros,
     overdraftMicros: settings.overdraftMicros,
+    sharedKeyDailyCapMicros: settings.sharedKeyDailyCapMicros,
   });
   for (const violation of violations) {
     // One report per violation, not one for the batch: each is its own
@@ -105,6 +115,7 @@ export async function POST(request: NextRequest) {
   // The daily line, whether or not anything was wrong: a journal with a
   // number in it every night is how a missing night gets noticed.
   logInfo("billing.nightly", {
+    apiTokenId: job.token.id,
     cogsMicros: summary.cogsMicros.toString(),
     contraRevenueMicros: summary.contraRevenueMicros.toString(),
     customerLiabilityMicros: summary.customerLiabilityMicros.toString(),
@@ -114,6 +125,8 @@ export async function POST(request: NextRequest) {
     meteringMode: settings.meteringMode,
     netRevenueMicros: summary.netRevenueMicros.toString(),
     revenueMicros: summary.revenueMicros.toString(),
+    subscriptionsAccrued: subscriptionCycle.accrued,
+    subscriptionsAccruedMicros: subscriptionCycle.accruedMicros.toString(),
     subscriptionsCharged: subscriptionCycle.charged,
     subscriptionsFailed: subscriptionCycle.failures.length,
     subscriptionsOpened: subscriptionCycle.opened,
@@ -141,6 +154,8 @@ export async function POST(request: NextRequest) {
       until: until.toISOString(),
     },
     subscriptions: {
+      accrued: subscriptionCycle.accrued,
+      accrued_micros: subscriptionCycle.accruedMicros.toString(),
       charged: subscriptionCycle.charged,
       failed: subscriptionCycle.failures.length,
       opened: subscriptionCycle.opened,

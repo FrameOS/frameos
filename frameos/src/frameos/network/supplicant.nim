@@ -946,7 +946,9 @@ proc readNmWifiCredentials*(ctx: NetworkContext): seq[NmWifiCredentials] =
     if content.len == 0:
       # Keyfiles are 0600 and root-owned; fall back to a privileged read for
       # the (Debian) case where FrameOS does not run as root.
-      let (catOutput, _) = ctx.run("sudo cat " & shq(path) & " 2>/dev/null || true", "")
+      # The keyfile holds the PSK: name the command in the log, never its output.
+      let (catOutput, _) = ctx.run("sudo cat " & shq(path) & " 2>/dev/null || true",
+                                   "sudo cat " & shq(path) & " (keyfile, output withheld)")
       content = catOutput
     if content.strip().len == 0:
       continue

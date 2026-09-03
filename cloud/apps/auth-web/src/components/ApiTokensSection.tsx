@@ -60,7 +60,7 @@ export function ApiTokensSection({
   const [tokens, setTokens] = useState(initialTokens);
   const [name, setName] = useState("");
   const [access, setAccess] = useState<"full" | "read_only">("full");
-  const [expiresInDays, setExpiresInDays] = useState<string>("");
+  const [expiresInDays, setExpiresInDays] = useState<string>("90");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [fresh, setFresh] = useState<
@@ -76,7 +76,7 @@ export function ApiTokensSection({
         body: JSON.stringify({
           access,
           name,
-          ...(expiresInDays ? { expires_in_days: Number(expiresInDays) } : {}),
+          expires_in_days: Number(expiresInDays),
         }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -217,7 +217,6 @@ export function ApiTokensSection({
               onChange={(event) => setExpiresInDays(event.target.value)}
               value={expiresInDays}
             >
-              <option value="">Never</option>
               <option value="7">In 7 days</option>
               <option value="30">In 30 days</option>
               <option value="90">In 90 days</option>

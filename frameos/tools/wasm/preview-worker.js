@@ -14,7 +14,7 @@
 //   {type: 'setFastMode', enabled}         lift (or restore) the 1 fps throttle
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 // Messages out:
-//   {type: 'ready', sceneInfo, browserAssets}
+//   {type: 'ready', sceneInfo, browserAssets, runtimeVersion}   runtimeVersion: FrameOS version of the bundle (null on older bundles)
 //   {type: 'frame', width, height, buffer, renderMs}   buffer: transferred ArrayBuffer (RGBA)
 //   {type: 'state', state}
 //   {type: 'log', message}
@@ -542,16 +542,79 @@ async function handleAssetsRequest(msg) {
   }
 }
 
+// ------------------------------------------------- simulated device memory
+
+// The runtime returns 3 from a render whose allocation was refused under the
+// simulated ceiling. The longjmp that gets it out abandons the Nim stack, so
+// whatever the render held is leaked — exactly as on a device, where the same
+// guard is followed by a reboot. Report it, then stop: the page re-inits the
+// worker to get a clean heap back.
+const RENDER_OUT_OF_MEMORY = 3
+
+let deviceLimits = null
+let outOfMemory = false
+
+function applyDeviceLimits(limits) {
+  deviceLimits = limits || null
+  if (!limits) {
+    return
+  }
+  try {
+    call('frameos_wasm_set_memory_limit', null, ['number', 'number'], [
+      Math.max(0, Math.floor(limits.memoryBytes || 0)),
+      Math.max(0, Math.floor(limits.memoryReserveBytes || 0)),
+    ])
+  } catch (e) {
+    // older bundle without the export: run unsimulated rather than fail
+    post({ type: 'log', message: 'device simulation unavailable in this runtime build' })
+    deviceLimits = null
+  }
+}
+
+function memoryStat(name) {
+  try {
+    return call(name, 'number', [], [])
+  } catch (e) {
+    return 0
+  }
+}
+
+function postMemory(refusedBytes) {
+  if (!deviceLimits) {
+    return
+  }
+  post({
+    type: 'memory',
+    limitBytes: memoryStat('frameos_wasm_memory_limit'),
+    usedBytes: memoryStat('frameos_wasm_memory_used'),
+    peakBytes: memoryStat('frameos_wasm_memory_peak'),
+    refusedBytes: refusedBytes || 0,
+  })
+}
+
 // ----------------------------------------------------------------- render
 
 function renderNow() {
-  if (!Module || rendering) {
+  if (!Module || rendering || outOfMemory) {
     return
   }
   rendering = true
   try {
     const started = Date.now()
     const rc = call('frameos_wasm_render', 'number', [], [])
+    if (rc === RENDER_OUT_OF_MEMORY) {
+      outOfMemory = true
+      const refused = memoryStat('frameos_wasm_memory_failed')
+      postMemory(refused)
+      post({
+        type: 'outOfMemory',
+        refusedBytes: refused,
+        limitBytes: memoryStat('frameos_wasm_memory_limit'),
+        usedBytes: memoryStat('frameos_wasm_memory_used'),
+        peakBytes: memoryStat('frameos_wasm_memory_peak'),
+      })
+      return
+    }
     const width = call('frameos_wasm_width', 'number', [], [])
     const height = call('frameos_wasm_height', 'number', [], [])
     const ptr = call('frameos_wasm_buffer', 'number', [], [])
@@ -564,6 +627,7 @@ function renderNow() {
     const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len)
     post({ type: 'frame', width, height, buffer, renderMs: Date.now() - started }, [buffer])
     postState()
+    postMemory(0)
   } catch (e) {
     post({ type: 'error', message: 'render crashed: ' + e })
   } finally {
@@ -583,7 +647,7 @@ function renderDelayMs(seconds, fast) {
 }
 
 function scheduleNextRender() {
-  if (!Module) {
+  if (!Module || outOfMemory) {
     return
   }
   if (renderTimer) {
@@ -617,6 +681,19 @@ function renderSoonIfRequested() {
     }
   } catch (e) {
     post({ type: 'error', message: String(e) })
+  }
+}
+
+// The FrameOS version this bundle was built from ("2026.9.0"), or null for a
+// bundle from before the export existed. The cloud installs the bundle from
+// a release rather than building it, so this is how the preview can say
+// which interpreter it is.
+function runtimeVersion() {
+  try {
+    const version = call('frameos_wasm_version', 'string', [], [])
+    return version && version !== 'unknown' ? version : null
+  } catch (e) {
+    return null
   }
 }
 
@@ -659,6 +736,10 @@ async function init(msg) {
     if (!ok) {
       throw new Error('init failed: ' + lastError())
     }
+    // Simulate a device's memory ceiling, if one was asked for. Set after
+    // init on purpose: module startup (the baked-in font tables and friends)
+    // lives in a frame's flash, not in its render budget.
+    applyDeviceLimits(msg.deviceLimits)
     // Apps may save into the browser folder (a device's saveAssets setting;
     // on by default here — it's the visitor's own browser storage). Pass
     // `saveAssets: false` or a {nodeName: bool} map to mirror a frame.
@@ -677,7 +758,7 @@ async function init(msg) {
     }
     lastPostedState = null
     const sceneInfo = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
-    post({ type: 'ready', sceneInfo, browserAssets: browserAssetsInfo() })
+    post({ type: 'ready', sceneInfo, browserAssets: browserAssetsInfo(), runtimeVersion: runtimeVersion() })
     renderNow()
   } catch (e) {
     post({ type: 'error', message: String(e && e.message ? e.message : e) })

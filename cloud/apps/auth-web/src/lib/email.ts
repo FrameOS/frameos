@@ -163,3 +163,70 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string) {
     to,
   });
 }
+
+export type SecurityNotification = {
+  // Which credential changed, as the subject line's noun phrase.
+  what:
+    | "google_linked"
+    | "passkey_added"
+    | "passkey_removed"
+    | "totp_enabled"
+    | "totp_disabled"
+    | "two_factor_disabled";
+  when: Date;
+  // Free text shown alongside (a passkey's name); never markup.
+  detail?: string | undefined;
+};
+
+const securityNotificationLines: Record<SecurityNotification["what"], string> = {
+  google_linked: "Google sign-in was connected to your FrameOS Cloud account. Signing in with Google now opens this account.",
+  passkey_added: "A passkey was added to your FrameOS Cloud account.",
+  passkey_removed: "A passkey was removed from your FrameOS Cloud account.",
+  totp_disabled: "The authenticator app was removed from your FrameOS Cloud account.",
+  totp_enabled: "An authenticator app was enabled on your FrameOS Cloud account.",
+  two_factor_disabled: "Two-factor authentication was turned off on your FrameOS Cloud account.",
+};
+
+// The plain-text and HTML bodies for a "your sign-in security changed" mail,
+// separate from the send so the wording can be unit-tested.
+export function securityNotificationEmail(
+  to: string,
+  notification: SecurityNotification,
+) {
+  const line = securityNotificationLines[notification.what];
+  const when = notification.when.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+  const detail = notification.detail?.trim();
+  const lines = [
+    line,
+    "",
+    `When: ${when}`,
+    ...(detail ? [`Details: ${detail}`] : []),
+    "",
+    "If this was you, there is nothing to do. If it was not, sign in to FrameOS Cloud right away, review the security settings on your account page, and change your password.",
+  ];
+  return {
+    htmlBody: [
+      `<p>${escapeHtml(line)}</p>`,
+      `<p>When: ${escapeHtml(when)}${detail ? `<br>Details: ${escapeHtml(detail)}` : ""}</p>`,
+      "<p>If this was you, there is nothing to do. If it was not, sign in to FrameOS Cloud right away, review the security settings on your account page, and change your password.</p>",
+    ].join("\n"),
+    subject: "Your FrameOS Cloud sign-in security changed",
+    textBody: lines.join("\n"),
+    to,
+  };
+}
+
+export async function sendSecurityNotificationEmail(
+  to: string,
+  notification: SecurityNotification,
+) {
+  await sendEmail(securityNotificationEmail(to, notification));
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}

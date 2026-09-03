@@ -1,4 +1,5 @@
 import type { CloudSceneSource, FrameScene } from '../types'
+import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import {
   cloudDeployActiveSceneId,
   createCloudAccountScene,
@@ -84,11 +85,27 @@ export interface CloudScenePersistOptions {
    * when its scenes.json cannot be re-read during the save.
    */
   sources?: Record<string, CloudSceneSource> | null
+  /**
+   * The service-settings groups to GRANT a scene that becomes a new private
+   * cloud scene on this save (built in the workspace, or a fork of an edited
+   * public install): the groups its apps declare, as the owner built it.
+   * Without it a new scene is served no keys
+   * (cloud/docs/cloud-frames.md, "Service settings").
+   */
+  settingsGroupsForNewScene?: (scenes: readonly FrameScene[]) => string[]
 }
 
 interface AssignmentPlan {
   scene_id: string
   scene_version?: number | null
+  /** The grant this save posts for the scene; omitted = keep as is. */
+  settings_groups?: string[] | undefined
+}
+
+// Every save re-posts each kept assignment's grant explicitly, so a row
+// from before grants existed becomes explicit on the owner's first save.
+function keptGrant(row: CloudFrameSceneRow): string[] | undefined {
+  return row.granted_settings_groups ?? undefined
 }
 
 function sceneName(scene: Partial<FrameScene>): string {
@@ -159,6 +176,8 @@ async function persistAndPushCloudFrameScenesNow(
 ): Promise<CloudScenePersistOutcome> {
   const sceneUnchanged = options.sceneUnchanged ?? rawSceneUnchanged
   const sources = options.sources ?? {}
+  const grantForNew = (scenes: readonly FrameScene[]): string[] | undefined =>
+    options.settingsGroupsForNewScene ? options.settingsGroupsForNewScene(scenes) : undefined
   const rows = await listCloudFrameScenes(frameId)
   const formById = new Map<string, FrameScene>()
   for (const scene of formScenes) {
@@ -179,7 +198,11 @@ async function persistAndPushCloudFrameScenesNow(
       // assignment untouched rather than guessing — and claim every runtime
       // scene the workspace hydrated from it (plus a stub tile carrying the
       // store id), or they would be created again as new private scenes.
-      assignments.push({ scene_id: row.scene_id, scene_version: row.scene_version ?? null })
+      assignments.push({
+        scene_id: row.scene_id,
+        scene_version: row.scene_version ?? null,
+        settings_groups: keptGrant(row),
+      })
       if (formById.has(row.scene_id)) {
         claimedRuntimeIds.add(row.scene_id)
       }
@@ -210,7 +233,11 @@ async function persistAndPushCloudFrameScenesNow(
       return !!form && form !== scene && !sceneUnchanged(withoutSceneOrigin(scene), form)
     })
     if (!edited) {
-      assignments.push({ scene_id: row.scene_id, scene_version: row.scene_version ?? null })
+      assignments.push({
+        scene_id: row.scene_id,
+        scene_version: row.scene_version ?? null,
+        settings_groups: keptGrant(row),
+      })
       continue
     }
 
@@ -222,6 +249,7 @@ async function persistAndPushCloudFrameScenesNow(
         // A pinned assignment follows the edit it just made; an unpinned one
         // keeps tracking latest (which now IS the edit).
         scene_version: row.scene_version ? (version ?? null) : null,
+        settings_groups: keptGrant(row),
       })
     } catch (error) {
       // Not ours to edit (public install), name clash, moderation… — fork the
@@ -230,12 +258,18 @@ async function persistAndPushCloudFrameScenesNow(
         const name = row.name || sceneName(updated[0] ?? {})
         const newSceneId = await createCloudAccountScene(name, updated, undefined, coverHint(frameId, updated))
         changedStoreSceneIds.push(newSceneId)
-        assignments.push({ scene_id: newSceneId })
+        // The fork inherits what the original was granted, narrowed to what
+        // the edited copy still declares (the server intersects).
+        assignments.push({ scene_id: newSceneId, settings_groups: keptGrant(row) ?? grantForNew(updated) })
         notes.push(`Saved the edited "${name}" as a new private cloud scene`)
       } catch (forkError) {
         const message = forkError instanceof Error ? forkError.message : String(forkError)
         notes.push(`Kept "${row.name ?? row.scene_id}" unchanged in the cloud: ${message}`)
-        assignments.push({ scene_id: row.scene_id, scene_version: row.scene_version ?? null })
+        assignments.push({
+          scene_id: row.scene_id,
+          scene_version: row.scene_version ?? null,
+          settings_groups: keptGrant(row),
+        })
       }
     }
   }
@@ -253,7 +287,9 @@ async function persistAndPushCloudFrameScenesNow(
       sceneId: scene.id,
     })
     changedStoreSceneIds.push(newSceneId)
-    assignments.push({ scene_id: newSceneId })
+    // A scene the owner built here is granted what its apps declare — that
+    // is the owner choosing it, the same consent as picking a template.
+    assignments.push({ scene_id: newSceneId, settings_groups: grantForNew([scene]) })
   }
 
   await setCloudFrameScenes(

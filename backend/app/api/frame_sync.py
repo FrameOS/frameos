@@ -12,6 +12,7 @@ from arq import ArqRedis as Redis
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.frame import (
     Frame,
     compact_timezone_updater,
@@ -21,6 +22,7 @@ from app.models.frame import (
     normalize_error_behavior,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
+    record_successful_deploy,
     update_frame,
 )
 from app.schemas.frames import FrameAdoptRequest, FrameSyncApplyRequest, FrameUpdateRequest
@@ -171,6 +173,7 @@ FRAME_SYNC_SECRET_PATH_PARTS = {
     "server_key",
     "serverKey",
     "client_ca",
+    "wifiPassword",
     "clientCa",
     "private_key",
     "privateKey",
@@ -737,8 +740,7 @@ def _frame_sync_snapshot(frame: Frame) -> dict[str, Any]:
 
 
 def _mark_frame_sync_baseline(frame: Frame, synced_at: datetime | None = None) -> None:
-    frame.last_successful_deploy = _frame_sync_snapshot(frame)
-    frame.last_successful_deploy_at = synced_at or datetime.now(timezone.utc)
+    record_successful_deploy(frame, _frame_sync_snapshot(frame), synced_at)
 
 
 def _frame_sync_baseline_missing_version(frame: Frame) -> bool:
@@ -758,6 +760,45 @@ def _extract_remote_frame_payload(payload: Any) -> dict[str, Any]:
     raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Frame returned an invalid sync payload")
 
 
+def _restore_write_only_secrets(remote_frame: dict[str, Any], backend_frame: Frame | dict[str, Any]) -> dict[str, Any]:
+    """Fill secrets the device blanked with the backend's own copy.
+
+    The ESP32 serves "" for its admin password, TLS private key, backend API
+    key and Wi-Fi passphrase (embedded/esp32/main/fos_http.c: write-only, the
+    backend↔frame hop is plain HTTP by default). Read literally, every sync
+    would show those as "changed on the frame" and a "take the frame's
+    value" choice would blank the row, which the next deploy pushes back to
+    the device. So a blank secret leaf means "unchanged": it takes the value
+    the backend already holds, and only a secret the device does report
+    replaces it. Non-secret leaves are untouched; shapes that do not match
+    (a section missing on either side, a non-dict where a dict is expected)
+    are left as the device sent them.
+    """
+    if not isinstance(remote_frame, dict):
+        return remote_frame
+
+    def backend_value(key: str) -> Any:
+        if isinstance(backend_frame, dict):
+            return backend_frame.get(key)
+        return getattr(backend_frame, key, None)
+
+    def restore(remote: dict[str, Any], backend: dict[str, Any], *, top: bool) -> dict[str, Any]:
+        restored: dict[str, Any] = {}
+        for key, value in remote.items():
+            other = backend.get(key)
+            is_secret = key in FRAME_SYNC_SECRET_PATH_PARTS or (top and key in FRAME_SYNC_SECRET_KEYS)
+            if is_secret and value in (None, "") and isinstance(other, str) and other:
+                restored[key] = other
+            elif isinstance(value, dict) and isinstance(other, dict):
+                restored[key] = restore(value, other, top=False)
+            else:
+                restored[key] = value
+        return restored
+
+    backend_view = {key: backend_value(key) for key in remote_frame.keys()}
+    return restore(remote_frame, backend_view, top=True)
+
+
 async def _load_live_frame_api_payload(
     frame: Frame, redis: Redis, fetch_frame_http_bytes: FrameFetch
 ) -> dict[str, Any]:
@@ -771,11 +812,30 @@ async def _load_live_frame_api_payload(
         if status != 200:
             continue
         try:
-            return _extract_remote_frame_payload(json.loads(body.decode("utf-8")))
+            remote_frame = _extract_remote_frame_payload(json.loads(body.decode("utf-8")))
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Frame returned invalid JSON: {exc}")
-    detail = _decode_bytes(last_body) if last_body else "Unable to load frame sync payload"
-    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Frame sync load failed: {last_status} {detail}")
+        return _restore_write_only_secrets(remote_frame, frame)
+    # Whatever answered on that address does not get its body relayed to the
+    # browser; a structured `detail`/`error` from a FrameOS runtime does.
+    raise HTTPException(
+        status_code=HTTPStatus.BAD_GATEWAY,
+        detail=f"Frame sync load failed: HTTP {last_status} {_frame_error_detail(last_body)}".rstrip(),
+    )
+
+
+def _frame_error_detail(body: bytes) -> str:
+    try:
+        payload = json.loads(body.decode("utf-8")) if body else None
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("detail", "error", "message"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:200]
+    return ""
 
 
 async def _frame_admin_session_headers(
@@ -811,7 +871,9 @@ async def _frame_admin_session_headers(
 
 def _frame_sync_baseline(frame: Frame, backend_frame: dict[str, Any]) -> dict[str, Any]:
     if isinstance(frame.last_successful_deploy, dict):
-        return frame.last_successful_deploy
+        # Secrets are not stored in the baseline; the ones that still match
+        # the row come back so an untouched device does not read as changed.
+        return deployed_frame_snapshot(frame)
     return backend_frame
 
 

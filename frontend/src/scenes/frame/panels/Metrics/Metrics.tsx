@@ -1,20 +1,27 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
+import { useEffect, useMemo, useRef } from 'react'
 import {
+  metricCardElementId,
+  metricCardFromHash,
   metricSeriesVisibilityKey,
   metricTimestamp,
   metricsLogic,
   metricsTimeRangeOptions,
+  type MetricSeries,
   type MetricsTimeRangePreset,
+  type RebootMarker,
+  type TimeRange,
 } from './metricsLogic'
 import { frameLogic } from '../../frameLogic'
-import { ParentSize } from '@visx/responsive'
 import { BrushChart } from './BrushChart'
 import { Select } from '../../../../components/Select'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
-import { metricChartThemes, themeMetricSeries } from './chartTheme'
+import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './chartTheme'
 import { BoltIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
+import type { ChartSeries } from './chartData'
+import { metricChartHeight, metricChartMargin } from './chartLayout'
 
 const metricLabels: Record<string, string> = {
   load: 'Load',
@@ -68,6 +75,22 @@ const metricHelp: Record<string, JSX.Element> = {
   ),
 }
 
+const batteryMisreadHelp = (
+  <div className="space-y-1">
+    <div>
+      Readings the samples around them contradict, left off the chart. The frame reads its cell through a resistor
+      divider on an ADC pin, and every way that read can go wrong — a divider still charging, the supply sagging under
+      the radio, two tasks sampling at once — pulls the number down, never up.
+    </div>
+    <div>
+      So a lone reading far below its neighbours is a misread, not a discharge, and a frame that shows a red 0% for one
+      sample and 78% for the next has not moved. Frequent misreads mean the frame wants a firmware update.
+    </div>
+  </div>
+)
+
+const CHART_RESIZE_DEBOUNCE_MS = 100
+
 const latestDatapointFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
@@ -76,6 +99,143 @@ const latestDatapointFormatter = new Intl.DateTimeFormat(undefined, {
   second: '2-digit',
   hourCycle: 'h23',
 })
+
+/**
+ * Scrolls the card a `#metric=...` link named into view. The cards only
+ * exist once the samples have loaded, hence the retries — the same shape as
+ * the settings-section scroll in FrameWorkspace.
+ */
+function scrollToMetricCard(category: string, attempt = 0): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return
+  }
+  window.requestAnimationFrame(() => {
+    const card = document.getElementById(metricCardElementId(category))
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToMetricCard(category, attempt + 1), 50)
+    }
+  })
+}
+
+const noChartSeries: ChartSeries[] = []
+
+function MetricCard({
+  category,
+  series,
+  visibleSeries,
+  overviewSeries,
+  hiddenMetricSeries,
+  latestSummary,
+  batteryMisreadCount,
+  chartWidth,
+  chartTheme,
+  theme,
+  metricsTimeRange,
+  visibleTimeRange,
+  rebootMarkers,
+  metricGapThresholdMs,
+  onToggleSeries,
+  onTimeRangeChange,
+  onResetTimeRange,
+}: {
+  category: string
+  /** Every series of the card, hidden ones included — for the legend. */
+  series: MetricSeries[]
+  /** The visible window, prepared for the main plot. */
+  visibleSeries: ChartSeries[]
+  /** The whole history, prepared for the overview strip. */
+  overviewSeries: ChartSeries[]
+  hiddenMetricSeries: Record<string, boolean>
+  latestSummary?: string
+  batteryMisreadCount: number
+  chartWidth: number
+  chartTheme: MetricChartTheme
+  theme: string
+  metricsTimeRange: TimeRange | null
+  visibleTimeRange: TimeRange | null
+  rebootMarkers: RebootMarker[]
+  metricGapThresholdMs: number | null
+  onToggleSeries: (category: string, seriesKey: string) => void
+  onTimeRangeChange: (start: number, end: number) => void
+  onResetTimeRange: () => void
+}) {
+  const themedSeries = useMemo(() => themeMetricSeries(series, chartTheme), [series, chartTheme])
+  const themedVisibleSeries = useMemo(() => themeMetricSeries(visibleSeries, chartTheme), [visibleSeries, chartTheme])
+  const themedOverviewSeries = useMemo(
+    () => themeMetricSeries(overviewSeries, chartTheme),
+    [overviewSeries, chartTheme]
+  )
+
+  return (
+    <div id={metricCardElementId(category)} className="frame-tool-card mb-3 overflow-hidden rounded-[22px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
+        <strong className="frame-tool-heading">{metricLabels[category] ?? category}</strong>
+        {metricHelp[category] ? (
+          <Tooltip title={metricHelp[category]} className="frame-tool-muted" titleClassName="w-72 text-xs leading-snug">
+            <InformationCircleIcon className="h-4 w-4" aria-label={`About ${metricLabels[category] ?? category}`} />
+          </Tooltip>
+        ) : null}
+        {latestSummary ? <span className="frame-tool-muted">{latestSummary}</span> : null}
+        {batteryMisreadCount > 0 && (category === 'batteryPercent' || category === 'batteryMillivolts') ? (
+          <Tooltip title={batteryMisreadHelp} className="frame-tool-muted" titleClassName="w-72 text-xs leading-snug">
+            <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-600">
+              {batteryMisreadCount} misread{batteryMisreadCount === 1 ? '' : 's'} ignored
+            </span>
+          </Tooltip>
+        ) : null}
+        {series.length > 1 &&
+          themedSeries.map((chartSeries) => {
+            const hidden = hiddenMetricSeries[metricSeriesVisibilityKey(category, chartSeries.key)]
+            return (
+              <button
+                key={chartSeries.key}
+                type="button"
+                className={clsx(
+                  'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
+                  hidden ? 'frame-tool-muted line-through opacity-60' : 'frame-tool-row hover:bg-white/80'
+                )}
+                onClick={() => onToggleSeries(category, chartSeries.key)}
+              >
+                <span
+                  className={clsx('inline-block h-2 w-3 rounded-sm', hidden ? 'opacity-30' : '')}
+                  style={{ backgroundColor: chartSeries.color }}
+                />
+                {chartSeries.label}
+              </button>
+            )
+          })}
+      </div>
+      <div
+        className={clsx(
+          // select-none here only: dragging the brush must not select
+          // text, but the card titles above stay copyable.
+          'select-none p-0',
+          theme === 'dark' ? 'bg-[#18181b] text-white' : 'bg-white/70 text-slate-900'
+        )}
+        style={{ height: metricChartHeight }}
+      >
+        <BrushChart
+          width={chartWidth}
+          height={metricChartHeight}
+          margin={metricChartMargin}
+          series={themedVisibleSeries}
+          overviewSeries={themedOverviewSeries}
+          totalTimeRange={metricsTimeRange}
+          visibleTimeRange={visibleTimeRange}
+          rebootMarkers={rebootMarkers}
+          gapThresholdMs={metricGapThresholdMs}
+          onTimeRangeChange={onTimeRangeChange}
+          onResetTimeRange={onResetTimeRange}
+          chartTheme={chartTheme}
+        />
+      </div>
+    </div>
+  )
+}
 
 interface MetricsProps {
   scrollContainer?: boolean
@@ -88,7 +248,8 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
     metrics,
     sortedMetrics,
     metricsByCategory,
-    visibleMetricsByCategory,
+    visibleChartSeriesByCategory,
+    overviewChartSeriesByCategory,
     hiddenMetricSeries,
     metricsLoading,
     metricsTimeRange,
@@ -97,7 +258,9 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
     selectedTimeRangePreset,
     metricGapThresholdMs,
     latestMetricSummariesByCategory,
+    batteryMisreadCount,
     requestMetricsLoading,
+    chartWidth,
   } = useValues(metricsLogic({ frameId }))
   const {
     setSelectedTimeRange,
@@ -105,6 +268,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
     setSelectedTimeRangePreset,
     toggleMetricSeries,
     requestMetrics,
+    setChartWidth,
   } = useActions(metricsLogic({ frameId }))
   const timeRangeOptions =
     selectedTimeRangePreset === 'custom'
@@ -112,6 +276,50 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
       : metricsTimeRangeOptions
   const chartTheme = metricChartThemes[theme]
   const requestMetricsTooltipId = `frame-${frameId}-request-metrics-tooltip`
+  const scrolledToHashCardRef = useRef(false)
+  useEffect(() => {
+    const category = metricCardFromHash()
+    if (scrolledToHashCardRef.current || metricsLoading || metrics.length === 0 || !category) {
+      return
+    }
+    scrolledToHashCardRef.current = true
+    scrollToMetricCard(category)
+  }, [metricsLoading, metrics.length])
+
+  // One observer for all the cards, not one per chart: every card is the
+  // full width of this column, and the width is what sets how many points
+  // the logic prepares for each chart. A window being dragged wider fires
+  // per pixel; the charts follow once it settles.
+  const cardsRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const element = cardsRef.current
+    if (!element || typeof ResizeObserver === 'undefined') {
+      return
+    }
+    let timeout: number | null = null
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (typeof width !== 'number') {
+        return
+      }
+      if (timeout !== null) {
+        window.clearTimeout(timeout)
+      }
+      timeout = window.setTimeout(() => {
+        timeout = null
+        setChartWidth(width)
+      }, CHART_RESIZE_DEBOUNCE_MS)
+    })
+    observer.observe(element)
+    setChartWidth(element.getBoundingClientRect().width)
+    return () => {
+      observer.disconnect()
+      if (timeout !== null) {
+        window.clearTimeout(timeout)
+      }
+    }
+  }, [metricsLoading, metrics.length === 0])
+
   const latestMetric = sortedMetrics[sortedMetrics.length - 1]
   const latestMetricTimestamp = latestMetric ? metricTimestamp(latestMetric) : null
   const latestDatapointLabel =
@@ -173,76 +381,30 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
           No metrics yet.
         </div>
       ) : (
-        Object.entries(metricsByCategory).map(([key, series]) => {
-          const themedSeries = themeMetricSeries(series, chartTheme)
-          const visibleSeries = themeMetricSeries(visibleMetricsByCategory[key] ?? [], chartTheme)
-          return (
-            <div key={key} className="frame-tool-card mb-3 overflow-hidden rounded-[22px]">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
-                <strong className="frame-tool-heading">{metricLabels[key] ?? key}</strong>
-                {metricHelp[key] ? (
-                  <Tooltip
-                    title={metricHelp[key]}
-                    className="frame-tool-muted"
-                    titleClassName="w-72 text-xs leading-snug"
-                  >
-                    <InformationCircleIcon className="h-4 w-4" aria-label={`About ${metricLabels[key] ?? key}`} />
-                  </Tooltip>
-                ) : null}
-                {latestMetricSummariesByCategory[key] ? (
-                  <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
-                ) : null}
-                {series.length > 1 &&
-                  themedSeries.map((chartSeries) => {
-                    const hidden = hiddenMetricSeries[metricSeriesVisibilityKey(key, chartSeries.key)]
-                    return (
-                      <button
-                        key={chartSeries.key}
-                        type="button"
-                        className={clsx(
-                          'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
-                          hidden ? 'frame-tool-muted line-through opacity-60' : 'frame-tool-row hover:bg-white/80'
-                        )}
-                        onClick={() => toggleMetricSeries(key, chartSeries.key)}
-                      >
-                        <span
-                          className={clsx('inline-block h-2 w-3 rounded-sm', hidden ? 'opacity-30' : '')}
-                          style={{ backgroundColor: chartSeries.color }}
-                        />
-                        {chartSeries.label}
-                      </button>
-                    )
-                  })}
-              </div>
-              <div
-                className={clsx(
-                  // select-none here only: dragging the brush must not select
-                  // text, but the card titles above stay copyable.
-                  'h-[200px] select-none p-0',
-                  theme === 'dark' ? 'bg-[#18181b] text-white' : 'bg-white/70 text-slate-900'
-                )}
-              >
-                <ParentSize>
-                  {(parent) => (
-                    <BrushChart
-                      width={parent.width}
-                      height={200}
-                      margin={{ top: 20, left: 56, bottom: 12, right: 45 }}
-                      series={visibleSeries}
-                      totalTimeRange={metricsTimeRange}
-                      visibleTimeRange={visibleTimeRange}
-                      rebootMarkers={rebootMarkers}
-                      gapThresholdMs={metricGapThresholdMs}
-                      onTimeRangeChange={setSelectedTimeRange}
-                      onResetTimeRange={resetSelectedTimeRange}
-                      chartTheme={chartTheme}
-                    />
-                  )}
-                </ParentSize>
-              </div>
-            </div>
-          )
-        })
+        <div ref={cardsRef}>
+          {Object.entries(metricsByCategory).map(([key, series]) => (
+            <MetricCard
+              key={key}
+              category={key}
+              series={series}
+              visibleSeries={visibleChartSeriesByCategory[key] ?? noChartSeries}
+              overviewSeries={overviewChartSeriesByCategory[key] ?? noChartSeries}
+              hiddenMetricSeries={hiddenMetricSeries}
+              latestSummary={latestMetricSummariesByCategory[key]}
+              batteryMisreadCount={batteryMisreadCount}
+              chartWidth={chartWidth}
+              chartTheme={chartTheme}
+              theme={theme}
+              metricsTimeRange={metricsTimeRange}
+              visibleTimeRange={visibleTimeRange}
+              rebootMarkers={rebootMarkers}
+              metricGapThresholdMs={metricGapThresholdMs}
+              onToggleSeries={toggleMetricSeries}
+              onTimeRangeChange={setSelectedTimeRange}
+              onResetTimeRange={resetSelectedTimeRange}
+            />
+          ))}
+        </div>
       )}
     </div>
   )

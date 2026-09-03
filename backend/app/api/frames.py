@@ -11,13 +11,12 @@ import asyncssh
 import gzip
 import hashlib
 import io
-import ipaddress
 import json
 import mimetypes
 import os
 import re
+from pathlib import Path
 import shlex
-import socket
 import shutil
 import sys
 import tempfile
@@ -57,6 +56,7 @@ from app.models.frame import (
     normalize_error_behavior,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
+    record_successful_deploy,
     update_frame,
 )
 from app.models.log import FRAME_ACTIVITY_LOG_TYPES, Log, new_log as log
@@ -91,7 +91,8 @@ from app.schemas.frames import (
 )
 from app.api.auth import get_current_user_from_request
 from app.config import config
-from app.utils.network import is_safe_host
+from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, is_safe_host
+from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES, read_upload_limited, reject_oversized_content_length
 from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.remote_exec import (
     RemoteTransport,
@@ -140,23 +141,15 @@ from app.utils.versions import current_frameos_version
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
-    cancel_embedded_firmware_ota,
-    ensure_embedded_frame_defaults,
-    pending_frame_commands,
-    embedded_flash_size_for_frame,
-    embedded_ota_supported_for_frame,
-    embedded_toolchain_available,
-    latest_embedded_firmware,
-    embedded_platform_spec_for_frame,
-    embedded_provisioning_plan,
-    is_virtual_frame,
+    embedded_firmware_layout_for_frame,
     normalize_embedded_platform,
-    refresh_embedded_firmware_status,
-    request_or_queue_embedded_firmware_ota,
-    start_embedded_firmware,
-    with_embedded_firmware_layout,
+    embedded_provisioning_plan,
+    ensure_embedded_frame_defaults,
+    is_virtual_frame,
+    request_embedded_firmware_update,
 )
 from app.tasks.buildroot_image import (
+    buildroot_artifact_dir,
     buildroot_agent_defaults,
     buildroot_sd_image_no_build_environment_message,
     buildroot_sd_image_config_fingerprint,
@@ -174,6 +167,7 @@ from app.tasks.buildroot_image import (
 from app.codegen.drivers_nim import frame_compilation_mode
 from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_button_defaults
 from app.api.project_scope import project_get_or_404
+from app.api.firmware_release import latest_published_provisioning_assets
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
@@ -229,6 +223,23 @@ async def _public_project_frame(
     if frame is None:
         _not_found()
     return frame
+
+
+def _require_artifact_path(path: str, artifact_dir) -> None:
+    """Refuse to serve a build artifact that does not live under its directory.
+
+    Artifact paths are persisted on the frame row, and several client-facing
+    writes (frame update/import, backup restore) can set them; without this
+    check a crafted path turned the download routes into an arbitrary file
+    read on the backend host.
+    """
+    try:
+        resolved = Path(path).resolve(strict=True)
+        root = Path(artifact_dir).resolve()
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Artifact not found")
+    if resolved == root or root not in resolved.parents:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Artifact not found")
 
 
 def _bad_request(msg: str):
@@ -1149,17 +1160,16 @@ def _frame_to_response_dict(
 ) -> dict[str, Any]:
     data = frame.to_dict()
     if (frame.mode or "rpios") == "embedded":
+        # The flash layout + on-device memory plan the deploy drawer draws.
+        # Derived, never stored: the frame row carries no build state.
         try:
-            firmware = latest_embedded_firmware(frame) or with_embedded_firmware_layout(frame, {
-                "status": "idle",
-                "platform": normalize_embedded_platform((frame.embedded or {}).get("platform")),
-                "flashSize": embedded_flash_size_for_frame(frame),
-                "otaSupported": embedded_ota_supported_for_frame(frame),
-            })
+            layout = embedded_firmware_layout_for_frame(frame)
         except ValueError:
-            firmware = None
-        if firmware:
-            data["embedded"] = {**(data.get("embedded") or {}), "firmware": firmware}
+            layout = None
+        embedded = {key: value for key, value in (data.get("embedded") or {}).items() if key != "firmware"}
+        if layout:
+            embedded["layout"] = layout
+        data["embedded"] = embedded
     if latest_log_at is not _LATEST_LOG_AT_UNSET:
         data["last_log_at"] = (
             latest_log_at.replace(tzinfo=timezone.utc).isoformat() if isinstance(latest_log_at, datetime) else None
@@ -1353,6 +1363,7 @@ async def api_frame_ping(
 
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
+    await assert_target_allowed(frame.frame_host, what="Frame host")
 
     if mode_normalised == "icmp":
         ok, elapsed_ms, message = await _icmp_ping_host(frame.frame_host)
@@ -1380,7 +1391,9 @@ async def api_frame_ping(
             frame, redis, path=ping_path, method="GET"
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
-        message = _format_body_preview(body) or f"HTTP {status}"
+        # Only a success body is worth showing; an error page from whatever
+        # answered on that address is not reflected back to the browser.
+        message = (_format_body_preview(body) if 200 <= status < 300 else "") or f"HTTP {status}"
         return FramePingResponse(
             ok=200 <= status < 400,
             mode="http",
@@ -2031,33 +2044,22 @@ async def api_frame_scene_preview_settings(
     return {"settings": frame_json.get("settings") or {}}
 
 
-def _preview_proxy_host_is_blocked(host: str) -> bool:
-    """Best-effort SSRF guard for the live-preview HTTP proxy: reject hosts that
-    resolve to loopback / private / link-local / reserved addresses so an
-    authenticated project user can't turn the backend into an internal-network
-    probe. DNS is resolved once here; a rebind between this check and the fetch
-    is a residual risk accepted for a project-authenticated preview feature."""
+# The largest upstream body the live-preview proxy relays (generated images
+# are a few MB); the rest is dropped mid-stream instead of buffered.
+PREVIEW_PROXY_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+
+
+async def _preview_proxy_host_is_blocked(host: str) -> bool:
+    """SSRF guard for the live-preview HTTP proxy, on the shared resolver-based
+    check (app/utils/network.py) with private ranges refused as well: an
+    authenticated project user must not turn the backend into an
+    internal-network probe."""
     if not host:
         return True
     try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
+        await check_target_host(host, allow_private=False, allow_loopback=False)
+    except TargetBlocked:
         return True
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr.split("%", 1)[0])
-        except ValueError:
-            return True
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            return True
     return False
 
 
@@ -2098,7 +2100,7 @@ async def api_frame_scene_preview_proxy(
     parsed = httpx.URL(url) if url else None
     if parsed is None or parsed.scheme not in ("http", "https") or not parsed.host:
         _bad_request(f"Invalid proxy URL: {url}")
-    if _preview_proxy_host_is_blocked(parsed.host):
+    if await _preview_proxy_host_is_blocked(parsed.host):
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Proxy target host is not allowed")
 
     body_bytes = base64.b64decode(body_b64) if body_b64 else None
@@ -2112,16 +2114,30 @@ async def api_frame_scene_preview_proxy(
     # Short connect timeout, long read timeout for slow APIs (image generation).
     timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 15.0))
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-            upstream = await client.request(method, url, headers=forward_headers, content=body_bytes)
+        # No redirects: the host check covered the URL the app asked for, not
+        # wherever it might bounce to. The body is streamed under a cap.
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+            async with client.stream(method, url, headers=forward_headers, content=body_bytes) as upstream:
+                upstream_status = upstream.status_code
+                media_type = upstream.headers.get("content-type", "application/octet-stream")
+                declared = upstream.headers.get("content-length") or ""
+                if declared.isdigit() and int(declared) > PREVIEW_PROXY_MAX_RESPONSE_BYTES:
+                    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Proxy response too large")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in upstream.aiter_bytes():
+                    total += len(chunk)
+                    if total > PREVIEW_PROXY_MAX_RESPONSE_BYTES:
+                        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Proxy response too large")
+                    chunks.append(chunk)
+                upstream_body = b"".join(chunks)
     except httpx.HTTPError as exc:
         # Timeout exceptions often stringify empty; include the type so the
         # failure is diagnosable in the preview's runtime log.
         detail = str(exc).strip() or type(exc).__name__
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Proxy fetch failed: {detail}")
 
-    media_type = upstream.headers.get("content-type", "application/octet-stream")
-    return Response(content=upstream.content, status_code=upstream.status_code, media_type=media_type)
+    return Response(content=upstream_body, status_code=upstream_status, media_type=media_type)
 
 
 @api_project.get("/frames/{id:int}/sync")
@@ -2678,13 +2694,15 @@ async def api_frame_assets_sync(
 @api_project.post("/frames/{id:int}/assets/upload_image")
 async def api_frame_assets_upload_image(
     id: int,
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     frame = _project_frame(db, id) or _not_found()
 
-    data = await file.read()
+    data = await read_upload_limited(file, MAX_ASSET_UPLOAD_BYTES)
     if not data:
         _bad_request("Uploaded file is empty")
 
@@ -3018,6 +3036,23 @@ def _reject_embedded_frame(frame: Frame, reason: str) -> None:
         _bad_request(reason)
 
 
+@api_project.post("/frames/{id:int}/ssh_host_key/forget")
+async def api_frame_forget_ssh_host_key(
+    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
+):
+    """Drop the SSH host key pinned on first connect, so a reinstalled frame
+    (new host key at the same address) can be reached again. The next
+    connection records whatever key it is offered."""
+    frame = _project_frame(db, id) or _not_found()
+    frame.ssh_host_key = None
+    await update_frame(db, redis, frame)
+    await log(
+        db, redis, id, "stdinfo",
+        "Forgot the stored SSH host key; the next SSH connection records the key it is offered",
+    )
+    return {"frame": frame.to_dict()}
+
+
 @api_project.post("/frames/{id:int}/clear_build_cache")
 async def api_frame_clear_build_cache(
     id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
@@ -3300,6 +3335,10 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
     path = sd_image.get("path")
     if not isinstance(path, str) or not os.path.isfile(path):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated SD card image file not found")
+    # The path is stored on the frame row, which clients can write (update,
+    # import, backup restore). Only ever serve — or gzip next to — a file that
+    # the builder itself put under the artifact directory.
+    _require_artifact_path(path, buildroot_artifact_dir())
 
     filename = str(sd_image.get("filename") or f"frameos-{id}.img")
     download_path = path
@@ -3313,36 +3352,6 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
                     shutil.copyfileobj(source, destination)
 
     return FileResponse(download_path, media_type="application/gzip", filename=download_filename)
-
-
-@api_project.get("/frames/{id:int}/embedded/firmware")
-async def api_frame_embedded_firmware_status(
-    id: int,
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-):
-    frame = _project_frame(db, id)
-    if not frame:
-        _not_found()
-    if (frame.mode or "rpios") != "embedded":
-        _bad_request("Firmware generation is only available for embedded frames")
-
-    try:
-        platform = normalize_embedded_platform((frame.embedded or {}).get("platform"))
-        firmware = await refresh_embedded_firmware_status(db, redis, frame)
-        flash_size = embedded_flash_size_for_frame(frame)
-        ota_supported = embedded_ota_supported_for_frame(frame)
-    except ValueError as exc:
-        _bad_request(str(exc))
-    return {
-        "firmware": firmware
-        or with_embedded_firmware_layout(frame, {
-            "status": "idle",
-            "platform": platform,
-            "flashSize": flash_size,
-            "otaSupported": ota_supported,
-        })
-    }
 
 
 @api_project.get("/frames/{id:int}/embedded/provisioning")
@@ -3359,88 +3368,26 @@ async def api_frame_embedded_provisioning(
         _not_found()
     if (frame.mode or "rpios") != "embedded":
         _bad_request("Firmware provisioning is only available for embedded frames")
+    # Which images the release carries decides between the layout-matched
+    # asset and the generic one; the listing is the same cached lookup the
+    # flasher's download goes through, so this costs no GitHub request.
+    published_assets = await latest_published_provisioning_assets()
     try:
-        return {"provisioning": embedded_provisioning_plan(frame)}
+        return {"provisioning": embedded_provisioning_plan(frame, published_assets)}
     except ValueError as exc:
         _bad_request(str(exc))
-
-
-@api_project.post("/frames/{id:int}/embedded/firmware")
-async def api_frame_embedded_firmware(
-    id: int,
-    force: bool = Query(False),
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-):
-    frame = _project_frame(db, id)
-    if not frame:
-        _not_found()
-    if (frame.mode or "rpios") != "embedded":
-        _bad_request("Firmware generation is only available for embedded frames")
-    if not embedded_toolchain_available():
-        _bad_request(
-            "ESP-IDF toolchain not found on the backend. "
-            "Install it and set IDF_PATH (see embedded/esp32/README.md)."
-        )
-
-    try:
-        ensure_embedded_frame_defaults(frame)
-    except ValueError as exc:
-        _bad_request(str(exc))
-
-    db.add(frame)
-    db.commit()
-
-    try:
-        started, firmware = await start_embedded_firmware(db, redis, frame, force=force)
-        if started:
-            message = "Firmware build started"
-        elif firmware.get("status") == "ready":
-            message = "Firmware already ready"
-        else:
-            message = "Firmware build already running"
-        return {
-            "message": message,
-            "firmware": firmware,
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@api_project.get("/frames/{id:int}/embedded/firmware/download")
-async def api_frame_embedded_firmware_download(id: int, db: Session = Depends(get_db)):
-    frame = _project_frame(db, id)
-    if not frame:
-        _not_found()
-    if (frame.mode or "rpios") != "embedded":
-        _bad_request("Firmware downloads are only available for embedded frames")
-
-    firmware = latest_embedded_firmware(frame)
-    if not firmware or firmware.get("status") != "ready":
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No ready firmware image for this frame")
-
-    path = firmware.get("path")
-    if not isinstance(path, str) or not os.path.isfile(path):
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated firmware file not found")
-
-    filename = str(firmware.get("filename") or f"frameos-esp32-{id}.bin")
-    return FileResponse(
-        path,
-        media_type="application/octet-stream",
-        filename=filename,
-        headers={"Cache-Control": "no-store"},
-    )
 
 
 @api_project.post("/frames/{id:int}/embedded/firmware/ota")
 async def api_frame_embedded_firmware_ota(
     id: int,
-    force: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    """Ask the board to install the latest FrameOS release over the air. The
+    device pulls this backend's relay of the release manifest and installs
+    the signed release image for its flash layout if it runs an older
+    version; progress arrives as ``ota:backend`` log lines."""
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
@@ -3448,20 +3395,11 @@ async def api_frame_embedded_firmware_ota(
         _bad_request("OTA updates are only available for embedded frames")
 
     try:
-        message, firmware, device_payload = await request_or_queue_embedded_firmware_ota(
-            db,
-            redis,
-            frame,
-            force=force,
-        )
+        device_payload = await request_embedded_firmware_update(db, redis, frame)
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
 
-    return {
-        "message": message,
-        "firmware": firmware,
-        "device": device_payload,
-    }
+    return {"message": "Firmware update requested", "device": device_payload}
 
 
 @api_project.get("/frames/{id:int}/commands")
@@ -3469,15 +3407,14 @@ async def api_frame_pending_commands(id: int, db: Session = Depends(get_db)):
     """What is still waiting for this frame to act on it.
 
     Cloud parity endpoint (docs/api-triality.md): the cloud answers this from
-    its durable `frame_commands` queue, the backend from the one action it
-    records instead of pushing immediately — a queued ESP32 OTA request. Same
-    wire shape either way, so the workspace's pending-actions panel is one
-    component.
+    its durable `frame_commands` queue. The backend pushes every action
+    immediately and queues nothing, so this is always empty — kept so the
+    workspace's pending-actions panel is one component.
     """
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
-    return {"commands": pending_frame_commands(frame)}
+    return {"commands": []}
 
 
 @api_project.delete("/frames/{id:int}/commands/{command_id}")
@@ -3485,16 +3422,12 @@ async def api_frame_cancel_pending_command(
     id: int,
     command_id: str,
     db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
-    if not await cancel_embedded_firmware_ota(db, redis, frame, command_id):
-        # Already delivered, already cancelled, or never queued — all "there
-        # is nothing here to stop", and none of them a success.
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
-    return {"status": "cancelled"}
+    # The backend queues nothing (see above): there is never anything to stop.
+    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
 
 
 @api_project.get("/frames/{id:int}/deploy_plan")
@@ -3633,8 +3566,7 @@ async def api_frame_embedded_usb_deploy_complete(
     if isinstance(frameos_version, str) and frameos_version:
         snapshot["frameos_version"] = frameos_version
     frame.status = "starting"
-    frame.last_successful_deploy = snapshot
-    frame.last_successful_deploy_at = datetime.now(timezone.utc)
+    record_successful_deploy(frame, snapshot)
     await update_frame(db, redis, frame)
     await log(
         db,
@@ -4129,13 +4061,15 @@ def _reboot_hint_from_log(log: Log) -> dict[str, Any] | None:
     if "rebooting device" in lower:
         return {"kind": "initiated", "reason": line, "source": "backend", "message": line}
 
-    if line in {"sudo reboot", "/sbin/shutdown -r now", "sudo shutdown -r now"} or "systemctl reboot" in lower:
+    if line in {"sudo reboot", "sudo -n reboot", "/sbin/shutdown -r now", "sudo shutdown -r now"} or "systemctl reboot" in lower:
         return {"kind": "initiated", "reason": "Device reboot requested", "source": "backend", "message": line}
 
     if "restarting frameos" in lower or line in {
         "sudo systemctl restart frameos.service",
+        "sudo -n systemctl restart frameos.service",
         "systemctl restart frameos.service",
         "sudo systemctl start frameos.service",
+        "sudo -n systemctl start frameos.service",
     }:
         return {"kind": "initiated", "reason": "FrameOS restart requested", "source": "backend", "message": line}
 

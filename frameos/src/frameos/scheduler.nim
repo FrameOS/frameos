@@ -8,6 +8,12 @@ import frameos/channels
 import frameos/utils/local_time
 import sequtils
 
+# Events a schedule entry may fire. Everything else the runner understands is a
+# runtime verb (uploadScenes) reserved for the server/hub paths that stamp an
+# origin on what they deliver. Keep in step with sceneRefusedDispatchEvents in
+# interpreter.nim.
+const schedulerRefusedEvents* = ["uploadScenes"]
+
 var thread: Thread[FrameOS]
 
 # Returns the weekday as 1=Monday..7=Sunday
@@ -95,6 +101,20 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
     })
 
   for ev in matched:
+    # A schedule is data — it arrives from frame.json, the backend, or the
+    # cloud's set_schedule verb, none of which validates the event name. The
+    # runner treats "uploadScenes" as "replace every scene with this payload"
+    # with no origin stamp, which would let a schedule entry smuggle scenes
+    # past the guards the direct push goes through. Schedules may switch,
+    # render, power and reboot; they may not rewrite what is installed.
+    if ev.event in schedulerRefusedEvents:
+      log(%*{
+        "event": "scheduler:refused",
+        "id": ev.id,
+        "action": ev.event,
+        "reason": "runtime-only event is not schedulable"
+      })
+      continue
     log(%*{
       "event": "scheduler:fire",
       "id": ev.id,

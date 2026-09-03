@@ -1,10 +1,12 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class AiAppChatMessage(BaseModel):
-    role: str
+    # Only the two roles a client may replay; anything else (system, tool)
+    # would let a request smuggle instructions into the model context.
+    role: Literal["user", "assistant"]
     content: str
 
 

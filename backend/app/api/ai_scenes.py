@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import uuid4
 import re
 import time
+import traceback
 import json
 from typing import Any
 from fastapi import Depends, HTTPException
@@ -56,13 +57,22 @@ def _sanitize_ai_id(value: str | None) -> str | None:
 
 
 def _format_ai_exception(exc: Exception) -> str:
+    """What the AI log panel and the HTTP error show for a failed provider
+    call. The raw exception text (which can echo request bodies, hosts, and
+    keys) is only returned in DEBUG; it always goes to the server log."""
+    traceback.print_exception(exc)
     detail = str(exc).strip() or exc.__class__.__name__
     if detail.lower() == "not found":
         return (
             "OpenAI returned Not Found. Check the configured OpenAI model names in Settings -> OpenAI "
             "(chat, scene generation, and review models) and make sure the API key has access to them."
         )
-    return detail
+    if config.DEBUG:
+        return detail
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return f"OpenAI request failed (HTTP {status_code})"
+    return f"Request failed ({exc.__class__.__name__})"
 
 
 def _capture_ai_span(

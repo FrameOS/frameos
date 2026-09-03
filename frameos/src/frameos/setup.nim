@@ -7,6 +7,8 @@ import frameos/device_setup
 import frameos/privileged
 import frameos/samba_mounts
 import frameos/types
+import frameos/cloud/contract
+import frameos/utils/system
 import drivers/drivers as drivers
 import lib/tz
 
@@ -602,6 +604,15 @@ proc setupTimezone*(timeZone: string): SetupResult =
     setupLog("FrameOS setup: timezone: none configured")
     return setupOk()
 
+  # The zone reaches here from frame.json, the cloud (`set_settings`) and
+  # enrollment personalization. It is joined onto /usr/share/zoneinfo and
+  # symlinked to /etc/localtime as root, so a `../../etc/shadow` would hand
+  # the file to every reader of /etc/localtime — refuse anything that is not
+  # an IANA zone name before touching the path.
+  if not isIanaZone(normalized):
+    setupLog("FrameOS setup: timezone: refusing invalid zone name " & normalized)
+    return setupOk()
+
   let zoneinfoPath = "/usr/share/zoneinfo" / normalized
   if not fileExists(zoneinfoPath):
     setupLog("FrameOS setup: timezone: zoneinfo file not found for " & normalized)
@@ -673,7 +684,7 @@ proc writeFrameConfigDimensions*(configPath: string, frameConfig: FrameConfig): 
 
   setupLog("FrameOS setup: frame config: updating " & path & " dimensions to " &
     $frameConfig.width & "x" & $frameConfig.height)
-  writePrivilegedFile(path, pretty(payload, indent = 4) & "\n")
+  writePrivilegedFile(path, pretty(payload, indent = 4) & "\n", private = true)
   true
 
 proc setupFrameOS*(configPath = ""): SetupResult =
@@ -757,9 +768,11 @@ proc writeSetupReleasePayload*(
 
   let payload = readJsonFile(configPath)
   let frameJson = pretty(payload, indent = 4) & "\n"
-  writeFile(frameosCurrentDir / "frame.json", frameJson)
+  # frame.json carries the API key, the admin password and every service
+  # token: never world-readable.
+  writePrivateFile(frameosCurrentDir / "frame.json", frameJson)
   if dirExists(remoteCurrentDir):
-    writeFile(remoteCurrentDir / "frame.json", frameJson)
+    writePrivateFile(remoteCurrentDir / "frame.json", frameJson)
 
   let allScenes = if payload{"scenes"} != nil and payload{"scenes"}.kind == JArray: payload{"scenes"} else: newJArray()
   writeFile(frameosCurrentDir / "all_scenes.json.gz", compress(pretty(allScenes, indent = 4) & "\n", dataFormat = dfGzip))

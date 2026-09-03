@@ -1,49 +1,35 @@
-"""Build flashable firmware images for embedded (ESP32) frames.
+"""Embedded (ESP32 / Pico / virtual) frame model: platforms, flash layouts,
+hardware presets, pins, panel formats — and the provisioning plan that turns
+a stock release image into a specific frame.
 
-The firmware runs the FrameOS embedded runtime: Wi-Fi provisioning, the Nim
-renderer (pixie on PSRAM), a Waveshare
-e-ink driver, thin-client fetch, and OTA A/B updates. The build bakes
-per-frame defaults into ``main/generated_config.h`` (backend URL, API key,
-panel, pins), cross-compiles the Nim runtime via ``build_nim.sh`` when nim is
-installed, and produces two artifacts: the merged image flashable at 0x0 and
-the bare app image the device pulls over the air.
-
-The pipeline mirrors the Buildroot SD image flow: an arq task builds the
-image, status lives on the frame's ``embedded.firmware`` JSON, and download
-endpoints serve the binaries.
-
-Requires ESP-IDF on the machine running the worker: the ``IDF_PATH`` env var,
-or a checkout at ``~/esp/esp-idf`` (see embedded/esp32/README.md).
+The self-hosted backend never builds firmware. Like the cloud, it flashes the
+signed generic release image published for the board's chip and flash layout
+(app/api/firmware_release.py streams it from the GitHub release), tells the
+board what it is over the USB console (``embedded_provisioning_plan`` →
+``usb_api set <key> <value>``), and the device pulls everything else from
+``GET /api/frames/{id}/embedded/settings`` (app/api/embedded_device.py). OTA
+is the release OTA: the backend relays the release manifest and proxies the
+signed app image, and the device verifies it against the release key baked
+into every image (embedded/esp32/main/fos_ota.c). Doctrine in docs/todo.md,
+"the self-hosted backend flashes what the cloud flashes".
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import hashlib
 import json
-import os
 import re
-import shlex
-import shutil
-import signal
-import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from arq import ArqRedis as Redis
-from arq.jobs import Job, JobStatus
 from sqlalchemy.orm import Session
 
-from app.utils.tz_slice import tz_slice_json
 from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
 from app.models.frame import (
     DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     Frame,
     normalize_frame_admin_auth,
     normalize_https_proxy,
-    update_frame,
 )
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
@@ -53,9 +39,10 @@ from app.utils.token import secure_token
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED_EMBEDDED_PLATFORM = "esp32-s3"
 # Every chip the embedded firmware supports. ``family`` selects the firmware
-# tree and build/flash story: "esp32" builds per-frame with ESP-IDF
-# (embedded/esp32); "pico" ships a generic UF2 (embedded/pico) flashed over
-# BOOTSEL and provisioned over USB serial — the backend never builds it.
+# tree and flash story: "esp32" flashes the signed release image for the
+# chip's flash layout (embedded/esp32, EMBEDDED_FLASH_PROFILES.releaseAssets)
+# and is provisioned over the USB console; "pico" ships a generic UF2
+# (embedded/pico) flashed over BOOTSEL and provisioned over USB serial.
 # ``localRenderSupported`` gates the on-device Nim/pixie/QuickJS renderer: it
 # needs PSRAM (an 800×480 RGBA compose buffer alone is 1.5MB), so PSRAM-less
 # chips run thin-client only against the server-side wasm renderer.
@@ -67,7 +54,6 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
         "aliases": {"", "esp32s3", "esp32-s3-devkitc-1"},
         "maxGpio": 48,
         "defaultPsramMB": 8,
-        "sdkconfigOverlay": None,
         "localRenderSupported": True,
     },
     "esp32-c3": {
@@ -77,7 +63,6 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
         "aliases": {"esp32c3", "esp32-c3-devkitm-1"},
         "maxGpio": 21,
         "defaultPsramMB": 0,
-        "sdkconfigOverlay": "sdkconfig.defaults.esp32c3",
         "localRenderSupported": False,
     },
     "pico-w": {
@@ -111,8 +96,6 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
 }
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
-# Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 51  # battery wiring in the console presets: E1001/E1002, TRMNL OG/BWRY, XIAO DIY kits, X4
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -568,55 +551,100 @@ EMBEDDED_PANEL_FORMATS = {
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
 EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
+# One entry per flash layout: the partition table the release image for that
+# layout carries (read for the flash report), whether it has OTA slots, and
+# ``releaseAssets`` — the published release image per chip built with exactly
+# that layout, which is what a board is flashed with. The asset names are the
+# esp32 jobs' in .github/workflows/docker-publish-multi.yml via
+# embedded/esp32/ci_build_image.sh; the generic images ARE the 8MB (S3) and
+# 4MB (C3) layouts, so those entries name them. The same names come back
+# from the device as the ``platform`` of its OTA manifest request
+# (fos_ota_platform in embedded/esp32/main/fos_ota.c).
 EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
     # Pico W (RP2040). Informational only: pico-family firmware is a generic
-    # UF2 flashed over BOOTSEL, the backend never builds or partitions it.
+    # UF2 flashed over BOOTSEL; there is no partition table to report.
     "2MB": {
         "flashSize": "2MB",
         "flashBytes": 2 * 1024 * 1024,
-        "sdkconfigDefaults": (),
         "partitionTable": None,
         "otaSupported": False,
+        "releaseAssets": {},
     },
     "4MB": {
         "flashSize": "4MB",
         "flashBytes": 4 * 1024 * 1024,
-        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.4mb-no-ota"),
         "partitionTable": "partitions_4mb.csv",
         "otaSupported": False,
+        "releaseAssets": {"esp32-s3": "esp32-s3-4mb", "esp32-c3": "esp32-c3-generic"},
     },
     "8MB": {
         "flashSize": "8MB",
         "flashBytes": 8 * 1024 * 1024,
-        "sdkconfigDefaults": ("sdkconfig.defaults",),
         "partitionTable": "partitions.csv",
         "otaSupported": True,
+        "releaseAssets": {"esp32-s3": "esp32-s3-generic", "esp32-c3": "esp32-c3-8mb"},
     },
     "16MB": {
         "flashSize": "16MB",
         "flashBytes": 16 * 1024 * 1024,
-        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.16mb-ota"),
         "partitionTable": "partitions_ota_16mb.csv",
         "otaSupported": True,
+        "releaseAssets": {"esp32-s3": "esp32-s3-16mb", "esp32-c3": "esp32-c3-16mb"},
     },
     "32MB": {
         "flashSize": "32MB",
         "flashBytes": 32 * 1024 * 1024,
-        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.32mb-ota"),
         "partitionTable": "partitions_ota_32mb.csv",
         "otaSupported": True,
+        "releaseAssets": {"esp32-s3": "esp32-s3-32mb", "esp32-c3": "esp32-c3-32mb"},
     },
 }
 # The published GENERIC images (release assets), and the layout each is built
-# with — the esp32 job in .github/workflows/docker-publish-multi.yml, via
-# embedded/esp32/ci_build_image.sh. They carry no per-frame configuration at
-# all: a board flashed with one is told what it is over the USB console
-# afterwards (embedded_provisioning_plan). Keep in sync with
-# PROVISIONING_ASSETS in app/api/firmware_release.py.
+# with. They carry no per-frame configuration at all: a board flashed with
+# one is told what it is over the USB console afterwards
+# (embedded_provisioning_plan). These are the fallback when a release predates
+# the per-layout assets above, and what the cloud flasher ships. Keep in sync
+# with PROVISIONING_ASSETS in app/api/firmware_release.py.
 EMBEDDED_RELEASE_FIRMWARE: dict[str, dict[str, str]] = {
     "esp32-s3": {"asset": "esp32-s3-generic", "flashSize": "8MB"},
     "esp32-c3": {"asset": "esp32-c3-generic", "flashSize": "4MB"},
 }
+
+
+def embedded_release_asset_names() -> list[str]:
+    """Every release asset the flash profiles name, generic ones first."""
+    names = [release["asset"] for release in EMBEDDED_RELEASE_FIRMWARE.values()]
+    for profile in EMBEDDED_FLASH_PROFILES.values():
+        for asset in profile["releaseAssets"].values():
+            if asset not in names:
+                names.append(asset)
+    return names
+
+
+def embedded_release_firmware_for_frame(
+    frame: Frame, published_assets: Optional[set[str]] = None
+) -> Optional[dict[str, Any]]:
+    """The release image to flash this frame with: the one built for its
+    flash layout when the release publishes it, else the chip's generic image.
+
+    ``published_assets`` is the set of provisioning platforms the current
+    release actually carries (app/api/firmware_release.py). None means
+    "unknown" (GitHub unreachable, or a caller with no listing) and resolves
+    to the generic image, which every release since the flasher exists has
+    shipped — the size-matched assets only started with docs/todo.md step 1,
+    so an older release must keep flashing.
+    """
+    platform = embedded_platform_for_frame(frame)
+    generic = EMBEDDED_RELEASE_FIRMWARE.get(platform)
+    if generic is None:
+        return None
+    flash_size = embedded_flash_size_for_frame(frame)
+    profile = EMBEDDED_FLASH_PROFILES[flash_size]
+    asset = profile["releaseAssets"].get(platform)
+    if asset and (asset == generic["asset"] or (published_assets is not None and asset in published_assets)):
+        return {"asset": asset, "flashSize": flash_size, "otaSupported": bool(profile["otaSupported"])}
+    generic_profile = EMBEDDED_FLASH_PROFILES[generic["flashSize"]]
+    return {**generic, "otaSupported": bool(generic_profile["otaSupported"])}
 # Memory guardrail (M4): the on-device renderer composites into a pixie canvas
 # (frameos/src/embedded/embedded_runtime.nim `renderCanvas`), packs it to the
 # selected panel format, and needs headroom for the Nim heap + QuickJS. The
@@ -635,62 +663,6 @@ EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES = 1024 * 1024
 EMBEDDED_DISPLAY_STATE_BYTES = 80
 EMBEDDED_RENDER_LOCAL = 0
 EMBEDDED_RENDER_REMOTE = 1
-EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS = int(
-    os.environ.get("FRAMEOS_EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS", str(15 * 60))
-)
-ACTIVE_FIRMWARE_STATUSES = {"queued", "building"}
-ACTIVE_OTA_STATUSES = {"queued", "requesting"}
-ACTIVE_ARQ_JOB_STATUSES = {JobStatus.deferred, JobStatus.queued, JobStatus.in_progress}
-EMBEDDED_REQUIRED_SDKCONFIG = {
-    # Formatting an empty SPIFFS state partition happens inside app_main on
-    # first boot. The ESP-IDF default stack is too small for that path.
-    "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
-    # Scene-upload and deploy diagnostics rely on readable ESP-IDF error names.
-    "CONFIG_ESP_ERR_TO_NAME_LOOKUP": "y",
-}
-
-# idf.py builds are not safe to run concurrently in the same build directory
-_build_lock = asyncio.Lock()
-
-# The build writes per-frame state (main/generated_config.h, sdkconfig) into
-# the shared in-tree ESP-IDF project before running idf.py, so two frames
-# building at once — even from different worker processes — would corrupt each
-# other's images. The asyncio lock above only covers one process; this redis
-# key is the cross-process guard.
-EMBEDDED_BUILD_LOCK_KEY = "embedded_firmware:build_lock"
-EMBEDDED_BUILD_LOCK_TTL_SECONDS = int(
-    os.environ.get("FRAMEOS_EMBEDDED_BUILD_LOCK_TTL_SECONDS", str(2 * 3600))
-)
-EMBEDDED_BUILD_LOCK_WAIT_SECONDS = float(
-    os.environ.get("FRAMEOS_EMBEDDED_BUILD_LOCK_WAIT_SECONDS", str(30 * 60))
-)
-EMBEDDED_BUILD_LOCK_POLL_SECONDS = float(
-    os.environ.get("FRAMEOS_EMBEDDED_BUILD_LOCK_POLL_SECONDS", "2")
-)
-
-
-async def _acquire_embedded_build_lock(redis: Redis) -> str:
-    """Blockingly acquire the global firmware build lock; returns the token."""
-    token = secure_token(16)
-    deadline = time.monotonic() + EMBEDDED_BUILD_LOCK_WAIT_SECONDS
-    while not await redis.set(
-        EMBEDDED_BUILD_LOCK_KEY, token, nx=True, ex=EMBEDDED_BUILD_LOCK_TTL_SECONDS
-    ):
-        if time.monotonic() >= deadline:
-            raise ValueError(
-                "Another embedded firmware build is holding the shared build directory; "
-                "try again once it finishes."
-            )
-        await asyncio.sleep(EMBEDDED_BUILD_LOCK_POLL_SECONDS)
-    return token
-
-
-async def _release_embedded_build_lock(redis: Redis, token: str) -> None:
-    # Delete only our own token: the TTL may have expired and another build
-    # may legitimately hold the lock now.
-    current = await redis.get(EMBEDDED_BUILD_LOCK_KEY)
-    if current is not None and current.decode(errors="replace") == token:
-        await redis.delete(EMBEDDED_BUILD_LOCK_KEY)
 
 
 def normalize_embedded_platform(platform: str | None) -> str:
@@ -784,241 +756,6 @@ def embedded_flash_profile_for_frame(frame: Frame) -> dict[str, Any]:
 
 def embedded_ota_supported_for_frame(frame: Frame) -> bool:
     return bool(embedded_flash_profile_for_frame(frame)["otaSupported"])
-
-
-def embedded_sdkconfig_defaults_for_frame(frame: Frame) -> str:
-    files = list(embedded_flash_profile_for_frame(frame)["sdkconfigDefaults"])
-    overlay = embedded_platform_spec_for_frame(frame).get("sdkconfigOverlay")
-    if overlay:
-        files.append(overlay)
-    return ";".join(files)
-
-
-def embedded_required_sdkconfig_for_frame(frame: Frame) -> dict[str, str]:
-    spec = embedded_platform_spec_for_frame(frame)
-    if spec["family"] != "esp32":
-        return {}
-    profile = embedded_flash_profile_for_frame(frame)
-    required = {
-        **EMBEDDED_REQUIRED_SDKCONFIG,
-        # A mismatch wipes the shared build dir, which is exactly what a chip
-        # target switch needs: CMake caches cannot survive an IDF_TARGET change.
-        "CONFIG_IDF_TARGET": f'"{spec["idfTarget"]}"',
-        "CONFIG_ESPTOOLPY_FLASHSIZE": f'"{profile["flashSize"]}"',
-        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": f'"{profile["partitionTable"]}"',
-    }
-    if profile["flashSize"] == "32MB":
-        required["CONFIG_SPIFFS_PAGE_SIZE"] = "512"
-    return required
-
-
-def embedded_artifact_dir() -> Path:
-    return Path(
-        os.environ.get("FRAMEOS_EMBEDDED_ARTIFACT_DIR")
-        or (REPO_ROOT / "db" / "artifacts" / "embedded-firmware")
-    )
-
-
-def embedded_idf_path() -> Path:
-    return Path(os.environ.get("IDF_PATH") or (Path.home() / "esp" / "esp-idf"))
-
-
-def embedded_toolchain_available() -> bool:
-    return (embedded_idf_path() / "export.sh").is_file()
-
-
-def _read_sdkconfig_values(path: Path) -> dict[str, str]:
-    if not path.is_file():
-        return {}
-    values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if not line.startswith("CONFIG_") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key] = value.strip()
-    return values
-
-
-def _missing_required_sdkconfig(path: Path, required: dict[str, str] | None = None) -> dict[str, str]:
-    values = _read_sdkconfig_values(path)
-    required_values = required or EMBEDDED_REQUIRED_SDKCONFIG
-    return {
-        key: value
-        for key, value in required_values.items()
-        if values.get(key) != value
-    }
-
-
-def embedded_build_root() -> Path:
-    """Parent directory for the per-platform build dirs. Defaults to the
-    firmware project, next to a manual idf.py workflow's build/. Deployments
-    where the project lives on an ephemeral container layer (the Docker image,
-    the Home Assistant add-on) point this at a volume instead: a cold ESP-IDF
-    build is ~1300 objects, so discarding the build dir on every restart makes
-    every build a from-scratch build."""
-    override = os.environ.get("FRAMEOS_EMBEDDED_BUILD_ROOT")
-    return Path(override) if override else EMBEDDED_PROJECT_DIR
-
-
-def embedded_build_dir(platform: str, flash_profile: dict[str, Any]) -> Path:
-    """Backend builds get a build dir per platform + flash profile (matching
-    ci_build_image.sh's -B convention), with the generated sdkconfig inside
-    it. Chip-target or flash-size switches then land in separate directories
-    instead of wiping one shared CMake cache, and backend builds never
-    clobber the in-tree build/ + sdkconfig a manual idf.py workflow uses.
-    The build-* prefix keeps these out of the source fingerprint."""
-    return embedded_build_root() / f"build-{platform}-{str(flash_profile['flashSize']).lower()}"
-
-
-def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | None = None) -> dict[str, str]:
-    sdkconfig_path = build_dir / "sdkconfig"
-    missing = _missing_required_sdkconfig(sdkconfig_path, required)
-    if not missing or not sdkconfig_path.exists():
-        return {}
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
-    return missing
-
-
-def embedded_pixie_path() -> Path | None:
-    """FRAMEOS_PIXIE_PATH wins when set; otherwise a checkout next to the
-    repo (../pixie) is picked up automatically, matching the Pi builds."""
-    configured = os.environ.get("FRAMEOS_PIXIE_PATH")
-    candidate = (
-        Path(configured)
-        if configured
-        else Path(__file__).resolve().parents[4] / "pixie"
-    )
-    if (candidate / "src" / "pixie").is_dir():
-        return candidate.resolve()
-    return None
-
-
-_FIRMWARE_SOURCE_PATHS = (
-    Path("Dockerfile"),
-    Path("backend/app/codegen"),
-    Path("backend/app/drivers/waveshare.py"),
-    Path("backend/app/tasks/embedded_firmware.py"),
-    Path("embedded/esp32"),
-    Path("frameos/config.nims"),
-    Path("frameos/frameos.nimble"),
-    Path("frameos/nim.cfg"),
-    Path("frameos/nimble.lock"),
-    Path("frameos/src"),
-    Path("frameos/tools/makeapploaders.py"),
-    Path("repo/apps"),
-    Path("repo/scenes"),
-)
-_FIRMWARE_SOURCE_EXCLUDED_NAMES = {
-    ".cache",
-    ".git",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "__pycache__",
-    "build",
-    "managed_components",
-    "nimcache",
-    "node_modules",
-    "testresults",
-    "tests",
-    "tmp",
-}
-_FIRMWARE_SOURCE_EXCLUDED_PATHS = {
-    Path("embedded/esp32/dependencies.lock"),
-    Path("embedded/esp32/main/generated_config.h"),
-    Path("embedded/esp32/sdkconfig"),
-    Path("embedded/esp32/sdkconfig.old"),
-    Path("frameos/src/codegen"),
-}
-_source_fingerprint_cache: tuple[float, tuple[tuple[str, int, int], ...], str] | None = None
-
-
-def _firmware_source_files() -> tuple[list[tuple[str, Path | None]], tuple[tuple[str, int, int], ...]]:
-    """Collect immutable firmware inputs without relying on a Git checkout.
-
-    The production image deliberately has no ``.git`` directory. Build output,
-    per-frame generated config, caches, and tests are excluded because they do
-    not define the firmware source and may change while a build is running.
-    """
-    entries: list[tuple[str, Path | None]] = []
-    signature: list[tuple[str, int, int]] = []
-
-    def excluded(relative: Path) -> bool:
-        if relative in _FIRMWARE_SOURCE_EXCLUDED_PATHS:
-            return True
-        return any(
-            part in _FIRMWARE_SOURCE_EXCLUDED_NAMES or part.startswith("build-")
-            for part in relative.parts
-        )
-
-    def collect(label: str, path: Path, relative: Path) -> None:
-        if excluded(relative):
-            return
-        if path.is_symlink():
-            target = os.readlink(path)
-            entries.append((f"symlink:{label}\0{target}", None))
-            signature.append((f"{label}\0{target}", -2, path.lstat().st_mtime_ns))
-            return
-        if path.is_dir():
-            for child in sorted(path.iterdir(), key=lambda item: item.name):
-                collect(f"{label}/{child.name}", child, relative / child.name)
-            return
-        if path.is_file():
-            stat = path.stat()
-            entries.append((f"file:{label}", path))
-            signature.append((label, stat.st_size, stat.st_mtime_ns))
-            return
-        entries.append((f"missing:{label}", None))
-        signature.append((label, -1, -1))
-
-    for relative in _FIRMWARE_SOURCE_PATHS:
-        collect(f"repo/{relative.as_posix()}", REPO_ROOT / relative, relative)
-
-    pixie_path = embedded_pixie_path()
-    if pixie_path is None:
-        # nimble.lock is one of the repo inputs above and pins the exact Pixie
-        # revision used in production. This marker distinguishes that path from
-        # an explicit source override.
-        entries.append(("pixie/nimble-lock", None))
-        signature.append(("pixie/nimble-lock", -3, -3))
-    else:
-        for relative in (Path("pixie.nimble"), Path("src")):
-            collect(f"pixie/{relative.as_posix()}", pixie_path / relative, relative)
-
-    return entries, tuple(signature)
-
-
-def embedded_firmware_source_fingerprint() -> str:
-    """Fingerprint of the source trees a firmware image is built from, so
-    cached builds go stale when the code changes — not only when the frame's
-    settings or the manually-bumped EMBEDDED_FIRMWARE_VERSION do. Covers this
-    repo (the inputs baked into the image) and either the local Pixie checkout
-    or its production lock. The digest is based on file content, so it works in
-    Docker where Git metadata and a neighboring Pixie checkout are absent."""
-    global _source_fingerprint_cache
-    now = time.monotonic()
-    if _source_fingerprint_cache is not None and now - _source_fingerprint_cache[0] < 5.0:
-        return _source_fingerprint_cache[2]
-
-    entries, signature = _firmware_source_files()
-    if _source_fingerprint_cache is not None and signature == _source_fingerprint_cache[1]:
-        fingerprint = _source_fingerprint_cache[2]
-        _source_fingerprint_cache = (now, signature, fingerprint)
-        return fingerprint
-
-    digest = hashlib.sha256()
-    for label, path in entries:
-        digest.update(label.encode("utf-8"))
-        digest.update(b"\0")
-        if path is not None:
-            with path.open("rb") as source:
-                for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                    digest.update(chunk)
-        digest.update(b"\0")
-    fingerprint = f"sha256:{digest.hexdigest()}"
-    _source_fingerprint_cache = (now, signature, fingerprint)
-    return fingerprint
 
 
 def embedded_panel_for_frame(frame: Frame) -> str:
@@ -1346,15 +1083,12 @@ def _pixel_format_name(pixel_format: int) -> str:
     }.get(pixel_format, f"format {pixel_format}")
 
 
-def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | None = None) -> dict[str, Any]:
+def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
+    """The board's flash layout (from the release image's partition table)
+    and the on-device memory plan for its panel — what the deploy drawer
+    draws. Byte counts of the image itself are not known here: the image is
+    a release asset, not something this backend built."""
     flash_profile = embedded_flash_profile_for_frame(frame)
-    firmware = firmware or {}
-    app_size = firmware.get("appSize") or firmware.get("otaSize")
-    merged_size = firmware.get("size")
-    if not isinstance(app_size, int) or isinstance(app_size, bool):
-        app_size = None
-    if not isinstance(merged_size, int) or isinstance(merged_size, bool):
-        merged_size = None
 
     partitions = [
         {
@@ -1364,7 +1098,7 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
             "offset": 0,
             "size": 0x8000,
             "end": 0x8000,
-            "usedBytes": firmware.get("bootloaderSize") if isinstance(firmware.get("bootloaderSize"), int) else None,
+            "usedBytes": None,
         },
         {
             "name": "partition_table",
@@ -1373,20 +1107,13 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
             "offset": 0x8000,
             "size": 0x1000,
             "end": 0x9000,
-            "usedBytes": firmware.get("partitionTableSize")
-            if isinstance(firmware.get("partitionTableSize"), int)
-            else None,
+            "usedBytes": None,
         },
     ]
     app_slot_names = {"factory"} if not flash_profile["otaSupported"] else {"ota_0", "ota_1"}
-    active_app_slot = "factory" if not flash_profile["otaSupported"] else "ota_0"
     for partition in _embedded_partition_table_rows(flash_profile["partitionTable"]):
         if partition["name"] in app_slot_names:
-            partition = {
-                **partition,
-                "appSlot": True,
-                "usedBytes": app_size if partition["name"] == active_app_slot else None,
-            }
+            partition = {**partition, "appSlot": True, "usedBytes": None}
         partitions.append(partition)
 
     from app.drivers.devices import device_dimensions
@@ -1413,9 +1140,6 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
             "partitionTable": flash_profile["partitionTable"],
             "otaSupported": flash_profile["otaSupported"],
             "flashOffset": EMBEDDED_FLASH_OFFSET,
-            "mergedBinaryBytes": merged_size,
-            "appBinaryBytes": app_size,
-            "otaBinaryBytes": firmware.get("otaSize") if isinstance(firmware.get("otaSize"), int) else None,
             "partitions": partitions,
         },
         "ram": {
@@ -1443,16 +1167,12 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
     }
 
 
-def with_embedded_firmware_layout(frame: Frame, firmware: dict[str, Any]) -> dict[str, Any]:
-    return {**firmware, "layout": embedded_firmware_layout_for_frame(frame, firmware)}
-
-
 def check_embedded_panel_fits_memory(frame: Frame) -> None:
     """Refuse a panel that can't be rendered on-device within the module PSRAM.
 
     The firmware applies the same check at boot and falls back to thin-client
-    mode; failing the build early gives the user a clear, actionable error
-    instead of a frame that silently never renders locally.
+    mode; saying so in the provisioning plan gives the user a clear,
+    actionable warning instead of a frame that silently never renders locally.
     """
     panel = embedded_panel_for_frame(frame)
     if panel == "none" or embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE:
@@ -1541,16 +1261,9 @@ def embedded_gpio_buttons_config(frame: Frame) -> str:
     return "\n".join(f"{pin}:{label}" for pin, label in embedded_gpio_buttons_for_frame(frame))
 
 
-def embedded_firmware_config_hash(frame: Frame) -> str:
-    wifi_ssid, wifi_password = embedded_wifi_credentials(frame)
-    generated = _generated_config_header(frame, wifi_ssid=wifi_ssid, wifi_password=wifi_password)
-    return hashlib.sha256(generated.encode("utf-8")).hexdigest()
-
-
 def embedded_backend_url_for_frame(frame: Frame) -> str:
-    """Where the device reaches this backend: what the built image bakes in as
-    FRAMEOS_DEFAULT_BACKEND_URL, and what console provisioning sends as
-    `set backend`. Empty when the frame has no server host yet."""
+    """Where the device reaches this backend: what console provisioning sends
+    as `set backend`. Empty when the frame has no server host yet."""
     server_host = str(frame.server_host or "")
     if not server_host:
         return ""
@@ -1570,140 +1283,39 @@ def _embedded_device_config_value(frame: Frame, *keys: str) -> object:
     return None
 
 
-def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: str = "") -> str:
-    """Per-frame compile-time defaults baked into the image (NVS overrides win).
-
-    Includes the frame's API key and the frame's Wi-Fi network settings (the
-    same per-frame `network` JSON the Pi flows use): flashing a frame-specific
-    image fully provisions the device in one step. The captive portal / serial
-    console remain available to override everything.
-    """
-    def c_str(value: object) -> str:
-        return (
-            '"'
-            + str(value or "")
-            .replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            + '"'
-        )
-
-    backend_url = embedded_backend_url_for_frame(frame)
-    https_proxy = normalize_https_proxy(frame.https_proxy)
-    tls_certs = https_proxy.get("certs", {})
-    tls_port = https_proxy.get("port") or 8443
-    admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
-    admin_auth_enabled = admin_auth["enabled"] and bool(admin_auth["user"]) and bool(admin_auth["pass"])
-
-    lines = [
-        "/* Generated by the FrameOS backend for this frame — do not edit. */",
-        "#pragma once",
-        f"#define FRAMEOS_DEFAULT_WIFI_SSID {c_str(wifi_ssid)}",
-        f"#define FRAMEOS_DEFAULT_WIFI_PASS {c_str(wifi_password)}",
-        f"#define FRAMEOS_DEFAULT_BACKEND_URL {c_str(backend_url)}",
-        f"#define FRAMEOS_DEFAULT_API_KEY {c_str(frame.server_api_key)}",
-        f"#define FRAMEOS_DEFAULT_FRAME_ID {int(frame.id)}",
-        f"#define FRAMEOS_DEFAULT_HOSTNAME {c_str(embedded_hostname_for_frame(frame))}",
-        f"#define FRAMEOS_DEFAULT_GPIO_BUTTONS {c_str(embedded_gpio_buttons_config(frame))}",
-        f"#define FRAMEOS_DEFAULT_HARDWARE_PRESET {c_str(embedded_hardware_preset_for_frame(frame))}",
-        f"#define FRAMEOS_DEFAULT_PANEL {c_str(embedded_panel_for_frame(frame))}",
-        f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
-        f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",
-        f"#define FRAMEOS_DEFAULT_ROTATE {int(frame.rotate or 0) % 360}",
-        f"#define FRAMEOS_DEFAULT_SCALING_MODE {c_str(embedded_scaling_mode_for_frame(frame))}",
-        f"#define FRAMEOS_DEFAULT_TIME_ZONE {c_str((getattr(frame, 'timezone', None) or '').strip())}",
-        # That zone's tzdata slice (app.utils.tz_slice): the chip has no tz
-        # database, so the firmware carries the one zone it was built for.
-        f"#define FRAMEOS_DEFAULT_TZ_DATA {c_str(tz_slice_json((getattr(frame, 'timezone', None) or '').strip()))}",
-        f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {embedded_max_http_response_bytes_for_frame(frame)}",
-        f"#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS {1 if frame.server_send_logs is not False else 0}",
-        f"#define FRAMEOS_DEFAULT_TLS_ENABLE {1 if https_proxy.get('enable') else 0}",
-        f"#define FRAMEOS_DEFAULT_TLS_PORT {int(tls_port)}",
-        f"#define FRAMEOS_DEFAULT_TLS_SERVER_CERT {c_str(tls_certs.get('server', ''))}",
-        f"#define FRAMEOS_DEFAULT_TLS_SERVER_KEY {c_str(tls_certs.get('server_key', ''))}",
-        f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_ENABLE {1 if admin_auth_enabled else 0}",
-        f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_USER {c_str(admin_auth['user'] if admin_auth_enabled else '')}",
-        f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS {c_str(admin_auth['pass'] if admin_auth_enabled else '')}",
-        f"#define FRAMEOS_DEFAULT_ASSETS_PATH {c_str('/srv/assets')}",
-    ]
-    pins = embedded_pins_for_frame(frame)
-    mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
-               "sck": "SCK", "mosi": "MOSI", "pwr": "PWR"}
-    for key, macro in mapping.items():
-        lines.append(f"#define FRAMEOS_DEFAULT_PIN_{macro} {pins[key]}")
-
-    sd_card_assets = embedded_sd_card_assets_for_frame(frame)
-    sd_pins = sd_card_assets["pins"]
-    lines.extend([
-        f"#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE {1 if sd_card_assets['enabled'] else 0}",
-        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS {sd_pins['cs']}",
-        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK {sd_pins['sck']}",
-        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO {sd_pins['miso']}",
-        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI {sd_pins['mosi']}",
-        f"#define FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ {sd_card_assets['maxFrequencyKHz']}",
-    ])
-
-    # Optional power-management settings (M4). Absent → firmware defaults
-    # (no deep sleep, no battery pin); all still overridable from the device.
-    def _config_value(*keys: str) -> object:
-        return _embedded_device_config_value(frame, *keys)
-
-    deep_sleep = _config_value("deepSleep", "deep_sleep")
-    if isinstance(deep_sleep, bool):
-        lines.append(f"#define FRAMEOS_DEFAULT_DEEP_SLEEP {1 if deep_sleep else 0}")
-    deep_sleep_on_battery = _config_value("deepSleepOnBattery", "deep_sleep_on_battery")
-    if isinstance(deep_sleep_on_battery, bool):
-        lines.append(
-            f"#define FRAMEOS_DEFAULT_DEEP_SLEEP_ON_BATTERY {1 if deep_sleep_on_battery else 0}"
-        )
-    wake_schedule = _config_value("wakeSchedule", "wake_schedule")
-    if isinstance(wake_schedule, bool):
-        lines.append(f"#define FRAMEOS_DEFAULT_WAKE_SCHEDULE {1 if wake_schedule else 0}")
-    wake_check_seconds = _config_value("wakeCheckSeconds", "wake_check_seconds")
-    if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
-        lines.append(f"#define FRAMEOS_DEFAULT_WAKE_CHECK_SEC {max(0, wake_check_seconds)}")
-    battery_pin = _config_value("batteryPin", "battery_pin")
-    if isinstance(battery_pin, int) and not isinstance(battery_pin, bool):
-        lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_PIN {battery_pin}")
-    battery_divider = _config_value("batteryDivider", "battery_divider")
-    if isinstance(battery_divider, (int, float)) and not isinstance(battery_divider, bool):
-        lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_DIVIDER {float(battery_divider)}f")
-    battery_enable_pin = _config_value("batteryEnablePin", "battery_enable_pin")
-    if isinstance(battery_enable_pin, int) and not isinstance(battery_enable_pin, bool):
-        lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN {battery_enable_pin}")
-    return "\n".join(lines) + "\n"
-
-
 def _provisioning_setting(key: str, value: object, secret: bool = False) -> dict[str, Any]:
     return {"key": key, "value": str(value), "secret": secret}
 
 
-def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
-    """What the published GENERIC firmware has to be told to become this frame.
+def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]] = None) -> dict[str, Any]:
+    """What the published firmware has to be told to become this frame.
 
-    The browser flasher's other path builds a per-frame image, which bakes
-    every setting below into generated_config.h — a full ESP-IDF compile, tens
-    of minutes on a small self-hosted box for the first build of a chip target.
-    Nothing about that is required: all panel drivers are compiled into every
-    image (embedded/esp32/main/fos_defaults.h) and every baked value here has a
-    `set` key on the device's USB console (cmd_set in fos_console.c). So the
-    stock release image plus this command list is the same frame, minutes
-    sooner — the shape the cloud's enrollment flasher has always used
-    (cloud-frontend/src/components/Esp32CloudFlasher.tsx).
+    All panel drivers are compiled into every release image
+    (embedded/esp32/main/fos_defaults.h) and every per-frame value has a
+    `set` key on the device's USB console (cmd_set in fos_console.c), so the
+    stock release image plus this command list is the frame — the shape the
+    cloud's enrollment flasher has always used
+    (cloud-frontend/src/components/Esp32CloudFlasher.tsx). The two things a
+    console line cannot carry, the frame's own HTTPS certificate and key,
+    reach the device through its first settings pull instead
+    (app/api/embedded_device.py, ``embedded_frame_settings``).
 
     ``settings`` are `usb_api set <key> <value>` pairs IN ORDER: `hardware`
     first because a preset applies a whole board bundle (panel, EPD wiring,
     buttons, TF socket, battery sensing) that this frame's own values must be
     able to override.
 
-    ``blockers`` are settings that exist only as compile-time defaults, so a
-    frame that needs one cannot be provisioned this way at all and has to build
-    an image. ``warnings`` are differences the user should know about but that
-    still leave a working frame.
+    ``blockers`` are reasons the frame cannot be provisioned at all (no
+    backend to talk to, no published image for the chip). ``warnings`` are
+    differences the user should know about but that still leave a working
+    frame.
+
+    ``published_assets`` — which provisioning images the current release
+    carries — picks the image built for this frame's flash layout over the
+    generic one (embedded_release_firmware_for_frame).
     """
     platform = embedded_platform_for_frame(frame)
-    release = EMBEDDED_RELEASE_FIRMWARE.get(platform)
+    release = embedded_release_firmware_for_frame(frame, published_assets)
     blockers: list[str] = []
     warnings: list[str] = []
     settings: list[dict[str, Any]] = []
@@ -1723,6 +1335,10 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
         )
     else:
         settings.append(_provisioning_setting("panel", panel))
+        try:
+            check_embedded_panel_fits_memory(frame)
+        except ValueError as exc:
+            warnings.append(f"{exc} Until then the board renders as a thin client.")
 
     pins = embedded_pins_for_frame(frame)
     settings.append(_provisioning_setting("pins", ",".join(f"{key}={pins[key]}" for key in EMBEDDED_PIN_KEYS)))
@@ -1735,8 +1351,7 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
         # `set gpio_buttons ""` is not a thing — the console's argument parser
         # rejects an empty value — so the preset's buttons stay wired.
         warnings.append(
-            f"This frame defines no buttons, but the {preset} preset does; the device keeps the preset's buttons. "
-            "Build an image instead if the board must come up with none."
+            f"This frame defines no buttons, but the {preset} preset does; the device keeps the preset's buttons."
         )
 
     backend_url = embedded_backend_url_for_frame(frame)
@@ -1752,6 +1367,8 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
         blockers.append("This frame has no API key, so the device could not authenticate against this backend.")
 
     settings.append(_provisioning_setting("frame_id", int(frame.id)))
+    if frame.frame_host:
+        settings.append(_provisioning_setting("hostname", embedded_hostname_for_frame(frame)))
     settings.append(_provisioning_setting(
         "render_mode",
         "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
@@ -1760,6 +1377,20 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
     settings.append(_provisioning_setting("rotate", int(frame.rotate or 0) % 360))
     settings.append(_provisioning_setting("scaling_mode", embedded_scaling_mode_for_frame(frame)))
     settings.append(_provisioning_setting("server_send_logs", 1 if frame.server_send_logs is not False else 0))
+    max_http = embedded_max_http_response_bytes_for_frame(frame)
+    if max_http != EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES:
+        settings.append(_provisioning_setting("max_http_response_bytes", max_http))
+
+    # The device's own web UI login. Every embedded frame gets a generated
+    # one (ensure_embedded_frame_defaults); the credentials go first and the
+    # switch last, because the console refuses to enable it without both.
+    admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    if admin_auth["user"] and admin_auth["pass"]:
+        settings.append(_provisioning_setting("admin_user", admin_auth["user"]))
+        settings.append(_provisioning_setting("admin_pass", admin_auth["pass"], secret=True))
+    settings.append(_provisioning_setting(
+        "admin_auth", 1 if admin_auth["enabled"] and admin_auth["user"] and admin_auth["pass"] else 0
+    ))
 
     sd_card_assets = embedded_sd_card_assets_for_frame(frame)
     if sd_card_assets["enabled"]:
@@ -1795,44 +1426,23 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
     if isinstance(battery_enable_pin, int) and not isinstance(battery_enable_pin, bool):
         settings.append(_provisioning_setting("battery_enable_pin", battery_enable_pin))
 
-    # Compile-time only: the console has no key for any of these, so a frame
-    # that needs them would come up quietly missing them.
+    # The frame's own certificate is not a console value: it rides the first
+    # settings pull once the board is on Wi-Fi and talking to this backend.
     https_proxy = normalize_https_proxy(frame.https_proxy)
     if https_proxy.get("enable"):
-        blockers.append(
-            "This frame terminates TLS with its own certificate, which only exists as a compile-time default."
-        )
-    # Not a blocker: every embedded frame gets a generated device login
-    # (ensure_embedded_frame_defaults), and the cloud's enrollment flasher has
-    # always shipped generic images without one. But the frame row would then
-    # show a password the board does not actually ask for, so say it plainly.
-    admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
-    if admin_auth["enabled"] and admin_auth["user"] and admin_auth["pass"]:
         warnings.append(
-            "The console cannot set the device admin login, so the board's own web UI answers without the "
-            "password shown for this frame. Build an image if that page must be protected."
-        )
-
-    if frame.frame_host:
-        hostname = embedded_hostname_for_frame(frame)
-        warnings.append(
-            f"The board keeps the firmware's default DHCP hostname instead of \"{hostname}\" — "
-            "the console cannot set a hostname."
-        )
-    if embedded_max_http_response_bytes_for_frame(frame) != EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES:
-        warnings.append(
-            "This frame's HTTP response limit is a compile-time default; the board uses the firmware's."
+            "HTTPS on the frame turns on after its first settings sync with this backend, "
+            "which delivers the certificate and key; the board answers over plain HTTP until then."
         )
 
     if release is not None:
         frame_flash_size = embedded_flash_size_for_frame(frame)
-        release_profile = EMBEDDED_FLASH_PROFILES[release["flashSize"]]
         if frame_flash_size != release["flashSize"]:
             warnings.append(
                 f"The published image uses the {release['flashSize']} partition layout; this frame is configured "
                 f"for {frame_flash_size} flash, so the rest of the chip stays unused."
             )
-        if embedded_ota_supported_for_frame(frame) and not release_profile["otaSupported"]:
+        if embedded_ota_supported_for_frame(frame) and not release["otaSupported"]:
             warnings.append(
                 "The published image has no OTA slot, so future firmware updates need the USB cable again."
             )
@@ -1924,318 +1534,20 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     frame.device_config = device_config
 
 
-def clear_embedded_firmware(frame: Frame | Any) -> None:
-    embedded = dict(getattr(frame, "embedded", None) or {})
-    embedded.pop("firmware", None)
-    frame.embedded = embedded
+async def request_embedded_firmware_update(db: Session, redis: Redis, frame: Frame) -> Any:
+    """Ask a backend-managed board to check this backend's OTA manifest now.
 
-
-def embedded_firmware_download_url(frame_id: int, sha256: object = None) -> str:
-    """Return a content-addressed browser download URL when a hash is known.
-
-    Firmware artifacts are replaced in place for each frame. Keeping the URL
-    stable lets a browser reuse an older merged image after a rebuild, so put
-    the image hash in the query string to give every build a distinct cache
-    key. The download response is also marked no-store as a second safeguard.
-    """
-    base_url = f"/api/frames/{frame_id}/embedded/firmware/download"
-    if isinstance(sha256, str) and re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
-        return f"{base_url}?sha256={sha256.lower()}"
-    return base_url
-
-
-def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
-    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
-    firmware = embedded.get("firmware")
-    if not isinstance(firmware, dict):
-        return None
-    if firmware.get("status") == "ready" and firmware.get("firmwareVersion") != EMBEDDED_FIRMWARE_VERSION:
-        return with_embedded_firmware_layout(frame, {
-            **firmware,
-            "status": "stale",
-            "error": "The generated firmware was built from an older firmware project version",
-        })
-    if firmware.get("status") == "ready":
-        source_fingerprint = firmware.get("sourceFingerprint")
-        if isinstance(source_fingerprint, str) and \
-                source_fingerprint != embedded_firmware_source_fingerprint():
-            return with_embedded_firmware_layout(frame, {
-                **firmware,
-                "status": "stale",
-                "error": "The generated firmware was built from older FrameOS sources",
-            })
-    if firmware.get("status") == "ready":
-        # An esp32-s3 <-> esp32-c3 switch produces a binary for the wrong chip:
-        # the generated config header (and hence configHash) can be identical
-        # across targets, so the chip target is a staleness input of its own.
-        firmware_platform = firmware.get("platform")
-        if isinstance(firmware_platform, str) and firmware_platform:
-            try:
-                normalized_firmware_platform = normalize_embedded_platform(firmware_platform)
-            except ValueError:
-                normalized_firmware_platform = ""
-            if normalized_firmware_platform != embedded_platform_for_frame(frame):
-                return with_embedded_firmware_layout(frame, {
-                    **firmware,
-                    "status": "stale",
-                    "error": "The generated firmware was built for a different chip target",
-                })
-    if firmware.get("status") == "ready":
-        try:
-            firmware_flash_size = normalize_embedded_flash_size(firmware.get("flashSize") or EMBEDDED_DEFAULT_FLASH_SIZE)
-        except ValueError:
-            firmware_flash_size = ""
-        expected_flash_size = embedded_flash_size_for_frame(frame)
-        if firmware_flash_size != expected_flash_size:
-            return with_embedded_firmware_layout(frame, {
-                **firmware,
-                "status": "stale",
-                "error": "The generated firmware was built for a different ESP32 flash size",
-            })
-        panel = firmware.get("panel")
-        if isinstance(panel, str) and panel != embedded_panel_for_frame(frame):
-            return with_embedded_firmware_layout(frame, {
-                **firmware,
-                "status": "stale",
-                "error": "The generated firmware was built for a different embedded panel",
-            })
-        config_hash = firmware.get("configHash")
-        expected_hash = embedded_firmware_config_hash(frame)
-        if not isinstance(config_hash, str) or config_hash != expected_hash:
-            return with_embedded_firmware_layout(frame, {
-                **firmware,
-                "status": "stale",
-                "error": "The generated firmware was built from older embedded frame settings",
-            })
-    path = firmware.get("path")
-    if firmware.get("status") == "ready":
-        if not isinstance(path, str) or not Path(path).is_file():
-            return with_embedded_firmware_layout(
-                frame,
-                {**firmware, "status": "missing", "error": "The generated firmware file is missing"},
-            )
-        if firmware.get("otaSupported") is not False:
-            ota_path = firmware.get("otaPath")
-            if not isinstance(ota_path, str) or not Path(ota_path).is_file():
-                return with_embedded_firmware_layout(
-                    frame,
-                    {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"},
-                )
-        firmware = {
-            **firmware,
-            "downloadUrl": embedded_firmware_download_url(int(frame.id), firmware.get("sha256")),
-        }
-    return with_embedded_firmware_layout(frame, firmware)
-
-
-async def refresh_embedded_firmware_status(db: Session, redis: Redis, frame: Frame) -> dict[str, Any] | None:
-    firmware = latest_embedded_firmware(frame)
-    if not firmware or firmware.get("status") not in ACTIVE_FIRMWARE_STATUSES:
-        return firmware
-    if await _firmware_queue_job_active(redis, firmware):
-        return firmware
-
-    error = (
-        "Firmware build stopped updating. "
-        "The worker process probably exited; start the firmware build again."
-    )
-    recovered = {**firmware, "status": "error", "error": error, "completedAt": _utc_now()}
-    await log(db, redis, int(frame.id), "stderr", f"Marking embedded firmware build as failed: {error}")
-    await _set_firmware_status(db, redis, frame, recovered)
-    return recovered
-
-
-async def start_embedded_firmware(
-    db: Session,
-    redis: Redis,
-    frame: Frame,
-    *,
-    force: bool = False,
-) -> tuple[bool, dict[str, Any]]:
-    if not embedded_toolchain_available():
-        raise ValueError(
-            f"ESP-IDF toolchain not found at {embedded_idf_path()}. "
-            "Set IDF_PATH or install it (see embedded/esp32/README.md)."
-        )
-
-    firmware = latest_embedded_firmware(frame)
-    if firmware and firmware.get("status") == "ready" and not force:
-        return False, firmware
-    if firmware and firmware.get("status") in ACTIVE_FIRMWARE_STATUSES:
-        if await _firmware_queue_job_active(redis, firmware):
-            return False, firmware
-        await log(db, redis, int(frame.id), "stderr",
-                  "Recovering stale embedded firmware build state; previous worker job is no longer active")
-
-    request_id = secure_token(12)
-    queue_job_id = _queue_job_id(frame.id, request_id)
-    queued_at = _utc_now()
-    metadata: dict[str, Any] = {
-        "status": "queued",
-        "requestId": request_id,
-        "queueJobId": queue_job_id,
-        "platform": _embedded_platform_or_default(frame),
-        "flashSize": embedded_flash_size_for_frame(frame),
-        "otaSupported": embedded_ota_supported_for_frame(frame),
-        "queuedAt": queued_at,
-        "startedAt": queued_at,
-    }
-    await _set_firmware_status(db, redis, frame, metadata)
-
-    try:
-        await redis.enqueue_job("embedded_firmware", id=int(frame.id), request_id=request_id, _job_id=queue_job_id)
-    except Exception as exc:
-        await _set_firmware_status(db, redis, frame, {
-            **metadata,
-            "status": "error",
-            "error": f"Failed to enqueue embedded firmware build: {exc}",
-            "completedAt": _utc_now(),
-        })
-        raise
-
-    return True, latest_embedded_firmware(frame) or metadata
-
-
-def _new_ota_update_request() -> dict[str, Any]:
-    requested_at = _utc_now()
-    return {
-        "id": secure_token(12),
-        "status": "queued",
-        "requestedAt": requested_at,
-        "updatedAt": requested_at,
-    }
-
-
-def _ota_update_request_active(firmware: dict[str, Any] | None) -> bool:
-    ota_update = firmware.get("otaUpdate") if isinstance(firmware, dict) else None
-    return isinstance(ota_update, dict) and ota_update.get("status") in ACTIVE_OTA_STATUSES
-
-
-def pending_frame_commands(frame: Frame) -> list[dict[str, Any]]:
-    """Actions recorded against this frame that have NOT reached the device.
-
-    The self-hosted backend has no durable per-frame command queue: deploys,
-    restarts and renders are immediate SSH/HTTP pushes that fail loudly when
-    the device is unreachable, so there is nothing to observe or cancel. The
-    one exception is the ESP32 OTA request — it is recorded on the frame and
-    replayed once the firmware build finishes
-    (``request_pending_embedded_firmware_ota``), so it can sit "queued" for as
-    long as the build takes.
-
-    Shaped like the cloud's ``GET /api/frames/{id}/commands`` rows so the
-    shared workspace panel reads one wire format on both control planes
-    (docs/api-triality.md). ``expires_at`` is always null here: a backend OTA
-    request has no TTL, it waits for its image.
-    """
-    if (frame.mode or "rpios") != "embedded":
-        return []
-    firmware = latest_embedded_firmware(frame) or {}
-    ota_update = firmware.get("otaUpdate")
-    if not isinstance(ota_update, dict) or ota_update.get("status") not in ACTIVE_OTA_STATUSES:
-        return []
-    return [
-        {
-            "id": str(ota_update.get("id") or "ota"),
-            "type": "notify_update_available",
-            # "queued" means no image yet; "requesting" means the push to the
-            # device is in flight. Both are "not applied", which is what the
-            # panel says, so map them onto the cloud's two waiting states.
-            "status": "pending" if ota_update.get("status") == "queued" else "sent",
-            "created_at": ota_update.get("requestedAt"),
-            "expires_at": None,
-            "sent_at": ota_update.get("startedAt"),
-            "detail": (
-                "Waiting for the firmware image to finish building"
-                if ota_update.get("status") == "queued"
-                else "Delivering the update request to the device"
-            ),
-        }
-    ]
-
-
-async def cancel_embedded_firmware_ota(
-    db: Session,
-    redis: Redis,
-    frame: Frame,
-    command_id: str | None = None,
-) -> bool:
-    """Drop a queued/in-flight ESP32 OTA request. False when there is none.
-
-    Terminal status rather than a delete, matching the cloud's cancel: the
-    record is what the frame log and the firmware panel read back. Cancelling
-    does not touch a build already running — the image is still useful, and
-    the user can ask for the update again without rebuilding.
+    The device answers, reboots into its early updater, fetches
+    ``/embedded/ota/manifest`` (app/api/embedded_device.py — the release
+    manifest, relayed), and installs the release app image for its flash
+    layout if the version differs, verifying the release signature first.
+    Progress arrives as ``ota:backend`` log lines. The backend holds no image
+    and no key: the release is the only thing it can offer.
     """
     frame = get_fresh_frame(db, int(frame.id)) or frame
-    firmware = latest_embedded_firmware(frame) or {}
-    ota_update = firmware.get("otaUpdate")
-    if not isinstance(ota_update, dict) or ota_update.get("status") not in ACTIVE_OTA_STATUSES:
-        return False
-    if command_id and str(ota_update.get("id") or "ota") != command_id:
-        return False
-    await _set_ota_update(
-        db,
-        redis,
-        frame,
-        firmware,
-        {**ota_update, "status": "cancelled", "error": None, "completedAt": _utc_now()},
-    )
-    await log(db, redis, int(frame.id), "stdout", "Cancelled the queued ESP32 OTA update")
-    return True
-
-
-def _decode_frame_http_payload(body: bytes, headers: dict[str, str]) -> Any:
-    content_type = headers.get("content-type", "")
-    if content_type.startswith("application/json"):
-        try:
-            return json.loads(body.decode("utf-8", errors="replace"))
-        except Exception:
-            pass
-    return body.decode("utf-8", errors="replace")
-
-
-def _truncate_ota_error(body: bytes) -> str:
-    text = body.decode("utf-8", errors="replace").strip()
-    if len(text) > 240:
-        return f"{text[:240]}..."
-    return text
-
-
-async def _set_ota_update(
-    db: Session,
-    redis: Redis,
-    frame: Frame,
-    firmware: dict[str, Any],
-    ota_update: dict[str, Any],
-) -> dict[str, Any]:
-    updated = {**firmware, "otaUpdate": {**ota_update, "updatedAt": _utc_now()}}
-    await _set_firmware_status(db, redis, frame, updated)
-    return updated
-
-
-async def request_embedded_firmware_ota(
-    db: Session,
-    redis: Redis,
-    frame: Frame,
-    ota_update: dict[str, Any] | None = None,
-) -> Any:
-    frame = get_fresh_frame(db, int(frame.id)) or frame
-    firmware = latest_embedded_firmware(frame) or {}
-    ota_path = firmware.get("otaPath")
-    if firmware.get("otaSupported") is False or not embedded_ota_supported_for_frame(frame):
+    if not embedded_ota_supported_for_frame(frame):
         raise ValueError("OTA updates are not available for the selected ESP32 flash size")
-    if firmware.get("status") != "ready":
-        raise ValueError("No ready OTA firmware image for this frame")
-    if not isinstance(ota_path, str) or not Path(ota_path).is_file():
-        raise ValueError("Generated OTA firmware file not found")
-
-    request = ota_update if isinstance(ota_update, dict) else firmware.get("otaUpdate")
-    if not isinstance(request, dict):
-        request = _new_ota_update_request()
-    request = {**request, "status": "requesting", "startedAt": request.get("startedAt") or _utc_now()}
-    firmware = await _set_ota_update(db, redis, frame, firmware, request)
-    await log(db, redis, int(frame.id), "stdout", "Requesting ESP32 OTA update")
-
+    await log(db, redis, int(frame.id), "stdout", "Asking the frame to check for a firmware update")
     try:
         status, body, headers = await _fetch_frame_http_bytes(
             frame,
@@ -2245,557 +1557,19 @@ async def request_embedded_firmware_ota(
         )
     except Exception as exc:
         error = str(exc)
-        request = {**request, "status": "error", "error": error, "completedAt": _utc_now()}
-        await _set_ota_update(db, redis, frame, firmware, request)
-        await log(db, redis, int(frame.id), "stderr", f"Failed to request ESP32 OTA update: {error}")
+        await log(db, redis, int(frame.id), "stderr", f"Failed to request the firmware update: {error}")
         raise ValueError(error)
-
     if status != 200:
-        detail = _truncate_ota_error(body) or "no response body"
-        error = f"HTTP {status}: {detail}"
-        request = {**request, "status": "error", "error": error, "completedAt": _utc_now()}
-        await _set_ota_update(db, redis, frame, firmware, request)
-        await log(db, redis, int(frame.id), "stderr", f"Failed to request ESP32 OTA update: {error}")
+        detail = body.decode("utf-8", errors="replace").strip()
+        if len(detail) > 240:
+            detail = f"{detail[:240]}..."
+        error = f"HTTP {status}: {detail or 'no response body'}"
+        await log(db, redis, int(frame.id), "stderr", f"Failed to request the firmware update: {error}")
         raise ValueError(error)
-
-    request = {**request, "status": "requested", "completedAt": _utc_now(), "error": None}
-    await _set_ota_update(db, redis, frame, firmware, request)
-    await log(db, redis, int(frame.id), "stdout", "Requested ESP32 OTA update")
-    return _decode_frame_http_payload(body, headers)
-
-
-async def request_or_queue_embedded_firmware_ota(
-    db: Session,
-    redis: Redis,
-    frame: Frame,
-    *,
-    force: bool = False,
-) -> tuple[str, dict[str, Any], Any | None]:
-    if not embedded_ota_supported_for_frame(frame):
-        raise ValueError("OTA updates are not available for the selected ESP32 flash size")
-
-    firmware = await refresh_embedded_firmware_status(db, redis, frame) or {}
-    if firmware.get("status") == "ready" and not force:
-        payload = await request_embedded_firmware_ota(db, redis, frame)
-        frame = get_fresh_frame(db, int(frame.id)) or frame
-        return "OTA update requested", latest_embedded_firmware(frame) or firmware, payload
-
-    if not firmware or firmware.get("status") != "ready" or force:
-        await start_embedded_firmware(db, redis, frame, force=force)
-
-    frame = get_fresh_frame(db, int(frame.id)) or frame
-    firmware = latest_embedded_firmware(frame) or {}
-    ota_update = _new_ota_update_request()
-    firmware = await _set_ota_update(db, redis, frame, firmware, ota_update)
-
-    if firmware.get("status") == "ready":
-        payload = await request_embedded_firmware_ota(db, redis, frame, ota_update)
-        frame = get_fresh_frame(db, int(frame.id)) or frame
-        return "OTA update requested", latest_embedded_firmware(frame) or firmware, payload
-
-    await log(db, redis, int(frame.id), "stdout", "Queued ESP32 OTA update; waiting for firmware image")
-    return "OTA update queued", firmware, None
-
-
-async def request_pending_embedded_firmware_ota(db: Session, redis: Redis, frame: Frame) -> bool:
-    frame = get_fresh_frame(db, int(frame.id)) or frame
-    firmware = latest_embedded_firmware(frame) or {}
-    if not _ota_update_request_active(firmware):
-        return False
-    try:
-        await request_embedded_firmware_ota(db, redis, frame, firmware.get("otaUpdate"))
-    except ValueError:
-        # request_embedded_firmware_ota already records the concrete error
-        # in both frame metadata and the frame logs. Keep the build itself
-        # marked ready so the user can retry OTA without rebuilding.
-        return False
-    return True
-
-
-async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str | None = None):
-    db: Session = ctx["db"]
-    redis: Redis = ctx["redis"]
-    frame: Optional[Frame] = get_fresh_frame(db, id)
-    if frame is None:
-        await log(db, redis, id, "stderr", "Frame not found")
-        raise Exception("Frame not found")
-
-    try:
-        ensure_embedded_frame_defaults(frame)
-        if request_id and not _firmware_request_matches(frame, request_id):
-            await log(db, redis, id, "stderr", "Ignoring stale embedded firmware worker job")
-            return
-        await _build_firmware(db, redis, frame, request_id)
-    except Exception as exc:
-        frame = get_fresh_frame(db, id) or frame
-        if not request_id or _firmware_request_matches(frame, request_id):
-            current = latest_embedded_firmware(frame) or {}
-            await _set_firmware_status(db, redis, frame, {
-                **_preserved_queue_metadata(current),
-                "status": "error",
-                "platform": _embedded_platform_or_default(frame),
-                "error": str(exc),
-                "completedAt": _utc_now(),
-            })
-        await log(db, redis, id, "stderr", f"Embedded firmware build failed: {exc}")
-        raise
-
-
-# Ninja prefixes every completed edge with its position in the build graph.
-_NINJA_PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]")
-# A full ESP-IDF build is thousands of lines, so progress reaches the frame log
-# on whichever of these comes first — enough to prove the build is alive
-# without drowning the log.
-EMBEDDED_BUILD_PROGRESS_PERCENT_STEP = 5.0
-EMBEDDED_BUILD_PROGRESS_MAX_SILENCE_SECONDS = 60.0
-# Longest line kept from the build output. asyncio's StreamReader raises past
-# its own 64KiB limit, and ninja echoes the whole command line of a failed
-# edge — the link step's runs to hundreds of KiB with 1300 objects. Truncating
-# beats losing the error that follows it.
-EMBEDDED_BUILD_MAX_LINE_BYTES = 8192
-# Upper bound on the failure tail carried into the error and the frame log.
-EMBEDDED_BUILD_FAILURE_TAIL_CHARS = 8000
-
-
-def _format_duration(seconds: float) -> str:
-    total = int(seconds)
-    if total < 60:
-        return f"{total}s"
-    return f"{total // 60}m{total % 60:02d}s"
-
-
-async def _iter_process_lines(stream: asyncio.StreamReader):
-    """Yield output lines without StreamReader.readline()'s line-length limit."""
-    buffer = b""
-    while True:
-        chunk = await stream.read(65536)
-        if not chunk:
-            break
-        buffer += chunk
-        while True:
-            newline = buffer.find(b"\n")
-            if newline >= 0:
-                yield buffer[:newline]
-                buffer = buffer[newline + 1:]
-            elif len(buffer) > EMBEDDED_BUILD_MAX_LINE_BYTES:
-                yield buffer[:EMBEDDED_BUILD_MAX_LINE_BYTES]
-                buffer = buffer[EMBEDDED_BUILD_MAX_LINE_BYTES:]
-            else:
-                break
-    if buffer:
-        yield buffer
-
-
-# How long the group gets to finish on SIGTERM before SIGKILL, once the shell
-# itself is gone. Nothing waits on this in the common case: the loop below
-# stops as soon as the group is empty, which is normally within milliseconds.
-EMBEDDED_GROUP_KILL_GRACE_SECONDS = 3.0
-
-
-def _process_group_is_empty(group: int) -> bool:
-    """Whether *group* has no members left to signal."""
-    try:
-        os.killpg(group, 0)
-    except ProcessLookupError:
-        return True
-    except OSError:
-        return False
-    return False
-
-
-async def _terminate_process_group(process: asyncio.subprocess.Process) -> None:
-    """Kill the build and everything it spawned. The task runs ``bash -c``, so
-    signalling the child alone would leave ninja and its compilers running:
-    they would keep burning the machine's CPU and, worse, collide with the
-    next attempt inside the same build directory.
-
-    Escalating on "did the shell exit?" is not enough, and that is the bug this
-    shape exists to avoid: ``bash`` dies on SIGTERM at once, so waiting for it
-    and returning happy leaves behind anything in the group that blocks SIGTERM
-    or was forked in the instant before the signal landed. The shell's death is
-    the START of the question, so after it we watch the GROUP and SIGKILL
-    whatever is still there."""
-    if process.returncode is not None:
-        return
-    try:
-        group = os.getpgid(process.pid)
-    except (ProcessLookupError, OSError):
-        group = None
-
-    def signal_all(sig: int) -> bool:
-        """Signal the whole group (or just the child); False if it is gone."""
+    await log(db, redis, int(frame.id), "stdout", "Firmware update check requested; the frame reboots into its updater")
+    if headers.get("content-type", "").startswith("application/json"):
         try:
-            if group is not None:
-                os.killpg(group, sig)
-            else:
-                process.send_signal(sig)
-        except (ProcessLookupError, OSError):
-            return False
-        return True
-
-    if not signal_all(signal.SIGTERM):
-        return
-    with contextlib.suppress(asyncio.TimeoutError):
-        await asyncio.wait_for(process.wait(), timeout=10)
-
-    if group is None:
-        # No group to sweep: the child is all there is to kill.
-        if process.returncode is None and signal_all(signal.SIGKILL):
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(process.wait(), timeout=10)
-        return
-
-    deadline = asyncio.get_running_loop().time() + EMBEDDED_GROUP_KILL_GRACE_SECONDS
-    while not _process_group_is_empty(group):
-        if asyncio.get_running_loop().time() >= deadline:
-            # Whatever is left has had its chance to exit cleanly. SIGKILL is
-            # a no-op against the zombies an unreaping PID 1 leaves behind, so
-            # this is safe to fire blind rather than parsing /proc for states.
-            signal_all(signal.SIGKILL)
-            break
-        await asyncio.sleep(0.05)
-
-    if process.returncode is None:
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(process.wait(), timeout=10)
-
-
-async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:
-    family = embedded_platform_spec_for_frame(frame)["family"]
-    if family == "virtual":
-        raise ValueError(
-            "Virtual frames have no firmware — the backend renders them; "
-            "use the image URL from the frame's settings."
-        )
-    if family != "esp32":
-        raise ValueError(
-            "This platform uses the generic prebuilt firmware: flash the "
-            "frameos-<version>-pico-w.uf2 (or -pico-2w.uf2) release asset over "
-            "BOOTSEL and provision it over the USB serial console."
-        )
-    if not EMBEDDED_PROJECT_DIR.is_dir():
-        raise ValueError(f"Embedded firmware project not found at {EMBEDDED_PROJECT_DIR}")
-    idf_path = embedded_idf_path()
-    if not (idf_path / "export.sh").is_file():
-        raise ValueError(f"ESP-IDF toolchain not found at {idf_path}")
-
-    check_embedded_panel_fits_memory(frame)
-
-    current = latest_embedded_firmware(frame) or {}
-    started_at = _utc_now()
-    platform = embedded_platform_for_frame(frame)
-    platform_spec = EMBEDDED_PLATFORMS[platform]
-    flash_profile = embedded_flash_profile_for_frame(frame)
-    sdkconfig_defaults = embedded_sdkconfig_defaults_for_frame(frame)
-    required_sdkconfig = embedded_required_sdkconfig_for_frame(frame)
-    await _set_firmware_status(db, redis, frame, {
-        **_preserved_queue_metadata(current),
-        "status": "building",
-        "requestId": request_id or current.get("requestId"),
-        "platform": platform,
-        "flashSize": flash_profile["flashSize"],
-        "otaSupported": flash_profile["otaSupported"],
-        "startedAt": started_at,
-        "lastHeartbeatAt": started_at,
-    })
-    selected_panel = embedded_panel_for_frame(frame)
-    await log(db, redis, int(frame.id), "stdout",
-              f"Building {platform_spec['label']} firmware with ESP-IDF at {idf_path} "
-              f"(panel={selected_panel}, flash={flash_profile['flashSize']})")
-
-    build_dir = embedded_build_dir(platform, flash_profile)
-    # export.sh refuses to run inside a foreign Python venv; scrub venv vars and
-    # let it activate the ESP-IDF Python environment itself.
-    env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV", "IDF_PYTHON_ENV_PATH"}}
-    env["PATH"] = os.pathsep.join(
-        p for p in env.get("PATH", "").split(os.pathsep) if "/.venv/" not in p and not p.endswith("/.venv/bin")
-    )
-    env["IDF_PATH"] = str(idf_path)
-    env["IDF_TARGET"] = str(platform_spec["idfTarget"])
-    # Every frame's image recompiles the same ~1300 objects — all ~50 panel
-    # drivers plus the IDF itself — and only the handful that include
-    # generated_config.h actually differ between frames. idf.py wires ccache in
-    # as the compiler launcher when this is set.
-    if shutil.which("ccache"):
-        env.setdefault("IDF_CCACHE_ENABLE", "1")
-    # All panel drivers are compiled into every firmware image; this env var
-    # only sets the default panel a plain checkout would bake in. Per-frame
-    # builds get the same value via FRAMEOS_DEFAULT_PANEL in generated_config.h
-    # below, which takes precedence.
-    env["FRAMEOS_SELECTED_PANEL"] = selected_panel
-    pixie_path = embedded_pixie_path()
-    if pixie_path is not None:
-        env["FRAMEOS_PIXIE_PATH"] = str(pixie_path)
-        await log(db, redis, int(frame.id), "stdout", f"Using explicit Pixie override at {pixie_path}")
-
-    # Per-frame compile-time defaults (backend URL, API key, panel, pins, Wi-Fi).
-    # Written to disk only under the build lock below: the header lives in the
-    # shared in-tree project, so writing it while another frame builds would
-    # bake this frame's credentials into the other frame's image.
-    wifi_ssid, wifi_password = embedded_wifi_credentials(frame)
-    generated_header = EMBEDDED_PROJECT_DIR / "main" / "generated_config.h"
-    generated_config = _generated_config_header(frame, wifi_ssid=wifi_ssid, wifi_password=wifi_password)
-    generated_config_hash = hashlib.sha256(generated_config.encode("utf-8")).hexdigest()
-
-    # Fallback demo-scene parameters: interpreted scenes are loaded at runtime,
-    # but this define gives the built-in demo a frame-specific label. Keep the
-    # demo background independent from configured scenes; otherwise a black
-    # first scene makes the no-scenes boot screen unreadable.
-    scenes = frame.scenes if isinstance(frame.scenes, list) else []
-    if scenes and isinstance(scenes[0], dict):
-        # The flags expand unquoted in build_nim.sh, so reduce values to a
-        # safe charset instead of shell-quoting (quotes would survive the
-        # expansion literally).
-        def define_safe(value: str, fallback: str) -> str:
-            cleaned = re.sub(r"[^A-Za-z0-9_.#-]+", "-", value).strip("-")
-            return cleaned or fallback
-
-        scene_name = define_safe(str(scenes[0].get("name") or scenes[0].get("id") or ""), "default")
-        env["FRAMEOS_EXTRA_NIM_FLAGS"] = f"-d:frameosSceneName={scene_name}"
-
-    # Cross-compile the Nim runtime. If nim is not installed on the worker the
-    # firmware still builds, thin-client only. Platforms without local-render
-    # support skip Nim entirely — and must clear any nimcache a previous build
-    # left behind, because its generated C targets the other chip's ABI.
-    nim_step = ""
-    if not platform_spec["localRenderSupported"]:
-        nim_step = "./build_nim.sh clean && "
-    elif shutil.which("nim"):
-        nim_step = "./build_nim.sh && "
-    else:
-        await log(db, redis, int(frame.id), "stderr",
-                  "nim not found on the worker; building firmware without the on-device Nim runtime")
-    # generated_config.h and a fresh nimcache require a CMake reconfigure: the
-    # component globs nimcache/*.c at configure time.
-    idf_base = (f'idf.py -B {shlex.quote(str(build_dir))} '
-                f'-D SDKCONFIG={shlex.quote(str(build_dir / "sdkconfig"))}')
-    # The CMake configure output is kept (rather than sent to /dev/null): it is
-    # where a failure in this step explains itself, and the progress filter
-    # below drops it from the log anyway.
-    command = (f'source "$IDF_PATH/export.sh" >/dev/null 2>&1 && {nim_step}'
-               f'{idf_base} -D SDKCONFIG_DEFAULTS={shlex.quote(sdkconfig_defaults)} '
-               f'reconfigure && {idf_base} build merge-bin')
-
-    build_lock_token = await _acquire_embedded_build_lock(redis)
-    try:
-        async with _build_lock:
-            build_dir.parent.mkdir(parents=True, exist_ok=True)
-            generated_header.write_text(generated_config)
-            reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir, required_sdkconfig)
-            if reset_sdkconfig:
-                reset_keys = ", ".join(f"{key}={value}" for key, value in sorted(reset_sdkconfig.items()))
-                await log(db, redis, int(frame.id), "stdout",
-                          f"Regenerating ESP32 sdkconfig for required defaults: {reset_keys}")
-
-            process = await asyncio.create_subprocess_exec(
-                "bash", "-c", command,
-                cwd=str(EMBEDDED_PROJECT_DIR),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                # Own process group, so a failure or a cancelled task can take
-                # ninja and its compilers down with the shell.
-                start_new_session=True,
-            )
-            output_tail: list[str] = []
-            assert process.stdout is not None
-            build_started = time.monotonic()
-            last_heartbeat = datetime.now(timezone.utc)
-            last_progress_at = build_started
-            last_progress_percent = -EMBEDDED_BUILD_PROGRESS_PERCENT_STEP
-            # Latest ninja edge count, published on the heartbeat below rather
-            # than written on its own: the browser flasher waits on this to
-            # tell a slow build from a dead one, and a full first build is
-            # ~1100 edges — one status write each would be absurd.
-            build_progress: dict[str, Any] | None = None
-            try:
-                async for line in _iter_process_lines(process.stdout):
-                    text = line.decode("utf-8", errors="replace").rstrip()
-                    if text:
-                        output_tail.append(text)
-                        del output_tail[:-50]
-                    now_monotonic = time.monotonic()
-                    # A full build is silent for tens of minutes on a small
-                    # host; without this it is indistinguishable from a hang.
-                    progress = _NINJA_PROGRESS_RE.match(text) if text else None
-                    if progress:
-                        done, total = int(progress.group(1)), int(progress.group(2))
-                        percent = (100.0 * done / total) if total else 0.0
-                        build_progress = {"done": done, "total": total, "percent": round(percent, 1)}
-                        if percent >= last_progress_percent + EMBEDDED_BUILD_PROGRESS_PERCENT_STEP or \
-                                now_monotonic - last_progress_at >= EMBEDDED_BUILD_PROGRESS_MAX_SILENCE_SECONDS:
-                            last_progress_at = now_monotonic
-                            last_progress_percent = percent
-                            await log(db, redis, int(frame.id), "stdout",
-                                      f"Compiling firmware: {done}/{total} ({percent:.0f}%), "
-                                      f"{_format_duration(now_monotonic - build_started)} elapsed")
-                    now = datetime.now(timezone.utc)
-                    if (now - last_heartbeat).total_seconds() >= 15:
-                        last_heartbeat = now
-                        frame = get_fresh_frame(db, int(frame.id)) or frame
-                        current = latest_embedded_firmware(frame) or {}
-                        if current.get("status") == "building":
-                            heartbeat = {**current, "lastHeartbeatAt": _utc_now()}
-                            if build_progress:
-                                heartbeat["buildProgress"] = build_progress
-                            await _set_firmware_status(db, redis, frame, heartbeat)
-                returncode = await process.wait()
-            except BaseException:
-                # Includes CancelledError: an abandoned build must not keep a
-                # compiler fleet alive against the next attempt's build dir.
-                await _terminate_process_group(process)
-                raise
-    finally:
-        await _release_embedded_build_lock(redis, build_lock_token)
-
-    build_duration = time.monotonic() - build_started
-    if returncode != 0:
-        # Ninja echoes the failing edge's whole command line, and the link
-        # step's is hundreds of KiB — keep the tail readable in a log row.
-        tail = "\n".join(output_tail[-20:])[-EMBEDDED_BUILD_FAILURE_TAIL_CHARS:]
-        raise ValueError(f"idf.py build failed with exit code {returncode}:\n{tail}")
-    await log(db, redis, int(frame.id), "stdout",
-              f"ESP-IDF build finished in {_format_duration(build_duration)}")
-
-    missing_sdkconfig = _missing_required_sdkconfig(build_dir / "sdkconfig", required_sdkconfig)
-    if missing_sdkconfig:
-        missing = ", ".join(f"{key}={value}" for key, value in sorted(missing_sdkconfig.items()))
-        raise ValueError(f"ESP32 sdkconfig is missing required defaults after build: {missing}")
-
-    merged_bin = build_dir / "merged-binary.bin"
-    if not merged_bin.is_file():
-        raise ValueError(f"Build succeeded but {merged_bin} was not produced")
-
-    # The app artifact is the bare app image. OTA-capable profiles flash it
-    # into the inactive ota_0/ota_1 slot; 4MB builds keep it only for size/hash
-    # metadata because that partition table has a single factory app.
-    ota_bin = build_dir / "frameos_esp32.bin"
-    if not ota_bin.is_file():
-        raise ValueError(f"Build succeeded but {ota_bin} was not produced")
-    ota_elf = build_dir / "frameos_esp32.elf"
-    if not ota_elf.is_file():
-        raise ValueError(f"Build succeeded but {ota_elf} was not produced")
-
-    artifact_dir = embedded_artifact_dir()
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"frameos-{platform}-frame{frame.id}.bin"
-    artifact_path = artifact_dir / filename
-    shutil.copyfile(merged_bin, artifact_path)
-    ota_filename = f"frameos-{platform}-frame{frame.id}-ota.bin"
-    ota_artifact_path = artifact_dir / ota_filename
-    if flash_profile["otaSupported"]:
-        shutil.copyfile(ota_bin, ota_artifact_path)
-
-    frame = get_fresh_frame(db, int(frame.id)) or frame
-    current = latest_embedded_firmware(frame) or {}
-    merged_sha256 = _sha256(artifact_path)
-    ready_status = {
-        **_preserved_queue_metadata(current),
-        "status": "ready",
-        "requestId": request_id or current.get("requestId"),
-        "platform": platform,
-        "flashSize": flash_profile["flashSize"],
-        "flashBytes": flash_profile["flashBytes"],
-        "partitionTable": flash_profile["partitionTable"],
-        "otaSupported": flash_profile["otaSupported"],
-        "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
-        "filename": filename,
-        "path": str(artifact_path),
-        "size": artifact_path.stat().st_size,
-        "sha256": merged_sha256,
-        "flashOffset": EMBEDDED_FLASH_OFFSET,
-        "panel": selected_panel,
-        "configHash": generated_config_hash,
-        "sourceFingerprint": embedded_firmware_source_fingerprint(),
-        "appSize": ota_bin.stat().st_size,
-        "bootloaderSize": (build_dir / "bootloader" / "bootloader.bin").stat().st_size,
-        "partitionTableSize": (build_dir / "partition_table" / "partition-table.bin").stat().st_size,
-        "otaElfSha256": _sha256(ota_elf),
-        "startedAt": current.get("startedAt") or started_at,
-        "completedAt": _utc_now(),
-        "downloadUrl": embedded_firmware_download_url(int(frame.id), merged_sha256),
-    }
-    if flash_profile["otaSupported"]:
-        ready_status = {
-            **ready_status,
-            "otaPath": str(ota_artifact_path),
-            "otaSize": ota_artifact_path.stat().st_size,
-            "otaSha256": _sha256(ota_artifact_path),
-        }
-    await _set_firmware_status(db, redis, frame, ready_status)
-    await log(db, redis, int(frame.id), "stdout",
-              f"{platform_spec['label']} firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
-
-    await request_pending_embedded_firmware_ota(db, redis, frame)
-
-
-async def _firmware_queue_job_active(redis: Redis, firmware: dict[str, Any]) -> bool:
-    job_id = firmware.get("queueJobId")
-    if not isinstance(job_id, str) or not job_id:
-        return False
-    try:
-        status = await Job(job_id, redis).status()
-        return status in ACTIVE_ARQ_JOB_STATUSES and not _firmware_inactive(firmware)
-    except Exception:
-        return not _firmware_inactive(firmware)
-
-
-def _firmware_inactive(firmware: dict[str, Any]) -> bool:
-    timestamp = _parse_utc(firmware.get("lastHeartbeatAt") or firmware.get("startedAt") or firmware.get("queuedAt"))
-    if timestamp is None:
-        return True
-    return (datetime.now(timezone.utc) - timestamp).total_seconds() > EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS
-
-
-def _parse_utc(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _queue_job_id(frame_id: int, request_id: str) -> str:
-    return f"embedded_firmware:{frame_id}:{request_id}"
-
-
-def _firmware_request_matches(frame: Frame, request_id: str) -> bool:
-    firmware = latest_embedded_firmware(frame) or {}
-    return firmware.get("requestId") == request_id
-
-
-def _preserved_queue_metadata(firmware: dict[str, Any]) -> dict[str, Any]:
-    preserved = {
-        key: firmware[key]
-        for key in ("requestId", "queueJobId", "queuedAt")
-        if isinstance(firmware.get(key), str) and firmware.get(key)
-    }
-    ota_update = firmware.get("otaUpdate")
-    if isinstance(ota_update, dict):
-        preserved["otaUpdate"] = ota_update
-    return preserved
-
-
-async def _set_firmware_status(db: Session, redis: Redis, frame: Frame, firmware: dict[str, Any]) -> None:
-    embedded = dict(frame.embedded or {})
-    embedded["platform"] = normalize_embedded_platform(embedded.get("platform"))
-    embedded["flashSize"] = embedded_flash_size_for_frame(frame)
-    embedded["firmware"] = with_embedded_firmware_layout(frame, firmware)
-    frame.embedded = embedded
-    await update_frame(db, redis, frame)
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+            return json.loads(body.decode("utf-8", errors="replace"))
+        except ValueError:
+            pass
+    return body.decode("utf-8", errors="replace")

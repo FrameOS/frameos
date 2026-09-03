@@ -30,17 +30,31 @@ jobs:
     # stay on GitHub-hosted runners on purpose: their auto-committed
     # Playwright/snapshot baselines must keep rendering on the image that
     # produced them.
-    runs-on: epyc-4
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
+      # Anonymous git over HTTP/2 is throttled by GitHub from the runner
+      # pool's address (the git-upload-pack POST answers 401 while the
+      # advertisement is fine): nimble's fetch-by-commit died on it across a
+      # whole push. HTTP/1.1 from the same host succeeds every time.
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
+      # head.sha, never head.ref: the ref is a branch name in the fork, and a
+      # branch can be moved between the event and the checkout. The sha is
+      # the commit the run was started for.
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       # The runner image ships python3 (+ `python`), which is all the nim
       # setup scripts need. Node is only needed when the compiled-assets cache
@@ -191,7 +205,12 @@ jobs:
     # Pixie renders these snapshots in software from fonts in the repo — no
     # browser, no system fonts — so the host image does not shape the pixels
     # and the job can use the self-hosted pool like the Nim shards.
-    runs-on: epyc-4
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     permissions:
       contents: read
     strategy:
@@ -199,11 +218,17 @@ jobs:
       matrix:
         shard: [1, 2]
     steps:
+      # Anonymous git over HTTP/2 is throttled by GitHub from the runner
+      # pool's address (the git-upload-pack POST answers 401 while the
+      # advertisement is fine): nimble's fetch-by-commit died on it across a
+      # whole push. HTTP/1.1 from the same host succeeds every time.
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -337,7 +362,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+
+      # The checkout pins head.sha, which leaves HEAD detached, and the
+      # commit step's `pull --rebase` needs a branch with an upstream. This
+      # job only runs for same-repo pull requests (see `if`), so head.ref is
+      # a branch of this repository; it is still only ever read into an
+      # environment variable, never interpolated into the script.
+      - name: Return to the pull request branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # No depth limit: the branch may already carry a commit from the
+          # other snapshot job, and the rebase must see head.sha as its
+          # ancestor rather than try to apply it again.
+          git fetch --no-tags origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
+          git checkout -B "$HEAD_REF"
+          git branch --set-upstream-to "origin/$HEAD_REF"
 
       - name: Download visual snapshot changes
         uses: actions/download-artifact@v4
@@ -380,7 +421,12 @@ jobs:
     # version in pnpm-lock.yaml; bump both together) fixes that environment
     # wherever it runs, so the job can move to the self-hosted pool. Browsers
     # ship in the image, hence no `playwright install` step.
-    runs-on: epyc-4
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     container:
       image: mcr.microsoft.com/playwright:v1.60.0-noble
     permissions:
@@ -390,11 +436,17 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
+      # Anonymous git over HTTP/2 is throttled by GitHub from the runner
+      # pool's address (the git-upload-pack POST answers 401 while the
+      # advertisement is fine): nimble's fetch-by-commit died on it across a
+      # whole push. HTTP/1.1 from the same host succeeds every time.
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -405,10 +457,16 @@ jobs:
       # snapshot diff steps below; checkout itself falls back to the REST API
       # without it, but `git diff` does not — and it refuses a workspace owned
       # by another uid (the runner's) unless it is marked safe.
-      - name: Install redis
+      # fonts-inter: every font stack in the repo asks for Inter first, and
+      # without it the image resolves Inter / system-ui / sans-serif to
+      # WenQuanYi Zen Hei, a CJK face with no bold — the cloud stack (no
+      # Helvetica/Arial to alias onto Liberation Sans) then renders every
+      # weight as regular.
+      - name: Install redis and fonts
         run: |
           apt-get -y update
-          apt-get install -y --no-install-recommends redis-server git
+          apt-get install -y --no-install-recommends redis-server git fonts-inter
+          fc-cache -f >/dev/null
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           redis-server --daemonize yes
 
@@ -449,6 +507,11 @@ jobs:
         # frame-admin.spec.ts serves this bundle through route interception;
         # without it those browser tests skip silently.
         run: pnpm --dir frameos/frontend run build
+
+      - name: Build cloud frontend
+        # visual-cloud-*.spec.ts serve this bundle the same way (see
+        # tests/cloud-workspace-fixture.ts); without it they skip silently.
+        run: pnpm --dir cloud-frontend run build
 
       - name: Run frontend visual regression tests
         shell: bash
@@ -521,7 +584,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+
+      # The checkout pins head.sha, which leaves HEAD detached, and the
+      # commit step's `pull --rebase` needs a branch with an upstream. This
+      # job only runs for same-repo pull requests (see `if`), so head.ref is
+      # a branch of this repository; it is still only ever read into an
+      # environment variable, never interpolated into the script.
+      - name: Return to the pull request branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # No depth limit: the branch may already carry a commit from the
+          # other snapshot job, and the rebase must see head.sha as its
+          # ancestor rather than try to apply it again.
+          git fetch --no-tags origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
+          git checkout -B "$HEAD_REF"
+          git branch --set-upstream-to "origin/$HEAD_REF"
 
       - name: Download frontend visual snapshot changes
         uses: actions/download-artifact@v4
@@ -599,6 +678,20 @@ jobs:
       - name: Install redis
         run: sudo apt-get -y update && sudo apt-get install -y redis-server
 
+      # The editor's JavaScript validation (tools/js_check.nim, built by the
+      # backend on first use) links the bundled QuickJS, so the prebuilt
+      # library has to be here. Same cache key as the Nim jobs.
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
+      - name: FrameOS QuickJS
+        run: |
+          cd frameos
+          nimble build_quickjs --silent
+
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
@@ -644,7 +737,12 @@ jobs:
     name: Deploy E2E SSH
     # Self-hosted 8-core slot: docker + SSH loopback deploy, no rendering.
     # The redis service container runs via the VM's own docker daemon.
-    runs-on: epyc-8
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-8' }}
     # Redis for the runtime E2E test. A service container comes up during job
     # setup instead of costing an `apt-get update && apt-get install` step
     # (~30 s) inside it; the tests reach it through REDIS_URL, and the runtime
@@ -660,6 +758,12 @@ jobs:
           --health-timeout 2s
           --health-retries 15
     steps:
+      # Anonymous git over HTTP/2 is throttled by GitHub from the runner
+      # pool's address (the git-upload-pack POST answers 401 while the
+      # advertisement is fine): nimble's fetch-by-commit died on it across a
+      # whole push. HTTP/1.1 from the same host succeeds every time.
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
         uses: actions/checkout@v4
 

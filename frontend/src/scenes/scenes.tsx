@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import { urls } from '../urls'
 import { getRouteBasePath } from '../utils/getBasePath'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
+import { isCloudMode } from '../utils/cloudMode'
 
 export type SceneComponent = ComponentType<Record<string, any>>
 
@@ -70,12 +71,23 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
   void loadSceneComponent(scene).catch(() => {})
 }
 
+// kea-router takes the FIRST pattern that matches, so the literal routes are
+// registered before the parametric /frames/:id ones. Self-hosted that is
+// moot (/settings and /frames/:id never overlap), but on the cloud the SPA is
+// mounted AT /frames, and /frames/:id would swallow /frames/apps and
+// /frames/:frameId/scenes: sceneLogic then reported scene "frame" on the apps
+// page, and the shell's rail — which compares that scene with the mode the
+// rendered page passed it — showed the Frame button as forever pending.
+//
+// The settings scene is not registered at all where it never renders: on the
+// cloud the settings page is an account page (urls.settings() links out to
+// it), and in frame-admin mode urls.settings() IS a frame tool path
+// (/frames/<id>/settings) that the frame scene renders.
 export const getRoutes = () =>
   ({
     ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
-    [urls.frame(':id')]: 'frame',
-    [urls.frame(':id', ':tool')]: 'frame',
+    ...(isInFrameAdminMode() || isCloudMode() ? {} : { [urls.settings()]: 'settings' }),
     [urls.scenes()]: 'sceneWorkspace',
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
@@ -83,8 +95,9 @@ export const getRoutes = () =>
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId', ':nodeId')]: 'appsWorkspace',
-    [urls.settings()]: 'settings',
     [urls.login()]: 'login',
     [urls.signup()]: 'signup',
     [urls.setupUnavailable()]: 'setupUnavailable',
-  } as const)
+    [urls.frame(':id')]: 'frame',
+    [urls.frame(':id', ':tool')]: 'frame',
+  }) as const

@@ -5,7 +5,6 @@
 import frameos/types
 import frameos/values
 import frameos/js_runtime/source_map
-import frameos/js_runtime/transpiler
 import frameos/js_runtime/burrito
 when defined(frameosEmbedded): import frameos/utils/memory
 import lib/tz
@@ -31,10 +30,9 @@ type
   LazySourceMap = object
     ## A line map that may not have been built yet.
     ##
-    ## Building one costs ~45% of a transform — 10 s of the 22 s a 36 KB app
-    ## takes on an ESP32-S3 — and it exists only to rewrite line numbers in
-    ## error messages. Most runs never throw, so the map is built on the first
-    ## error that needs it and cached from then on.
+    ## It exists only to rewrite line numbers in error messages, and most
+    ## runs never throw, so the map is built on the first error that needs it
+    ## and cached from then on.
     built: bool
     map: SourceLineMap
     provider: proc(): SourceLineMap {.closure, gcsafe, raises: [].}
@@ -60,7 +58,7 @@ when defined(frameosEmbedded):
   # Recompilation is what makes eviction safe: getOrCompileCodeFn and
   # evalInline both rebuild a missing function on demand, and cleanupSceneJs
   # clears the name tables so they will. It is not free — rebuilding
-  # re-transpiles each snippet — so this only fires when headroom is actually
+  # re-parses each snippet — so this only fires when headroom is actually
   # short, and a roomy frame never evicts.
   var liveSceneJsScenes: seq[InterpretedFrameScene] = @[]
   # Scenes with a JS frame on the stack right now. Freeing one of those
@@ -147,42 +145,10 @@ proc getCodeSnippet(node: DiagramNode): string =
     return node.data["code"].getStr()
   ""
 
-proc transpileSource*(source: string, filename: string): string =
-  if source.len == 0:
-    return source
-  transformFrameosScript(source, filename)
-
-proc transpileSourceWithMap*(source: string, filename: string): TransformResult =
-  if source.len == 0:
-    return TransformResult(code: source, sourceMap: identitySourceLineMap(source, filename, filename))
-  transform(source, TransformOptions(filePath: filename, transforms: @["typescript", "jsx"]))
-
-proc transpileModuleSource*(source: string, filename: string): string =
-  if source.len == 0:
-    return source
-  transformFrameosModule(source, filename)
-
-proc transpileAppSource*(source: string, filename: string, allowJsx = false): string =
-  ## Prepare a JS app's source for QuickJS: erase TypeScript, and stop.
-  ##
-  ## The module form is deliberately left intact — evalModuleNamespace lets
-  ## QuickJS parse it as a real ES module, instead of tokenising the whole
-  ## file here to rewrite `export` into CommonJS. No line map is built either;
-  ## app_runtime rebuilds one from the source and this output if an error ever
-  ## needs to name a line. On an ESP32-S3 those two stages were ~70% of what
-  ## transpiling a 36 KB app cost.
-  if source.len == 0:
-    return source
-  transform(source, TransformOptions(
-    filePath: filename,
-    transforms: if allowJsx: @["typescript", "jsx"] else: @["typescript"],
-    skipSourceMap: true,
-  )).code
-
-proc transpileModuleSourceWithMap*(source: string, filename: string): TransformResult =
-  if source.len == 0:
-    return TransformResult(code: source, sourceMap: identitySourceLineMap(source, filename, filename))
-  transform(source, TransformOptions(filePath: filename, transforms: @["typescript", "jsx", "imports"]))
+# Code nodes and inline expressions are TypeScript with JSX, whatever the
+# scene calls them; the bundled QuickJS (quickts) parses both directly, so
+# the only text ever generated is the envelope around a snippet.
+const snippetEvalFlags* = JS_EVAL_FLAG_TYPESCRIPT or JS_EVAL_FLAG_JSX
 
 proc registerJsSourceMap*(ctx: ptr JSContext, sourceMap: SourceLineMap) =
   if ctx == nil or sourceMap.generatedName.len == 0:
@@ -238,25 +204,6 @@ proc logNodeErrorPayload(scene: InterpretedFrameScene, nodeId: NodeId, payload: 
   if sourceNodeId.len > 0:
     payload["sourceNodeId"] = %sourceNodeId
   scene.logger.log(payload)
-
-proc logCompileError(
-  scene: InterpretedFrameScene,
-  nodeId: NodeId,
-  sourceKind: string,
-  sourceName: string,
-  snippet: string,
-  error: ref CatchableError
-) =
-  scene.logNodeErrorPayload(nodeId, %*{
-    "event": "interpreter:jsCompileError",
-    "sceneId": scene.id.string,
-    "nodeId": nodeId.int,
-    "sourceKind": sourceKind,
-    "sourceName": sourceName,
-    "error": error.msg,
-    "stacktrace": error.getStackTrace(),
-    "snippet": snippet
-  })
 
 proc logCompileError(
   scene: InterpretedFrameScene,
@@ -765,9 +712,9 @@ proc closeSceneJsLocked(scene: InterpretedFrameScene) =
 when defined(frameosEmbedded):
   proc evictIdleSceneJs(keep: InterpretedFrameScene) =
     ## Reclaim other scenes' interpreters before building one more, but only
-    ## when headroom is genuinely short: rebuilding re-transpiles every code
-    ## node in the evicted scene, so a frame with room to spare should never
-    ## pay that. Mirrors evictIdleJsRuntimes in app_runtime.
+    ## when headroom is genuinely short: rebuilding re-parses every code node
+    ## in the evicted scene, so a frame with room to spare should never pay
+    ## that. Mirrors evictIdleJsRuntimes in app_runtime.
     let headroom = availableRenderBytes()
     if headroom <= 0 or headroom >= SceneJsEvictHeadroomBytes:
       return
@@ -844,16 +791,13 @@ proc compileInlineFn(scene: InterpretedFrameScene,
   ensureSceneJs(scene)
   let fnName = nameBuilder(scene, nodeId, name)
   let filename = "<frameos:inline:" & $nodeId.int & ":" & name & ">"
-  var sourceMap = buildEnvelopeFunctionWithMap(snippet, @[], fnName, filename).sourceMap
+  let envelope = buildEnvelopeFunctionWithMap(snippet, @[], fnName, filename)
   try:
-    let envelope = buildEnvelopeFunctionWithMap(snippet, @[], fnName, filename)
-    let transformed = transpileSourceWithMap(envelope.code, filename)
-    sourceMap = composeSourceLineMaps(transformed.sourceMap, envelope.sourceMap).withGeneratedName(filename)
     withLock sceneJsLock:
-      discard scene.js.eval(transformed.code, filename)
-      registerJsSourceMap(scene.js.context, sourceMap)
+      discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
+      registerJsSourceMap(scene.js.context, envelope.sourceMap)
   except CatchableError as e:
-    logCompileError(scene, nodeId, "inline", name, snippet, e, sourceMap)
+    logCompileError(scene, nodeId, "inline", name, snippet, e, envelope.sourceMap)
     raise
   if not mappingRef.hasKey(nodeId):
     mappingRef[nodeId] = initTable[string, string]()
@@ -889,16 +833,13 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
 
   let fnName = uniqueCodeFnName(scene, node.id)
   let filename = "<frameos:code:" & $node.id.int & ">"
-  var sourceMap = buildEnvelopeFunctionWithMap(codeSnippet, argNames, fnName, filename).sourceMap
+  let envelope = buildEnvelopeFunctionWithMap(codeSnippet, argNames, fnName, filename)
   try:
-    let envelope = buildEnvelopeFunctionWithMap(codeSnippet, argNames, fnName, filename)
-    let transformed = transpileSourceWithMap(envelope.code, filename)
-    sourceMap = composeSourceLineMaps(transformed.sourceMap, envelope.sourceMap).withGeneratedName(filename)
     withLock sceneJsLock:
-      discard scene.js.eval(transformed.code, filename)
-      registerJsSourceMap(scene.js.context, sourceMap)
+      discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
+      registerJsSourceMap(scene.js.context, envelope.sourceMap)
   except CatchableError as e:
-    logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e, sourceMap)
+    logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e, envelope.sourceMap)
     raise
   scene.jsFuncNameByNode[node.id] = fnName
 
@@ -1048,16 +989,13 @@ proc evalSnippet*(
   inc anonCounter
   let fnName = "__frameos_eval_" & $(nodeId.int) & "_" & $anonCounter
   let filename = "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">"
-  var sourceMap = buildEnvelopeFunctionWithMap(code, argNames, fnName, filename).sourceMap
+  let envelope = buildEnvelopeFunctionWithMap(code, argNames, fnName, filename)
   try:
-    let envelope = buildEnvelopeFunctionWithMap(code, argNames, fnName, filename)
-    let transformed = transpileSourceWithMap(envelope.code, filename)
-    sourceMap = composeSourceLineMaps(transformed.sourceMap, envelope.sourceMap).withGeneratedName(filename)
     withLock sceneJsLock:
-      discard scene.js.eval(transformed.code, filename)
-      registerJsSourceMap(scene.js.context, sourceMap)
+      discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
+      registerJsSourceMap(scene.js.context, envelope.sourceMap)
   except CatchableError as e:
-    logCompileError(scene, nodeId, "eval", fnName, code, e, sourceMap)
+    logCompileError(scene, nodeId, "eval", fnName, code, e, envelope.sourceMap)
     raise
 
   var outs = outputTypes
@@ -1076,9 +1014,6 @@ proc jsQuoteForTest*(s: string): string =
 
 proc envelopeToValueForTest*(env: JsonNode, expectedType: string = ""): Value =
   envelopeToValue(env, expectedType)
-
-proc transpileSourceForTest*(source: string, filename: string = "<test>"): string =
-  transpileSource(source, filename)
 
 proc cleanupCompilerJs*() =
   discard

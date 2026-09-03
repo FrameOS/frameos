@@ -1,9 +1,13 @@
 name: Cloud CI
 
 # The cloud app consumes frameos-wasm, frameos-editor and cloud-frontend as
-# workspace packages, so its build pulls in the frontend build and the wasm
-# runtime (nim + emscripten). Turbo caches every step: warm runs skip whatever
-# didn't change.
+# workspace packages, so its build pulls in the frontend build. The wasm
+# runtime itself is NOT built here: auth-web's prebuild installs the signed
+# frameos-<version>-wasm.tar.gz from the release pinned in versions.json
+# (scripts/lib/wasm-runtime.mjs), so the preview renders with the interpreter
+# frames run — a runtime built from main showed features the last firmware
+# did not have. Turbo caches every step: warm runs skip whatever didn't
+# change.
 #
 # These paths are the inputs of everything `turbo run build
 # --filter=@frameos-cloud/auth-web` builds (see turbo.json). A missing one is
@@ -23,13 +27,11 @@ on:
       - "repo/**"
       - "frameos/wasm/**"
       - "frameos/editor/**"
-      # Inputs of frameos-wasm#build:runtime — the wasm the cloud editor's
-      # live preview runs. If they do not trigger a deploy, the preview
-      # silently drifts from what frames actually render.
-      - "frameos/src/wasm/**"
-      - "frameos/src/frameos/**"
-      - "frameos/frameos.nimble"
-      - "frameos/tools/build_wasm.sh"
+      # The Nim runtime sources are deliberately NOT here: the wasm bundle
+      # comes from the release pinned in versions.json, and a release
+      # reaches production through the workflow_run trigger below.
+      - "versions.json"
+      - "release-assets/firmware-signing.pub"
       - "turbo.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -56,13 +58,8 @@ on:
       - "repo/**"
       - "frameos/wasm/**"
       - "frameos/editor/**"
-      # Inputs of frameos-wasm#build:runtime — the wasm the cloud editor's
-      # live preview runs. If they do not trigger a deploy, the preview
-      # silently drifts from what frames actually render.
-      - "frameos/src/wasm/**"
-      - "frameos/src/frameos/**"
-      - "frameos/frameos.nimble"
-      - "frameos/tools/build_wasm.sh"
+      - "versions.json"
+      - "release-assets/firmware-signing.pub"
       - "turbo.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -74,10 +71,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The token GitHub hands the jobs is read-only. Neither job comments on PRs,
+# writes checks or statuses, or uses OIDC: verify only checks out and builds,
+# and deploy reaches production over an SSH key held in the `production`
+# environment, not through the GitHub API. The wasm runtime download is a
+# plain unauthenticated GET of a public release asset.
+permissions:
+  contents: read
+
 # NEXT_PUBLIC_* values are inlined into the browser bundle when `next build`
 # runs — which is here, on the runner, not on the server. The key in
 # /etc/frameos-cloud/auth-web.env only reaches the server-side uses
-# (error-tracking.ts, signup-notifications.ts); without this, the deployed
+# (error-tracking.ts, posthog-capture.ts); without this, the deployed
 # bundle calls posthog.init("") and analytics is silently off. A repository
 # variable, not a secret: the token is public by design (it ships in the
 # served JS). Workflow-level so verify builds with the same value and the
@@ -97,6 +102,8 @@ jobs:
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     # Real Postgres for the backend-linking integration tests.
     services:
@@ -132,43 +139,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      # nim-lang.org drops connections and serves 503s often enough to fail
-      # real runs — one observed window outlasted curl's five retries AND a
-      # spaced second attempt. Cache the installed toolchain: on a hit the
-      # host is never contacted at all; the download (with its one retry
-      # below) only runs when this key has never been populated.
-      - name: Cache Nim toolchain
-        id: cache_nim_toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.choosenim
-            ~/.nimble/bin
-          key: ${{ runner.os }}-nim-toolchain-2.2.4
-
-      - uses: jiro4989/setup-nim-action@v1
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
-        id: setup_nim
-        continue-on-error: true
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Retry Nim setup once
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-        uses: jiro4989/setup-nim-action@v1
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add cached Nim to PATH
-        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: 6.0.2
-
       - uses: actions/cache@v4
         with:
           path: .turbo
@@ -177,16 +147,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # The wasm runtime (frameos.js/frameos.wasm) is a build output, not
-      # committed; turbo caches it against the nim sources.
-      - name: Build the wasm runtime
-        run: |
-          (cd frameos && nimble install -d -y)
-          pnpm exec turbo run build:runtime --filter=frameos-wasm
-
       # Lint, typecheck, test, and build the cloud workspace; turbo builds
-      # the frontend, editor, and wasm packages it depends on.
-      - run: pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*'
+      # the frontend, editor, and wasm packages it depends on. auth-web's
+      # prebuild downloads and verifies the release's wasm runtime.
+      # cloud-frontend (the frames SPA wrapper auth-web serves) is built by
+      # esbuild, which checks no types, so its typecheck task rides along.
+      - run: pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend
 
       # Backend-linking flow against the Postgres service container.
       - run: pnpm --filter @frameos-cloud/auth-web test:integration
@@ -227,6 +193,8 @@ jobs:
          github.event.workflow_run.conclusion == 'success')
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     # Deployment history, and the one place the deploy secrets live. Nothing
     # else in this repo can read them.
@@ -242,11 +210,15 @@ jobs:
       group: frameos-cloud-deploy
       cancel-in-progress: false
 
+    # Every action in this job is pinned to a commit, not a tag: a tag can be
+    # moved, and this job ends with the production deploy key on disk. Bump
+    # by resolving the new tag (`gh api repos/<o>/<r>/git/ref/tags/<tag>`,
+    # dereferencing annotated tags) and updating the trailing comment.
     steps:
       # Full history and the normal remote refspec: scripts/deploy.sh proves
       # the commit it is about to ship exists on the remote before shipping
       # it, which a shallow single-ref checkout cannot answer.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
@@ -291,6 +263,38 @@ jobs:
             echo "proceed=true" >>"$GITHUB_OUTPUT"
           fi
 
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        if: steps.freshness.outputs.proceed == 'true'
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.freshness.outputs.proceed == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      # verify just wrote this exact key, so the build below is mostly cache
+      # replay rather than a second full build of the frontend.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.freshness.outputs.proceed == 'true'
+        with:
+          path: .turbo
+          key: turbo-cloud-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-cloud-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.freshness.outputs.proceed == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # The wasm runtime is not built here: `pnpm deploy:prod` below runs
+      # auth-web's prebuild, which installs the signed bundle of the release
+      # pinned in versions.json (scripts/lib/wasm-runtime.mjs). A deploy
+      # between a release's version bump and its assets landing fails on
+      # that download and is simply re-run.
+
+      # Written only now, after every third-party action in this job has
+      # run: the key is root on the production box, and nothing that is
+      # not ours should execute with it on disk.
       - name: Configure SSH
         if: steps.freshness.outputs.proceed == 'true'
         env:
@@ -312,10 +316,15 @@ jobs:
           # a literal ~ inside quotes is a path that does not exist.
           echo "FRAMEOS_CLOUD_DEPLOY_SSH_KEY=$HOME/.ssh/frameos-cloud-deploy" >>"$GITHUB_ENV"
 
+
       # Production is allowed to run a branch — some frame-facing work can
       # only be exercised against the real cloud — and an automatic deploy
       # must not silently take that away while someone is using it. Deploying
       # main by hand when you are done re-arms this.
+      # Runs here, after Configure SSH, because it is the first thing that
+      # needs the key; the install above is wasted when it stands down,
+      # which is the cheaper side of "the key is on disk only after every
+      # third-party action in the job".
       - name: Stand down if production is running a branch
         id: live
         if: steps.freshness.outputs.proceed == 'true'
@@ -336,71 +345,6 @@ jobs:
               echo "Run \`pnpm deploy:prod\` from cloud/ when you are done with that ref to resume."
             } | tee -a "$GITHUB_STEP_SUMMARY"
             echo "proceed=false" >>"$GITHUB_OUTPUT"
-          fi
-
-      - uses: pnpm/action-setup@v4
-        if: steps.live.outputs.proceed == 'true'
-
-      - uses: actions/setup-node@v4
-        if: steps.live.outputs.proceed == 'true'
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      # Same cache as verify, for the same reason (nim-lang.org is unreliable).
-      - name: Cache Nim toolchain
-        if: steps.live.outputs.proceed == 'true'
-        id: cache_nim_toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.choosenim
-            ~/.nimble/bin
-          key: ${{ runner.os }}-nim-toolchain-2.2.4
-
-      - uses: jiro4989/setup-nim-action@v1
-        if: steps.live.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add cached Nim to PATH
-        if: steps.live.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit == 'true'
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-
-      - uses: mymindstorm/setup-emsdk@v14
-        if: steps.live.outputs.proceed == 'true'
-        with:
-          version: 6.0.2
-
-      # verify just wrote this exact key, so the build below is mostly cache
-      # replay rather than a second full build of the frontend and the wasm
-      # runtime.
-      - uses: actions/cache@v4
-        if: steps.live.outputs.proceed == 'true'
-        with:
-          path: .turbo
-          key: turbo-cloud-${{ runner.os }}-${{ github.sha }}
-          restore-keys: turbo-cloud-${{ runner.os }}-
-
-      - name: Install dependencies
-        if: steps.live.outputs.proceed == 'true'
-        run: pnpm install --frozen-lockfile
-
-      # build:runtime is not part of the `build` task graph, so the deploy has
-      # to ask for it explicitly or the editor would ship whatever wasm
-      # happened to be lying around.
-      - name: Build the wasm runtime
-        if: steps.live.outputs.proceed == 'true'
-        run: |
-          (cd frameos && nimble install -d -y)
-          pnpm exec turbo run build:runtime --filter=frameos-wasm
-          # deploy.sh refuses a dirty tree, and "commit or stash" is unhelpful
-          # advice on a runner: say what actually moved.
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::warning::the build left the tree dirty; the deploy will refuse it"
-            git status --porcelain
           fi
 
       # The same script a human runs. `-- main` rather than the bare form so

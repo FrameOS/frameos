@@ -230,9 +230,11 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
  * the per-frame settings panel above. `null` means "everything the page
  * renders": the backend owns all of it, and the on-device admin never mounts
  * this page at all (urls.settings() routes it to the frame's own settings
- * panel instead). The cloud keeps only the service API keys scenes use —
- * there is no local account, deploy host, SSH, build environment, font
- * store, backend PostHog or backend system info to configure.
+ * panel instead). The cloud does not mount it either any more: its service
+ * API keys and SSH keys are an account page
+ * (cloud/apps/auth-web/app/account/settings), and urls.settings() links out
+ * to it. The cloud list below is the subset that page carries, kept so the
+ * shared component's mode contract stays complete.
  */
 export const allowedGlobalSettingsSections: Record<WorkspaceMode, readonly string[] | null> = {
   backend: null,

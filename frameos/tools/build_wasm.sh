@@ -56,12 +56,12 @@ QJS_SRC="$FRAMEOS_DIR/quickjs"
 if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
     QJS_SRC="$BUILD_DIR/quickjs-src"
     if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
-        QJS_TARBALL_VERSION="2026-06-04"
-        QJS_TARBALL_SHA256="b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"
+        QJS_TARBALL_VERSION="2026-06-04-quickts.1"
+        QJS_TARBALL_SHA256="94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f"
         echo "quickjs/ has no C sources (prebuilt install) — downloading QuickJS $QJS_TARBALL_VERSION sources"
         mkdir -p "$BUILD_DIR"
         curl -fsSL -o "$BUILD_DIR/quickjs-src.tar.xz" \
-            "https://bellard.org/quickjs/quickjs-$QJS_TARBALL_VERSION.tar.xz"
+            "https://archive.frameos.net/source/vendor/quickjs-$QJS_TARBALL_VERSION.tar.xz"
         if command -v sha256sum >/dev/null; then
             echo "$QJS_TARBALL_SHA256  $BUILD_DIR/quickjs-src.tar.xz" | sha256sum -c -
         else
@@ -115,13 +115,26 @@ if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
     emar rcs "$QJS_BUILD/libquickjs.a" "$QJS_BUILD"/*.o
 fi
 
+# ------------------------------------------------- simulated device memory
+# The preview can run under a device's memory ceiling (see the file's header).
+# It owns the exported `frameos_wasm_render` symbol, wrapping the Nim
+# `frameos_wasm_render_impl` in a setjmp guard, and Nim's allocator is patched
+# to route through it (src/wasm/patched_malloc.nim via config.nims).
+MEM_SHIM="$FRAMEOS_DIR/tools/wasm/fos_wasm_mem.c"
+MEM_OBJ="$BUILD_DIR/fos_wasm_mem.o"
+mkdir -p "$BUILD_DIR"
+if [[ ! -f "$MEM_OBJ" || "$MEM_SHIM" -nt "$MEM_OBJ" || "${MEM_SHIM%.c}.h" -nt "$MEM_OBJ" ]]; then
+    echo "building the simulated-memory shim with emcc"
+    emcc -c -O2 -w "$MEM_SHIM" -o "$MEM_OBJ"
+fi
+
 # --------------------------------------------------------------- nim -> wasm
 FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_tz_offset_seconds
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_version,_frameos_wasm_tz_offset_seconds,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
 # FS lets the render harness preload a virtual frame's assets into MEMFS;
 # IDBFS (linked below with -lidbfs.js) backs the browser preview's
 # /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).
@@ -147,6 +160,11 @@ nim c \
     --define:frameosVersion:"$FRAMEOS_VERSION" \
     --nimcache:"$NIMCACHE" \
     --out:"$BUILD_DIR/frameos.js" \
+    --passC:"-I$FRAMEOS_DIR/tools/wasm" \
+    --passL:"$MEM_OBJ" \
+    `# setjmp/longjmp is how a refused allocation gets out of a render` \
+    `# without taking the module down (tools/wasm/fos_wasm_mem.c).` \
+    --passL:"-sSUPPORT_LONGJMP=emscripten" \
     --passL:"-sMODULARIZE=1" \
     --passL:"-sEXPORT_ES6=1" \
     --passL:"-sEXPORT_NAME=createFrameOS" \
@@ -174,6 +192,26 @@ nim c \
 
 mkdir -p "$OUT_DIR"
 cp "$BUILD_DIR/frameos.js" "$BUILD_DIR/frameos.wasm" "$OUT_DIR/"
+# The stamp the release ships next to the bundle: which FrameOS version the
+# interpreter is (the published form a frame reports), which release the
+# bundle belongs to, and the commit. The runtime also answers it at run time
+# (frameos_wasm_version); this file is for whoever holds the tarball.
+FRAMEOS_RELEASE="$(python3 tools/frameos_version.py --key=docker ../versions.json)"
+WASM_COMMIT="${FRAMEOS_WASM_COMMIT:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+python3 - "$OUT_DIR/version.json" "$FRAMEOS_VERSION" "$FRAMEOS_RELEASE" "$WASM_COMMIT" <<'PY'
+import datetime, json, sys
+out, version, release, commit = sys.argv[1:5]
+published = lambda v: (v[1:] if v.startswith("v") else v).split("+", 1)[0] or "unknown"
+stamp = {
+    "version": published(version),
+    "release": published(release),
+    "commit": commit,
+    "built_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+}
+with open(out, "w") as f:
+    json.dump(stamp, f, indent=2)
+    f.write("\n")
+PY
 if [[ -f "$SCRIPT_DIR/wasm/preview-worker.js" ]]; then
     cp "$SCRIPT_DIR/wasm/preview-worker.js" "$OUT_DIR/"
 fi

@@ -51,6 +51,7 @@ import {
 } from "../../auth-web/src/lib/frames";
 import {
   cachedAssetFile,
+  cachedAssetContentType,
   assetFetchCommandTtlMs,
   outstandingAssetGet,
   queueImageGetIfIdle,
@@ -209,7 +210,6 @@ const maxBufferedBytes = 4 * 1024 * 1024;
 // at-least-once redelivery re-streams from scratch.
 interface AssetStream {
   chunks: Buffer[];
-  contentType: string;
   nextSeq: number;
   receivedBytes: number;
 }
@@ -1112,10 +1112,47 @@ export async function startFrameHub(
     }
   }
 
+  // A frame is a full device only once its owner confirmed the enrolment.
+  // Until then it holds a link token and a socket (the confirm page needs
+  // to see it online), but nothing it sends may land in the account's data:
+  // anyone who boots a leaked multi-use SD image gets a `pending` row, and
+  // that row must not be able to fill the log budget (the account-wide cull
+  // would delete the owner's real history), plant metrics, or seed the
+  // asset cache with bytes the owner's browser will load from the app
+  // origin the moment they open its page. The status is re-read from the
+  // row on the way through so a confirm takes effect without a reconnect;
+  // the re-read is cheap and only pending frames pay it.
+  async function isConfirmedFrame(
+    session: DeviceSession,
+    msg: Record<string, unknown>,
+  ) {
+    if (session.frame.status === "active") {
+      return true;
+    }
+    const [row] = await db
+      .select({ status: frames.status })
+      .from(frames)
+      .where(eq(frames.id, session.frame.id))
+      .limit(1);
+    if (row?.status === "active") {
+      session.frame = { ...session.frame, status: row.status };
+      return true;
+    }
+    logWarn("device.message_from_unconfirmed_frame", {
+      frameId: session.frame.id,
+      type: msg.type,
+    });
+    sendAckError(session, msg, "frame_not_confirmed");
+    return false;
+  }
+
   async function handleLogBatch(
     session: DeviceSession,
     msg: Record<string, unknown>,
   ) {
+    if (!(await isConfirmedFrame(session, msg))) {
+      return;
+    }
     if (!session.scopes.includes(frameTelemetryLogsScope)) {
       sendAckError(session, msg, "insufficient_scope");
       return;
@@ -1169,6 +1206,9 @@ export async function startFrameHub(
     session: DeviceSession,
     msg: Record<string, unknown>,
   ) {
+    if (!(await isConfirmedFrame(session, msg))) {
+      return;
+    }
     if (!session.scopes.includes(frameTelemetryMetricsScope)) {
       sendAckError(session, msg, "insufficient_scope");
       return;
@@ -1216,6 +1256,9 @@ export async function startFrameHub(
     session: DeviceSession,
     msg: Record<string, unknown>,
   ) {
+    if (!(await isConfirmedFrame(session, msg))) {
+      return;
+    }
     const entries = parseAssetEntries(msg.assets);
     const stored = await storeFrameAssetListing(
       db,
@@ -1237,6 +1280,9 @@ export async function startFrameHub(
     session: DeviceSession,
     msg: Record<string, unknown>,
   ) {
+    if (!(await isConfirmedFrame(session, msg))) {
+      return;
+    }
     const commandId =
       typeof msg.id === "string" && uuidPattern.test(msg.id)
         ? msg.id
@@ -1270,14 +1316,11 @@ export async function startFrameHub(
       }
       // seq 0 always restarts: at-least-once delivery may re-send the whole
       // asset_get, and the device then re-streams from scratch.
+      // The device's `content_type` is deliberately not read: the stored
+      // type is sniffed from the bytes (cachedAssetContentType) so a frame
+      // can never choose what the app origin serves.
       stream = {
         chunks: [],
-        contentType:
-          typeof msg.content_type === "string" &&
-          msg.content_type.length > 0 &&
-          msg.content_type.length <= 256
-            ? msg.content_type
-            : "application/octet-stream",
         nextSeq: 0,
         receivedBytes: 0,
       };
@@ -1339,9 +1382,10 @@ export async function startFrameHub(
     if (!path) {
       return;
     }
+    const content = Buffer.concat(stream.chunks);
     await storeFrameAssetFile(db, session.frame.id, {
-      content: Buffer.concat(stream.chunks),
-      contentType: stream.contentType,
+      content,
+      contentType: cachedAssetContentType(content),
       path,
       thumb: command.type === "asset_get" && payload?.thumb === true,
     });

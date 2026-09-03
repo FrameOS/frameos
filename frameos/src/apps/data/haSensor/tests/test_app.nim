@@ -1,4 +1,4 @@
-import std/[json, options, times, unittest]
+import std/[json, options, strutils, times, unittest]
 
 import ../app
 import frameos/types
@@ -34,6 +34,27 @@ suite "data/haSensor app":
 
     let output = app.get(ExecutionContext())
     check output == %*{"error": "Please provide a Home Assistant access token in the settings."}
+
+  test "entity ids must be <domain>.<object_id>":
+    check isHaEntityId("sensor.outdoor_temp")
+    check isHaEntityId("binary_sensor.door_2")
+    check not isHaEntityId("")
+    check not isHaEntityId("sensor")
+    check not isHaEntityId("sensor.")
+    check not isHaEntityId(".temp")
+    check not isHaEntityId("sensor.a.b")
+    check not isHaEntityId("Sensor.Temp")
+    check not isHaEntityId("sensor.temp/../../admin")
+    check not isHaEntityId("sensor.temp?x=1")
+    check not isHaEntityId("sensor.temp#frag")
+
+  test "a malformed entity id never reaches the network":
+    let app = makeApp(%*{"homeAssistant": {"url": "http://127.0.0.1:9", "accessToken": "token"}})
+    app.appConfig.entityId = "../../api/config"
+
+    let output = app.get(ExecutionContext())
+    check output.hasKey("error")
+    check "Invalid Home Assistant entity id" in output["error"].getStr()
 
   test "error helper returns shaped payload":
     let app = makeApp(%*{"homeAssistant": {}})

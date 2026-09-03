@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import timezone, datetime
 from copy import deepcopy
@@ -6,13 +7,15 @@ from ipaddress import ip_address
 from typing import Any, Optional
 from arq import ArqRedis as Redis
 
-from .frame import Frame, update_frame
+from .frame import Frame, record_successful_deploy, update_frame
 from .metrics import new_metrics
 from app.database import Base
 from app.utils.timezone import stored_timezone
 from sqlalchemy import Index, Integer, String, DateTime, ForeignKey, Text, delete, event, func, select
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
+
+logger = logging.getLogger(__name__)
 
 LOG_LIMIT_PER_FRAME = 10000
 # Run the count+prune query only every N inserts per frame (per process).
@@ -50,6 +53,43 @@ def _is_ip_literal(value: Any) -> bool:
     return True
 
 
+def _follow_boot_ip_enabled(frame: Frame) -> bool:
+    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
+    return bool(embedded.get("followBootIp"))
+
+
+def _accepted_boot_ip(frame: Frame, log: dict, ip: str | None) -> str | None:
+    """The address a `bootup` event may move `frame_host` to, or None.
+
+    Anyone holding a frame's server_api_key can post a bootup, and the backend
+    then pushes ssh credentials and frame.json at whatever host it records, so
+    the device's own claim is not enough. An embedded frame that DHCP moved is
+    still followed: its claimed address must be the one the request really
+    came from (`ip`, derived through the trusted-proxy rules). An explicit
+    `embedded.followBootIp` opt-in trusts the claim as-is; a hostname in
+    `frame_host` is never replaced.
+    """
+    if (frame.mode or "rpios") != "embedded":
+        return None
+    claimed = log.get("ip")
+    if not _is_ip_literal(claimed):
+        claimed = ip if _is_ip_literal(ip) else None
+    if not claimed:
+        return None
+    current_host = frame.frame_host or ""
+    if current_host and not _is_ip_literal(current_host):
+        return None
+    if claimed == current_host:
+        return None
+    if claimed == ip or _follow_boot_ip_enabled(frame):
+        return claimed
+    logger.warning(
+        "Ignoring bootup ip %s for frame %s: request came from %s and embedded.followBootIp is off",
+        claimed, frame.id, ip,
+    )
+    return None
+
+
 def _frameos_version_from_boot(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -57,28 +97,17 @@ def _frameos_version_from_boot(value: Any) -> str | None:
     return match.group(1) if match else None
 
 
-def _embedded_firmware_completed_at(frame: Frame) -> datetime | None:
-    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
-    firmware = embedded.get("firmware")
-    if not isinstance(firmware, dict):
-        return None
-    return _parse_iso_datetime(firmware.get("completedAt"))
-
-
-def _should_mark_embedded_boot_deployed(frame: Frame, boot_timestamp: datetime) -> bool:
-    if (frame.mode or "rpios") != "embedded":
+def _should_mark_embedded_boot_deployed(frame: Frame, boot_version: str | None) -> bool:
+    """A boot on firmware the last recorded deploy did not know about IS the
+    deploy landing: the board pulled a release over the air (the backend
+    builds nothing, so the release version is the only thing that changes),
+    and the deploy snapshot must say which version it now runs."""
+    if (frame.mode or "rpios") != "embedded" or not boot_version:
         return False
-
-    firmware_completed_at = _embedded_firmware_completed_at(frame)
-    if firmware_completed_at is None:
+    last_deploy = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None
+    if not last_deploy:
         return False
-
-    booted_at = _aware_utc(boot_timestamp)
-    if firmware_completed_at > booted_at:
-        return False
-
-    last_deploy_at = _aware_utc(frame.last_successful_deploy_at) if frame.last_successful_deploy_at else None
-    return last_deploy_at is None or firmware_completed_at > last_deploy_at
+    return _frameos_version_from_boot(last_deploy.get("frameos_version")) != boot_version
 
 
 def _embedded_boot_metadata(log: dict, boot_timestamp: datetime, ip: str | None = None) -> dict[str, Any]:
@@ -270,17 +299,14 @@ async def process_log(
             embedded = dict(frame.embedded or {})
             embedded["lastBoot"] = embedded_boot_metadata
             changes["embedded"] = embedded
-            mark_embedded_boot_deployed = _should_mark_embedded_boot_deployed(frame, timestamp)
+            mark_embedded_boot_deployed = _should_mark_embedded_boot_deployed(
+                frame, embedded_boot_metadata.get("frameosVersion")
+            )
         if frame.status != 'ready':
             changes['status'] = 'ready'
-        boot_ip = log.get("ip") or ip
-        if frame.mode == "embedded" and isinstance(boot_ip, str):
-            try:
-                ip_address(boot_ip)
-            except ValueError:
-                boot_ip = None
-            if boot_ip and _is_ip_literal(frame.frame_host) and boot_ip != frame.frame_host:
-                changes["frame_host"] = boot_ip
+        boot_ip = _accepted_boot_ip(frame, log, ip)
+        if boot_ip:
+            changes["frame_host"] = boot_ip
         for key in ['width', 'height', 'color']:
             # Width/height left empty means "autodetect": fill them in from the device's bootup
             # report, but never overwrite an explicitly configured resolution with a detected one.
@@ -301,10 +327,11 @@ async def process_log(
         for key, value in changes.items():
             setattr(frame, key, value)
         if marked_buildroot_sd_image_booted and isinstance(frame.last_successful_deploy, dict):
-            frame.last_successful_deploy = buildroot_sd_image_deploy_snapshot(frame, frame.buildroot["sdImage"])
+            record_successful_deploy(
+                frame, buildroot_sd_image_deploy_snapshot(frame, frame.buildroot["sdImage"]), frame.last_successful_deploy_at
+            )
         if mark_embedded_boot_deployed and embedded_boot_metadata is not None:
-            frame.last_successful_deploy = _embedded_boot_deploy_snapshot(frame, embedded_boot_metadata)
-            frame.last_successful_deploy_at = timestamp
+            record_successful_deploy(frame, _embedded_boot_deploy_snapshot(frame, embedded_boot_metadata), timestamp)
         await update_frame(db, redis, frame)
 
     if event == 'metrics':

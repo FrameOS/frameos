@@ -370,12 +370,67 @@ interface FirmwareAsset {
   size: number
 }
 
-async function fetchGenericFirmware(platform: string, log: (line: string) => void): Promise<Uint8Array> {
+interface FirmwareListing {
+  assets?: FirmwareAsset[]
+  release?: string
+}
+
+async function fetchFirmwareListing(log: (line: string) => void): Promise<FirmwareListing> {
   log('Looking up the latest FrameOS release…')
-  const release = await fetchReleaseListing<{
-    assets?: FirmwareAsset[]
-    release?: string
-  }>(firmwareApiUrl)
+  return fetchReleaseListing<FirmwareListing>(firmwareApiUrl)
+}
+
+/**
+ * The release image for a chip and the flash size esptool just read off the
+ * board. The release publishes one merged image per chip × flash layout
+ * (esp32-s3-{4mb,16mb,32mb}, esp32-c3-{8mb,16mb,32mb}); the generic pair IS
+ * the 8 MB S3 / 4 MB C3 layout. A board flashed with its own layout uses the
+ * whole chip (bigger app slots, a bigger state partition) and later asks the
+ * OTA manifest for that same layout, so the pick here decides what the board
+ * runs for good. Unknown size, or a release without that image: the generic
+ * one, which every board boots.
+ */
+export function layoutMatchedPlatform(
+  chipPlatform: string,
+  detectedFlashSize: string | null,
+  assets: FirmwareAsset[] | undefined
+): string {
+  const chip = chipPlatform.startsWith('esp32-c3') ? 'esp32-c3' : 'esp32-s3'
+  const size = (detectedFlashSize ?? '').trim().toUpperCase()
+  if (!/^(4|8|16|32)MB$/.test(size)) {
+    return chipPlatform
+  }
+  const genericSize = chip === 'esp32-c3' ? '4MB' : '8MB'
+  if (size === genericSize) {
+    return chipPlatform
+  }
+  const candidate = `${chip}-${size.toLowerCase()}`
+  return assets?.some((asset) => asset.platform === candidate) ? candidate : chipPlatform
+}
+
+/** esptool-js reads the SPI flash id once the stub is up; the size lives in
+ * its third byte (esptool's DETECTED_FLASH_SIZES table). null when the board
+ * or the library cannot say — the generic image is always a valid answer. */
+async function detectFlashSize(loader: unknown): Promise<string | null> {
+  const candidate = loader as {
+    readFlashId?: () => Promise<number>
+    DETECTED_FLASH_SIZES?: Record<number, string>
+  }
+  if (typeof candidate.readFlashId !== 'function' || !candidate.DETECTED_FLASH_SIZES) {
+    return null
+  }
+  try {
+    const flashId = await candidate.readFlashId()
+    if (flashId === 0xffffff || flashId === 0) {
+      return null
+    }
+    return candidate.DETECTED_FLASH_SIZES[(flashId >> 16) & 0xff] ?? null
+  } catch {
+    return null
+  }
+}
+
+function pickFirmwareAsset(release: FirmwareListing, platform: string): FirmwareAsset {
   // Prefer the requested chip's all-panels build; for ESP32-S3 fall back to
   // the single-panel build that releases before the runtime driver table
   // published. There is no legacy ESP32-C3 build to fall back to.
@@ -390,6 +445,10 @@ async function fetchGenericFirmware(platform: string, log: (line: string) => voi
       } has no ${suffix} asset yet — it ships with the first release after cloud frames landed. You can flash manually via embedded/esp32 instead.`
     )
   }
+  return asset
+}
+
+async function downloadFirmware(asset: FirmwareAsset, log: (line: string) => void): Promise<Uint8Array> {
   log(`Downloading ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)…`)
   const firmwareResponse = await fetch(`${firmwareApiUrl}?platform=${encodeURIComponent(asset.platform)}`)
   if (!firmwareResponse.ok) {
@@ -750,7 +809,12 @@ export function Esp32CloudFlasher({
     setKnownFrameIds(null)
     try {
       setPhase('fetching')
-      const firmware = await fetchGenericFirmware(firmwarePlatform, log)
+      // The listing up front (a release with nothing to flash fails here, before
+      // the port prompt); the image itself only once the board has said how
+      // much flash it has, so a 16 MB board gets the 16 MB layout.
+      const release = await fetchFirmwareListing(log)
+      pickFirmwareAsset(release, firmwarePlatform)
+      let firmware: { platform: string; bytes: Uint8Array } | null = null
 
       setPhase('connecting')
       log('Pick the USB serial port of your ESP32 — if several are listed, "USB JTAG/serial debug unit" is the faster one…')
@@ -793,10 +857,24 @@ export function Esp32CloudFlasher({
         try {
           await loader.main()
           log(`Connected: ${loader.chip?.CHIP_NAME ?? 'ESP32'}`)
+          const flashSize = await detectFlashSize(loader)
+          const platform = layoutMatchedPlatform(firmwarePlatform, flashSize, release.assets)
+          if (flashSize) {
+            log(
+              platform === firmwarePlatform
+                ? `Flash size ${flashSize}: using the ${platform} image.`
+                : `Flash size ${flashSize}: using the ${platform} image built for that layout.`
+            )
+          } else {
+            log(`Could not read the flash size; using the ${platform} image.`)
+          }
+          if (!firmware || firmware.platform !== platform) {
+            firmware = { platform, bytes: await downloadFirmware(pickFirmwareAsset(release, platform), log) }
+          }
           await loader.writeFlash({
             compress: true,
             eraseAll: false,
-            fileArray: [{ address: 0x0, data: firmware }],
+            fileArray: [{ address: 0x0, data: firmware.bytes }],
             flashFreq: 'keep',
             flashMode: 'keep',
             flashSize: 'keep',

@@ -192,3 +192,28 @@ describe("nimIdentifiers", () => {
     expect(nimIdentifiers("foo & 'c'").has("foo")).toBe(true);
   });
 });
+
+describe("nimExpressionToJs — hostile input stays bounded", () => {
+  it("refuses an expression whose output would grow exponentially", () => {
+    // capitalizeAscii used to emit its receiver twice; twenty nested calls
+    // were tens of megabytes of JavaScript from a 300-byte request.
+    const nested = `"a"${".capitalizeAscii".repeat(24)}`;
+    let js: string | undefined;
+    let error: unknown;
+    try {
+      js = nimExpressionToJs(nested);
+    } catch (caught) {
+      error = caught;
+    }
+    if (js !== undefined) {
+      expect(js.length).toBeLessThan(256 * 1024);
+    } else {
+      expect(error).toBeInstanceOf(NimConvertError);
+    }
+  });
+
+  it("emits the capitalizeAscii receiver once", () => {
+    const js = nimExpressionToJs(`"hello".capitalizeAscii`);
+    expect(js.split('"hello"').length - 1).toBe(1);
+  });
+});

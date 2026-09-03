@@ -12,14 +12,16 @@ import {
   backupScopeForKind,
   backupSummary,
   decodeBackupContent,
+  maxBackupBodyBytes,
   maxBackupBytes,
   maxBackupsPerAccount,
+  normalizeBackupContentType,
   sha256Hex,
 } from "../../../../src/lib/backups";
 import {
   jsonError,
   parseOptionalString,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
@@ -112,7 +114,11 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_link_token", 401);
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxBackupBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const kind = typeof body.kind === "string" ? body.kind : "";
   const requiredScope = backupScopeForKind(kind);
   if (!requiredScope) {
@@ -138,7 +144,7 @@ export async function POST(request: NextRequest) {
   }
 
   const name = parseOptionalString(body.name)?.slice(0, 256);
-  const contentType = parseOptionalString(body.content_type)?.slice(0, 128);
+  const contentType = normalizeBackupContentType(body.content_type);
 
   // Count quota (replacing an existing item never fails it) plus the account
   // byte quota — replacements only count the size delta, so re-uploading a
@@ -187,7 +193,7 @@ export async function POST(request: NextRequest) {
   const values = {
     accountId: linkedClient.accountId,
     content,
-    contentType: contentType ?? null,
+    contentType,
     itemKey,
     kind,
     linkedClientId: linkedClient.id,

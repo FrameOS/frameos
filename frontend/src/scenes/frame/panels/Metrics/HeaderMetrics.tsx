@@ -13,7 +13,9 @@ import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './c
 import { urls } from '../../../../urls'
 import { frameMetricsPreviewLogic } from '../../../workspace/frameMetricsPreviewLogic'
 import type { FrameId } from '../../../../types'
-import { BatteryIndicator, batteryTitle } from '../../../../components/BatteryIndicator'
+import { BatteryIndicator } from '../../../../components/BatteryIndicator'
+import { FrameBatteryPopover } from '../../../workspace/FrameBatteryPopover'
+import { framesModel } from '../../../../models/framesModel'
 
 const chartHeight = 28
 const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
@@ -112,6 +114,8 @@ export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
   const { theme } = useValues(workspaceLogic)
   const { headerMetricsByCategory, previewMetricsTimeRange, latestMetricSummariesByCategory, latestBatteryPercent } =
     useValues(frameMetricsPreviewLogic({ frameId }))
+  const { frames } = useValues(framesModel)
+  const frame = frames[frameId]
   const metricEntries = Object.entries(headerMetricsByCategory).filter(([, series]) => series.length > 0)
   const chartTheme = metricChartThemes[theme]
 
@@ -121,62 +125,70 @@ export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
 
   return (
     <div className="frame-header-metrics flex max-w-[calc(100%-5rem)] flex-none flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden @4xl:overflow-visible @4xl:gap-1.5">
-      {metricEntries.map(([key, series]) => (
-        <A
-          key={key}
-          href={urls.frame(frameId, 'metrics')}
-          className={clsx(
-            'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',
-            theme === 'dark'
-              ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
-              : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
-          )}
-          title={
-            key === 'batteryPercent' && latestBatteryPercent !== null
-              ? batteryTitle(latestBatteryPercent)
-              : `${metricLabels[key] ?? key}${
-                  latestMetricSummariesByCategory[key] ? ` ${latestMetricSummariesByCategory[key]}` : ''
-                }`
-          }
-        >
-          {key === 'batteryPercent' && latestBatteryPercent !== null ? (
-            // A battery glyph with the charge and a bar, instead of label + sparkline.
-            <BatteryIndicator percent={latestBatteryPercent} withBar className="min-w-[3.25rem]" />
-          ) : (
-            <>
-              <span
-                className={clsx(
-                  'flex min-w-0 items-baseline gap-1 whitespace-nowrap leading-none',
-                  theme === 'dark' ? 'text-gray-300' : 'text-slate-700'
-                )}
-              >
-                <span className="shrink-0 text-[10px] font-semibold uppercase">
-                  <span className="@4xl:hidden">{compactMetricLabels[key] ?? metricLabels[key] ?? key}</span>
-                  <span className="hidden @4xl:inline">{metricLabels[key] ?? key}</span>
-                </span>
-                {latestMetricSummariesByCategory[key] ? (
-                  <span
-                    className={clsx(
-                      'min-w-0 truncate text-[11px] font-medium',
-                      theme === 'dark' ? 'text-gray-400' : 'text-slate-500'
-                    )}
-                  >
-                    {latestMetricSummariesByCategory[key]}
-                  </span>
-                ) : null}
+      {metricEntries.map(([key, series]) => {
+        const chipClassName = clsx(
+          'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',
+          theme === 'dark'
+            ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
+            : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
+        )
+        if (key === 'batteryPercent' && latestBatteryPercent !== null && frame) {
+          // A battery glyph with the charge and a bar, instead of label +
+          // sparkline; the chip opens the battery popup rather than the
+          // metrics page.
+          return (
+            <FrameBatteryPopover
+              key={key}
+              frame={frame}
+              percent={latestBatteryPercent}
+              variant="chip"
+              className={chipClassName}
+            >
+              <BatteryIndicator percent={latestBatteryPercent} withBar className="min-w-[3.25rem]" />
+            </FrameBatteryPopover>
+          )
+        }
+        return (
+          <A
+            key={key}
+            href={urls.frame(frameId, 'metrics')}
+            className={chipClassName}
+            title={`${metricLabels[key] ?? key}${
+              latestMetricSummariesByCategory[key] ? ` ${latestMetricSummariesByCategory[key]}` : ''
+            }`}
+          >
+            <span
+              className={clsx(
+                'flex min-w-0 items-baseline gap-1 whitespace-nowrap leading-none',
+                theme === 'dark' ? 'text-gray-300' : 'text-slate-700'
+              )}
+            >
+              <span className="shrink-0 text-[10px] font-semibold uppercase">
+                <span className="@4xl:hidden">{compactMetricLabels[key] ?? metricLabels[key] ?? key}</span>
+                <span className="hidden @4xl:inline">{metricLabels[key] ?? key}</span>
               </span>
-              {key !== 'diskUsage' ? (
-                <HeaderMetricChart
-                  series={themeMetricSeries(series, chartTheme)}
-                  timeRange={previewMetricsTimeRange}
-                  chartTheme={chartTheme}
-                  className="hidden @5xl:block @5xl:w-20 @7xl:w-[104px]"
-                />
+              {latestMetricSummariesByCategory[key] ? (
+                <span
+                  className={clsx(
+                    'min-w-0 truncate text-[11px] font-medium',
+                    theme === 'dark' ? 'text-gray-400' : 'text-slate-500'
+                  )}
+                >
+                  {latestMetricSummariesByCategory[key]}
+                </span>
               ) : null}
-            </>
-          )}
-        </A>
-      ))}
+            </span>
+            {key !== 'diskUsage' ? (
+              <HeaderMetricChart
+                series={themeMetricSeries(series, chartTheme)}
+                timeRange={previewMetricsTimeRange}
+                chartTheme={chartTheme}
+                className="hidden @5xl:block @5xl:w-20 @7xl:w-[104px]"
+              />
+            ) : null}
+          </A>
+        )
+      })}
     </div>
   )
 }

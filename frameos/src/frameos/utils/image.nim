@@ -102,6 +102,13 @@ proc scaledFitPlacement*(fit: ScaledDecodeFit): string =
   of fitContain: "contain"
   of fitStretch: "stretch"
 
+proc boundedRequestedDimensions*(width, height: int): tuple[width: int, height: int] =
+  ## A scene-requested raster size (an SVG's `width`/`height`, a plain
+  ## canvas) held to the same ceiling as a decoded image: DisplayDecodeMaxEdge
+  ## and the live decode budget. A JS app asking for a 20000x20000 canvas
+  ## used to be an allocation failure — on the ESP32 an abort, not an error.
+  displayDecodeDimensions(max(1, width), max(1, height))
+
 proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
   ## Rasterises an SVG into a new image of the given size; none when pixie
   ## cannot parse it. pixie fills gradient paints through a coverage mask and

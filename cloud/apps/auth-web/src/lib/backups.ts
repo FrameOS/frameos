@@ -15,6 +15,27 @@ export const backupKindScopes: Record<string, string> = {
 // still. The cap protects the shared database, not a product quota.
 export const maxBackupBytes = 8 * 1024 * 1024;
 export const maxBackupsPerAccount = 500;
+// The JSON envelope around one base64 blob of that size, plus its metadata.
+export const maxBackupBodyBytes = Math.ceil((maxBackupBytes * 4) / 3) + 64 * 1024;
+
+// What a backup's content_type may say. The value is replayed as the
+// Content-Type of the owner's download, so it is a fixed vocabulary rather
+// than whatever the client wrote — an attacker-shaped type on a blob the
+// browser then renders inline is the classic stored-XSS vector. Anything
+// else is stored (and served) as an opaque octet stream.
+export const allowedBackupContentTypes = [
+  "application/gzip",
+  "application/json",
+  "application/octet-stream",
+  "application/zip",
+] as const;
+
+export function normalizeBackupContentType(value: unknown): string {
+  const lowered = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return (allowedBackupContentTypes as readonly string[]).includes(lowered)
+    ? lowered
+    : "application/octet-stream";
+}
 
 export function backupScopeForKind(kind: unknown): string | undefined {
   return typeof kind === "string" ? backupKindScopes[kind] : undefined;

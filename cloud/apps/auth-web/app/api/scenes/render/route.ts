@@ -16,6 +16,7 @@ import {
   maxRenderDimension,
   maxRenderPixels,
   minRenderDimension,
+  rendererVersion,
   renderScenes,
   SceneRenderError,
 } from "../../../../src/lib/scene-render";
@@ -137,6 +138,7 @@ export async function POST(request: NextRequest) {
           logs: result.logs,
           png_base64: result.png.toString("base64"),
           render_ms: result.renderMs,
+          runtime_version: rendererVersion(),
           state: result.state,
           ...(sceneVersion ? { version: sceneVersion } : {}),
           width: result.width,
@@ -148,6 +150,7 @@ export async function POST(request: NextRequest) {
       headers: {
         "cache-control": "no-store",
         "content-length": String(result.png.length),
+        ...(rendererVersion() ? { "x-frameos-runtime-version": rendererVersion() as string } : {}),
         "content-type": "image/png",
         "x-render-errors": String(result.errors.length),
         "x-render-ms": String(result.renderMs),

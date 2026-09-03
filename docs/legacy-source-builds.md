@@ -6,7 +6,7 @@ for removal. Nothing here is the recommended way to run FrameOS.*
 
 ## What FrameOS does by default
 
-FrameOS is distributed as released binaries: eleven Linux tarballs
+FrameOS is distributed as released binaries: twelve Linux tarballs
 (`frameos-<version>-<distro>-<arch>.tar.gz` on the GitHub release, one per
 `backend/bin/cross list` target) and the ESP32 firmware. A deploy from the
 backend downloads the tarball for the frame's distro and architecture,
@@ -38,6 +38,15 @@ explicit, both deprecated:
 - The installation mode **`static`** ("Build from source — single binary"),
   under *advanced: installation mode* in Frame Settings and the deploy
   drawer. Chosen by hand, honoured as chosen.
+- A **distro older than the release matrix**. Releases are built for
+  Debian / Raspberry Pi OS bookworm and trixie and Ubuntu 24.04 and 26.04
+  (`backend/app/utils/release_targets.py`). A frame still on bullseye
+  resolves to a target no tarball exists for, and a newer distro's tarball
+  is not a substitute: the bookworm binary needs glibc 2.34+ symbols and
+  bullseye's loader (glibc 2.31) refuses it outright. The deploy plan says
+  "no precompiled release is published for debian-bullseye-arm64" and
+  builds from source (cross-compiled in a `debian:bullseye` container, or on
+  the device). Upgrading the OS to bookworm moves the frame onto releases.
 
 `last_successful_deploy.build_kind` on each frame records what its last full
 deploy did: `precompiled`, `cross` (server-side source build) or

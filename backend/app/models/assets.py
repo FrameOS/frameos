@@ -119,17 +119,17 @@ async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_pat
         f'opts=$(awk -v m="$mp" \'$2 == m {{o=$4}} END {{print o}}\' /proc/mounts 2>/dev/null); '
         f'case ",$opts," in *,ro,*) '
         f'  echo "$mp is mounted read-only, remounting read-write"; '
-        f'  sudo mount -o remount,rw "$mp" || echo "Warning: failed to remount $mp read-write"; '
+        f'  sudo -n mount -o remount,rw "$mp" || echo "Warning: failed to remount $mp read-write"; '
         f'esac; '
-        f'[ -d "$t" ] || sudo mkdir -p "$t" || echo "Warning: failed to create $t"; '
+        f'[ -d "$t" ] || sudo -n mkdir -p "$t" || echo "Warning: failed to create $t"; '
         f'if [ ! -w "$p" ] || [ ! -w "$t" ]; then '
         f'  echo "User lacks write access to $p. Fixing..."; '
         f'  case "$fstype" in '
         f'    vfat|exfat|msdos) echo "Skipping chown/chmod on $fstype filesystem";; '
         f'    *) '
         f'      fix="$p"; if [ -w "$p" ]; then fix="$t"; fi; '
-        f'      sudo chown -R "$(whoami)" "$fix" || echo "Warning: failed to chown $fix"; '
-        f'      sudo chmod -R u+rwX,go+rX "$fix" || echo "Warning: failed to chmod $fix";; '
+        f'      sudo -n chown -R "$(whoami)" "$fix" || echo "Warning: failed to chown $fix"; '
+        f'      sudo -n chmod -R u+rwX,go+rX "$fix" || echo "Warning: failed to chmod $fix";; '
         f'  esac; '
         f'fi; '
         f'if [ -w "$p" ] && [ -w "$t" ]; then echo {ASSETS_WRITABLE_MARKER}; '
@@ -145,7 +145,7 @@ async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_pat
         assets = await assets_list_on_frame(frame.id, assets_path + "/fonts", redis=redis)
         remote_fonts = {a["path"]: int(a.get("size", 0)) for a in assets}
     else:
-        command = f"find {assets_path}/fonts -type f -exec stat --format='%s %Y %n' {{}} +"
+        command = f"find {shlex.quote(assets_path + '/fonts')} -type f -exec stat --format='%s %Y %n' {{}} +"
         status, stdout, _ = await run_command(db, redis, frame, command, log_output=False)
         stdout_lines = stdout.splitlines()
         remote_fonts = {}

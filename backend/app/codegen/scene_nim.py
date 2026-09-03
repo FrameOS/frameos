@@ -31,7 +31,7 @@ def wrap_color(value: str) -> str:
 
 
 def nim_string_literal(value: str) -> str:
-    return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n') + '"'
+    return '"' + sanitize_nim_string(value) + '"'
 
 
 def write_scene_nim(frame: Frame, scene: dict) -> str:

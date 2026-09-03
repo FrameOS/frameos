@@ -10,9 +10,14 @@ import {
 import {
   assignScenesToFrame,
   maxScenesPerFrame,
+  readSettingsGroupsField,
   type RequestedScene,
 } from "../../../../../src/lib/frame-scenes";
-import { frameForAccount } from "../../../../../src/lib/frames";
+import {
+  frameForAccount,
+  grantedSettingsGroupsForAssignment,
+  readServiceSettingGroups,
+} from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
@@ -44,6 +49,8 @@ export async function GET(
   }
   const rows = await db
     .select({
+      declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
+      grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       latestVersion: storeScenes.latestVersion,
       position: frameSceneAssignments.position,
       sceneId: frameSceneAssignments.sceneId,
@@ -67,6 +74,14 @@ export async function GET(
       position: row.position,
       scene_id: row.sceneId,
       scene_version: row.sceneVersion,
+      // Service settings, per assignment: what the assigned version's apps
+      // DECLARE (a request) and what the owner GRANTED (what the device may
+      // pull). Names only. A legacy row (no grant recorded yet) reports its
+      // declared list as granted, which is how it is served until the owner
+      // saves the list; a row whose declaration was never computed reports
+      // both as empty until the next push or pull computes it.
+      declared_settings_groups: readServiceSettingGroups(row.declaredSettingsGroups) ?? [],
+      granted_settings_groups: grantedSettingsGroupsForAssignment(row),
       slug: row.sceneSlug,
       visibility: row.visibility,
     })),
@@ -75,8 +90,13 @@ export async function GET(
 }
 
 // Replace the frame's scene assignments and enqueue a set_scenes push.
-// Body: {"scenes": [{"scene_id": "...", "scene_version"?: N}, …]} in render
-// order. Safety gates, in order: the frame must be active (owner confirmed),
+// Body: {"scenes": [{"scene_id": "...", "scene_version"?: N,
+// "settings_groups"?: ["unsplash", …]}, …]} in render order.
+// `settings_groups` is the owner's grant of the account's service keys to
+// that scene on this frame (docs/cloud-frames.md, "Service settings"):
+// stored ∩ what the version declares; omitted keeps an assigned scene's
+// current grant and gives a NEW assignment none.
+// Safety gates, in order: the frame must be active (owner confirmed),
 // every scene must be accessible to this account (own scene or public), the
 // pinned version must exist, and a version carrying the store's "shell" risk
 // class is refused outright — a cloud push may never carry it (the device
@@ -152,9 +172,16 @@ export async function POST(
     if (requested.some((r) => r.sceneId === sceneId)) {
       return jsonError("duplicate_scene", 400);
     }
+    const settingsGroups = readSettingsGroupsField(
+      (entry as Record<string, unknown>).settings_groups,
+    );
+    if (settingsGroups === false) {
+      return jsonError("invalid_scenes", 400);
+    }
     requested.push({
       sceneId,
       sceneVersion: typeof sceneVersion === "number" ? sceneVersion : null,
+      ...(settingsGroups ? { settingsGroups } : {}),
     });
   }
 
@@ -182,6 +209,10 @@ export async function POST(
   return NextResponse.json({
     assigned_checksum: outcome.result.assignedChecksum,
     command_id: outcome.result.commandId,
+    // Store scene id → the groups it is granted after this save, so the
+    // workspace can say which scene still lacks a key it asked for.
+    granted_settings_groups: outcome.result.grantedSettingsGroups,
     status: "queued",
   });
 }
+

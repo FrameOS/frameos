@@ -31,13 +31,18 @@ export {
   type PlanEntitlements,
 } from "./plans";
 export {
+  accruePeriod,
   addMonth,
   cancelAccountPlan,
   chargePeriod,
+  closeOutSubscriptionForDeletedAccount,
+  deferredMicros,
+  earnedToDateMicros,
   recognizePeriod,
   refundUnearnedPeriod,
   runSubscriptionCycle,
   setAccountPlan,
+  unearnedMicros,
   type SubscriptionCycleResult,
   type SubscriptionRecord,
 } from "./subscriptions";
@@ -57,6 +62,8 @@ export {
   checkBalanceCache,
   checkCustomerCreditFloor,
   checkDailyCapRespected,
+  checkDeferredSubscriptions,
+  checkPricesCameFromTheTable,
   checkEntriesBalance,
   checkEventsPostedOnce,
   checkImmutabilityTriggers,
@@ -75,6 +82,7 @@ export {
 } from "./kernel";
 export {
   absorbedSurfaces,
+  markUsageRecordsCredited,
   postUsageRecord,
   recordAiUsage,
   surfaceIsAbsorbed,
@@ -96,6 +104,7 @@ export {
   applyMarginMicros,
   divideRoundHalfUp,
   fallbackModelPrice,
+  baseModelName,
   fallbackModelPrices,
   priceUsage,
   providerCostMicros,

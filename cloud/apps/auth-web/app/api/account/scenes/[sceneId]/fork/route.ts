@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { csrfResponse } from "../../../../../../src/lib/csrf";
 import {
+  defaultJsonBodyBytes,
   jsonError,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
@@ -44,7 +45,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const { sceneId } = await context.params;
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, defaultJsonBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   if (!Array.isArray(body.scenes) || body.scenes.length === 0) {
     return jsonError("invalid_scenes", 400);
   }

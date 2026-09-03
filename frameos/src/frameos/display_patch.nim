@@ -10,6 +10,7 @@
 ## written, so a bad value can never leave a half-patched file behind.
 
 import std/[json, os, strutils]
+import frameos/utils/system
 
 type
   DisplayPatch* = object
@@ -98,7 +99,7 @@ proc runSetDisplay*(args: seq[string]): int =
     return 1
   applyDisplayPatch(data, patch)
   let tmp = patch.frameJsonPath & ".set-display-tmp"
-  writeFile(tmp, data.pretty() & "\n")
+  writePrivateFile(tmp, data.pretty() & "\n")
   moveFile(tmp, patch.frameJsonPath)
   echo "FrameOS set-display: applied device '" & patch.device & "' to " & patch.frameJsonPath
   return 0

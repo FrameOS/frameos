@@ -83,11 +83,12 @@ import {
   fetchReleaseFirmwareListing,
   hasReleaseFirmwarePlatform,
   releaseFirmwarePlatform,
+  releaseFirmwarePlatformForFrame,
 } from './EmbeddedUsbFirmwareUpdate'
 import { registeredFramePanel } from './addFramePanelRegistry'
 import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
-import { EmbeddedUsbConnectionButton, EmbeddedWebFlasher } from './EmbeddedWebFlasher'
+import { EmbeddedUsbConnectionButton } from './embeddedFlashShared'
 import { EmbeddedReleaseFlasher } from './EmbeddedReleaseFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { framePendingCommandsLogic, pendingCommandLabel, type FramePendingCommand } from './framePendingCommandsLogic'
@@ -107,7 +108,7 @@ interface DeployPlanProgressStep {
 }
 
 function embeddedFlashSize(frame: FrameType): '2MB' | '4MB' | '8MB' | '16MB' | '32MB' {
-  const raw = frame.embedded?.firmware?.flashSize ?? frame.embedded?.flashSize ?? '8MB'
+  const raw = frame.embedded?.layout?.flash?.flashSize ?? frame.embedded?.flashSize ?? '8MB'
   const normalized = typeof raw === 'string' ? raw.trim().toUpperCase().replace(/\s+/g, '') : '8MB'
   return normalized === '2MB' ||
     normalized === '4MB' ||
@@ -119,9 +120,9 @@ function embeddedFlashSize(frame: FrameType): '2MB' | '4MB' | '8MB' | '16MB' | '
 }
 
 function embeddedOtaSupported(frame: FrameType): boolean {
-  const firmwareSupport = frame.embedded?.firmware?.otaSupported
-  if (typeof firmwareSupport === 'boolean') {
-    return firmwareSupport
+  const layoutSupport = frame.embedded?.layout?.flash?.otaSupported
+  if (typeof layoutSupport === 'boolean') {
+    return layoutSupport
   }
   const flashSize = embeddedFlashSize(frame)
   return flashSize !== '2MB' && flashSize !== '4MB'
@@ -129,7 +130,7 @@ function embeddedOtaSupported(frame: FrameType): boolean {
 
 function needsEsp32UsbJtagPortGuidance(frame: FrameType): boolean {
   const panel =
-    frame.embedded?.firmware?.panel || frame.embedded?.lastBoot?.panel || frame.device?.split('.').pop() || ''
+    frame.embedded?.layout?.ram?.panel || frame.embedded?.lastBoot?.panel || frame.device?.split('.').pop() || ''
   const hardwarePreset = frame.embedded?.hardwarePreset || frame.device_config?.hardwarePreset || ''
   return (
     panel === 'EPD_13in3e' ||
@@ -138,8 +139,7 @@ function needsEsp32UsbJtagPortGuidance(frame: FrameType): boolean {
   )
 }
 
-type EmbeddedFirmwareStatus = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
-type EmbeddedFirmwareLayout = NonNullable<EmbeddedFirmwareStatus['layout']>
+type EmbeddedFirmwareLayout = NonNullable<NonNullable<FrameType['embedded']>['layout']>
 type EmbeddedFlashPartition = NonNullable<NonNullable<EmbeddedFirmwareLayout['flash']>['partitions']>[number]
 
 function formatFirmwareBytes(bytes?: number | null): string {
@@ -217,18 +217,15 @@ function FirmwareStat({ label, value, detail }: { label: string; value: ReactNod
 }
 
 function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.Element | null {
-  const firmware = frame.embedded?.firmware
-  const layout = firmware?.layout
+  const layout = frame.embedded?.layout
   const flash = layout?.flash
   const ram = layout?.ram
   const partitions = flash?.partitions ?? []
-  const flashBytes = flash?.flashBytes ?? firmware?.flashBytes ?? 0
+  const flashBytes = flash?.flashBytes ?? 0
   const otaSupported = flash?.otaSupported ?? embeddedOtaSupported(frame)
   const psramBytes = ram?.psramBytes ?? 0
   const renderWorkingBytes = ram?.renderWorkingBytes ?? 0
   const renderSpareBytes = psramBytes > renderWorkingBytes ? psramBytes - renderWorkingBytes : 0
-  const appBinaryBytes = flash?.appBinaryBytes ?? firmware?.appSize ?? firmware?.otaSize ?? null
-  const mergedBinaryBytes = flash?.mergedBinaryBytes ?? firmware?.size ?? null
   const ramSegments = [
     { label: 'Render canvas', bytes: ram?.canvasBufferBytes ?? ram?.rgbaBufferBytes ?? 0, color: '#2563eb' },
     { label: 'Packed panel', bytes: ram?.packedBufferBytes ?? 0, color: '#16a34a' },
@@ -249,23 +246,19 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
 
       <div className="grid gap-3 sm:grid-cols-3">
         <FirmwareStat
-          label="Merged image"
-          value={formatFirmwareBytes(mergedBinaryBytes)}
-          detail={mergedBinaryBytes ? `flashed at ${flash?.flashOffset ?? '0x0'}` : 'measured after build'}
-        />
-        <FirmwareStat
-          label={otaSupported ? 'App / OTA image' : 'App image'}
-          value={formatFirmwareBytes(appBinaryBytes)}
-          detail={
-            appBinaryBytes && partitions.find((partition) => partition.appSlot)
-              ? `${formatPercent(appBinaryBytes, partitions.find((partition) => partition.appSlot)?.size)} of app slot`
-              : 'measured after build'
-          }
-        />
-        <FirmwareStat
           label="Flash profile"
           value={flash?.flashSize ?? embeddedFlashSize(frame)}
           detail={otaSupported ? 'OTA A/B slots' : 'single app slot'}
+        />
+        <FirmwareStat
+          label="Partition table"
+          value={flash?.partitionTable ?? '—'}
+          detail={flashBytes ? `${formatFirmwareBytes(flashBytes)} flash` : 'from the release image'}
+        />
+        <FirmwareStat
+          label="Firmware"
+          value="Release image"
+          detail={otaSupported ? 'updated over the air' : 'updated over USB'}
         />
       </div>
 
@@ -1936,25 +1929,18 @@ function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX
 function EmbeddedFirmwareSection({
   frame,
   onBack,
-  onDownload,
   onOtaUpdate,
 }: {
   frame: FrameType
   onBack?: () => void
-  onDownload: () => void
   onOtaUpdate: () => void
 }): JSX.Element {
   const [copied, setCopied] = useState(false)
-  const [buildFlashBusy, setBuildFlashBusy] = useState(false)
   const [releaseFlashBusy, setReleaseFlashBusy] = useState(false)
-  // Two flashers share one cable and one board; either one running is "busy"
-  // for everything else on this card.
-  const browserFlashBusy = buildFlashBusy || releaseFlashBusy
-  const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
   // Pico-family boards flash a generic UF2 release asset over BOOTSEL and are
-  // provisioned over the USB serial console: no per-frame firmware builds, no
-  // esptool, no browser flashing, no OTA. Hide all of those controls.
+  // provisioned over the USB serial console: no esptool, no browser flashing,
+  // no OTA. Hide all of those controls.
   const isPicoPlatform = platformLabel.startsWith('pico')
   // Virtual frames have no hardware at all: the backend renders them, so
   // instead of firmware the section shows the image and kiosk page URLs.
@@ -1981,15 +1967,17 @@ function EmbeddedFirmwareSection({
   const flashSize = embeddedFlashSize(frame)
   const otaSupported = embeddedOtaSupported(frame)
   const showUsbJtagPortGuidance = needsEsp32UsbJtagPortGuidance(frame)
-  const filename = firmware?.filename || `frameos-${platformLabel}-frame${frame.id}.bin`
+  // The self-hosted backend serves the same release listing the cloud does;
+  // a device's own frame-admin bundle serves neither that nor the
+  // provisioning plan, so the release cards are backend-mode only.
+  const releaseAvailable = workspaceMode() === 'backend' && hasReleaseFirmwarePlatform(frame)
+  const releasePlatform = releaseAvailable ? releaseFirmwarePlatform(frame) : platformLabel
+  // The manual recipe: the published merged image for this chip and flash
+  // layout, written at 0x0 — the same bytes the browser flasher writes.
   const flashCommand = `esptool.py --chip ${platformLabel.replace(
     /-/g,
     ''
-  )} --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash ${
-    firmware?.flashOffset || '0x0'
-  } ${filename}`
-  const building = firmware?.status === 'building' || firmware?.status === 'queued'
-  const otaBuilding = otaSupported && building && !browserFlashBusy
+  )} --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash 0x0 frameos-<version>-${releasePlatform}.bin`
 
   const copyFlashCommand = (): void => {
     copy(flashCommand)
@@ -2014,8 +2002,7 @@ function EmbeddedFirmwareSection({
           ) : isPicoPlatform ? (
             <>
               This {platformLabel} board runs the generic FrameOS UF2 firmware: copy the release asset onto the board
-              over BOOTSEL drag-and-drop and provision it over the USB serial console. The backend does not build
-              per-frame firmware for it.{' '}
+              over BOOTSEL drag-and-drop and provision it over the USB serial console.{' '}
               <a
                 href="https://github.com/FrameOS/frameos/releases/latest"
                 target="_blank"
@@ -2028,24 +2015,6 @@ function EmbeddedFirmwareSection({
             </>
           ) : null}
         </div>
-        {firmware?.status && !isVirtualPlatform ? (
-          <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
-            Status: {firmware.status}
-          </div>
-        ) : null}
-        {firmware?.error && !isVirtualPlatform ? (
-          <div
-            className={clsx(
-              'mt-2 text-sm font-semibold',
-              firmware.status === 'stale' || firmware.status === 'missing' ? 'text-amber-600' : 'text-red-500'
-            )}
-          >
-            {firmware.error}
-            {firmware.status === 'stale' || firmware.status === 'missing'
-              ? ' It will be rebuilt automatically before flashing or downloading.'
-              : null}
-          </div>
-        ) : null}
       </div>
       {isVirtualPlatform ? (
         <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
@@ -2064,10 +2033,10 @@ function EmbeddedFirmwareSection({
         <>
           <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
             <div className="frame-tool-muted text-sm leading-5">
-              Plug the board into this computer over USB, then flash it straight from the browser. “Flash latest
-              release” writes the published image and sends this frame’s settings over the cable — the quick way to a
-              working board. “Flash from browser” compiles an image with those settings baked in instead; the first
-              build of a chip target can take an hour on a small machine.
+              Plug the board into this computer over USB and flash the published FrameOS release straight from the
+              browser. Every ESP32 board runs the same signed image: this frame’s settings go over the cable right
+              after the flash, and the rest — its scenes, service keys and HTTPS certificate — arrives from this
+              backend once the board is on Wi-Fi.
               {showUsbJtagPortGuidance ? (
                 <span className="mt-2 block">
                   The 13.3&quot; ESP32 board can appear as two serial ports and either works.
@@ -2078,28 +2047,24 @@ function EmbeddedFirmwareSection({
                 </span>
               ) : null}
             </div>
-            {/* Backend mode only, like the release updater below: a device's
-                own frame-admin bundle serves neither /api/frames/firmware nor
-                the provisioning plan. */}
-            {workspaceMode() === 'backend' && hasReleaseFirmwarePlatform(frame) ? (
-              <EmbeddedReleaseFlasher frame={frame} disabled={buildFlashBusy} onBusyChange={setReleaseFlashBusy} />
-            ) : null}
-            <EmbeddedWebFlasher frame={frame} disabled={releaseFlashBusy} onBusyChange={setBuildFlashBusy} />
+            {releaseAvailable ? (
+              <EmbeddedReleaseFlasher frame={frame} onBusyChange={setReleaseFlashBusy} />
+            ) : (
+              <div className="frame-tool-muted text-xs leading-5">
+                Flashing from the browser needs the FrameOS backend’s release listing, which this page cannot reach.
+                Flash the release image by hand (below) and provision the board under USB setup.
+              </div>
+            )}
           </div>
-          {/* Backend mode only: the frame-admin bundle renders this section
-              too, but a device serves no /api/frames/firmware release pipe —
-              the card would only ever error there. */}
-          {workspaceMode() === 'backend' && hasReleaseFirmwarePlatform(frame) ? (
+          {releaseAvailable ? (
             <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-[color:var(--tool-strong)]">
                   Update to release firmware over USB
                 </div>
                 <div className="frame-tool-muted mt-1 text-sm leading-5">
-                  Flashes the latest published FrameOS release ({releaseFirmwarePlatform(frame)}) around the board's
-                  settings partition, so it keeps its Wi-Fi credentials and saved settings. Unlike the server build
-                  above, the release image carries none of this frame's baked-in configuration — the board runs on
-                  whatever it has saved.
+                  Flashes the latest published FrameOS release ({releasePlatform}) around the board's settings
+                  partition, so it keeps its Wi-Fi credentials, its identity and every saved setting.
                 </div>
               </div>
               <EmbeddedUsbFirmwareUpdate frame={frame} />
@@ -2111,39 +2076,46 @@ function EmbeddedFirmwareSection({
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
                 <div className="frame-tool-muted mt-1 text-sm leading-5">
-                  {otaSupported
-                    ? 'Build the latest app image, then ask the frame to pull it from this backend and reboot.'
-                    : 'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'}
+                  {otaSupported ? (
+                    <>
+                      Ask the frame to install the latest published FrameOS release. It downloads the signed image for
+                      its flash layout through this backend, verifies the release signature, and reboots into it;
+                      progress shows up in Logs as <code>ota:backend</code> lines.
+                    </>
+                  ) : (
+                    'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'
+                  )}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={onOtaUpdate}
-                disabled={browserFlashBusy || !otaSupported}
+                disabled={releaseFlashBusy || !otaSupported}
                 className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
               >
-                {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
-                {otaBuilding ? 'Finish build & update' : 'Update over the air'}
+                <CloudArrowUpIcon className="h-4 w-4" />
+                Update over the air
               </button>
             </div>
           </div>
           <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
             <div className="frame-tool-muted text-sm leading-5">
-              Or download the image and flash it by hand (<code>pip install esptool</code> if you don't have it):
+              Or download{' '}
+              <a
+                href="https://github.com/FrameOS/frameos/releases/latest"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                the release image
+              </a>{' '}
+              and flash it by hand (<code>pip install esptool</code> if you don't have it), then provision the board
+              under USB setup:
             </div>
             <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
               <code>{flashCommand}</code>
             </pre>
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onDownload}
-                disabled={building}
-                className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-              >
-                {building ? <Spinner /> : <ArrowDownTrayIcon className="h-4 w-4" />}
-                {building ? 'Building firmware' : 'Build & download firmware'}
-              </button>
               <button
                 type="button"
                 onClick={copyFlashCommand}
@@ -2191,12 +2163,11 @@ function useCloudFirmwareRelease(frame: FrameType, enabled: boolean): CloudFirmw
     }
     let cancelled = false
     setInfo({ loading: true, error: null, release: null, assetSize: null })
-    fetchReleaseFirmwareListing()
-      .then((listing) => {
+    Promise.all([fetchReleaseFirmwareListing(), releaseFirmwarePlatformForFrame(frame)])
+      .then(([listing, platform]) => {
         if (cancelled) {
           return
         }
-        const platform = releaseFirmwarePlatform(frame)
         const asset = listing.assets?.find((entry) => entry.platform === platform)
         setInfo({
           loading: false,
@@ -3128,10 +3099,10 @@ function CloudPiUpdateCard({
  * version vs. the published release, scenes sync) and close with the
  * hardware panel built from what the device reports on every hello.
  *
- * Deliberately absent: the firmware BUILD controls (EmbeddedWebFlasher,
- * OTA-from-this-backend, esptool command, footprint chart). Those all read
- * frame.embedded.firmware, which the backend builds and cloud frames do not
- * have — the cloud only ever installs published release binaries.
+ * Deliberately absent: the backend's release flasher, OTA-from-this-backend,
+ * esptool command and footprint chart. The cloud has its own enrollment
+ * flasher (Esp32CloudFlasher) and its own OTA nudge; both control planes
+ * install the same published release binaries.
  */
 function CloudDeploySection({
   frame,
@@ -3241,7 +3212,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
-  const { applyEmbeddedFirmwareOta, cancelDeploy, downloadEmbeddedFirmware, downloadSdCardImage, loadFrame } =
+  const { applyEmbeddedFirmwareOta, cancelDeploy, downloadSdCardImage, loadFrame } =
     useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
   const { savedSettings } = useValues(settingsLogic)
@@ -3258,10 +3229,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
   const embeddedFastDeployReady = isEmbeddedFrame && frameHasActivityLog(frame)
   const embeddedPlatform = frameForm.embedded?.platform ?? frame.embedded?.platform ?? ''
-  // ESP32 targets get a real full deploy: rebuild the firmware and deliver it
-  // over the air. The Pico family runs a generic UF2 the backend never builds,
-  // and 2/4MB flash profiles have a single app slot (no OTA), so both keep
-  // fast deploy only.
+  // ESP32 targets get a real full deploy: the latest release delivered over
+  // the air. The Pico family runs a generic UF2 with no OTA, and 2/4MB flash
+  // profiles have a single app slot (no OTA), so both keep fast deploy only.
   const embeddedFullDeploySupported =
     isEmbeddedFrame &&
     embeddedPlatform !== EMBEDDED_VIRTUAL &&
@@ -3373,7 +3343,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <EmbeddedFirmwareSection
               frame={frame}
               onBack={embeddedFastDeployReady ? showMainDeployView : undefined}
-              onDownload={() => downloadEmbeddedFirmware(frame.id)}
               onOtaUpdate={() => applyEmbeddedFirmwareOta(frame.id)}
             />
           ) : activeDeployDrawerView === 'sdCard' ? (
@@ -3514,7 +3483,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   {isEmbeddedFrame ? (
                     <EmbeddedFirmwareSection
                       frame={frame}
-                      onDownload={() => downloadEmbeddedFirmware(frame.id)}
                       onOtaUpdate={() => closeAndRun(() => applyEmbeddedFirmwareOta(frame.id))}
                     />
                   ) : null}
@@ -3649,7 +3617,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {!isEmbeddedFrame || embeddedFullDeploySupported ? (
                 <button
                   type="button"
-                  title={isEmbeddedFrame ? 'Rebuild the firmware and update the frame over the air (OTA)' : undefined}
+                  title={isEmbeddedFrame ? 'Install the latest FrameOS release over the air (OTA), then push the scenes' : undefined}
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
                   className={clsx(
                     'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',

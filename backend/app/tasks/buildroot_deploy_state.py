@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from typing import Any
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.frame import Frame, update_frame
+from app.models.frame import Frame, record_successful_deploy, update_frame
 from app.tasks.buildroot_image import _buildroot_sd_image_config_payload, buildroot_sd_image_config_fingerprint
 from app.tasks.frame_deploy_workflow import FRAMEOS_AVAILABLE_COMMANDS
 from app.utils.versions import current_frameos_version
@@ -65,8 +64,7 @@ async def mark_buildroot_sd_image_booted(db: Session, redis: Redis, frame: Frame
     if sd_image is None:
         return False
 
-    frame.last_successful_deploy = buildroot_sd_image_deploy_snapshot(frame, sd_image)
-    frame.last_successful_deploy_at = datetime.now(timezone.utc)
+    record_successful_deploy(frame, buildroot_sd_image_deploy_snapshot(frame, sd_image))
     if frame.status == "uninitialized":
         frame.status = "starting"
 

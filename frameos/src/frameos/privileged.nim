@@ -10,7 +10,7 @@
 ##   /srv/frameos/privileged/queue/<id>.json     written by the runtime (frameos)
 ##   /srv/frameos/privileged/results/<id>.json   written by the worker (root)
 ##
-## `frameos-privileged.path` (DirectoryNotEmpty=queue) starts
+## `frameos-privileged.path` (PathExistsGlob=queue/*.json) starts
 ## `frameos-privileged.service`, a root oneshot that runs
 ## `frameos privileged-worker` (frameos/privileged_worker.nim): it drains the
 ## queue, executes each verb, writes the result and exits. Files are written
@@ -29,6 +29,7 @@
 ## in-process as before.
 
 import std/[algorithm, json, os, strutils, sysrand, times]
+import frameos/utils/system
 
 when not defined(windows):
   from std/posix import geteuid
@@ -47,7 +48,6 @@ const
 type
   PrivilegedVerb* = enum
     pvReboot = "reboot"
-    pvApplySetup = "apply-setup"
     pvApplyDriverSetup = "apply-driver-setup"
     pvInstallRelease = "install-release"
     pvSetHostname = "set-hostname"
@@ -56,11 +56,9 @@ type
     pvNmWifiList = "nm-wifi-list"
     pvNmConnections = "nm-connections"
     pvNmRadioOn = "nm-radio-on"
-    pvNmDeviceManaged = "nm-device-managed"
     pvNmHotspotStart = "nm-hotspot-start"
     pvNmHotspotStop = "nm-hotspot-stop"
     pvNmWifiConnect = "nm-wifi-connect"
-    pvNmForget = "nm-forget"
 
   PrivilegedRequest* = object
     id*: string
@@ -164,6 +162,21 @@ proc validPsk*(value: string): bool =
       return false
   true
 
+proc validReleaseVersion*(value: string): bool =
+  ## Release artifacts use exactly three non-empty numeric CalVer fields.
+  ## Keeping this strict also makes the requested version safe to use in an
+  ## expected archive-root name on the root side.
+  let parts = value.split('.')
+  if parts.len != 3:
+    return false
+  for part in parts:
+    if part.len == 0:
+      return false
+    for c in part:
+      if c notin {'0'..'9'}:
+        return false
+  true
+
 proc sanitizeHostname*(raw: string): string =
   ## The hostname rules portal.nim applies (lower-case letters, digits and
   ## single dashes, no leading/trailing dash, at most 63 characters), applied
@@ -208,15 +221,13 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
   let allowedKeys: seq[string] =
     case verb
     of pvReboot: @["delaySeconds"]
-    of pvApplySetup, pvApplyDriverSetup: @["rebootIfRequired"]
+    of pvApplyDriverSetup: @["rebootIfRequired"]
     of pvInstallRelease: @["archive", "signature", "version"]
     of pvSetHostname: @["hostname"]
     of pvSyncClock, pvNmDeviceStatus, pvNmWifiList, pvNmRadioOn, pvNmHotspotStop: @[]
     of pvNmConnections: @["active"]
-    of pvNmDeviceManaged: @["device"]
     of pvNmHotspotStart: @["device", "ssid", "psk"]
     of pvNmWifiConnect: @["ssid", "psk", "device"]
-    of pvNmForget: @["connection"]
   if args != nil and args.kind != JObject:
     return "arguments must be an object"
   if args != nil:
@@ -229,7 +240,7 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
       let node = args["delaySeconds"]
       if node.kind != JInt or node.getInt() < 0 or node.getInt() > 300:
         return "delaySeconds must be an integer between 0 and 300"
-  of pvApplySetup, pvApplyDriverSetup:
+  of pvApplyDriverSetup:
     if hasArg(args, "rebootIfRequired") and args["rebootIfRequired"].kind != JBool:
       return "rebootIfRequired must be a boolean"
   of pvInstallRelease:
@@ -242,20 +253,14 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
     if signature.len == 0 or signature.len > 8 * 1024:
       return "signature must be the .minisig text"
     let version = argStr(args, "version")
-    if version.len == 0 or version.len > 64:
-      return "version is required"
-    for c in version:
-      if c notin {'0'..'9', '.'}:
-        return "version must be numeric (YYYY.M.N)"
+    if version.len > 64 or not validReleaseVersion(version):
+      return "version must have exactly three numeric fields (YYYY.M.N)"
   of pvSetHostname:
     if sanitizeHostname(argStr(args, "hostname")).len == 0:
       return "hostname is empty after sanitizing"
   of pvNmConnections:
     if hasArg(args, "active") and args["active"].kind != JBool:
       return "active must be a boolean"
-  of pvNmDeviceManaged:
-    if not validInterfaceName(argStr(args, "device")):
-      return "device is not a valid interface name"
   of pvNmHotspotStart:
     if not validInterfaceName(argStr(args, "device")):
       return "device is not a valid interface name"
@@ -271,9 +276,6 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
       return "psk must be empty, a WPA passphrase (8..63 characters) or 64 hex digits"
     if hasArg(args, "device") and not validInterfaceName(argStr(args, "device")):
       return "device is not a valid interface name"
-  of pvNmForget:
-    if argStr(args, "connection") notin ["wifi", "hotspot"]:
-      return "connection must be \"wifi\" or \"hotspot\""
   of pvSyncClock, pvNmDeviceStatus, pvNmWifiList, pvNmRadioOn, pvNmHotspotStop:
     discard
   ""
@@ -306,6 +308,8 @@ proc parsePrivilegedRequest*(text: string): PrivilegedRequest =
   let verbName = node{"verb"}.getStr("")
   result.id = id
   result.verb = parsePrivilegedVerb(verbName)
+  if node.hasKey("args") and node["args"].kind != JObject:
+    raise newException(ValueError, "request arguments must be an object")
   result.args = if node.hasKey("args") and node["args"].kind == JObject: node["args"] else: newJObject()
   let problem = validatePrivilegedArgs(result.verb, result.args)
   if problem.len > 0:
@@ -350,11 +354,6 @@ proc newPrivilegedRequestId*(): string =
     random = toHex(int(epochTime() * 1_000_000), 12).toLowerAscii
   $(int64(epochTime() * 1000)) & "-" & random
 
-proc writeAtomically(path: string, content: string) =
-  let tmp = parentDir(path) / ("." & lastPathPart(path) & ".tmp")
-  writeFile(tmp, content)
-  moveFile(tmp, path)
-
 proc requestPrivileged*(verb: PrivilegedVerb, args: JsonNode = nil,
                         timeoutMs = 60_000, pollMs = 100): PrivilegedResult {.gcsafe.} =
   ## Queue one request and wait for its result. Never raises: a door that
@@ -375,7 +374,7 @@ proc requestPrivileged*(verb: PrivilegedVerb, args: JsonNode = nil,
   let queueDir = privilegedQueueDir()
   let resultPath = privilegedResultsDir() / (request.id & ".json")
   try:
-    writeAtomically(queueDir / (request.id & ".json"), $request.toJson() & "\n")
+    writeFileAtomically(queueDir / (request.id & ".json"), $request.toJson() & "\n")
   except CatchableError as e:
     return privilegedError("cannot queue privileged request " & $verb & ": " & e.msg)
 
@@ -414,7 +413,8 @@ proc requestPrivileged*(verb: PrivilegedVerb, args: JsonNode = nil,
 
 proc writePrivilegedResult*(resultsDir: string, id: string, res: PrivilegedResult) =
   createDir(resultsDir)
-  writeAtomically(resultsDir / (id & ".json"), $res.toJson() & "\n")
+  writeFileAtomically(resultsDir / (id & ".json"), $res.toJson() & "\n",
+    groupReadableOnly = true)
 
 proc prunePrivilegedResults*(resultsDir: string, maxAgeSeconds = 3600.0): int =
   ## Drops results nobody came back for. A successful `install-release`

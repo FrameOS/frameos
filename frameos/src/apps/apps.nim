@@ -45,175 +45,141 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
   import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
   import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
 
+type AppEntry = object
+  ## One app's four entry points, so dispatch is a table lookup instead of
+  ## four `case keyword:` chains repeated over every app in the registry.
+  keyword: string
+  initProc: proc (node: DiagramNode, scene: FrameScene): AppRoot {.nimcall.}
+  setFieldProc: proc (app: AppRoot, field: string, value: Value) {.nimcall.}
+  getProc: proc (app: AppRoot, context: ExecutionContext): Value {.nimcall.}
+  runProc: proc (app: AppRoot, context: ExecutionContext) {.nimcall.}
+
+when defined(frameosEmbedded) or defined(frameosWasm):
+  const appEntries = [
+    AppEntry(keyword: "data/beRecycle", initProc: data_beRecycle_loader.init, setFieldProc: data_beRecycle_loader.setField, getProc: data_beRecycle_loader.get, runProc: nil),
+    AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
+    AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
+    AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
+    AppEntry(keyword: "data/frameOSGallery", initProc: data_frameOSGallery_loader.init, setFieldProc: data_frameOSGallery_loader.setField, getProc: data_frameOSGallery_loader.get, runProc: nil),
+    AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
+    AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
+    AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
+    AppEntry(keyword: "data/immich", initProc: data_immich_loader.init, setFieldProc: data_immich_loader.setField, getProc: data_immich_loader.get, runProc: nil),
+    AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
+    AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/openaiImage", initProc: data_openaiImage_loader.init, setFieldProc: data_openaiImage_loader.setField, getProc: data_openaiImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/openaiText", initProc: data_openaiText_loader.init, setFieldProc: data_openaiText_loader.setField, getProc: data_openaiText_loader.get, runProc: nil),
+    AppEntry(keyword: "data/parseJson", initProc: data_parseJson_loader.init, setFieldProc: data_parseJson_loader.setField, getProc: data_parseJson_loader.get, runProc: nil),
+    AppEntry(keyword: "data/prettyJson", initProc: data_prettyJson_loader.init, setFieldProc: data_prettyJson_loader.setField, getProc: data_prettyJson_loader.get, runProc: nil),
+    AppEntry(keyword: "data/qr", initProc: data_qr_loader.init, setFieldProc: data_qr_loader.setField, getProc: data_qr_loader.get, runProc: nil),
+    AppEntry(keyword: "data/resizeImage", initProc: data_resizeImage_loader.init, setFieldProc: data_resizeImage_loader.setField, getProc: data_resizeImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/rotateImage", initProc: data_rotateImage_loader.init, setFieldProc: data_rotateImage_loader.setField, getProc: data_rotateImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/unsplash", initProc: data_unsplash_loader.init, setFieldProc: data_unsplash_loader.setField, getProc: data_unsplash_loader.get, runProc: nil),
+    AppEntry(keyword: "data/weather", initProc: data_weather_loader.init, setFieldProc: data_weather_loader.setField, getProc: data_weather_loader.get, runProc: nil),
+    AppEntry(keyword: "data/wikicommons", initProc: data_wikicommons_loader.init, setFieldProc: data_wikicommons_loader.setField, getProc: data_wikicommons_loader.get, runProc: nil),
+    AppEntry(keyword: "data/xmlToJson", initProc: data_xmlToJson_loader.init, setFieldProc: data_xmlToJson_loader.setField, getProc: data_xmlToJson_loader.get, runProc: nil),
+    AppEntry(keyword: "logic/breakIfRendering", initProc: logic_breakIfRendering_loader.init, setFieldProc: logic_breakIfRendering_loader.setField, getProc: nil, runProc: logic_breakIfRendering_loader.run),
+    AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
+    AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
+    AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
+    AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
+    AppEntry(keyword: "render/chart", initProc: render_chart_loader.init, setFieldProc: render_chart_loader.setField, getProc: render_chart_loader.get, runProc: render_chart_loader.run),
+    AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
+    AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
+    AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),
+    AppEntry(keyword: "render/opacity", initProc: render_opacity_loader.init, setFieldProc: render_opacity_loader.setField, getProc: render_opacity_loader.get, runProc: render_opacity_loader.run),
+    AppEntry(keyword: "render/split", initProc: render_split_loader.init, setFieldProc: render_split_loader.setField, getProc: render_split_loader.get, runProc: render_split_loader.run),
+    AppEntry(keyword: "render/svg", initProc: render_svg_loader.init, setFieldProc: render_svg_loader.setField, getProc: render_svg_loader.get, runProc: render_svg_loader.run),
+    AppEntry(keyword: "render/text", initProc: render_text_loader.init, setFieldProc: render_text_loader.setField, getProc: render_text_loader.get, runProc: render_text_loader.run),
+    AppEntry(keyword: "render/zoomPan", initProc: render_zoomPan_loader.init, setFieldProc: render_zoomPan_loader.setField, getProc: render_zoomPan_loader.get, runProc: render_zoomPan_loader.run),
+  ]
+else:
+  const appEntries = [
+    AppEntry(keyword: "data/beRecycle", initProc: data_beRecycle_loader.init, setFieldProc: data_beRecycle_loader.setField, getProc: data_beRecycle_loader.get, runProc: nil),
+    AppEntry(keyword: "data/chromiumScreenshot", initProc: data_chromiumScreenshot_loader.init, setFieldProc: data_chromiumScreenshot_loader.setField, getProc: data_chromiumScreenshot_loader.get, runProc: nil),
+    AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
+    AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
+    AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
+    AppEntry(keyword: "data/frameOSGallery", initProc: data_frameOSGallery_loader.init, setFieldProc: data_frameOSGallery_loader.setField, getProc: data_frameOSGallery_loader.get, runProc: nil),
+    AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
+    AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
+    AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
+    AppEntry(keyword: "data/immich", initProc: data_immich_loader.init, setFieldProc: data_immich_loader.setField, getProc: data_immich_loader.get, runProc: nil),
+    AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
+    AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/openaiImage", initProc: data_openaiImage_loader.init, setFieldProc: data_openaiImage_loader.setField, getProc: data_openaiImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/openaiText", initProc: data_openaiText_loader.init, setFieldProc: data_openaiText_loader.setField, getProc: data_openaiText_loader.get, runProc: nil),
+    AppEntry(keyword: "data/parseJson", initProc: data_parseJson_loader.init, setFieldProc: data_parseJson_loader.setField, getProc: data_parseJson_loader.get, runProc: nil),
+    AppEntry(keyword: "data/prettyJson", initProc: data_prettyJson_loader.init, setFieldProc: data_prettyJson_loader.setField, getProc: data_prettyJson_loader.get, runProc: nil),
+    AppEntry(keyword: "data/qr", initProc: data_qr_loader.init, setFieldProc: data_qr_loader.setField, getProc: data_qr_loader.get, runProc: nil),
+    AppEntry(keyword: "data/resizeImage", initProc: data_resizeImage_loader.init, setFieldProc: data_resizeImage_loader.setField, getProc: data_resizeImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/rotateImage", initProc: data_rotateImage_loader.init, setFieldProc: data_rotateImage_loader.setField, getProc: data_rotateImage_loader.get, runProc: nil),
+    AppEntry(keyword: "data/rstpSnapshot", initProc: data_rstpSnapshot_loader.init, setFieldProc: data_rstpSnapshot_loader.setField, getProc: data_rstpSnapshot_loader.get, runProc: nil),
+    AppEntry(keyword: "data/unsplash", initProc: data_unsplash_loader.init, setFieldProc: data_unsplash_loader.setField, getProc: data_unsplash_loader.get, runProc: nil),
+    AppEntry(keyword: "data/weather", initProc: data_weather_loader.init, setFieldProc: data_weather_loader.setField, getProc: data_weather_loader.get, runProc: nil),
+    AppEntry(keyword: "data/wikicommons", initProc: data_wikicommons_loader.init, setFieldProc: data_wikicommons_loader.setField, getProc: data_wikicommons_loader.get, runProc: nil),
+    AppEntry(keyword: "data/xmlToJson", initProc: data_xmlToJson_loader.init, setFieldProc: data_xmlToJson_loader.setField, getProc: data_xmlToJson_loader.get, runProc: nil),
+    AppEntry(keyword: "logic/breakIfRendering", initProc: logic_breakIfRendering_loader.init, setFieldProc: logic_breakIfRendering_loader.setField, getProc: nil, runProc: logic_breakIfRendering_loader.run),
+    AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
+    AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
+    AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
+    AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
+    AppEntry(keyword: "render/chart", initProc: render_chart_loader.init, setFieldProc: render_chart_loader.setField, getProc: render_chart_loader.get, runProc: render_chart_loader.run),
+    AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
+    AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
+    AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),
+    AppEntry(keyword: "render/opacity", initProc: render_opacity_loader.init, setFieldProc: render_opacity_loader.setField, getProc: render_opacity_loader.get, runProc: render_opacity_loader.run),
+    AppEntry(keyword: "render/split", initProc: render_split_loader.init, setFieldProc: render_split_loader.setField, getProc: render_split_loader.get, runProc: render_split_loader.run),
+    AppEntry(keyword: "render/svg", initProc: render_svg_loader.init, setFieldProc: render_svg_loader.setField, getProc: render_svg_loader.get, runProc: render_svg_loader.run),
+    AppEntry(keyword: "render/text", initProc: render_text_loader.init, setFieldProc: render_text_loader.setField, getProc: render_text_loader.get, runProc: render_text_loader.run),
+    AppEntry(keyword: "render/zoomPan", initProc: render_zoomPan_loader.init, setFieldProc: render_zoomPan_loader.setField, getProc: render_zoomPan_loader.get, runProc: render_zoomPan_loader.run),
+  ]
+
+const hostOnlyApps = ["data/chromiumScreenshot", "data/rstpSnapshot"]
+
+proc appIndex(keyword: string): int =
+  ## Bisect the keyword-sorted registry. -1 when this build has no such app.
+  var lo = 0
+  var hi = appEntries.len - 1
+  while lo <= hi:
+    let mid = (lo + hi) div 2
+    if appEntries[mid].keyword == keyword: return mid
+    elif appEntries[mid].keyword < keyword: lo = mid + 1
+    else: hi = mid - 1
+  -1
+
+proc raiseUnknownApp(keyword: string) =
+  when defined(frameosEmbedded) or defined(frameosWasm):
+    for hostOnly in hostOnlyApps:
+      if hostOnly == keyword:
+        raise newException(ValueError,
+          "App '" & keyword & "' is not available on this build target")
+  raise newException(ValueError, "Unknown app keyword: " & keyword)
+
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
-  case keyword:
-  of "data/beRecycle": data_beRecycle_loader.init(node, scene)
-  of "data/chromiumScreenshot":
-    when defined(frameosEmbedded) or defined(frameosWasm):
-      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on this build target")
-    else:
-      data_chromiumScreenshot_loader.init(node, scene)
-  of "data/clock": data_clock_loader.init(node, scene)
-  of "data/downloadImage": data_downloadImage_loader.init(node, scene)
-  of "data/downloadUrl": data_downloadUrl_loader.init(node, scene)
-  of "data/eventsToAgenda": data_eventsToAgenda_loader.init(node, scene)
-  of "data/frameOSGallery": data_frameOSGallery_loader.init(node, scene)
-  of "data/googlePhotos": data_googlePhotos_loader.init(node, scene)
-  of "data/haSensor": data_haSensor_loader.init(node, scene)
-  of "data/icalJson": data_icalJson_loader.init(node, scene)
-  of "data/immich": data_immich_loader.init(node, scene)
-  of "data/localImage": data_localImage_loader.init(node, scene)
-  of "data/log": data_log_loader.init(node, scene)
-  of "data/newImage": data_newImage_loader.init(node, scene)
-  of "data/openaiImage": data_openaiImage_loader.init(node, scene)
-  of "data/openaiText": data_openaiText_loader.init(node, scene)
-  of "data/parseJson": data_parseJson_loader.init(node, scene)
-  of "data/prettyJson": data_prettyJson_loader.init(node, scene)
-  of "data/qr": data_qr_loader.init(node, scene)
-  of "data/resizeImage": data_resizeImage_loader.init(node, scene)
-  of "data/rotateImage": data_rotateImage_loader.init(node, scene)
-  of "data/rstpSnapshot":
-    when defined(frameosEmbedded) or defined(frameosWasm):
-      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on this build target")
-    else:
-      data_rstpSnapshot_loader.init(node, scene)
-  of "data/unsplash": data_unsplash_loader.init(node, scene)
-  of "data/weather": data_weather_loader.init(node, scene)
-  of "data/wikicommons": data_wikicommons_loader.init(node, scene)
-  of "data/xmlToJson": data_xmlToJson_loader.init(node, scene)
-  of "logic/breakIfRendering": logic_breakIfRendering_loader.init(node, scene)
-  of "logic/ifElse": logic_ifElse_loader.init(node, scene)
-  of "logic/nextSleepDuration": logic_nextSleepDuration_loader.init(node, scene)
-  of "logic/setAsState": logic_setAsState_loader.init(node, scene)
-  of "render/calendar": render_calendar_loader.init(node, scene)
-  of "render/chart": render_chart_loader.init(node, scene)
-  of "render/color": render_color_loader.init(node, scene)
-  of "render/gradient": render_gradient_loader.init(node, scene)
-  of "render/image": render_image_loader.init(node, scene)
-  of "render/opacity": render_opacity_loader.init(node, scene)
-  of "render/split": render_split_loader.init(node, scene)
-  of "render/svg": render_svg_loader.init(node, scene)
-  of "render/text": render_text_loader.init(node, scene)
-  of "render/zoomPan": render_zoomPan_loader.init(node, scene)
-  else: raise newException(ValueError, "Unknown app keyword: " & keyword)
+  let i = appIndex(keyword)
+  if i < 0: raiseUnknownApp(keyword)
+  appEntries[i].initProc(node, scene)
 
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
-  case keyword:
-  of "data/beRecycle": data_beRecycle_loader.setField(app, field, value)
-  of "data/chromiumScreenshot":
-    when defined(frameosEmbedded) or defined(frameosWasm):
-      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on this build target")
-    else:
-      data_chromiumScreenshot_loader.setField(app, field, value)
-  of "data/clock": data_clock_loader.setField(app, field, value)
-  of "data/downloadImage": data_downloadImage_loader.setField(app, field, value)
-  of "data/downloadUrl": data_downloadUrl_loader.setField(app, field, value)
-  of "data/eventsToAgenda": data_eventsToAgenda_loader.setField(app, field, value)
-  of "data/frameOSGallery": data_frameOSGallery_loader.setField(app, field, value)
-  of "data/googlePhotos": data_googlePhotos_loader.setField(app, field, value)
-  of "data/haSensor": data_haSensor_loader.setField(app, field, value)
-  of "data/icalJson": data_icalJson_loader.setField(app, field, value)
-  of "data/immich": data_immich_loader.setField(app, field, value)
-  of "data/localImage": data_localImage_loader.setField(app, field, value)
-  of "data/log": data_log_loader.setField(app, field, value)
-  of "data/newImage": data_newImage_loader.setField(app, field, value)
-  of "data/openaiImage": data_openaiImage_loader.setField(app, field, value)
-  of "data/openaiText": data_openaiText_loader.setField(app, field, value)
-  of "data/parseJson": data_parseJson_loader.setField(app, field, value)
-  of "data/prettyJson": data_prettyJson_loader.setField(app, field, value)
-  of "data/qr": data_qr_loader.setField(app, field, value)
-  of "data/resizeImage": data_resizeImage_loader.setField(app, field, value)
-  of "data/rotateImage": data_rotateImage_loader.setField(app, field, value)
-  of "data/rstpSnapshot":
-    when defined(frameosEmbedded) or defined(frameosWasm):
-      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on this build target")
-    else:
-      data_rstpSnapshot_loader.setField(app, field, value)
-  of "data/unsplash": data_unsplash_loader.setField(app, field, value)
-  of "data/weather": data_weather_loader.setField(app, field, value)
-  of "data/wikicommons": data_wikicommons_loader.setField(app, field, value)
-  of "data/xmlToJson": data_xmlToJson_loader.setField(app, field, value)
-  of "logic/breakIfRendering": logic_breakIfRendering_loader.setField(app, field, value)
-  of "logic/ifElse": logic_ifElse_loader.setField(app, field, value)
-  of "logic/nextSleepDuration": logic_nextSleepDuration_loader.setField(app, field, value)
-  of "logic/setAsState": logic_setAsState_loader.setField(app, field, value)
-  of "render/calendar": render_calendar_loader.setField(app, field, value)
-  of "render/chart": render_chart_loader.setField(app, field, value)
-  of "render/color": render_color_loader.setField(app, field, value)
-  of "render/gradient": render_gradient_loader.setField(app, field, value)
-  of "render/image": render_image_loader.setField(app, field, value)
-  of "render/opacity": render_opacity_loader.setField(app, field, value)
-  of "render/split": render_split_loader.setField(app, field, value)
-  of "render/svg": render_svg_loader.setField(app, field, value)
-  of "render/text": render_text_loader.setField(app, field, value)
-  of "render/zoomPan": render_zoomPan_loader.setField(app, field, value)
-  else: raise newException(ValueError, "Unknown app keyword: " & keyword)
+  let i = appIndex(keyword)
+  if i < 0: raiseUnknownApp(keyword)
+  appEntries[i].setFieldProc(app, field, value)
 
 proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
-  case keyword:
-  of "logic/breakIfRendering": logic_breakIfRendering_loader.run(app, context)
-  of "logic/ifElse": logic_ifElse_loader.run(app, context)
-  of "logic/nextSleepDuration": logic_nextSleepDuration_loader.run(app, context)
-  of "logic/setAsState": logic_setAsState_loader.run(app, context)
-  of "render/calendar": render_calendar_loader.run(app, context)
-  of "render/chart": render_chart_loader.run(app, context)
-  of "render/color": render_color_loader.run(app, context)
-  of "render/gradient": render_gradient_loader.run(app, context)
-  of "render/image": render_image_loader.run(app, context)
-  of "render/opacity": render_opacity_loader.run(app, context)
-  of "render/split": render_split_loader.run(app, context)
-  of "render/svg": render_svg_loader.run(app, context)
-  of "render/text": render_text_loader.run(app, context)
-  of "render/zoomPan": render_zoomPan_loader.run(app, context)
-  else: raise newException(Exception, "App '" & keyword & "' cannot be run; use get().")
+  let i = appIndex(keyword)
+  if i < 0 or appEntries[i].runProc == nil:
+    raise newException(Exception, "App '" & keyword & "' cannot be run; use get().")
+  appEntries[i].runProc(app, context)
 
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
-  case keyword:
-  of "data/beRecycle": data_beRecycle_loader.get(app, context)
-  of "data/chromiumScreenshot":
-    when defined(frameosEmbedded) or defined(frameosWasm):
-      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on this build target")
-    else:
-      data_chromiumScreenshot_loader.get(app, context)
-  of "data/clock": data_clock_loader.get(app, context)
-  of "data/downloadImage": data_downloadImage_loader.get(app, context)
-  of "data/downloadUrl": data_downloadUrl_loader.get(app, context)
-  of "data/eventsToAgenda": data_eventsToAgenda_loader.get(app, context)
-  of "data/frameOSGallery": data_frameOSGallery_loader.get(app, context)
-  of "data/googlePhotos": data_googlePhotos_loader.get(app, context)
-  of "data/haSensor": data_haSensor_loader.get(app, context)
-  of "data/icalJson": data_icalJson_loader.get(app, context)
-  of "data/immich": data_immich_loader.get(app, context)
-  of "data/localImage": data_localImage_loader.get(app, context)
-  of "data/log": data_log_loader.get(app, context)
-  of "data/newImage": data_newImage_loader.get(app, context)
-  of "data/openaiImage": data_openaiImage_loader.get(app, context)
-  of "data/openaiText": data_openaiText_loader.get(app, context)
-  of "data/parseJson": data_parseJson_loader.get(app, context)
-  of "data/prettyJson": data_prettyJson_loader.get(app, context)
-  of "data/qr": data_qr_loader.get(app, context)
-  of "data/resizeImage": data_resizeImage_loader.get(app, context)
-  of "data/rotateImage": data_rotateImage_loader.get(app, context)
-  of "data/rstpSnapshot":
-    when defined(frameosEmbedded) or defined(frameosWasm):
-      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on this build target")
-    else:
-      data_rstpSnapshot_loader.get(app, context)
-  of "data/unsplash": data_unsplash_loader.get(app, context)
-  of "data/weather": data_weather_loader.get(app, context)
-  of "data/wikicommons": data_wikicommons_loader.get(app, context)
-  of "data/xmlToJson": data_xmlToJson_loader.get(app, context)
-  of "render/calendar": render_calendar_loader.get(app, context)
-  of "render/chart": render_chart_loader.get(app, context)
-  of "render/color": render_color_loader.get(app, context)
-  of "render/gradient": render_gradient_loader.get(app, context)
-  of "render/image": render_image_loader.get(app, context)
-  of "render/opacity": render_opacity_loader.get(app, context)
-  of "render/split": render_split_loader.get(app, context)
-  of "render/svg": render_svg_loader.get(app, context)
-  of "render/text": render_text_loader.get(app, context)
-  of "render/zoomPan": render_zoomPan_loader.get(app, context)
-  else: raise newException(ValueError, "Unknown app keyword: " & keyword)
+  let i = appIndex(keyword)
+  if i < 0 or appEntries[i].getProc == nil: raiseUnknownApp(keyword)
+  appEntries[i].getProc(app, context)
 
 proc appCapabilities*(keyword: string): AppCapabilities =
   ## Per-port protocols this app declares in its config.json. Apps that

@@ -30,6 +30,15 @@ from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.jwt_tokens import validate_scoped_token
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
+from app.utils.network import assert_url_target_allowed
+from app.utils.upload_limits import (
+    MAX_TEMPLATE_MEMBER_BYTES,
+    MAX_TEMPLATE_ZIP_BYTES,
+    fetch_body_limited,
+    read_upload_limited,
+    read_zip_member_limited,
+    reject_oversized_content_length,
+)
 from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
@@ -101,25 +110,46 @@ def template_zip_bytes(template: Template) -> bytes:
     return in_memory.getvalue()
 
 
-def parse_template_zip(zip_bytes: bytes) -> dict:
-    """Inverse of template_zip_bytes: returns template fields incl. scenes/image."""
-    zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes))
+def open_template_zip(zip_bytes: bytes) -> zipfile.ZipFile:
+    """A ZipFile over `zip_bytes`, 422 (not 500) when it is not a zip."""
+    if len(zip_bytes) > MAX_TEMPLATE_ZIP_BYTES:
+        raise HTTPException(status_code=413, detail="Template zip too large")
+    try:
+        return zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=422, detail="Not a valid template .zip") from exc
+
+
+def template_zip_folder(zip_file: zipfile.ZipFile) -> str:
+    """The folder template.json lives in ('' at the root, else 'Name/')."""
     folder_name = ''
     for name_in_zip in zip_file.namelist():
         if name_in_zip == 'template.json':
-            folder_name = ''
-            break
+            return ''
         elif name_in_zip.endswith('/template.json'):
             if folder_name == '' or len(name_in_zip) < len(folder_name):
                 folder_name = name_in_zip[:-len('template.json')]
+    return folder_name
 
-    data = json.loads(zip_file.read(f'{folder_name}template.json'))
-    data['scenes'] = json.loads(zip_file.read(f'{folder_name}scenes.json'))
+
+def read_template_member(zip_file: zipfile.ZipFile, name: str) -> bytes:
+    """A member of the template zip, capped: template.json, scenes.json and
+    the cover are all inflated into memory."""
+    return read_zip_member_limited(zip_file, name, MAX_TEMPLATE_MEMBER_BYTES)
+
+
+def parse_template_zip(zip_bytes: bytes) -> dict:
+    """Inverse of template_zip_bytes: returns template fields incl. scenes/image."""
+    zip_file = open_template_zip(zip_bytes)
+    folder_name = template_zip_folder(zip_file)
+
+    data = json.loads(read_template_member(zip_file, f'{folder_name}template.json'))
+    data['scenes'] = json.loads(read_template_member(zip_file, f'{folder_name}scenes.json'))
     image = data.get('image')
     if isinstance(image, str) and image.startswith('./'):
         image_path = image[len('./'):]
         try:
-            data['image'] = zip_file.read(f'{folder_name}{image_path}')
+            data['image'] = read_template_member(zip_file, f'{folder_name}{image_path}')
         except KeyError:
             data['image'] = None
     else:
@@ -163,6 +193,9 @@ async def create_template(
       - raw JSON body (application/json) containing name, scenes, etc.
       - merges old Flask logic that handled either request.files['file'] or request.json['url'] etc.
     """
+    # The zip (uploaded, or fetched from the pasted URL) is inflated in memory.
+    reject_oversized_content_length(request, MAX_TEMPLATE_ZIP_BYTES)
+
     # Attempt to parse any JSON body if the Content-Type is application/json
     try:
         parsed_json = await request.json()
@@ -199,17 +232,18 @@ async def create_template(
     zip_file = None
     # If file was uploaded via form
     if file and file.filename:
-        file_bytes = await file.read()
-        zip_file = zipfile.ZipFile(io.BytesIO(file_bytes))
+        zip_file = open_template_zip(await read_upload_limited(file, MAX_TEMPLATE_ZIP_BYTES))
     elif url:
-        # If we have a URL, fetch it. URLs on the linked cloud provider get
-        # the link token attached so private cloud scenes install.
+        # If we have a URL, fetch it — streamed, and never more than the zip
+        # cap into memory. URLs on the linked cloud provider get the link
+        # token attached so private cloud scenes install.
         from app.utils.cloud_backup import cloud_headers_for_url
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=cloud_headers_for_url(db, url))
-            resp.raise_for_status()
-            content = resp.content
+        await assert_url_target_allowed(url, what="Template URL")
+        async with httpx.AsyncClient(timeout=30) as client:
+            content = await fetch_body_limited(
+                client, url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, url)
+            )
             if not zipfile.is_zipfile(io.BytesIO(content)):
                 # Not a zip: maybe a scene page (e.g. a FrameOS Cloud store
                 # page) that advertises its zip in a <meta name="frameos:zip">
@@ -220,10 +254,12 @@ async def create_template(
                         status_code=422,
                         detail="URL is neither a template .zip nor a page with a frameos:zip meta tag",
                     )
-                resp = await client.get(zip_url, headers=cloud_headers_for_url(db, zip_url))
-                resp.raise_for_status()
-                content = resp.content
-        zip_file = zipfile.ZipFile(io.BytesIO(content))
+                # The page chose this URL, not the user: same guard again.
+                await assert_url_target_allowed(zip_url, what="Template zip URL")
+                content = await fetch_body_limited(
+                    client, zip_url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, zip_url)
+                )
+        zip_file = open_template_zip(content)
 
     data = {
         "from_frame_id": from_frame_id,
@@ -239,17 +275,10 @@ async def create_template(
 
     # If we have a zip file, parse template.json and scenes.json
     if zip_file:
-        folder_name = ''
-        for name_in_zip in zip_file.namelist():
-            if name_in_zip == 'template.json':
-                folder_name = ''
-                break
-            elif name_in_zip.endswith('/template.json'):
-                if folder_name == '' or len(name_in_zip) < len(folder_name):
-                    folder_name = name_in_zip[:-len('template.json')]
+        folder_name = template_zip_folder(zip_file)
 
-        template_json = zip_file.read(f'{folder_name}template.json')
-        scenes_json = zip_file.read(f'{folder_name}scenes.json')
+        template_json = read_template_member(zip_file, f'{folder_name}template.json')
+        scenes_json = read_template_member(zip_file, f'{folder_name}scenes.json')
 
         parsed_data = json.loads(template_json)
         parsed_data['scenes'] = json.loads(scenes_json)
@@ -267,14 +296,15 @@ async def create_template(
                 img_val = base64.b64decode(b64data)
             elif img_val.startswith('./'):
                 image_path = img_val[len('./'):]
-                img_val = zip_file.read(f'{folder_name}{image_path}')
+                img_val = read_template_member(zip_file, f'{folder_name}{image_path}')
             elif img_val.startswith('http:') or img_val.startswith('https:'):
                 from app.utils.cloud_backup import cloud_headers_for_url
 
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(img_val, headers=cloud_headers_for_url(db, img_val))
-                resp.raise_for_status()
-                img_val = resp.content
+                await assert_url_target_allowed(img_val, what="Template image URL")
+                async with httpx.AsyncClient(timeout=30) as client:
+                    img_val = await fetch_body_limited(
+                        client, img_val, MAX_TEMPLATE_MEMBER_BYTES, headers=cloud_headers_for_url(db, img_val)
+                    )
             else:
                 img_val = None
             data['image'] = img_val

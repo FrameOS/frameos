@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, normalize_compilation_mode
 from app.models.assets import sync_assets
-from app.models.frame import Frame, normalize_https_proxy, normalize_reboot_crontab, update_frame
+from app.models.frame import Frame, normalize_https_proxy, normalize_reboot_crontab, record_successful_deploy, update_frame
+from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
@@ -80,16 +81,6 @@ def _apply_frame_sync_deploy_revision(frame: Frame, frame_dict: dict[str, Any]) 
     frame_dict[FRAME_SYNC_CURRENT_REVISION_KEY] = revision
     frame_dict[FRAME_SYNC_DEPLOYED_REVISION_KEY] = revision
     setattr(frame, "_frame_sync_deploy_revision", revision)
-
-
-def _parse_embedded_utc(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _embedded_status_failure_context(body: bytes) -> str | None:
@@ -352,25 +343,19 @@ class FullDeployPlan:
 
 @dataclass(slots=True)
 class EmbeddedFullDeployPlan:
-    """Full deploy for an embedded (ESP32) frame: rebuild the firmware image
-    when it is stale or missing, deliver it over the air (the backend pokes
-    ``POST /api/action/ota`` and the device pulls manifest + image), wait for
-    the post-OTA bootup, then re-upload scenes like a fast deploy.
-
-    ``to_dict`` keeps the key shape the deploy drawer's FullDeployPlanResponse
-    consumer expects (target/binary/packages/...), with the embedded specifics
-    under an extra ``embedded`` key.
-    """
+    """An ESP32 full deploy: the board installs the latest FrameOS release
+    over the air (the release image for its own flash layout, verified
+    against the release signing key on the device), then the scenes are
+    re-uploaded. The backend builds nothing and holds no image."""
 
     platform: str
     idf_target: str
     flash_size: str
     psram_mb: int
     ota_supported: bool
-    firmware_status: str
-    firmware_error: str | None
-    needs_firmware_build: bool
-    action: str = "build_firmware_ota_upload_scenes"
+    release_platform: str | None
+    release_version: str | None
+    action: str = "release_ota_upload_scenes"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -385,7 +370,7 @@ class EmbeddedFullDeployPlan:
             "binary": {
                 "will_attempt_cross_compile": False,
                 "will_attempt_precompiled": False,
-                "cross_compile_supported": True,
+                "cross_compile_supported": False,
                 "build_host_configured": False,
             },
             "packages": [],
@@ -403,9 +388,8 @@ class EmbeddedFullDeployPlan:
                 "idfTarget": self.idf_target,
                 "flashSize": self.flash_size,
                 "otaSupported": self.ota_supported,
-                "firmwareStatus": self.firmware_status,
-                "firmwareError": self.firmware_error,
-                "needsFirmwareBuild": self.needs_firmware_build,
+                "releasePlatform": self.release_platform,
+                "releaseVersion": self.release_version,
                 "action": self.action,
             },
         }
@@ -440,7 +424,9 @@ def tls_settings_changed(frame: Frame) -> bool:
     if not frame.last_successful_deploy:
         return False
 
-    previous_deploy = frame.last_successful_deploy or {}
+    # The stored snapshot carries no TLS key; the current one is filled back
+    # in when it still matches, so only a real change reads as a change.
+    previous_deploy = deployed_frame_snapshot(frame) or {}
     previous_proxy = normalize_https_proxy(previous_deploy.get("https_proxy"))
     current_proxy = normalize_https_proxy(frame.https_proxy)
     return previous_proxy != current_proxy
@@ -802,7 +788,7 @@ class FrameDeployWorkflow:
                 await self._plan_package(
                     "caddy",
                     "FrameOS TLS proxy support",
-                    run_after_install="sudo systemctl disable --now caddy.service",
+                    run_after_install="sudo -n systemctl disable --now caddy.service",
                 )
             )
 
@@ -946,13 +932,14 @@ class FrameDeployWorkflow:
         frame_dict: dict[str, Any],
         previous_frameos_version: str | None,
     ) -> FrameDeployPlan:
+        from app.api.firmware_release import latest_release_summary
         from app.tasks.embedded_firmware import (
             embedded_flash_size_for_frame,
             embedded_module_psram_bytes,
             embedded_ota_supported_for_frame,
             embedded_platform_for_frame,
             embedded_platform_spec_for_frame,
-            latest_embedded_firmware,
+            embedded_release_firmware_for_frame,
         )
 
         frame = self.frame
@@ -973,13 +960,18 @@ class FrameDeployWorkflow:
                 "single app slot without OTA support. Flash the firmware over USB instead."
             )
 
-        firmware = latest_embedded_firmware(frame) or {}
-        firmware_status = str(firmware.get("status") or "missing")
-        firmware_error = firmware.get("error") if isinstance(firmware.get("error"), str) else None
-        needs_firmware_build = firmware_status != "ready"
-
         frame_dict["mode"] = "embedded"
         frame_dict["frameos_version"] = current_frameos_version()
+
+        # The release the device will be offered: named here for the plan,
+        # decided on the device (it asks the manifest for its own flash
+        # layout). GitHub being unreachable does not block the plan — the
+        # device may still have the manifest cached, or answer up-to-date.
+        release = await latest_release_summary()
+        release_version = release["version"] if release else None
+        release_platform = embedded_release_firmware_for_frame(
+            frame, release["platforms"] if release else None
+        )
 
         platform = embedded_platform_for_frame(frame)
         full_deploy = EmbeddedFullDeployPlan(
@@ -988,21 +980,20 @@ class FrameDeployWorkflow:
             flash_size=embedded_flash_size_for_frame(frame),
             psram_mb=embedded_module_psram_bytes(frame) // (1024 * 1024),
             ota_supported=True,
-            firmware_status=firmware_status,
-            firmware_error=firmware_error,
-            needs_firmware_build=needs_firmware_build,
+            release_platform=release_platform["asset"] if release_platform else None,
+            release_version=release_version,
         )
 
         notes = [
             f"Embedded target: {platform} ({full_deploy.flash_size} flash).",
-            "Full deploy rebuilds the firmware image when it is stale, updates the frame over the air (OTA), "
-            "then re-uploads the interpreted scenes.",
+            "Full deploy asks the frame to install the latest FrameOS release over the air (OTA) — "
+            "the signed release image for its flash layout, verified on the device — then re-uploads "
+            "the interpreted scenes.",
         ]
-        if needs_firmware_build:
-            detail = f": {firmware_error}" if firmware_error else ""
-            notes.append(f"Firmware image needs a rebuild ({firmware_status}{detail}).")
+        if release_version:
+            notes.append(f"Latest published release: {release_version}; the frame skips the download if it already runs it.")
         else:
-            notes.append("Firmware image is up to date; the device is asked to pull it only if it runs an older build.")
+            notes.append("The release listing could not be fetched right now; the frame checks the release itself.")
 
         return FrameDeployPlan(
             mode="full",
@@ -1015,10 +1006,9 @@ class FrameDeployWorkflow:
             notes=notes,
         )
 
-    # Bounded waits for the embedded full deploy. Firmware builds stream their
-    # own progress into the frame log; the deploy job polls status. Class
-    # attributes so tests (and desperate operators) can shorten them.
-    EMBEDDED_BUILD_WAIT_TIMEOUT_SECONDS = 45 * 60
+    # Bounded waits for the embedded full deploy: the device downloads the
+    # release image on its own and reports back with a boot. Class attributes
+    # so tests (and desperate operators) can shorten them.
     EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 10 * 60
     EMBEDDED_POLL_INTERVAL_SECONDS = 5.0
 
@@ -1054,37 +1044,6 @@ class FrameDeployWorkflow:
             if aware > since:
                 return True
         return False
-
-    async def _await_embedded_firmware_build(self) -> dict[str, Any]:
-        from app.tasks.embedded_firmware import refresh_embedded_firmware_status
-
-        deadline = time.monotonic() + self.EMBEDDED_BUILD_WAIT_TIMEOUT_SECONDS
-        last_status: str | None = None
-        while True:
-            frame = self._refresh_frame()
-            firmware = await refresh_embedded_firmware_status(self.db, self.redis, frame) or {}
-            status = firmware.get("status")
-            if status != last_status:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Firmware build status: {status or 'unknown'}")
-                last_status = status
-            if status == "ready":
-                return firmware
-            if status == "error":
-                # The build task stores the idf.py output tail in the error.
-                raise RuntimeError(
-                    f"Embedded firmware build failed: {firmware.get('error') or 'unknown error'}"
-                )
-            if status not in {"queued", "building"}:
-                raise RuntimeError(
-                    f"Embedded firmware build ended in unexpected state '{status or 'missing'}'"
-                )
-            if time.monotonic() >= deadline:
-                raise RuntimeError(
-                    "Timed out waiting for the embedded firmware build; "
-                    "check the frame logs and start the deploy again once it finishes."
-                )
-            await asyncio.sleep(self.EMBEDDED_POLL_INTERVAL_SECONDS)
 
     async def _await_embedded_boot(self, since: datetime) -> bool:
         deadline = time.monotonic() + self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS
@@ -1150,8 +1109,7 @@ class FrameDeployWorkflow:
             await self._upload_embedded_scenes_and_reload(frame)
 
             frame.status = "starting"
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
             await log(
                 self.db,
@@ -1166,11 +1124,7 @@ class FrameDeployWorkflow:
             raise
 
     async def _execute_embedded_full(self, plan: FrameDeployPlan) -> None:
-        from app.tasks.embedded_firmware import (
-            refresh_embedded_firmware_status,
-            request_embedded_firmware_ota,
-            start_embedded_firmware,
-        )
+        from app.tasks.embedded_firmware import request_embedded_firmware_update
 
         if not isinstance(plan.full_deploy, EmbeddedFullDeployPlan):
             raise RuntimeError("Embedded full deploy plan missing")
@@ -1186,34 +1140,12 @@ class FrameDeployWorkflow:
                     "render log. Flash the first firmware over USB from the deploy drawer."
                 )
 
-            # 1. Firmware image: rebuild when stale/missing, reuse when ready.
-            firmware = await refresh_embedded_firmware_status(self.db, self.redis, frame) or {}
-            rebuilt = False
-            if firmware.get("status") != "ready":
-                reason = firmware.get("error") or firmware.get("status") or "missing"
-                await log(self.db, self.redis, int(frame.id), "stdinfo",
-                          f"{icon} Firmware image is not ready ({reason}); building a fresh image")
-                await start_embedded_firmware(self.db, self.redis, frame)
-                firmware = await self._await_embedded_firmware_build()
-                rebuilt = True
-            else:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Firmware image is up to date; skipping rebuild")
-            frame = self._refresh_frame()
-
-            # If nothing was rebuilt and the device already booted after this
-            # image finished building, it is running the current firmware: the
-            # OTA poke below is a no-op the device answers without rebooting,
-            # so a reboot must not be required.
-            firmware_completed_at = _parse_embedded_utc(firmware.get("completedAt"))
-            boot_required = rebuilt or firmware_completed_at is None or not self._embedded_device_active_after(
-                frame, firmware_completed_at
-            )
-
-            # 2. Deliver over the air: the device pulls manifest + image.
+            # 1. Deliver over the air: the device reboots into its updater,
+            #    pulls this backend's relay of the release manifest and, when
+            #    its version differs, the signed release image.
             ota_requested_at = datetime.now(timezone.utc)
             try:
-                await request_embedded_firmware_ota(self.db, self.redis, frame)
+                await request_embedded_firmware_update(self.db, self.redis, frame)
             except ValueError as exc:
                 raise RuntimeError(
                     f"Could not start the OTA update: {exc}. "
@@ -1221,30 +1153,25 @@ class FrameDeployWorkflow:
                 )
             frame = self._refresh_frame()
 
-            # 3. Confirm via the device's post-OTA bootup.
-            if boot_required:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} OTA update requested; waiting for the frame to boot the new firmware")
-                if not await self._await_embedded_boot(ota_requested_at):
-                    raise RuntimeError(
-                        "OTA update requested, but the frame did not report a new boot within "
-                        f"{int(self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS // 60)} minutes. "
-                        "The device retries the OTA download on its own, so the update may still "
-                        "complete; check the frame logs and re-run the deploy to confirm."
-                    )
-                frame = self._refresh_frame()
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Frame booted after the OTA update")
-            else:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Frame already runs the current firmware; not waiting for a reboot")
+            # 2. Confirm via the device's post-update bootup. The updater
+            #    always reboots (an up-to-date frame just comes straight back).
+            await log(self.db, self.redis, int(frame.id), "stdout",
+                      f"{icon} Update requested; waiting for the frame to boot")
+            if not await self._await_embedded_boot(ota_requested_at):
+                raise RuntimeError(
+                    "Update requested, but the frame did not report a new boot within "
+                    f"{int(self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS // 60)} minutes. "
+                    "The device retries the download on its own, so the update may still "
+                    "complete; check the frame logs (ota:backend lines) and re-run the deploy to confirm."
+                )
+            frame = self._refresh_frame()
+            await log(self.db, self.redis, int(frame.id), "stdout", f"{icon} Frame booted")
 
-            # 4. Leave scenes fresh, exactly like a fast deploy.
+            # 3. Leave scenes fresh, exactly like a fast deploy.
             await self._upload_embedded_scenes_and_reload(frame)
 
             frame.status = "starting"
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
             await log(
                 self.db,
@@ -1275,12 +1202,11 @@ class FrameDeployWorkflow:
             setup_requires_reboot = await self._run_current_setup()
             if setup_requires_reboot:
                 frame.status = "starting"
-                frame.last_successful_deploy = plan.frame_dict
-                frame.last_successful_deploy_at = datetime.now(timezone.utc)
+                record_successful_deploy(frame, plan.frame_dict)
                 await update_frame(self.db, self.redis, frame)
-                await self.deployer.exec_command("sudo systemctl enable frameos.service")
+                await self.deployer.exec_command("sudo -n systemctl enable frameos.service")
                 await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} Deployed! Rebooting device after setup changes")
-                await self.deployer.exec_command("sudo reboot")
+                await self.deployer.exec_command("sudo -n reboot")
                 return
 
             if plan.fast_deploy.tls_settings_changed:
@@ -1298,8 +1224,7 @@ class FrameDeployWorkflow:
                     await self.deployer.restart_service("frameos")
 
             frame.status = "starting"
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
         except Exception:
             frame.status = "uninitialized"
@@ -1353,8 +1278,7 @@ class FrameDeployWorkflow:
             frame.status = "starting"
             plan.frame_dict["frameos_version"] = current_frameos_version()
             plan.frame_dict["frameos_commands"] = list(FRAMEOS_AVAILABLE_COMMANDS)
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
         except Exception:
             frame.status = "uninitialized"
@@ -1451,7 +1375,7 @@ class FrameDeployWorkflow:
     async def _stop_frameos_for_remote_build_if_needed(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
         if full_plan.low_memory and not cross_compiled:
             await self.deployer.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
-            await self.deployer.exec_command("sudo systemctl stop frameos.service", raise_on_error=False)
+            await self.deployer.exec_command("sudo -n systemctl stop frameos.service", raise_on_error=False)
 
     async def _install_planned_remote_dependencies(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
         await self.deployer.log("stdout", f"{icon} Installing dependencies on remote")
@@ -1478,7 +1402,7 @@ class FrameDeployWorkflow:
             )
 
     async def _prepare_release_directory(self, build_id: str) -> None:
-        await self.deployer.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
+        await self.deployer.exec_command("sudo -n mkdir -p /srv/frameos && sudo -n chown $(whoami):$(whoami) /srv/frameos")
         await self.deployer.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
         await self.deployer.exec_command(f"mkdir -p {self._release_dir(build_id)}")
 
@@ -1619,9 +1543,9 @@ class FrameDeployWorkflow:
     async def _stop_frameos_for_release_setup(self) -> bool:
         await self.deployer.log("stdout", f"{icon} Stopping running FrameOS before device setup")
         statuses = [
-            await self.deployer.exec_command("sudo systemctl stop frameos.service", raise_on_error=False),
+            await self.deployer.exec_command("sudo -n systemctl stop frameos.service", raise_on_error=False),
             await self.deployer.exec_command(
-                "sudo sh -c 'killall frameos 2>/dev/null || true'",
+                "sudo -n sh -c 'killall frameos 2>/dev/null || true'",
                 raise_on_error=False,
             ),
         ]
@@ -1657,7 +1581,7 @@ class FrameDeployWorkflow:
                 self._frameos_setup_command(path),
                 output=setup_output,
                 raise_on_error=False,
-                log_command="sudo ./frameos setup",
+                log_command="sudo -n ./frameos setup",
             )
         finally:
             if root_remounted_rw:
@@ -1687,7 +1611,7 @@ class FrameDeployWorkflow:
     def _frameos_setup_command(self, path: str) -> str:
         quoted_path = shlex.quote(path)
         if not _deploy_uses_remote(self.frame):
-            return f"cd {quoted_path} && sudo ./frameos setup"
+            return f"cd {quoted_path} && sudo -n ./frameos setup"
 
         systemd_inner = shlex.quote(
             'set -eu; export FRAMEOS_SETUP_UNDER_REMOTE=1; export FRAMEOS_SERVICE_USER="$1"; cd "$2"; ./frameos setup'
@@ -1715,15 +1639,15 @@ class FrameDeployWorkflow:
             return False
 
         await self.deployer.log("stdout", f"Root filesystem is read-only; remounting read-write for {context}")
-        await self._exec_host_root_command("mount -o remount,rw /", fallback_command="sudo mount -o remount,rw /")
+        await self._exec_host_root_command("mount -o remount,rw /", fallback_command="sudo -n mount -o remount,rw /")
         return True
 
     async def _remount_root_ro(self, context: str) -> None:
         await self.deployer.log("stdout", f"Restoring root filesystem to read-only after {context}")
-        await self._exec_host_root_command("sync", fallback_command="sudo sync", raise_on_error=False, timeout=30)
+        await self._exec_host_root_command("sync", fallback_command="sudo -n sync", raise_on_error=False, timeout=30)
         status = await self._exec_host_root_command(
             "mount -o remount,ro /",
-            fallback_command="sudo mount -o remount,ro /",
+            fallback_command="sudo -n mount -o remount,ro /",
             raise_on_error=False,
             timeout=30,
         )
@@ -1732,7 +1656,7 @@ class FrameDeployWorkflow:
 
     def _host_root_command(self, command: str, *, fallback_command: str | None = None) -> str:
         if not _deploy_uses_remote(self.frame):
-            return fallback_command or f"sudo sh -lc {shlex.quote(command)}"
+            return fallback_command or f"sudo -n sh -lc {shlex.quote(command)}"
 
         inner = shlex.quote(f"set -eu; {command}")
         return (
@@ -1792,7 +1716,7 @@ class FrameDeployWorkflow:
                 "FrameOS processes",
                 "ps -eo pid,ppid,stat,rss,comm,args | grep -E '[f]rameos|[f]rameos_agent'",
             ),
-            ("kernel messages", "sudo sh -c 'dmesg -T 2>/dev/null || dmesg' | tail -80"),
+            ("kernel messages", "sudo -n sh -c 'dmesg -T 2>/dev/null || dmesg' | tail -80"),
         )
         for label, command in diagnostics:
             await self.deployer.exec_command(
@@ -1855,19 +1779,19 @@ class FrameDeployWorkflow:
 
         if post_deploy.get("final_action") == "reboot":
             await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
-            await self.deployer.exec_command("sudo reboot")
+            await self.deployer.exec_command("sudo -n reboot")
         else:
-            await self.deployer.exec_command("sudo systemctl daemon-reload")
+            await self.deployer.exec_command("sudo -n systemctl daemon-reload")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
-            await self.deployer.exec_command("sudo systemctl restart frameos.service")
-            await self.deployer.exec_command("sudo systemctl status frameos.service")
+            await self.deployer.exec_command("sudo -n systemctl restart frameos.service")
+            await self.deployer.exec_command("sudo -n systemctl status frameos.service")
 
     async def _run_post_deploy_cleanup_writes(self, *, post_deploy: dict[str, Any], boot_config: str) -> None:
         if post_deploy.get("low_memory_masks_apt_daily"):
             await self.deployer.exec_command(
-                "sudo systemctl mask apt-daily-upgrade && "
-                "sudo systemctl mask apt-daily && "
-                "sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service"
+                "sudo -n systemctl mask apt-daily-upgrade && "
+                "sudo -n systemctl mask apt-daily && "
+                "sudo -n systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service"
             )
 
         reboot_schedule = post_deploy.get("reboot_schedule") or {}
@@ -1877,12 +1801,12 @@ class FrameDeployWorkflow:
             crontab = f"{cron_schedule} root {reboot_command}"
             await self._exec_host_root_command(
                 f"printf '%s\\n' {shlex.quote(crontab)} > /etc/cron.d/frameos-reboot",
-                fallback_command=f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot",
+                fallback_command=f"printf '%s\\n' {shlex.quote(crontab)} | sudo -n tee /etc/cron.d/frameos-reboot",
             )
         elif reboot_schedule.get("needs_remove"):
             await self._exec_host_root_command(
                 "rm -f /etc/cron.d/frameos-reboot",
-                fallback_command="sudo rm -f /etc/cron.d/frameos-reboot",
+                fallback_command="sudo -n rm -f /etc/cron.d/frameos-reboot",
             )
 
         for change in post_deploy.get("bootconfig_changes") or []:
@@ -1893,23 +1817,23 @@ class FrameDeployWorkflow:
                 to_remove = str(line)
                 await self._exec_host_root_command(
                     f'grep -q "^{to_remove}" {boot_config} && sed -i "/^{to_remove}/d" {boot_config}',
-                    fallback_command=f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}',
+                    fallback_command=f'grep -q "^{to_remove}" {boot_config} && sudo -n sed -i "/^{to_remove}/d" {boot_config}',
                     raise_on_error=False,
                 )
             elif change.get("action") == "add":
                 if (await self.deployer.exec_command(f'grep -q "^{line}" {boot_config}', raise_on_error=False)) != 0:
                     await self._exec_host_root_command(
                         f"printf '%s\\n' {shlex.quote(str(line))} >> {boot_config}",
-                        fallback_command=f'echo "{line}" | sudo tee -a ' + boot_config,
+                        fallback_command=f"printf '%s\\n' {shlex.quote(str(line))} | sudo -n tee -a " + boot_config,
                         log_output=False,
                     )
 
         if post_deploy.get("disable_userconfig"):
-            await self.deployer.exec_command("sudo systemctl disable userconfig || true")
+            await self.deployer.exec_command("sudo -n systemctl disable userconfig || true")
 
         if post_deploy.get("disable_caddy_service"):
             await self.deployer.log("stdout", f"{icon} Disabling system-managed Caddy service (managed by FrameOS tls_proxy)")
-            await self.deployer.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
+            await self.deployer.exec_command("sudo -n systemctl disable --now caddy.service", raise_on_error=False)
 
         setup_json_reset_path = setup_json_reset_file_path(self.frame)
         if setup_json_reset_path:
@@ -1940,14 +1864,14 @@ class FrameDeployWorkflow:
         )
         await self._exec_host_root_command(
             f"install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
-            fallback_command=f"sudo install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+            fallback_command=f"sudo -n install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
         )
         await self._exec_host_root_command(
             f"install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
-            fallback_command=f"sudo install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
+            fallback_command=f"sudo -n install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
         )
-        await self.deployer.exec_command("sudo systemctl daemon-reload")
-        await self.deployer.exec_command(f"sudo systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
+        await self.deployer.exec_command("sudo -n systemctl daemon-reload")
+        await self.deployer.exec_command(f"sudo -n systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
 
     async def _remove_setup_json_reset_helper(self) -> None:
         status = await self.deployer.exec_command(
@@ -1966,13 +1890,13 @@ class FrameDeployWorkflow:
         await self.deployer.exec_command(
             f"if systemctl list-unit-files --type=service --no-legend {SETUP_JSON_RESET_SERVICE_NAME} "
             f"| grep -q '^{SETUP_JSON_RESET_SERVICE_NAME}'; then "
-            f"sudo systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}; "
+            f"sudo -n systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}; "
             "fi",
             raise_on_error=False,
         )
         await self._exec_host_root_command(
             f"rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
-            fallback_command=f"sudo rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+            fallback_command=f"sudo -n rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
             raise_on_error=False,
         )
         await self.deployer.exec_command(
@@ -1996,16 +1920,16 @@ class FrameDeployWorkflow:
                 f'grep -q "^dtparam=i2c_vc=on$" {shlex.quote(boot_config)}'
             )
             i2c_needs_runtime_enable = await self._command_succeeds(
-                'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"'
+                'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_i2c | grep -q "1"'
             )
 
         spi_action = "unchanged"
         if drivers.get("spi") and await self._command_succeeds(
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"'
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "1"'
         ):
             spi_action = "enable"
         elif drivers.get("noSpi") and await self._command_succeeds(
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "0"'
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "0"'
         ):
             spi_action = "disable"
 

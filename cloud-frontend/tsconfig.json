@@ -16,5 +16,7 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src"]
+  // node-forge ships no types; frontend/ declares the module itself, and the
+  // TLS helpers this bundle imports need that declaration here too.
+  "include": ["src", "../frontend/src/types/node-forge.d.ts"]
 }

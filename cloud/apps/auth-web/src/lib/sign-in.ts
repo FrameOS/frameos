@@ -12,13 +12,17 @@ import {
   sessionCookieOptions,
   type SessionProfile,
 } from "./session";
+import { claimSingleUse, singleUseClaimed } from "./rate-limit";
 import {
   availableSecondFactors,
   createPendingSignInToken,
+  pendingSignInClaimKey,
   pendingSignInCookieName,
   pendingSignInCookieOptions,
+  pendingSignInMaxAgeSeconds,
   readPendingSignInToken,
   type PendingSignIn,
+  type PendingSignInToken,
   type SecondFactorMethod,
 } from "./two-factor";
 
@@ -57,13 +61,23 @@ export async function completeFirstFactor(
   return { kind: "session", token };
 }
 
-// Second factor satisfied: the session the first step withheld.
+// Second factor satisfied: the session the first step withheld. The pending
+// token is spent here, so a second presentation of the same cookie — even
+// with another valid code — gets nothing; `undefined` means it was already
+// spent and the caller answers sign_in_expired.
 export async function completeSecondFactor(
   db: ReturnType<typeof createDb>,
-  pending: PendingSignIn,
+  pending: PendingSignInToken,
   secondFactor: SecondFactorMethod,
   extra: Record<string, unknown> = {},
 ) {
+  const claimed = await claimSingleUse(
+    pendingSignInClaimKey(pending.tokenId),
+    pendingSignInMaxAgeSeconds * 1000,
+  );
+  if (!claimed) {
+    return undefined;
+  }
   await recordSignedIn(db, pending.profile, {
     ...pending.auditMetadata,
     method: pending.method,
@@ -71,6 +85,13 @@ export async function completeSecondFactor(
     ...extra,
   });
   return createSession(db, pending.profile);
+}
+
+// The cheap early answer for a spent pending token, checked before the code
+// or assertion so a replay does not get to burn a recovery code or a TOTP
+// step first. Does not spend the token: a wrong code must leave it usable.
+export async function pendingSignInSpent(pending: PendingSignInToken) {
+  return singleUseClaimed(pendingSignInClaimKey(pending.tokenId));
 }
 
 async function recordSignedIn(

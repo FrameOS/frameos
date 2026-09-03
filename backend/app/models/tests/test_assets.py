@@ -39,12 +39,12 @@ async def test_make_asset_folders_command_is_best_effort(mock_run, db, redis):
 
     cmd = mock_run.call_args.args[3]
     # Remounts a read-only assets partition (vfat flips to ro after power loss)
-    assert 'sudo mount -o remount,rw "$mp"' in cmd
+    assert 'sudo -n mount -o remount,rw "$mp"' in cmd
     # Never chowns filesystems without POSIX ownership
     assert "vfat|exfat|msdos)" in cmd
     # Permission fixes must not abort the deploy on failure
-    assert 'sudo chown -R "$(whoami)" "$fix" || echo' in cmd
-    assert 'sudo chmod -R u+rwX,go+rX "$fix" || echo' in cmd
+    assert 'sudo -n chown -R "$(whoami)" "$fix" || echo' in cmd
+    assert 'sudo -n chmod -R u+rwX,go+rX "$fix" || echo' in cmd
     # Fonts subfolder is the target when fonts are uploaded
     assert "t=/srv/assets/fonts" in cmd
     assert ASSETS_WRITABLE_MARKER in cmd
@@ -101,3 +101,19 @@ async def test_sync_assets_skips_fonts_when_disabled(mock_folders, mock_fonts, d
     mock_folders.return_value = True
     await sync_assets(db, redis, make_frame(upload_fonts="none"))
     mock_fonts.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("app.models.assets.upload_file", new_callable=AsyncMock)
+@patch("app.models.assets.log", new_callable=AsyncMock)
+@patch("app.models.assets._use_remote", new_callable=AsyncMock)
+@patch("app.models.assets.run_command", new_callable=AsyncMock)
+async def test_upload_font_assets_quotes_the_assets_path(mock_run, mock_use_remote, mock_log, mock_upload, db, redis):
+    from app.models.assets import upload_font_assets
+
+    mock_use_remote.return_value = False
+    mock_run.return_value = (0, "", "")
+    await upload_font_assets(db, redis, make_frame(), "/srv/my assets; id")
+
+    cmd = mock_run.call_args.args[3]
+    assert cmd.startswith("find '/srv/my assets; id/fonts' -type f")

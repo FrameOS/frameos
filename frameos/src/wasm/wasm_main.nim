@@ -20,6 +20,7 @@ import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/js_runtime/runtime as jsRuntime
 import lib/tz
+import frameos/version
 
 # ------------------------------------------------------------------ JS hooks
 # Implemented in tools/wasm/frameos_library.js and linked by emcc.
@@ -47,6 +48,7 @@ var
   sceneInfoBuffer: string
   sceneStateBuffer: string
   lastErrorBuffer: string
+  versionBuffer: string
   # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
   # before the scene's first render and merged into scene.state at init.
   pendingSceneStates = initTable[string, JsonNode]()
@@ -335,10 +337,14 @@ proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
 
 # ---------------------------------------------------------------- rendering
 
-proc frameos_wasm_render(): cint {.exportc, cdecl.} =
+proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   ## Render the current scene into an RGBA buffer owned by Nim; read it via
   ## frameos_wasm_buffer/_buffer_len/_width/_height. Returns 0 on success,
   ## 1 when the render produced an error frame, 2 when nothing could render.
+  ##
+  ## Called through `frameos_wasm_render` in tools/wasm/fos_wasm_mem.c, which
+  ## wraps it in the setjmp guard that catches a simulated out-of-memory and
+  ## returns 3. Without a simulated memory limit the guard is a direct call.
   renderRequested = false
   try:
     refreshDecodeBudget()
@@ -459,6 +465,14 @@ proc frameos_wasm_scene_state(): cstring {.exportc, cdecl.} =
 
 proc frameos_wasm_last_error(): cstring {.exportc, cdecl.} =
   lastErrorBuffer.cstring
+
+# The FrameOS version this runtime was built from, in the same published form
+# a frame reports ("2026.9.0", no build hash) — so a preview can say which
+# interpreter it renders with, and whether that is the firmware the frame
+# actually runs. Baked at build time (-d:frameosVersion, from versions.json).
+proc frameos_wasm_version(): cstring {.exportc, cdecl.} =
+  versionBuffer = publishedFrameOSVersion(compiledFrameOSVersion())
+  versionBuffer.cstring
 
 # ---------------------------------------------------------------- keep alive
 # Nim/ARC emits destructor calls for every module-level global at the end of

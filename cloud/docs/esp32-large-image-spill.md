@@ -127,17 +127,18 @@ sufficient and simpler.
   file-backed `BitStreamReader` source in the pixie fork (follow-up below).
   Note the in-RAM chunked PNG path already covers PNGs that fit in PSRAM.
 
-### Firmware wiring — TODO (the deliberate remaining piece)
+### Firmware wiring — done
 
-In `embedded/esp32/main/main.c` after storage init:
+Wired in `embedded/esp32/main/main.c` after storage init, as designed:
 
 - SD mounted (`fos_assets_sd_mounted()`): `mkdir <assets_path>/.cache`, sweep
-  leftover `http-spill-*.tmp`, then
+  leftover `http-spill-*` files, then
   `fos_nim_http_set_spill_dir("<assets_path>/.cache", 0)` (no extra cap; the
   request's own `maxBytes` — default 10MB — still applies).
-- No SD: `esp_spiffs_info("state", …)`; if free space minus a 128KB safety
-  margin is meaningful (say ≥256KB), `fos_nim_http_set_spill_dir("/state",
-  free - margin)`; else leave spill disabled. `/state` also holds the scene
+- No SD: `esp_spiffs_info("state", …)`; free space minus a 512KB margin,
+  capped at 8MB, becomes the spill cap if it is ≥256KB
+  (`fos_nim_http_set_spill_dir("/state", cap)`); else spill stays disabled
+  and the boot log says so. `/state` also holds the scene
   store — the cap must never let a spill starve a scene update, hence the
   margin and the low ceiling. (Since 2026.8.13 that store is one file per
   scene plus `scene-index.json` rather than a single `scenes.json`; the
@@ -172,13 +173,18 @@ needs no lock (revisit if HTTP ever leaves the render task).
 | C glue (`frameos_nim_glue.c` + `frameos_nim.h`) | ~170 lines | done |
 | Nim `http_client.nim` embedded branch | ~45 lines | done |
 | Nim `image.nim` decode entry | ~35 lines | done |
-| Firmware wiring (`main.c` + stub + sweep) | ~40 lines | TODO |
+| Firmware wiring (`main.c` + stub + sweep) | ~40 lines | done |
 | pixie fork: file-backed PNG inflate source | ~150 lines | follow-up, only if spilled PNGs show up in practice |
 
 ### Follow-ups
 
-- Wire `main.c` (above) and validate on the bench frame with the 12-scene
-  workload and a ~3MB gallery JPEG; confirm PSRAM floor during spill+decode.
+- Superseded for images, 2026-08-26 (#398): any download with a decode
+  target now decodes straight off the socket (`image:streamed` in the log),
+  so gallery images never reach the spill. The spill still serves bodies
+  without a target and non-image responses. On the 8 MB layout the `/state`
+  cap is a few hundred KB, which is what the old
+  `response exceeded 6291456 bytes` message was really reporting — the glue
+  now prints the effective cap and directory.
 - Consider the proactive Content-Length trigger.
 - pixie fork: `InflateSegment`-from-file source so spilled PNGs stream too.
 - Optional: reuse the spill file as a decode cache keyed by URL+ETag (the

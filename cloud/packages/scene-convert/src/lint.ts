@@ -106,7 +106,9 @@ export function lintConvertedCodeNode(codeJS: string, argNames: string[]): strin
     return problems;
   }
   for (const name of argNames) {
-    if (new RegExp(`(^|[^.\\w])(?:const|let|var|function|class)\\s+${name}\\b`).test(codeJS)) {
+    // The name is scene-supplied: escape it, or "[" throws and "(a*)*c" backtracks forever.
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^.\\w])(?:const|let|var|function|class)\\s+${escaped}\\b`).test(codeJS)) {
       problems.push(`redeclares the argument "${name}" (it is already a const from codeArgs)`);
     }
   }

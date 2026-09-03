@@ -26,8 +26,21 @@ cleanup, or sync jobs need separate execution.
   flag of every frame on boot, so a second hub marks live frames offline. It
   is deliberately not blue/green — it restarts in place and frames reconnect.
 - **Database TLS.** `postgres.js` defaults to no TLS. If Postgres is not on
-  the same host, set `DATABASE_SSL=require` (or `sslmode=require` in
-  `DATABASE_URL`).
+  the same host, encrypt the connection — and know what each mode buys:
+  - `DATABASE_SSL=require` (or `sslmode=require` in `DATABASE_URL`) encrypts
+    the connection but **does not verify the server certificate**
+    (`postgres.js` sets `rejectUnauthorized: false` for `require`, `allow`
+    and `prefer`). It stops passive sniffing, not an active man in the
+    middle. Only acceptable on a private network you control end to end.
+  - `sslmode=verify-full` in `DATABASE_URL` verifies the certificate chain
+    against the system trust store **and** that it matches the host name.
+    Use it whenever the database is reached over a network you do not own
+    (managed Postgres, a separate VPS). The server certificate must be
+    signed by a CA the Node process trusts (a public CA, or one added via
+    `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` in the env file). Leave
+    `DATABASE_SSL` unset when you do this: the variable takes precedence
+    over the URL, and the code only understands `require`/`true` — a
+    `DATABASE_SSL=verify-full` is silently ignored, which means no TLS.
 - **Periodic cleanup.** Schedule `pnpm db:cleanup` (e.g. daily cron) to prune
   finished device authorization requests, expired login codes, and expired or
   revoked sessions. These tables grow without bound otherwise.
@@ -77,7 +90,8 @@ you are done.**
 The deploy builds locally and ships a self-contained bundle:
 
 1. `turbo run build --filter=@frameos-cloud/auth-web` builds the editor and
-   wasm packages as needed and produces `.next/standalone`
+   wasm packages as needed, installs the wasm runtime from the pinned
+   release (below), and produces `.next/standalone`
    (`output: "standalone"` in `next.config.ts`, traced from the monorepo root
    so pnpm workspace dependencies resolve into the bundle).
 2. The script assembles `.next/standalone` + `.next/static` + `public/`
@@ -87,7 +101,13 @@ The deploy builds locally and ships a self-contained bundle:
    the server.
 3. `frameos-cloud-update` applies the SQL migrations via `psql` from the new
    release (before anything is flipped, so a failed migration leaves the
-   running app untouched), then performs the zero-downtime flip below.
+   running app untouched), then performs the zero-downtime flip below. Each
+   migration file runs in one transaction together with its
+   `schema_migrations` row, so a failure part-way through a file leaves the
+   schema untouched too and the next deploy simply retries it (see the
+   header of `scripts/db-migrate.sh`, including the `-- migrate:
+   no-transaction` opt-out for statements Postgres refuses inside a
+   transaction).
 
 ### Zero-downtime deploys
 
@@ -235,8 +255,10 @@ which never answers `/healthz` is a failed deploy rather than an outage.
 
 Which merges count is the workflow's `paths:` filter, and it mirrors the
 input closure of `turbo run build --filter=@frameos-cloud/auth-web` — the
-shared `frontend/`, the frames SPA in `cloud-frontend/`, `repo/`, and the Nim
-sources the editor's wasm preview is built from, not just `cloud/`. A path
+shared `frontend/`, the frames SPA in `cloud-frontend/`, `repo/`, and
+`versions.json` (the wasm runtime pin, below), not just `cloud/`. The Nim
+runtime sources are deliberately absent: they reach the cloud through a
+release, never through a merge. A path
 missing from that list is not a saved CI run: it is a change that merges,
 looks shipped, and never reaches production. Re-derive the closure with
 `pnpm exec turbo run build --filter=@frameos-cloud/auth-web --dry=json`
@@ -342,6 +364,51 @@ in Actions either way. Production is untouched by a failure before the flip;
 `frameos-cloud-update --status` on the box is the source of truth, and
 `--rollback` is unchanged. Nothing about the automatic path is required — the
 manual one keeps working with the switch off.
+
+## The wasm runtime is a release asset
+
+The interpreter the browser preview, the fleet tiles and the headless
+renderer (`src/lib/scene-render.ts`, `POST /api/scenes/render`, MCP
+`scene_render`) run is the FrameOS runtime compiled to WebAssembly —
+`frameos.js`, `frameos.wasm`, `preview-worker.js`. It used to be compiled
+from whatever `main` the deploy checked out, so the preview rendered with
+features the frames' firmware did not have yet; one skew shipped a scene that
+previewed fine and painted "No image provided" on the panel.
+
+Since 2026-09 the cloud does not build it. Every "Release FrameOS" run
+attaches `frameos-<version>-wasm.tar.gz` (the three files plus a
+`version.json` stamp) and its `.minisig`, signed with the same key as the
+firmware and the Pi release archives. auth-web's prebuild
+(`scripts/copy-wasm-assets.mjs` and `copy-editor-assets.mjs`, through
+`scripts/lib/wasm-runtime.mjs`) reads the release version from the repo's
+`versions.json` (`docker`, the tag's version — the one place the release bump
+already updates), downloads that asset once into `node_modules/.cache/`,
+verifies the signature against the committed
+`release-assets/firmware-signing.pub` on every run, and installs it under
+`public/frameos-wasm/` and `public/frameos-editor/frameos-wasm/`. Nothing on
+the production box changes: the bundle ships inside the deploy archive as
+before.
+
+Consequences worth knowing:
+
+- **A new interpreter feature reaches the preview with the next release**, at
+  the same moment it reaches frames. Merging runtime changes to `main` no
+  longer moves the preview, and no longer triggers a cloud deploy.
+- **Which runtime the preview is** is visible: the bundle answers
+  `frameos_wasm_version()`, the preview panel shows "runtime 2026.9.0" next
+  to the memory picker, `POST /api/scenes/render` returns `runtime_version`
+  in its JSON reply (and an `x-frameos-runtime-version` header on the PNG
+  reply). The `version.json` next to the bundle carries the interpreter
+  version, the release it belongs to and the commit.
+- **Working on the runtime itself**: `FRAMEOS_WASM_SOURCE=local pnpm dev`
+  (or `build`) installs the workspace package's own build instead —
+  `turbo run build:runtime --filter=frameos-wasm` after `nimble install -d`
+  in `frameos/`, needs nim + emscripten. Nothing else changes.
+- **A deploy in the window between a release's `chore: version X` commit and
+  its assets landing** fails on the download with a message saying so; the
+  release's own `workflow_run` deploy follows minutes later, or re-run the
+  job. `FRAMEOS_WASM_RELEASE_REPO` points the download at a fork's releases
+  for testing.
 
 ## Frame hub
 
@@ -669,26 +736,31 @@ queues behind a cursor that cannot advance until the write runs. It does not
 error; it hangs, with Postgres reporting `ClientRead`. Page with `limit N`
 instead.
 
-## Signup Notifications
+## Operational Notifications
 
-When a brand new account is created (password signup or first Google
-sign-in), auth-web fires two optional fire-and-forget notifications
-(`src/lib/signup-notifications.ts`). Each is skipped silently when its
-environment variable is unset, and failures never affect the signup:
+auth-web fires optional fire-and-forget server-side PostHog captures
+(`src/lib/posthog-capture.ts`) for a few operational events. They are
+skipped silently when the key is unset, and failures never affect the flow
+that triggered them:
 
 ```text
-FRAMEOS_CLOUD_DISCORD_REPORTS_WEBHOOK_URL=…  # Discord webhook for a one-line
-                                             # "new user" message in the
-                                             # reports channel
 NEXT_PUBLIC_POSTHOG_KEY=…                    # PostHog project key; also used
                                              # by the browser SDK
 NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
                                              # https://eu.i.posthog.com
 ```
 
-The PostHog event is `cloud user signed up` with the account id as
-`distinct_id`, sent server-side to the `/capture` endpoint using the same
-public project key as the browser SDK (no extra secret required).
+| Event                  | `distinct_id`        | Fired by                                          |
+| ---------------------- | -------------------- | ------------------------------------------------- |
+| `cloud user signed up` | the new account id   | password signup, first Google sign-in             |
+| `store scene reported` | the reporter account | `POST /api/store/scenes/<id>/report` (new report) |
+
+Both go to the `/capture` endpoint using the same public project key as the
+browser SDK (no extra secret required). The Discord messages for these
+("new user", "scene reported") are PostHog webhook destinations on the
+events, configured in PostHog, not in auth-web. `DISCORD_REPORTS_WEBHOOK_URL`
+(`src/lib/discord.ts`) is the older direct post for scene reports and is on
+its way out (`docs/todo.md`).
 
 **The browser SDK does not read this from the server's env file.**
 `NEXT_PUBLIC_*` values are inlined into the client bundle when `next build`

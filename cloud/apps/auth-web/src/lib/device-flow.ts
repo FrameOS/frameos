@@ -36,16 +36,64 @@ export function requireDatabase() {
   };
 }
 
-export async function readJsonObject(request: NextRequest) {
-  try {
-    const body = (await request.json()) as unknown;
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return {};
-    }
-    return body as Record<string, unknown>;
-  } catch {
-    return {};
+// Ceiling on a JSON request body nobody has sized explicitly. Wide enough
+// for a scenes.json push (maxScenesPayloadBytes in ./frames.ts is 3 MiB of
+// serialized scenes); routes that carry base64 blobs (a scene zip, a backup)
+// pass their own, and routes with tiny bodies pass something much smaller.
+export const defaultJsonBodyBytes = 4 * 1024 * 1024;
+
+export type BoundedJsonObject =
+  | { body: Record<string, unknown>; response?: undefined }
+  | { body?: undefined; response: NextResponse };
+
+// Reads a JSON object body without letting the client decide how much memory
+// the parse costs. The declared content-length is checked first so an honest
+// oversize request is refused before a byte is read; the text itself is
+// measured afterwards, because a chunked request declares nothing. Over the
+// cap returns a 413 for the route to send back; a malformed or non-object
+// body is `{}`, as it always was.
+export async function readBoundedJsonObject(
+  request: NextRequest,
+  maxBytes = defaultJsonBodyBytes,
+): Promise<BoundedJsonObject> {
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return { response: payloadTooLarge(maxBytes) };
   }
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    return { body: {} };
+  }
+  // Bytes, not characters: the cap is what content-length would have said.
+  // (The length check first is the cheap way out for the obvious cases.)
+  if (text.length > maxBytes || Buffer.byteLength(text, "utf8") > maxBytes) {
+    return { response: payloadTooLarge(maxBytes) };
+  }
+  try {
+    const body = JSON.parse(text) as unknown;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return { body: {} };
+    }
+    return { body: body as Record<string, unknown> };
+  } catch {
+    return { body: {} };
+  }
+}
+
+function payloadTooLarge(maxBytes: number) {
+  return jsonError("payload_too_large", 413, { max_bytes: maxBytes });
+}
+
+// The lenient form most routes use: an oversize body reads as `{}` (so the
+// route's own "missing field" check answers), never as an unbounded parse.
+export async function readJsonObject(
+  request: NextRequest,
+  maxBytes = defaultJsonBodyBytes,
+) {
+  const result = await readBoundedJsonObject(request, maxBytes);
+  return result.body ?? {};
 }
 
 export function normalizeUserCode(value: string) {
@@ -131,8 +179,15 @@ export function isLocalHostname(hostname: string) {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
     return true;
   }
-  if (host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) {
-    return true;
+  // IPv6 literals only: loopback, link-local and unique-local. The prefix
+  // tests must never run against a DNS name — "fdcloud.example.com" starts
+  // with "fd" too, and this allowlist decides where login codes may be sent.
+  if (host.includes(":")) {
+    return (
+      host === "::1" ||
+      host.startsWith("fe80:") ||
+      /^f[cd][0-9a-f]{2}:/.test(host)
+    );
   }
 
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);

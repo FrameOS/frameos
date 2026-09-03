@@ -3,6 +3,7 @@ import {
   encodePng,
   isRenderErrorLine,
   rendererAvailable,
+  rendererVersion,
   renderScenes,
 } from "./scene-render";
 
@@ -33,6 +34,18 @@ describe("isRenderErrorLine", () => {
     expect(isRenderErrorLine('{"event":"render:done"}')).toBe(false);
     expect(isRenderErrorLine("http error while fetching")).toBe(true);
     expect(isRenderErrorLine("scene initialized")).toBe(false);
+  });
+});
+
+describe("rendererVersion", () => {
+  // The stamp ships next to the bundle (build_wasm.sh / the release
+  // tarball); without a bundle, or with one from before the stamp, it is
+  // simply unknown rather than an error.
+  it("is the bundle's published FrameOS version, or null", () => {
+    const version = rendererVersion();
+    if (version !== null) {
+      expect(version).toMatch(/^\d{4}\.\d{1,2}\.\d+$/);
+    }
   });
 });
 

@@ -43,6 +43,7 @@ from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_remote import RemoteDeployer
+from app.tasks.frame_deploy_helpers import systemd_unit_user
 from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.tasks.precompiled_frameos import (
     download_release_file,
@@ -646,7 +647,7 @@ def render_systemd_service(
     console_output: bool = False,
     environment: dict[str, str] | None = None,
 ) -> str:
-    service = source.read_text(encoding="utf-8").replace("%I", user)
+    service = source.read_text(encoding="utf-8").replace("%I", systemd_unit_user(user))
     service_lines = service.splitlines()
     rendered_lines: list[str] = []
     in_service = False
@@ -823,13 +824,14 @@ def render_frameos_partition_ownership_commands(
       releases/<r>            root:frameos 1775  sticky: the runtime may add files
                                                   but cannot replace root's binary
       releases/<r>/frameos    root:root    0755
-      releases/<r>/drivers    root:root
+      releases/<r>/{drivers,scenes,vendor} root:root
       releases/<r>/*.json*    frameos      0600 / 0644 for scene payloads
-      state                   frameos      0750  (NetworkManager/, wpa_supplicant/
+      state                   root:frameos 1770  (NetworkManager/, wpa_supplicant/
                                                   stay root 0700: NM ignores
                                                   keyfiles anyone else owns)
-      logs tmp runtime staging privileged/results   frameos 0770
-      privileged              root:frameos 0755; queue root:frameos 1770
+      logs tmp runtime staging root:frameos 1770; contents frameos
+      privileged              root:frameos 0755; queue root:frameos 1770;
+                              results root:frameos 2750
 
     genimage copies the tree as uid 0 and mke2fs keeps that, so ownership is
     applied to the finished ext4 image. debugfs needs no root for this.
@@ -851,24 +853,32 @@ def render_frameos_partition_ownership_commands(
         if top == "releases":
             if len(parts) == 2:
                 sif(rel, 0, gid, 0o41775)
+            elif len(parts) >= 3 and parts[2] in ("drivers", "scenes", "vendor"):
+                sif(rel, 0, 0, 0o40755 if entry.is_dir() and len(parts) == 3 else None)
             elif len(parts) == 3 and entry.is_file():
                 name = parts[2]
-                if name in ("frameos", "frameos.service"):
-                    continue
-                sif(rel, uid, gid, 0o100600 if name.startswith("frame.json") else 0o100644)
+                if name == "frameos":
+                    sif(rel, 0, 0, 0o100755)
+                elif name == "frameos.service":
+                    sif(rel, 0, 0, 0o100644)
+                else:
+                    sif(rel, uid, gid, 0o100600 if name.startswith("frame.json") else 0o100644)
         elif top == "state":
             if len(parts) >= 2 and parts[1] in ("NetworkManager", "wpa_supplicant"):
                 continue
-            sif(rel, uid, gid, 0o40750 if len(parts) == 1 else None)
+            sif(rel, 0 if len(parts) == 1 else uid, gid, 0o41770 if len(parts) == 1 else None)
         elif top in ("logs", "tmp", "runtime", "staging"):
-            sif(rel, uid, gid, 0o40770 if entry.is_dir() else None)
+            sif(rel, 0 if len(parts) == 1 else uid, gid, 0o41770 if len(parts) == 1 else None)
         elif top == "privileged":
             if len(parts) == 1:
                 sif(rel, 0, gid, 0o40755)
             elif parts[1] == "queue":
                 sif(rel, 0, gid, 0o41770 if len(parts) == 2 else None)
             elif parts[1] == "results":
-                sif(rel, uid, gid, 0o40770 if len(parts) == 2 else None)
+                result_mode = 0o42750 if len(parts) == 2 else (0o100640 if entry.is_file() else 0o40750)
+                sif(rel, 0, gid, result_mode)
+        elif top == "vendor":
+            sif(rel, 0, 0, 0o40755 if len(parts) == 1 and entry.is_dir() else None)
     return "\n".join(lines) + ("\n" if lines else "")
 
 
@@ -1932,6 +1942,11 @@ class BuildrootImageBuilder:
         shutil.copy2(frameos_build.binary_path, release_dir / "frameos")
         os.chmod(release_dir / "frameos", 0o755)
         self._copy_libraries(frameos_build.driver_library_paths, release_dir / "drivers")
+        # The privileged worker loads code from the current release. Always
+        # create these roots in the composed image so the runtime cannot
+        # pre-plant them in the sticky release directory.
+        (release_dir / "drivers").mkdir(exist_ok=True)
+        (release_dir / "scenes").mkdir(exist_ok=True)
 
         (release_dir / "frame.json").write_text(
             json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
@@ -3721,19 +3736,24 @@ chmod 700 "$frameos_root/state/NetworkManager/system-connections"
 mkdir -p "$frameos_root/state/wpa_supplicant"
 chown 0:0 "$frameos_root/state/wpa_supplicant"
 chmod 700 "$frameos_root/state/wpa_supplicant"
-# The runtime user's directories (docs/buildroot-privileges.md §3); numeric
-# ids because this runs under fakeroot where the users table is not applied yet.
-for d in logs tmp runtime staging privileged/results; do
+# The runtime-writable sticky directories (docs/buildroot-privileges.md §3);
+# numeric ids because this runs under fakeroot where the users table is not
+# applied yet. Root owns each directory so the runtime cannot replace a root
+# helper's atomic temporary file before rename.
+for d in logs tmp runtime staging; do
   mkdir -p "$frameos_root/$d"
-  chown __FRAMEOS_UID__:__FRAMEOS_GID__ "$frameos_root/$d"
-  chmod 770 "$frameos_root/$d"
+  chown 0:__FRAMEOS_GID__ "$frameos_root/$d"
+  chmod 1770 "$frameos_root/$d"
 done
-chown __FRAMEOS_UID__:__FRAMEOS_GID__ "$frameos_root/state"
-chmod 750 "$frameos_root/state"
+chown 0:__FRAMEOS_GID__ "$frameos_root/state"
+chmod 1770 "$frameos_root/state"
 mkdir -p "$frameos_root/privileged/queue"
 chown 0:__FRAMEOS_GID__ "$frameos_root/privileged" "$frameos_root/privileged/queue"
 chmod 755 "$frameos_root/privileged"
 chmod 1770 "$frameos_root/privileged/queue"
+mkdir -p "$frameos_root/privileged/results"
+chown 0:__FRAMEOS_GID__ "$frameos_root/privileged/results"
+chmod 2750 "$frameos_root/privileged/results"
 mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections" "$target_dir/etc/wpa_supplicant"
 chown 0:0 "$target_dir/etc/NetworkManager/system-connections"
 chmod 700 "$target_dir/etc/NetworkManager/system-connections"

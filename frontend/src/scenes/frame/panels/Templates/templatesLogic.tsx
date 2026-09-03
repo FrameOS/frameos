@@ -9,6 +9,7 @@ import { appsModel } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
+import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
@@ -1065,7 +1066,14 @@ export const templatesLogic = kea<templatesLogicType>([
           detail: 'Assigning the scene to this frame',
         })
         try {
-          const assigned = await assignCloudFrameStoreScene(props.frameId, storeSceneId)
+          // Installing is the owner's consent: the scene is granted the
+          // service keys its apps declare, and the frame's Service settings
+          // section shows the grant per scene for adjusting later.
+          const assigned = await assignCloudFrameStoreScene(
+            props.frameId,
+            storeSceneId,
+            collectSecretSettingsFromScenes(scenes, values.apps)
+          )
           longRunningTasksModel.actions.finishTask({
             frameId: props.frameId,
             kind: 'save',

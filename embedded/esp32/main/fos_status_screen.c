@@ -248,7 +248,7 @@ static int draw_header(uint8_t *buf, int width, int height, fos_pixel_format_t f
     return y + header_h;
 }
 
-esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
+esp_err_t fos_status_screen_show_portal(const char *ssid, const char *psk, const char *ip)
 {
     if (!fos_display_present()) return ESP_ERR_INVALID_STATE;
 
@@ -268,8 +268,10 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
     int gap = scale * 4;
 
     char ssid_line[48];
+    char psk_line[80];
     char ip_line[64];
     snprintf(ssid_line, sizeof(ssid_line), "Wi-Fi: %s", ssid && ssid[0] ? ssid : "FrameOS");
+    snprintf(psk_line, sizeof(psk_line), "Password: %s", psk && psk[0] ? psk : "(none)");
     snprintf(ip_line, sizeof(ip_line), "then open http://%s/", ip && ip[0] ? ip : "192.168.4.1");
 
     int avail = width - 2 * margin;
@@ -282,6 +284,9 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
     int ssid_scale = fit_scale(ssid_line, scale + 1, avail);
     draw_text(buf, width, height, format, ssid_line, margin, y, ssid_scale);
     y += 7 * ssid_scale + gap;
+    int psk_scale = fit_scale(psk_line, scale + 1, avail);
+    draw_text(buf, width, height, format, psk_line, margin, y, psk_scale);
+    y += 7 * psk_scale + gap;
     draw_text(buf, width, height, format, ip_line, margin, y, fit_scale(ip_line, scale, avail));
 
     esp_err_t err = fos_display_blit(buf, len);

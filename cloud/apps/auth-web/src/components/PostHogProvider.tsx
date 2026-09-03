@@ -50,7 +50,7 @@ export function PostHogProvider({
     posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "", {
       // `|| default`, not `??`: CI may inline an empty string here, and an
       // empty api_host would send events nowhere (matches error-tracking.ts
-      // and signup-notifications.ts).
+      // and posthog-capture.ts).
       api_host:
         process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() ||
         "https://eu.i.posthog.com",

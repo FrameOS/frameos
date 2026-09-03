@@ -475,3 +475,15 @@ def test_compiled_scene_keeps_a_wired_fill_color_on_the_floor():
     scene["fields"] = [{"name": "tint", "type": "string", "value": "#336699"}]
     source = write_scene_nim(_frame(), scene)
     assert "decodeTarget" not in source
+
+
+def test_nim_string_literal_escapes_every_way_out_of_the_literal():
+    from app.codegen.scene_nim import nim_string_literal
+    from app.codegen.utils import nim_comment, sanitize_nim_string
+
+    assert nim_string_literal('a"b\\c') == '"a\\"b\\\\c"'
+    # CR alone would let CRLF input end the line the literal sits on; NUL is
+    # end-of-file to the Nim lexer, so it is dropped rather than escaped.
+    assert nim_string_literal("x\r\ny\0z") == '"x\\r\\nyz"'
+    assert sanitize_nim_string("x\r\ny\0z") == "x\\r\\nyz"
+    assert nim_comment("a\0b\r\nc") == "ab  c"

@@ -15,7 +15,8 @@ import {
   surfaceIsAbsorbed,
   utcDayWindow,
 } from "@frameos-cloud/ledger";
-import { accounts, accountSettings, type createDb } from "@frameos-cloud/db";
+import { accounts, type createDb } from "@frameos-cloud/db";
+import { storedAccountSettings } from "../account-settings";
 import { resolveChatModel, resolveReasoningEffort } from "./openai";
 
 export type AiCredentials = {
@@ -32,13 +33,37 @@ export type AiCredentials = {
 export type AiRefusal =
   // The account turned AI off. Nothing is wrong; they asked for this.
   | { detail: string; reason: "ai_disabled" }
-  // Today's spend is at the cap. Comes back tomorrow on its own.
-  | { detail: string; reason: "daily_cap_reached"; resetAt: string; capMicros: string; spentMicros: string }
+  // Today's spend is at the cap. Comes back tomorrow on its own. `allowance`
+  // says whose money the cap was guarding: "billable" is the account's own
+  // credit limit, "shared" is the operator's free allowance on the shared
+  // key — a limit on money the account does not owe, and the copy must not
+  // pretend otherwise (§9.3).
+  | {
+      allowance: "billable" | "shared";
+      capMicros: string;
+      detail: string;
+      reason: "daily_cap_reached";
+      resetAt: string;
+      spentMicros: string;
+    }
   // No key available to this account at all — the original meaning of null.
   | { detail: string; reason: "missing_api_key" };
 
+// What the cap looked like when the turn was let through, for the runner
+// to keep checking against while the turn runs. Absent when no cap applies
+// (their own key, an absorbed surface, a deployment with no cap).
+export type AiSpendBudget = {
+  allowance: "billable" | "shared";
+  capMicros: bigint;
+  overdraftMicros: bigint;
+  // What the ledger has recorded for today. Does NOT include the account's
+  // other unfinished turns — the runner reads those from the reservation
+  // registry as it goes (spend-reservations.ts), because they move.
+  spentMicros: bigint;
+};
+
 export type AiAccess =
-  | { credentials: AiCredentials; ok: true }
+  | { budget?: AiSpendBudget; credentials: AiCredentials; ok: true }
   | { ok: false; refusal: AiRefusal };
 
 type SharedAccess = "none" | "superadmin" | "verified" | "all";
@@ -73,6 +98,10 @@ export function sharedKeyAllowedFor(
  * its spend queried, let alone be told about a cap), then the key, then the
  * cap — which only binds when the key is OURS, because a turn on the
  * customer's own key costs us nothing and capping it would be gratuitous.
+ *
+ * Two caps, one query: the shared key (the operator's free tier) has its own
+ * `shared_key_daily_cap_micros`, because that usage is our money and not a
+ * bill the account will ever see. It falls back to the main cap when unset.
  */
 export async function resolveAiAccess(
   db: ReturnType<typeof createDb>,
@@ -82,6 +111,11 @@ export async function resolveAiAccess(
     // The product surface, so an absorbed one (the legacy scene converter,
     // which we pay for on purpose) is never turned into a 402 by a cap.
     surface?: string | null | undefined;
+    // What the account's OTHER turns have reserved but not yet metered
+    // (spend-reservations.ts inFlightSpendMicros). The ledger only learns a
+    // turn's cost when it ends, so without this three turns started at once
+    // are all admitted under a cap the first one alone may exhaust.
+    inFlightMicros?: bigint | undefined;
   } = {},
 ): Promise<AiAccess> {
   const env = options.env ?? process.env;
@@ -117,28 +151,54 @@ export async function resolveAiAccess(
   }
 
   const settings = await readBillingSettings(db, env);
-  if (settings.dailyCapMicros > 0n) {
+  const allowance = credentials.source === "shared" ? "shared" : "billable";
+  const capMicros =
+    allowance === "shared" ? settings.sharedKeyDailyCapMicros : settings.dailyCapMicros;
+  if (capMicros > 0n) {
     const window = utcDayWindow();
     const spent = await accountAiSpendMicros(db, accountId, window);
-    // Checked before a turn, never during: a turn's cost is unknown until it
-    // ends, so the last turn of the day can cross the line. That accepted
-    // overshoot is what `payg_overdraft_micros` sizes, and it is why the cap
-    // is $10 rather than $10,000.
-    if (spent >= settings.dailyCapMicros + settings.overdraftMicros) {
+    const inFlight = options.inFlightMicros ?? 0n;
+    // Refused AT the cap, counting what is reserved in flight as spent. A turn's cost is unknown until it ends, so a turn
+    // let through here can still cross the line; `payg_overdraft_micros` is
+    // how far past it the runner lets that turn go before stopping it
+    // mid-flight, and the tolerance the nightly check allows. The gate used
+    // to refuse at cap + overdraft, which made the real cap $11 and every
+    // honest overshoot a nightly alert (§9.2 item 3).
+    if (spent + inFlight >= capMicros) {
       return {
         ok: false,
         refusal: {
-          capMicros: settings.dailyCapMicros.toString(),
-          detail:
-            "This account has reached its daily AI limit. It resets at midnight UTC.",
+          allowance,
+          capMicros: capMicros.toString(),
+          detail: dailyCapDetail(allowance),
           reason: "daily_cap_reached",
           resetAt: window.until.toISOString(),
-          spentMicros: spent.toString(),
+          spentMicros: (spent + inFlight).toString(),
         },
       };
     }
+    return {
+      budget: {
+        allowance,
+        capMicros,
+        overdraftMicros: settings.overdraftMicros,
+        spentMicros: spent,
+      },
+      credentials,
+      ok: true,
+    };
   }
   return { credentials, ok: true };
+}
+
+// The sentence a refused turn carries. A shared-key user is not "over
+// budget" on anything they owe: the allowance is ours, and the message says
+// whose it is rather than showing them a dollar limit on a bill that does
+// not exist.
+export function dailyCapDetail(allowance: "billable" | "shared"): string {
+  return allowance === "shared"
+    ? "This account has used up today's free AI allowance on the shared key. Nothing is billed for it; it resets at midnight UTC."
+    : "This account has reached its daily AI limit. It resets at midnight UTC.";
 }
 
 export async function resolveAiCredentials(
@@ -146,11 +206,10 @@ export async function resolveAiCredentials(
   accountId: string,
   env: Record<string, string | undefined> = process.env,
 ): Promise<AiCredentials | null> {
-  const settingsRows = await db
-    .select()
-    .from(accountSettings)
-    .where(eq(accountSettings.accountId, accountId));
-  const raw = settingsRows.find((row) => row.key === "openAI")?.value;
+  // Opened, not masked: this is one of the two readers that get the sealed
+  // secrets back as bytes (account-settings.ts) — the key goes to OpenAI.
+  const raw = (await storedAccountSettings(db, accountId, { reveal: true }))
+    .openAI;
   const openaiSettings =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)

@@ -15,6 +15,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "./csrf";
 import { verifyPasswordWithDummyFallback } from "./passwords";
 import { identityRateLimitResponse, rateLimitResponse } from "./rate-limit";
+import { requireRecentAuth } from "./recent-auth";
+import { sendSecurityNotificationEmail, type SecurityNotification } from "./email";
+import { reportError } from "./log";
 import { readSession } from "./session";
 import { secondFactorStatus, verifySecondFactorCode } from "./two-factor";
 
@@ -32,7 +35,15 @@ export type AccountSessionContext = {
 export async function accountSecurityContext(
   request: NextRequest,
   db: ReturnType<typeof createDb>,
-  options: { action: string; limit?: number; mutating?: boolean } = {
+  options: {
+    action: string;
+    limit?: number;
+    mutating?: boolean;
+    // Strengthening routes (enrolling a passkey or an authenticator) demand
+    // it: a credential added with nothing but a stolen cookie is permanent,
+    // and the passkey then satisfies sudo mode on its own.
+    recentAuth?: boolean;
+  } = {
     action: "two-factor",
   },
 ): Promise<AccountSessionContext | { response: NextResponse }> {
@@ -56,6 +67,17 @@ export async function accountSecurityContext(
       response: NextResponse.json({ error: "login_required" }, { status: 401 }),
     };
   }
+  // The second-factor routes prove the account with a live secret in the
+  // body, or change what such a proof will be from now on; neither is a
+  // thing a bearer token minted from an old session gets to do.
+  if (options.mutating && session.apiToken) {
+    return {
+      response: NextResponse.json(
+        { error: "api_token_not_allowed" },
+        { status: 403 },
+      ),
+    };
+  }
   if (options.mutating) {
     const accountLimited = await identityRateLimitResponse(
       session.accountId,
@@ -64,6 +86,12 @@ export async function accountSecurityContext(
     );
     if (accountLimited) {
       return { response: accountLimited };
+    }
+  }
+  if (options.recentAuth) {
+    const stale = await requireRecentAuth(db, session.accountId);
+    if (stale) {
+      return { response: stale };
     }
   }
   const [account] = await db
@@ -126,6 +154,39 @@ export async function requireWeakeningProof(
   return undefined;
 }
 
+// The proof a STRENGTHENING action carries: enrolling an authenticator or a
+// passkey. Recent auth alone is a cookie that was fresh a quarter of an hour
+// ago; a passkey enrolled with it then satisfies sudo mode on its own, for
+// good. So when the account has a password the body must carry it, checked
+// here at the START of enrollment. The finishing steps (totp/confirm, the
+// passkey attestation) are bound to what the start minted — the pending
+// secret, the single-use challenge cookie — so nothing reaches them without
+// having passed this. Accounts without a password have nothing more to ask
+// for and stay on the recent-auth gate alone.
+export async function requireStrengtheningProof(
+  db: ReturnType<typeof createDb>,
+  context: AccountSessionContext,
+  body: Record<string, unknown> | undefined,
+): Promise<NextResponse | undefined> {
+  if (!context.hasPassword) {
+    return undefined;
+  }
+  const [account] = await db
+    .select({ passwordHash: accounts.passwordHash })
+    .from(accounts)
+    .where(eq(accounts.id, context.accountId))
+    .limit(1);
+  const password = typeof body?.password === "string" ? body.password : "";
+  const valid = await verifyPasswordWithDummyFallback(
+    password,
+    account?.passwordHash,
+  );
+  if (!valid) {
+    return NextResponse.json({ error: "invalid_password" }, { status: 403 });
+  }
+  return undefined;
+}
+
 export async function readJsonBody(request: NextRequest) {
   const body = (await request.json().catch(() => undefined)) as unknown;
   return body && typeof body === "object" && !Array.isArray(body)
@@ -154,4 +215,27 @@ export async function twoFactorStatusPayload(
     totp_enabled: status.totpEnabled,
     totp_pending: status.totpPending,
   };
+}
+
+// Tells the owner a second factor changed. A stolen session that quietly
+// adds a passkey is the scenario; the mail is the owner's chance to notice.
+// Never fails the change itself: the credential is already written, and a
+// mail outage is not a reason to report the enrollment as failed.
+export async function notifySecurityChange(
+  context: AccountSessionContext,
+  what: SecurityNotification["what"],
+  detail?: string | undefined,
+) {
+  try {
+    await sendSecurityNotificationEmail(context.email, {
+      detail,
+      what,
+      when: new Date(),
+    });
+  } catch (error) {
+    reportError("email.security_notification_send_failed", error, {
+      accountId: context.accountId,
+      what,
+    });
+  }
 }

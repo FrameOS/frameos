@@ -3,33 +3,47 @@ import {
   accounts,
   createDb,
 } from "@frameos-cloud/db";
+import { closeOutSubscriptionForDeletedAccount } from "@frameos-cloud/ledger";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../src/lib/admin";
+import {
+  getSuperadminContext,
+  isUuid,
+  superadminRefusal,
+} from "../../../../../src/lib/admin";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { assertDatabaseUrlConfigured } from "../../../../../src/lib/env";
+import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 
 type RouteContext = { params: Promise<{ accountId: string }> };
 
-function forbidden(kind: "unauthenticated" | "forbidden") {
-  return NextResponse.json(
-    { error: kind },
-    { status: kind === "unauthenticated" ? 401 : 403 },
-  );
-}
+// Two grants a minute is already generous for a human at the admin table;
+// the limit is there so a stolen fresh session cannot sweep the user list.
+const adminUsersRateLimit = { limit: 30, windowMs: 15 * 60 * 1000 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const csrf = csrfResponse(request);
   if (csrf) {
     return csrf;
   }
+  const limited = await rateLimitResponse(
+    request,
+    "admin:users",
+    adminUsersRateLimit,
+  );
+  if (limited) {
+    return limited;
+  }
 
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ mutation: true });
   if (admin.kind !== "ok") {
-    return forbidden(admin.kind);
+    return superadminRefusal(admin);
   }
 
   const { accountId } = await context.params;
+  if (!isUuid(accountId)) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
   const body = (await request.json().catch(() => undefined)) as
     | { is_superadmin?: unknown }
     | undefined;
@@ -72,19 +86,34 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (csrf) {
     return csrf;
   }
+  const limited = await rateLimitResponse(
+    request,
+    "admin:users",
+    adminUsersRateLimit,
+  );
+  if (limited) {
+    return limited;
+  }
 
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ mutation: true });
   if (admin.kind !== "ok") {
-    return forbidden(admin.kind);
+    return superadminRefusal(admin);
   }
 
   const { accountId } = await context.params;
+  if (!isUuid(accountId)) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
   if (accountId === admin.accountId) {
     return NextResponse.json({ error: "cannot_delete_self" }, { status: 400 });
   }
 
   assertDatabaseUrlConfigured();
   const db = createDb();
+  // Books first (cloud/docs/accounting-todo.md §9.2 item 4): a subscription
+  // in progress returns its unearned remainder to the receivable and ends,
+  // so deleting the account cannot strand deferred revenue.
+  await closeOutSubscriptionForDeletedAccount(db, accountId);
   const [deleted] = await db
     .delete(accounts)
     .where(eq(accounts.id, accountId))

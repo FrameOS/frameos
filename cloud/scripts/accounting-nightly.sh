@@ -14,17 +14,29 @@ set -euo pipefail
 # tsx, which is why this cannot simply be a Node script either — the same
 # reason object-store-sweep.sh is bash.)
 #
-# Authentication is a personal API token belonging to a superadmin, which is
-# an auth mechanism that already exists rather than a new shared secret:
+# Authentication is a JOB token (`fc_apijob_…`, access `billing_nightly`) on
+# a dedicated service account — an existing token mechanism rather than a
+# new shared secret, but a kind that opens this one route and nothing else
+# (src/lib/api-tokens.ts authenticateJobToken). The account is not a
+# superadmin and cannot be signed in to:
 #
 #   /etc/frameos-cloud/accounting.env
-#     ACCOUNTING_API_TOKEN=fc_api_...
+#     ACCOUNTING_API_TOKEN=fc_apijob_...
 #     ACCOUNTING_URL=https://cloud.frameos.net/api/admin/billing/nightly
-#     ACCOUNTING_HEALTHCHECKS_URL=https://hc-ping.com/...   # optional
+#     ACCOUNTING_HEALTHCHECKS_URL=https://hc-ping.com/...   # or "none"
 #
-# Create the token at /account/api-tokens as a superadmin. Run nightly via
+# Whose token: a dedicated service account, minted by
+# scripts/accounting-service-account.sh, NOT a person's. A personal token
+# dies with the person — revoked on their way out, or expired with their
+# account — and the job with it, silently (§9.3). Run nightly via
 # ops/accounting/frameos-cloud-accounting.timer; see
 # cloud/docs/operational-runbooks.md.
+#
+# The healthchecks ping is REQUIRED. This is a dead-man job: the failure
+# mode that matters is not a loud error but a night that never ran, and
+# only an external check that expects a ping can notice that. A deployment
+# that genuinely has nowhere to ping says so with ACCOUNTING_HEALTHCHECKS_URL=none
+# rather than by leaving it unset.
 #
 # Exit status is the alert: 0 when the sweep worked and every invariant
 # holds, 1 when anything needs a human. Violations are NOT fixed
@@ -33,15 +45,26 @@ set -euo pipefail
 
 url="${ACCOUNTING_URL:-http://127.0.0.1:3000/api/admin/billing/nightly}"
 token="${ACCOUNTING_API_TOKEN:?set ACCOUNTING_API_TOKEN in /etc/frameos-cloud/accounting.env}"
-ping_url="${ACCOUNTING_HEALTHCHECKS_URL:-}"
+ping_url="${ACCOUNTING_HEALTHCHECKS_URL:?set ACCOUNTING_HEALTHCHECKS_URL in /etc/frameos-cloud/accounting.env (a healthchecks.io ping URL, or "none" to opt out of the dead-man check on purpose)}"
+if [ "$ping_url" = "none" ]; then
+  ping_url=""
+fi
 
-response="$(mktemp)"
-trap 'rm -f "$response"' EXIT
+# The token reaches curl through a header file (`-H @file`), never as an
+# argument: a process's command line is readable by every user on the box
+# in `ps` / /proc/*/cmdline for as long as the request runs — up to the
+# 300 s below. The directory is created
+# 0700 by mktemp -d; the umask keeps the files inside it 0600.
+workdir="$(umask 077 && mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+header_file="$workdir/authorization"
+response="$workdir/response"
+(umask 077 && printf 'authorization: Bearer %s\n' "$token" >"$header_file")
 
 status="$(curl -sS -o "$response" -w '%{http_code}' \
   --max-time 300 \
   -X POST \
-  -H "authorization: Bearer ${token}" \
+  -H @"$header_file" \
   -H 'content-type: application/json' \
   --data '{}' \
   "$url" || echo 000)"

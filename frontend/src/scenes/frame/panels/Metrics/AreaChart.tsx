@@ -6,6 +6,21 @@ import { LinearGradient } from '@visx/gradient'
 import { curveMonotoneX } from '@visx/curve'
 import type { MetricPoint, MetricSeries } from './metricsLogic'
 import { metricChartThemes, type MetricChartTheme } from './chartTheme'
+import { splitByGap } from './chartData'
+
+/**
+ * A series to draw. `segments` — gap-split, downsampled runs — come from
+ * chartData.prepareChartSeries; a caller without them (the header
+ * sparklines) gets the raw data split at gaps here instead.
+ */
+export type AreaChartSeries = MetricSeries & { segments?: MetricPoint[][] }
+
+/**
+ * Sample circles are drawn while they still mean something: past this
+ * many drawn points per pixel of width they merge into a thick line and
+ * cost a DOM node each.
+ */
+const MAX_POINT_MARKER_DENSITY = 1 / 4
 
 // Initialize some variables
 const axisBottomTickLabelBaseProps = {
@@ -76,30 +91,6 @@ interface ChartTooltipSnapshot {
 
 interface ChartTooltipState extends ChartTooltipSnapshot {
   pointerY: number
-}
-
-function splitDataByGap(data: MetricPoint[], gapThresholdMs?: number | null): MetricPoint[][] {
-  if (!gapThresholdMs || data.length <= 1) {
-    return data.length === 0 ? [] : [data]
-  }
-
-  const segments: MetricPoint[][] = []
-  let segment: MetricPoint[] = []
-
-  data.forEach((point) => {
-    const previous = segment[segment.length - 1]
-    if (previous && getDate(point).getTime() - getDate(previous).getTime() > gapThresholdMs) {
-      segments.push(segment)
-      segment = []
-    }
-    segment.push(point)
-  })
-
-  if (segment.length > 0) {
-    segments.push(segment)
-  }
-
-  return segments
 }
 
 function getScaleTicks(scale: AxisScale<number>, count: number): number[] {
@@ -194,19 +185,24 @@ function formatTooltipTimestamp(timestamp: number): string {
   return tooltipTimestampFormatter.format(new Date(timestamp))
 }
 
+/** The snapshot nearest to pixel `x`; snapshots are sorted by x, so a binary search. */
 function closestTooltipSnapshot(snapshots: ChartTooltipSnapshot[], x: number): ChartTooltipSnapshot | null {
-  let closest: ChartTooltipSnapshot | null = null
-  let closestDistance = Infinity
-
-  snapshots.forEach((snapshot) => {
-    const distance = Math.abs(snapshot.x - x)
-    if (distance < closestDistance) {
-      closest = snapshot
-      closestDistance = distance
+  if (snapshots.length === 0) {
+    return null
+  }
+  let low = 0
+  let high = snapshots.length
+  while (low < high) {
+    const mid = (low + high) >>> 1
+    if (snapshots[mid].x < x) {
+      low = mid + 1
+    } else {
+      high = mid
     }
-  })
-
-  return closest
+  }
+  const after = snapshots[Math.min(low, snapshots.length - 1)]
+  const before = snapshots[Math.max(low - 1, 0)]
+  return Math.abs(after.x - x) < Math.abs(before.x - x) ? after : before
 }
 
 function ChartTooltip({
@@ -295,6 +291,98 @@ function ChartTooltip({
   )
 }
 
+type ValueScale = AxisScale<number>
+
+function seriesValueScale(
+  chartSeries: AreaChartSeries,
+  yScale: ValueScale,
+  yScaleRight: ValueScale | undefined
+): ValueScale {
+  return chartSeries.axis === 'right' && yScaleRight ? yScaleRight : yScale
+}
+
+/**
+ * The lines, areas and sample circles. Memoised on its own: the tooltip
+ * re-renders the chart on every pointer move, and this is the part whose
+ * render builds a path string per drawn point.
+ */
+const SeriesPaths = React.memo(function SeriesPaths({
+  series,
+  xScale,
+  yScale,
+  yScaleRight,
+  gradientId,
+  compact,
+  withPoints,
+  xMax,
+}: {
+  series: (AreaChartSeries & { segments: MetricPoint[][] })[]
+  xScale: AxisScale<number>
+  yScale: ValueScale
+  yScaleRight?: ValueScale
+  gradientId: string
+  compact: boolean
+  withPoints: boolean
+  xMax: number
+}) {
+  const isMultiSeries = series.length > 1
+  const lineStrokeWidth = compact ? 1.35 : isMultiSeries ? 1.75 : 1.5
+  const lineStrokeOpacity = compact ? 0.9 : 0.95
+  const drawnPointCount = series.reduce(
+    (count, chartSeries) => count + chartSeries.segments.reduce((sum, segment) => sum + segment.length, 0),
+    0
+  )
+  const showPoints = withPoints && xMax > 0 && drawnPointCount <= xMax * MAX_POINT_MARKER_DENSITY
+
+  return (
+    <>
+      {series.map((chartSeries) => {
+        const valueScale = seriesValueScale(chartSeries, yScale, yScaleRight)
+        const x = (d: MetricPoint) => xScale(getDate(d)) || 0
+        const y = (d: MetricPoint) => valueScale(getValue(d)) || 0
+        return chartSeries.segments.map((segment, index) => (
+          <React.Fragment key={`${chartSeries.key}-${getDate(segment[0]).getTime()}-${index}`}>
+            {!isMultiSeries && (
+              <AreaClosed<MetricPoint>
+                data={segment}
+                x={x}
+                y={y}
+                yScale={valueScale}
+                strokeWidth={compact ? 0 : 1}
+                stroke={compact ? 'transparent' : `url(#${gradientId})`}
+                fill={`url(#${gradientId})`}
+                curve={curveMonotoneX}
+              />
+            )}
+            <LinePath<MetricPoint>
+              curve={curveMonotoneX}
+              data={segment}
+              x={x}
+              y={y}
+              stroke={chartSeries.color}
+              strokeWidth={lineStrokeWidth}
+              strokeOpacity={lineStrokeOpacity}
+              shapeRendering={compact ? 'auto' : 'geometricPrecision'}
+            />
+            {showPoints &&
+              segment.map((d, j) => (
+                <circle
+                  key={j}
+                  r={2}
+                  cx={x(d)}
+                  cy={y(d)}
+                  stroke={chartSeries.color}
+                  strokeOpacity={0.85}
+                  fill="transparent"
+                />
+              ))}
+          </React.Fragment>
+        ))
+      })}
+    </>
+  )
+})
+
 export function AreaChart({
   series,
   gradientColor,
@@ -317,7 +405,7 @@ export function AreaChart({
   left,
   children,
 }: {
-  series: MetricSeries[]
+  series: AreaChartSeries[]
   gradientColor: string
   xScale: AxisScale<number>
   yScale: AxisScale<number>
@@ -338,7 +426,9 @@ export function AreaChart({
   left?: number
   children?: React.ReactNode
 }) {
-  const gradientId = useId().replace(/:/g, '')
+  const ids = useId().replace(/:/g, '')
+  const gradientId = `${ids}-gradient`
+  const clipId = `${ids}-clip`
   const [tooltip, setTooltip] = useState<ChartTooltipState | null>(null)
   const xMax = Math.max(width - margin.left - margin.right, 0)
   const primaryColor = series[0]?.color ?? gradientColor
@@ -362,49 +452,61 @@ export function AreaChart({
     () =>
       series.map((chartSeries) => ({
         ...chartSeries,
-        segments: splitDataByGap(chartSeries.data, gapThresholdMs),
+        segments: chartSeries.segments ?? splitByGap(chartSeries.data, gapThresholdMs),
       })),
     [series, gapThresholdMs]
   )
+  // One snapshot per drawn timestamp, sorted by x, for the hover lookup.
+  // Only the points inside the plot: the padding sample either side of the
+  // window is drawn (clipped) so the line runs off the edge, but hovering
+  // must not snap to it.
   const tooltipSnapshots = useMemo(() => {
+    if (!showTooltip) {
+      return []
+    }
     const snapshots = new Map<number, ChartTooltipSnapshotAccumulator>()
 
-    series.forEach((chartSeries) => {
-      chartSeries.data.forEach((point) => {
-        const timestamp = getDate(point).getTime()
-        const x = xScale(getDate(point))
-        const value = getValue(point)
-        const y = chartSeries.axis === 'right' && yScaleRight ? yScaleRight(value) : yScale(value)
+    seriesSegments.forEach((chartSeries) => {
+      const valueScale = seriesValueScale(chartSeries, yScale, yScaleRight)
+      chartSeries.segments.forEach((segment) => {
+        segment.forEach((point) => {
+          const timestamp = getDate(point).getTime()
+          const x = xScale(getDate(point))
+          const value = getValue(point)
+          const y = valueScale(value)
 
-        if (
-          !Number.isFinite(timestamp) ||
-          typeof x !== 'number' ||
-          !Number.isFinite(x) ||
-          typeof y !== 'number' ||
-          !Number.isFinite(y)
-        ) {
-          return
-        }
-
-        let snapshot = snapshots.get(timestamp)
-        if (!snapshot) {
-          snapshot = { timestamp, x, rowsByKey: new Map() }
-          snapshots.set(timestamp, snapshot)
-        }
-        let row = snapshot.rowsByKey.get(chartSeries.key)
-        if (!row) {
-          row = {
-            key: chartSeries.key,
-            label: chartSeries.label,
-            color: chartSeries.color,
-            unit: chartSeries.unit,
-            values: [],
-            yValues: [],
+          if (
+            !Number.isFinite(timestamp) ||
+            typeof x !== 'number' ||
+            !Number.isFinite(x) ||
+            x < 0 ||
+            x > xMax ||
+            typeof y !== 'number' ||
+            !Number.isFinite(y)
+          ) {
+            return
           }
-          snapshot.rowsByKey.set(chartSeries.key, row)
-        }
-        row.values.push(value)
-        row.yValues.push(y)
+
+          let snapshot = snapshots.get(timestamp)
+          if (!snapshot) {
+            snapshot = { timestamp, x, rowsByKey: new Map() }
+            snapshots.set(timestamp, snapshot)
+          }
+          let row = snapshot.rowsByKey.get(chartSeries.key)
+          if (!row) {
+            row = {
+              key: chartSeries.key,
+              label: chartSeries.label,
+              color: chartSeries.color,
+              unit: chartSeries.unit,
+              values: [],
+              yValues: [],
+            }
+            snapshot.rowsByKey.set(chartSeries.key, row)
+          }
+          row.values.push(value)
+          row.yValues.push(y)
+        })
       })
     })
 
@@ -422,13 +524,10 @@ export function AreaChart({
           })),
         })
       )
-      .sort((a, b) => a.timestamp - b.timestamp)
-  }, [series, xScale, yScale, yScaleRight])
-  const isMultiSeries = series.length > 1
+      .sort((a, b) => a.x - b.x)
+  }, [seriesSegments, showTooltip, xScale, yScale, yScaleRight, xMax])
   const areaFromOpacity = compact ? 0.1 : 0.28
   const areaToOpacity = compact ? 0 : 0.04
-  const lineStrokeWidth = compact ? 1.35 : isMultiSeries ? 1.75 : 1.5
-  const lineStrokeOpacity = compact ? 0.9 : 0.95
 
   const onTooltipPointerMove = (event: React.PointerEvent<SVGRectElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -449,58 +548,27 @@ export function AreaChart({
         to={primaryColor}
         toOpacity={areaToOpacity}
       />
+      <clipPath id={clipId}>
+        {/* Headroom above and below: nice()d domains and stroke widths spill past yMax. */}
+        <rect x={0} y={-8} width={xMax} height={yMax + 16} />
+      </clipPath>
       {!hideGrid &&
         gridTicks.map((tick) => {
           const y = yScale(tick) || 0
           return <line key={tick} x1={0} x2={xMax} y1={y} y2={y} stroke={chartTheme.grid} strokeWidth={1} />
         })}
-      {seriesSegments.map((chartSeries) =>
-        chartSeries.segments.map((segment, index) => (
-          <React.Fragment key={`${chartSeries.key}-${getDate(segment[0]).getTime()}-${index}`}>
-            {!isMultiSeries && (
-              <AreaClosed<MetricPoint>
-                data={segment}
-                x={(d) => xScale(getDate(d)) || 0}
-                y={(d) =>
-                  (chartSeries.axis === 'right' && yScaleRight ? yScaleRight(getValue(d)) : yScale(getValue(d))) || 0
-                }
-                yScale={chartSeries.axis === 'right' && yScaleRight ? yScaleRight : yScale}
-                strokeWidth={compact ? 0 : 1}
-                stroke={compact ? 'transparent' : `url(#${gradientId})`}
-                fill={`url(#${gradientId})`}
-                curve={curveMonotoneX}
-              />
-            )}
-            <LinePath<MetricPoint>
-              curve={curveMonotoneX}
-              data={segment}
-              x={(d) => xScale(getDate(d)) || 0}
-              y={(d) =>
-                (chartSeries.axis === 'right' && yScaleRight ? yScaleRight(getValue(d)) : yScale(getValue(d))) || 0
-              }
-              stroke={chartSeries.color}
-              strokeWidth={lineStrokeWidth}
-              strokeOpacity={lineStrokeOpacity}
-              shapeRendering={compact ? 'auto' : 'geometricPrecision'}
-              markerMid={compact ? undefined : 'url(#marker-circle)'}
-            />
-          </React.Fragment>
-        ))
-      )}
-      {withPoints &&
-        series.map((chartSeries) =>
-          chartSeries.data.map((d, j) => (
-            <circle
-              key={`${chartSeries.key}-${j}`}
-              r={2}
-              cx={xScale(getDate(d))}
-              cy={(chartSeries.axis === 'right' && yScaleRight ? yScaleRight(getValue(d)) : yScale(getValue(d))) || 0}
-              stroke={chartSeries.color}
-              strokeOpacity={0.85}
-              fill="transparent"
-            />
-          ))
-        )}
+      <g clipPath={`url(#${clipId})`}>
+        <SeriesPaths
+          series={seriesSegments}
+          xScale={xScale}
+          yScale={yScale}
+          yScaleRight={yScaleRight}
+          gradientId={gradientId}
+          compact={compact}
+          withPoints={withPoints}
+          xMax={xMax}
+        />
+      </g>
       {!hideBottomAxis && (
         <AxisBottom
           top={yMax}

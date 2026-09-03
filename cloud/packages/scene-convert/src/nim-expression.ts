@@ -240,12 +240,29 @@ function jsString(value: string): string {
   return JSON.stringify(value);
 }
 
+// Every emitted fragment passes through here. A few Nim forms emit their
+// receiver more than once (a case-expression tests its subject per arm, say),
+// so a chain of them grows the output exponentially: twenty nested calls in
+// a 300-byte request could be tens of megabytes of JavaScript. A code node
+// on a frame is a handful of lines; anything past this is not a scene.
+const maxEmittedJsBytes = 256 * 1024;
+
+function guardEmitted(js: string): string {
+  if (js.length > maxEmittedJsBytes) {
+    throw new NimConvertError(
+      `converted expression exceeds ${maxEmittedJsBytes} characters`,
+      0,
+    );
+  }
+  return js;
+}
+
 function wrap(e: Emitted, minPrec: number): string {
-  return e.prec < minPrec ? `(${e.js})` : e.js;
+  return guardEmitted(e.prec < minPrec ? `(${e.js})` : e.js);
 }
 
 function atom(js: string, kind: Kind, extra: Partial<Emitted> = {}): Emitted {
-  return { js, kind, prec: PREC_ATOM, ...extra };
+  return { js: guardEmitted(js), kind, prec: PREC_ATOM, ...extra };
 }
 
 function kindForFieldType(type: string | undefined): Kind {
@@ -960,7 +977,9 @@ class Parser {
         return atom(`${str()}.toUpperCase()`, "string");
       case "capitalizeAscii":
         arity(1);
-        return atom(`(${str()}.charAt(0).toUpperCase() + ${str()}.slice(1))`, "string");
+        // The receiver is emitted once: repeating it doubles the output per
+        // nested call (see guardEmitted).
+        return atom(`((s) => s.charAt(0).toUpperCase() + s.slice(1))(${asString(recv()).js})`, "string");
       case "isEmptyOrWhitespace":
         arity(1);
         return { js: `${str()}.trim() === ""`, kind: "boolean", prec: PREC_CMP };

@@ -62,6 +62,20 @@ export function getTurn(turnId: string): Turn | undefined {
   return turns.get(turnId);
 }
 
+// Unfinished turns this account has in flight, across all its chats. The
+// per-chat rule (one turn at a time) says nothing about an account opening
+// twenty chats at once; the route caps that, because every one of them
+// spends against the same daily budget before any of them has reported.
+export function activeTurnCountForAccount(accountId: string): number {
+  let count = 0;
+  for (const turn of turns.values()) {
+    if (turn.accountId === accountId && turn.finishedAt === null) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 // The running turn of a chat, if any — a chat runs one turn at a time.
 export function activeTurnForChat(chatId: string): Turn | undefined {
   for (const turn of turns.values()) {

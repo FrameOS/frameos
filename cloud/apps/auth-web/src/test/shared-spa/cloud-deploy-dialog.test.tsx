@@ -5,9 +5,10 @@
 // FrameDeployPlanDrawer was written for the backend control plane: deploy
 // plans fetched from POST /api/frames/{id}/deploy_plan, an SSH/agent
 // transport toggle, SD-card and script install views, and the embedded
-// firmware section that reads frame.embedded.firmware (which the BACKEND
-// builds). A cloud frame has none of those fields — its summary carries
-// `hardware`, not `mode` — so the drawer takes a cloud branch instead.
+// firmware section (the backend's release flasher, its OTA button and the
+// flash layout it derives). A cloud frame has none of those fields — its
+// summary carries `hardware`, not `mode` — so the drawer takes a cloud branch
+// instead.
 //
 // The cloud branch is a two-path chooser: a frame has exactly two transports
 // (its own outbound cloud connection, or a USB cable to this computer), so
@@ -228,7 +229,8 @@ describe("the deploy dialog in cloud mode", () => {
       "Run a script",
       "Fast deploy",
       "Full deploy",
-      "Build & download firmware",
+      "Flash latest release",
+      "Copy flash command",
       "Update over the air",
     ]) {
       expect(screen.queryByText(backendOnly)).toBeNull();

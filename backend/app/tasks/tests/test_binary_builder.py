@@ -294,3 +294,44 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
     assert deployer.local_modification_calls == 0
     assert not any("Preparing local build sources" in message for _level, message in logs)
     assert not any("Applying local modifications" in message for _level, message in logs)
+
+
+@pytest.mark.asyncio
+async def test_plan_build_skips_precompiled_when_no_release_is_published_for_target(monkeypatch: pytest.MonkeyPatch):
+    # Raspberry Pi OS bullseye resolves to a prebuilt-deps slug (the deps
+    # manifest has it) but the release matrix stops at bookworm. The bookworm
+    # tarball cannot stand in — its binary wants glibc 2.34+ and bullseye
+    # ships 2.31 — so the plan must fall back to a source build instead of
+    # letting the download 404.
+    async def fake_resolve_prebuilt_entry(**_kwargs):
+        return None, "debian-bullseye-arm64"
+
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
+    monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
+
+    builder = FrameBinaryBuilder(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(
+            device="pimoroni.hyperpixel2r",
+            gpio_buttons=[],
+            rpios={"compilationMode": "precompiled"},
+            scenes=[{"settings": {"execution": "interpreted"}}],
+        ),
+        deployer=FakeDeployer(),
+        temp_dir="/tmp",
+    )
+
+    plan = await builder.plan_build(
+        target_override=TargetMetadata(arch="aarch64", distro="raspios", version="bullseye")
+    )
+
+    assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.compilation_mode == COMPILATION_MODE_STATIC
+    assert plan.will_attempt_precompiled is False
+    assert plan.prebuilt_target == "debian-bullseye-arm64"
+    assert plan.precompiled_skip_reason == (
+        "no precompiled release is published for debian-bullseye-arm64 "
+        "(releases cover debian bookworm/trixie, ubuntu 24.04/26.04)"
+    )
+    assert plan.build_kind != "precompiled"

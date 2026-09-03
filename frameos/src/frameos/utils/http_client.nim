@@ -24,13 +24,73 @@ const
   DefaultFetchMaxSeconds* = 35.0
   DefaultFetchMaxRedirects* = 5
 
+import std/strutils
 import frameos/spool
 
 type
   SimpleHttpHeader* = tuple[name: string, value: string]
 
+## Request hygiene, shared by every target.
+##
+## Scene JS supplies header names, values and URLs (`httpRequest` in
+## js_runtime/app_runtime.nim), so each is untrusted input: a CR/LF splices a
+## second header or request line into the stream, a NUL truncates whatever the
+## other end parses, and a caller-set Host / Content-Length /
+## Transfer-Encoding rewrites framing the client itself is responsible for.
+## Both the Linux socket client below and the embedded esp_http_client bridge
+## run these before a byte goes out.
+const
+  HttpTokenChars = {'!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_',
+                    '`', '|', '~', '0'..'9', 'a'..'z', 'A'..'Z'}
+  ## Hop-by-hop and framing headers the client owns. `Proxy-*` is matched by
+  ## prefix.
+  ReservedRequestHeaders = ["host", "content-length", "transfer-encoding",
+                            "connection", "upgrade", "keep-alive", "te", "trailer"]
+
+proc isReservedHttpHeader*(name: string): bool =
+  let lowered = name.strip().toLowerAscii()
+  lowered in ReservedRequestHeaders or lowered.startsWith("proxy-")
+
+proc validateHttpHeader*(name, value: string) =
+  ## Raises ValueError for a header the client refuses to send: a non-token
+  ## name (RFC 9110 tchar — which rules out CR, LF, NUL, ':' and whitespace),
+  ## a control character in the value (HTAB is allowed), or a reserved
+  ## hop-by-hop / framing name.
+  if name.len == 0:
+    raise newException(ValueError, "Invalid HTTP header name: empty")
+  for c in name:
+    if c notin HttpTokenChars:
+      raise newException(ValueError, "Invalid HTTP header name: " & name.escape())
+  if isReservedHttpHeader(name):
+    raise newException(ValueError, "Reserved HTTP header: " & name)
+  for c in value:
+    if c != '\t' and (ord(c) < 0x20 or ord(c) == 0x7f):
+      raise newException(ValueError, "Invalid HTTP header value for " & name &
+        ": control character")
+
+proc validateHttpHeaders*(headers: seq[SimpleHttpHeader]) =
+  for header in headers:
+    let name = header.name.strip()
+    if name.len == 0:
+      continue
+    validateHttpHeader(name, header.value.strip())
+
+proc validateHttpRequestUrl*(url: string) =
+  ## The URL is copied onto the request line as-is, so anything that ends the
+  ## line, splits the target from the version, or is a control byte is refused
+  ## along with any scheme other than http(s).
+  if url.strip().len == 0:
+    raise newException(ValueError, "Invalid HTTP URL: empty")
+  for c in url:
+    if ord(c) <= 0x20 or ord(c) == 0x7f:
+      raise newException(ValueError, "Invalid HTTP URL: control character or space in " &
+        url.escape())
+  let lowered = url.toLowerAscii()
+  if not (lowered.startsWith("http://") or lowered.startsWith("https://")):
+    raise newException(ValueError, "Invalid HTTP URL: " & url)
+
 when defined(frameosEmbedded) or defined(frameosWasm):
-  import std/[strformat, strutils]
+  import std/strformat
 
   type
     HttpRequestError* = object of IOError
@@ -92,13 +152,15 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                             {.importc: "remove", header: "<stdio.h>".}
 
   proc encodeSimpleHeaders(headers: seq[SimpleHttpHeader]): string =
+    ## Newline-separated `Name: value` block for the C side (frameos_nim_glue
+    ## set_extra_headers). Validated first: the block's own framing is the
+    ## newline, so a value carrying one would become a second header.
     for header in headers:
       let name = header.name.strip()
       if name.len == 0:
         continue
-      if name.contains(":") or name.contains("\r") or name.contains("\n"):
-        raise newException(ValueError, "Invalid HTTP header name: " & name)
-      let value = header.value.replace("\r", " ").replace("\n", " ").strip()
+      let value = header.value.strip()
+      validateHttpHeader(name, value)
       result.add(name & ": " & value & "\n")
 
   proc requireHttpResponseWithinLimit*(content: string, maxBytes: int) =
@@ -213,10 +275,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       ## Opens the request; raises IOError when no response arrives at all.
       ## An HTTP error status is not an exception — check
       ## `httpBodyStreamFailed` / `code`.
-      if url.strip().len == 0:
-        raise newException(ValueError, "Invalid HTTP URL: empty")
-      if not (url.startsWith("http://") or url.startsWith("https://")):
-        raise newException(ValueError, &"Invalid HTTP URL: {url}")
+      validateHttpRequestUrl(url)
       result = HttpBodyStream(url: url, headerBlock: encodeSimpleHeaders(headers),
         timeoutMs: timeoutMs, contentLength: -1)
       result.openStreamHandle()
@@ -320,10 +379,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     ## Returns the C-owned response buffer directly on embedded targets.
     ## Callers must release it with freeHttpBufferResponse once they have
     ## decoded or copied the bytes they need.
-    if url.strip().len == 0:
-      raise newException(ValueError, "Invalid HTTP URL: empty")
-    if not (url.startsWith("http://") or url.startsWith("https://")):
-      raise newException(ValueError, &"Invalid HTTP URL: {url}")
+    validateHttpRequestUrl(url)
     var status: cint = 0
     let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
     let headerBlock = encodeSimpleHeaders(headers)
@@ -536,7 +592,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
 
 else:
   import std/[httpclient, locks, nativesockets, net, os, posix, strformat,
-              strutils, tables, times, uri]
+              tables, times, uri]
 
   const
     RecvChunkBytes = 65536
@@ -763,10 +819,17 @@ else:
       result.add(key, value)
 
   proc validateHttpUrl(url: string) =
+    validateHttpRequestUrl(url)
     let parsed = parseUri(url)
     let scheme = parsed.scheme.toLowerAscii()
     if scheme notin ["http", "https"] or parsed.hostname.len == 0:
       raise newException(ValueError, &"Invalid HTTP URL: {url}")
+
+  proc validateRequestHeaders(headers: HttpHeaders) =
+    if headers == nil:
+      return
+    for key, value in headers:
+      validateHttpHeader(key.strip(), value)
 
   proc limitHttpResponse*(client: HttpClient, maxBytes: int, maxSeconds = DefaultFetchMaxSeconds) =
     client.onProgressChanged = guardFetchProgress(epochTime(), maxBytes, maxSeconds)
@@ -902,9 +965,12 @@ else:
       if parsed.query.len > 0:
         path &= "?" & parsed.query
       var requestHeaders = fetchHeaders(headers)
-      if not requestHeaders.hasKey("Host"):
-        requestHeaders["Host"] =
-          if parsed.port.len > 0: parsed.hostname & ":" & parsed.port else: parsed.hostname
+      # Host, Connection and Content-Length are the client's, never the
+      # caller's: validateRequestHeaders refused them up front, and they are
+      # derived from the URL and body here so a redirect hop cannot carry a
+      # stale one either.
+      requestHeaders["Host"] =
+        if parsed.port.len > 0: parsed.hostname & ":" & parsed.port else: parsed.hostname
       requestHeaders["Connection"] = "close"
       if body.len > 0 or httpMethod in {HttpPost, HttpPut, HttpPatch}:
         requestHeaders["Content-Length"] = $body.len
@@ -969,6 +1035,7 @@ else:
     ## comes off the socket and `result.body` stays empty; everything else
     ## (redirect hops, error bodies) materializes as before.
     validateHttpUrl(url)
+    validateRequestHeaders(headers)
     let deadline = if maxSeconds > 0: epochTime() + maxSeconds else: 0.0
     var currentUrl = url
     var currentMethod = httpMethod

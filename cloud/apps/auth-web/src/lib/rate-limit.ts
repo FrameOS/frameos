@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { createDb, rateLimitBuckets } from "@frameos-cloud/db";
 import { hasDatabaseUrl } from "./env";
@@ -187,6 +187,40 @@ export async function identityRateLimitResponse(
   return tooManyRequests(result.resetAt);
 }
 
+// One-shot tokens on the same store: the first claim of a key wins and every
+// later claim inside `ttlMs` (the token's own lifetime — after that the token
+// is expired anyway) loses. The database table makes a replay against another
+// replica lose too; the in-memory buckets serve when there is no database.
+export async function claimSingleUse(key: string, ttlMs: number) {
+  const result = await checkRateLimit(`single-use:${key}`, {
+    limit: 1,
+    windowMs: ttlMs,
+  });
+  return result.allowed;
+}
+
+// Whether a key has already been claimed, without claiming it — for a route
+// that wants to refuse a spent token up front but must not spend it on a
+// failed attempt (a mistyped code should not end the sign-in).
+export async function singleUseClaimed(key: string) {
+  const bucketKey = `single-use:${key}`;
+  const now = Date.now();
+  if (hasDatabaseUrl()) {
+    try {
+      const [row] = await createDb()
+        .select({ count: rateLimitBuckets.count, resetAt: rateLimitBuckets.resetAt })
+        .from(rateLimitBuckets)
+        .where(eq(rateLimitBuckets.key, bucketKey))
+        .limit(1);
+      return row !== undefined && row.resetAt.getTime() > now && row.count >= 1;
+    } catch {
+      // Fall through to the per-instance buckets.
+    }
+  }
+  const bucket = buckets.get(bucketKey);
+  return bucket !== undefined && bucket.resetAt > now && bucket.count >= 1;
+}
+
 export function resetRateLimitForTests() {
   buckets.clear();
   operationsSinceSweep = 0;
@@ -212,6 +246,15 @@ export function clientKey(request: NextRequest) {
 
 // The client IP the trusted-proxy config says to believe; also used to stamp
 // audit events (see lib/audit.ts).
+//
+// Every trusted proxy appends exactly one entry, so a chain with fewer
+// entries than proxies did not pass through all of them: the request reached
+// the origin around the outer proxy, and whatever the chain holds was
+// written by the client. Such requests share one fixed key rather than a
+// key of the client's choosing — with no proxy-appended entry to believe,
+// a per-request key would be a free pass through every limit.
+export const untrustedClientKey = "untrusted";
+
 export function clientIpFromHeaders(headers: Headers) {
   const count = trustedProxyCount();
   if (count > 0) {
@@ -221,8 +264,10 @@ export function clientIpFromHeaders(headers: Headers) {
       .map((value) => value.trim())
       .filter(Boolean);
     if (chain && chain.length > 0) {
-      const index = Math.max(0, chain.length - count);
-      const clientIp = chain[index];
+      if (chain.length < count) {
+        return untrustedClientKey;
+      }
+      const clientIp = chain[chain.length - count];
       if (clientIp) {
         return clientIp;
       }

@@ -164,9 +164,11 @@ is the reference; the moving parts here are:
   frame upgrading from a root-only release.
 - `render_frameos_partition_ownership_commands` stamps the `/srv/frameos`
   layout onto the finished ext4 with `debugfs sif`: root owns the code
-  (`releases/<r>/frameos`, `drivers/`), `frameos` owns state, logs, assets
-  and the door's results, and each release directory is sticky (`1775`) so
-  the runtime can add files but cannot replace root's binary.
+  (`releases/<r>/frameos`, `drivers/`, `scenes/`, and `vendor/`), shared
+  writable directory roots are root-owned and sticky (`1770`), result files
+  are root-owned and group-readable, and each release directory is sticky
+  (`1775`) so the runtime can add its data files but cannot replace root's
+  binary or code-loading directories.
 
 Generic release images also ship **no FrameOS Remote** — no
 `/srv/frameos/remote`, no unit. A self-hosted backend that adopts the card

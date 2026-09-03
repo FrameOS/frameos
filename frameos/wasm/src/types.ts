@@ -82,6 +82,15 @@ export interface PreviewAssetEntry {
   isDir: boolean
 }
 
+/** What the worker reports about the runtime itself (its `ready` message). */
+export interface PreviewRuntimeInfo {
+  /** The FrameOS version the wasm bundle was built from, in the published
+   * form a frame reports ("2026.9.0") — null for a bundle older than the
+   * export. The preview renders with this interpreter; a frame renders with
+   * its own firmware, and the two can differ between releases. */
+  version: string | null
+}
+
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */
 export interface PreviewAssetsInfo {
   /** False when the wasm bundle has no filesystem export at all. */

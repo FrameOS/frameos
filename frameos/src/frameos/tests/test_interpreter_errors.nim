@@ -134,6 +134,73 @@ suite "interpreter error paths":
       check err["nodeId"].getInt() == 2
       check "Source nodes" in err["error"].getStr()
 
+  test "a node wired to its own input is a scene error, not a stack overflow":
+    let sceneId = "tests/interpreter-errors/self-input".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "self input",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[
+        StateField(name: "bucket", fieldType: "string", value: %*"")
+      ],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(20, "app", %*{
+          "keyword": "logic/setAsState",
+          "config": {"stateKey": "bucket", "valueString": "x"}
+        })
+      ],
+      edges: @[
+        edge(100, 10, "next", 20, "prev"),
+        # The app's own output feeds its own input.
+        edge(101, 20, "fieldOutput", 20, "fieldInput/valueString")
+      ]
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      discard render(scene, ctx(scene, "render"))
+      let err = eventPayload(store, "interpreter:setField:error")
+      check not err.isNil
+      check err["nodeId"].getInt() == 20
+      check "depends on itself" in err["error"].getStr()
+
+  test "a producer chain deeper than the guard is refused, naming the node":
+    # A chain of 70 code nodes, each taking the previous one as its input.
+    let sceneId = "tests/interpreter-errors/deep-chain".SceneId
+    var nodes: seq[DiagramNode] = @[]
+    var edges: seq[DiagramEdge] = @[]
+    for index in 0 ..< 70:
+      let id = 100 + index
+      if index == 0:
+        nodes.add(node(id, "code", %*{
+          "codeArgs": [], "codeOutputs": [%*{"name": "value", "type": "string"}], "codeJS": "'leaf'"}))
+      else:
+        nodes.add(node(id, "code", %*{
+          "codeArgs": [%*{"name": "prev", "type": "string"}],
+          "codeOutputs": [%*{"name": "value", "type": "string"}],
+          "codeJS": "prev"}))
+        edges.add(edge(1000 + index, id - 1, "fieldOutput", id, "codeField/prev"))
+    let exported = ExportedInterpretedScene(
+      name: "deep chain",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: nodes,
+      edges: edges
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      var raised = ""
+      try:
+        discard scene.getDataNode(169.NodeId, ctx(scene, "render"))
+      except Exception as e:
+        raised = e.msg
+      var seen = false
+      for entry in store.entries:
+        if entry.kind == JObject and ($entry).contains("nested deeper than"):
+          seen = true
+      check seen or "nested deeper than" in raised
+
   test "data node evaluation does not continue through flow edges":
     let sceneId = "tests/interpreter-errors/data-node-flow-edge".SceneId
     let exported = ExportedInterpretedScene(
@@ -285,6 +352,35 @@ suite "interpreter error paths":
       check ignored["eventName"].getStr() == "render"
       check ignored["reason"].getStr() == "renderSelfDispatch"
     clearEventChannel()
+
+  test "a scene's dispatch node cannot fire runtime verbs":
+    # Scene code is untrusted: dispatching uploadScenes would replace the
+    # installed scenes past every guard, and reboot on every render is a loop.
+    for verb in ["uploadScenes", "reboot", "restart", "reload"]:
+      clearEventChannel()
+      let sceneId = ("tests/interpreter-errors/dispatch-" & verb).SceneId
+      let exported = ExportedInterpretedScene(
+        name: "dispatch " & verb,
+        backgroundColor: parseHtmlColor("#000000"),
+        refreshInterval: 1.0,
+        publicStateFields: @[],
+        nodes: @[
+          node(10, "event", %*{"keyword": "render"}),
+          node(20, "dispatch", %*{"keyword": verb, "config": {}})
+        ],
+        edges: @[
+          edge(100, 10, "next", 20, "prev")
+        ]
+      )
+      withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+        discard render(scene, ctx(scene, "render"))
+        let (ok, _) = eventChannel.tryRecv()
+        check not ok
+        let ignored = eventPayload(store, "interpreter:dispatch:ignored")
+        check not ignored.isNil
+        check ignored["eventName"].getStr() == verb
+        check ignored["reason"].getStr() == "runtimeVerb"
+      clearEventChannel()
 
   test "malformed field path is handled as literal key during edge wiring":
     var scene = InterpretedFrameScene(nodes: initTable[NodeId, DiagramNode]())

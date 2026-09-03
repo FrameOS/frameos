@@ -5,9 +5,13 @@
 #include <string.h>
 #include <strings.h>
 
+#include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_private/esp_gpio_reserve.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "sdkconfig.h"
+#include "soc/soc_caps.h"
 
 #include "fos_defaults.h"
 
@@ -81,6 +85,28 @@ static void nvs_get_string(nvs_handle_t nvs, const char *key, char *out, size_t 
     }
 }
 
+/* PEM material lives in a blob: NVS strings top out at ~4000 bytes, and a
+ * certificate chain can be longer than that. Absent or oversized keeps the
+ * default (empty); the buffer is always NUL-terminated. */
+static void nvs_get_pem(nvs_handle_t nvs, const char *key, char *out, size_t out_len)
+{
+    size_t len = out_len - 1;
+    if (nvs_get_blob(nvs, key, out, &len) == ESP_OK) {
+        out[len] = '\0';
+    } else {
+        out[0] = '\0';
+    }
+}
+
+static void nvs_set_pem(nvs_handle_t nvs, const char *key, const char *pem)
+{
+    if (pem[0]) {
+        nvs_set_blob(nvs, key, pem, strlen(pem));
+    } else {
+        nvs_erase_key(nvs, key);
+    }
+}
+
 esp_err_t fos_config_init(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -98,13 +124,7 @@ esp_err_t fos_config_init(void)
     nvs_handle_t nvs;
     err = nvs_open(NVS_NS, NVS_READONLY, &nvs);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGI(TAG, "no stored config, using %s defaults",
-#ifdef FRAMEOS_HAVE_GENERATED_CONFIG
-                 "frame-specific baked"
-#else
-                 "generic"
-#endif
-        );
+        ESP_LOGI(TAG, "no stored config, using generic defaults");
         return ESP_OK;
     }
     if (err != ESP_OK) {
@@ -123,6 +143,7 @@ esp_err_t fos_config_init(void)
     nvs_get_string(nvs, "assets_path", s_config.assets_path, sizeof(s_config.assets_path));
     nvs_get_string(nvs, "admin_user", s_config.admin_user, sizeof(s_config.admin_user));
     nvs_get_string(nvs, "admin_pass", s_config.admin_pass, sizeof(s_config.admin_pass));
+    nvs_get_string(nvs, "ap_psk", s_config.ap_psk, sizeof(s_config.ap_psk));
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
     size_t gpio_buttons_len = sizeof(gpio_buttons);
     esp_err_t buttons_err = nvs_get_str(nvs, "gpio_buttons", gpio_buttons, &gpio_buttons_len);
@@ -165,6 +186,8 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
+    nvs_get_pem(nvs, "tls_cert", s_config.tls_server_cert, sizeof(s_config.tls_server_cert));
+    nvs_get_pem(nvs, "tls_key", s_config.tls_server_key, sizeof(s_config.tls_server_key));
     int8_t i8;
     if (nvs_get_u8(nvs, "assets_sd", &u8) == ESP_OK) s_config.assets_sd.enabled = u8 != 0;
     if (nvs_get_u8(nvs, "sd_autofmt", &u8) == ESP_OK) s_config.assets_sd.autoformat = u8 != 0;
@@ -228,6 +251,7 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "assets_path", s_config.assets_path);
     nvs_set_str(nvs, "admin_user", s_config.admin_user);
     nvs_set_str(nvs, "admin_pass", s_config.admin_pass);
+    nvs_set_str(nvs, "ap_psk", s_config.ap_psk);
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
     nvs_set_u16(nvs, "rotate", s_config.rotate);
@@ -243,6 +267,8 @@ esp_err_t fos_config_save(void)
     nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
     nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
     nvs_set_u32(nvs, "tls_port", s_config.tls_port);
+    nvs_set_pem(nvs, "tls_cert", s_config.tls_server_cert);
+    nvs_set_pem(nvs, "tls_key", s_config.tls_server_key);
     nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0);
     nvs_set_u8(nvs, "sd_autofmt", s_config.assets_sd.autoformat ? 1 : 0);
     nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs);
@@ -365,6 +391,42 @@ void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, c
              assets_sd->cs, assets_sd->sck, assets_sd->miso, assets_sd->mosi);
 }
 
+/* The chip's SPI flash / PSRAM pads, by target. esp_gpio_is_reserved below
+ * knows the same pins once the flash and PSRAM drivers have claimed them,
+ * but this table does not depend on that having happened yet, and names the
+ * reason. */
+static bool gpio_pin_is_memory_pad(int pin)
+{
+#if CONFIG_IDF_TARGET_ESP32S3
+    /* GPIO26-32: the in-package / module SPI flash (and a quad PSRAM).
+     * GPIO33-37: the four extra data lines of octal PSRAM / octal flash. */
+    if (pin >= 26 && pin <= 32) return true;
+#if CONFIG_SPIRAM_MODE_OCT || CONFIG_ESPTOOLPY_OCT_FLASH
+    if (pin >= 33 && pin <= 37) return true;
+#endif
+#elif CONFIG_IDF_TARGET_ESP32
+    /* GPIO6-11: SPI flash. GPIO16/17: PSRAM CS / CLK on the WROVER modules. */
+    if (pin >= 6 && pin <= 11) return true;
+#if CONFIG_SPIRAM
+    if (pin == 16 || pin == 17) return true;
+#endif
+#elif CONFIG_IDF_TARGET_ESP32C3
+    /* GPIO12-17: the in-package SPI flash of the C3 modules FrameOS runs on. */
+    if (pin >= 12 && pin <= 17) return true;
+#endif
+    return false;
+}
+
+const char *fos_config_gpio_pin_reserved(int pin)
+{
+    if (pin < 0 || pin >= SOC_GPIO_PIN_COUNT || !GPIO_IS_VALID_GPIO(pin)) {
+        return "not a GPIO on this chip";
+    }
+    if (gpio_pin_is_memory_pad(pin)) return "SPI flash / PSRAM pad";
+    if (esp_gpio_is_reserved(BIT64(pin))) return "claimed by a driver";
+    return NULL;
+}
+
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)
 {
     if (!spec || !spec[0]) {
@@ -390,6 +452,13 @@ esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)
         long pin = strtol(line, &end, 10);
         if (end == line || *end != '\0') return ESP_ERR_INVALID_ARG;
         if (pin < 0 || pin > 48) return ESP_ERR_INVALID_ARG;
+        const char *reserved = fos_config_gpio_pin_reserved((int)pin);
+        if (reserved != NULL) {
+            /* Every writer lands here — NVS at boot, the USB console, the
+             * cloud set_settings verb — so the refusal is logged once, here. */
+            ESP_LOGW(TAG, "GPIO %ld refused for a button: %s", pin, reserved);
+            return ESP_ERR_INVALID_ARG;
+        }
 
         char *label = sep + 1;
         while (*label == ' ' || *label == '\t') label++;

@@ -1,7 +1,8 @@
 import uuid
+import re
 from typing import Optional
 from http import HTTPStatus
-from fastapi import Depends, HTTPException, File, Form, UploadFile, Query
+from fastapi import Depends, HTTPException, File, Form, Request, UploadFile, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from fastapi.responses import Response
@@ -13,9 +14,32 @@ from app.schemas.assets import (
     AssetResponse
 )
 from app.tenancy import current_project_id
+from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES, read_upload_limited, reject_oversized_content_length
 from . import api_project
 
 # This file handles assets uploaded under /settings. For assets on frames, see frame.py.
+
+
+# Asset paths are relative names under the project's asset tree ("fonts/x.ttf").
+# They are later joined onto local build folders and onto the frame's asset
+# directory, so a path with ".." segments or a leading "/" would write outside
+# both. Any printable name is fine; only the separators and dot segments matter.
+def _validated_asset_path(path: str) -> str:
+    value = (path or "").strip().replace("\\", "/")
+    segments = value.split("/")
+    if (
+        not value
+        or len(value) > 512
+        or any(
+            seg == "" or seg in (".", "..") or any(ord(ch) < 0x20 or ch == "\x7f" for ch in seg)
+            for seg in segments
+        )
+    ):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Asset path must be a relative path of plain file and folder names",
+        )
+    return value
 
 @api_project.get("/assets", response_model=list[AssetResponse])
 async def list_assets(
@@ -73,6 +97,7 @@ async def download_asset(asset_id: str, db: Session = Depends(get_db)):
 
 @api_project.post("/assets", response_model=AssetResponse, status_code=201)
 async def create_asset(
+    request: Request,
     path: str = Form(..., description="Unique path identifier for this asset"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
@@ -82,7 +107,9 @@ async def create_asset(
       - `path` must be unique
       - `file` is the actual file data
     """
+    reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     project_id = current_project_id()
+    path = _validated_asset_path(path)
     existing = db.query(Assets).filter_by(project_id=project_id, path=path).first()
     if existing:
         raise HTTPException(
@@ -91,7 +118,9 @@ async def create_asset(
         )
 
     try:
-        content = await file.read()
+        content = await read_upload_limited(file, MAX_ASSET_UPLOAD_BYTES)
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=400, detail="Error reading uploaded file.")
 
@@ -112,6 +141,7 @@ async def create_asset(
 
 @api_project.put("/assets/{asset_id}", response_model=AssetResponse)
 async def update_asset(
+    request: Request,
     asset_id: str,
     path: Optional[str] = Form(None, description="New path (must remain unique)"),
     file: Optional[UploadFile] = File(None),
@@ -124,10 +154,13 @@ async def update_asset(
       - The file contents (if provided).
     If you only want to change the path (and not the file), omit `file`.
     """
+    reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     project_id = current_project_id()
     asset = project_get_or_404(db, Assets, asset_id, detail="Asset not found")
 
     # If user wants to update the path:
+    if path:
+        path = _validated_asset_path(path)
     if path and path != asset.path:
         # check uniqueness of new path
         conflict = db.query(Assets).filter_by(project_id=project_id, path=path).first()
@@ -141,8 +174,10 @@ async def update_asset(
     # If user wants to update the binary data:
     if file is not None:
         try:
-            content = await file.read()
+            content = await read_upload_limited(file, MAX_ASSET_UPLOAD_BYTES)
             asset.data = content
+        except HTTPException:
+            raise
         except Exception:
             raise HTTPException(status_code=400, detail="Error reading uploaded file.")
 

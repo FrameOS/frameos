@@ -3,7 +3,10 @@ import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../src/lib/blobs";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
-import { queueImageGetIfIdle } from "../../../../../src/lib/frame-asset-cache";
+import {
+  isServableImageContentType,
+  queueImageGetIfIdle,
+} from "../../../../../src/lib/frame-asset-cache";
 import { commandTtlForFrame, frameIsAsleep } from "../../../../../src/lib/frame-sleep";
 import {
   frameForAccount,
@@ -59,11 +62,17 @@ async function imageResponse(row: {
   if (!content) {
     return jsonError("image_unavailable", 404);
   }
+  // Only a sniffed raster type is served as one (see the asset route): the
+  // device never chooses what the app origin hands the browser.
+  const isImage = isServableImageContentType(row.contentType);
   return new NextResponse(new Uint8Array(content), {
     headers: {
       // The panel cache-busts with ?t=…; the bytes themselves must not stick.
       "cache-control": "no-store",
-      "content-type": row.contentType || "application/octet-stream",
+      "content-security-policy": "sandbox",
+      "content-type": isImage ? row.contentType : "application/octet-stream",
+      ...(isImage ? {} : { "content-disposition": "attachment; filename=\"image\"" }),
+      "x-content-type-options": "nosniff",
     },
   });
 }

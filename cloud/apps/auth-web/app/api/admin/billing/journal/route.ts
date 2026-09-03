@@ -2,12 +2,13 @@ import { createDb } from "@frameos-cloud/db";
 import {
   LedgerError,
   manualJournalEventType,
+  markUsageRecordsCredited,
   postEvent,
   reclassificationEventType,
   reverseEntry,
 } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { getSuperadminContext, superadminRefusal } from "../../../../../src/lib/admin";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
@@ -51,12 +52,9 @@ export async function POST(request: NextRequest) {
   if (limited) {
     return limited;
   }
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ mutation: true });
   if (admin.kind !== "ok") {
-    return jsonError(
-      admin.kind === "forbidden" ? "forbidden" : "unauthenticated",
-      admin.kind === "forbidden" ? 403 : 401,
-    );
+    return superadminRefusal(admin);
   }
   const { db, response } = requireDatabase();
   if (!db) {
@@ -195,11 +193,15 @@ async function postReversal(
     reason,
     source: "admin",
   });
+  // A reversed AI charge is a turn the customer no longer owes for; tell the
+  // metering subledger so their usage page and the daily cap agree with the
+  // journal (§9.2 item 11). No-op for anything but an ai_usage_charge.
+  const credited = await markUsageRecordsCredited(db, entryId);
 
   await recordAuditEvent(db, {
     actor: { accountId: adminAccountId, kind: "superadmin", providerSubject },
     eventType: "billing.reversal",
-    metadata: { reason, replayed: result.replayed },
+    metadata: { credited, reason, replayed: result.replayed },
     target: { entryId },
   });
   return NextResponse.json({

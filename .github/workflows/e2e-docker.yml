@@ -214,9 +214,11 @@ jobs:
           gh release view --repo "$GITHUB_REPOSITORY" --json tagName,assets > .firmware-size/release.json
           tag="$(jq -r .tagName .firmware-size/release.json)"
           echo "BASELINE_TAG=$tag" >> "$GITHUB_ENV"
-          # Size documents published by the release workflow, when present.
+          # Size documents published by the release workflow, when present —
+          # the generic pair plus one per flash layout, so the 32MB build
+          # above diffs against its own baseline rather than none.
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
-            --pattern '*-esp32-*-generic-size.json' --dir .firmware-size/baseline || true
+            --pattern '*-esp32-*-size.json' --dir .firmware-size/baseline || true
           for f in .firmware-size/baseline/*-size.json; do
             [ -f "$f" ] || continue
             platform="$(jq -r .platform "$f")"

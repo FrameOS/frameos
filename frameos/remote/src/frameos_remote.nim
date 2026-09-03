@@ -69,6 +69,14 @@ type
 
 var currentUpload: UploadSession
 
+const MaxFileWriteChunkBytes* = 4 * 1024 * 1024
+  ## The backend sends at most one zlib-compressed 2 MiB source chunk. Leave
+  ## room for incompressible data while refusing an authenticated peer's
+  ## unbounded allocation request.
+
+proc validFileWriteChunkSize*(size: int): bool =
+  size > 0 and size <= MaxFileWriteChunkBytes
+
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
 # ----------------------------------------------------------------------------
@@ -358,11 +366,19 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
         await sendResp(ws, cfg, id, false, %*{"error": "file_write_open missing"})
         return
       let expected = args["size"].getInt()
+      if not validFileWriteChunkSize(expected):
+        await sendResp(ws, cfg, id, false,
+          %*{"error": "file_write_chunk size must be between 1 and " & $MaxFileWriteChunkBytes})
+        return
       var buf = newStringUninit(expected) # one shot, uninitialised
       var pos = 0
 
       while pos < expected:
         let frame = await recvBinary(ws) # returns raw bytes of a WS frame
+        if frame.len == 0 or frame.len > expected - pos:
+          await sendResp(ws, cfg, id, false,
+            %*{"error": "file_write_chunk binary payload exceeded its declared size"})
+          return
         copyMem(addr buf[pos], unsafeAddr frame[0], frame.len)
         pos += frame.len
 

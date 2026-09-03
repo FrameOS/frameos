@@ -8,6 +8,8 @@
 // caller never notices beyond a short pause. Only when that fails repeatedly,
 // or the turn is gone, does it throw an AiChatTransportError.
 
+import type { AiInstallProposal } from "./ai-install-proposal";
+
 export type AiScenesTool = "build_scene" | "modify_scene";
 
 export type AiChatEvent =
@@ -32,6 +34,9 @@ export type AiChatEvent =
       type: "listing";
       listing: AiListingChanges;
     }
+  /** A frame change the agent proposes; the chat renders an Install card
+   * and only the user's Approve on it deploys anything. */
+  | AiInstallProposal
   | { type: "done"; tool: string; reply: string }
   | { type: "error"; detail: string }
   | { type: "ping" };
@@ -70,12 +75,19 @@ export type AiChatRequest = {
 export class AiChatRequestError extends Error {
   readonly code: string;
   readonly status: number;
+  // When the daily cap refused the turn: the moment today's number resets,
+  // and whether the cap was the account's own limit or the operator's free
+  // allowance on the shared key ("shared").
+  readonly resetAt: string | undefined;
+  readonly allowance: string | undefined;
 
-  constructor(code: string, status: number, detail?: string) {
+  constructor(code: string, status: number, detail?: string, resetAt?: string, allowance?: string) {
     super(detail || code);
     this.name = "AiChatRequestError";
     this.code = code;
     this.status = status;
+    this.resetAt = resetAt;
+    this.allowance = allowance;
   }
 }
 
@@ -118,7 +130,17 @@ export function transportFailureMessage(elapsedMs: number, hadTurn: boolean): st
   return `${base} and could not be re-established. The assistant may still finish on its own — reload this chat in a minute to see its reply.`;
 }
 
-const eventTypes = new Set(["chat", "delta", "tool", "scenes", "listing", "done", "error", "ping"]);
+const eventTypes = new Set([
+  "chat",
+  "delta",
+  "tool",
+  "scenes",
+  "listing",
+  "proposal",
+  "done",
+  "error",
+  "ping",
+]);
 
 /** One NDJSON line → event, or null for blank/garbled lines. */
 export function parseAiChatLine(line: string): AiChatEvent | null {
@@ -235,8 +257,10 @@ export async function streamAiChat(
   });
   if (!response.ok || !response.body) {
     const payload = (await response.json().catch(() => ({}))) as {
+      allowance?: unknown;
       error?: unknown;
       detail?: unknown;
+      reset_at?: unknown;
     };
     const code =
       typeof payload.error === "string" && payload.error
@@ -248,6 +272,8 @@ export async function streamAiChat(
       code,
       response.status,
       typeof payload.detail === "string" ? payload.detail : undefined,
+      typeof payload.reset_at === "string" ? payload.reset_at : undefined,
+      typeof payload.allowance === "string" ? payload.allowance : undefined,
     );
   }
 

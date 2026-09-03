@@ -21,20 +21,64 @@ import {
   storeSceneReports,
   storeScenes,
 } from "@frameos-cloud/db";
+import { NextResponse } from "next/server";
 import { hasDatabaseUrl } from "./env";
+import { requireRecentAuth } from "./recent-auth";
 import { readSession } from "./session";
 
 export type SuperadminContext =
   | { kind: "unauthenticated" }
   | { kind: "forbidden" }
+  | { kind: "reauth_required"; response: NextResponse }
   | { kind: "ok"; accountId: string };
+
+// Every /api/admin/* mutation answers a refusal the same way, and the
+// reauth one carries its own payload (which proofs /login/reauth offers).
+export function superadminRefusal(
+  admin: Exclude<SuperadminContext, { kind: "ok" }>,
+): NextResponse {
+  if (admin.kind === "reauth_required") {
+    return admin.response;
+  }
+  return NextResponse.json(
+    { error: admin.kind },
+    { status: admin.kind === "unauthenticated" ? 401 : 403 },
+  );
+}
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Path parameters naming an account are user-typed strings until proven
+// otherwise; a non-uuid here is a 404, not a database error to read.
+export function isUuid(value: string): boolean {
+  return uuidPattern.test(value);
+}
 
 // Superadmin is checked against the accounts row on every request, not a
 // session claim, so revoking the flag takes effect immediately.
-export async function getSuperadminContext(): Promise<SuperadminContext> {
+//
+// Superadmin is a property of the person at the keyboard, so only a session
+// cookie counts: a personal API token minted by a superadmin must not carry
+// the power to grant superadmin, delete accounts or post journal entries
+// from a script or a leaked ops box. The nightly accounting job, which used
+// to be the one token caller here, now runs on its own job-token kind
+// (authenticateJobToken, `billing_nightly`) and never touches this.
+//
+// Mutations pass `mutation: true`: granting superadmin, deleting an account
+// or posting a journal entry is sudo-mode work, so a cookie that has not
+// proved its credentials in the last fifteen minutes (recent-auth.ts) is
+// sent through /login/reauth first, exactly like revoking a frame. Reads
+// (the tables, the pages) stay on the plain session.
+export async function getSuperadminContext(
+  options: { mutation?: boolean } = {},
+): Promise<SuperadminContext> {
   const session = await readSession();
   if (!session?.accountId || !hasDatabaseUrl()) {
     return { kind: "unauthenticated" };
+  }
+  if (session.apiToken) {
+    return { kind: "forbidden" };
   }
 
   const [account] = await createDb()
@@ -48,6 +92,12 @@ export async function getSuperadminContext(): Promise<SuperadminContext> {
   }
   if (!account.isSuperadmin) {
     return { kind: "forbidden" };
+  }
+  if (options.mutation) {
+    const reauth = await requireRecentAuth(createDb(), session.accountId);
+    if (reauth) {
+      return { kind: "reauth_required", response: reauth };
+    }
   }
   return { accountId: session.accountId, kind: "ok" };
 }

@@ -7,7 +7,8 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "node build.mjs",
-    "dev": "node build.mjs --dev --watch"
+    "dev": "node build.mjs --dev --watch",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@babel/runtime": "^7.28.4",

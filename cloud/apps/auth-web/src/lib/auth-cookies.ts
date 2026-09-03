@@ -32,6 +32,13 @@ export function safeAuthReturnPath(value: string | null | undefined) {
       if (parsed.origin !== "http://frameos.local") {
         return undefined;
       }
+      // Dot segments resolve before the leading-"//" check above could see
+      // them: "/..//evil.example" (and "/.\\evil.example", backslashes being
+      // slashes for http URLs) normalizes to "//evil.example", which every
+      // sink then treats as a protocol-relative URL to another host.
+      if (parsed.pathname.startsWith("//")) {
+        return undefined;
+      }
       return `${parsed.pathname}${parsed.search}${parsed.hash}`;
     }
 

@@ -225,6 +225,10 @@ suite "cloud enrollment":
     check personalization == %*{"name": "Boot frame", "timezone": "Europe/Brussels"}
     check pendingPersonalization(%*{"claim_token": "x"}) == %*{}
     check pendingPersonalization(%*{"name": "  ", "time_zone": "UTC"}) == %*{"timezone": "UTC"}
+    # The zone is joined onto /usr/share/zoneinfo for /etc/localtime, so only
+    # an IANA zone name survives; a traversal is dropped, not applied.
+    check pendingPersonalization(%*{"time_zone": "../../etc/shadow"}) == %*{}
+    check pendingPersonalization(%*{"time_zone": "Europe//Berlin"}) == %*{}
     let state = linkState()
     check state{"mode"}.getStr("") == "managed"
     check state{"frame_id"}.getStr("") == "frame-boot"

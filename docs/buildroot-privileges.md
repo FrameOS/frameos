@@ -8,10 +8,11 @@ Two questions, audited together on 2026-08-16 because they share an answer:
 2. Does a Buildroot frame need FrameOS Remote at all? Self-hosted backends do.
    Cloud-managed frames?
 
-**No code changed for this audit.** What follows is the state of the tree and
-what the choices cost. §1–§3 are the audit as written on 2026-08-16; **§4 is
-what has shipped since** (the `frameos` user, the privileged door, no Remote on
-generic images) and is the part to read for how a Buildroot frame works today.
+**No code changed for the original audit.** What follows is the state of the
+tree and what the choices cost. §1–§3 are the audit as written on 2026-08-16;
+**§4 describes the implementation in PR #415** (the `frameos` user, the
+privileged door, no Remote on generic images) and is the part to read for how
+a Buildroot frame will work after that PR lands.
 
 ---
 
@@ -231,7 +232,7 @@ None of it is blocked on a decision; all of it is blocked on hardware time.
 
 ---
 
-## 4. What shipped (2026-08-29)
+## 4. Implementation (PR #415)
 
 The §3 split is implemented for the two NetworkManager platforms
 (`raspberry-pi-64`, `raspberry-pi-5`). This section is the reference for how
@@ -249,7 +250,7 @@ user (uid/gid 990, fixed, `/bin/false`). The unit is rendered from
 `RestrictNamespaces`, `LockPersonality`, `SystemCallArchitectures=native`,
 `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK`, and a bounding
 set of exactly `CAP_SYS_TTY_CONFIG` (the framebuffer driver's `KDSETMODE`).
-`SupplementaryGroups=video input tty` covers the nodes udev already groups;
+`SupplementaryGroups=video input` covers the nodes udev already groups;
 an `ExecStartPre=+` step (root) hands `/dev/spidev*`, `/dev/gpiochip*`,
 `/dev/i2c-*`, `/dev/vchiq`, `/dev/fb*`, `/dev/tty0-1` and the two sysfs
 knobs the driver pokes (`fbcon/cursor_blink`, `fb0/blank`) to the service
@@ -281,7 +282,7 @@ device. Both read the same two template files.
 
 `frameos/src/frameos/privileged.nim` is the whole contract. The runtime writes
 one JSON file per request into `/srv/frameos/privileged/queue/` (`root:frameos
-1770`); `frameos-privileged.path` (`DirectoryNotEmpty=`) starts
+1770`); `frameos-privileged.path` (`PathExistsGlob=…/*.json`) starts
 `frameos-privileged.service`, a root oneshot running
 `/srv/frameos/current/frameos privileged-worker`
 (`frameos/src/frameos/privileged_worker.nim`), which drains the queue, executes,
@@ -292,14 +293,14 @@ path outside `/srv/frameos/staging`:
 | Verb | Arguments | Does |
 | --- | --- | --- |
 | `reboot` | `delaySeconds` 0–300 | `systemctl reboot` after the delay |
-| `apply-setup`, `apply-driver-setup` | `rebootIfRequired` | `setupFrameOS` / `setupFrameOSDrivers` in-process as root (boot config, units, timezone, watchdog, ownership) |
-| `install-release` | `archive` (under `/srv/frameos/staging`, no symlinks), `signature` (minisig text), `version` | copies the archive to a root-owned dir, **re-verifies the minisign signature against the key in this binary**, unpacks, activates, runs setup, restarts or reboots |
+| `apply-driver-setup` | `rebootIfRequired` | `setupFrameOSDrivers` in-process as root (fixed driver setup from root-owned libraries) |
+| `install-release` | `archive` (under `/srv/frameos/staging`, no symlinks), `signature` (minisig text), `version` | requires a strictly newer three-part version, copies the archive to a root-owned dir, **re-verifies the minisign signature against the key in this binary**, requires its sole top-level directory to match that version and this device target, then unpacks, activates, runs setup, and restarts or reboots |
 | `set-hostname` | `hostname` (sanitized again on the root side) | `/etc/hostname`, `/boot/frameos-hostname`, `hostname` |
 | `sync-clock` | — | `systemctl restart systemd-timesyncd` / `ntpd -gq` / `sntp` |
 | `nm-device-status`, `nm-wifi-list`, `nm-connections` (`active`) | — | fixed `nmcli` queries |
-| `nm-radio-on`, `nm-device-managed` (`device`) | interface name `[A-Za-z0-9_.:-]{1,15}` | `rfkill unblock wifi`, `nmcli radio wifi on`, `nmcli device set … managed yes` |
+| `nm-radio-on` | — | `rfkill unblock wifi`, `nmcli radio wifi on` |
 | `nm-hotspot-start` (`device`, `ssid`, `psk`), `nm-hotspot-stop` | SSID 1–32 bytes no control chars; PSK 8–63 printable or 64 hex | the add / modify / up sequence for `frameos-hotspot`, as argv, never through a shell |
-| `nm-wifi-connect` (`ssid`, `psk`, `device`), `nm-forget` (`wifi`/`hotspot`) | as above; `psk` may be empty (open network) | `nmcli device wifi connect …` for `frameos-wifi` |
+| `nm-wifi-connect` (`ssid`, `psk`, `device`) | as above; `psk` may be empty (open network) | `nmcli device wifi connect …` for `frameos-wifi` |
 
 Unknown keys are refused, oversized or unparsable request files are deleted
 and answered with an error, and a request the worker never picks up is
@@ -310,30 +311,44 @@ uses (`device_setup.nim` for reboots, `portal.nim` for everything network,
 itself absent and the old in-process paths run unchanged, so Raspberry Pi OS
 installs and root Buildroot frames behave exactly as before.
 
+The broader `apply-setup`, standalone connection-forget, and device-managed
+verbs were removed because no runtime call site needed them. Wi-Fi PSKs are
+redacted from the worker journal before an `nmcli` argv is logged.
+
 **Why root may execute `/srv/frameos/current/frameos` at all.** The
 `frameos` user cannot replace it: `/srv/frameos` and `releases/` are
 `root:root 0755`, each release directory is `root:frameos 1775` (sticky —
 the runtime may add `frame.json`, scene payloads and its session salt, but
 cannot unlink root's `frameos` binary or `drivers/`), and `current` is a
 root-owned symlink in a root-owned directory. Only `install-release` writes
-there, and only after the signature check on a root-owned copy. The layout is
+there, and only after the signature check on a root-owned copy. The privileged
+worker's `LD_LIBRARY_PATH` includes only the pre-created, root-owned `drivers/`
+directory plus system libraries; runtime-writable `scenes/` is deliberately
+absent. The layout is
 stamped by the image composer (`render_frameos_partition_ownership_commands`,
 via `debugfs sif` on the finished ext4), by `PARTITION_POST_BUILD_SCRIPT` for
 base images, and by `buildrootOwnershipScript` in `frameos setup` /
 `install-release` on the device.
 
 Every verb runs as root, so several of them (`install-release`,
-`apply-setup`) leave root-owned files in the runtime's own directories —
+`apply-driver-setup`) leave root-owned files in the runtime's own directories —
 `state/upgrade-status.json` above all, which the unprivileged runtime
 rewrites on the *next* upgrade. The worker therefore re-applies the
 ownership layout after each request; without it the failure would surface
-one upgrade later, as an EACCES on a status file.
+one upgrade later, as an EACCES on a status file. Shared writable directory
+roots remain `root:frameos 1770` (sticky), and result files remain root-owned
+`0640`; all root-side writes there use randomized same-directory temporary
+files and atomic rename, so the runtime cannot pre-plant a symlink at a
+predictable temporary path.
 
 ### OTA and migration
 
 `frameos upgrade` as the `frameos` user: check GitHub, download the archive
 and its `.minisig` into `/srv/frameos/staging/<ts>/`, verify locally (for a
-clear early failure), then `install-release`. The worker owns
+clear early failure), then `install-release`. The root side refuses a downgrade
+and binds the signed archive to the claimed version and detected target via its
+required top-level directory name; a valid older signed archive cannot be
+relabeled as a newer release. The worker owns
 `upgrade-status.json` from that point — the runtime that asked is restarted
 (and its detached upgrade child with it) once the release is in place. The
 `systemd-run` transient unit the root path uses is replaced by a plain
@@ -364,16 +379,21 @@ Terminal panel is SSH-only now) and the one-shot `file_write`. What remains
 `file_read/md5/delete/mkdir/rename`, `assets_list`) is what a backend deploy
 is built from; `shell` in particular is the deploy transport, and retiring it
 means teaching the backend structured deploy verbs — a separate piece of
-work, tracked in `docs/todo.md`.
+work, tracked in `docs/todo.md`. Streamed upload chunks are capped at 4 MiB and
+their actual binary payload is checked against the declared remaining size
+before copying.
 
 ### What was verified off-hardware
 
 The permission model is not a design note; it was run. `mke2fs -d` builds a
 FRAMEOS-shaped ext4 the way the composer does, the generated `debugfs sif`
 commands are applied to it, and `e2fsck` passes: release directory
-`root:frameos 1775`, `frameos` binary `root:root 0755` untouched, `frame.json`
-`frameos 0600`, `state` `frameos 0750` with `state/NetworkManager` left
-`root 0700`, `privileged/queue` `root:frameos 1770`. The same layout, built by
+`root:frameos 1775`, `frameos` binary and `drivers/`/`scenes/`/`vendor/`
+`root:root` untouched, `frame.json` `frameos 0600`, `state` and the other
+runtime-writable roots `root:frameos 1770`, NetworkManager keyfiles `root 0600`
+behind a `root 0700` directory, `privileged/queue` `root:frameos 1770`, and
+`privileged/results` `root:frameos 2750` with root-owned `0640` results. The
+filesystem passed `e2fsck`. The same layout, built by
 `buildrootOwnershipScript` itself, was then exercised in a container with a
 real uid 990: as `frameos` the runtime can queue a request, write its state,
 logs and staged OTA, and write `frame.json` and scene payloads into its
@@ -389,9 +409,10 @@ root partition through `debugfs`: it appends the three account lines (shadow
 back at 0600), is a no-op on the second run, and aborts the compose loudly
 when uid or gid 990 belongs to someone else.
 
-The two unit renderers (Nim and Python) were diffed and are byte-identical
-for all four user/NetworkManager combinations plus the door's units and the
-udev rule.
+The two unit renderers (Nim and Python) are covered for all four
+user/NetworkManager combinations plus the door's units and the udev rule; the
+rendered root and unprivileged services and both door units also pass
+`systemd-analyze verify` under systemd 252.
 
 ### Not yet verified on hardware
 

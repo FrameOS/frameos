@@ -1,6 +1,7 @@
 import std/[json, os, sequtils, sets, strutils, times]
-import frameos/utils/process
 import frameos/privileged
+import frameos/utils/process
+import frameos/utils/system
 
 when not defined(windows):
   import posix
@@ -328,7 +329,11 @@ proc applyBootConfigLines*(content: string, requestedLines: seq[string]): tuple[
 
   result = (normalizeBootConfig(lines.join("\n")), changed)
 
-proc writePrivilegedFile*(path: string, content: string) =
+proc writePrivilegedFile*(path: string, content: string, private = false) =
+  ## `private` files (credentials) are created 0600 on every path through
+  ## here — the direct write, the temp copy handed to `install`, and the
+  ## installed file itself — so the secret is never world-readable, not even
+  ## for the moment between writing and a later chmod.
   if fileExists(path):
     try:
       if readFile(path) == content:
@@ -338,13 +343,20 @@ proc writePrivilegedFile*(path: string, content: string) =
 
   withWritableMount(path):
     try:
-      writeFile(path, content)
+      if private:
+        writePrivateFile(path, content)
+      else:
+        writeFileAtomically(path, content)
     except CatchableError as writeError:
       let writeErrorMessage = writeError.msg
       let tmpPath = getTempDir() / ("frameos-setup-" & $epochTime().int64 & "-" & lastPathPart(path))
-      writeFile(tmpPath, content)
+      if private:
+        writePrivateFile(tmpPath, content)
+      else:
+        writeFile(tmpPath, content)
+      let mode = if private: "0600" else: "644"
       try:
-        discard runSetupCommand(privilegedShell("install -m 644 " & shellQuote(tmpPath) & " " & shellQuote(path)))
+        discard runSetupCommand(privilegedShell("install -m " & mode & " " & shellQuote(tmpPath) & " " & shellQuote(path)))
       except CatchableError as installError:
         raise newException(
           OSError,

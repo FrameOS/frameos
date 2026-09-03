@@ -7,7 +7,9 @@ RequiresMountsFor=/srv/frameos
 # The unprivileged runtime drops one JSON file per request here
 # (frameos/src/frameos/privileged.nim); the worker drains the directory and
 # exits, and systemd triggers again if anything arrived meanwhile.
-DirectoryNotEmpty=/srv/frameos/privileged/queue
+# Ignore an interrupted writer's hidden .tmp file. Completed requests always
+# end in .json; the worker itself refuses malformed or non-regular entries.
+PathExistsGlob=/srv/frameos/privileged/queue/*.json
 MakeDirectory=yes
 DirectoryMode=0755
 Unit=frameos-privileged.service

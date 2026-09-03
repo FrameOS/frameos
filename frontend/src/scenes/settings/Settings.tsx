@@ -229,6 +229,9 @@ function AccountSettingsSection({ onLogout }: { onLogout: () => void }): JSX.Ele
               <Field name="email" className="min-w-[14rem] flex-1">
                 <TextInput type="email" autoComplete="email" autoFocus />
               </Field>
+              <Field name="current_password" className="min-w-[12rem] flex-1">
+                <TextInput type="password" autoComplete="current-password" placeholder="Current password" />
+              </Field>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Button
                   color="secondary"
@@ -359,8 +362,8 @@ function DockerDaemonStatus(): JSX.Element {
         {systemInfo?.docker?.daemonAvailable
           ? 'Docker daemon is reachable.'
           : systemInfo?.docker?.cliAvailable
-            ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
-            : 'Docker CLI is not installed.'}
+          ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
+          : 'Docker CLI is not installed.'}
       </p>
       <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
         Recheck
@@ -402,6 +405,7 @@ export function Settings() {
     deleteCustomFont,
     toggleSshKeyExpanded,
     toggleOpenAiModelOverrides,
+    setSettingsValues,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -847,6 +851,40 @@ export function Settings() {
                               >
                                 <TextArea rows={3} />
                               </Field>
+                              <div className="@md:flex @md:gap-2">
+                                <Label className="@md:w-1/3">Host key</Label>
+                                <div className="w-full space-y-1">
+                                  {settings.buildHost?.hostKey ? (
+                                    <>
+                                      <div className="text-sm break-all">
+                                        {settings.buildHost.hostKey.split(' ')[0]}{' '}
+                                        {settings.buildHost.hostKeyFingerprint}
+                                      </div>
+                                      <Button
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() =>
+                                          setSettingsValues({
+                                            buildHost: { ...settings.buildHost, hostKey: '', hostKeyFingerprint: '' },
+                                          })
+                                        }
+                                      >
+                                        Forget host key
+                                      </Button>
+                                      <p className="text-xs text-gray-500">
+                                        Pinned when the connection was first checked; any other key is refused. Forget
+                                        it only after reinstalling the build host, then save and check the connection
+                                        again.
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-gray-500">
+                                      Not recorded yet. Check the connection to pin the key the host offers; any other
+                                      key is refused from then on.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button
                                   onClick={testBuildHost}

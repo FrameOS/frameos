@@ -6,6 +6,7 @@ import shlex
 import shutil
 import tarfile
 import tempfile
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -16,6 +17,13 @@ from sqlalchemy.orm import Session
 from app.models.settings import get_settings_dict
 from app.utils.build_environment import selected_build_environment_provider
 from app.utils.modal_sandbox import ModalSandboxConfig, get_modal_sandbox_config
+from app.utils.ssh_host_keys import (
+    host_key_changed_message,
+    host_key_fingerprint,
+    host_key_type,
+    openssh_host_key_line,
+    trusted_known_hosts,
+)
 
 LogFunc = Callable[[str, str], Awaitable[None]]
 
@@ -27,6 +35,9 @@ class BuildHostConfig:
     port: int = 22
     ssh_key: str | None = None
     enabled: bool = False
+    # The host key pinned on the first connect ("<type> <base64>"); None
+    # until then (utils/ssh_host_keys.py).
+    host_key: str | None = None
 
     @classmethod
     def from_settings(cls, raw: object) -> BuildHostConfig | None:
@@ -36,12 +47,28 @@ class BuildHostConfig:
         host = (raw.get("host") or "").strip()
         user = (raw.get("user") or "").strip()
         ssh_key = raw.get("sshKey") or raw.get("ssh_key")
+        host_key = (raw.get("hostKey") or raw.get("host_key") or "").strip() or None
         port = int(raw.get("port") or 22)
         if not enabled:
             return None
         if not (host and user and ssh_key):
             return None
-        return cls(host=host, user=user, port=port, ssh_key=str(ssh_key), enabled=True)
+        return cls(host=host, user=user, port=port, ssh_key=str(ssh_key), enabled=True, host_key=host_key)
+
+
+def persist_build_host_key(db: Session | None, project_id: int | None, host_key_line: str) -> None:
+    """Pin the build host key in the project's ``buildHost`` settings after a
+    first connect (the settings form shows the fingerprint and can forget it)."""
+    if db is None or project_id is None:
+        return
+    from app.models.settings import Settings
+
+    row = db.query(Settings).filter_by(project_id=project_id, key="buildHost").first()
+    if row is None or not isinstance(row.value, dict) or row.value.get("hostKey"):
+        return
+    row.value = {**row.value, "hostKey": host_key_line, "hostKeyFingerprint": host_key_fingerprint(host_key_line)}
+    db.add(row)
+    db.commit()
 
 
 def get_build_host_config(db: Session | None, project_id: int | None = None) -> BuildHostConfig | None:
@@ -65,9 +92,13 @@ class BuildHostSession:
         config: BuildHostConfig,
         *,
         logger: LogFunc | None = None,
+        on_host_key: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> None:
         self.config = config
         self._logger = logger
+        self._on_host_key = on_host_key
+        # The key the host offered on a first (unpinned) connect.
+        self.observed_host_key: str | None = None
         self._conn: asyncssh.SSHClientConnection | None = None
         self._cleanup_paths: list[str] = []
 
@@ -95,15 +126,43 @@ class BuildHostSession:
                 client_keys.append(asyncssh.import_private_key(self.config.ssh_key))
             except (asyncssh.KeyImportError, TypeError) as exc:
                 raise ValueError("Invalid build host SSH key") from exc
-        self._conn = await asyncssh.connect(
-            self.config.host,
-            port=self.config.port,
-            username=self.config.user,
-            client_keys=client_keys or None,
-            known_hosts=None,
-            connect_timeout=30,
-            login_timeout=30,
-        )
+        # Trust on first use (utils/ssh_host_keys.py): a pinned key refuses
+        # any other; none pinned yet means this connect records the offer.
+        try:
+            known_hosts = trusted_known_hosts(self.config.host_key)
+        except ValueError as exc:
+            raise ValueError(f"{exc}. Forget the build host key in Settings and check the connection again.")
+        try:
+            self._conn = await asyncssh.connect(
+                self.config.host,
+                port=self.config.port,
+                username=self.config.user,
+                client_keys=client_keys or None,
+                known_hosts=known_hosts,
+                connect_timeout=30,
+                login_timeout=30,
+            )
+        except asyncssh.HostKeyNotVerifiable:
+            raise ValueError(
+                host_key_changed_message(
+                    f"{self.config.host}:{self.config.port}",
+                    self.config.host_key,
+                    "forget the build host key in Settings → Build environment and check the connection again",
+                )
+            )
+        if not self.config.host_key:
+            key = self._conn.get_server_host_key()
+            if key is not None:
+                self.observed_host_key = openssh_host_key_line(key)
+                await self._log(
+                    "stdinfo",
+                    f"Recorded the build host's SSH key ({host_key_type(self.observed_host_key)} "
+                    f"{host_key_fingerprint(self.observed_host_key)}); later connections refuse any other key",
+                )
+                if self._on_host_key is not None:
+                    result = self._on_host_key(self.observed_host_key)
+                    if inspect.isawaitable(result):
+                        await result
 
     async def _log(self, level: str, message: str) -> None:
         if self._logger:

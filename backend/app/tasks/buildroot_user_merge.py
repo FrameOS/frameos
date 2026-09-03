@@ -30,8 +30,16 @@ FRAMEOS_GROUP_LINE = f"{FRAMEOS_SERVICE_USER}:x:{FRAMEOS_GID}:"
 FRAMEOS_SHADOW_LINE = f"{FRAMEOS_SERVICE_USER}:*:::::::"
 
 
+def _fields_for_name(content: str, user: str) -> list[str] | None:
+    for line in content.splitlines():
+        fields = line.split(":")
+        if fields[0] == user:
+            return fields
+    return None
+
+
 def _has_name(content: str, user: str) -> bool:
-    return any(line.split(":", 1)[0] == user for line in content.splitlines())
+    return _fields_for_name(content, user) is not None
 
 
 def _id_taken(content: str, wanted: int, user: str) -> bool:
@@ -56,12 +64,26 @@ def merge_frameos_user(passwd: str, group: str, shadow: str) -> tuple[str, str, 
     """
     user = FRAMEOS_SERVICE_USER
     changed: list[str] = []
-    if not _has_name(group, user):
+    group_fields = _fields_for_name(group, user)
+    if group_fields is not None:
+        if len(group_fields) <= 2 or group_fields[2] != str(FRAMEOS_GID):
+            raise RuntimeError(f"group {user} has the wrong gid (expected {FRAMEOS_GID})")
+    else:
         if _id_taken(group, FRAMEOS_GID, user):
             raise RuntimeError(f"gid {FRAMEOS_GID} is taken by another group")
         group = _append(group, FRAMEOS_GROUP_LINE)
         changed.append("group")
-    if not _has_name(passwd, user):
+    passwd_fields = _fields_for_name(passwd, user)
+    if passwd_fields is not None:
+        if (
+            len(passwd_fields) <= 3
+            or passwd_fields[2] != str(FRAMEOS_UID)
+            or passwd_fields[3] != str(FRAMEOS_GID)
+        ):
+            raise RuntimeError(
+                f"user {user} has the wrong uid/gid (expected {FRAMEOS_UID}:{FRAMEOS_GID})"
+            )
+    else:
         if _id_taken(passwd, FRAMEOS_UID, user):
             raise RuntimeError(f"uid {FRAMEOS_UID} is taken by another user")
         passwd = _append(passwd, FRAMEOS_PASSWD_LINE)

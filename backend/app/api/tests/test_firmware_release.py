@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from fastapi import HTTPException
 from unittest.mock import AsyncMock, patch
 
 from app.api import firmware_release as firmware_release_module
@@ -80,6 +81,54 @@ async def test_firmware_listing(async_client):
         response = await async_client.get("/api/frames/firmware")
     assert response.status_code == 200
     second_fetch.assert_not_awaited()
+
+
+def _asset(name: str, size: int) -> dict:
+    return {
+        "name": name,
+        "size": size,
+        "browser_download_url": f"https://github.com/FrameOS/frameos/releases/download/v1.3.0/{name}",
+    }
+
+
+@pytest.mark.asyncio
+async def test_firmware_listing_includes_the_per_layout_images(async_client):
+    # A release since docs/todo.md step 1 carries one image per chip and flash
+    # layout next to the generic pair; the listing names each by its platform
+    # and still never lists a bare -app.bin.
+    release = {
+        "tag_name": "v1.3.0",
+        "assets": [
+            *RELEASE["assets"],
+            _asset("frameos-1.3.0-esp32-s3-32mb.bin", 70),
+            _asset("frameos-1.3.0-esp32-s3-32mb-app.bin", 50),
+            _asset("frameos-1.3.0-esp32-c3-16mb.bin", 40),
+        ],
+    }
+    with patch_release(release=release):
+        response = await async_client.get("/api/frames/firmware")
+
+    assert response.status_code == 200, response.text
+    assert [asset["platform"] for asset in response.json()["assets"]] == [
+        "esp32-s3-generic",
+        "esp32-c3-generic",
+        "esp32-c3-16mb",
+        "esp32-s3-32mb",
+        "raspberry-pi-64",
+    ]
+    assert firmware_release_module.published_provisioning_assets(release) == {
+        "esp32-s3-generic",
+        "esp32-c3-generic",
+        "esp32-c3-16mb",
+        "esp32-s3-32mb",
+        "raspberry-pi-64",
+    }
+    # No listing at all is "unknown", not "nothing published".
+    assert firmware_release_module.published_provisioning_assets(None) is None
+    # Every per-layout image is streamable like the generic ones.
+    assert "esp32-c3-16mb" in firmware_release_module.STREAMABLE_PLATFORMS
+    assert "esp32-s3-32mb" in firmware_release_module.STREAMABLE_PLATFORMS
+    assert "raspberry-pi-64" not in firmware_release_module.STREAMABLE_PLATFORMS
 
 
 @pytest.mark.asyncio
@@ -244,3 +293,191 @@ async def test_firmware_requires_auth(no_auth_client):
         response = await no_auth_client.get("/api/projects/1/frames/firmware")
     assert response.status_code == 401
     fetch.assert_not_awaited()
+
+
+# --- The device-facing OTA relay -------------------------------------------
+#
+# Same release, different asset: the provisioning route streams the MERGED
+# image, the OTA routes the bare `-app.bin`. These exercise the helpers the
+# device routes in app/api/embedded_device.py call.
+
+MINISIG = (
+    "untrusted comment: signature from minisign secret key\n"
+    "RUQf6LRCGA9i55abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQ==\n"
+)
+
+
+def patch_minisig(text=MINISIG):
+    return patch(
+        "app.api.firmware_release.fetch_release_asset_text",
+        new_callable=AsyncMock,
+        return_value=text,
+    )
+
+
+@pytest.mark.asyncio
+async def test_latest_release_summary_names_the_release_and_its_platforms():
+    with patch_release():
+        summary = await firmware_release_module.latest_release_summary()
+
+    assert summary == {
+        "tag": "v1.2.3",
+        # The device compares against esp_app_get_description()->version,
+        # which is not v-prefixed.
+        "version": "1.2.3",
+        "platforms": {"esp32-s3-generic", "esp32-c3-generic", "raspberry-pi-64"},
+    }
+    assert firmware_release_module.release_version({"tag_name": "v2026.9.2"}) == "2026.9.2"
+    assert firmware_release_module.release_version({"tag_name": "2026.9.2"}) == "2026.9.2"
+    assert firmware_release_module.release_version({}) == ""
+
+
+@pytest.mark.asyncio
+async def test_latest_release_summary_is_none_when_github_is_unreachable():
+    with patch_release(release=None):
+        assert await firmware_release_module.latest_release_summary() is None
+
+
+@pytest.mark.asyncio
+async def test_ota_assets_name_the_bare_app_image_for_every_layout():
+    assert set(firmware_release_module.OTA_ASSETS) == set(
+        firmware_release_module.embedded_release_asset_names()
+    )
+    assert firmware_release_module.OTA_ASSETS["esp32-s3-16mb"] == "-esp32-s3-16mb-app.bin"
+    # The merged provisioning image is never an OTA image: esp_ota_write
+    # validates an esp_app_desc at offset 0x20, where the merged image has
+    # the bootloader.
+    asset = firmware_release_module.find_ota_asset(RELEASE, "esp32-s3-generic")
+    assert asset["name"] == "frameos-1.2.3-esp32-s3-generic-app.bin"
+    assert firmware_release_module.find_ota_asset(RELEASE, "esp32-c3-generic") is None
+    assert firmware_release_module.find_ota_asset(RELEASE, "esp99-mega") is None
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_shape():
+    signed = {
+        "tag_name": "v1.2.3",
+        "assets": [
+            *RELEASE["assets"],
+            _asset("frameos-1.2.3-esp32-s3-generic-app.bin.minisig", 120),
+        ],
+    }
+    with patch_release(release=signed), patch_minisig():
+        manifest = await firmware_release_module.latest_release_ota_manifest(
+            "esp32-s3-generic", "/download/here"
+        )
+
+    assert manifest == {
+        "platform": "esp32-s3-generic",
+        "version": "1.2.3",
+        "size": 48,
+        "minisig": MINISIG,
+        "downloadUrl": "/download/here",
+    }
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_error_tokens():
+    signed = {
+        "tag_name": "v1.2.3",
+        "assets": [
+            *RELEASE["assets"],
+            _asset("frameos-1.2.3-esp32-s3-generic-app.bin.minisig", 120),
+        ],
+    }
+
+    async def manifest(release, platform, minisig=MINISIG):
+        # Each case is its own lookup: the in-process listing cache would
+        # otherwise answer the next one with the previous release.
+        firmware_release_module.clear_release_cache()
+        with patch_release(release=release), patch_minisig(text=minisig):
+            with pytest.raises(HTTPException) as exc:
+                await firmware_release_module.latest_release_ota_manifest(platform, "/d")
+        return exc.value.status_code, exc.value.detail
+
+    # 400: a platform with no published OTA image family at all.
+    assert await manifest(signed, "esp99-mega") == (400, "invalid_platform")
+    # 404: this release does not carry the app image.
+    assert await manifest(RELEASE, "esp32-c3-generic") == (404, "ota_image_not_published")
+    # 409: an app image the device could never verify.
+    assert await manifest(RELEASE, "esp32-s3-generic") == (409, "unsigned_release")
+    # 502: GitHub unreachable, and separately a signature we could not fetch.
+    assert await manifest(None, "esp32-s3-generic") == (502, "release_lookup_failed")
+    assert await manifest(signed, "esp32-s3-generic", minisig=None) == (502, "release_lookup_failed")
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_asset_text_refuses_oversized_and_off_host_assets():
+    # A minisign signature is a few hundred bytes; anything bigger is not one.
+    oversized = _asset("frameos-1.3.0-esp32-s3-generic-app.bin.minisig", 1024 * 1024)
+    assert await firmware_release_module.fetch_release_asset_text(oversized) is None
+
+    off_host = {
+        "name": "frameos-1.3.0-esp32-s3-generic-app.bin.minisig",
+        "size": 120,
+        "browser_download_url": "https://evil.example.com/sig.minisig",
+    }
+    assert await firmware_release_module.fetch_release_asset_text(off_host) is None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=MINISIG.encode())
+
+    real_async_client = httpx.AsyncClient
+
+    def mocked_async_client(*args, **kwargs):
+        kwargs.pop("timeout", None)
+        kwargs.pop("follow_redirects", None)
+        return real_async_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    good = _asset("frameos-1.3.0-esp32-s3-generic-app.bin.minisig", 120)
+    with patch.object(httpx, "AsyncClient", mocked_async_client):
+        assert await firmware_release_module.fetch_release_asset_text(good) == MINISIG
+
+
+@pytest.mark.asyncio
+async def test_release_asset_stream_forwards_a_range_and_relays_206():
+    """Firmware from before the signed release OTA resumes its download in
+    512 KB ranges. Refusing the Range would strand exactly the boards this
+    relay exists to move onto the release image."""
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("range"))
+        return httpx.Response(
+            206,
+            content=b"\xa5" * 16,
+            headers={"content-length": "16", "content-range": "bytes 0-15/48"},
+        )
+
+    real_async_client = httpx.AsyncClient
+
+    def mocked_async_client(*args, **kwargs):
+        kwargs.pop("timeout", None)
+        kwargs.pop("follow_redirects", None)
+        return real_async_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with patch_release(), patch.object(httpx, "AsyncClient", mocked_async_client):
+        response = await firmware_release_module.stream_latest_release_ota_image(
+            "esp32-s3-generic", range_header="bytes=0-15"
+        )
+
+    assert response.status_code == 206
+    assert response.headers["content-range"] == "bytes 0-15/48"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["x-frameos-image-name"] == "frameos-1.2.3-esp32-s3-generic-app.bin"
+    assert seen == ["bytes=0-15"]
+    assert b"".join([chunk async for chunk in response.body_iterator]) == b"\xa5" * 16
+
+
+@pytest.mark.asyncio
+async def test_stream_latest_release_ota_image_error_tokens():
+    async def stream(release, platform):
+        firmware_release_module.clear_release_cache()
+        with patch_release(release=release):
+            with pytest.raises(HTTPException) as exc:
+                await firmware_release_module.stream_latest_release_ota_image(platform)
+        return exc.value.status_code, exc.value.detail
+
+    assert await stream(RELEASE, "esp99-mega") == (400, "invalid_platform")
+    assert await stream(RELEASE, "esp32-c3-generic") == (404, "ota_image_not_published")
+    assert await stream(None, "esp32-s3-generic") == (502, "release_lookup_failed")

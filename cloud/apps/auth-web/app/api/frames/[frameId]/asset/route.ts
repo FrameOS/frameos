@@ -4,6 +4,7 @@ import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import {
   assetFetchCommandTtlMs,
   cachedAssetFile,
+  isServableImageContentType,
   queueAssetGetIfIdle,
   recentFailedAssetGet,
 } from "../../../../../src/lib/frame-asset-cache";
@@ -74,14 +75,23 @@ async function assetResponse(
   if (!content) {
     return jsonError("asset_fetch_failed", 404);
   }
+  // The bytes came off a device, and the device's word on what they are was
+  // never taken (cachedAssetContentType sniffs raster images and stores
+  // everything else as opaque). Belt and braces here: only a sniffed image
+  // type is ever served with a rendering type, and anything else leaves the
+  // app origin as a download — the device must not be able to hand a
+  // browser a same-origin HTML or script document.
+  const isImage = isServableImageContentType(row.contentType);
   const headers: Record<string, string> = {
     // Private: these bytes came off a specific user's frame. The browser may
     // keep them briefly so a re-render does not re-download every thumbnail.
     "cache-control": "private, max-age=60",
     "content-length": String(row.sizeBytes),
-    "content-type": row.contentType || "application/octet-stream",
+    "content-security-policy": "sandbox",
+    "content-type": isImage ? row.contentType : "application/octet-stream",
+    "x-content-type-options": "nosniff",
   };
-  if (mode === "download") {
+  if (mode === "download" || !isImage) {
     headers["content-disposition"] = contentDisposition(
       "attachment",
       filename ?? "asset",

@@ -35,11 +35,20 @@ def _bounded_gunzip(raw_body: bytes, limit: int) -> bytes | None:
 class GzipRequestMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.headers.get("content-encoding") == "gzip":
+            from starlette.responses import Response
+
+            # Refuse on the declared size before buffering anything: the
+            # compressed body cannot usefully be larger than the decompressed cap.
+            content_length = request.headers.get("content-length") or ""
+            if content_length.isdigit() and int(content_length) > MAX_DECOMPRESSED_BODY:
+                return Response("Request body too large", status_code=413)
+
             # Read the raw gzipped body
             raw_body = await request.body()
+            if len(raw_body) > MAX_DECOMPRESSED_BODY:
+                return Response("Request body too large", status_code=413)
 
             # Decompress with a hard size cap
-            from starlette.responses import Response
             try:
                 decompressed_body = _bounded_gunzip(raw_body, MAX_DECOMPRESSED_BODY)
             except (OSError, zlib.error):

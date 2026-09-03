@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { accounts, createDb, normalizeEmail } from "@frameos-cloud/db";
+import { closeOutSubscriptionForDeletedAccount } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { csrfResponse } from "../../../../src/lib/csrf";
@@ -27,11 +28,15 @@ import {
 // users at all) is worse.
 //
 // The delete itself is a single row: every table that holds this account's
-// data cascades from accounts.id (see packages/db/src/schema.ts). audit_events
-// is the exception — it is ON DELETE SET NULL, so the security trail survives
-// with the account identifier stripped out. A security log that the subject
-// can erase is not a security log; a de-identified one is not their personal
-// data either. The privacy policy says so out loud.
+// data cascades from accounts.id (see packages/db/src/schema.ts). Two
+// exceptions. audit_events is ON DELETE SET NULL, so the security trail
+// survives with the account identifier stripped out — a security log that
+// the subject can erase is not a security log; a de-identified one is not
+// their personal data either. The privacy policy says so out loud. And the
+// accounting tables reference nothing (cloud/docs/accounting-todo.md §2.1):
+// the books keep a bare uuid, and a subscription in progress is closed out
+// BELOW before the row goes, so its unearned remainder returns to the
+// receivable rather than sitting as deferred revenue nothing will ever earn.
 
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
@@ -43,6 +48,15 @@ export async function POST(request: NextRequest) {
   const accountId = session?.accountId;
   if (!accountId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  // Erasure is proved with the password, or for password-less accounts with
+  // the primary email — which any token can read. A bearer token is a
+  // script's credential, not the person's; it does not get to end the account.
+  if (session.apiToken) {
+    return NextResponse.json(
+      { error: "api_token_not_allowed" },
+      { status: 403 },
+    );
   }
 
   const limited =
@@ -116,6 +130,11 @@ export async function POST(request: NextRequest) {
     eventType: "account.self_deleted",
     metadata: { email: account.primaryEmail },
   });
+
+  // Books first: return the unearned rest of any subscription period to the
+  // receivable and end the subscription. The receivable that remains is a
+  // write-off decision for a human, not something erasure may silently drop.
+  await closeOutSubscriptionForDeletedAccount(db, accountId);
 
   await db.delete(accounts).where(eq(accounts.id, accountId));
 

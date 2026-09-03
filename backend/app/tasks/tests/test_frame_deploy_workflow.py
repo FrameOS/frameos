@@ -50,7 +50,7 @@ class FakeDeployer:
             return 0
         if command.startswith("grep -q ") or command.startswith("test -f /etc/cron.d/frameos-reboot && grep -Fxq "):
             return 1
-        if command.startswith("command -v raspi-config > /dev/null && sudo raspi-config nonint get_"):
+        if command.startswith("command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_"):
             return 1
         if command.startswith("systemctl is-enabled ") or command.startswith("systemctl is-active "):
             return 1
@@ -903,7 +903,7 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     )
     deployer = FakeDeployer(
         installed_packages={"build-essential", "ntp", "python3-pip"},
-        existing_paths={"/srv/frameos/vendor/quickjs/quickjs-2026-06-04"},
+        existing_paths={"/srv/frameos/vendor/quickjs/quickjs-2026-06-04-quickts.1"},
     )
     deployer.success_commands.update(
         {
@@ -1138,8 +1138,8 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
     deployer = FakeDeployer(existing_paths={"/boot/firmware/config.txt"})
     deployer.success_commands.update(
         {
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"',
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_i2c | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "1"',
             "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1",
             "systemctl is-enabled userconfig >/dev/null 2>&1",
         }
@@ -1175,8 +1175,8 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
     )
     workflow.deployer.success_commands.update(
         {
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"',
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_i2c | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "1"',
             "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1",
             "systemctl is-enabled userconfig >/dev/null 2>&1",
         }
@@ -1396,16 +1396,16 @@ async def test_run_post_deploy_cleanup_uses_planned_actions_without_recalculatin
         }
     )
 
-    assert all("sudo ./frameos setup" not in command for command in deployer.commands)
+    assert all("sudo -n ./frameos setup" not in command for command in deployer.commands)
     assert any("/boot/custom.txt" in command for command in deployer.commands)
-    assert "sudo raspi-config nonint do_spi 1" not in deployer.commands
+    assert "sudo -n raspi-config nonint do_spi 1" not in deployer.commands
     assert any("/etc/cron.d/frameos-reboot" in command for command in deployer.commands)
-    assert "sudo systemctl daemon-reload" in deployer.commands
-    assert "sudo systemctl restart frameos.service" in deployer.commands
-    assert "sudo systemctl status frameos.service" in deployer.commands
+    assert "sudo -n systemctl daemon-reload" in deployer.commands
+    assert "sudo -n systemctl restart frameos.service" in deployer.commands
+    assert "sudo -n systemctl status frameos.service" in deployer.commands
     assert deployer.restarted_services == []
     assert all("userconfig" not in command for command in deployer.commands)
-    assert "sudo reboot" not in deployer.commands
+    assert "sudo -n reboot" not in deployer.commands
 
 
 @pytest.mark.asyncio
@@ -1449,11 +1449,11 @@ async def test_run_post_deploy_cleanup_remounts_read_only_root_around_cron_updat
     )
 
     root_check = next(index for index, command in enumerate(deployer.commands) if command.startswith("awk '$2 == \"/\" "))
-    remount_rw = deployer.commands.index("sudo mount -o remount,rw /")
+    remount_rw = deployer.commands.index("sudo -n mount -o remount,rw /")
     cron_update = next(index for index, command in enumerate(deployer.commands) if "/etc/cron.d/frameos-reboot" in command)
-    sync = deployer.commands.index("sudo sync")
-    remount_ro = deployer.commands.index("sudo mount -o remount,ro /")
-    restart = deployer.commands.index("sudo systemctl restart frameos.service")
+    sync = deployer.commands.index("sudo -n sync")
+    remount_ro = deployer.commands.index("sudo -n mount -o remount,ro /")
+    restart = deployer.commands.index("sudo -n systemctl restart frameos.service")
     assert root_check < remount_rw < cron_update < sync < remount_ro < restart
     assert ("stdout", "Root filesystem is read-only; remounting read-write for final cleanup") in deployer.logs
     assert ("stdout", "Restoring root filesystem to read-only after final cleanup") in deployer.logs
@@ -1504,7 +1504,7 @@ async def test_run_post_deploy_cleanup_uses_host_systemd_for_remote_rootfs_write
     assert any("mount -o remount,rw /" in command for command in host_commands)
     assert any("/etc/cron.d/frameos-reboot" in command for command in host_commands)
     assert any("mount -o remount,ro /" in command for command in host_commands)
-    assert not any(command == "sudo mount -o remount,rw /" for command in deployer.commands)
+    assert not any(command == "sudo -n mount -o remount,rw /" for command in deployer.commands)
 
 
 @pytest.mark.asyncio
@@ -1537,11 +1537,11 @@ async def test_run_release_setup_uses_staged_release_and_marks_reboot_when_setup
         post_deploy=post_deploy,
     )
 
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
-    assert "cd /srv/frameos/current && sudo ./frameos setup" not in deployer.commands
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/current && sudo -n ./frameos setup" not in deployer.commands
     assert post_deploy["final_action"] == "reboot"
-    assert "sudo systemctl enable frameos.service" not in deployer.commands
-    assert "sudo reboot" not in deployer.commands
+    assert "sudo -n systemctl enable frameos.service" not in deployer.commands
+    assert "sudo -n reboot" not in deployer.commands
     assert deployer.restarted_services == []
 
 
@@ -1577,10 +1577,10 @@ async def test_run_release_setup_remounts_read_only_root_around_setup():
 
     assert post_deploy["final_action"] == "restart_frameos"
     root_check = next(index for index, command in enumerate(deployer.commands) if command.startswith("awk '$2 == \"/\" "))
-    remount_rw = deployer.commands.index("sudo mount -o remount,rw /")
-    setup = deployer.commands.index("cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup")
-    sync = deployer.commands.index("sudo sync")
-    remount_ro = deployer.commands.index("sudo mount -o remount,ro /")
+    remount_rw = deployer.commands.index("sudo -n mount -o remount,rw /")
+    setup = deployer.commands.index("cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup")
+    sync = deployer.commands.index("sudo -n sync")
+    remount_ro = deployer.commands.index("sudo -n mount -o remount,ro /")
     assert root_check < remount_rw < setup < sync < remount_ro
     assert ("stdout", "Root filesystem is read-only; remounting read-write for setup") in deployer.logs
     assert ("stdout", "Restoring root filesystem to read-only after setup") in deployer.logs
@@ -1617,7 +1617,7 @@ async def test_run_release_setup_uses_systemd_run_when_deploying_through_remote(
     assert "FRAMEOS_SETUP_UNDER_REMOTE=1" in setup_command
     assert 'FRAMEOS_SERVICE_USER="$1"' in setup_command
     assert "/srv/frameos/releases/release_build12345678" in setup_command
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" not in deployer.commands
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" not in deployer.commands
 
 
 @pytest.mark.asyncio
@@ -1653,7 +1653,7 @@ async def test_buildroot_current_setup_continues_after_legacy_systemd_service_wr
     setup_requires_reboot = await workflow._run_current_setup()
 
     assert setup_requires_reboot is False
-    assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/current && sudo -n ./frameos setup" in deployer.commands
     assert any("failed refreshing the Buildroot systemd service file" in message for _kind, message in deployer.logs)
     assert not any("diagnostics:" in command for command in deployer.commands)
 
@@ -1694,7 +1694,7 @@ async def test_buildroot_release_setup_fails_on_systemd_service_write_failure():
             post_deploy={"final_action": "restart_frameos"},
         )
 
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" in deployer.commands
     assert any("FrameOS setup exited with code 1; collecting diagnostics" in message for _kind, message in deployer.logs)
     assert "free -m" in deployer.commands
     assert not any("failed refreshing the Buildroot systemd service file" in message for _kind, message in deployer.logs)
@@ -1723,8 +1723,8 @@ async def test_stop_frameos_for_release_setup_leaves_remote_running():
     stopped = await workflow._stop_frameos_for_release_setup()
 
     assert stopped is True
-    assert "sudo systemctl stop frameos.service" in deployer.commands
-    assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
+    assert "sudo -n systemctl stop frameos.service" in deployer.commands
+    assert "sudo -n sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
     assert all("frameos-remote" not in command and "frameos_agent" not in command for command in deployer.commands)
 
 
@@ -1742,9 +1742,9 @@ async def test_stop_frameos_for_release_setup_treats_missing_service_as_not_runn
     class MissingServiceDeployer(RecordingDeployer):
         async def exec_command(self, command: str, **kwargs) -> int:
             self.commands.append(command)
-            if command == "sudo systemctl stop frameos.service":
+            if command == "sudo -n systemctl stop frameos.service":
                 return 5
-            if command == "sudo sh -c 'killall frameos 2>/dev/null || true'":
+            if command == "sudo -n sh -c 'killall frameos 2>/dev/null || true'":
                 return 0
             return await super().exec_command(command, **kwargs)
 
@@ -1761,8 +1761,8 @@ async def test_stop_frameos_for_release_setup_treats_missing_service_as_not_runn
     stopped = await workflow._stop_frameos_for_release_setup()
 
     assert stopped is False
-    assert "sudo systemctl stop frameos.service" in deployer.commands
-    assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
+    assert "sudo -n systemctl stop frameos.service" in deployer.commands
+    assert "sudo -n sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
     assert not any(kind == "stderr" for kind, _message in deployer.logs)
     assert any("service was not loaded" in message for _kind, message in deployer.logs)
 
@@ -1799,8 +1799,8 @@ async def test_run_post_deploy_cleanup_reboots_when_setup_requested_it():
         }
     )
 
-    assert "sudo systemctl enable frameos.service" not in deployer.commands
-    assert "sudo reboot" in deployer.commands
+    assert "sudo -n systemctl enable frameos.service" not in deployer.commands
+    assert "sudo -n reboot" in deployer.commands
     assert deployer.restarted_services == []
 
 
@@ -1861,7 +1861,7 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
         ("/srv/frameos/current/scenes.json.gz", True),
         ("/srv/frameos/current/all_scenes.json.gz", True),
     ]
-    assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/current && sudo -n ./frameos setup" in deployer.commands
 
 
 @pytest.mark.asyncio
@@ -2072,7 +2072,7 @@ async def test_execute_fast_skips_setup_for_old_frameos_without_setup_command(mo
 
     await workflow._execute_fast(plan)
 
-    assert not any(command.endswith("&& sudo ./frameos setup") for command in deployer.commands)
+    assert not any(command.endswith("&& sudo -n ./frameos setup") for command in deployer.commands)
     assert not any("grep -aq 'FrameOS setup: starting'" in command for command in deployer.commands)
     assert (
         "stdout",
@@ -2223,9 +2223,9 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
     with pytest.raises(RuntimeError, match="FrameOS setup failed with exit code 1"):
         await workflow._execute_full(plan)
 
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
-    assert deployer.commands.index("sudo systemctl stop frameos.service") < deployer.commands.index(
-        "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup"
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" in deployer.commands
+    assert deployer.commands.index("sudo -n systemctl stop frameos.service") < deployer.commands.index(
+        "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup"
     )
     assert deployer.restarted_services == ["frameos"]
     assert frame.status == "uninitialized"
@@ -2377,7 +2377,7 @@ async def test_remote_build_uses_x86_feature_flags(monkeypatch: pytest.MonkeyPat
         ),
         "build12345678",
         "/srv/frameos/releases/release_build12345678/frameos",
-        "quickjs-2026-06-04",
+        "quickjs-2026-06-04-quickts.1",
     )
 
     assert uploaded == ["/srv/frameos/build/build_build12345678.tar.gz"]
@@ -2419,19 +2419,40 @@ def _embedded_workflow(frame: SimpleNamespace) -> FrameDeployWorkflow:
     )
 
 
+RELEASE_SUMMARY = {
+    "tag": "v2026.9.2",
+    "version": "2026.9.2",
+    "platforms": {"esp32-s3-generic", "esp32-s3-16mb"},
+}
+
+
+def _patch_release_summary(summary=RELEASE_SUMMARY):
+    """The plan names the release the device will be offered; GitHub is not on
+    the test's network."""
+    from unittest.mock import AsyncMock, patch
+
+    return patch("app.api.firmware_release.latest_release_summary",
+                 new_callable=AsyncMock, return_value=summary)
+
+
 @pytest.mark.asyncio
-async def test_plan_full_for_embedded_returns_ota_plan():
+async def test_plan_full_for_embedded_returns_release_ota_plan():
     frame = _embedded_workflow_frame()
     workflow = _embedded_workflow(frame)
 
-    plan = await workflow.plan("full")
+    with _patch_release_summary():
+        plan = await workflow.plan("full")
 
     assert plan.mode == "full"
     assert isinstance(plan.full_deploy, EmbeddedFullDeployPlan)
     assert plan.full_deploy.platform == "esp32-s3"
-    assert plan.full_deploy.needs_firmware_build is True
+    # The backend builds nothing: the plan names the published release and the
+    # image family this board's flash layout takes.
+    assert plan.full_deploy.release_version == "2026.9.2"
+    assert plan.full_deploy.release_platform == "esp32-s3-generic"
     assert plan.frame_dict["mode"] == "embedded"
     assert plan.frame_dict["frameos_version"]
+    assert any("2026.9.2" in note for note in plan.notes)
 
     # The drawer consumes the FullDeployPlanResponse key shape.
     payload = plan.full_deploy.to_dict()
@@ -2443,8 +2464,38 @@ async def test_plan_full_for_embedded_returns_ota_plan():
     }
     assert payload["packages"] == []
     assert payload["binary"]["will_attempt_precompiled"] is False
-    assert payload["embedded"]["action"] == "build_firmware_ota_upload_scenes"
+    assert payload["binary"]["cross_compile_supported"] is False
+    assert payload["embedded"]["action"] == "release_ota_upload_scenes"
     assert payload["embedded"]["otaSupported"] is True
+    assert payload["embedded"]["releasePlatform"] == "esp32-s3-generic"
+    assert payload["embedded"]["releaseVersion"] == "2026.9.2"
+    assert "firmwareStatus" not in payload["embedded"]
+    assert "needsFirmwareBuild" not in payload["embedded"]
+
+
+@pytest.mark.asyncio
+async def test_plan_full_for_embedded_picks_the_image_for_the_flash_layout():
+    frame = _embedded_workflow_frame(embedded={"platform": "esp32-s3", "flashSize": "16MB"})
+
+    with _patch_release_summary():
+        plan = await _embedded_workflow(frame).plan("full")
+
+    assert plan.full_deploy.release_platform == "esp32-s3-16mb"
+
+
+@pytest.mark.asyncio
+async def test_plan_full_for_embedded_survives_an_unreachable_github():
+    """A release listing this backend cannot fetch does not block the deploy:
+    the device asks for the manifest itself and may answer up to date."""
+    frame = _embedded_workflow_frame()
+
+    with _patch_release_summary(summary=None):
+        plan = await _embedded_workflow(frame).plan("full")
+
+    assert plan.full_deploy.release_version is None
+    # No listing still resolves the generic image for the chip.
+    assert plan.full_deploy.release_platform == "esp32-s3-generic"
+    assert any("could not be fetched" in note for note in plan.notes)
 
 
 @pytest.mark.asyncio
@@ -2465,7 +2516,8 @@ async def test_plan_full_for_embedded_rejects_pico_and_no_ota_profiles():
 @pytest.mark.asyncio
 async def test_plan_combined_for_embedded_includes_fast_and_full():
     frame = _embedded_workflow_frame()
-    plan = await _embedded_workflow(frame).plan("combined")
+    with _patch_release_summary():
+        plan = await _embedded_workflow(frame).plan("combined")
 
     assert plan.mode == "combined"
     assert plan.fast_deploy is not None
@@ -2498,17 +2550,18 @@ def _embedded_full_plan_for(frame: SimpleNamespace) -> FrameDeployPlan:
             flash_size="8MB",
             psram_mb=8,
             ota_supported=True,
-            firmware_status="stale",
-            firmware_error=None,
-            needs_firmware_build=True,
+            release_platform="esp32-s3-generic",
+            release_version="2026.9.2",
         ),
     )
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scenes(
+async def test_execute_embedded_full_updates_waits_for_boot_and_uploads_scenes(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """The whole embedded full deploy now: poke the device's updater, wait for
+    the boot that proves it came back, re-upload the scenes."""
     from datetime import datetime, timedelta, timezone
 
     frame = _embedded_workflow_frame()
@@ -2516,11 +2569,6 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
     events: list[str] = []
     http_calls: list[str] = []
-    firmware_statuses = [
-        {"status": "stale"},
-        {"status": "building"},
-        {"status": "ready", "completedAt": datetime.now(timezone.utc).isoformat()},
-    ]
 
     async def fake_update_frame(_db, _redis, _frame):
         return _frame
@@ -2528,17 +2576,10 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
     async def fake_log(_db, _redis, _frame_id, _type, message):
         events.append(message)
 
-    async def fake_refresh(_db, _redis, _frame):
-        return firmware_statuses.pop(0) if len(firmware_statuses) > 1 else firmware_statuses[0]
-
-    async def fake_start(_db, _redis, _frame, **_kwargs):
-        events.append("build-started")
-        return True, {"status": "queued"}
-
-    async def fake_request_ota(_db, _redis, _frame, *_args, **_kwargs):
-        events.append("ota-requested")
-        # The device pulls the image and reboots; its bootup log lands in
-        # frame.embedded.lastBoot.
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
+        events.append("update-requested")
+        # The device pulls the release image and reboots; its bootup log lands
+        # in frame.embedded.lastBoot.
         _frame.embedded = {
             **_frame.embedded,
             "lastBoot": {"at": (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()},
@@ -2552,14 +2593,11 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.start_embedded_firmware", fake_start)
-    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_ota", fake_request_ota)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
     await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
-    assert "build-started" in events
-    assert "ota-requested" in events
+    assert "update-requested" in events
     assert http_calls == ["/uploadScenes", "/reload"]
     assert frame.status == "starting"
     assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
@@ -2568,58 +2606,13 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_ota_timeout_says_it_may_still_complete(
-    monkeypatch: pytest.MonkeyPatch,
-):
+async def test_execute_embedded_full_always_waits_for_a_boot(monkeypatch: pytest.MonkeyPatch):
+    """The updater reboots whatever it decides, so a frame already running the
+    release comes straight back — there is no "skip the wait" branch to get
+    wrong, and a device that never returns is a failed deploy."""
     from datetime import datetime, timezone
 
-    frame = _embedded_workflow_frame(
-        # Last device activity predates the ready build: a reboot is required.
-        last_log_at=datetime(2026, 6, 14, tzinfo=timezone.utc),
-    )
-    workflow = _embedded_workflow(frame)
-    workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
-    workflow.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 0.01
-
-    async def fake_update_frame(_db, _redis, _frame):
-        return _frame
-
-    async def fake_log(_db, _redis, _frame_id, _type, _message):
-        return None
-
-    async def fake_refresh(_db, _redis, _frame):
-        return {"status": "ready", "completedAt": datetime.now(timezone.utc).isoformat()}
-
-    async def fake_request_ota(_db, _redis, _frame, *_args, **_kwargs):
-        return {"ok": True}
-
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_ota", fake_request_ota)
-
-    with pytest.raises(RuntimeError) as exc:
-        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
-
-    assert "may still" in str(exc.value)
-    assert frame.status == "uninitialized"
-
-
-@pytest.mark.asyncio
-async def test_execute_embedded_full_skips_boot_wait_when_device_runs_current_firmware(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    from datetime import datetime, timedelta, timezone
-
-    built_at = datetime(2026, 6, 14, tzinfo=timezone.utc)
-    frame = _embedded_workflow_frame(
-        embedded={
-            "platform": "esp32-s3",
-            "flashSize": "8MB",
-            # Device booted after the ready image finished building.
-            "lastBoot": {"at": (built_at + timedelta(minutes=5)).isoformat()},
-        },
-    )
+    frame = _embedded_workflow_frame(last_log_at=datetime(2026, 6, 14, tzinfo=timezone.utc))
     workflow = _embedded_workflow(frame)
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
     workflow.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 0.01
@@ -2631,41 +2624,35 @@ async def test_execute_embedded_full_skips_boot_wait_when_device_runs_current_fi
     async def fake_log(_db, _redis, _frame_id, _type, _message):
         return None
 
-    async def fake_refresh(_db, _redis, _frame):
-        return {"status": "ready", "completedAt": built_at.isoformat()}
-
-    async def fake_start(_db, _redis, _frame, **_kwargs):
-        raise AssertionError("ready firmware must not be rebuilt")
-
-    async def fake_request_ota(_db, _redis, _frame, *_args, **_kwargs):
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
         return {"ok": True}
 
-    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None, timeout=None):
-        http_calls.append(path)
+    async def fake_fetch_frame_http_bytes(_frame, _redis, **_kwargs):
+        http_calls.append(_kwargs.get("path"))
         return 200, b"{}", {}
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.start_embedded_firmware", fake_start)
-    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_ota", fake_request_ota)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
-    await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+    with pytest.raises(RuntimeError) as exc:
+        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
-    assert http_calls == ["/uploadScenes", "/reload"]
-    assert frame.status == "starting"
+    assert "may still" in str(exc.value)
+    assert "ota:backend" in str(exc.value)
+    assert frame.status == "uninitialized"
+    # Scenes are never uploaded to a frame that did not come back.
+    assert http_calls == []
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_surfaces_build_failure(monkeypatch: pytest.MonkeyPatch):
+async def test_execute_embedded_full_surfaces_an_unreachable_device(monkeypatch: pytest.MonkeyPatch):
+    """The OTA poke is a plain HTTP call to the board. Nothing is queued for
+    later, so a device that will not answer fails the deploy now."""
     frame = _embedded_workflow_frame()
     workflow = _embedded_workflow(frame)
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
-    firmware_statuses = [
-        {"status": "missing"},
-        {"status": "error", "error": "idf.py build failed with exit code 2:\nninja: error"},
-    ]
 
     async def fake_update_frame(_db, _redis, _frame):
         return _frame
@@ -2673,19 +2660,47 @@ async def test_execute_embedded_full_surfaces_build_failure(monkeypatch: pytest.
     async def fake_log(_db, _redis, _frame_id, _type, _message):
         return None
 
-    async def fake_refresh(_db, _redis, _frame):
-        return firmware_statuses.pop(0) if len(firmware_statuses) > 1 else firmware_statuses[0]
-
-    async def fake_start(_db, _redis, _frame, **_kwargs):
-        return True, {"status": "queued"}
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
+        raise ValueError("HTTP 503: busy rendering")
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.start_embedded_firmware", fake_start)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
     with pytest.raises(RuntimeError) as exc:
         await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
-    assert "ninja: error" in str(exc.value)
+    assert "Could not start the OTA update" in str(exc.value)
+    assert "busy rendering" in str(exc.value)
+    assert frame.status == "uninitialized"
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_full_needs_a_device_that_has_reported_once(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """There is no first flash over the air: a board that has never spoken to
+    this backend has to be flashed over USB."""
+    frame = _embedded_workflow_frame(last_log_at=None)
+    workflow = _embedded_workflow(frame)
+    requested: list[int] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, _type, _message):
+        return None
+
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
+        requested.append(1)
+        return {"ok": True}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
+
+    with pytest.raises(RuntimeError, match="Flash the first firmware over USB"):
+        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+
+    assert requested == []
     assert frame.status == "uninitialized"

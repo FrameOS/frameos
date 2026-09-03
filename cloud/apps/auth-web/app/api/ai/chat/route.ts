@@ -8,18 +8,37 @@ import {
 import { NextRequest } from "next/server";
 import {
   appendChatMessage,
+  boundHistory,
   ensureChat,
   historyForModel,
 } from "../../../../src/lib/ai/chat-store";
+import {
+  priceUsage,
+  readAccountMargin,
+  resolveModelPrice,
+  splitProviderUsage,
+} from "@frameos-cloud/ledger";
 import { aiRefusalResponse } from "../../../../src/lib/ai/access";
 import { resolveAiAccess } from "../../../../src/lib/ai/api-key";
 import { meterAiUsageInBackground } from "../../../../src/lib/billing";
 import { buildInitialInput, runAgentLoop } from "../../../../src/lib/ai/loop";
 import { formatAiException, type JsonObject } from "../../../../src/lib/ai/scene-utils";
 import { captureAiGeneration, captureAiTurn } from "../../../../src/lib/ai/telemetry";
-import type { ListingEvent, ScenesEvent, ToolContext } from "../../../../src/lib/ai/tools";
+import {
+  inFlightSpendMicros,
+  releaseTurnSpend,
+  reserveTurnSpend,
+  updateTurnSpend,
+} from "../../../../src/lib/ai/spend-reservations";
+import type {
+  InstallProposalEvent,
+  ListingEvent,
+  ScenesEvent,
+  ToolContext,
+} from "../../../../src/lib/ai/tools";
 import {
   activeTurnForChat,
+  activeTurnCountForAccount,
   startTurn,
   turnStream,
 } from "../../../../src/lib/ai/turn-runner";
@@ -31,7 +50,10 @@ import {
 } from "../../../../src/lib/device-flow";
 import { frameForAccount } from "../../../../src/lib/frames";
 import { logInfo, logWarn, reportError } from "../../../../src/lib/log";
-import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -121,7 +143,7 @@ function parseDraftListing(value: unknown): ListingEvent["listing"] | null {
   }
   const draft: ListingEvent["listing"] = {};
   if (typeof record.description === "string" || record.description === null) {
-    draft.description = record.description;
+    draft.description = record.description?.slice(0, maxListingDescriptionChars) ?? null;
   }
   if (typeof record.category === "string" || record.category === null) {
     draft.category = record.category;
@@ -202,6 +224,26 @@ async function storeSceneContextBlock(
   return { block: lines.join("\n"), storeSceneId: scene.id };
 }
 
+// Per account, on top of the per-IP window: a person iterating on a scene
+// sends a turn every minute or two; forty in fifteen minutes is a script.
+const aiTurnsPerAccountRateLimit = { limit: 40, windowMs: 15 * 60 * 1000 };
+// Unfinished turns one account may hold open across all its chats. Each one
+// is admitted under the daily cap before any of them has metered; this bounds
+// the count, and the spend reservations (spend-reservations.ts) bound the
+// money — the gate below counts what the other turns have reserved.
+const maxActiveTurnsPerAccount = 3;
+
+// Bounds on what one request may put into the model context. Everything
+// else the client sends is either dropped to names/ids (editor scenes,
+// listing) or already bounded (history: chat-store.ts boundHistory; the
+// body as a whole: readJsonObject's 4 MiB). Refusals, not silent cuts, for
+// the two that carry meaning: a prompt or a scene cut in the middle would be
+// answered wrong rather than not at all.
+const maxPromptChars = 20_000;
+const maxSceneContextChars = 300_000;
+const maxSelectionContextChars = 100_000;
+const maxListingDescriptionChars = 4_000;
+
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -223,25 +265,71 @@ export async function POST(request: NextRequest) {
     return response;
   }
   const accountId = session.accountId;
+  // The IP limit above is per address; this one is per account, because a
+  // turn on the shared operator key costs real money and an account behind
+  // many addresses (or a token used from many boxes) is still one budget.
+  const accountLimited = await identityRateLimitResponse(
+    accountId,
+    "ai:chat",
+    aiTurnsPerAccountRateLimit,
+  );
+  if (accountLimited) {
+    return accountLimited;
+  }
+  if (activeTurnCountForAccount(accountId) >= maxActiveTurnsPerAccount) {
+    return jsonError("too_many_turns", 429, {
+      detail: `At most ${maxActiveTurnsPerAccount} AI turns can run at once. Wait for one to finish.`,
+    });
+  }
 
   const body = await readJsonObject(request);
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) {
     return jsonError("invalid_prompt", 400, { detail: "Prompt is required" });
   }
+  if (prompt.length > maxPromptChars) {
+    return jsonError("prompt_too_long", 400, {
+      detail: `A message can be at most ${maxPromptChars} characters.`,
+      max_chars: maxPromptChars,
+    });
+  }
 
   // The one gate: the AI switch, the key, and the daily cap, in that order
   // (§5.1/§5.3). Every AI surface goes through it, which is what makes
-  // "does the cap apply here?" a question with one answer.
-  const access = await resolveAiAccess(db, accountId, { surface: "scene_chat" });
+  // "does the cap apply here?" a question with one answer. The cap counts
+  // what this account's unfinished turns have reserved, so a burst of turns
+  // cannot each be admitted under a cap the first one will spend.
+  const access = await resolveAiAccess(db, accountId, {
+    inFlightMicros: inFlightSpendMicros(accountId),
+    surface: "scene_chat",
+  });
   if (!access.ok) {
     return aiRefusalResponse(access.refusal);
   }
   const { apiKey, model, reasoningEffort, source: credentialSource } =
     access.credentials;
+  // The in-turn budget (§5.3): the gate let the turn start under the cap,
+  // and this is what stops it once its own rounds have carried the day past
+  // cap + overdraft. Priced the way metering will price it, from the same
+  // price row and the same margin, so the number the runner stops on is the
+  // number the record will say.
+  const budget = access.budget
+    ? {
+        ...access.budget,
+        marginBasisPoints: await readAccountMargin(db, accountId),
+        price: await resolveModelPrice(db, model),
+      }
+    : undefined;
 
   const requestedChatId = stringOrNull(body.chatId) ?? crypto.randomUUID();
   const scenePayload = objectOrNull(body.scene);
+  const sceneContextJson = scenePayload ? JSON.stringify(scenePayload) : "";
+  if (sceneContextJson.length > maxSceneContextChars) {
+    return jsonError("scene_too_large", 400, {
+      detail: `This scene is too large for the AI chat (${sceneContextJson.length} characters; the limit is ${maxSceneContextChars}).`,
+      max_chars: maxSceneContextChars,
+    });
+  }
   const sceneId = stringOrNull(body.sceneId);
   const { block: frameBlock, frameId } = await frameContextBlock(
     db,
@@ -289,6 +377,7 @@ export async function POST(request: NextRequest) {
         role: item.role as "user" | "assistant",
       }))
       .slice(-12);
+    history = boundHistory(history);
   }
 
   const contextParts: string[] = [];
@@ -314,7 +403,7 @@ export async function POST(request: NextRequest) {
     contextParts.push(
       `The user has this scene open in the editor (its id is "${sceneId ?? scenePayload.id}"). ` +
         "update_scene will modify it:\n" +
-        JSON.stringify(scenePayload),
+        sceneContextJson,
     );
   }
   if (editorScenes && editorScenes.length > 1) {
@@ -331,9 +420,11 @@ export async function POST(request: NextRequest) {
   const selectedNodes = Array.isArray(body.selectedNodes) ? body.selectedNodes : [];
   const selectedEdges = Array.isArray(body.selectedEdges) ? body.selectedEdges : [];
   if (selectedNodes.length > 0 || selectedEdges.length > 0) {
+    const selection = JSON.stringify({ edges: selectedEdges, nodes: selectedNodes });
     contextParts.push(
-      "The user has selected these elements in the editor:\n" +
-        JSON.stringify({ edges: selectedEdges, nodes: selectedNodes }),
+      selection.length <= maxSelectionContextChars
+        ? "The user has selected these elements in the editor:\n" + selection
+        : `The user has selected ${selectedNodes.length} node(s) and ${selectedEdges.length} edge(s) in the editor; the selection is too large to include here, so work from the scene JSON above.`,
     );
   }
 
@@ -345,10 +436,23 @@ export async function POST(request: NextRequest) {
 
   await appendChatMessage(db, chat.id, { content: prompt, role: "user" });
 
-  const surface =
-    typeof body.surface === "string" && body.surface ? body.surface : frameId ? "frame" : "editor";
+  // The metered surface is the gate's, never the client's. `surface` decides
+  // whether a turn is absorbed — free and uncapped — so a client-chosen value
+  // was free AI for anyone who sent "scene_convert" (§9.2 item 1). What the
+  // client says about where it is ("editor", "frame", "store") is kept as
+  // context for the usage page, and nothing prices on it.
+  const surface = "scene_chat";
+  const context =
+    typeof body.surface === "string" && /^[a-z0-9_-]{1,32}$/i.test(body.surface)
+      ? body.surface.toLowerCase()
+      : frameId
+        ? "frame"
+        : "editor";
   const scenesDelivered: { tool: string; title?: string; count: number }[] = [];
   const deliveredScenes: unknown[] = [];
+  // Frame changes proposed this turn, persisted with the reply so a chat
+  // reopened later still shows the Install card (unapproved ones included).
+  const proposals: InstallProposalEvent[] = [];
   const roundToolCalls: string[] = [];
   const toolArgErrors: string[] = [];
 
@@ -356,7 +460,7 @@ export async function POST(request: NextRequest) {
   let roundsSeen = 0;
   let usageSeen = { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
   // The turn's emit, once it is running; emitScenes forwards through it.
-  let turnEmit: (event: ScenesEvent | ListingEvent) => void = () => {};
+  let turnEmit: (event: ScenesEvent | ListingEvent | InstallProposalEvent) => void = () => {};
   const toolContext: ToolContext = {
     accountId,
     currentListing: draftListing,
@@ -365,6 +469,10 @@ export async function POST(request: NextRequest) {
     db,
     editorScenes,
     emitListing: (event) => {
+      turnEmit(event);
+    },
+    emitProposal: (event) => {
+      proposals.push(event);
       turnEmit(event);
     },
     emitScenes: (event) => {
@@ -385,11 +493,15 @@ export async function POST(request: NextRequest) {
     storeSceneId,
   };
 
+  // Reserved from here until onFinish: the next turn's admission gate counts
+  // it, and the ledger takes over once the metering below has run.
+  reserveTurnSpend(accountId, turnId);
   const turn = startTurn({
     accountId,
     chatId: chat.id,
     id: turnId,
     onFinish: (finished, outcome, failure) => {
+      releaseTurnSpend(finished.id);
       const durationMs = Date.now() - finished.startedAt;
       // Metered whatever the outcome: a turn that errored or was stopped
       // still burned the tokens it burned, and the provider bills for them.
@@ -397,6 +509,7 @@ export async function POST(request: NextRequest) {
       meterAiUsageInBackground({
         accountId,
         chatId: chat.id,
+        context,
         credentialSource,
         model,
         rounds: roundsSeen,
@@ -456,6 +569,43 @@ export async function POST(request: NextRequest) {
                 outputTokens: usageSeen.outputTokens + report.usage.outputTokens,
                 reasoningTokens: usageSeen.reasoningTokens + report.usage.reasoningTokens,
               };
+              if (budget && !signal.aborted) {
+                const soFar = priceUsage({
+                  billable: true,
+                  marginBasisPoints: budget.marginBasisPoints,
+                  price: budget.price,
+                  usage: splitProviderUsage(usageSeen),
+                }).priceMicros;
+                // What this turn has cost so far replaces its reservation,
+                // and the account's OTHER running turns count against the
+                // line too — they will be metered as surely as this one.
+                updateTurnSpend(turnId, soFar);
+                const othersInFlight = inFlightSpendMicros(accountId, turnId);
+                if (
+                  budget.spentMicros + othersInFlight + soFar >=
+                  budget.capMicros + budget.overdraftMicros
+                ) {
+                  // The turn crossed the day's line mid-flight: stop it here
+                  // rather than let a long tool loop run the overshoot up.
+                  // The tokens already burned are metered in onFinish.
+                  logWarn("ai.chat.turn_over_budget", {
+                    accountId,
+                    chatId: chat.id,
+                    inFlightMicros: othersInFlight.toString(),
+                    round: report.round,
+                    soFarMicros: soFar.toString(),
+                    spentMicros: budget.spentMicros.toString(),
+                    turnId,
+                  });
+                  turn.controller.abort(
+                    new Error(
+                      budget.allowance === "shared"
+                        ? "This reply used up today's free AI allowance on the shared key. Nothing is billed for it; it resets at midnight UTC."
+                        : "This account reached its daily AI limit during this reply. Today's limit resets at midnight UTC.",
+                    ),
+                  );
+                }
+              }
             }
             captureAiGeneration({
               accountId,
@@ -501,8 +651,13 @@ export async function POST(request: NextRequest) {
         await appendChatMessage(db, chat.id, {
           content,
           payload:
-            scenesDelivered.length > 0
-              ? { delivered: deliveredScenes, scenes: scenesDelivered }
+            scenesDelivered.length > 0 || proposals.length > 0
+              ? {
+                  ...(scenesDelivered.length > 0
+                    ? { delivered: deliveredScenes, scenes: scenesDelivered }
+                    : {}),
+                  ...(proposals.length > 0 ? { proposals } : {}),
+                }
               : null,
           role: "assistant",
           tool,

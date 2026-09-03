@@ -46,7 +46,6 @@ import { frameSupportsUsbSerialConsole } from '../scenes/workspace/workspaceSurf
 import type { FrameEmbeddedFlashSize } from '../types'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
-export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
 function remoteTaskQuery(params: { recompile?: boolean; transport?: RemoteTaskTransport }): string {
   const query = new URLSearchParams()
@@ -217,11 +216,6 @@ const pendingSdCardImageDownloads = new Set<FrameId>()
 const sdCardImageStatusPollsInFlight = new Set<FrameId>()
 const sdCardImageProgressTimers = new Map<FrameId, ReturnType<typeof window.setInterval>>()
 
-const pendingEmbeddedFirmwareDownloads = new Set<FrameId>()
-const embeddedFirmwareStatusPollsInFlight = new Set<FrameId>()
-const embeddedFirmwareProgressTimers = new Map<FrameId, ReturnType<typeof window.setInterval>>()
-const embeddedFirmwareRecoveryAttempts = new Map<FrameId, number>()
-const EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT = 2
 const embeddedUsbImageRefreshTimers = new Map<FrameId, ReturnType<typeof window.setTimeout>>()
 const embeddedUsbImageRefreshesInFlight = new Set<FrameId>()
 const embeddedUsbImageRefreshRetries = new Map<FrameId, number>()
@@ -249,54 +243,6 @@ async function responseErrorDetail(response: Response, fallback: string): Promis
   } catch (error) {
     return fallback
   }
-}
-
-function mergeEmbeddedFirmwareStatus(
-  current: EmbeddedFirmware | undefined,
-  firmware: EmbeddedFirmware
-): EmbeddedFirmware {
-  if (!current) {
-    return firmware
-  }
-  return {
-    ...firmware,
-    layout: firmware.layout ?? current.layout,
-  }
-}
-
-async function requestEmbeddedFirmwareBuild(frameId: FrameId, force = false): Promise<EmbeddedFirmware | null> {
-  const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware${force ? '?force=1' : ''}`, {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    throw new Error(await responseErrorDetail(response, 'Failed to start firmware build'))
-  }
-  const data = await response.json()
-  return (data?.firmware as EmbeddedFirmware | undefined) ?? null
-}
-
-async function recoverEmbeddedFirmwareBuild(frameId: FrameId, status: EmbeddedFirmware): Promise<boolean> {
-  if (status.status !== 'stale' && status.status !== 'missing') {
-    return false
-  }
-  const attempts = embeddedFirmwareRecoveryAttempts.get(frameId) ?? 0
-  if (attempts >= EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT) {
-    return false
-  }
-  embeddedFirmwareRecoveryAttempts.set(frameId, attempts + 1)
-  longRunningTasksModel.actions.updateTaskProgress({
-    frameId,
-    kind: 'embeddedFirmware',
-    progressCurrent: null,
-    progressTotal: null,
-    detail:
-      status.status === 'stale' ? 'Rebuilding firmware from current settings' : 'Rebuilding missing firmware image',
-  })
-  const firmware = await requestEmbeddedFirmwareBuild(frameId, true)
-  if (firmware) {
-    framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
-  }
-  return true
 }
 
 function usbLogLineIndicatesImageReady(line: string): boolean {
@@ -496,115 +442,13 @@ function startSdCardImageProgress(frameId: FrameId): void {
   sdCardImageProgressTimers.set(frameId, window.setInterval(updateProgressDetail, SD_CARD_IMAGE_PROGRESS_INTERVAL_MS))
 }
 
-const EMBEDDED_FIRMWARE_PROGRESS_INTERVAL_MS = 15 * 1000
-
-function embeddedFirmwareProgressDetail(startedAt: number): string {
-  const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
-  if (elapsedMinutes > 0) {
-    return `Still building firmware (${elapsedMinutes} min elapsed)`
-  }
-  return 'Still building firmware'
-}
-
-function stopEmbeddedFirmwareProgress(frameId: FrameId): void {
-  const timer = embeddedFirmwareProgressTimers.get(frameId)
-  if (timer === undefined || typeof window === 'undefined') {
-    return
-  }
-  window.clearInterval(timer)
-  embeddedFirmwareProgressTimers.delete(frameId)
-}
-
-async function pollEmbeddedFirmwareStatus(frameId: FrameId, downloadUrl?: string): Promise<void> {
-  if (!pendingEmbeddedFirmwareDownloads.has(frameId) || embeddedFirmwareStatusPollsInFlight.has(frameId)) {
-    return
-  }
-  embeddedFirmwareStatusPollsInFlight.add(frameId)
-  try {
-    const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware`)
-    if (!response.ok) {
-      return
-    }
-    const data = await response.json()
-    const firmware = data?.firmware as NonNullable<NonNullable<FrameType['embedded']>['firmware']> | undefined
-    if (!firmware || !pendingEmbeddedFirmwareDownloads.has(frameId)) {
-      return
-    }
-    framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
-    if (firmware.status === 'ready') {
-      pendingEmbeddedFirmwareDownloads.delete(frameId)
-      embeddedFirmwareRecoveryAttempts.delete(frameId)
-      stopEmbeddedFirmwareProgress(frameId)
-      startBrowserDownload(firmware.downloadUrl || downloadUrl || `/api/frames/${frameId}/embedded/firmware/download`)
-      framesModel.actions.loadFrame(frameId)
-      longRunningTasksModel.actions.finishTask({
-        frameId,
-        kind: 'embeddedFirmware',
-        status: 'success',
-        detail: 'Firmware image ready',
-      })
-    } else if (firmware.status === 'missing' || firmware.status === 'stale') {
-      if (await recoverEmbeddedFirmwareBuild(frameId, firmware)) {
-        return
-      }
-      pendingEmbeddedFirmwareDownloads.delete(frameId)
-      embeddedFirmwareRecoveryAttempts.delete(frameId)
-      stopEmbeddedFirmwareProgress(frameId)
-      framesModel.actions.loadFrame(frameId)
-      longRunningTasksModel.actions.taskFailed({
-        frameId,
-        kind: 'embeddedFirmware',
-        detail: firmware.error || 'Firmware image needs to be rebuilt',
-      })
-    } else if (firmware.status === 'error') {
-      pendingEmbeddedFirmwareDownloads.delete(frameId)
-      embeddedFirmwareRecoveryAttempts.delete(frameId)
-      stopEmbeddedFirmwareProgress(frameId)
-      framesModel.actions.loadFrame(frameId)
-      longRunningTasksModel.actions.taskFailed({
-        frameId,
-        kind: 'embeddedFirmware',
-        detail: firmware.error || 'Firmware build failed',
-      })
-    }
-  } finally {
-    embeddedFirmwareStatusPollsInFlight.delete(frameId)
-  }
-}
-
-function startEmbeddedFirmwareProgress(frameId: FrameId): void {
-  stopEmbeddedFirmwareProgress(frameId)
-  if (typeof window === 'undefined') {
-    return
-  }
-  const startedAt = Date.now()
-  const updateProgressDetail = (): void => {
-    if (!pendingEmbeddedFirmwareDownloads.has(frameId)) {
-      stopEmbeddedFirmwareProgress(frameId)
-      return
-    }
-    longRunningTasksModel.actions.updateTaskProgress({
-      frameId,
-      kind: 'embeddedFirmware',
-      progressCurrent: null,
-      progressTotal: null,
-      detail: embeddedFirmwareProgressDetail(startedAt),
-    })
-    void pollEmbeddedFirmwareStatus(frameId)
-  }
-  embeddedFirmwareProgressTimers.set(
-    frameId,
-    window.setInterval(updateProgressDetail, EMBEDDED_FIRMWARE_PROGRESS_INTERVAL_MS)
-  )
-}
-
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface framesModelValues {
   activeFramesList: FrameType[]
   archivedFramesExpanded: boolean
   archivedFramesList: FrameType[]
   cloudFrameConfirmErrors: Record<FrameId, string>
+  cloudFrameScenesLoaded: Record<FrameId, boolean>
   cloudFramesConfirming: Record<FrameId, boolean>
   frames: Record<FrameId, FrameType>
   framesEverLoaded: boolean
@@ -619,14 +463,13 @@ export interface framesModelActions {
   addFrame: (frame: FrameType) => {
     frame: FrameType
   }
-  applyEmbeddedFirmwareOta: (
-    id: FrameId,
-    force?: boolean
-  ) => {
-    force: boolean
+  applyEmbeddedFirmwareOta: (id: FrameId) => {
     id: FrameId
   }
   cancelDeploy: (id: FrameId) => {
+    id: FrameId
+  }
+  cloudFrameScenesSettled: (id: FrameId) => {
     id: FrameId
   }
   confirmCloudFrame: (id: FrameId) => {
@@ -657,9 +500,6 @@ export interface framesModelActions {
     id: FrameId
     recompile: boolean
     transport: RemoteTaskTransport
-  }
-  downloadEmbeddedFirmware: (id: FrameId) => {
-    id: FrameId
   }
   downloadSdCardImage: (id: FrameId) => {
     id: FrameId
@@ -762,99 +602,6 @@ export interface framesModelActions {
   toggleInactiveFramesExpanded: () => {
     value: true
   }
-  updateEmbeddedFirmwareStatus: (
-    id: FrameId,
-    firmware: EmbeddedFirmware
-  ) => {
-    firmware: {
-      appSize?: number | undefined
-      bootloaderSize?: number | undefined
-      buildProgress?:
-        | {
-            done: number
-            percent: number
-            total: number
-          }
-        | undefined
-      completedAt?: string | undefined
-      downloadUrl?: string | undefined
-      error?: string | undefined
-      filename?: string | undefined
-      flashBytes?: number | undefined
-      flashOffset?: string | undefined
-      flashSize?: FrameEmbeddedFlashSize | undefined
-      lastHeartbeatAt?: string | undefined
-      layout?:
-        | {
-            flash?:
-              | {
-                  appBinaryBytes?: number | null | undefined
-                  flashBytes?: number | undefined
-                  flashOffset?: string | undefined
-                  flashSize?: FrameEmbeddedFlashSize | undefined
-                  mergedBinaryBytes?: number | null | undefined
-                  otaBinaryBytes?: number | null | undefined
-                  otaSupported?: boolean | undefined
-                  partitions?:
-                    | {
-                        appSlot?: boolean | undefined
-                        end?: number | undefined
-                        name: string
-                        offset: number
-                        size: number
-                        subtype?: string | undefined
-                        type?: string | undefined
-                        usedBytes?: number | null | undefined
-                      }[]
-                    | undefined
-                  partitionTable?: string | undefined
-                }
-              | undefined
-            ram?:
-              | {
-                  canvasBufferBytes?: number | undefined
-                  canvasBytesPerPixel?: number | undefined
-                  displayStateBytes?: number | undefined
-                  height?: number | undefined
-                  httpResponseLimitBytes?: number | undefined
-                  packedBufferBytes?: number | undefined
-                  panel?: string | undefined
-                  pixelFormat?: number | undefined
-                  pixelFormatName?: string | undefined
-                  previewBmpBytes?: number | undefined
-                  previewSnapshotBytes?: number | undefined
-                  previewSnapshotReserveBytes?: number | undefined
-                  psramBytes?: number | undefined
-                  quickJsHeapLimitBytes?: number | undefined
-                  renderMode?: 'local' | 'remote' | undefined
-                  renderReserveBytes?: number | undefined
-                  renderWorkingBytes?: number | undefined
-                  rgbaBufferBytes?: number | undefined
-                  width?: number | undefined
-                }
-              | undefined
-          }
-        | undefined
-      otaElfSha256?: string | undefined
-      otaPath?: string | undefined
-      otaSha256?: string | undefined
-      otaSize?: number | undefined
-      otaSupported?: boolean | undefined
-      panel?: string | undefined
-      partitionTable?: string | undefined
-      partitionTableSize?: number | undefined
-      path?: string | undefined
-      platform?: string | undefined
-      queuedAt?: string | undefined
-      queueJobId?: string | undefined
-      requestId?: string | undefined
-      sha256?: string | undefined
-      size?: number | undefined
-      startedAt?: string | undefined
-      status?: 'building' | 'error' | 'idle' | 'missing' | 'queued' | 'ready' | 'stale' | undefined
-    }
-    id: FrameId
-  }
   updateFrameFirmware: (id: FrameId) => {
     id: FrameId
   }
@@ -896,6 +643,10 @@ export const framesModel = kea<framesModelType>([
     // frame.scenes so the tiles survive a reload. `force` skips the
     // once-a-minute throttle (used right after an install).
     hydrateCloudFrameScenes: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    // One hydration attempt for this frame has finished, successfully or not.
+    // Until the first one does, an empty scene list means "not fetched yet",
+    // not "this frame has none".
+    cloudFrameScenesSettled: (id: FrameId) => ({ id }),
     setCloudFrameScenes: (id: FrameId, scenes: FrameScene[], sources?: Record<string, CloudSceneSource>) => ({
       id,
       scenes,
@@ -908,9 +659,7 @@ export const framesModel = kea<framesModelType>([
     }),
     restartRemote: (id: FrameId, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
     downloadSdCardImage: (id: FrameId) => ({ id }),
-    downloadEmbeddedFirmware: (id: FrameId) => ({ id }),
-    updateEmbeddedFirmwareStatus: (id: FrameId, firmware: EmbeddedFirmware) => ({ id, firmware }),
-    applyEmbeddedFirmwareOta: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    applyEmbeddedFirmwareOta: (id: FrameId) => ({ id }),
     // Cloud only: enqueue the advisory notify_update_available verb. The
     // device fetches the signed OTA manifest and installs on its own
     // schedule (docs/cloud-frames.md "Signed OTA") — nothing to track here.
@@ -986,6 +735,15 @@ export const framesModel = kea<framesModelType>([
         loadFrameSuccess: (state) => (Object.keys(state).length > 0 ? {} : state),
       },
     ],
+    // Which frames have had their cloud scenes fetched at least once. A frame
+    // that is still fetching has an empty `scenes` for the same reason a frame
+    // with none does, and the dashboard must not confuse the two.
+    cloudFrameScenesLoaded: [
+      {} as Record<FrameId, boolean>,
+      {
+        cloudFrameScenesSettled: (state, { id }) => (state[id] ? state : { ...state, [id]: true }),
+      },
+    ],
     cloudFrameConfirmErrors: [
       {} as Record<FrameId, string>,
       {
@@ -1052,21 +810,6 @@ export const framesModel = kea<framesModelType>([
             },
           }
         },
-        updateEmbeddedFirmwareStatus: (state, { id, firmware }) => {
-          const frame = state[id]
-          if (!frame) return state
-          const currentFirmware = frame.embedded?.firmware
-          return {
-            ...state,
-            [id]: sanitizeFrameForStore({
-              ...frame,
-              embedded: {
-                ...(frame.embedded ?? {}),
-                firmware: mergeEmbeddedFirmwareStatus(currentFirmware, firmware),
-              },
-            }),
-          }
-        },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
           ...state,
           // Cloud hub broadcasts are scene-less frameSummary rows too; keep
@@ -1079,17 +822,12 @@ export const framesModel = kea<framesModelType>([
             sanitizeFrameForStore({
               ...(state[frame.id] ?? {}),
               ...frame,
+              // The socket broadcast carries the stored row; the derived
+              // flash/memory layout only rides the REST read, so keep it.
               embedded:
-                frame.embedded?.firmware && state[frame.id]?.embedded?.firmware
-                  ? {
-                      ...(state[frame.id]?.embedded ?? {}),
-                      ...frame.embedded,
-                      firmware: mergeEmbeddedFirmwareStatus(
-                        state[frame.id]?.embedded?.firmware,
-                        frame.embedded.firmware
-                      ),
-                    }
-                  : frame.embedded ?? state[frame.id]?.embedded,
+                frame.embedded && state[frame.id]?.embedded?.layout && !frame.embedded.layout
+                  ? { ...frame.embedded, layout: state[frame.id]?.embedded?.layout }
+                  : (frame.embedded ?? state[frame.id]?.embedded),
             }),
             state[frame.id]
           ),
@@ -1434,100 +1172,36 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
-    downloadEmbeddedFirmware: async ({ id }) => {
-      const frame = values.frames[id]
-      const currentFirmware = frame?.embedded?.firmware
-      const downloadUrl = currentFirmware?.downloadUrl || `/api/frames/${id}/embedded/firmware/download`
-
-      pendingEmbeddedFirmwareDownloads.add(id)
-      embeddedFirmwareRecoveryAttempts.delete(id)
-      startEmbeddedFirmwareProgress(id)
-      longRunningTasksModel.actions.startTask({
-        frameId: id,
-        kind: 'embeddedFirmware',
-        title: 'Building firmware image',
-        detail:
-          currentFirmware?.status === 'building' || currentFirmware?.status === 'queued'
-            ? 'Checking firmware build status'
-            : 'Firmware build started',
-      })
-
-      try {
-        const nextFirmware = await requestEmbeddedFirmwareBuild(
-          id,
-          currentFirmware?.status === 'stale' || currentFirmware?.status === 'missing'
-        )
-        if (nextFirmware) {
-          actions.updateEmbeddedFirmwareStatus(id, nextFirmware)
-        }
-        if (nextFirmware?.status === 'ready') {
-          pendingEmbeddedFirmwareDownloads.delete(id)
-          embeddedFirmwareRecoveryAttempts.delete(id)
-          stopEmbeddedFirmwareProgress(id)
-          startBrowserDownload(nextFirmware.downloadUrl || downloadUrl)
-          longRunningTasksModel.actions.finishTask({
-            frameId: id,
-            kind: 'embeddedFirmware',
-            status: 'success',
-            detail: 'Firmware image ready',
-          })
-          return
-        }
-        void pollEmbeddedFirmwareStatus(id, downloadUrl)
-      } catch (error) {
-        pendingEmbeddedFirmwareDownloads.delete(id)
-        embeddedFirmwareRecoveryAttempts.delete(id)
-        stopEmbeddedFirmwareProgress(id)
-        longRunningTasksModel.actions.taskFailed({
-          frameId: id,
-          kind: 'embeddedFirmware',
-          detail: error instanceof Error ? error.message : 'Failed to build firmware image',
-        })
-        throw error
-      }
-    },
-    applyEmbeddedFirmwareOta: async ({ id, force }) => {
-      const frame = values.frames[id]
-      const firmware = frame?.embedded?.firmware
+    applyEmbeddedFirmwareOta: async ({ id }) => {
+      // The board pulls this backend's relay of the release manifest and
+      // installs the signed release image for its flash layout if it runs an
+      // older version; the request itself only reboots it into its updater.
+      // Progress arrives as ota:backend log lines.
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'embeddedOta',
-        title: 'Applying OTA update',
-        detail:
-          firmware?.status === 'ready' && !force
-            ? 'Requesting OTA update'
-            : firmware?.status === 'building' || firmware?.status === 'queued'
-            ? 'Waiting for firmware build'
-            : 'Preparing firmware image',
+        title: 'Updating firmware over the air',
+        detail: 'Asking the frame to check for a release',
       })
 
       try {
-        longRunningTasksModel.actions.updateTaskProgress({
-          frameId: id,
-          kind: 'embeddedOta',
-          progressCurrent: null,
-          progressTotal: null,
-          detail: 'Requesting OTA update',
-        })
-        const response = await apiFetch(`/api/frames/${id}/embedded/firmware/ota${force ? '?force=1' : ''}`, {
-          method: 'POST',
-        })
+        const response = await apiFetch(`/api/frames/${id}/embedded/firmware/ota`, { method: 'POST' })
         if (!response.ok) {
-          throw new Error(await responseErrorDetail(response, 'Failed to request OTA update'))
+          throw new Error(await responseErrorDetail(response, 'Failed to request the firmware update'))
         }
         const data = await response.json()
         longRunningTasksModel.actions.finishTask({
           frameId: id,
           kind: 'embeddedOta',
           status: 'success',
-          detail: data?.message || 'OTA update requested',
+          detail: data?.message || 'Firmware update requested',
         })
         actions.loadFrame(id)
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
           kind: 'embeddedOta',
-          detail: error instanceof Error ? error.message : 'Failed to apply OTA update',
+          detail: error instanceof Error ? error.message : 'Failed to request the firmware update',
         })
         actions.loadFrame(id)
         throw error
@@ -1587,56 +1261,6 @@ export const framesModel = kea<framesModelType>([
           })
         }
       }
-      const firmware = frame.embedded?.firmware
-      if (firmware && pendingEmbeddedFirmwareDownloads.has(frame.id)) {
-        if (firmware.status === 'ready') {
-          pendingEmbeddedFirmwareDownloads.delete(frame.id)
-          stopEmbeddedFirmwareProgress(frame.id)
-          startBrowserDownload(firmware.downloadUrl || `/api/frames/${frame.id}/embedded/firmware/download`)
-          longRunningTasksModel.actions.finishTask({
-            frameId: frame.id,
-            kind: 'embeddedFirmware',
-            status: 'success',
-            detail: 'Firmware image ready',
-          })
-        } else if (firmware.status === 'error' || firmware.status === 'missing' || firmware.status === 'stale') {
-          if (firmware.status === 'missing' || firmware.status === 'stale') {
-            void recoverEmbeddedFirmwareBuild(frame.id, firmware)
-              .then((recovered) => {
-                if (recovered) {
-                  return
-                }
-                pendingEmbeddedFirmwareDownloads.delete(frame.id)
-                embeddedFirmwareRecoveryAttempts.delete(frame.id)
-                stopEmbeddedFirmwareProgress(frame.id)
-                longRunningTasksModel.actions.taskFailed({
-                  frameId: frame.id,
-                  kind: 'embeddedFirmware',
-                  detail: firmware.error || 'Firmware image needs to be rebuilt',
-                })
-              })
-              .catch((error) => {
-                pendingEmbeddedFirmwareDownloads.delete(frame.id)
-                embeddedFirmwareRecoveryAttempts.delete(frame.id)
-                stopEmbeddedFirmwareProgress(frame.id)
-                longRunningTasksModel.actions.taskFailed({
-                  frameId: frame.id,
-                  kind: 'embeddedFirmware',
-                  detail: error instanceof Error ? error.message : firmware.error || 'Firmware build failed',
-                })
-              })
-          } else {
-            pendingEmbeddedFirmwareDownloads.delete(frame.id)
-            embeddedFirmwareRecoveryAttempts.delete(frame.id)
-            stopEmbeddedFirmwareProgress(frame.id)
-            longRunningTasksModel.actions.taskFailed({
-              frameId: frame.id,
-              kind: 'embeddedFirmware',
-              detail: firmware.error || 'Firmware build failed',
-            })
-          }
-        }
-      }
     },
     setDeployWithAgent: async ({ id, deployWithAgent }) => {
       const frame = values.frames[id]
@@ -1664,6 +1288,20 @@ export const framesModel = kea<framesModelType>([
     },
     deleteFrame: async ({ id }) => {
       const response = await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
+      // The cloud gates deletion behind a recent proof of credentials, like
+      // revoking: send the user through /login/reauth and back to this page,
+      // where they repeat the action with a fresh session.
+      if (response.status === 403 && isCloudMode()) {
+        const detail = (await response
+          .clone()
+          .json()
+          .catch(() => ({}))) as { error?: string; reauth?: { path?: string } }
+        if (detail.error === 'reauth_required') {
+          const path = detail.reauth?.path ?? '/login/reauth'
+          window.location.assign(`${path}?return_to=${encodeURIComponent(window.location.href)}`)
+          return
+        }
+      }
       if (router.values.location.pathname.includes('/frames/' + id)) {
         router.actions.push(urls.frames())
       }
@@ -1695,6 +1333,10 @@ export const framesModel = kea<framesModelType>([
       }
       const hydratedAt = cloudFrameScenesHydratedAt.get(id) ?? 0
       if (!force && Date.now() - hydratedAt < CLOUD_FRAME_SCENES_REFRESH_MS) {
+        // Already fetched recently. The throttle map outlives a logic remount
+        // while the reducer does not, so say so again rather than leave the
+        // dashboard waiting for a hydration that will never run.
+        actions.cloudFrameScenesSettled(id)
         return
       }
       cloudFrameSceneHydrationsInFlight.add(id)
@@ -1720,6 +1362,7 @@ export const framesModel = kea<framesModelType>([
         console.error(error)
       } finally {
         cloudFrameSceneHydrationsInFlight.delete(id)
+        actions.cloudFrameScenesSettled(id)
       }
     },
     loadFrameSuccess: ({ frames }) => {

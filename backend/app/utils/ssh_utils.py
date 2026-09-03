@@ -6,7 +6,14 @@ from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
-from app.models.frame import Frame
+from app.models.frame import Frame, update_frame
+from app.utils.ssh_host_keys import (
+    host_key_changed_message,
+    host_key_fingerprint,
+    host_key_type,
+    openssh_host_key_line,
+    trusted_known_hosts,
+)
 from app.models.settings import Settings
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 
@@ -208,6 +215,15 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
         f"({'password' if password else f'keypair: {keypair_label}'})"
     )
 
+    # Trust on first use: the key recorded on the frame row pins every later
+    # connect; with none recorded yet, whatever this connect is offered gets
+    # recorded below (app/utils/ssh_host_keys.py).
+    stored_host_key = getattr(frame, "ssh_host_key", None) or None
+    try:
+        known_hosts = trusted_known_hosts(stored_host_key)
+    except ValueError as exc:
+        raise Exception(f"{exc}. Forget the stored host key in the frame's SSH settings and connect again.")
+
     try:
         ssh = await asyncssh.connect(
             host=host,
@@ -215,16 +231,40 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
             username=username,
             password=password if password else None,
             client_keys=client_keys if not password else None,
-            known_hosts=None,
+            known_hosts=known_hosts,
             # A powered-off frame must not hang the caller on the OS TCP
             # timeout (minutes) — arq worker slots and API requests wait on this.
             connect_timeout=30,
             login_timeout=30,
         )
-        await log(db, redis, frame.id, "stdinfo", f"SSH connection established to {username}@{host}")
-        return ssh
+    except asyncssh.HostKeyNotVerifiable:
+        message = host_key_changed_message(
+            f"{host}:{port}", stored_host_key, "forget the stored host key in the frame's SSH settings"
+        )
+        await log(db, redis, frame.id, "stderr", message)
+        raise Exception(message)
     except (OSError, asyncssh.Error) as exc:
         raise Exception(f"Unable to connect to {host}:{port} via SSH: {exc}")
+
+    await log(db, redis, frame.id, "stdinfo", f"SSH connection established to {username}@{host}")
+    if not stored_host_key:
+        await _record_frame_host_key(db, redis, frame, ssh)
+    return ssh
+
+
+async def _record_frame_host_key(db, redis, frame, ssh: asyncssh.SSHClientConnection) -> None:
+    key = ssh.get_server_host_key()
+    if key is None:
+        return
+    line = openssh_host_key_line(key)
+    frame.ssh_host_key = line
+    if isinstance(frame, Frame) and db is not None and redis is not None:
+        await update_frame(db, redis, frame)
+    await log(
+        db, redis, frame.id, "stdinfo",
+        f"Recorded the frame's SSH host key ({host_key_type(line)} {host_key_fingerprint(line)}); "
+        "later connections refuse any other key",
+    )
 
 
 async def exec_command(

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { accounts } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { getSuperadminContext, isUuid, superadminRefusal } from "../../../../../src/lib/admin";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
   jsonError,
@@ -36,12 +36,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return limited;
   }
 
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ mutation: true });
   if (admin.kind !== "ok") {
-    return jsonError(
-      admin.kind === "forbidden" ? "forbidden" : "unauthenticated",
-      admin.kind === "forbidden" ? 403 : 401,
-    );
+    return superadminRefusal(admin);
   }
 
   const { db, response } = requireDatabase();
@@ -50,6 +47,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const { accountId } = await context.params;
+  if (!isUuid(accountId)) {
+    return jsonError("not_found", 404);
+  }
   if (!/^[0-9a-f-]{36}$/i.test(accountId)) {
     return jsonError("account_not_found", 404);
   }

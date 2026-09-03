@@ -91,7 +91,7 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                         ) : (
                           <div>
                             The state is Nim's{' '}
-                            <a href="https://nim-lang.org/docs/json.html" target="_blank" rel="noreferer">
+                            <a href="https://nim-lang.org/docs/json.html" target="_blank" rel="noreferrer">
                               <code className="text-xs underline">JsonNode</code>
                             </a>
                             . Use <code className="text-xs">{'state{"field"}.getStr()'}</code> to read values and{' '}
@@ -210,7 +210,12 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                 ) : (
                   <>
                     Use the <code>state</code> object of type{' '}
-                    <a href="https://nim-lang.org/docs/json.html" className="underline" target="_blank" rel="noreferer">
+                    <a
+                      href="https://nim-lang.org/docs/json.html"
+                      className="underline"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
                       <code>JsonNode</code>
                     </a>{' '}
                     to share data between nodes.

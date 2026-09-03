@@ -2,9 +2,11 @@
  * FrameOS embedded config store.
  *
  * One NVS namespace ("frameos") holding everything a frame needs to run.
- * Compile-time defaults come from generated_config.h when the backend bakes
- * a per-frame image, else from the neutral fallbacks below. NVS always wins,
- * so a device reconfigured in the field keeps its settings across OTA.
+ * Compile-time defaults are the neutral fallbacks in fos_defaults.h; NVS
+ * always wins, so a device provisioned in the field keeps its settings
+ * across OTA. The TLS server certificate and key are stored as NVS blobs
+ * (a PEM exceeds the NVS string limit); everything else is a string or a
+ * scalar under a short key.
  */
 #pragma once
 
@@ -14,6 +16,7 @@
 #include "esp_err.h"
 
 #define FOS_STR_LEN 128
+#define FOS_AP_PSK_LEN 64          /* WPA2 passphrases are 8-63 characters */
 #define FOS_URL_LEN 256
 #define FOS_TLS_PEM_LEN 4096
 #define FOS_GPIO_BUTTONS_MAX 8
@@ -109,6 +112,12 @@ typedef struct {
     bool admin_auth_enabled;       /* protect setup/control routes outside hotspot mode */
     char admin_user[FOS_STR_LEN];
     char admin_pass[FOS_STR_LEN];
+    /* WPA2 passphrase of the provisioning AP (FrameOS-XXXX). Minted from
+     * hardware entropy the first time the portal starts and kept in NVS, so
+     * a fresh device is not provisioned by whoever is nearest; shown on the
+     * status screen and over the console (`config`), settable with
+     * `set ap_psk`. */
+    char ap_psk[FOS_AP_PSK_LEN];
     char assets_path[FOS_ASSETS_PATH_LEN]; /* VFS mount point for local assets, default /srv/assets */
     fos_assets_sd_config_t assets_sd;
     bool deep_sleep;               /* deep sleep between refreshes */
@@ -149,6 +158,15 @@ void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);
 /* "cs=38,sck=39,miso=40,mosi=41" (any subset) */
 esp_err_t fos_config_parse_assets_sd_pins(const char *spec, fos_assets_sd_config_t *assets_sd);
 void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, char *out, size_t out_len);
-/* "5:A\n6:B" */
+/* Pins the firmware refuses to hand to a button, the battery ADC read or the
+ * divider's enable switch: outside the chip's GPIO range, an SPI flash /
+ * PSRAM pad (an input pull-up or an output level on one of those wedges the
+ * next boot, which a cloud `set_settings` push could otherwise cause), or a
+ * pin a driver already claimed through esp_gpio_reserve. Returns NULL when
+ * the pin is usable, else a short reason for the log line. -1 ("none") is
+ * the caller's business, not this function's. */
+const char *fos_config_gpio_pin_reserved(int pin);
+/* "5:A\n6:B" — refuses a reserved pin (see above) as ESP_ERR_INVALID_ARG,
+ * leaving `config` untouched. */
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config);
 void fos_config_format_gpio_buttons(const fos_config_t *config, char *out, size_t out_len);

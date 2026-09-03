@@ -3,7 +3,7 @@ import ../privileged
 import ../privileged_worker
 import ../buildroot_privileges
 import ../config
-import ../types
+import ../utils/system
 
 proc tempRoot(tag: string): string =
   result = getTempDir() / ("frameos-privileged-" & tag & "-" & $epochTime().int64)
@@ -22,8 +22,8 @@ block test_argument_validation:
   doAssert validatePrivilegedArgs(pvReboot, %*{"delaySeconds": 10}) == ""
   doAssert validatePrivilegedArgs(pvReboot, %*{"delaySeconds": 9999}).len > 0
   doAssert validatePrivilegedArgs(pvReboot, %*{"cmd": "reboot"}).len > 0, "unknown keys are refused"
-  doAssert validatePrivilegedArgs(pvApplySetup, %*{"rebootIfRequired": true}) == ""
-  doAssert validatePrivilegedArgs(pvApplySetup, %*{"rebootIfRequired": "yes"}).len > 0
+  doAssert validatePrivilegedArgs(pvApplyDriverSetup, %*{"rebootIfRequired": true}) == ""
+  doAssert validatePrivilegedArgs(pvApplyDriverSetup, %*{"rebootIfRequired": "yes"}).len > 0
   doAssert validatePrivilegedArgs(pvInstallRelease, %*{
     "archive": "/srv/frameos/staging/x/frameos.tar.gz", "signature": "untrusted comment: x\nRWQ...\n",
     "version": "2026.8.44"}) == ""
@@ -33,6 +33,9 @@ block test_argument_validation:
     "archive": "/srv/frameos/staging/x/frameos.zip", "signature": "sig", "version": "2026.8.44"}).len > 0
   doAssert validatePrivilegedArgs(pvInstallRelease, %*{
     "archive": "/srv/frameos/staging/x/frameos.tar.gz", "signature": "sig", "version": "2026.8.44; rm -rf /"}).len > 0
+  for malformed in ["2026", "2026.8", "2026..44", ".8.44", "2026.8.44.1"]:
+    doAssert validatePrivilegedArgs(pvInstallRelease, %*{
+      "archive": "/srv/frameos/staging/x/frameos.tar.gz", "signature": "sig", "version": malformed}).len > 0
   doAssert validatePrivilegedArgs(pvSetHostname, %*{"hostname": "My Frame"}) == ""
   doAssert validatePrivilegedArgs(pvSetHostname, %*{"hostname": "---"}).len > 0
   doAssert validatePrivilegedArgs(pvNmWifiConnect, %*{"ssid": "Home Wifi", "psk": "hunter2hunter2"}) == ""
@@ -43,8 +46,6 @@ block test_argument_validation:
   doAssert validatePrivilegedArgs(pvNmWifiConnect, %*{"ssid": "Home", "psk": "hunter2hunter2", "device": "--wait"}).len > 0
   doAssert validatePrivilegedArgs(pvNmHotspotStart, %*{"device": "wlan0", "ssid": "FrameOS-Setup", "psk": "frame1234"}) == ""
   doAssert validatePrivilegedArgs(pvNmHotspotStart, %*{"device": "wlan0", "ssid": "FrameOS-Setup", "psk": ""}).len > 0
-  doAssert validatePrivilegedArgs(pvNmForget, %*{"connection": "wifi"}) == ""
-  doAssert validatePrivilegedArgs(pvNmForget, %*{"connection": "eth0"}).len > 0
   doAssert validatePrivilegedArgs(pvNmDeviceStatus, %*{"device": "wlan0"}).len > 0, "no-arg verbs refuse args"
   doAssert validatePrivilegedArgs(pvNmDeviceStatus, nil) == ""
 
@@ -67,6 +68,18 @@ block test_validators:
   doAssert sanitizeHostname("my frame:8787/x") == "my-frame"
   doAssert sanitizeHostname("  ") == ""
   doAssert sanitizeHostname("a".repeat(80)).len == 63
+  doAssert validReleaseVersion("2026.8.44")
+  doAssert not validReleaseVersion("2026..44")
+
+block test_worker_log_arguments_hide_wifi_secrets:
+  let password = "never-write-this-psk"
+  let connect = redactedExecArgs(@["device", "wifi", "connect", "Home", "password", password])
+  doAssert password notin $connect
+  doAssert connect[^1] == "<redacted>"
+  let modify = redactedExecArgs(@["connection", "modify", "frameos-hotspot",
+    "802-11-wireless-security.psk", password, "ipv4.method", "shared"])
+  doAssert password notin $modify
+  doAssert modify[4] == "<redacted>"
 
 block test_wire_format_round_trip:
   let request = PrivilegedRequest(id: "1-abc", verb: pvNmWifiConnect, args: %*{"ssid": "Home", "psk": "hunter2hunter2"})
@@ -80,6 +93,8 @@ block test_wire_format_round_trip:
     discard parsePrivilegedRequest("""{"id": "../x", "verb": "reboot", "args": {}}""")
   doAssertRaises(ValueError):
     discard parsePrivilegedRequest("""{"id": "x", "verb": "reboot", "args": {"cmd": "id"}}""")
+  doAssertRaises(ValueError):
+    discard parsePrivilegedRequest("""{"id": "x", "verb": "reboot", "args": "ignored"}""")
   doAssertRaises(ValueError):
     discard parsePrivilegedRequest("[1,2]")
   let res = PrivilegedResult(ok: true, exitCode: 0, output: "wlan0:wifi:connected\n", data: %*{"a": 1})
@@ -132,7 +147,8 @@ block test_request_hook_replaces_transport:
     let res = requestPrivileged(pvNmDeviceStatus)
     doAssert res.ok and res.output == "done"
     doAssert seen.len == 1 and seen[0].verb == pvNmDeviceStatus
-    let refused = requestPrivileged(pvNmForget, %*{"connection": "eth0"})
+    let refused = requestPrivileged(pvNmHotspotStart,
+      %*{"device": "--bad", "ssid": "FrameOS", "psk": "frame1234"})
     doAssert not refused.ok and seen.len == 1, "invalid arguments never reach the transport"
   finally:
     resetPrivilegedRequestHookForTest()
@@ -147,6 +163,8 @@ block test_stale_results_are_pruned:
   try:
     writePrivilegedResult(resultsDir, "fresh", privilegedOk("recent"))
     writePrivilegedResult(resultsDir, "stale", privilegedOk("orphaned"))
+    let freshPermissions = getFilePermissions(resultsDir / "fresh.json")
+    doAssert fpGroupRead in freshPermissions and fpOthersRead notin freshPermissions
     let stalePath = resultsDir / "stale.json"
     let old = getTime() - initDuration(hours = 3)
     setLastModificationTime(stalePath, old)
@@ -156,6 +174,21 @@ block test_stale_results_are_pruned:
     doAssert prunePrivilegedResults(resultsDir) == 0
   finally:
     removeDir(root)
+
+block test_atomic_write_replaces_a_symlink_without_touching_its_target:
+  when defined(posix):
+    let root = tempRoot("atomic-symlink")
+    let victim = root / "victim"
+    let destination = root / "status.json"
+    try:
+      writeFile(victim, "unchanged")
+      createSymlink(victim, destination)
+      writePrivateFile(destination, "safe")
+      doAssert readFile(victim) == "unchanged"
+      doAssert not symlinkExists(destination)
+      doAssert readFile(destination) == "safe"
+    finally:
+      removeDir(root)
 
 block test_worker_drains_queue_and_refuses_junk:
   let root = tempRoot("worker")
@@ -204,7 +237,7 @@ block test_worker_drains_queue_and_refuses_junk:
 
 block test_ownership_script_covers_what_the_root_worker_writes:
   # The worker runs every verb as root, so `install-release` and
-  # `apply-setup` leave root-owned files in state/ and logs/ — including
+  # `apply-driver-setup` leave root-owned files in state/ and logs/ — including
   # upgrade-status.json, which the unprivileged runtime rewrites on the NEXT
   # upgrade. handleRequestFile calls restoreRuntimeOwnership after each
   # request; this pins that the script it uses actually covers those paths.
@@ -212,10 +245,9 @@ block test_ownership_script_covers_what_the_root_worker_writes:
   for path in ["state", "logs", "runtime", "staging"]:
     doAssert ("/srv/frameos'/" & path) in ownership or ("'/srv/frameos'/" & path) in ownership,
       "ownership script does not cover " & path & ": " & ownership
-  doAssert "chown -R 'frameos:frameos' '/srv/frameos'/logs" in ownership or
-    "chown -R 'frameos:frameos' '/srv/frameos'/$p" in ownership or
-    "for p in logs tmp runtime staging privileged/results" in ownership,
-    "logs are not chowned recursively"
+  doAssert "for p in logs tmp runtime staging" in ownership
+  doAssert "chmod 1770" in ownership
+  doAssert "chmod 2750" in ownership
 
 block test_hotspot_start_sequence_cleans_up_on_failure:
   var calls: seq[seq[string]] = @[]
@@ -251,6 +283,9 @@ block test_buildroot_unit_rendering:
   doAssert "__FRAMEOS_UNPRIVILEGED_SERVICE__" notin unprivileged
   doAssert "%I" notin unprivileged
   doAssert "Environment=FRAMEOS_HOME=/srv/frameos/current\n" in unprivileged
+  doAssert "SupplementaryGroups=video input\n" in unprivileged
+  doAssert "SupplementaryGroups=video input tty" notin unprivileged
+  doAssert "Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/usr/lib:/usr/local/lib\n" in unprivileged
   doAssert unprivileged.endsWith("[Install]\nWantedBy=multi-user.target\n")
   let root = renderBuildrootFrameosService("root", usesNetworkManager = false)
   doAssert "User=root\n" in root
@@ -259,7 +294,8 @@ block test_buildroot_unit_rendering:
   doAssert "NetworkManager" notin root
   doAssert "After=network.target\n" in root
   doAssert "__FRAMEOS_UNPRIVILEGED_SERVICE__" notin root
-  doAssert "ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime;" in root
+  doAssert "ExecStopPost=-/bin/sh -lc 'mkdir -p /srv/frameos/runtime;" in root
+  doAssert "ExecStopPost=-+/bin/sh" notin root
 
 block test_buildroot_service_user_rule:
   var config = parseFrameConfig("""{"mode": "buildroot", "serverHost": "", "agent": {"agentEnabled": false}}""")
@@ -289,8 +325,12 @@ block test_buildroot_user_lines_and_scripts:
   let ownership = buildrootOwnershipScript("frameos", "/srv/frameos")
   doAssert "chmod 1775" in ownership, "release dirs are sticky so the runtime cannot replace root's binary"
   doAssert "chown root:root \"$r/frameos\"" in ownership
+  doAssert "for sub in drivers scenes vendor" in ownership
   doAssert "'/srv/frameos'/privileged/queue" in ownership and "chmod 1770" in ownership
+  doAssert "'/srv/frameos'/privileged/results" in ownership and "chmod 2750" in ownership
   doAssert "-path '/srv/frameos'/state/NetworkManager" in ownership, "NetworkManager keyfiles stay root's"
+  doAssert "PathExistsGlob=/srv/frameos/privileged/queue/*.json" in BuildrootPrivilegedPathUnit
+  doAssert "/srv/frameos/current/scenes" notin BuildrootPrivilegedServiceUnit
 
 block test_user_setup_script_runs:
   # The generated sh is executed for real against a scratch /etc; it must
@@ -311,5 +351,9 @@ block test_user_setup_script_runs:
       writeFile(root / "passwd", "root:x:0:0:root:/root:/bin/sh\nother:x:990:990::/:/bin/false\n")
       doAssert execShellCmd("sh -c " & quoteShell(script)) != 0, "a taken uid is refused, not duplicated"
       doAssert "frameos:" notin readFile(root / "passwd")
+      writeFile(root / "passwd", "root:x:0:0:root:/root:/bin/sh\nframeos:x:991:991::/:/bin/false\n")
+      writeFile(root / "group", "root:x:0:\nframeos:x:991:\n")
+      doAssert execShellCmd("sh -c " & quoteShell(script)) != 0,
+        "the right name with the wrong ids must not pass validation"
     finally:
       removeDir(root)

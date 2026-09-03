@@ -12,6 +12,7 @@ import frameos/reboot_reason
 import frameos/server
 import frameos/scheduler
 import frameos/scenes
+import frameos/spool
 import frameos/timezone_updater
 import frameos/types
 import frameos/utils/memory
@@ -349,6 +350,13 @@ proc start*(self: FrameOS) {.async.} =
   # crash is counted by the boot guard on the next attempt. (Already up on
   # boot-screen devices — see initDriversOnce.)
   self.initDriversOnce()
+
+  # Spill files a previous run left behind (crash, power cut mid-render):
+  # nothing will ever reference them again, and on a Pi Zero's SD card they
+  # are the difference between a working image cache and a full disk.
+  let sweptSpills = sweepSpoolScratchDir(spoolDir(self.frameConfig))
+  if sweptSpills > 0:
+    self.logger.log(%*{"event": "spool:sweep", "removed": sweptSpills})
 
   self.runner.start(firstSceneId)
   # The runner owns the panel from here; the boot canvas is dead weight.

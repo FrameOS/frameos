@@ -1,3 +1,5 @@
+import { and, eq } from "drizzle-orm";
+import { frameSceneAssignments } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../../src/lib/csrf";
 import {
@@ -9,8 +11,12 @@ import {
   assignScenesToFrame,
   currentSceneAssignments,
   maxScenesPerFrame,
+  readSettingsGroupsField,
 } from "../../../../../../src/lib/frame-scenes";
-import { frameForAccount } from "../../../../../../src/lib/frames";
+import {
+  frameForAccount,
+  readServiceSettingGroups,
+} from "../../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../../src/lib/session";
 
@@ -21,7 +27,11 @@ export const runtime = "nodejs";
 // /scenes replaces the whole list; this is the same merge the chat agent's
 // add_scene_to_frame tool does (src/lib/ai/tools.ts). Re-adding an assigned
 // scene re-deploys it at the requested version.
-// Body: {"scene_id": "...", "scene_version"?: N}
+// Body: {"scene_id": "...", "scene_version"?: N, "settings_groups"?: [...]}
+// `settings_groups` grants the scene the named service-key groups on this
+// frame (∩ what it declares); omitted, a new install is granted none and a
+// re-install keeps what it had. The answer's `granted_settings_groups` /
+// `declared_settings_groups` let the caller say what the scene still needs.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -70,16 +80,25 @@ export async function POST(
     return jsonError("invalid_scene", 400);
   }
   const pinned = typeof sceneVersion === "number" ? sceneVersion : null;
+  const settingsGroups = readSettingsGroupsField(body.settings_groups);
+  if (settingsGroups === false) {
+    return jsonError("invalid_scene", 400);
+  }
 
   const existing = await currentSceneAssignments(db, frame.id);
   const alreadyAssigned = existing.some((entry) => entry.sceneId === sceneId);
+  const added = {
+    sceneId,
+    sceneVersion: pinned,
+    ...(settingsGroups ? { settingsGroups } : {}),
+  };
   const requested = alreadyAssigned
     ? existing.map((entry) =>
         entry.sceneId === sceneId
-          ? { sceneId, sceneVersion: pinned }
+          ? { ...added, ...(settingsGroups ? {} : { settingsGroups: entry.settingsGroups }) }
           : entry,
       )
-    : [...existing, { sceneId, sceneVersion: pinned }];
+    : [...existing, added];
   if (requested.length > maxScenesPerFrame) {
     return jsonError("too_many_scenes", 409, { max: maxScenesPerFrame });
   }
@@ -102,11 +121,27 @@ export async function POST(
     );
   }
 
+  const [assignment] = await db
+    .select({
+      declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
+    })
+    .from(frameSceneAssignments)
+    .where(
+      and(
+        eq(frameSceneAssignments.frameId, frame.id),
+        eq(frameSceneAssignments.sceneId, sceneId),
+      ),
+    )
+    .limit(1);
+
   return NextResponse.json({
     already_assigned: alreadyAssigned,
     assigned_checksum: outcome.result.assignedChecksum,
     command_id: outcome.result.commandId,
     connected: frame.connected,
+    declared_settings_groups:
+      readServiceSettingGroups(assignment?.declaredSettingsGroups) ?? [],
+    granted_settings_groups: outcome.result.grantedSettingsGroups[sceneId] ?? [],
     status: "queued",
   });
 }

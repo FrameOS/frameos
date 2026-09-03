@@ -27,6 +27,13 @@ import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
 import {
+  billingSettingKeys,
+  checkDailyCapRespected,
+  recordAiUsage,
+  writeBillingSetting,
+} from "@frameos-cloud/ledger";
+import { resolveAiAccess } from "../../lib/ai/api-key";
+import {
   accountUsage,
   maxBackupBytesPerAccount,
   maxFrameLogBytesPerAccount,
@@ -140,7 +147,7 @@ function rawPublicKeyBase64() {
   return Buffer.from(spki.subarray(spki.length - 32)).toString("base64");
 }
 
-async function seedFrame(accountId: string) {
+async function seedFrame(accountId: string, suffix = "") {
   const [client] = await db
     .insert(linkedClients)
     .values({
@@ -148,7 +155,7 @@ async function seedFrame(accountId: string) {
       clientKind: "frame",
       providerClientMetadata: { requestedScopes: ["frame:managed"] },
       publicDisplayName: "Usage frame",
-      tokenReference: hashSecret(`fc_link_usage_${accountId}`),
+      tokenReference: hashSecret(`fc_link_usage_${accountId}${suffix}`),
     })
     .returning();
   const [frame] = await db
@@ -185,6 +192,105 @@ async function linkBackend() {
   const { access_token: accessToken } = await readJson(pollResponse);
   return { accessToken: accessToken as string, accountId };
 }
+
+// The daily cap (cloud/docs/accounting-todo.md §5.3) refuses AT the cap; the
+// overdraft is how far a turn already running may overshoot, not extra
+// headroom for the next one. The gate used to refuse at cap + overdraft,
+// which made the real cap $11 and every honest overshoot a nightly alert
+// (§9.2 item 3).
+describe("the daily AI cap", () => {
+  const env = { FRAMEOS_AI_SHARED_KEY_ACCESS: "all", OPENAI_API_KEY: "sk-shared" };
+  const turn = (accountId: string, n: number) =>
+    recordAiUsage(db, {
+      accountId,
+      credentialSource: "shared",
+      model: "gpt-5.6-terra",
+      surface: "scene_chat",
+      turnId: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+      // 442,400 of provider cost; 575,120 at the 30% fallback margin the
+      // tests' empty plan table leaves in force.
+      usage: { cachedInputTokens: 12_000, inputTokens: 52_000, outputTokens: 30_000 },
+    });
+
+  it("lets a turn start under the cap and refuses at it", async () => {
+    const accountId = await signIn();
+    // 17 turns: 9,777,040 — under the $10 default cap, with the budget the
+    // runner keeps checking against handed back.
+    for (let n = 1; n <= 17; n += 1) {
+      await turn(accountId, n);
+    }
+    const under = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(under.ok).toBe(true);
+    if (under.ok) {
+      expect(under.budget).toMatchObject({
+        capMicros: 10_000_000n,
+        overdraftMicros: 1_000_000n,
+        spentMicros: 9_777_040n,
+      });
+    }
+
+    // One more: 10,352,160 — past the cap but inside cap + overdraft, which
+    // the old gate would still have let through.
+    await turn(accountId, 18);
+    const over = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.refusal).toMatchObject({
+        capMicros: "10000000",
+        reason: "daily_cap_reached",
+        spentMicros: "10352160",
+      });
+    }
+    // An absorbed surface is never refused by the cap.
+    const absorbed = await resolveAiAccess(db, accountId, { env, surface: "scene_convert" });
+    expect(absorbed.ok).toBe(true);
+  });
+
+  // §9.3: the shared key is the operator's free tier, and its usage is our
+  // money. It gets its own cap, and the refusal says whose allowance ran
+  // out rather than showing a dollar limit on a bill the account does not
+  // owe.
+  it("caps the shared key on its own allowance, and says so", async () => {
+    const accountId = await signIn();
+    for (let n = 1; n <= 3; n += 1) {
+      await turn(accountId, n); // 1,725,360 in all
+    }
+    // Under the $10 default the shared cap falls back to: through, on the
+    // shared allowance.
+    const under = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(under.ok).toBe(true);
+    if (under.ok) {
+      expect(under.budget).toMatchObject({ allowance: "shared", capMicros: 10_000_000n });
+    }
+
+    // A $1.50 shared allowance: the same three turns are over it, while
+    // the $10 billable cap is untouched.
+    await writeBillingSetting(db, billingSettingKeys.sharedKeyDailyCapMicros, "1500000");
+    const over = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.refusal).toMatchObject({
+        allowance: "shared",
+        capMicros: "1500000",
+        reason: "daily_cap_reached",
+        spentMicros: "1725360",
+      });
+      expect(over.refusal.detail).toContain("free AI allowance");
+      expect(over.refusal.detail).not.toContain("daily AI limit");
+    }
+    // The nightly check judges a shared-key day against the shared ceiling.
+    const violations = await checkDailyCapRespected(db, {
+      dailyCapMicros: 10_000_000n,
+      overdraftMicros: 0n,
+      sharedKeyDailyCapMicros: 1_500_000n,
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.detail).toContain("past the 1500000 ceiling");
+    expect(
+      await checkDailyCapRespected(db, { dailyCapMicros: 10_000_000n, overdraftMicros: 0n }),
+    ).toEqual([]);
+  });
+});
 
 describe("account storage usage and quotas", () => {
   it("splits scene bytes by visibility — public scenes are free", async () => {
@@ -313,6 +419,57 @@ describe("account storage usage and quotas", () => {
     expect(labels).not.toContain("oldest");
     expect(labels).toContain("newest");
     expect(labels).toContain("fresh");
+  });
+
+  it("culls the overflowing frame's own logs before a quiet frame's history", async () => {
+    const accountId = await signIn();
+    const quiet = await seedFrame(accountId, "-quiet");
+    const chatty = await seedFrame(accountId, "-chatty");
+    const fat = Math.floor(maxFrameLogBytesPerAccount * 0.3);
+    // Quiet frame: 30% of the budget as history, written first (lowest ids
+    // = the oldest rows, which the account-wide cull would take first).
+    await db.insert(frameLogs).values({
+      frameId: quiet.id,
+      payload: { label: "quiet-history" },
+      sizeBytes: fat,
+      timestamp: new Date(),
+    });
+    // Chatty frame: 3 × 30% → the account is at 120% of budget.
+    for (const label of ["chatty-old", "chatty-mid", "chatty-new"]) {
+      await db.insert(frameLogs).values({
+        frameId: chatty.id,
+        payload: { label },
+        sizeBytes: fat,
+        timestamp: new Date(),
+      });
+    }
+
+    await storeFrameLogs(
+      db,
+      chatty.id,
+      [{ payload: { line: "fresh" }, timestamp: new Date() }],
+      accountId,
+    );
+
+    const quietRows = await db
+      .select({ payload: frameLogs.payload })
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, quiet.id));
+    expect(quietRows).toHaveLength(1);
+    const chattyRows = await db
+      .select({ payload: frameLogs.payload, sizeBytes: frameLogs.sizeBytes })
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, chatty.id))
+      .orderBy(frameLogs.id);
+    const labels = chattyRows.map(
+      (row) => (row.payload as Record<string, unknown>).label ?? "fresh",
+    );
+    expect(labels).not.toContain("chatty-old");
+    expect(labels).toContain("chatty-new");
+    expect(labels).toContain("fresh");
+    const total =
+      fat + chattyRows.reduce((sum, row) => sum + row.sizeBytes, 0);
+    expect(total).toBeLessThanOrEqual(maxFrameLogBytesPerAccount);
   });
 
   it("reports usage with limits on the grants poll", async () => {

@@ -15,12 +15,15 @@ import {
   jsonError,
   maskUserCode,
   parseScopes,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { autoGrantedDeviceScopes } from "../../../../src/lib/device-scopes";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createSecretToken, hashSecret, hashUserCode } from "../../../../src/lib/secrets";
+
+// A scope list.
+const maxScopesBodyBytes = 16 * 1024;
 
 export const runtime = "nodejs";
 
@@ -57,7 +60,11 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_link_token", 401);
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxScopesBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   if (!Array.isArray(body.scopes)) {
     return jsonError("invalid_scopes", 400);
   }

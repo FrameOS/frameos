@@ -22,6 +22,12 @@ import {
 import { deviceSceneIdForFrame } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../../src/lib/session";
+import {
+  compiledSceneHint,
+  compiledSceneNames,
+  detectRiskFlags,
+  riskFlagShell,
+} from "../../../../../../src/lib/store";
 
 export const runtime = "nodejs";
 
@@ -47,8 +53,12 @@ const maxScenesPerUpload = 20;
 // An uploadScenes push deliberately does NOT touch the frame's store-scene
 // assignments: the device's scenes_checksum will differ from the assigned
 // checksum afterwards, and the workspace showing "out of sync" is the truth
-// about an ad-hoc preview. Anything else the backend accepts as an event
-// (metrics, custom scene events) has no cloud verb yet and 404s honestly.
+// about an ad-hoc preview. It does go through the same two refusals as an
+// assignment push, though (assignScenesToFrame): a scene the store would
+// flag `shell` and a legacy compiled scene are refused here too, so the
+// ad-hoc route is not a way around the gates on the assigned one. Anything
+// else the backend accepts as an event (metrics, custom scene events) has no
+// cloud verb yet and 404s honestly.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string; eventName: string }> },
@@ -172,9 +182,35 @@ export async function POST(
       ) {
         return jsonError("invalid_scenes", 400);
       }
+      if (
+        !scenes.every(
+          (scene) =>
+            scene &&
+            typeof scene === "object" &&
+            !Array.isArray(scene) &&
+            typeof (scene as { id?: unknown }).id === "string",
+        )
+      ) {
+        return jsonError("invalid_scenes", 400);
+      }
       const serialized = JSON.stringify(scenes);
       if (Buffer.byteLength(serialized, "utf8") > maxScenesPayloadBytes) {
         return jsonError("scenes_payload_too_large", 400);
+      }
+      if (detectRiskFlags(scenes).includes(riskFlagShell)) {
+        return jsonError("scene_refused", 422, {
+          detail:
+            "This scene runs shell commands, which cloud-managed frames refuse.",
+          reason: riskFlagShell,
+        });
+      }
+      const compiled = compiledSceneNames(scenes);
+      if (compiled.length > 0) {
+        return jsonError("scene_refused", 422, {
+          detail: compiledSceneHint,
+          reason: "compiled",
+          scenes: compiled,
+        });
       }
       // The same digest the assignment push uses (buildScenesPayloadForFrame):
       // the device stores it opaquely and echoes it in scene_ack, which is
@@ -215,7 +251,16 @@ export async function POST(
       providerSubject: session.providerSubject,
     },
     eventType: "frame.command_sent",
-    metadata: { event: eventName, type },
+    metadata: {
+      event: eventName,
+      type,
+      ...(type === "set_scenes" && payload
+        ? {
+            checksum: payload.checksum,
+            scene_count: (payload.scenes as unknown[]).length,
+          }
+        : {}),
+    },
     target: { commandId: command?.id, frameId: frame.id },
   });
 

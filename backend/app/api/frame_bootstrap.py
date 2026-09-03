@@ -21,6 +21,7 @@ from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.deploy_remote import legacy_remote_cleanup_script
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
+from app.utils.release_targets import release_distro_summary, release_versions
 from app.utils.token import secure_token
 
 from . import api_project, api_public
@@ -256,9 +257,15 @@ detect_target() {{
     esac
   fi
 
+  # Only releases with a tarball on the GitHub release pass (the matrix in
+  # app/utils/release_targets.py). An older distro cannot borrow a newer
+  # build: bookworm's binary needs glibc 2.34+ and bullseye ships 2.31.
   case "$release" in
-    buster|bullseye|bookworm|trixie|22.04|24.04|26.04) ;;
-    *) echo "Unsupported OS release: ${{release:-unknown}}" >&2; exit 1 ;;
+    {"|".join(release_versions())}) ;;
+    *)
+      echo "Unsupported OS release: ${{release:-unknown}}. FrameOS releases are built for {release_distro_summary()}; upgrade the OS to install this way." >&2
+      exit 1
+      ;;
   esac
 
   echo "$distro-$release-$(detect_arch)"

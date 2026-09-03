@@ -45,6 +45,9 @@ def test_unprivileged_unit_carries_the_hardening_block():
     assert "chgrp frameos" in service
     assert "Wants=NetworkManager.service\nAfter=network.target NetworkManager.service\n" in service
     assert "Environment=FRAMEOS_HOME=/srv/frameos/current\n" in service
+    assert "SupplementaryGroups=video input\n" in service
+    assert "SupplementaryGroups=video input tty" not in service
+    assert "Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/usr/lib:/usr/local/lib\n" in service
     assert "__FRAMEOS_UNPRIVILEGED_SERVICE__" not in service
     assert "%I" not in service
     assert service.endswith("[Install]\nWantedBy=multi-user.target\n")
@@ -99,11 +102,13 @@ def test_privileged_units_are_staged_and_enabled(tmp_path):
     systemd = tmp_path / "etc" / "systemd" / "system"
     path_unit = (systemd / BUILDROOT_PRIVILEGED_PATH_UNIT_NAME).read_text(encoding="utf-8")
     service_unit = (systemd / BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME).read_text(encoding="utf-8")
-    assert "DirectoryNotEmpty=/srv/frameos/privileged/queue" in path_unit
+    assert "PathExistsGlob=/srv/frameos/privileged/queue/*.json" in path_unit
     assert f"Unit={BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME}" in path_unit
     assert "ExecStart=/srv/frameos/current/frameos privileged-worker" in service_unit
     assert "User=root" in service_unit
     assert "Type=oneshot" in service_unit
+    assert "UMask=0027" in service_unit
+    assert "/srv/frameos/current/scenes" not in service_unit
     link = systemd / "multi-user.target.wants" / BUILDROOT_PRIVILEGED_PATH_UNIT_NAME
     assert link.is_symlink() and link.readlink().as_posix() == f"../{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME}"
     rules = (tmp_path / "etc" / "udev" / "rules.d" / BUILDROOT_DEVICE_UDEV_RULES_NAME).read_text(encoding="utf-8")
@@ -121,7 +126,8 @@ def test_stage_frameos_service_takes_the_user(tmp_path):
 def test_users_table_and_partition_skeleton_use_the_fixed_ids():
     assert BUILDROOT_USERS_TABLE_CONTENT == "frameos 990 frameos 990 * /srv/frameos /bin/false - FrameOS runtime\n"
     assert BUILDROOT_USERS_TABLE_WORK_PATH == "/work/frameos-users.txt"
-    assert 'chown 990:990 "$frameos_root/$d"' in PARTITION_POST_BUILD_SCRIPT
+    assert 'chown 0:990 "$frameos_root/$d"' in PARTITION_POST_BUILD_SCRIPT
+    assert 'chmod 2750 "$frameos_root/privileged/results"' in PARTITION_POST_BUILD_SCRIPT
     assert 'chmod 1770 "$frameos_root/privileged/queue"' in PARTITION_POST_BUILD_SCRIPT
     assert "__FRAMEOS_UID__" not in PARTITION_POST_BUILD_SCRIPT
 
@@ -130,6 +136,7 @@ def test_partition_ownership_commands(tmp_path):
     root = tmp_path / "frameos"
     release = root / "releases" / "release_x"
     (release / "drivers").mkdir(parents=True)
+    (release / "scenes").mkdir()
     (release / "frameos").write_bytes(b"bin")
     (release / "drivers" / "a.so").write_bytes(b"so")
     (release / "frame.json").write_text("{}")
@@ -143,6 +150,9 @@ def test_partition_ownership_commands(tmp_path):
         (root / d).mkdir(parents=True)
     (root / "state" / "NetworkManager" / "system-connections" / "wifi.nmconnection").write_text("x")
     (root / "state" / "cloud_link.json").write_text("{}")
+    (root / "privileged" / "results" / "old.json").write_text("{}")
+    (root / "vendor" / "inkyPython").mkdir(parents=True)
+    (root / "vendor" / "inkyPython" / "install.py").write_text("pass\n")
 
     cmds = render_frameos_partition_ownership_commands(root)
     lines = cmds.splitlines()
@@ -150,20 +160,27 @@ def test_partition_ownership_commands(tmp_path):
     assert "sif /releases/release_x uid 0" in lines
     assert "sif /releases/release_x gid 990" in lines
     assert "sif /releases/release_x mode 041775" in lines
-    assert not any(line.startswith("sif /releases/release_x/frameos ") for line in lines)
-    assert not any(line.startswith("sif /releases/release_x/frameos.service ") for line in lines)
-    assert not any(line.startswith("sif /releases/release_x/drivers") for line in lines)
+    assert "sif /releases/release_x/frameos uid 0" in lines
+    assert "sif /releases/release_x/frameos mode 0100755" in lines
+    assert "sif /releases/release_x/frameos.service uid 0" in lines
+    assert "sif /releases/release_x/frameos.service mode 0100644" in lines
+    assert "sif /releases/release_x/drivers uid 0" in lines
+    assert "sif /releases/release_x/drivers/a.so uid 0" in lines
+    assert "sif /releases/release_x/scenes uid 0" in lines
     assert "sif /releases/release_x/frame.json uid 990" in lines
     assert "sif /releases/release_x/frame.json mode 0100600" in lines
     assert "sif /releases/release_x/frame.json.admin_session_salt mode 0100600" in lines
     assert "sif /releases/release_x/scenes.json.gz mode 0100644" in lines
-    assert "sif /state uid 990" in lines and "sif /state mode 040750" in lines
+    assert "sif /state uid 0" in lines and "sif /state gid 990" in lines and "sif /state mode 041770" in lines
     assert "sif /state/cloud_link.json uid 990" in lines
     assert not any("NetworkManager" in line or "wpa_supplicant" in line for line in lines)
-    assert "sif /logs mode 040770" in lines
+    assert "sif /logs uid 0" in lines and "sif /logs mode 041770" in lines
     assert "sif /privileged uid 0" in lines and "sif /privileged gid 990" in lines and "sif /privileged mode 040755" in lines
     assert "sif /privileged/queue mode 041770" in lines and "sif /privileged/queue uid 0" in lines
-    assert "sif /privileged/results uid 990" in lines and "sif /privileged/results mode 040770" in lines
+    assert "sif /privileged/results uid 0" in lines and "sif /privileged/results mode 042750" in lines
+    assert "sif /privileged/results/old.json uid 0" in lines
+    assert "sif /privileged/results/old.json mode 0100640" in lines
+    assert "sif /vendor uid 0" in lines and "sif /vendor/inkyPython/install.py uid 0" in lines
     assert not any("/current" in line for line in lines), "symlinks are left alone"
 
 
@@ -182,6 +199,25 @@ def test_user_merge_appends_once_and_refuses_taken_ids():
         buildroot_user_merge.merge_frameos_user(passwd + "other:x:990:990::/:/bin/false\n", group, shadow)
     with pytest.raises(RuntimeError, match="gid 990"):
         buildroot_user_merge.merge_frameos_user(passwd, group + "other:x:990:\n", shadow)
+    with pytest.raises(RuntimeError, match="wrong uid/gid"):
+        buildroot_user_merge.merge_frameos_user(
+            passwd + "frameos:x:991:991::/:/bin/false\n", group + "frameos:x:990:\n", shadow
+        )
+    with pytest.raises(RuntimeError, match="wrong gid"):
+        buildroot_user_merge.merge_frameos_user(
+            passwd + buildroot_user_merge.FRAMEOS_PASSWD_LINE + "\n", group + "frameos:x:991:\n", shadow
+        )
+    p_existing, g_existing, sh_missing, changed_missing = buildroot_user_merge.merge_frameos_user(
+        passwd + buildroot_user_merge.FRAMEOS_PASSWD_LINE + "\n",
+        group + buildroot_user_merge.FRAMEOS_GROUP_LINE + "\n",
+        shadow,
+    )
+    assert (p_existing, g_existing) == (
+        passwd + buildroot_user_merge.FRAMEOS_PASSWD_LINE + "\n",
+        group + buildroot_user_merge.FRAMEOS_GROUP_LINE + "\n",
+    )
+    assert sh_missing.endswith(buildroot_user_merge.FRAMEOS_SHADOW_LINE + "\n")
+    assert changed_missing == ["shadow"]
     # Files without a trailing newline (debugfs `cat` output) still get their own line.
     p3, _, _, _ = buildroot_user_merge.merge_frameos_user("root:x:0:0:root:/root:/bin/sh", "root:x:0:", "")
     assert "\nframeos:x:990:" in p3

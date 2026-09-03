@@ -22,8 +22,9 @@ from app.database import SessionLocal
 from app.redis import close_redis_connection, get_redis, create_redis_connection
 from app.websockets import publish_message
 from app.models.frame import Frame
+from app.utils.frame_secrets import websocket_frame_payload
 from app.models.log import new_log as log
-from app.utils.request_ip import extract_client_ip
+from app.utils.request_ip import client_ip_for_request
 from app.ws.remote_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
 
 router = APIRouter()
@@ -104,10 +105,13 @@ async def store_connected_remote_version(
     finally:
         db.close()
 
+    # ``agent`` holds the shared secret and the browser merges broadcasts
+    # shallowly, so it is not sent (websocket_frame_payload); the new
+    # agentVersion / remoteCapabilities reach the UI on its next frame fetch.
     await publish_message(
         redis,
         "update_frame",
-        {"agent": agent, "id": frame.id, "project_id": frame.project_id},
+        websocket_frame_payload({"agent": agent, "id": frame.id, "project_id": frame.project_id}),
     )
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -482,10 +486,7 @@ async def ws_remote_endpoint(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )
 
-    client_ip = extract_client_ip(
-        ws.headers,
-        ws.client.host if ws.client else None,
-    )
+    client_ip = client_ip_for_request(ws)
 
     # ----- bookkeeping -----------------------------------------------------
     active_sockets.add(ws)

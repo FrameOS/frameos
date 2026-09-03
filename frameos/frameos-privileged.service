@@ -15,8 +15,11 @@ Type=oneshot
 User=root
 WorkingDirectory=/srv/frameos/current
 Environment=FRAMEOS_HOME=/srv/frameos/current
-Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib
+# Never search the runtime-writable release root (or a directory it can
+# create) for libraries loaded into this root process.
+Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/usr/lib:/usr/local/lib
 ExecStart=/srv/frameos/current/frameos privileged-worker
+UMask=0027
 # install-release unpacks a release and runs its setup; 30 minutes is far
 # above anything legitimate and still ends a wedged worker.
 TimeoutStartSec=1800

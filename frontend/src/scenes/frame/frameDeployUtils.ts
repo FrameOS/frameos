@@ -73,15 +73,14 @@ export interface FullDeployPlanResponse {
     current_version: string
     transport: 'remote' | 'ssh' | string
   } | null
-  /** Present for embedded (ESP32) frames: full deploy = firmware rebuild + OTA. */
+  /** Present for embedded (ESP32) frames: full deploy = the latest release over the air + scenes. */
   embedded?: {
     platform: string
     idfTarget: string
     flashSize: string
     otaSupported: boolean
-    firmwareStatus: string
-    firmwareError?: string | null
-    needsFirmwareBuild: boolean
+    releasePlatform?: string | null
+    releaseVersion?: string | null
     action: string
   } | null
   post_deploy?: {

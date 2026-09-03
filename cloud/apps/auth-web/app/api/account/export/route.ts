@@ -16,6 +16,13 @@ export async function GET() {
   if (!accountId) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
+  // The export is the whole account in one file. A read-only token is the
+  // credential handed to a dashboard or a script that may only look at
+  // frames and scenes; it does not get the audit trail, the identities and
+  // the settings list in one download.
+  if (session.apiToken?.access === "read_only") {
+    return NextResponse.json({ error: "read_only_token" }, { status: 403 });
+  }
 
   // Building an export scans every table this account touches. Keyed on the
   // account rather than the IP, so one user cannot make the database

@@ -13,6 +13,12 @@
 typedef void (*fos_action_cb)(void);
 
 esp_err_t fos_http_start(bool portal_mode);
+
+/* Compare two NUL-terminated secrets without stopping at the first
+ * differing byte, so response timing does not leak how much of an API key
+ * or password prefix was right. Lengths still differ in time; the length of
+ * a credential is not the secret. */
+bool fos_consttime_eq(const char *a, const char *b);
 bool fos_http_is_running(void);
 void fos_http_stop(void);
 /* Wired by main: "render now" and "check OTA now" triggers. */

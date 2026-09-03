@@ -5,7 +5,6 @@ import { NewSceneWithAi } from "../../../src/components/NewSceneWithAi";
 import {
   getAccountUrl,
   getCloudBaseUrl,
-  getFramesUrl,
   getMyScenesUrl,
   getScenesBaseUrl,
   hasDatabaseUrl,
@@ -66,7 +65,7 @@ export default async function NewScenePage({
       initialPrompt={prompt}
       loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
       myScenesUrl={getMyScenesUrl()}
-      settingsUrl={`${getFramesUrl()}/settings#settings-openai`}
+      settingsUrl={`${getAccountUrl("/account/settings")}#settings-openai`}
     />
   );
 }

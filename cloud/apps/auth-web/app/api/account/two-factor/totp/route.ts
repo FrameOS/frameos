@@ -1,12 +1,15 @@
 // Authenticator app enrollment.
 // POST  — start (or restart) enrollment: a fresh secret + QR code. Nothing is
-//         enforced until /confirm sees a valid code.
+//         enforced until /confirm sees a valid code. Needs the password when
+//         the account has one (requireStrengtheningProof).
 // DELETE — remove the authenticator (needs the weakening proof).
 import QRCode from "qrcode";
 import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
+  notifySecurityChange,
   readJsonBody,
+  requireStrengtheningProof,
   requireWeakeningProof,
 } from "../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
@@ -26,9 +29,18 @@ export async function POST(request: NextRequest) {
   const context = await accountSecurityContext(request, db, {
     action: "two-factor-totp",
     mutating: true,
+    recentAuth: true,
   });
   if ("response" in context) {
     return context.response;
+  }
+  const denied = await requireStrengtheningProof(
+    db,
+    context,
+    await readJsonBody(request),
+  );
+  if (denied) {
+    return denied;
   }
   const secret = await beginTotpEnrollment(db, context.accountId);
   if (!secret) {
@@ -73,5 +85,9 @@ export async function DELETE(request: NextRequest) {
       : "account.two_factor_disabled",
     metadata: { method: "totp" },
   });
+  await notifySecurityChange(
+    context,
+    status.enabled ? "totp_disabled" : "two_factor_disabled",
+  );
   return NextResponse.json({ ok: true, two_factor_enabled: status.enabled });
 }

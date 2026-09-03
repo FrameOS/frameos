@@ -344,6 +344,8 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert 'shred_remove_file "$CLOUD_FILE"' in script
     assert "dd if=/dev/zero" in script
     assert "cloud_enroll_pending.json" in script
+    assert 'chown root:frameos "$pending_dir"' in script
+    assert 'chmod 1770 "$pending_dir"' in script
     assert "frameos-cloud-wifi.nmconnection" in script
     assert "request_reboot()" in script
     assert "systemctl reboot" in script
@@ -2256,6 +2258,8 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     # door's queue (ownership is stamped onto the ext4 at compose time).
     for name in ("state", "logs", "tmp", "runtime", "staging", "privileged/queue", "privileged/results"):
         assert (overlay_dir / "srv" / "frameos" / name).is_dir(), name
+    for name in ("drivers", "scenes"):
+        assert (release_dir / name).is_dir(), name
 
 
 def test_buildroot_boot_config_merge_is_written_to_active_boot_location(tmp_path):

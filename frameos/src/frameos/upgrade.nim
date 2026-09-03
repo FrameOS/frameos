@@ -11,6 +11,7 @@ import frameos/device_setup
 from frameos/setup import frameosServiceContents, frameosServiceUser
 import frameos/utils/http_client
 import frameos/utils/process
+import frameos/utils/system
 import frameos/version
 
 const
@@ -81,7 +82,7 @@ proc writeUpgradeStatus*(payload: JsonNode) =
     return
   payload["updated_at"] = %nowIso()
   createDir(frameosStateDir())
-  writeFile(frameosUpgradeStatusPath(), pretty(payload, indent = 2) & "\n")
+  writeFileAtomically(frameosUpgradeStatusPath(), pretty(payload, indent = 2) & "\n")
 
 proc deleteIfPresent(payload: JsonNode, key: string) =
   if payload != nil and payload.kind == JObject and payload.hasKey(key):
@@ -196,6 +197,20 @@ proc parseOsRelease(path = "/etc/os-release"): Table[string, string] =
     if value.len >= 2 and ((value[0] == '"' and value[^1] == '"') or (value[0] == '\'' and value[^1] == '\'')):
       value = value[1 .. ^2]
     result[parts[0]] = value
+
+proc isBuildrootHost*(osReleasePath = "/etc/os-release"): bool =
+  ## The root-owned host identity is the trust anchor for the root worker.
+  ## frame.json is writable by the runtime and must never be allowed to make
+  ## a Buildroot host execute the broader Raspberry Pi OS setup path.
+  parseOsRelease(osReleasePath).getOrDefault("ID", "").toLowerAscii() == "buildroot"
+
+proc privilegedBuildrootContextProblem*(configuredMode: string,
+                                        osReleasePath = "/etc/os-release"): string =
+  if not isBuildrootHost(osReleasePath):
+    return "the privileged worker is only available on a Buildroot host"
+  if configuredMode != "buildroot":
+    return "the installed frame config mode must be buildroot"
+  ""
 
 proc archForUname*(uname: string): string =
   case uname
@@ -401,6 +416,14 @@ proc installedFrameOSVersion*(): string =
   let config = currentFrameConfig()
   normalizeReleaseVersion(config{"frameosVersion"}.getStr(config{"frameos_version"}.getStr("")))
 
+proc releaseInstallVersionProblem*(currentVersion, requestedVersion: string): string =
+  if not validReleaseVersion(requestedVersion):
+    return "release version must have exactly three numeric fields (YYYY.M.N)"
+  let current = normalizeReleaseVersion(currentVersion)
+  if current != "unknown" and compareFrameOSVersions(current, requestedVersion) >= 0:
+    return "release " & requestedVersion & " is not newer than installed FrameOS " & current
+  ""
+
 proc releaseJson(release: FrameOSReleaseInfo): JsonNode =
   %*{
     "version": release.version,
@@ -559,7 +582,7 @@ proc writeFrameConfigForUpgrade(configPath, destination, version: string) =
   if payload.kind != JObject:
     raise newException(ValueError, "Current frame config is not a JSON object: " & configPath)
   payload["frameosVersion"] = %version
-  writeFile(destination, pretty(payload, indent = 4) & "\n")
+  writePrivateFile(destination, pretty(payload, indent = 4) & "\n")
 
 proc serviceUserFromFile(path: string): string =
   let installed = installedServiceUser(path)
@@ -604,8 +627,55 @@ proc copyFirstExistingFile(sources: openArray[string], destination: string) =
       copyFile(source, destination)
       return
 
+const ReleaseExtractSpaceFactor* = 2
+  ## Free bytes an extraction needs, as a multiple of the .tar.gz size: the
+  ## unpacked binaries plus their copies into the release directories.
+
+proc releaseSpaceShortfall*(archiveBytes, availableBytes: int64): int64 =
+  ## How many bytes short `availableBytes` is of unpacking an archive of
+  ## `archiveBytes`; 0 when it fits, and 0 when the free space is unknown
+  ## (-1 from getAvailableDiskSpace — a filesystem statvfs cannot answer for
+  ## is not a reason to refuse an upgrade).
+  if availableBytes < 0 or archiveBytes <= 0:
+    return 0
+  let needed = archiveBytes * ReleaseExtractSpaceFactor
+  if availableBytes >= needed: 0 else: needed - availableBytes
+
+proc ensureFreeSpaceForRelease(archivePath: string, dirs: openArray[string]) =
+  ## Refuse before tar starts: a full SD card mid-extraction leaves a half
+  ## release and, on Buildroot's data partition, a frame that cannot even
+  ## log why. Both the scratch dir and the releases dir are checked because
+  ## on Raspberry Pi OS they are different filesystems (/tmp vs /srv).
+  let archiveBytes = getFileSize(archivePath)
+  for dir in dirs:
+    let available = getAvailableDiskSpace(dir)
+    let shortfall = releaseSpaceShortfall(archiveBytes, available)
+    if shortfall > 0:
+      raise newException(ValueError,
+        "Not enough free disk space in " & dir & " to unpack the release: " &
+        $(archiveBytes * ReleaseExtractSpaceFactor) & " bytes needed (archive " &
+        $archiveBytes & " x" & $ReleaseExtractSpaceFactor & "), " & $available &
+        " available, short by " & $shortfall)
+
 proc newStagedReleaseName(release: FrameOSReleaseInfo, timestamp: string): string =
   "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
+
+proc expectedReleaseArchiveRootName*(release: FrameOSReleaseInfo): string =
+  "frameos-" & release.version & "-" & release.target
+
+proc extractedReleaseRoot*(extractDir: string, release: FrameOSReleaseInfo): string =
+  ## Bind the signed bytes to the requested version and detected target. A
+  ## signature proves an archive is an official FrameOS artifact, but without
+  ## this name check an untrusted runtime could label any older signed archive
+  ## as the requested release and have root install and execute it.
+  result = extractDir / expectedReleaseArchiveRootName(release)
+  if not dirExists(result) or symlinkExists(result):
+    raise newException(ValueError, "The signed release archive did not contain the expected root " &
+      expectedReleaseArchiveRootName(release))
+  for _, path in walkDir(extractDir):
+    if path != result:
+      raise newException(ValueError, "The signed release archive contained an unexpected top-level entry: " &
+        lastPathPart(path))
 
 proc assembleReleaseFromArchive(release: FrameOSReleaseInfo, archivePath, workDir: string,
                                 staged: var StagedFrameOSRelease) =
@@ -613,7 +683,10 @@ proc assembleReleaseFromArchive(release: FrameOSReleaseInfo, archivePath, workDi
   ## directories, carry the frame's config and scene payloads over, and
   ## settle ownership. `archivePath` must already be verified — this proc
   ## trusts it, so callers verify before calling (both do).
-  let mode = currentFrameConfig(){"mode"}.getStr("rpios")
+  let configuredMode = currentFrameConfig(){"mode"}.getStr("rpios")
+  if isBuildrootHost() and configuredMode != "buildroot":
+    raise newException(ValueError, privilegedBuildrootContextProblem(configuredMode))
+  let mode = if isBuildrootHost(): "buildroot" else: configuredMode
   let withRemote = mode != "buildroot" or buildrootRemoteInstalled()
   createDir(workDir / "extract")
   createDir(staged.frameosReleaseDir)
@@ -624,28 +697,32 @@ proc assembleReleaseFromArchive(release: FrameOSReleaseInfo, archivePath, workDi
   createDir(frameosStateDir())
   createDir(frameosAssetsDir())
 
-  discard runSetupCommand("tar -xzf " & shellQuote(archivePath) & " -C " & shellQuote(workDir / "extract"))
+  ensureFreeSpaceForRelease(archivePath, [workDir, frameosInstallDir() / "releases"])
+  # Extraction can run as root: never restore archive-supplied ownership or
+  # special mode bits even though the release signature is valid.
+  discard runSetupCommand("tar --no-same-owner --no-same-permissions -xzf " &
+    shellQuote(archivePath) & " -C " & shellQuote(workDir / "extract"))
 
-  let frameosBinary = findFileNamed(workDir / "extract", "frameos")
-  var remoteBinary = findFileNamed(workDir / "extract", "frameos_remote")
+  let artifactRoot = extractedReleaseRoot(workDir / "extract", release)
+  let frameosBinary = findFileNamed(artifactRoot, "frameos")
+  var remoteBinary = findFileNamed(artifactRoot, "frameos_remote")
   if remoteBinary.len == 0:
-    remoteBinary = findFileNamed(workDir / "extract", "frameos_agent")
+    remoteBinary = findFileNamed(artifactRoot, "frameos_agent")
   if frameosBinary.len == 0:
     raise newException(ValueError, "The FrameOS release did not contain a frameos binary for " & release.target)
   if withRemote and remoteBinary.len == 0:
     raise newException(ValueError, "The FrameOS release did not contain a frameos_remote binary for " & release.target)
 
-  let artifactRoot = parentDir(frameosBinary)
   discard runSetupCommand("install -m 0755 " & shellQuote(frameosBinary) & " " & shellQuote(staged.frameosReleaseDir / "frameos"))
   if withRemote:
     discard runSetupCommand("install -m 0755 " & shellQuote(remoteBinary) & " " & shellQuote(staged.remoteReleaseDir / "frameos_remote"))
 
   copyDirIfExists(artifactRoot / "drivers", staged.frameosReleaseDir / "drivers")
-  # No `scenes/` any more: release archives never carried scene `.so`s, and
-  # the modes that built them are gone. The stale `current/scenes` entry in
-  # LD_LIBRARY_PATH stays — a directory that does not exist costs a linker
-  # nothing, and rewriting it would rewrite the installed unit (and the
-  # published base images' hashes) for no gain.
+  # These are roots from which privileged processes may load code. Pre-create
+  # them while the release is root-only, before Buildroot's sticky release
+  # ownership is applied, so the runtime cannot plant either directory.
+  createDir(staged.frameosReleaseDir / "drivers")
+  createDir(staged.frameosReleaseDir / "scenes")
   if dirExists(artifactRoot / "vendor"):
     createDir(frameosInstallDir() / "vendor")
     discard runSetupCommand("cp -R " & shellQuote(artifactRoot / "vendor" / ".") & " " & shellQuote(frameosInstallDir() / "vendor" / ""))
@@ -655,6 +732,7 @@ proc assembleReleaseFromArchive(release: FrameOSReleaseInfo, archivePath, workDi
   writeFrameConfigForUpgrade(currentFrameConfigPath(), staged.frameosReleaseDir / "frame.json", release.version)
   if withRemote:
     copyFile(staged.frameosReleaseDir / "frame.json", staged.remoteReleaseDir / "frame.json")
+    setFilePermissions(staged.remoteReleaseDir / "frame.json", {fpUserRead, fpUserWrite})
   copyScenePayloads(staged.frameosReleaseDir, oldReleaseDir)
 
   copyAdminSessionSaltForUpgrade(staged.frameosReleaseDir)
@@ -865,6 +943,13 @@ proc installStagedReleaseArchive*(archivePath, minisig, version: string): JsonNo
   try:
     if not runningAsRoot():
       raise newException(ValueError, "install-release must run as root")
+    let contextProblem = privilegedBuildrootContextProblem(
+      currentFrameConfig(){"mode"}.getStr(""))
+    if contextProblem.len > 0:
+      raise newException(ValueError, contextProblem)
+    let versionProblem = releaseInstallVersionProblem(installedFrameOSVersion(), version)
+    if versionProblem.len > 0:
+      raise newException(ValueError, versionProblem)
     release = releaseInfoForVersion(version)
     if not stagedArchiveInsideStagingDir(archivePath):
       raise newException(ValueError, "Refusing to install an archive outside " &

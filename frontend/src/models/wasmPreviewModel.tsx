@@ -51,7 +51,9 @@ export function fetchSettingsJson(frameId: FrameId): Promise<string> {
   if (!promise) {
     promise = (async () => {
       if (isCloudMode()) {
-        const response = await apiFetch('/api/settings')
+        // reveal=1: the cloud masks secrets by default; the in-browser runtime
+        // needs the real keys (session-only, see the cloud's settings route).
+        const response = await apiFetch('/api/settings?reveal=1')
         if (!response.ok) {
           throw new Error(`settings fetch failed: ${response.status}`)
         }

@@ -12,6 +12,11 @@ import {
 } from "../../../../../src/lib/auth-cookies";
 import { resolveGoogleSignIn } from "../../../../../src/lib/google-account";
 import {
+  createPendingGoogleLinkToken,
+  pendingGoogleLinkCookieName,
+  pendingGoogleLinkCookieOptions,
+} from "../../../../../src/lib/google-link";
+import {
   getBaseUrl,
   getGoogleCallbackUrl,
   getGoogleOAuthConfig,
@@ -96,9 +101,37 @@ export async function GET(request: NextRequest) {
   const db = createDb();
 
   // Merge rules live in resolveGoogleSignIn: an existing verified password
-  // account links automatically; an unverified one requires a password reset
-  // first so a squatter's password cannot ride along into this account.
+  // account links only after its password is proved on /login/link-google;
+  // an unverified one requires a password reset first so a squatter's
+  // password cannot ride along into this account.
   const resolution = await resolveGoogleSignIn(db, discovery.issuer, claims);
+
+  if (resolution.status === "requires_link_confirmation") {
+    // The verified claims are parked in a signed, short-lived cookie; the
+    // link route re-reads them once the password checks out. Nothing is
+    // written to the account until then.
+    const response = NextResponse.redirect(
+      new URL("/login/link-google", getBaseUrl()),
+    );
+    response.cookies.set(
+      pendingGoogleLinkCookieName,
+      await createPendingGoogleLinkToken({
+        accountId: resolution.accountId,
+        email: resolution.email,
+        name: claims.name,
+        providerIssuer: discovery.issuer,
+        providerSubject: claims.sub,
+        returnTo,
+      }),
+      pendingGoogleLinkCookieOptions(),
+    );
+    response.cookies.delete(authCookieNames.state);
+    response.cookies.delete(authCookieNames.nonce);
+    response.cookies.delete(authCookieNames.verifier);
+    response.cookies.delete(authCookieNames.returnTo);
+    response.cookies.delete(authCookieNames.mergeEmail);
+    return response;
+  }
 
   if (resolution.status === "requires_password_reset") {
     const response = NextResponse.redirect(

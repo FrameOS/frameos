@@ -13,6 +13,7 @@ import {
 import {
   completeSecondFactor,
   pendingSignInFromRequest,
+  pendingSignInSpent,
   signedInResponse,
 } from "../../../../../../src/lib/sign-in";
 import {
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
     return limited;
   }
   const pending = await pendingSignInFromRequest(request);
-  if (!pending) {
+  if (!pending || (await pendingSignInSpent(pending))) {
     return NextResponse.json({ error: "sign_in_expired" }, { status: 401 });
   }
   const accountId = pending.profile.accountId;
@@ -82,6 +83,9 @@ export async function POST(request: NextRequest) {
   const token = await completeSecondFactor(db, pending, "passkey", {
     passkey: result.passkeyName,
   });
+  if (!token) {
+    return NextResponse.json({ error: "sign_in_expired" }, { status: 401 });
+  }
   const response = signedInResponse(token, pending.returnTo);
   response.cookies.set(webauthnChallengeCookieName, "", {
     ...webauthnChallengeCookieOptions(),

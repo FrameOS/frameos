@@ -259,6 +259,34 @@ proc spoolScratchDir*(preferred = ""): string =
     return fallback
   ""
 
+proc sweepSpoolScratchDir*(preferred = ""): int =
+  ## Deletes every leftover spill file from a previous run — a crash or a
+  ## power cut mid-render leaves the spool's files behind, and nothing else
+  ## ever names them again (newSpillFilePath counts from zero per process).
+  ## Boot-time only: while the process is up, live spools own their files.
+  ## Sweeps the directory in use AND the temp fallback, since the one chosen
+  ## last boot may not be the one chosen now (an SD card that came or went).
+  ## Returns the number of files removed; never raises.
+  var dirs: seq[string] = @[]
+  let chosen = spoolScratchDir(preferred)
+  if chosen.len > 0:
+    dirs.add(chosen)
+  let fallback = getTempDir() / "frameos-spool"
+  if fallback != chosen and dirExists(fallback):
+    dirs.add(fallback)
+  for dir in dirs:
+    try:
+      for kind, path in walkDir(dir):
+        if kind != pcFile:
+          continue
+        try:
+          removeFile(path)
+          inc result
+        except CatchableError:
+          discard
+    except CatchableError:
+      discard
+
 type SpoolWriter* = object
   ## Accumulates bytes and decides, as they arrive, whether they still fit in
   ## memory. Nothing touches storage until the threshold is crossed, so the

@@ -1,8 +1,4 @@
-import asyncio
-import os
 import re
-import shlex
-import sys
 from pathlib import Path
 
 import pytest
@@ -13,7 +9,6 @@ from app.tasks import embedded_firmware as embedded_firmware_module
 from app.tasks.embedded_firmware import (
     EMBEDDED_DEFAULT_FLASH_SIZE,
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
-    EMBEDDED_FIRMWARE_VERSION,
     EMBEDDED_RENDER_REMOTE,
     EMBEDDED_SUPPORTED_PANELS,
     FOS_PIXEL_2BPP_GRAY,
@@ -21,12 +16,9 @@ from app.tasks.embedded_firmware import (
     FOS_PIXEL_4BPP_SPECTRA6,
     FOS_PIXEL_DUAL_1BPP_RED,
     embedded_buffer_size,
-    _generated_config_header,
     check_embedded_panel_fits_memory,
     embedded_default_pins_for_frame,
     embedded_flash_size_for_frame,
-    embedded_firmware_config_hash,
-    embedded_firmware_source_fingerprint,
     embedded_gpio_buttons_for_frame,
     embedded_hardware_preset_for_frame,
     embedded_hostname_for_frame,
@@ -37,21 +29,17 @@ from app.tasks.embedded_firmware import (
     embedded_panel_for_frame,
     embedded_pins_for_frame,
     embedded_pixel_format_for_panel,
-    embedded_pixie_path,
     embedded_provisioning_plan,
-    embedded_required_sdkconfig_for_frame,
+    embedded_release_asset_names,
     embedded_render_psram_bytes,
     embedded_render_canvas_bytes_per_pixel,
     embedded_render_mode_for_frame,
-    embedded_sdkconfig_defaults_for_frame,
     embedded_sd_card_assets_for_frame,
     ensure_embedded_frame_defaults,
     embedded_platform_for_frame,
-    latest_embedded_firmware,
     normalize_embedded_flash_size,
     normalize_embedded_platform,
-    request_pending_embedded_firmware_ota,
-    _reset_stale_embedded_sdkconfig,
+    request_embedded_firmware_update,
 )
 
 
@@ -166,7 +154,6 @@ def test_embedded_flash_size_profiles():
     default_frame = Frame()
     assert embedded_flash_size_for_frame(default_frame) == '8MB'
     assert embedded_ota_supported_for_frame(default_frame) is True
-    assert embedded_sdkconfig_defaults_for_frame(default_frame) == 'sdkconfig.defaults'
 
     device_config_frame = Frame(device_config={'flashSize': '4MB'})
     ensure_embedded_frame_defaults(device_config_frame)
@@ -175,15 +162,15 @@ def test_embedded_flash_size_profiles():
     four_mb = Frame(embedded={'flashSize': '4MB'})
     assert embedded_flash_size_for_frame(four_mb) == '4MB'
     assert embedded_ota_supported_for_frame(four_mb) is False
-    assert embedded_sdkconfig_defaults_for_frame(four_mb) == 'sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota'
-    assert embedded_required_sdkconfig_for_frame(four_mb)['CONFIG_ESPTOOLPY_FLASHSIZE'] == '"4MB"'
-    assert embedded_required_sdkconfig_for_frame(four_mb)['CONFIG_ESP_ERR_TO_NAME_LOOKUP'] == 'y'
 
     thirty_two_mb = Frame(embedded={'flashSize': '32MB'})
     assert embedded_flash_size_for_frame(thirty_two_mb) == '32MB'
     assert embedded_ota_supported_for_frame(thirty_two_mb) is True
-    assert embedded_sdkconfig_defaults_for_frame(thirty_two_mb) == 'sdkconfig.defaults;sdkconfig.defaults.32mb-ota'
-    assert embedded_required_sdkconfig_for_frame(thirty_two_mb)['CONFIG_SPIFFS_PAGE_SIZE'] == '512'
+    # Each layout names the release image built with exactly that partition
+    # table -- what a board is flashed with, since nothing is built here.
+    assert embedded_firmware_module.EMBEDDED_FLASH_PROFILES['32MB']['releaseAssets'] == {
+        'esp32-s3': 'esp32-s3-32mb', 'esp32-c3': 'esp32-c3-32mb',
+    }
 
 
 def test_embedded_firmware_layout_tracks_flash_and_ram():
@@ -194,7 +181,7 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
         device_config={'psramMB': 16},
     )
 
-    layout = embedded_firmware_layout_for_frame(frame, {'appSize': 2_900_000, 'size': 3_000_000})
+    layout = embedded_firmware_layout_for_frame(frame)
 
     assert layout['flash']['flashBytes'] == 32 * 1024 * 1024
     assert layout['flash']['partitionTable'] == 'partitions_ota_32mb.csv'
@@ -203,7 +190,9 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     state = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'state')
     assert ota_0['offset'] == 0x20000
     assert ota_0['size'] == 0x3F0000
-    assert ota_0['usedBytes'] == 2_900_000
+    # The image is a release asset, not something this backend built: how many
+    # bytes of a slot it fills is not knowable here.
+    assert ota_0['usedBytes'] is None
     assert ota_1['offset'] == 0x410000
     assert ota_1['size'] == 0x3F0000
     assert ota_1['usedBytes'] is None
@@ -229,7 +218,7 @@ def test_embedded_firmware_layout_keeps_large_16mb_state_partition():
         embedded={'platform': 'esp32-s3', 'flashSize': '16MB'},
     )
 
-    layout = embedded_firmware_layout_for_frame(frame, {'appSize': 2_900_000})
+    layout = embedded_firmware_layout_for_frame(frame)
 
     assert layout['flash']['flashBytes'] == 16 * 1024 * 1024
     assert layout['flash']['partitionTable'] == 'partitions_ota_16mb.csv'
@@ -238,7 +227,9 @@ def test_embedded_firmware_layout_keeps_large_16mb_state_partition():
     state = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'state')
     assert ota_0['offset'] == 0x20000
     assert ota_0['size'] == 0x3F0000
-    assert ota_0['usedBytes'] == 2_900_000
+    # The image is a release asset, not something this backend built: how many
+    # bytes of a slot it fills is not knowable here.
+    assert ota_0['usedBytes'] is None
     assert ota_1['offset'] == 0x410000
     assert ota_1['size'] == 0x3F0000
     assert ota_1['usedBytes'] is None
@@ -248,18 +239,28 @@ def test_embedded_firmware_layout_keeps_large_16mb_state_partition():
 
 
 @pytest.mark.asyncio
-async def test_firmware_status_idle(async_client):
+async def test_frame_get_embedded_includes_the_flash_layout(async_client, db):
+    """The deploy drawer draws the board's flash layout and memory plan. It is
+    derived on every read from the frame's platform + flash size — the frame
+    row carries no build state, and a stored `embedded.firmware` blob left
+    over from the build era is never echoed back."""
     frame = await create_embedded_frame(async_client)
-    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
+
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {**(stored.embedded or {}), 'firmware': {'status': 'ready', 'path': '/tmp/old.bin'}}
+    db.add(stored)
+    db.commit()
+
+    response = await async_client.get(f"/api/frames/{frame['id']}")
+
     assert response.status_code == 200
-    firmware = response.json()['firmware']
-    assert firmware['status'] == 'idle'
-    assert firmware['platform'] == 'esp32-s3'
-    assert firmware['flashSize'] == '8MB'
-    assert firmware['otaSupported'] is True
-    assert firmware['layout']['flash']['flashBytes'] == 8 * 1024 * 1024
-    assert firmware['layout']['flash']['partitionTable'] == 'partitions.csv'
-    assert [partition['name'] for partition in firmware['layout']['flash']['partitions']] == [
+    embedded = response.json()['frame']['embedded']
+    assert 'firmware' not in embedded
+    layout = embedded['layout']
+    assert layout['flash']['flashBytes'] == 8 * 1024 * 1024
+    assert layout['flash']['partitionTable'] == 'partitions.csv'
+    assert layout['flash']['otaSupported'] is True
+    assert [partition['name'] for partition in layout['flash']['partitions']] == [
         'bootloader',
         'partition_table',
         'nvs',
@@ -269,26 +270,16 @@ async def test_firmware_status_idle(async_client):
         'ota_1',
         'state',
     ]
-    assert firmware['layout']['ram']['panel'] == 'EPD_7in5_V2'
-    assert firmware['layout']['ram']['rgbaBufferBytes'] > 0
-    assert firmware['layout']['ram']['packedBufferBytes'] > 0
-
-
-@pytest.mark.asyncio
-async def test_frame_get_embedded_includes_firmware_layout(async_client):
-    frame = await create_embedded_frame(async_client)
-
-    response = await async_client.get(f"/api/frames/{frame['id']}")
-
-    assert response.status_code == 200
-    firmware = response.json()['frame']['embedded']['firmware']
-    assert firmware['status'] == 'idle'
-    assert firmware['layout']['flash']['partitionTable'] == 'partitions.csv'
-    assert firmware['layout']['ram']['renderWorkingBytes'] > 0
+    assert layout['ram']['panel'] == 'EPD_7in5_V2'
+    assert layout['ram']['rgbaBufferBytes'] > 0
+    assert layout['ram']['packedBufferBytes'] > 0
+    assert layout['ram']['renderWorkingBytes'] > 0
 
 
 @pytest.mark.asyncio
 async def test_firmware_endpoints_reject_non_embedded_frames(async_client):
+    """Only the OTA poke is left of the firmware routes; the build/download
+    pair went with the per-frame builds."""
     response = await async_client.post('/api/frames/new', json={
         'name': 'Pi Frame',
         'frame_host': 'pi@localhost',
@@ -297,244 +288,17 @@ async def test_firmware_endpoints_reject_non_embedded_frames(async_client):
     assert response.status_code == 200
     frame_id = response.json()['frame']['id']
 
+    response = await async_client.post(f'/api/frames/{frame_id}/embedded/firmware/ota')
+    assert response.status_code == 400, response.text
+
     for method, url in [
         ('GET', f'/api/frames/{frame_id}/embedded/firmware'),
         ('POST', f'/api/frames/{frame_id}/embedded/firmware'),
         ('GET', f'/api/frames/{frame_id}/embedded/firmware/download'),
-        ('POST', f'/api/frames/{frame_id}/embedded/firmware/ota'),
     ]:
         response = await async_client.request(method, url)
-        assert response.status_code == 400, url
+        assert response.status_code in (404, 405), (url, response.status_code)
 
-
-@pytest.mark.asyncio
-async def test_firmware_build_requires_toolchain(async_client):
-    frame = await create_embedded_frame(async_client)
-    with patch('app.api.frames.embedded_toolchain_available', return_value=False):
-        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
-    assert response.status_code == 400
-    assert 'ESP-IDF toolchain not found' in response.json()['detail']
-
-
-@pytest.mark.asyncio
-async def test_firmware_build_queues_job(async_client, db, redis):
-    frame = await create_embedded_frame(async_client)
-    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
-         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
-        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data['message'] == 'Firmware build started'
-    assert data['firmware']['status'] == 'queued'
-    assert data['firmware']['platform'] == 'esp32-s3'
-    assert data['firmware']['flashSize'] == '8MB'
-    assert data['firmware']['otaSupported'] is True
-    assert data['firmware']['layout']['flash']['partitionTable'] == 'partitions.csv'
-    assert data['firmware']['layout']['ram']['renderWorkingBytes'] > 0
-    assert data['firmware']['queueJobId'].startswith(f"embedded_firmware:{frame['id']}:")
-
-    stored = db.get(Frame, frame['id'])
-    assert stored.embedded['firmware']['status'] == 'queued'
-
-
-@pytest.mark.asyncio
-async def test_firmware_download(async_client, db, tmp_path):
-    frame = await create_embedded_frame(async_client)
-
-    artifact = tmp_path / 'frameos-esp32-s3.bin'
-    artifact.write_bytes(b'firmware-bytes')
-    stored = db.get(Frame, frame['id'])
-    stored.embedded = {
-        'platform': 'esp32-s3',
-        'firmware': {
-            'status': 'ready',
-            'platform': 'esp32-s3',
-            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
-            'filename': 'frameos-esp32-s3.bin',
-            'path': str(artifact),
-            'sha256': 'ef' * 32,
-            'panel': 'EPD_7in5_V2',
-            'configHash': embedded_firmware_config_hash(stored),
-            'otaPath': str(artifact),
-            'otaSha256': 'ab' * 32,
-            'otaElfSha256': 'cd' * 32,
-            'otaSize': artifact.stat().st_size,
-        },
-    }
-    db.add(stored)
-    db.commit()
-
-    status_response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
-    download_url = status_response.json()['firmware']['downloadUrl']
-    assert download_url == (
-        f"/api/frames/{frame['id']}/embedded/firmware/download?sha256={'ef' * 32}"
-    )
-
-    response = await async_client.get(download_url)
-    assert response.status_code == 200
-    assert response.content == b'firmware-bytes'
-    assert 'frameos-esp32-s3.bin' in response.headers.get('content-disposition', '')
-    assert response.headers['cache-control'] == 'no-store'
-
-
-@pytest.mark.asyncio
-async def test_firmware_from_older_project_version_is_stale(async_client, db, tmp_path):
-    frame = await create_embedded_frame(async_client)
-
-    artifact = tmp_path / 'frameos-esp32-s3.bin'
-    artifact.write_bytes(b'firmware-bytes')
-    stored = db.get(Frame, frame['id'])
-    stored.embedded = {
-        'platform': 'esp32-s3',
-        'firmware': {
-            'status': 'ready',
-            'platform': 'esp32-s3',
-            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION - 1,
-            'filename': 'frameos-esp32-s3.bin',
-            'path': str(artifact),
-        },
-    }
-    db.add(stored)
-    db.commit()
-
-    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
-    assert response.status_code == 200
-    assert response.json()['firmware']['status'] == 'stale'
-
-    # Stale firmware is not downloadable and a new build request rebuilds instead of re-serving
-    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
-    assert response.status_code == 404
-
-    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
-         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
-        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
-    assert response.status_code == 200
-    assert response.json()['firmware']['status'] == 'queued'
-
-
-@pytest.mark.asyncio
-async def test_firmware_download_missing_artifact(async_client, db):
-    frame = await create_embedded_frame(async_client)
-    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
-    assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_firmware_ota_queues_build_when_artifact_not_ready(async_client):
-    frame = await create_embedded_frame(async_client)
-    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
-        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
-
-    assert response.status_code == 200, response.text
-    firmware = response.json()['firmware']
-    assert response.json()['message'] == 'OTA update queued'
-    assert firmware['status'] == 'queued'
-    assert firmware['otaUpdate']['status'] == 'queued'
-
-
-@pytest.mark.asyncio
-async def test_firmware_ota_rejects_4mb_flash_profile(async_client, db):
-    frame = await create_embedded_frame(async_client)
-    stored = db.get(Frame, frame['id'])
-    stored.embedded = {**stored.embedded, 'flashSize': '4MB'}
-    db.add(stored)
-    db.commit()
-
-    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
-    assert response.status_code == 400
-    assert 'OTA updates are not available' in response.json()['detail']
-
-
-@pytest.mark.asyncio
-async def test_firmware_ota_requests_device_update(async_client, db, tmp_path):
-    frame = await create_embedded_frame(async_client)
-
-    artifact = tmp_path / 'frameos-esp32-s3.bin'
-    ota_artifact = tmp_path / 'frameos-esp32-s3-ota.bin'
-    artifact.write_bytes(b'flash-image')
-    ota_artifact.write_bytes(b'\xe9ota-image')
-    stored = db.get(Frame, frame['id'])
-    stored.embedded = {
-        'platform': 'esp32-s3',
-        'firmware': {
-            'status': 'ready',
-            'platform': 'esp32-s3',
-            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
-            'filename': 'frameos-esp32-s3.bin',
-            'path': str(artifact),
-            'size': artifact.stat().st_size,
-            'sha256': '11' * 32,
-            'panel': 'EPD_7in5_V2',
-            'configHash': embedded_firmware_config_hash(stored),
-            'otaPath': str(ota_artifact),
-            'otaSha256': '22' * 32,
-            'otaElfSha256': '33' * 32,
-            'otaSize': ota_artifact.stat().st_size,
-        },
-    }
-    db.add(stored)
-    db.commit()
-
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch_frame:
-        fetch_frame.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
-        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
-
-    assert response.status_code == 200, response.text
-    assert response.json()['message'] == 'OTA update requested'
-    assert response.json()['device'] == {'ok': True}
-    assert response.json()['firmware']['otaUpdate']['status'] == 'requested'
-    fetch_frame.assert_awaited_once()
-    assert fetch_frame.await_args.kwargs['path'] == '/api/action/ota'
-    assert fetch_frame.await_args.kwargs['method'] == 'POST'
-
-
-@pytest.mark.asyncio
-async def test_pending_firmware_ota_requests_device_when_build_becomes_ready(db, redis, tmp_path, async_client):
-    frame = await create_embedded_frame(async_client)
-
-    artifact = tmp_path / 'frameos-esp32-s3.bin'
-    ota_artifact = tmp_path / 'frameos-esp32-s3-ota.bin'
-    artifact.write_bytes(b'flash-image')
-    ota_artifact.write_bytes(b'\xe9ota-image')
-    stored = db.get(Frame, frame['id'])
-    stored.embedded = {
-        'platform': 'esp32-s3',
-        'firmware': {
-            'status': 'ready',
-            'platform': 'esp32-s3',
-            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
-            'filename': 'frameos-esp32-s3.bin',
-            'path': str(artifact),
-            'size': artifact.stat().st_size,
-            'sha256': '11' * 32,
-            'panel': 'EPD_7in5_V2',
-            'configHash': embedded_firmware_config_hash(stored),
-            'otaPath': str(ota_artifact),
-            'otaSha256': '22' * 32,
-            'otaElfSha256': '33' * 32,
-            'otaSize': ota_artifact.stat().st_size,
-            'otaUpdate': {
-                'id': 'pending-ota',
-                'status': 'queued',
-                'requestedAt': '2026-06-15T00:00:00+00:00',
-            },
-        },
-    }
-    db.add(stored)
-    db.commit()
-
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch_frame:
-        fetch_frame.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
-        requested = await request_pending_embedded_firmware_ota(db, redis, stored)
-
-    assert requested is True
-    fetch_frame.assert_awaited_once()
-    db.expire_all()
-    updated = db.get(Frame, frame['id'])
-    assert updated.embedded['firmware']['otaUpdate']['status'] == 'requested'
-
-
-# --- M4: panel matrix, memory guardrails, power-setting baking --------------
 
 def test_embedded_panel_matrix_includes_new_panels():
     # The backend panel set and ESP32 selected-panel generator must stay in sync.
@@ -688,34 +452,25 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     }
     check_embedded_panel_fits_memory(frame)
 
-    header = _generated_config_header(frame)
-    assert '#define FRAMEOS_DEFAULT_PANEL "EPD_13in3e"' in header
-    assert "#define FRAMEOS_DEFAULT_PIN_RST 2" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_DC 11" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_CS 10" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_CS2 3" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 12" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_SCK 9" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 46" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_PWR 1" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 15" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 6" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 5" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 7" in header
+    # The USB console provisions what a per-frame build used to bake in.
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "EPD_13in3e"
+    assert settings["pins"] == "rst=2,dc=11,cs=10,cs2=3,busy=12,sck=9,mosi=46,pwr=1"
+    assert settings["assets_sd_pins"] == "cs=15,sck=6,miso=5,mosi=7"
+    assert settings["assets_sd"] == "1"
     # Battery: VBAT on ADC1_CH7 = GPIO8 through a 1/3 divider (vendor ADC
     # examples read CHANNEL_7 and multiply the calibrated voltage by 3).
     assert frame.device_config["batteryPin"] == 8
     assert frame.device_config["batteryDivider"] == 3.0
-    assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 8" in header
-    assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 3.0f" in header
+    assert settings["battery_pin"] == "8"
+    assert settings["battery_divider"] == "3.0"
     # Scaling mode: unset falls back to the embedded default "cover"; a
-    # configured value is baked, an unknown one is refused server-side.
-    assert '#define FRAMEOS_DEFAULT_SCALING_MODE "cover"' in header
+    # configured value is provisioned, an unknown one is refused server-side.
+    assert settings["scaling_mode"] == "cover"
     frame.scaling_mode = "contain"
-    assert '#define FRAMEOS_DEFAULT_SCALING_MODE "contain"' in _generated_config_header(frame)
+    assert _provisioned(embedded_provisioning_plan(frame))["scaling_mode"] == "contain"
     frame.scaling_mode = "diagonal"
-    assert '#define FRAMEOS_DEFAULT_SCALING_MODE "cover"' in _generated_config_header(frame)
+    assert _provisioned(embedded_provisioning_plan(frame))["scaling_mode"] == "cover"
     frame.scaling_mode = None
 
 
@@ -757,23 +512,14 @@ def test_embedded_hardware_preset_for_waveshare_photopainter():
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (4, "KEY1")]
     check_embedded_panel_fits_memory(frame)
 
-    header = _generated_config_header(frame)
-    assert '#define FRAMEOS_DEFAULT_GPIO_BUTTONS "0:BOOT\\n4:KEY1"' in header
-    assert '#define FRAMEOS_DEFAULT_HARDWARE_PRESET "waveshare_esp32_s3_photopainter"' in header
-    assert '#define FRAMEOS_DEFAULT_PANEL "EPD_7in3e"' in header
-    assert "#define FRAMEOS_DEFAULT_PIN_RST 12" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_DC 8" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_CS 9" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_CS2 -1" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 13" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_SCK 10" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 11" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_PWR -1" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 38" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 39" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 40" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["hardware"] == "waveshare_esp32_s3_photopainter"
+    # The console takes the button spec comma-separated, not newline-separated.
+    assert settings["gpio_buttons"] == "0:BOOT,4:KEY1"
+    assert settings["panel"] == "EPD_7in3e"
+    assert settings["pins"] == "rst=12,dc=8,cs=9,cs2=-1,busy=13,sck=10,mosi=11,pwr=-1"
+    assert settings["assets_sd_pins"] == "cs=38,sck=39,miso=40,mosi=41"
+    assert settings["assets_sd"] == "1"
 
 
 def test_normalize_embedded_platform():
@@ -814,12 +560,8 @@ def test_embedded_hardware_preset_for_trmnl_og():
     assert frame.device_config["batteryDivider"] == 2.0
     assert "batteryEnablePin" not in frame.device_config
     assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
-    assert embedded_sdkconfig_defaults_for_frame(frame) == (
-        "sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota;sdkconfig.defaults.esp32c3"
-    )
-    required = embedded_required_sdkconfig_for_frame(frame)
-    assert required["CONFIG_IDF_TARGET"] == '"esp32c3"'
-    assert required["CONFIG_ESPTOOLPY_FLASHSIZE"] == '"4MB"'
+    assert embedded_flash_size_for_frame(frame) == "4MB"
+    assert embedded_ota_supported_for_frame(frame) is False
 
 
 def test_embedded_hardware_preset_for_trmnl_bwry():
@@ -886,10 +628,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
         "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
         "busy": 18, "sck": 13, "mosi": 14, "pwr": -1,
     }
-    assert embedded_sdkconfig_defaults_for_frame(frame) == (
-        "sdkconfig.defaults;sdkconfig.defaults.32mb-ota"
-    )
-    assert embedded_required_sdkconfig_for_frame(frame)["CONFIG_IDF_TARGET"] == '"esp32s3"'
+    assert embedded_flash_size_for_frame(frame) == "32MB"
+    assert embedded_firmware_module.embedded_platform_spec_for_frame(frame)["idfTarget"] == "esp32s3"
 
 
 def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
@@ -969,9 +709,7 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert settings["battery_enable_pin"] == "21"
     assert settings["deep_sleep_on_battery"] == "1"
     assert settings["wake_check"] == "900"
-    assert embedded_sdkconfig_defaults_for_frame(frame) == (
-        "sdkconfig.defaults;sdkconfig.defaults.32mb-ota"
-    )
+    assert embedded_flash_size_for_frame(frame) == "32MB"
 
 
 def test_embedded_hardware_preset_only_seeds_user_editable_power_settings():
@@ -1055,7 +793,6 @@ def test_embedded_hardware_preset_for_inky_frames():
         assert embedded_module_psram_bytes(frame) == 0
         # Pico family: thin client always, no ESP-IDF build inputs.
         assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
-        assert embedded_required_sdkconfig_for_frame(frame) == {}
         check_embedded_panel_fits_memory(frame)
         # The shift-register wiring rides along in device_config for the
         # pico firmware's provisioning flow.
@@ -1064,15 +801,6 @@ def test_embedded_hardware_preset_for_inky_frames():
         # Layout must not crash without a partition table.
         layout = embedded_firmware_layout_for_frame(frame)
         assert layout["flash"]["flashBytes"] == (2 if flash == "2MB" else 4) * 1024 * 1024
-
-
-@pytest.mark.asyncio
-async def test_pico_frames_refuse_backend_firmware_builds():
-    frame = Frame(id=9, embedded={"hardwarePreset": "pimoroni_inky_frame_5_7"})
-    ensure_embedded_frame_defaults(frame)
-
-    with pytest.raises(ValueError, match="BOOTSEL"):
-        await embedded_firmware_module._build_firmware(None, None, frame, None)
 
 
 def test_embedded_hardware_preset_for_trmnl_diy_kits():
@@ -1193,70 +921,6 @@ def test_headless_frame_skips_memory_check():
     check_embedded_panel_fits_memory(Frame(device="web_only"))  # must not raise
 
 
-def test_generated_config_bakes_power_settings():
-    frame = Frame(
-        id=7,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in5_V2",
-        device_config={
-            "deepSleep": True,
-            "wakeSchedule": True,
-            "batteryPin": 2,
-            "batteryDivider": 2.0,
-            "batteryEnablePin": 21,
-            "pins": {"cs2": 8},
-        },
-    )
-    header = _generated_config_header(frame)
-    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 0" in header
-    assert "#define FRAMEOS_DEFAULT_DEEP_SLEEP 1" in header
-    assert "#define FRAMEOS_DEFAULT_WAKE_SCHEDULE 1" in header
-    assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 2" in header
-    assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 2.0f" in header
-    assert "#define FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN 21" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_CS2 8" in header
-    assert f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES}" in header
-    assert "#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 1" in header
-    assert "#define FRAMEOS_DEFAULT_TLS_ENABLE 0" in header
-    assert "#define FRAMEOS_DEFAULT_TLS_PORT 8443" in header
-
-
-def test_generated_config_bakes_photo_painter_sd_card_assets():
-    frame = Frame(
-        id=7,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in5_V2",
-        device_config={
-            "sdCardAssets": {
-                "enabled": True,
-                "preset": "waveshare_esp32_s3_photopainter",
-            },
-        },
-    )
-
-    config = embedded_sd_card_assets_for_frame(frame)
-    assert config == {
-        "enabled": True,
-        "preset": "waveshare_esp32_s3_photopainter",
-        "mountPath": "/srv/assets",
-        "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41},
-        "maxFrequencyKHz": 20_000,
-    }
-
-    header = _generated_config_header(frame)
-    assert '#define FRAMEOS_DEFAULT_ASSETS_PATH "/srv/assets"' in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 38" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 39" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 40" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ 20000" in header
-
-
 def test_sd_card_assets_require_all_custom_pins():
     frame = Frame(
         device="waveshare.EPD_7in5_V2",
@@ -1273,68 +937,6 @@ def test_sd_card_assets_require_all_custom_pins():
     assert config["pins"] == {"cs": 10, "sck": 11, "miso": 12, "mosi": -1}
 
 
-def test_generated_config_bakes_tls_settings():
-    frame = Frame(
-        id=7,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in5_V2",
-        https_proxy={
-            "enable": True,
-            "port": 9443,
-            "certs": {
-                "server": "-----BEGIN CERTIFICATE-----\nserver\n-----END CERTIFICATE-----\n",
-                "server_key": "-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n",
-                "client_ca": "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
-            },
-        },
-    )
-    header = _generated_config_header(frame)
-    assert "#define FRAMEOS_DEFAULT_TLS_ENABLE 1" in header
-    assert "#define FRAMEOS_DEFAULT_TLS_PORT 9443" in header
-    assert 'FRAMEOS_DEFAULT_TLS_SERVER_CERT "-----BEGIN CERTIFICATE-----\\nserver\\n-----END CERTIFICATE-----\\n"' in header
-    assert 'FRAMEOS_DEFAULT_TLS_SERVER_KEY "-----BEGIN RSA PRIVATE KEY-----\\nkey\\n-----END RSA PRIVATE KEY-----\\n"' in header
-
-
-def test_generated_config_bakes_admin_auth():
-    frame = Frame(
-        id=9,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in5_V2",
-        frame_admin_auth={"enabled": True, "user": "admin", "pass": "secret"},
-    )
-    header = _generated_config_header(frame)
-
-    assert "#define FRAMEOS_DEFAULT_ADMIN_AUTH_ENABLE 1" in header
-    assert '#define FRAMEOS_DEFAULT_ADMIN_AUTH_USER "admin"' in header
-    assert '#define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS "secret"' in header
-
-
-def test_generated_config_bakes_hostname_from_frame_host():
-    frame = Frame(id=7, frame_host="Kitchen Frame.local", server_host="backend.local",
-                  server_port=8989, server_api_key="key", device="waveshare.EPD_7in5_V2")
-    header = _generated_config_header(frame)
-    assert embedded_hostname_for_frame(frame) == "kitchen-frame"
-    assert '#define FRAMEOS_DEFAULT_HOSTNAME "kitchen-frame"' in header
-
-
-def test_generated_config_bakes_gpio_buttons():
-    frame = Frame(
-        id=7,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in5_V2",
-        gpio_buttons=[{"pin": 5, "label": "A"}, {"pin": 6, "label": "Render: now"}],
-    )
-    header = _generated_config_header(frame)
-    assert embedded_gpio_buttons_for_frame(frame) == [(5, "A"), (6, "Render now")]
-    assert '#define FRAMEOS_DEFAULT_GPIO_BUTTONS "5:A\\n6:Render now"' in header
-
-
 def test_embedded_hostname_falls_back_for_ip_hosts():
     assert embedded_hostname_for_frame(Frame(id=12, frame_host="192.168.1.50")) == "frame12"
 
@@ -1345,9 +947,28 @@ def _provisioned(plan) -> dict:
     return {setting["key"]: setting["value"] for setting in plan["settings"]}
 
 
+def _console_set_keys() -> set[str]:
+    """Every key `usb_api set` accepts, parsed from the usage line of cmd_set
+    in fos_console.c. The provisioning plan speaks to that parser and nothing
+    else: a key the console does not know is a line the board rejects."""
+    source = _FOS_CONSOLE_C.read_text(encoding="utf-8")
+    usage = re.search(r'printf\("usage: set <(.*?)> <value\.\.\.>', source, re.DOTALL)
+    assert usage, "`usage: set <...>` not found in fos_console.c"
+    body = re.sub(r'"\s*\n\s*"', "", usage.group(1))
+    keys = {key.strip() for key in body.split("|")}
+    assert "panel" in keys and "api_key" in keys, keys
+    return keys
+
+
+@pytest.mark.skipif(not _FOS_CONSOLE_C.is_file(), reason="needs the embedded firmware sources")
 def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
-    """A stock generic image plus these commands is the same frame as a
-    per-frame build — that equivalence is the whole reason the flow exists."""
+    """A stock release image plus these commands IS this frame — that
+    equivalence is the whole reason the backend stopped building firmware.
+
+    Order matters twice over: `hardware` applies a whole board bundle that the
+    frame's own values must override afterwards, and the admin credentials
+    must land before the switch that enables them (the console refuses
+    `admin_auth 1` without both)."""
     frame = Frame(
         id=9,
         embedded={"hardwarePreset": "xteink_x4"},
@@ -1367,10 +988,32 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
     assert plan["blockers"] == []
     assert plan["platform"] == "esp32-c3"
     assert plan["releasePlatform"] == "esp32-c3-generic"
+
+    assert [setting["key"] for setting in plan["settings"]] == [
+        "hardware",          # the board bundle first; everything below overrides it
+        "panel",
+        "pins",
+        "gpio_buttons",
+        "backend",
+        "api_key",
+        "frame_id",
+        "hostname",
+        "render_mode",
+        "interval",
+        "rotate",
+        "scaling_mode",
+        "server_send_logs",
+        # max_http_response_bytes only when it differs from the default
+        "admin_user",
+        "admin_pass",
+        "admin_auth",        # after the credentials it switches on
+        # assets_sd_pins / assets_sd_freq only for an enabled SD socket
+        "assets_sd",
+        "battery_pin",
+        "battery_divider",
+    ]
+
     settings = _provisioned(plan)
-    # `set hardware` applies a whole board bundle, so it has to land before
-    # anything this frame overrides on top of it.
-    assert plan["settings"][0]["key"] == "hardware"
     assert settings["hardware"] == "xteink_x4"
     assert settings["panel"] == "EPD_4in26"
     assert settings["pins"] == "rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1"
@@ -1378,17 +1021,80 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
     assert settings["backend"] == "http://10.0.0.5:8989"
     assert settings["api_key"] == "key-9"
     assert settings["frame_id"] == "9"
+    assert settings["hostname"] == "frame9"
     # No PSRAM on the C3, so it can only ever be a thin client.
     assert settings["render_mode"] == "remote"
     assert settings["interval"] == "600"
     assert settings["rotate"] == "90"
     assert settings["scaling_mode"] == "contain"
     assert settings["server_send_logs"] == "1"
+    assert settings["admin_user"] == frame.frame_admin_auth["user"]
+    assert settings["admin_pass"] == frame.frame_admin_auth["pass"]
+    assert settings["admin_auth"] == "1"
     assert settings["assets_sd"] == "0"
     assert plan["wifi"] == {"ssid": "Home WiFi", "password": "hunter2"}
-    # The API key must be flagged so the flasher's log redacts it.
+
+    # Credentials must be flagged so the flasher's log redacts them.
     secrets = {setting["key"] for setting in plan["settings"] if setting["secret"]}
-    assert secrets == {"api_key"}
+    assert secrets == {"api_key", "admin_pass"}
+
+    # And every key has to be one the device's console actually accepts.
+    accepted = _console_set_keys()
+    assert set(settings) <= accepted, set(settings) - accepted
+
+
+@pytest.mark.skipif(not _FOS_CONSOLE_C.is_file(), reason="needs the embedded firmware sources")
+def test_provisioning_plan_carries_the_conditional_settings_too():
+    """The slots the frame above leaves empty: a non-default HTTP response cap
+    and an SD asset socket. Both are keys the console knows, and both land in
+    their documented position in the command order."""
+    frame = Frame(
+        id=9,
+        embedded={"hardwarePreset": "waveshare_esp32_s3_photopainter"},
+        server_host="host",
+        server_api_key="key",
+        network={"wifiSSID": "net"},
+        max_http_response_bytes=512 * 1024,
+        device_config={
+            "hardwarePreset": "waveshare_esp32_s3_photopainter",
+            "deepSleep": True,
+            "deepSleepOnBattery": True,
+            "wakeSchedule": True,
+            "wakeCheckSeconds": 900,
+            "batteryPin": 1,
+            "batteryDivider": 2.0,
+            "batteryEnablePin": 21,
+        },
+    )
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame)
+    keys = [setting["key"] for setting in plan["settings"]]
+    settings = _provisioned(plan)
+
+    assert settings["max_http_response_bytes"] == str(512 * 1024)
+    assert keys.index("server_send_logs") < keys.index("max_http_response_bytes")
+    assert keys.index("max_http_response_bytes") < keys.index("admin_user")
+    assert settings["assets_sd_pins"] == "cs=38,sck=39,miso=40,mosi=41"
+    assert settings["assets_sd_freq"] == "20000"
+    assert settings["assets_sd"] == "1"
+    assert keys.index("assets_sd_freq") < keys.index("assets_sd")
+    # Every power key the image used to bake in has a console key too.
+    assert settings["deep_sleep"] == "1"
+    assert settings["deep_sleep_on_battery"] == "1"
+    assert settings["wake_schedule"] == "1"
+    assert settings["wake_check"] == "900"
+    assert settings["battery_pin"] == "1"
+    assert settings["battery_divider"] == "2.0"
+    assert settings["battery_enable_pin"] == "21"
+
+    accepted = _console_set_keys()
+    assert set(settings) <= accepted, set(settings) - accepted
+
+    # The default cap is never sent: a value the device already has is a
+    # console line that can only go wrong.
+    frame.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    assert "max_http_response_bytes" not in _provisioned(embedded_provisioning_plan(frame))
 
 
 def test_provisioning_plan_warns_about_the_published_images_flash_layout():
@@ -1404,6 +1110,66 @@ def test_provisioning_plan_warns_about_the_published_images_flash_layout():
     assert plan["releaseFlashSize"] == "4MB"
     assert any("4MB partition layout" in warning for warning in plan["warnings"])
     assert any("no OTA slot" in warning for warning in plan["warnings"])
+
+
+def test_provisioning_plan_prefers_the_image_built_for_the_frames_flash_layout():
+    """Once the release publishes per-layout images, a 16MB XTEINK X4 is
+    flashed with the 16MB OTA layout — the whole chip, and OTA — not the
+    generic 4MB image, and neither layout warning applies."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "xteink_x4"}, server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame, published_assets={"esp32-c3-generic", "esp32-c3-16mb"})
+
+    assert plan["releasePlatform"] == "esp32-c3-16mb"
+    assert plan["releaseFlashSize"] == "16MB"
+    assert not any("partition layout" in warning for warning in plan["warnings"])
+    assert not any("no OTA slot" in warning for warning in plan["warnings"])
+
+
+def test_provisioning_plan_falls_back_to_the_generic_image_without_a_layout_match():
+    """An older release (no per-layout images), or no listing at all, keeps
+    flashing the generic image with the same warnings as before."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "xteink_x4"}, server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    for published in ({"esp32-c3-generic", "esp32-s3-generic"}, None):
+        plan = embedded_provisioning_plan(frame, published_assets=published)
+        assert plan["releasePlatform"] == "esp32-c3-generic"
+        assert plan["releaseFlashSize"] == "4MB"
+        assert any("4MB partition layout" in warning for warning in plan["warnings"])
+
+
+def test_provisioning_plan_never_needs_a_listing_for_the_generic_layouts():
+    """The generic images ARE the 8MB S3 and 4MB C3 layouts, so a frame on one
+    of those resolves to them whatever the release lists."""
+    frame = Frame(id=9, device="waveshare.EPD_7in5_V2", server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame, published_assets=set())
+
+    assert plan["releasePlatform"] == "esp32-s3-generic"
+    assert plan["releaseFlashSize"] == "8MB"
+
+
+def test_release_asset_names_cover_every_flash_layout_once():
+    names = embedded_release_asset_names()
+    # Generic first: they are the fallback and what the cloud flasher ships.
+    assert names[:2] == ["esp32-s3-generic", "esp32-c3-generic"]
+    assert len(names) == len(set(names))
+    assert set(names) == {
+        "esp32-s3-generic",
+        "esp32-c3-generic",
+        "esp32-s3-4mb",
+        "esp32-s3-16mb",
+        "esp32-s3-32mb",
+        "esp32-c3-8mb",
+        "esp32-c3-16mb",
+        "esp32-c3-32mb",
+    }
 
 
 def test_provisioning_plan_sends_sd_card_pins_before_enabling_the_socket():
@@ -1430,9 +1196,10 @@ def test_provisioning_plan_sends_sd_card_pins_before_enabling_the_socket():
     assert keys.index("assets_sd_pins") < keys.index("assets_sd")
 
 
-def test_provisioning_plan_blocks_a_frame_that_terminates_tls_itself():
-    """A TLS certificate has no console key, and a backend expecting https
-    cannot fetch from a device serving plain http — that frame needs a build."""
+def test_provisioning_plan_warns_that_tls_arrives_on_the_first_settings_sync():
+    """A PEM is kilobytes: it cannot ride a console line. It reaches the board
+    through GET /embedded/settings instead, so a TLS frame is provisionable —
+    it just answers over plain HTTP until that first poll lands."""
     frame = Frame(
         id=9,
         device="waveshare.EPD_7in5_V2",
@@ -1445,21 +1212,41 @@ def test_provisioning_plan_blocks_a_frame_that_terminates_tls_itself():
 
     plan = embedded_provisioning_plan(frame)
 
-    assert plan["supported"] is False
-    assert any("TLS" in blocker for blocker in plan["blockers"])
+    assert plan["supported"] is True
+    assert plan["blockers"] == []
+    assert any("first settings sync" in warning for warning in plan["warnings"])
+    # And no TLS console keys are attempted.
+    assert "tls_enable" not in _provisioned(plan)
 
 
-def test_provisioning_plan_warns_that_the_device_admin_login_is_not_provisioned():
-    """Every embedded frame gets a generated device login, so refusing on one
-    would refuse every frame. The board simply answers without it — say so."""
+def test_provisioning_plan_provisions_the_device_admin_login():
+    """Every embedded frame gets a generated device login. The credentials go
+    over the console; the enable switch follows them, because the device
+    refuses to turn admin auth on without both."""
     frame = Frame(id=9, device="waveshare.EPD_7in5_V2", server_host="host",
                   server_api_key="key", network={"wifiSSID": "net"})
     ensure_embedded_frame_defaults(frame)
 
     plan = embedded_provisioning_plan(frame)
+    keys = [setting["key"] for setting in plan["settings"]]
+    settings = _provisioned(plan)
 
     assert plan["supported"] is True
-    assert any("admin login" in warning for warning in plan["warnings"])
+    assert settings["admin_user"] == frame.frame_admin_auth["user"]
+    assert settings["admin_pass"] == frame.frame_admin_auth["pass"]
+    assert settings["admin_auth"] == "1"
+    assert keys.index("admin_pass") < keys.index("admin_auth")
+    # The password is a credential: the flasher log has to redact it.
+    assert next(s for s in plan["settings"] if s["key"] == "admin_pass")["secret"] is True
+    assert next(s for s in plan["settings"] if s["key"] == "admin_user")["secret"] is False
+    assert not any("admin login" in warning for warning in plan["warnings"])
+
+    # Half a login is no login: the switch goes off and neither half is sent.
+    frame.frame_admin_auth = {"enabled": True, "user": "admin", "pass": ""}
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert "admin_user" not in settings
+    assert "admin_pass" not in settings
+    assert settings["admin_auth"] == "0"
 
 
 def test_provisioning_plan_blocks_a_frame_with_nowhere_to_call_home():
@@ -1476,250 +1263,43 @@ def test_provisioning_plan_blocks_a_frame_with_nowhere_to_call_home():
     assert plan["wifi"] is None
 
 
-def test_provisioning_plan_warns_when_the_hostname_cannot_be_provisioned():
-    frame = Frame(id=9, frame_host="kitchen.local", device="waveshare.EPD_7in5_V2",
+def test_provisioning_plan_sets_the_hostname():
+    """mDNS name and the device's own web UI host: `set hostname` carries it,
+    normalized the same way a per-frame build used to bake it in."""
+    frame = Frame(id=9, frame_host="Kitchen Frame.local", device="waveshare.EPD_7in5_V2",
                   server_host="host", server_api_key="key", network={"wifiSSID": "net"})
     ensure_embedded_frame_defaults(frame)
 
     plan = embedded_provisioning_plan(frame)
 
     assert plan["supported"] is True
-    assert any("kitchen" in warning for warning in plan["warnings"])
+    assert _provisioned(plan)["hostname"] == "kitchen-frame"
+    assert embedded_hostname_for_frame(frame) == "kitchen-frame"
+
+    # A frame with no host of its own gets no hostname line at all.
+    frame.frame_host = ""
+    assert "hostname" not in _provisioned(embedded_provisioning_plan(frame))
 
 
 @pytest.mark.asyncio
 async def test_provisioning_endpoint_returns_the_plan(async_client):
     frame = await create_embedded_frame(async_client)
 
-    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/provisioning")
+    # The route consults the cached release listing to pick a layout-matched
+    # image; GitHub is not on the test's network.
+    from unittest.mock import AsyncMock, patch
+
+    from app.api import firmware_release
+
+    firmware_release.clear_release_cache()
+    with patch("app.api.firmware_release._fetch_latest_release", new_callable=AsyncMock, return_value=None):
+        response = await async_client.get(f"/api/frames/{frame['id']}/embedded/provisioning")
+    firmware_release.clear_release_cache()
 
     assert response.status_code == 200, response.text
     plan = response.json()["provisioning"]
     assert plan["releasePlatform"] == "esp32-s3-generic"
     assert {setting["key"] for setting in plan["settings"]} >= {"backend", "api_key", "frame_id", "panel"}
-
-
-def test_generated_config_omits_absent_power_settings():
-    frame = Frame(id=7, server_host="backend.local", server_port=8989,
-                  server_api_key="key", device="waveshare.EPD_7in5_V2")
-    header = _generated_config_header(frame)
-    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 0" in header
-    assert "FRAMEOS_DEFAULT_DEEP_SLEEP" not in header
-    assert "FRAMEOS_DEFAULT_BATTERY_PIN" not in header
-
-
-def test_generated_config_bakes_remote_render_mode():
-    frame = Frame(id=7, server_host="backend.local", server_port=8989,
-                  server_api_key="key", device="waveshare.EPD_13in3e",
-                  device_config={"renderMode": "remote"})
-    header = _generated_config_header(frame)
-    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 1" in header
-
-
-def test_generated_config_bakes_disabled_backend_logs():
-    frame = Frame(id=7, server_host="backend.local", server_port=8989,
-                  server_api_key="key", device="waveshare.EPD_7in5_V2",
-                  server_send_logs=False)
-    header = _generated_config_header(frame)
-    assert "#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 0" in header
-
-
-def test_ready_firmware_is_stale_when_panel_changes(tmp_path):
-    artifact = tmp_path / "frameos-esp32-s3.bin"
-    artifact.write_bytes(b"firmware-bytes")
-    frame = Frame(
-        id=53,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in3e",
-        embedded={
-            "platform": "esp32-s3",
-            "firmware": {
-                "status": "ready",
-                "platform": "esp32-s3",
-                "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
-                "filename": "frameos-esp32-s3.bin",
-                "path": str(artifact),
-                "panel": "EPD_7in5_V2",
-                "configHash": "old",
-            },
-        },
-    )
-    from app.tasks.embedded_firmware import latest_embedded_firmware
-
-    firmware = latest_embedded_firmware(frame)
-    assert firmware["status"] == "stale"
-    assert "different embedded panel" in firmware["error"]
-
-
-def test_ready_firmware_is_stale_when_flash_size_changes(tmp_path):
-    artifact = tmp_path / "frameos-esp32-s3.bin"
-    artifact.write_bytes(b"firmware-bytes")
-    frame = Frame(
-        id=53,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in5_V2",
-        embedded={"platform": "esp32-s3", "flashSize": "32MB"},
-    )
-    frame.embedded = {
-        **frame.embedded,
-        "firmware": {
-            "status": "ready",
-            "platform": "esp32-s3",
-            "flashSize": "8MB",
-            "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
-            "filename": "frameos-esp32-s3.bin",
-            "path": str(artifact),
-            "panel": "EPD_7in5_V2",
-            "configHash": embedded_firmware_config_hash(frame),
-        },
-    }
-    firmware = latest_embedded_firmware(frame)
-    assert firmware["status"] == "stale"
-    assert "different ESP32 flash size" in firmware["error"]
-
-
-def test_ready_4mb_firmware_does_not_require_ota_artifact(tmp_path):
-    artifact = tmp_path / "frameos-esp32-s3-4mb.bin"
-    artifact.write_bytes(b"firmware-bytes")
-    frame = Frame(
-        id=53,
-        server_host="backend.local",
-        server_port=8989,
-        server_api_key="key",
-        device="waveshare.EPD_7in5_V2",
-        embedded={"platform": "esp32-s3", "flashSize": "4MB"},
-    )
-    frame.embedded = {
-        **frame.embedded,
-        "firmware": {
-            "status": "ready",
-            "platform": "esp32-s3",
-            "flashSize": "4MB",
-            "otaSupported": False,
-            "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
-            "filename": "frameos-esp32-s3-4mb.bin",
-            "path": str(artifact),
-            "panel": "EPD_7in5_V2",
-            "configHash": embedded_firmware_config_hash(frame),
-        },
-    }
-    firmware = latest_embedded_firmware(frame)
-    assert firmware["status"] == "ready"
-    assert firmware["otaSupported"] is False
-
-
-def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
-    build_dir = tmp_path / "build-esp32-s3-8mb"
-    build_dir.mkdir()
-    sdkconfig = build_dir / "sdkconfig"
-    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
-    (build_dir / "stale.o").write_text("old", encoding="utf-8")
-
-    missing = _reset_stale_embedded_sdkconfig(build_dir)
-
-    assert missing == {
-        "CONFIG_ESP_ERR_TO_NAME_LOOKUP": "y",
-        "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
-    }
-    assert not sdkconfig.exists()
-    assert not build_dir.exists()
-
-
-def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
-    build_dir = tmp_path / "build-esp32-s3-8mb"
-    build_dir.mkdir()
-    sdkconfig = build_dir / "sdkconfig"
-    sdkconfig.write_text(
-        "CONFIG_ESP_ERR_TO_NAME_LOOKUP=y\nCONFIG_ESP_MAIN_TASK_STACK_SIZE=8192\n",
-        encoding="utf-8",
-    )
-
-    missing = _reset_stale_embedded_sdkconfig(build_dir)
-
-    assert missing == {}
-    assert sdkconfig.exists()
-    assert build_dir.exists()
-
-
-def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
-    build_dir = tmp_path / "build-esp32-s3-8mb"
-    build_dir.mkdir()
-    sdkconfig = build_dir / "sdkconfig"
-    sdkconfig.write_text(
-        '\n'.join([
-            'CONFIG_ESP_ERR_TO_NAME_LOOKUP=y',
-            'CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192',
-            'CONFIG_IDF_TARGET="esp32s3"',
-            'CONFIG_ESPTOOLPY_FLASHSIZE="8MB"',
-            'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"',
-            '',
-        ]),
-        encoding="utf-8",
-    )
-
-    required = embedded_required_sdkconfig_for_frame(Frame(embedded={"flashSize": "32MB"}))
-    missing = _reset_stale_embedded_sdkconfig(build_dir, required)
-
-    assert missing == {
-        "CONFIG_ESPTOOLPY_FLASHSIZE": '"32MB"',
-        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": '"partitions_ota_32mb.csv"',
-        "CONFIG_SPIFFS_PAGE_SIZE": "512",
-    }
-    assert not sdkconfig.exists()
-    assert not build_dir.exists()
-
-
-def test_embedded_pixie_path_resolves_override(tmp_path, monkeypatch):
-    # Pin the override away from any real ../pixie checkout so this behaves
-    # the same on dev machines and CI (same trick as the deployer tests).
-    monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(tmp_path / "no-pixie"))
-    assert embedded_pixie_path() is None
-
-    pixie = tmp_path / "pixie"
-    (pixie / "src" / "pixie").mkdir(parents=True)
-    monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(pixie))
-    assert embedded_pixie_path() == pixie.resolve()
-
-
-def test_embedded_source_fingerprint_uses_contents_without_git(tmp_path, monkeypatch):
-    source = tmp_path / "frameos" / "src" / "embedded" / "embedded_main.nim"
-    source.parent.mkdir(parents=True)
-    source.write_text("const firmwareSource = 1\n", encoding="utf-8")
-    lock = tmp_path / "frameos" / "nimble.lock"
-    lock.write_text('{"packages":{"pixie":{"vcsRevision":"pixie-one"}}}\n', encoding="utf-8")
-    codegen = tmp_path / "backend" / "app" / "codegen" / "apps_nim.py"
-    codegen.parent.mkdir(parents=True)
-    codegen.write_text("CODEGEN_VERSION = 1\n", encoding="utf-8")
-    generated = tmp_path / "embedded" / "esp32" / "build" / "firmware.bin"
-    generated.parent.mkdir(parents=True)
-    generated.write_bytes(b"generated-one")
-
-    monkeypatch.setattr(embedded_firmware_module, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(embedded_firmware_module, "embedded_pixie_path", lambda: None)
-    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
-
-    first = embedded_firmware_source_fingerprint()
-    assert first.startswith("sha256:")
-    assert "unknown" not in first
-
-    # Build output is intentionally ignored and cannot make a ready artifact
-    # immediately stale after its own build.
-    generated.write_bytes(b"generated-two")
-    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
-    assert embedded_firmware_source_fingerprint() == first
-
-    source.write_text("const firmwareSource = 2\n", encoding="utf-8")
-    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
-    second = embedded_firmware_source_fingerprint()
-    assert second != first
-
-    lock.write_text('{"packages":{"pixie":{"vcsRevision":"pixie-two"}}}\n', encoding="utf-8")
-    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
-    assert embedded_firmware_source_fingerprint() != second
 
 
 @pytest.mark.asyncio
@@ -1740,17 +1320,48 @@ async def test_ssh_agent_endpoints_reject_embedded_frames(async_client, redis):
 async def test_deploy_plan_combined_for_embedded_includes_full_ota_plan(async_client):
     frame = await create_embedded_frame(async_client)
 
-    response = await async_client.get(f"/api/frames/{frame['id']}/deploy_plan?mode=combined")
+    summary = {"tag": "v2026.9.2", "version": "2026.9.2", "platforms": {"esp32-s3-generic"}}
+    with patch("app.api.firmware_release.latest_release_summary",
+               new_callable=AsyncMock, return_value=summary):
+        response = await async_client.get(f"/api/frames/{frame['id']}/deploy_plan?mode=combined")
+
     assert response.status_code == 200, response.text
     plan = response.json()['plan']
     assert plan['mode'] == 'combined'
     assert plan['fast_deploy']['action'] == 'http_upload_scenes_reload'
-    assert plan['full_deploy']['embedded']['platform'] == 'esp32-s3'
-    assert plan['full_deploy']['embedded']['otaSupported'] is True
-    assert plan['full_deploy']['embedded']['needsFirmwareBuild'] is True
+    embedded = plan['full_deploy']['embedded']
+    assert embedded['platform'] == 'esp32-s3'
+    assert embedded['otaSupported'] is True
+    # No build state any more: the plan names the release the device will be
+    # offered and the image family it will ask for.
+    assert embedded['releasePlatform'] == 'esp32-s3-generic'
+    assert embedded['releaseVersion'] == '2026.9.2'
+    assert embedded['action'] == 'release_ota_upload_scenes'
+    assert 'firmwareStatus' not in embedded
+    assert 'needsFirmwareBuild' not in embedded
+    assert any('2026.9.2' in note for note in plan['notes'])
     # FullDeployPlanResponse shape stays intact for the drawer
     assert plan['full_deploy']['packages'] == []
     assert plan['full_deploy']['target']['distro'] == 'esp-idf'
+
+
+@pytest.mark.asyncio
+async def test_deploy_plan_for_embedded_survives_an_unreachable_github(async_client):
+    """A release lookup this backend cannot make does not block the deploy:
+    the device asks for the manifest itself, and may answer up to date."""
+    frame = await create_embedded_frame(async_client)
+
+    with patch("app.api.firmware_release.latest_release_summary",
+               new_callable=AsyncMock, return_value=None):
+        response = await async_client.get(f"/api/frames/{frame['id']}/deploy_plan?mode=combined")
+
+    assert response.status_code == 200, response.text
+    plan = response.json()['plan']
+    embedded = plan['full_deploy']['embedded']
+    assert embedded['releaseVersion'] is None
+    # Without a listing the generic image for the chip is still the answer.
+    assert embedded['releasePlatform'] == 'esp32-s3-generic'
+    assert any('could not be fetched' in note for note in plan['notes'])
 
 
 @pytest.mark.asyncio
@@ -1768,271 +1379,112 @@ async def test_deploy_plan_full_for_embedded_pico_is_unavailable(async_client, d
     assert any(note.startswith('Full deploy unavailable:') for note in plan['notes'])
 
 
+
+# --- The release OTA: asking a board to update itself -----------------------
+
+
 @pytest.mark.asyncio
-async def test_ready_firmware_goes_stale_when_platform_changes(async_client, db, tmp_path):
+async def test_request_embedded_firmware_update_pokes_the_device(async_client, db, redis):
+    """The backend holds no image and no signing key. All it does is tell the
+    board to check this backend's relay of the release manifest now."""
     frame_json = await create_embedded_frame(async_client)
     frame = db.get(Frame, frame_json['id'])
-    ensure_embedded_frame_defaults(frame)
-    firmware_file = tmp_path / 'frameos.bin'
-    firmware_file.write_bytes(b'\xe9firmware')
-    embedded = dict(frame.embedded or {})
-    embedded['firmware'] = {
-        'status': 'ready',
-        'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
-        'platform': 'esp32-s3',
-        'flashSize': embedded_flash_size_for_frame(frame),
-        'path': str(firmware_file),
-        'otaPath': str(firmware_file),
-        'panel': embedded_panel_for_frame(frame),
-        'configHash': embedded_firmware_config_hash(frame),
-    }
-    frame.embedded = embedded
+
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        fetch.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
+        payload = await request_embedded_firmware_update(db, redis, frame)
+
+    assert payload == {'ok': True}
+    fetch.assert_awaited_once()
+    assert fetch.await_args.kwargs['path'] == '/api/action/ota'
+    assert fetch.await_args.kwargs['method'] == 'POST'
+
+    # A non-JSON body comes back as text, not an exception.
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        fetch.return_value = (200, b'started', {'content-type': 'text/plain'})
+        assert await request_embedded_firmware_update(db, redis, frame) == 'started'
+
+
+@pytest.mark.asyncio
+async def test_request_embedded_firmware_update_reports_device_failures(async_client, db, redis):
+    frame_json = await create_embedded_frame(async_client)
+    frame = db.get(Frame, frame_json['id'])
+
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        fetch.return_value = (503, b'busy rendering', {'content-type': 'text/plain'})
+        with pytest.raises(ValueError, match='HTTP 503'):
+            await request_embedded_firmware_update(db, redis, frame)
+
+    # A transport failure is the same kind of "no" — never a silent success.
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        fetch.side_effect = OSError('connection refused')
+        with pytest.raises(ValueError, match='connection refused'):
+            await request_embedded_firmware_update(db, redis, frame)
+
+
+@pytest.mark.asyncio
+async def test_request_embedded_firmware_update_refuses_a_4mb_board(async_client, db, redis):
+    """A 4MB layout has one app slot and no OTA data partition: there is
+    nowhere to write an update. That board needs the USB cable."""
+    frame_json = await create_embedded_frame(async_client)
+    frame = db.get(Frame, frame_json['id'])
+    frame.embedded = {**frame.embedded, 'flashSize': '4MB'}
     db.add(frame)
     db.commit()
 
-    firmware = latest_embedded_firmware(frame)
-    assert firmware['status'] == 'ready'
-
-    # Same everything, different chip target → stale
-    frame.embedded = {**frame.embedded, 'platform': 'esp32-c3'}
-    frame.device_config = {**(frame.device_config or {}), 'platform': 'esp32-c3'}
-    firmware = latest_embedded_firmware(frame)
-    assert firmware['status'] == 'stale'
-    assert 'different chip target' in firmware['error']
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        with pytest.raises(ValueError, match='OTA updates are not available'):
+            await request_embedded_firmware_update(db, redis, frame)
+    fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_embedded_build_lock_is_globally_exclusive(redis, monkeypatch):
-    monkeypatch.setattr(embedded_firmware_module, 'EMBEDDED_BUILD_LOCK_WAIT_SECONDS', 0.05)
-    monkeypatch.setattr(embedded_firmware_module, 'EMBEDDED_BUILD_LOCK_POLL_SECONDS', 0.01)
-
-    token = await embedded_firmware_module._acquire_embedded_build_lock(redis)
-    assert token
-
-    # A second builder (any worker process) cannot take the lock
-    with pytest.raises(ValueError, match='Another embedded firmware build'):
-        await embedded_firmware_module._acquire_embedded_build_lock(redis)
-
-    # Releasing with the wrong token leaves the lock alone
-    await embedded_firmware_module._release_embedded_build_lock(redis, 'not-the-token')
-    assert await redis.get(embedded_firmware_module.EMBEDDED_BUILD_LOCK_KEY) is not None
-
-    await embedded_firmware_module._release_embedded_build_lock(redis, token)
-    assert await redis.get(embedded_firmware_module.EMBEDDED_BUILD_LOCK_KEY) is None
-
-
-@pytest.mark.asyncio
-async def test_pending_commands_surface_and_cancel_a_queued_ota(async_client):
-    """The backend's half of the cloud's queue-observability endpoints.
-
-    A self-hosted backend pushes deploys/restarts/renders immediately and
-    fails loudly when the device is unreachable, so there is nothing durable
-    to observe — except an ESP32 OTA request, which waits for its firmware
-    image. That is what this reports, in the cloud's wire shape, and what the
-    workspace's "Waiting for the frame" panel lets you take back.
-    """
+async def test_firmware_ota_route_requests_the_device_update(async_client, db):
     frame = await create_embedded_frame(async_client)
 
-    # Nothing queued yet.
-    response = await async_client.get(f"/api/frames/{frame['id']}/commands")
-    assert response.status_code == 200
-    assert response.json() == {'commands': []}
-
-    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        fetch.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+
     assert response.status_code == 200, response.text
+    assert response.json() == {'message': 'Firmware update requested', 'device': {'ok': True}}
+    fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_firmware_ota_route_rejects_a_flash_layout_without_ota(async_client, db):
+    frame = await create_embedded_frame(async_client)
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {**stored.embedded, 'flashSize': '4MB'}
+    db.add(stored)
+    db.commit()
+
+    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+    assert response.status_code == 400
+    assert 'OTA updates are not available' in response.json()['detail']
+
+
+@pytest.mark.asyncio
+async def test_pending_commands_are_always_empty(async_client):
+    """Cloud parity endpoint (docs/api-triality.md). The cloud answers it from
+    a durable queue; the backend pushes every action immediately and queues
+    nothing — including the OTA poke, which is now a plain device call — so
+    there is never anything here to observe or to take back."""
+    frame = await create_embedded_frame(async_client)
 
     response = await async_client.get(f"/api/frames/{frame['id']}/commands")
     assert response.status_code == 200
-    commands = response.json()['commands']
-    assert len(commands) == 1
-    assert commands[0]['type'] == 'notify_update_available'
-    # "queued" (no image yet) maps onto the cloud's "pending" so one shared
-    # panel reads both control planes.
-    assert commands[0]['status'] == 'pending'
-    assert commands[0]['expires_at'] is None
-    command_id = commands[0]['id']
+    assert response.json() == {'commands': []}
 
-    response = await async_client.delete(f"/api/frames/{frame['id']}/commands/{command_id}")
-    assert response.status_code == 200
-    assert response.json()['status'] == 'cancelled'
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        fetch.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
+        assert (await async_client.post(
+            f"/api/frames/{frame['id']}/embedded/firmware/ota")).status_code == 200
 
     response = await async_client.get(f"/api/frames/{frame['id']}/commands")
     assert response.json() == {'commands': []}
 
-    # Nothing left to cancel is a 404, never a pretend success.
-    response = await async_client.delete(f"/api/frames/{frame['id']}/commands/{command_id}")
+    # Nothing to cancel is a 404, never a pretend success.
+    response = await async_client.delete(f"/api/frames/{frame['id']}/commands/anything")
     assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_build_output_reader_survives_lines_past_the_stream_limit():
-    """Ninja echoes the full command line of a failed edge, and the link
-    step's runs well past asyncio's 64KiB readline limit. The reader has to
-    keep going: the error message follows the command that produced it."""
-    overlong = b"x" * (embedded_firmware_module.EMBEDDED_BUILD_MAX_LINE_BYTES * 3 + 17)
-    payload = b"[1/2] Building C object a.o\n" + overlong + b"\nFAILED: the real error\n"
-
-    reader = asyncio.StreamReader()
-    reader.feed_data(payload)
-    reader.feed_eof()
-
-    lines = [line async for line in embedded_firmware_module._iter_process_lines(reader)]
-
-    assert lines[0] == b"[1/2] Building C object a.o"
-    assert lines[-1] == b"FAILED: the real error"
-    # The overlong line is chunked, never dropped and never fatal.
-    assert b"".join(lines[1:-1]) == overlong
-
-
-@pytest.mark.asyncio
-async def test_build_output_reader_yields_a_trailing_unterminated_line():
-    reader = asyncio.StreamReader()
-    reader.feed_data(b"first\nno trailing newline")
-    reader.feed_eof()
-
-    lines = [line async for line in embedded_firmware_module._iter_process_lines(reader)]
-
-    assert lines == [b"first", b"no trailing newline"]
-
-
-def test_ninja_progress_is_recognised_only_on_progress_lines():
-    match = embedded_firmware_module._NINJA_PROGRESS_RE.match("[247/1318] Building C object esp-idf/main/x.c.obj")
-    assert match is not None
-    assert (int(match.group(1)), int(match.group(2))) == (247, 1318)
-    assert embedded_firmware_module._NINJA_PROGRESS_RE.match("-- Building for target esp32c3") is None
-    assert embedded_firmware_module._NINJA_PROGRESS_RE.match("FAILED: [code=1] x.o") is None
-
-
-def test_format_duration_reads_as_a_wall_clock():
-    assert embedded_firmware_module._format_duration(9.6) == "9s"
-    assert embedded_firmware_module._format_duration(60) == "1m00s"
-    assert embedded_firmware_module._format_duration(1462) == "24m22s"
-
-
-def _process_is_running(pid: int) -> bool:
-    """Whether *pid* is a process that can still do work.
-
-    `os.kill(pid, 0)` is not that question. A killed grandchild is an orphan,
-    and until whatever inherits it calls wait() it stays in the table as a
-    zombie: signal 0 keeps succeeding for a process that is already dead. On
-    Linux that wait can be a long time coming — in a container whose PID 1
-    does not reap, it never comes — while macOS reaps it in microseconds,
-    which is the whole difference between this test passing on a laptop and
-    failing in CI. So ask /proc what state the pid is in, and treat "no /proc"
-    (macOS, and a pid that is genuinely gone) as not running.
-    """
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    if not os.path.isdir("/proc"):
-        # macOS has no zombie oracle; signal 0 is the whole answer there, and
-        # it reaps orphans promptly enough for that to be true.
-        return True
-    try:
-        with open(f"/proc/{pid}/stat", "rb") as handle:
-            # The comm field can contain spaces and parentheses; state is the
-            # first field after the last ')'.
-            return handle.read().rsplit(b")", 1)[1].split()[0] != b"Z"
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return True
-
-
-@pytest.mark.asyncio
-async def test_terminating_a_build_kills_the_processes_it_spawned():
-    """The build runs under `bash -c`, so signalling the shell alone would
-    leave ninja and its compilers alive — burning the machine's CPU and
-    colliding with the next attempt inside the same build directory."""
-    process = await asyncio.create_subprocess_exec(
-        "bash", "-c", "sleep 120 & echo $! && wait",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        start_new_session=True,
-    )
-    child_pid = int((await process.stdout.readline()).strip())
-    assert _process_is_running(child_pid)
-
-    await embedded_firmware_module._terminate_process_group(process)
-
-    assert process.returncode is not None
-    # The signal has landed by the time the shell is reaped, but the
-    # grandchild's own exit is asynchronous to it; give it a moment.
-    for _ in range(50):
-        if not _process_is_running(child_pid):
-            break
-        await asyncio.sleep(0.1)
-    assert not _process_is_running(child_pid)
-
-
-@pytest.mark.asyncio
-async def test_terminating_a_build_kills_children_that_ignore_sigterm(tmp_path):
-    """The escalation to SIGKILL must not hinge on the shell outliving SIGTERM.
-
-    ``bash -c`` dies on SIGTERM at once, so a cancel that waits for the shell
-    and then declares victory leaves behind exactly the process worth worrying
-    about: a compiler that traps SIGTERM. Only a SIGKILL aimed at the GROUP
-    ends that one, and the group is what a build cancel promises to clear.
-
-    Three details make this able to tell a fixed cancel from a broken one, each
-    of which silently made an earlier version of this test pass either way:
-      * `read` and not `wait` — bash defers SIGTERM until a job it is `wait`ing
-        on finishes, keeping the shell alive long enough for ANY implementation
-        to escalate on its own timeout;
-      * the grandchild's output goes to /dev/null instead of inheriting the
-        shell's stdout — asyncio's `wait()` also waits for the pipes to close,
-        and a process refusing to die holds them open, hiding the difference
-        behind that same timeout;
-      * the readiness handshake — a python that has not yet reached
-        `signal()` dies of the default SIGTERM like anything else, so without
-        waiting for it the test proves nothing.
-    """
-    ready = tmp_path / "ready"
-    ignores_sigterm = (
-        "import pathlib, signal, sys, time; "
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "pathlib.Path(sys.argv[1]).write_text('ready'); "
-        "time.sleep(120)"
-    )
-    process = await asyncio.create_subprocess_exec(
-        "bash",
-        "-c",
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(ignores_sigterm)} "
-        f"{shlex.quote(str(ready))} >/dev/null 2>&1 & echo $!; read _",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        start_new_session=True,
-    )
-    stubborn_pid = int((await process.stdout.readline()).strip())
-    for _ in range(100):
-        if ready.exists():
-            break
-        await asyncio.sleep(0.05)
-    assert ready.exists(), "grandchild never armed its SIGTERM handler"
-    assert _process_is_running(stubborn_pid)
-
-    await embedded_firmware_module._terminate_process_group(process)
-
-    assert process.returncode is not None
-    for _ in range(50):
-        if not _process_is_running(stubborn_pid):
-            break
-        await asyncio.sleep(0.1)
-    assert not _process_is_running(stubborn_pid)
-
-
-def test_build_root_is_redirectable_to_a_persistent_volume(monkeypatch, tmp_path):
-    """The Docker image and the Home Assistant add-on keep the firmware
-    project on an ephemeral container layer; a ~1300-object build dir thrown
-    away on every restart means every build is a from-scratch build."""
-    monkeypatch.delenv("FRAMEOS_EMBEDDED_BUILD_ROOT", raising=False)
-    assert embedded_firmware_module.embedded_build_root() == embedded_firmware_module.EMBEDDED_PROJECT_DIR
-
-    monkeypatch.setenv("FRAMEOS_EMBEDDED_BUILD_ROOT", str(tmp_path))
-    profile = {"flashSize": "16MB"}
-    assert embedded_firmware_module.embedded_build_dir("esp32-c3", profile) == tmp_path / "build-esp32-c3-16mb"
+    assert response.json()['detail'] == 'No pending action with that id'

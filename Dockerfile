@@ -18,6 +18,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
+# The digest list is the trust anchor for the compiler, not the CDN: an
+# archive whose sha256 is not on it is refused before extraction. Recipe
+# for a new Nim at the top of that file.
+COPY .github/nim-prebuilt.sha256 /tmp/nim-prebuilt.sha256
+
 RUN set -eux; \
     . /etc/os-release; \
     distro="${ID}"; \
@@ -45,14 +50,18 @@ RUN set -eux; \
       *) echo "Unsupported prebuilt Nim architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
     nim_target="${distro}-${release}-${arch}"; \
+    nim_archive="${nim_target}/nim-${NIM_VERSION}.tar.gz"; \
+    expected="$(grep -E "^[0-9a-f]{64}  ${nim_archive}\$" /tmp/nim-prebuilt.sha256 | cut -d' ' -f1 || true)"; \
+    if [ -z "${expected}" ]; then echo "No sha256 recorded for ${nim_archive} in .github/nim-prebuilt.sha256" >&2; exit 1; fi; \
     mkdir -p /opt/nim /tmp/nim-download; \
     echo "${nim_target}" > /opt/nim/.frameos-prebuilt-target; \
-    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${nim_target}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz; \
+    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${nim_archive}" -o /tmp/nim.tar.gz; \
+    echo "${expected}  /tmp/nim.tar.gz" | sha256sum -c -; \
     tar -xzf /tmp/nim.tar.gz -C /tmp/nim-download; \
     rm -rf "/tmp/nim-download/nim-${NIM_VERSION}/nim/bin"; \
     cp -a "/tmp/nim-download/nim-${NIM_VERSION}/bin" /opt/nim/bin; \
     cp -a "/tmp/nim-download/nim-${NIM_VERSION}/nim/." /opt/nim/; \
-    rm -rf /tmp/nim-download /tmp/nim.tar.gz
+    rm -rf /tmp/nim-download /tmp/nim.tar.gz /tmp/nim-prebuilt.sha256
 
 ENV PATH="/opt/nim/bin:${PATH}"
 
@@ -113,8 +122,9 @@ RUN set -eux; \
 FROM nim-toolchain AS app-builder
 
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
-ARG QUICKJS_VERSION=2026-06-04
-ARG QUICKJS_SHA256=b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a
+# quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts)
+ARG QUICKJS_VERSION=2026-06-04-quickts.1
+ARG QUICKJS_SHA256=94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f
 # emscripten, for the wasm live-preview bundle served by the frontend
 ARG EMSCRIPTEN_VERSION=6.0.2
 
@@ -173,6 +183,7 @@ RUN set -eux; \
     for quickjs_file in \
       LICENSE VERSION \
       quickjs.c dtoa.c libregexp.c libunicode.c cutils.c \
+      quickts.h quickts_enum.h quickts_jsx.h \
       quickjs.h quickjs-libc.h cutils.h list.h dtoa.h libregexp.h libregexp-opcode.h libunicode.h libunicode-table.h quickjs-atom.h quickjs-opcode.h; \
     do \
       cp -a "${quickjs_source_root}/${quickjs_file}" "/app/frameos/quickjs/${quickjs_file}"; \
@@ -259,13 +270,14 @@ RUN find /app/frameos -path '*/tests' -type d -prune -exec rm -rf {} + \
       /app/frameos/remote/build \
       /app/frameos/remote/tmp
 
+# The editor's JavaScript validation links the same QuickJS the frames run.
 WORKDIR /app/frameos
-RUN nim c \
-      --nimCache:/tmp/frameos-native-js-transpile-nimcache \
-      --out:/app/frameos/build/native_js_transpile \
-      tools/native_js_transpile.nim \
-    && test -x /app/frameos/build/native_js_transpile \
-    && rm -rf /tmp/frameos-native-js-transpile-nimcache
+RUN nim c -d:release --hints:off \
+      --nimCache:/tmp/frameos-js-check-nimcache \
+      --out:/app/frameos/build/js_check \
+      tools/js_check.nim \
+    && test -x /app/frameos/build/js_check \
+    && rm -rf /tmp/frameos-js-check-nimcache
 
 FROM esp-idf-toolchain AS esp32-ci
 
@@ -314,9 +326,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV VIRTUAL_ENV=/app/backend/.venv
-ENV FRAMEOS_NATIVE_JS_TRANSPILE=/app/frameos/build/native_js_transpile
-ENV IDF_PATH=/opt/esp/esp-idf
-ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
+ENV FRAMEOS_JS_CHECK=/app/frameos/build/js_check
 ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"
 
 WORKDIR /app
@@ -325,31 +335,18 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       bash \
-      bison \
       build-essential \
       ca-certificates \
-      ccache \
-      cmake \
       curl \
-      dfu-util \
       dosfstools \
       e2fsprogs \
-      flex \
       genimage \
       git \
       gnupg \
-      gperf \
       iputils-ping \
-      libgcrypt20 \
       libffi-dev \
-      libglib2.0-0 \
-      libpixman-1-0 \
-      libsdl2-2.0-0 \
       libssl-dev \
-      libslirp0 \
-      libusb-1.0-0 \
       mtools \
-      ninja-build \
       python3-pip \
       python3-setuptools \
       python3-venv \
@@ -375,10 +372,6 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=nim-toolchain /opt/nim /opt/nim
-COPY --from=esp-idf-toolchain /opt/esp /opt/esp
-
-# Only reads /opt/esp, so keep it above the copies that change every build.
-RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; qemu-system-xtensa --version'
 
 RUN mkdir -p /app/db
 
@@ -387,7 +380,9 @@ COPY --from=python-deps /app/backend/.venv /app/backend/.venv
 
 COPY docker-entrypoint.sh ./
 COPY backend backend
-COPY embedded embedded
+# Only the ESP32 partition tables are read at runtime (the flash-layout
+# report); the firmware itself is a signed release asset, never built here.
+COPY embedded/esp32/partitions*.csv embedded/esp32/
 COPY repo/apps repo/apps
 COPY repo/scenes repo/scenes
 COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json

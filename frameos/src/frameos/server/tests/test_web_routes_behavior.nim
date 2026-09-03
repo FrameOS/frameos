@@ -306,7 +306,7 @@ suite "web route behavior":
       )
       check response.status == 401
 
-  test "legacy control endpoints use frame write access":
+  test "legacy control endpoints use frame write access for scene events":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
@@ -352,23 +352,126 @@ suite "web route behavior":
     check eventPayload[1] == "test"
     check eventPayload[2]["value"].getInt() == 7
 
-    let uploadScenes = httpRequest(
+    # The backend's serverApiKey bearer is at least as good as the access key
+    # for a scene event (defaultFrameConfig's serverApiKey is "api").
+    let backendEvent = httpRequest(
       server.port,
       "POST",
-      "/uploadScenes",
+      "/event/setCurrentScene",
       headers = [
-        ("Authorization", "Bearer test-key"),
+        ("Authorization", "Bearer api"),
         ("Content-Type", "application/json"),
       ],
       body = $(%*{"sceneId": "demo"}),
     )
-    check uploadScenes.status == 200
-    let (uploadReceived, uploadPayload) = eventChannel.tryRecv()
-    check uploadReceived
-    check uploadPayload[1] == "uploadScenes"
-    check uploadPayload[2]["sceneId"].getStr() == "demo"
+    check backendEvent.status == 200
+    let (backendReceived, backendPayload) = eventChannel.tryRecv()
+    check backendReceived
+    check backendPayload[1] == "setCurrentScene"
 
-  test "reload endpoint returns 200 and 500 with frame write access":
+  test "control-plane verbs refuse the frame access key and public mode":
+    # The access key is printed on the frame's QR code: it may pick a scene,
+    # not replace the scene set or reboot-loop the device.
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+
+    let controlPaths = [
+      "/event/reboot", "/event/restart", "/event/reload", "/event/uploadScenes", "/uploadScenes",
+    ]
+    let keyPresentations = [
+      @[("Authorization", "Bearer test-key")],
+      @[("Cookie", ACCESS_COOKIE & "=test-key")],
+    ]
+    for path in controlPaths:
+      for presentation in keyPresentations:
+        var headers = presentation
+        headers.add(("Content-Type", "application/json"))
+        let refused = httpRequest(server.port, "POST", path, headers = headers,
+          body = $(%*{"sceneId": "demo"}))
+        check refused.status == 401
+      let viaQuery = httpRequest(server.port, "POST", path & "?k=test-key",
+        headers = [("Content-Type", "application/json")], body = $(%*{"sceneId": "demo"}))
+      check viaQuery.status == 401
+    let (leaked, _) = eventChannel.tryRecv()
+    check not leaked
+
+    # public mode: scene events open, control plane still closed.
+    config.frameAccess = "public"
+    configureServerState(config)
+    for path in controlPaths:
+      let refused = httpRequest(server.port, "POST", path,
+        headers = [("Content-Type", "application/json")], body = $(%*{"sceneId": "demo"}))
+      check refused.status == 401
+    let openEvent = httpRequest(server.port, "POST", "/event/setCurrentScene",
+      headers = [("Content-Type", "application/json")], body = $(%*{"sceneId": "demo"}))
+    check openEvent.status == 200
+    let (publicReceived, publicPayload) = eventChannel.tryRecv()
+    check publicReceived
+    check publicPayload[1] == "setCurrentScene"
+    let (leakedPublic, _) = eventChannel.tryRecv()
+    check not leakedPublic
+
+  test "control-plane verbs accept an admin session and the backend bearer":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+
+    let adminLogin = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminLogin.header("set-cookie").split(";", 1)[0]
+
+    for credential in [("Cookie", adminCookie), ("Authorization", "Bearer api")]:
+      let uploadScenes = httpRequest(
+        server.port,
+        "POST",
+        "/uploadScenes",
+        headers = [credential, ("Content-Type", "application/json")],
+        body = $(%*{"sceneId": "demo"}),
+      )
+      check uploadScenes.status == 200
+      let (uploadReceived, uploadPayload) = eventChannel.tryRecv()
+      check uploadReceived
+      check uploadPayload[1] == "uploadScenes"
+      check uploadPayload[2]["sceneId"].getStr() == "demo"
+
+      for event in ["reboot", "restart", "reload", "uploadScenes"]:
+        let response = httpRequest(
+          server.port,
+          "POST",
+          "/event/" & event,
+          headers = [credential, ("Content-Type", "application/json")],
+          body = "{}",
+        )
+        check response.status == 200
+        let (received, payload) = eventChannel.tryRecv()
+        check received
+        check payload[1] == event
+
+    # A wrong backend key is nothing.
+    let wrongKey = httpRequest(
+      server.port,
+      "POST",
+      "/uploadScenes",
+      headers = [("Authorization", "Bearer ap"), ("Content-Type", "application/json")],
+      body = $(%*{"sceneId": "demo"}),
+    )
+    check wrongKey.status == 401
+
+  test "reload endpoint takes control access, returns 200 and 500":
     let config = defaultFrameConfig()
     configureServerState(config)
 
@@ -391,12 +494,26 @@ suite "web route behavior":
 
     try:
       putEnv("FRAMEOS_CONFIG", configPath)
-      let success = httpRequest(
+      let withAccessKey = httpRequest(
         server.port,
         "POST",
         "/reload",
         headers = [
           ("Authorization", "Bearer test-key"),
+          ("Content-Type", "application/json"),
+        ],
+        body = "{}",
+      )
+      check withAccessKey.status == 401
+      let (leaked, _) = eventChannel.tryRecv()
+      check not leaked
+
+      let success = httpRequest(
+        server.port,
+        "POST",
+        "/reload",
+        headers = [
+          ("Authorization", "Bearer api"),
           ("Content-Type", "application/json"),
         ],
         body = "{}",
@@ -412,7 +529,7 @@ suite "web route behavior":
         "POST",
         "/reload",
         headers = [
-          ("Authorization", "Bearer test-key"),
+          ("Authorization", "Bearer api"),
           ("Content-Type", "application/json"),
         ],
         body = "{}",

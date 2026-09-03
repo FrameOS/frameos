@@ -258,7 +258,13 @@ async def test_build_host_test_runs_probe(async_client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "output": "frameos-build-host-ok"}
+    # No session on the fake executor: nothing pinned, nothing to report.
+    assert response.json() == {
+        "ok": True,
+        "output": "frameos-build-host-ok",
+        "hostKey": None,
+        "hostKeyFingerprint": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -303,3 +309,60 @@ async def test_modal_sandbox_test_runs_probe(async_client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"ok": True, "output": "frameos-modal-sandbox-ok"}
+
+
+class ExplodingBuildExecutor:
+    def __init__(self, config, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        raise ConnectionRefusedError("ssh: connect to host builder.local port 22: Connection refused")
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_build_host_probe_failure_hides_the_exception_text_outside_debug(async_client, monkeypatch):
+    # Patch the object the route reads (test_ingress reloads app.config).
+    import app.api.settings as settings_module
+
+    config = settings_module.config
+    monkeypatch.setattr("app.api.settings.create_build_executor", ExplodingBuildExecutor)
+    monkeypatch.setattr(config, "DEBUG", False)
+
+    response = await async_client.post(
+        '/api/settings/test_build_host',
+        json={"buildHost": {"host": "builder.local", "user": "ubuntu", "sshKey": "dummy-key"}},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Build host connection failed (ConnectionRefusedError)"
+
+    monkeypatch.setattr(config, "DEBUG", True)
+    response = await async_client.post(
+        '/api/settings/test_build_host',
+        json={"buildHost": {"host": "builder.local", "user": "ubuntu", "sshKey": "dummy-key"}},
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "Build host connection failed: ssh: connect to host builder.local port 22: Connection refused"
+    )
+
+
+@pytest.mark.asyncio
+async def test_modal_sandbox_probe_failure_hides_the_exception_text_outside_debug(async_client, monkeypatch):
+    # Patch the object the route reads (test_ingress reloads app.config).
+    import app.api.settings as settings_module
+
+    config = settings_module.config
+    monkeypatch.setattr("app.api.settings.create_build_executor", ExplodingBuildExecutor)
+    monkeypatch.setattr(config, "DEBUG", False)
+
+    response = await async_client.post(
+        '/api/settings/test_modal_sandbox',
+        json={"modalSandbox": {"enabled": True, "tokenId": "ak-test", "tokenSecret": "as-test"}},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Modal sandbox test failed (ConnectionRefusedError)"

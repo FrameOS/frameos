@@ -107,4 +107,7 @@ docker build -t frameos-frame . && docker run -t -i frameos python3 test.py
 
 # TODO
 
-Tracked here: https://github.com/FrameOS/frameos/issues/1
+Open work lives in `docs/todo.md`, which links the per-track files
+(`docs/convergence-todo.md`, `docs/scenes-todo.md`, `docs/ui-todo.md`,
+`docs/manual-testing-todo.md`, `cloud/docs/accounting-todo.md`). The
+historical task list is https://github.com/FrameOS/frameos/issues/1.

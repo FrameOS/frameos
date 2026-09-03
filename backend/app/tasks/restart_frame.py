@@ -94,10 +94,10 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
             redis,
             frame,
             [
-                "sudo systemctl stop frameos.service || true",
-                "sudo systemctl enable frameos.service",
-                "sudo systemctl start frameos.service",
-                "sudo systemctl status frameos.service",
+                "sudo -n systemctl stop frameos.service || true",
+                "sudo -n systemctl enable frameos.service",
+                "sudo -n systemctl start frameos.service",
+                "sudo -n systemctl status frameos.service",
             ],
         )
 
@@ -143,7 +143,7 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
             redis,
             frame,
             [
-                "sudo reboot",
+                "sudo -n reboot",
             ],
         )
 

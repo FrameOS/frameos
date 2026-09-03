@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { zlibSync } from "fflate";
@@ -72,6 +72,27 @@ export class SceneRenderError extends Error {
 
 export function wasmAssetsDir(): string {
   return path.join(process.cwd(), "public", "frameos-wasm");
+}
+
+// The stamp build_wasm.sh writes next to the bundle and the release tarball
+// carries (scripts/lib/wasm-runtime.mjs installs it with the runtime): which
+// FrameOS version the interpreter is. Frames run their own firmware, so a
+// render's caller can tell whether the two match. Null when the bundle is
+// missing or predates the stamp.
+export function rendererVersion(): string | null {
+  const stampPath = path.join(wasmAssetsDir(), "version.json");
+  if (!existsSync(stampPath)) {
+    return null;
+  }
+  try {
+    const stamp: unknown = JSON.parse(readFileSync(stampPath, "utf8"));
+    if (stamp && typeof stamp === "object" && typeof (stamp as { version?: unknown }).version === "string") {
+      return (stamp as { version: string }).version;
+    }
+  } catch {
+    // unreadable stamp: same answer as no stamp
+  }
+  return null;
 }
 
 export function rendererAvailable(): boolean {
@@ -535,18 +556,47 @@ process.stdin.on("end", async () => {
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), req.timeoutMs || 15000);
-    const response = await fetch(url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.bodyBase64 ? Buffer.from(req.bodyBase64, "base64") : undefined,
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > 10 * 1024 * 1024) {
-      throw new Error("response too large");
+    // Redirects are followed by hand so every hop passes the host check: a
+    // public URL must not bounce scene code to loopback or link-local.
+    let target = url;
+    let response;
+    for (let hop = 0; ; hop += 1) {
+      response = await fetch(target, {
+        method: req.method,
+        headers: req.headers,
+        body: req.bodyBase64 ? Buffer.from(req.bodyBase64, "base64") : undefined,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      const location = response.headers.get("location");
+      if (response.status >= 300 && response.status < 400 && location) {
+        if (hop >= 5) {
+          throw new Error("too many redirects");
+        }
+        target = new URL(location, target);
+        if ((target.protocol !== "http:" && target.protocol !== "https:") || (await hostIsBlocked(target.hostname))) {
+          throw new Error("host not allowed");
+        }
+        continue;
+      }
+      break;
     }
+    clearTimeout(timer);
+    const cap = 10 * 1024 * 1024;
+    const reader = response.body ? response.body.getReader() : null;
+    const parts = [];
+    let total = 0;
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > cap) {
+        await reader.cancel();
+        throw new Error("response too large");
+      }
+      parts.push(Buffer.from(value));
+    }
+    const body = Buffer.concat(parts);
     process.stdout.write(JSON.stringify({ status: response.status, bodyBase64: body.toString("base64") }));
   } catch (error) {
     process.stdout.write(JSON.stringify({ status: 0, error: String(error) }));

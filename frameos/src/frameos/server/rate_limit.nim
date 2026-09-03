@@ -17,7 +17,7 @@
 ## are generous enough for a single admin UI, and failing closed on a shared
 ## key is better than not limiting at all.
 
-import std/[locks, tables, times]
+import std/[algorithm, locks, tables, times]
 import mummy
 
 type RateWindow = object
@@ -27,7 +27,10 @@ type RateWindow = object
 const
   MaxRateLimitEntries = 512
   ## Cheap memory bound. Rotating source addresses would otherwise grow this
-  ## table without limit; a reset costs everyone one free window.
+  ## table without limit. When it fills, expired windows go first and then
+  ## the windows closest to expiry — never the whole table, which used to
+  ## hand every client a free window each time a rotating flood filled it.
+  EvictBatch = MaxRateLimitEntries div 8
 
 var
   rateLimitLock: Lock
@@ -38,6 +41,26 @@ initLock(rateLimitLock)
 proc clientKey(request: Request): string =
   let address = request.remoteAddress
   if address.len > 0: address else: "unknown"
+
+proc evictForInsert(now: float) =
+  ## Called with the lock held, when the table is full and a new key needs a
+  ## slot. Expired windows are free to drop; if none have expired, the
+  ## EvictBatch windows that expire soonest go — they have the least budget
+  ## left to lose, and a batch keeps this O(n log n) scan off every request.
+  var expired: seq[string] = @[]
+  for key, window in rateWindows.pairs:
+    if window.resetAt <= now:
+      expired.add(key)
+  for key in expired:
+    rateWindows.del(key)
+  if rateWindows.len < MaxRateLimitEntries:
+    return
+  var byExpiry: seq[(float, string)] = @[]
+  for key, window in rateWindows.pairs:
+    byExpiry.add((window.resetAt, key))
+  byExpiry.sort(proc(a, b: (float, string)): int = cmp(a[0], b[0]))
+  for index in 0 ..< min(EvictBatch, byExpiry.len):
+    rateWindows.del(byExpiry[index][1])
 
 proc rateLimitExceeded*(request: Request, bucket: string, limit: int,
                         windowSeconds: float): bool {.gcsafe.} =
@@ -50,7 +73,7 @@ proc rateLimitExceeded*(request: Request, bucket: string, limit: int,
   {.gcsafe.}:
     withLock rateLimitLock:
       if rateWindows.len >= MaxRateLimitEntries and not rateWindows.hasKey(key):
-        rateWindows.clear()
+        evictForInsert(now)
       var window = rateWindows.getOrDefault(key, RateWindow(count: 0, resetAt: 0.0))
       if window.resetAt <= now:
         window = RateWindow(count: 0, resetAt: now + windowSeconds)
@@ -74,3 +97,9 @@ proc resetRateLimits*() {.gcsafe.} =
   {.gcsafe.}:
     withLock rateLimitLock:
       rateWindows.clear()
+
+proc rateLimitEntryCount*(): int {.gcsafe.} =
+  ## Test seam.
+  {.gcsafe.}:
+    withLock rateLimitLock:
+      result = rateWindows.len

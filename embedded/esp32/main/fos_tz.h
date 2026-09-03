@@ -17,9 +17,8 @@
  * newlib's localtime_r() — QuickJS `Date`, Nim `now()`, fos_schedule — agrees
  * with chrono, DST included.
  *
- * Where slices come from: baked into the firmware for the frame's zone at
- * build time (FRAMEOS_DEFAULT_TZ_DATA), the backend settings poll
- * (timeZoneData), cloud set_settings (timezone_data), and — when only a name
+ * Where slices come from: the backend settings poll (timeZoneData), cloud
+ * set_settings (timezone_data), and — when only a name
  * is known (console `set time_zone`, an older provider) — one fetch of
  * https://tz.frameos.net/zone/<Zone>.json (fos_tz_resolve_pending). An empty
  * name means UTC. Thin clients (no Nim runtime) stay in UTC. */

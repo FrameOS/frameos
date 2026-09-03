@@ -3032,7 +3032,9 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_config_fingerprint
 
 
 @pytest.mark.asyncio
-async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tmp_path):
+async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tmp_path, monkeypatch):
+    # The download route only serves files under the builder's artifact dir.
+    monkeypatch.setenv('FRAMEOS_ARTIFACT_DIR', str(tmp_path))
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     image_path = tmp_path / 'frameos-test.img'
     image_path.write_bytes(b'frameos image')
@@ -3057,6 +3059,34 @@ async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tm
     assert image_path.with_suffix('.img.gz').is_file()
     assert response.headers['content-type'].startswith('application/gzip')
     assert 'frameos-test.img.gz' in response.headers['content-disposition']
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_download_refuses_paths_outside_artifact_dir(async_client, db, redis, tmp_path, monkeypatch):
+    # `buildroot.sdImage.path` is client-writable frame state (update, import,
+    # backup restore): a path outside the artifact dir must never be served.
+    monkeypatch.setenv('FRAMEOS_ARTIFACT_DIR', str(tmp_path / 'artifacts'))
+    (tmp_path / 'artifacts').mkdir()
+    secret = tmp_path / 'secret.env'
+    secret.write_bytes(b'SECRET_KEY=x')
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {
+        'platform': 'raspberry-pi-64',
+        'sdImage': {
+            'status': 'ready',
+            'filename': 'x.img',
+            'path': str(secret),
+            'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+        },
+    }
+    set_buildroot_sd_image_config_fingerprint(frame)
+    db.add(frame)
+    db.commit()
+    response = await async_client.get(f'/api/projects/{frame.project_id}/frames/{frame.id}/buildroot/sd_image/download')
+    assert response.status_code == 404
+    assert not secret.with_suffix('.env.gz').exists()
+
 
 
 @pytest.mark.asyncio
@@ -3418,3 +3448,28 @@ async def test_api_frame_new_ssh_connection_string_keeps_password(async_client):
     assert frame['ssh_pass'] == 's3cr:et@p@ss'
     assert frame['frame_host'] == '192.168.1.20'
     assert frame['ssh_port'] == 2222
+
+
+@pytest.mark.asyncio
+async def test_api_frame_bootstrap_script_only_accepts_released_distros(async_client, no_auth_client, db, redis):
+    # Raspberry Pi OS bullseye has no release tarball, and bookworm's binary
+    # will not load there (glibc 2.34+ vs 2.31), so the installer refuses it
+    # with a reason instead of 404ing on the download.
+    frame = await new_frame(db, redis, 'BootstrapReleaseFrame', 'frame.local', 'backend.local')
+    frame.device = 'framebuffer'
+    frame.scenes = []
+    db.add(frame)
+    db.commit()
+
+    command_response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap')
+    assert command_response.status_code == 200
+    script_url = command_response.json()['script_url']
+    script_path = urlparse(script_url).path
+    script_response = await no_auth_client.get(script_path)
+    assert script_response.status_code == 200
+    script = script_response.text
+    assert 'bookworm|trixie|24.04|26.04) ;;' in script
+    assert 'bullseye|' not in script
+    assert 'FrameOS releases are built for debian bookworm/trixie, ubuntu 24.04/26.04' in script
+    syntax_check = subprocess.run(['sh', '-n'], input=script, capture_output=True, text=True)
+    assert syntax_check.returncode == 0, syntax_check.stderr

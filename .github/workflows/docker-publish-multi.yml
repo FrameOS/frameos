@@ -83,13 +83,16 @@ jobs:
 
   publish-npm:
     name: Publish FrameOS npm packages
-    needs: update-versions
+    needs: [update-versions, build-wasm-runtime]
     runs-on: ubuntu-latest
     steps:
       # npm auth uses trusted publishing (OIDC), which matches on the
       # top-level workflow file — so publishing lives in npm-publish.yml and
       # is dispatched here rather than run inline. That workflow is also
       # manually dispatchable to re-publish without bumping versions.
+      # The run id lets it download the wasm runtime this run already built
+      # (build-wasm-runtime) instead of compiling a second copy: the npm
+      # package then ships byte-for-byte what the release attached.
       - name: Dispatch npm publish workflow
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,7 +101,8 @@ jobs:
           gh workflow run npm-publish.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
-            -f ref="$RELEASE_SHA"
+            -f ref="$RELEASE_SHA" \
+            -f runtime_run_id="$GITHUB_RUN_ID"
 
   release-notes:
     name: Generate Release Notes
@@ -155,6 +159,16 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.determine-release-targets.outputs.targets) }}
     steps:
+      # Anonymous git over HTTP/2 is throttled by GitHub from the self-hosted
+      # runner pool's address: nimble's fetch of QRgen died with "expected
+      # flush after ref listing" on all six epyc-8 legs of the 2026.9.1 run
+      # while the GitHub-hosted ARM legs sailed through. HTTP/1.1 from the
+      # same host succeeds every time (frameos-cross.yml and
+      # pull-request-tests.yml carry the same step). Harmless on GitHub-hosted
+      # runners.
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -204,8 +218,17 @@ jobs:
           esac
           nim_slug="${distro}-${version}-${host_arch}"
           echo "$nim_slug"
+          # The archive digest must be on the committed list or the runner
+          # refuses it: the CDN alone is not a trust anchor (recipe for a new
+          # Nim at the top of .github/nim-prebuilt.sha256).
+          expected="$(grep -E "^[0-9a-f]{64}  ${nim_slug}/nim-${NIM_VERSION}\.tar\.gz$" .github/nim-prebuilt.sha256 | cut -d' ' -f1 || true)"
+          if [ -z "$expected" ]; then
+            echo "::error::no sha256 recorded for ${nim_slug}/nim-${NIM_VERSION}.tar.gz in .github/nim-prebuilt.sha256"
+            exit 1
+          fi
           mkdir -p "$HOME/.nim"
-          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          curl -fsSL --retry 3 "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          echo "${expected}  /tmp/nim.tar.gz" | sha256sum -c -
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
           rm -rf "$HOME/.nim/nim-${NIM_VERSION}/nim/bin"
           mv "$HOME/.nim/nim-${NIM_VERSION}/nim/"* "$HOME/.nim/nim-${NIM_VERSION}/"
@@ -471,8 +494,11 @@ jobs:
           fi
           # Ubuntu 24.04 pip is PEP 668 "externally managed"; the fallback
           # keeps this working if the runner image ever stops being.
-          python3 -m pip install --quiet --break-system-packages cryptography \
-            || python3 -m pip install --quiet cryptography
+          # Pinned to the version backend/requirements.txt carries: this step
+          # holds the firmware signing key, and an unpinned `pip install` is
+          # whatever PyPI serves that minute.
+          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
+            || python3 -m pip install --quiet cryptography==50.0.0
           keyfile=$(mktemp)
           # The secret is the small text file sign_firmware.py keygen wrote:
           # a comment line + base64(ED + keyid8 + seed32).
@@ -509,6 +535,215 @@ jobs:
             release-assets/*-esp32-c3-generic-app.bin.minisig
             release-assets/*-esp32-s3-generic-size.json
             release-assets/*-esp32-c3-generic-size.json
+          if-no-files-found: error
+
+  # The same firmware on every other flash layout a board can have: one signed
+  # image per chip × {4mb,8mb,16mb,32mb}, minus the two the generic pair
+  # already IS (esp32-s3 = 8MB, esp32-c3 = 4MB). A backend then flashes a
+  # 16MB XTEINK X4 or a 32MB 13.3E6 board with the partition table it actually
+  # has instead of the generic image's, which is step 1 of docs/todo.md "the
+  # self-hosted backend flashes what the cloud flashes". One job per chip on
+  # GitHub-hosted runners (the three layouts share one build tree and, on the
+  # S3, one Nim compile) so nothing here queues behind the epyc pool; the
+  # generic job above stays exactly as it was — the cloud flasher depends on
+  # its assets and its Depot layer cache.
+  build-esp32-layout-firmware:
+    name: Build ESP32 firmware per flash layout
+    needs: [update-versions]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: esp32-s3
+            layouts: "4mb 16mb 32mb"
+          - chip: esp32-c3
+            layouts: "8mb 16mb 32mb"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
+
+      # Byte-identical in its cache-relevant inputs to the esp32-ci builds in
+      # this workflow's generic job and in e2e-docker.yml, so it only ever
+      # pulls the warm image (see the generic job's comment).
+      - name: Build ESP32 CI Docker image
+        uses: depot/build-push-action@v1
+        with:
+          project: rsbh2wrlkj
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          target: esp32-ci
+          tags: frameos-esp32-ci
+          load: true
+          push: false
+
+      - name: Build firmware
+        timeout-minutes: 60
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          CHIP: ${{ matrix.chip }}
+          LAYOUTS: ${{ matrix.layouts }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          # Values reach the container through the environment, never spliced
+          # into the inner script (same reason as the generic job).
+          docker run --rm \
+            -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            -e DOCKER_VERSION \
+            -e CHIP \
+            -e LAYOUTS \
+            -e FRAMEOS_VERSION="$DOCKER_VERSION" \
+            -v "$PWD/release-assets:/release-assets" \
+            frameos-esp32-ci \
+            bash -lc '
+              set -euo pipefail
+              for layout in $LAYOUTS; do
+                platform="$CHIP-$layout"
+                # Fresh build dir per layout (the script refuses to reuse one);
+                # the Nim side is shared through nimcache.
+                FRAMEOS_ESP32_PLATFORM="$platform" \
+                  FRAMEOS_ESP32_BUILD_DIR="build-ci-$layout" \
+                  bash embedded/esp32/ci_build_image.sh
+                # Same trio as the generic assets, same meaning: the merged
+                # image is what a USB flasher writes from 0x0, -app.bin is the
+                # bare app image an OTA slot accepts, -size.json is the
+                # size-report baseline for this layout.
+                cp "embedded/esp32/build-ci-$layout/merged-binary.bin" \
+                  "/release-assets/frameos-$DOCKER_VERSION-$platform.bin"
+                cp "embedded/esp32/build-ci-$layout/frameos_esp32.bin" \
+                  "/release-assets/frameos-$DOCKER_VERSION-$platform-app.bin"
+                cp "embedded/esp32/build-ci-$layout/firmware-size.json" \
+                  "/release-assets/frameos-$DOCKER_VERSION-$platform-size.json"
+              done
+            '
+          ls -lh release-assets/
+
+      # Same signing step as the generic job: every image gets its .minisig,
+      # a missing secret fails the release.
+      - name: Sign ESP32 firmware
+        env:
+          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
+            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned firmware"
+            exit 1
+          fi
+          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
+            || python3 -m pip install --quiet cryptography==50.0.0
+          keyfile=$(mktemp)
+          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
+          status=0
+          python3 tools/sign_firmware.py sign --secret "$keyfile" \
+            release-assets/frameos-*.bin || status=$?
+          shred -u "$keyfile"
+          [ "$status" -eq 0 ] || exit "$status"
+          for bin in release-assets/frameos-*.bin; do
+            python3 tools/sign_firmware.py verify \
+              --public release-assets/firmware-signing.pub "$bin"
+          done
+          ls -lh release-assets/
+
+      - name: Upload ESP32 firmware
+        uses: actions/upload-artifact@v4
+        with:
+          # Downloaded by the github-release job by the frameos-<version>-*
+          # name pattern.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-${{ matrix.chip }}-layouts
+          path: |
+            release-assets/*-${{ matrix.chip }}-*mb.bin
+            release-assets/*-${{ matrix.chip }}-*mb.bin.minisig
+            release-assets/*-${{ matrix.chip }}-*mb-app.bin
+            release-assets/*-${{ matrix.chip }}-*mb-app.bin.minisig
+            release-assets/*-${{ matrix.chip }}-*mb-size.json
+          if-no-files-found: error
+
+  # The interpreted-scene runtime compiled to WebAssembly: what the cloud's
+  # browser preview and headless renderer run, and what the frameos-wasm npm
+  # package ships. Built once here from the release commit and attached to
+  # the release as frameos-<version>-wasm.tar.gz — signed with the firmware
+  # key in the github-release job like every other .tar.gz — so FrameOS
+  # Cloud installs the runtime frames actually run instead of compiling one
+  # from main (cloud/apps/auth-web/scripts/lib/wasm-runtime.mjs pins the
+  # release version from versions.json and verifies the .minisig). The npm
+  # publish job downloads this artifact rather than building again.
+  build-wasm-runtime:
+    name: Build wasm runtime
+    needs: [update-versions]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      # Same Nim toolchain cache as npm-publish.yml, for the same reason
+      # (nim-lang.org drops connections often enough to fail real runs).
+      - name: Cache Nim toolchain
+        id: cache_nim_toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.choosenim
+            ~/.nimble/bin
+          key: ${{ runner.os }}-nim-toolchain-2.2.4
+
+      - uses: jiro4989/setup-nim-action@v1
+        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
+        id: setup_nim
+        continue-on-error: true
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Retry Nim setup once
+        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
+        uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add cached Nim to PATH
+        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
+        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      # build_wasm.sh writes frameos.js, frameos.wasm, preview-worker.js and
+      # a version.json stamp (interpreter version, release, commit) into the
+      # output directory; the tarball holds those four files at its top
+      # level. Named by the release version like the firmware images, so
+      # the cloud can pin it from versions.json's `docker` entry.
+      - name: Build the wasm runtime
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          FRAMEOS_WASM_COMMIT: ${{ needs.update-versions.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          out="$PWD/release-assets/frameos-$DOCKER_VERSION-wasm"
+          mkdir -p "$out"
+          (cd frameos && nimble install -d -y && ./tools/build_wasm.sh --out "$out")
+          test -f "$out/version.json"
+          tar -czf "release-assets/frameos-$DOCKER_VERSION-wasm.tar.gz" \
+            -C "$out" frameos.js frameos.wasm preview-worker.js version.json
+          rm -rf "$out"
+          ls -lh release-assets/
+
+      - name: Upload wasm runtime
+        uses: actions/upload-artifact@v4
+        with:
+          # frameos-<version>-* so the github-release job picks it up and
+          # signs it with the other archives.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-wasm
+          path: release-assets/*-wasm.tar.gz
           if-no-files-found: error
 
   # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
@@ -715,7 +950,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-pico-firmware, update-addon-repo, release-notes]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-esp32-layout-firmware, build-wasm-runtime, build-pico-firmware, update-addon-repo, release-notes]
     runs-on: ubuntu-latest
     steps:
       # Shallow: this job only needs a working directory for `gh` and the
@@ -765,7 +1000,9 @@ jobs:
             echo "::error::no release archives found to sign"
             exit 1
           fi
-          python3 -m pip install --quiet --break-system-packages cryptography             || python3 -m pip install --quiet cryptography
+          # Same pin as "Sign ESP32 firmware", for the same reason.
+          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
+            || python3 -m pip install --quiet cryptography==50.0.0
           keyfile=$(mktemp)
           printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
           status=0

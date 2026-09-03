@@ -479,6 +479,38 @@ html.theme-dark .button-primary {
   gap: 12px;
 }
 
+/* /account/settings: the service-key cards and the SSH key list. */
+.account-settings__fields {
+  margin-top: 14px;
+}
+
+.account-settings__hint {
+  font-size: 13px;
+}
+
+.account-settings__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* A Save with nothing to save: visibly inert, not a green promise. */
+.account-settings__actions .button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.account-settings__textarea {
+  min-height: 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
 /* The new-token form on /account/developer: one row — the name grows, the
    two selects and the button take what they need — over a one-line hint.
    Not .actions: that grid stretches a button to the card's full width,
@@ -1447,6 +1479,32 @@ a.tag-pill--active:hover {
 .viewport-controls__select:disabled {
   color: var(--muted);
   cursor: not-allowed;
+}
+
+/* The peak-usage readout beside the "Memory limit" control. */
+.viewport-controls__hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A render the simulated device could not fit. Sits under the controls, in
+   the same shape as the panel's other inline notices. */
+.preview-notice {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.preview-notice--error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
 }
 
 .json-editor {
@@ -2477,6 +2535,32 @@ a.stat-tile:hover {
   margin: 0;
 }
 
+/* The scene's declared service keys, as grant checkboxes. */
+.install-box__grants {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.install-box__grants legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.install-box__grants .copy {
+  margin: 0;
+}
+
+.install-box__grant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
 /* --- Scene editor: Preview / AI side columns ----------------------------- */
 
 /* With a side panel open the editor area becomes a grid: editor, then a
@@ -3472,6 +3556,37 @@ a.stat-tile:hover {
 
 .ai-panel__tool--error {
   color: var(--danger);
+}
+
+/* A frame change the agent proposed (add_scene_to_frame): the one thing in
+   the transcript with a button that changes a physical frame, so it is
+   framed as a card rather than folded into the tool list. */
+.ai-panel__proposal {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.ai-panel__proposal-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+}
+
+.ai-panel__proposal-copy {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.ai-panel__proposal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .ai-panel__thinking,

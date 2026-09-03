@@ -25,7 +25,7 @@ export default tseslint.config(
       // Same exclusion, same reason: renders the whole deploy drawer.
       "**/src/test/shared-spa/cloud-deploy-dialog.test.tsx",
       // Same exclusion, same reason: mounts EmbeddedWebFlasher.
-      "**/src/test/shared-spa/embedded-web-flasher.test.tsx",
+      "**/src/test/shared-spa/embedded-flash-shared.test.ts",
       // Same exclusion, same reason: mounts EmbeddedReleaseFlasher.
       "**/src/test/shared-spa/embedded-release-flasher.test.tsx",
       // Same exclusion, same reason: builds every logic the embedded editor
@@ -38,12 +38,22 @@ export default tseslint.config(
       // Same exclusion, same reason: importing frameLogic pulls in
       // framesModel and the decorators behind it.
       "**/src/test/shared-spa/cloud-frame-change-details.test.ts",
+      // Same exclusion, same reason: mounts framesModel itself.
+      "**/src/test/shared-spa/cloud-frame-scenes-loading.test.ts",
       // Same exclusion, same reason: imports frameLogic's sanitizeScene.
       "**/src/test/shared-spa/cloud-scene-persist-equality.test.ts",
       "**/src/test/shared-spa/scene-origin.test.ts",
       // Same exclusion, same reason: sanitizeIncomingScenes is a thin wrapper
       // over that same sanitizeScene.
       "**/src/test/shared-spa/embedded-editor-scene-sanitize.test.ts",
+      // Same exclusion, same reason from the other direction: it imports
+      // metricsLogic, whose RebootMarker literals spell optional fields as
+      // `undefined`.
+      "**/src/test/shared-spa/battery-misreads.test.ts",
+      // Same exclusion, same reason: chartData takes its types from
+      // metricsLogic, and BrushChart draws chartData's output.
+      "**/src/test/shared-spa/metrics-chart-data.test.ts",
+      "**/src/test/shared-spa/metrics-brush-chart.test.tsx",
       // Same exclusion, same reason, widest graph of the lot: mounts the
       // whole FrameSettings panel and the colour picker behind it.
       "**/src/test/shared-spa/cloud-frame-settings-panel.test.tsx",

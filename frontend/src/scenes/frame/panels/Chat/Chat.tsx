@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
-import { chatLogic } from './chatLogic'
+import { chatLogic, type ChatInstallProposal } from './chatLogic'
+import { cloudSettingsGroupLabels } from '../../../../utils/cloudAiChat'
 import { frameLogic } from '../../frameLogic'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
@@ -50,6 +51,8 @@ export function Chat() {
     selectChat,
     backToList,
     loadMoreChats,
+    approveInstallProposal,
+    dismissInstallProposal,
   } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
   const { editApp } = useActions(frameEditorsLogic({ frameId }))
   const { focusScene } = useActions(scenesLogic({ frameId }))
@@ -352,6 +355,66 @@ export function Chat() {
     )
   }
 
+  // The Install card behind a cloud-agent add_scene_to_frame proposal: the
+  // agent never deploys on its own, so this button is the only path from
+  // "the assistant suggested it" to "it is on the frame".
+  const renderInstallProposal = (messageId: string, card: ChatInstallProposal) => {
+    const { proposal, status } = card
+    const groups = proposal.declared_settings_groups
+    const groupNames = groups.map((group) => cloudSettingsGroupLabels[group] ?? group).join(', ')
+    const busyCard = status.state === 'approving'
+    return (
+      <div
+        key={proposal.proposal_id}
+        className="mt-3 rounded-xl border frameos-chat-proposal px-3 py-2 text-sm space-y-2"
+        role="group"
+        aria-label="Proposed frame install"
+      >
+        <div className="font-semibold">
+          {proposal.already_assigned ? 'Re-deploy' : 'Install'} &quot;{proposal.scene.name}&quot;
+          {proposal.scene.version ? ` (version ${proposal.scene.version})` : ''} on {proposal.frame.name}
+        </div>
+        <div className="frame-tool-muted text-xs">
+          {groups.length > 0
+            ? `The scene declares that it uses your ${groupNames}; approving hands ${
+                groups.length === 1 ? 'that key' : 'those keys'
+              } to this frame.`
+            : 'The scene declares no service keys.'}
+          {proposal.frame.connected
+            ? ' The frame is online, so it applies within seconds.'
+            : ' The frame is offline, so the deploy is queued until it reconnects.'}
+        </div>
+        {status.state === 'pending' || status.state === 'approving' ? (
+          <div className="flex gap-2">
+            <Button
+              color="primary"
+              size="small"
+              disabled={busyCard}
+              onClick={() => activeChatId && approveInstallProposal(activeChatId, messageId, proposal.proposal_id)}
+            >
+              {busyCard ? 'Installing…' : 'Approve and install'}
+            </Button>
+            <Button
+              color="secondary"
+              size="small"
+              disabled={busyCard}
+              onClick={() => activeChatId && dismissInstallProposal(activeChatId, messageId, proposal.proposal_id)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        ) : null}
+        {status.state === 'installed' ? (
+          <div className="text-xs text-green-600">
+            {status.queued ? 'Installed; the deploy lands when the frame reconnects.' : 'Installed and deployed.'}
+          </div>
+        ) : null}
+        {status.state === 'dismissed' ? <div className="frame-tool-muted text-xs">Not installed.</div> : null}
+        {status.state === 'failed' ? <div className="text-xs text-red-400">{status.error}</div> : null}
+      </div>
+    )
+  }
+
   // Assistant replies are markdown (the cloud agent answers in it); user
   // messages stay plain text so typed characters are never re-interpreted.
   const renderMessageContent = (messageContent: string, isUser: boolean) =>
@@ -546,6 +609,7 @@ export function Chat() {
                             message.logContent,
                             isUser
                           )}
+                          {(message.proposals ?? []).map((card) => renderInstallProposal(message.id, card))}
                         </div>
                       </div>
                     </div>

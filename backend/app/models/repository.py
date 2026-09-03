@@ -1,4 +1,5 @@
 import httpx
+import json
 import uuid
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
@@ -41,12 +42,31 @@ class Repository(Base):
         }
 
     async def update_templates(self):
-        async with httpx.AsyncClient() as client:
-            response = await client.get(self.url, timeout=10)
-        if response.status_code == 200:
+        # The URL is user data: the resolver guard refuses loopback /
+        # link-local / reserved targets, no redirects are followed (httpx
+        # default) and the body is streamed under a cap. Any failure leaves
+        # the cached templates as they were, like a non-200 always did.
+        from app.utils.network import TargetBlocked, check_target_host
+        from app.utils.upload_limits import MAX_REPOSITORY_JSON_BYTES, fetch_body_limited
+        from fastapi import HTTPException
+        from urllib.parse import urlparse
+
+        parsed = urlparse(self.url or "")
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return
+        try:
+            await check_target_host(parsed.hostname)
+        except TargetBlocked:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                content = await fetch_body_limited(client, self.url, MAX_REPOSITORY_JSON_BYTES)
+        except (httpx.HTTPError, HTTPException):
+            return
+        if True:
             self.last_updated_at = datetime.utcnow()
             try:
-                json_response = response.json()
+                json_response = json.loads(content)
                 if isinstance(json_response, dict):
                     self.templates = json_response.get('templates', [])
                     if 'name' in json_response:

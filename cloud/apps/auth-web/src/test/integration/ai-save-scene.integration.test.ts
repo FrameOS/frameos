@@ -51,7 +51,7 @@ async function account() {
   return accountId;
 }
 
-const previewBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 7]);
+const previewBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 7, 0, 0, 0, 0, 0, 0, 0]);
 
 function sceneZip(name: string, scenes: unknown[]) {
   const encode = (value: unknown) =>

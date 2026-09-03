@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 import {
   createDb,
   frameCommands,
+  frameSceneAssignments,
   frames,
   linkedClients,
   storeScenes,
@@ -25,7 +26,12 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/route";
 import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
-import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
+import { POST as addFrameScene } from "../../../app/api/frames/[frameId]/scenes/add/route";
+import { POST as activateScene } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
+import {
+  GET as listFrameScenes,
+  POST as assignFrameScenes,
+} from "../../../app/api/frames/[frameId]/scenes/route";
 import { GET as pullServiceSettings } from "../../../app/api/frames/[frameId]/service-settings/route";
 import { POST as setServiceSettingsEnabled } from "../../../app/api/frames/[frameId]/service-settings/enabled/route";
 import { POST as saveAccountSettings } from "../../../app/api/settings/route";
@@ -122,12 +128,20 @@ function devicePublicKey() {
 // A scene whose only app node is `data/unsplash` — the keyword table in
 // src/lib/preview-settings.ts maps it to the `unsplash` settings group.
 function sceneZip(sceneId: string, keyword: string) {
+  return sceneZipWithKeywords(sceneId, [keyword]);
+}
+
+function sceneZipWithKeywords(sceneId: string, keywords: string[]) {
   const scenes = [
     {
       edges: [],
       id: sceneId,
       name: `Scene ${sceneId}`,
-      nodes: [{ data: { keyword }, id: "node-1", type: "app" }],
+      nodes: keywords.map((keyword, index) => ({
+        data: { keyword },
+        id: `node-${index + 1}`,
+        type: "app",
+      })),
     },
   ];
   return Buffer.from(
@@ -199,16 +213,33 @@ async function activeFrame() {
   return { accountId, ...payload };
 }
 
-async function assignScene(frameId: string, sceneId: string) {
+// Assign one scene, GRANTING it the named groups (the workspace posts a
+// scene's declared groups checked at install time). Pass `null` to post no
+// settings_groups at all — the "nothing granted" / "keep as is" case.
+async function assignScene(
+  frameId: string,
+  sceneId: string,
+  settingsGroups: string[] | null = ["unsplash", "openAI"],
+) {
   const response = await assignFrameScenes(
     postJson(
       `/api/frames/${frameId}/scenes`,
-      { scenes: [{ scene_id: sceneId }] },
+      {
+        scenes: [
+          {
+            scene_id: sceneId,
+            ...(settingsGroups ? { settings_groups: settingsGroups } : {}),
+          },
+        ],
+      },
       { origin: baseUrl },
     ),
     routeParams(frameId),
   );
   expect(response.status).toBe(200);
+  return (await response.json()) as {
+    granted_settings_groups: Record<string, string[]>;
+  };
 }
 
 async function saveSettings(settings: Record<string, unknown>) {
@@ -260,6 +291,216 @@ describe("service-settings delivery to a cloud-managed frame", () => {
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: unsplashKey } },
     });
+  });
+
+  it("serves nothing for a scene the owner did not grant, even though it declares a group", async () => {
+    const frame = await activeFrame();
+    const scene = await createStoreScene(frame.accountId, "data/unsplash");
+    await saveSettings({ unsplash: { accessKey: unsplashKey } });
+
+    // No settings_groups on the install: the scene's own declaration is a
+    // request, not a grant.
+    const assigned = await assignScene(frame.frame_id, scene.id, null);
+    expect(assigned.granted_settings_groups).toEqual({ [scene.id]: [] });
+    const [row] = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    expect(row?.declaredSettingsGroups).toEqual(["unsplash"]);
+    expect(row?.grantedSettingsGroups).toEqual([]);
+
+    const response = await pull(frame.frame_id, frame.access_token);
+    expect(response.status).toBe(200);
+    // Not even the group NAME leaks: the device would otherwise treat it as
+    // cloud-owned and the UI would say "needs an Unsplash key".
+    await expect(response.json()).resolves.toEqual({ groups: [], settings: {} });
+
+    // The scene list tells the owner what the scene asked for vs got.
+    const listed = await listFrameScenes(
+      getRequest(`/api/frames/${frame.frame_id}/scenes`),
+      routeParams(frame.frame_id),
+    );
+    const { scenes } = (await listed.json()) as {
+      scenes: { declared_settings_groups: string[]; granted_settings_groups: string[] }[];
+    };
+    expect(scenes[0]?.declared_settings_groups).toEqual(["unsplash"]);
+    expect(scenes[0]?.granted_settings_groups).toEqual([]);
+
+    // Granting it on a later save — the same POST with the list — serves it.
+    await assignScene(frame.frame_id, scene.id, ["unsplash"]);
+    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+      groups: ["unsplash"],
+      settings: { unsplash: { accessKey: unsplashKey } },
+    });
+
+    // A grant can never outrun the declaration: openAI is not asked for.
+    const widened = await assignScene(frame.frame_id, scene.id, ["unsplash", "openAI"]);
+    expect(widened.granted_settings_groups).toEqual({ [scene.id]: ["unsplash"] });
+  });
+
+  it("keeps a grant on a save that omits settings_groups and revokes it on an explicit empty list", async () => {
+    const frame = await activeFrame();
+    const scene = await createStoreScene(frame.accountId, "data/unsplash");
+    await saveSettings({ unsplash: { accessKey: unsplashKey } });
+    await assignScene(frame.frame_id, scene.id, ["unsplash"]);
+
+    // Reordering, adding a scene: callers that do not touch the grant must
+    // not lose it.
+    const kept = await assignScene(frame.frame_id, scene.id, null);
+    expect(kept.granted_settings_groups).toEqual({ [scene.id]: ["unsplash"] });
+    expect((await (await pull(frame.frame_id, frame.access_token)).json()).groups).toEqual(["unsplash"]);
+
+    const revoked = await assignScene(frame.frame_id, scene.id, []);
+    expect(revoked.granted_settings_groups).toEqual({ [scene.id]: [] });
+    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+      groups: [],
+      settings: {},
+    });
+  });
+
+  it("serves a pre-grant assignment everything it declares until the owner saves a list", async () => {
+    const frame = await activeFrame();
+    const scene = await createStoreScene(frame.accountId, "data/unsplash");
+    await saveSettings({ unsplash: { accessKey: unsplashKey } });
+    await assignScene(frame.frame_id, scene.id, ["unsplash"]);
+    // Simulate a row from before migration 0048: no grant recorded, no
+    // declaration computed, and the frame column never computed either.
+    await db
+      .update(frameSceneAssignments)
+      .set({ declaredSettingsGroups: null, grantedSettingsGroups: null })
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    await db
+      .update(frames)
+      .set({ serviceSettingGroups: null })
+      .where(eq(frames.id, frame.frame_id));
+
+    // The backfill computes the declaration and reads the NULL grant as
+    // "all of it" — no frame that renders today goes dark overnight.
+    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+      groups: ["unsplash"],
+      settings: { unsplash: { accessKey: unsplashKey } },
+    });
+    const [row] = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    expect(row?.declaredSettingsGroups).toEqual(["unsplash"]);
+    expect(row?.grantedSettingsGroups).toBeNull();
+
+    // The list reports the legacy row as granted = declared, and a save
+    // that leaves the grant alone keeps it NULL (still served)...
+    const listed = await listFrameScenes(
+      getRequest(`/api/frames/${frame.frame_id}/scenes`),
+      routeParams(frame.frame_id),
+    );
+    const { scenes } = (await listed.json()) as {
+      scenes: { granted_settings_groups: string[] }[];
+    };
+    expect(scenes[0]?.granted_settings_groups).toEqual(["unsplash"]);
+    await assignScene(frame.frame_id, scene.id, null);
+    const [untouched] = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    expect(untouched?.grantedSettingsGroups).toBeNull();
+    expect((await (await pull(frame.frame_id, frame.access_token)).json()).groups).toEqual(["unsplash"]);
+
+    // ...while a save that posts the list makes it explicit.
+    await assignScene(frame.frame_id, scene.id, ["unsplash"]);
+    const [explicit] = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    expect(explicit?.grantedSettingsGroups).toEqual(["unsplash"]);
+  });
+
+  it("does not widen a grant when an unpinned assignment moves to a version that declares more", async () => {
+    const frame = await activeFrame();
+    const scene = await createStoreScene(frame.accountId, "data/unsplash");
+    await saveSettings({
+      openAI: { apiKey: openAiKey },
+      unsplash: { accessKey: unsplashKey },
+    });
+    await assignScene(frame.frame_id, scene.id, ["unsplash"]);
+
+    // v2 adds an OpenAI app. The assignment tracks the latest version.
+    await db.insert(storeSceneVersions).values({
+      content: sceneZipWithKeywords(scene.id, ["data/unsplash", "data/openaiImage"]),
+      contentType: "application/zip",
+      riskFlags: [],
+      sceneId: scene.id,
+      sha256: "test-v2",
+      sizeBytes: 1000,
+      version: 2,
+    });
+    await db
+      .update(storeScenes)
+      .set({ latestVersion: 2 })
+      .where(eq(storeScenes.id, scene.id));
+
+    // Activating re-pushes the current assignments at their resolved
+    // versions (redeployAssignedScenesToFrame) and refreshes what they
+    // declare — but the owner never granted openAI.
+    const activate = await activateScene(
+      postJson(
+        `/api/frames/${frame.frame_id}/event/setCurrentScene`,
+        { sceneId: scene.id },
+        { origin: baseUrl },
+      ),
+      { params: Promise.resolve({ eventName: "setCurrentScene", frameId: frame.frame_id }) },
+    );
+    expect(activate.status).toBe(200);
+    const [row] = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    expect(row?.declaredSettingsGroups).toEqual(["openAI", "unsplash"]);
+    expect(row?.grantedSettingsGroups).toEqual(["unsplash"]);
+    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+      groups: ["unsplash"],
+      settings: { unsplash: { accessKey: unsplashKey } },
+    });
+  });
+
+  it("reports what a store install asked for and got, so the owner can be told what it still needs", async () => {
+    const frame = await activeFrame();
+    const scene = await createStoreScene(frame.accountId, "data/unsplash");
+    const installed = await addFrameScene(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes/add`,
+        { scene_id: scene.id },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    expect(installed.status).toBe(200);
+    await expect(installed.json()).resolves.toMatchObject({
+      declared_settings_groups: ["unsplash"],
+      granted_settings_groups: [],
+    });
+    // Re-installing with a grant (the store page's ticked checkbox) grants;
+    // a malformed list is refused rather than dropped.
+    const granted = await addFrameScene(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes/add`,
+        { scene_id: scene.id, settings_groups: ["unsplash"] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    await expect(granted.json()).resolves.toMatchObject({
+      already_assigned: true,
+      granted_settings_groups: ["unsplash"],
+    });
+    const malformed = await addFrameScene(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes/add`,
+        { scene_id: scene.id, settings_groups: "unsplash" },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    expect(malformed.status).toBe(400);
   });
 
   it("answers 304 to a matching If-None-Match and 200 once the key rotates", async () => {

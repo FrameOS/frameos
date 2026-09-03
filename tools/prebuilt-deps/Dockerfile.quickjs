@@ -10,8 +10,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ARG QUICKJS_VERSION=2026-06-04
-ARG QUICKJS_SHA256=b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a
+# quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts),
+# mirrored at archive.frameos.net/source/vendor/.
+ARG QUICKJS_VERSION=2026-06-04-quickts.1
+ARG QUICKJS_SHA256=94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f
+ARG QUICKJS_SOURCE_BASE_URL=https://archive.frameos.net/source/vendor
 
 # Optional standalone cross toolchain (e.g. Bootlin armv6-eabihf for the
 # Raspberry Pi Zero W, which has no matching container platform). When set,
@@ -55,7 +58,7 @@ RUN mkdir -p /artifacts
 
 RUN set -euxo pipefail \
     && export PATH="/opt/cross/bin:${PATH}" \
-    && curl -fsSL -o quickjs.tar.xz "https://bellard.org/quickjs/quickjs-${QUICKJS_VERSION}.tar.xz" \
+    && curl -fsSL -o quickjs.tar.xz "${QUICKJS_SOURCE_BASE_URL}/quickjs-${QUICKJS_VERSION}.tar.xz" \
     && echo "${QUICKJS_SHA256}  quickjs.tar.xz" | sha256sum -c - \
     && tar -xf quickjs.tar.xz \
     && rm quickjs.tar.xz \
@@ -73,6 +76,7 @@ RUN set -euxo pipefail \
     && mkdir -p /artifacts/lib /artifacts/include/quickjs \
     && cp libquickjs.a /artifacts/lib/ \
     && cp quickjs.h quickjs-libc.h /artifacts/include/quickjs/ \
+    && cp quickts.h quickts_enum.h quickts_jsx.h /artifacts/include/quickjs/ \
     && cd /build \
     && rm -rf quickjs-${QUICKJS_VERSION}
 

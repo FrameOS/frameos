@@ -1,8 +1,10 @@
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
+  accountApiTokens,
   accountIdentities,
   accounts,
+  auditEvents,
   createDb,
   emailVerificationTokens,
   googleProviderKey,
@@ -20,9 +22,16 @@ import { POST as logout } from "../../../app/api/auth/logout/route";
 import { POST as resetConfirm } from "../../../app/api/auth/reset/confirm/route";
 import { POST as resetRequest } from "../../../app/api/auth/reset/request/route";
 import { POST as signup } from "../../../app/api/auth/signup/route";
+import { POST as verifyEmail } from "../../../app/api/auth/verify-email/route";
+import { POST as googleLink } from "../../../app/api/auth/google/link/route";
 import LoginPage from "../../../app/login/page";
 import { confirmEmailVerification } from "../../lib/email-verification";
 import { resolveGoogleSignIn } from "../../lib/google-account";
+import {
+  createPendingGoogleLinkToken,
+  pendingGoogleLinkCookieName,
+  readPendingGoogleLinkToken,
+} from "../../lib/google-link";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSecretToken, hashSecret } from "../../lib/secrets";
 import {
@@ -355,6 +364,42 @@ describe("email verification", () => {
     expect(after?.emailVerified).toBe(true);
   });
 
+  it("consumes the verification token through the POST route only", async () => {
+    const { accountId } = await signUpUserUnverified();
+    const rawToken = createSecretToken("frev", 32);
+    await db.insert(emailVerificationTokens).values({
+      accountId,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      tokenHash: hashSecret(rawToken),
+    });
+
+    // A cross-site POST (a link scanner, a forged form) has no app Origin.
+    const noOrigin = await verifyEmail(
+      new NextRequest(new URL("/api/auth/verify-email", baseUrl), {
+        body: JSON.stringify({ token: rawToken }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+    expect(noOrigin.status).toBe(403);
+
+    const verified = await verifyEmail(
+      postJson("/api/auth/verify-email", { token: rawToken }),
+    );
+    expect(verified.status).toBe(200);
+    const [identity] = await db
+      .select({ emailVerified: accountIdentities.emailVerified })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.accountId, accountId));
+    expect(identity?.emailVerified).toBe(true);
+
+    const replay = await verifyEmail(
+      postJson("/api/auth/verify-email", { token: rawToken }),
+    );
+    expect(replay.status).toBe(400);
+    expect(await replay.json()).toMatchObject({ error: "invalid_token" });
+  });
+
   it("rejects expired verification tokens", async () => {
     const { accountId } = await signUpUser();
     const rawToken = createSecretToken("frev", 32);
@@ -389,6 +434,13 @@ describe("password reset", () => {
     // so it must also verify the identity or the account stays locked out.
     const { accountId, email } = await signUpUserUnverified();
     await establishSession(accountId, email);
+    // A token minted before the reset is the foothold a reset must remove.
+    await db.insert(accountApiTokens).values({
+      accountId,
+      name: "script",
+      tokenHash: hashSecret("fc_api_before_reset"),
+      tokenHint: "fc_api_b",
+    });
 
     const rawToken = createSecretToken("frpr", 32);
     await db.insert(passwordResetTokens).values({
@@ -419,6 +471,12 @@ describe("password reset", () => {
       .where(eq(sessions.accountId, accountId));
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((row) => row.revokedAt !== null)).toBe(true);
+    const tokens = await db
+      .select({ revokedAt: accountApiTokens.revokedAt })
+      .from(accountApiTokens)
+      .where(eq(accountApiTokens.accountId, accountId));
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]?.revokedAt).not.toBeNull();
 
     const replay = await resetConfirm(
       postJson("/api/auth/reset/confirm", {
@@ -437,6 +495,64 @@ describe("password reset", () => {
       postJson("/api/auth/login", { email, password: "a brand new password" }),
     );
     expect(newPassword.status).toBe(200);
+  });
+
+  it("retires the account's other outstanding reset links on a successful reset", async () => {
+    const { accountId } = await signUpUser();
+    const first = createSecretToken("frpr", 32);
+    const second = createSecretToken("frpr", 32);
+    await db.insert(passwordResetTokens).values([
+      {
+        accountId,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        tokenHash: hashSecret(first),
+      },
+      {
+        accountId,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        tokenHash: hashSecret(second),
+      },
+    ]);
+    // Another account's live link is not the reset's business.
+    const bystander = await signUpUser();
+    const bystanderToken = createSecretToken("frpr", 32);
+    await db.insert(passwordResetTokens).values({
+      accountId: bystander.accountId,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      tokenHash: hashSecret(bystanderToken),
+    });
+
+    const confirm = await resetConfirm(
+      postJson("/api/auth/reset/confirm", {
+        password: "a brand new password",
+        token: first,
+      }),
+    );
+    expect(confirm.status).toBe(200);
+
+    const sibling = await resetConfirm(
+      postJson("/api/auth/reset/confirm", {
+        password: "an attacker's password",
+        token: second,
+      }),
+    );
+    expect(sibling.status).toBe(400);
+    expect(await readJson(sibling)).toMatchObject({ error: "invalid_token" });
+
+    const rows = await db
+      .select({ usedAt: passwordResetTokens.usedAt })
+      .from(passwordResetTokens)
+      .where(eq(passwordResetTokens.accountId, accountId));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.usedAt !== null)).toBe(true);
+
+    const other = await resetConfirm(
+      postJson("/api/auth/reset/confirm", {
+        password: "the bystander's new password",
+        token: bystanderToken,
+      }),
+    );
+    expect(other.status).toBe(200);
   });
 
   it("rejects expired tokens", async () => {
@@ -461,25 +577,149 @@ describe("password reset", () => {
 describe("google sign-in merging", () => {
   const googleIssuer = "https://accounts.google.com";
 
-  it("links google to a verified password account automatically", async () => {
+  // The pending-link cookie the Google callback would have set, built from
+  // the same claims; the link route is exercised with it directly.
+  async function linkRequest(
+    pending: Parameters<typeof createPendingGoogleLinkToken>[0] | undefined,
+    body: Record<string, unknown>,
+  ) {
+    const cookie = pending ? await createPendingGoogleLinkToken(pending) : undefined;
+    return new NextRequest(new URL("/api/auth/google/link", baseUrl), {
+      body: JSON.stringify(body),
+      headers: {
+        "content-type": "application/json",
+        origin: baseUrl,
+        ...(cookie ? { cookie: `${pendingGoogleLinkCookieName}=${cookie}` } : {}),
+      },
+      method: "POST",
+    });
+  }
+
+  it("asks for the password before linking google to a verified password account", async () => {
     const { accountId, email } = await signUpUser();
+    const sub = `google-sub-${email}`;
 
     const resolution = await resolveGoogleSignIn(db, googleIssuer, {
       email,
       email_verified: true,
-      sub: `google-sub-${email}`,
+      sub,
     });
-    // A link into an existing account is not a new signup: created is false.
-    expect(resolution).toEqual({ accountId, created: false, status: "ok" });
+    expect(resolution).toEqual({ accountId, email, status: "requires_link_confirmation" });
 
-    const identities = await db
+    // Google's word alone writes nothing.
+    const before = await db
       .select({ providerKey: accountIdentities.providerKey })
       .from(accountIdentities)
       .where(eq(accountIdentities.accountId, accountId));
-    expect(identities.map((row) => row.providerKey).sort()).toEqual([
-      "google",
-      "password",
-    ]);
+    expect(before.map((row) => row.providerKey)).toEqual(["password"]);
+
+    const pending = {
+      accountId,
+      email,
+      name: "Google Name",
+      providerIssuer: googleIssuer,
+      providerSubject: sub,
+      returnTo: "/frames",
+    };
+    // The cookie round-trips its claims and a fresh jti.
+    const token = await createPendingGoogleLinkToken(pending);
+    expect(await readPendingGoogleLinkToken(token)).toMatchObject(pending);
+    expect(await readPendingGoogleLinkToken(`${token}x`)).toBeUndefined();
+
+    // A session that predates the link, to be evicted by it.
+    const staleToken = await createSession(db, {
+      accountId,
+      email,
+      providerIssuer: passwordProviderIssuer,
+      providerSubject: email,
+    });
+
+    const wrong = await googleLink(await linkRequest(pending, { password: "not it" }));
+    expect(wrong.status).toBe(403);
+    expect(await readJson(wrong)).toMatchObject({ error: "invalid_password" });
+    const stillOne = await db
+      .select({ providerKey: accountIdentities.providerKey })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.accountId, accountId));
+    expect(stillOne.map((row) => row.providerKey)).toEqual(["password"]);
+
+    const linked = await googleLink(
+      await linkRequest(pending, { password: "a long enough password" }),
+    );
+    expect(linked.status).toBe(200);
+    expect(await readJson(linked)).toMatchObject({ ok: true, redirect: "/frames" });
+    const setCookies = linked.headers.getSetCookie().join("\n");
+    expect(setCookies).toContain(`${sessionCookieName}=`);
+    expect(setCookies).toMatch(new RegExp(`${pendingGoogleLinkCookieName}=;`));
+
+    const identities = await db
+      .select({ providerKey: accountIdentities.providerKey, emailVerified: accountIdentities.emailVerified })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.accountId, accountId));
+    expect(identities.map((row) => row.providerKey).sort()).toEqual(["google", "password"]);
+    expect(identities.every((row) => row.emailVerified)).toBe(true);
+
+    // The old session is gone; the one minted by the link is live.
+    cookieJar.set(sessionCookieName, staleToken);
+    expect(await readSession()).toBeUndefined();
+    const liveSessions = await db
+      .select({ revokedAt: sessions.revokedAt })
+      .from(sessions)
+      .where(eq(sessions.accountId, accountId));
+    expect(liveSessions.filter((row) => row.revokedAt === null)).toHaveLength(1);
+
+    const events = await db
+      .select({ eventType: auditEvents.eventType })
+      .from(auditEvents)
+      .where(eq(auditEvents.accountId, accountId));
+    const types = events.map((row) => row.eventType);
+    expect(types).toContain("account.google_link_failed");
+    expect(types).toContain("account.google_linked");
+    expect(types).toContain("account.signed_in");
+
+    // From here on the Google identity signs straight in.
+    const again = await resolveGoogleSignIn(db, googleIssuer, {
+      email,
+      email_verified: true,
+      sub,
+    });
+    expect(again).toEqual({ accountId, created: false, status: "ok" });
+  });
+
+  it("refuses to link without a pending cookie, and when the google identity moved elsewhere", async () => {
+    const { accountId, email } = await signUpUser();
+    const noCookie = await googleLink(
+      await linkRequest(undefined, { password: "a long enough password" }),
+    );
+    expect(noCookie.status).toBe(400);
+    expect(await readJson(noCookie)).toMatchObject({ error: "link_expired" });
+
+    // The same Google subject got attached to another account in between.
+    const other = await upsertAccountFromIdentity(db, {
+      email: "other-google@example.com",
+      emailVerified: true,
+      providerIssuer: googleIssuer,
+      providerKey: googleProviderKey,
+      providerSubject: "google-sub-moved",
+    });
+    const conflict = await googleLink(
+      await linkRequest(
+        {
+          accountId,
+          email,
+          providerIssuer: googleIssuer,
+          providerSubject: "google-sub-moved",
+        },
+        { password: "a long enough password" },
+      ),
+    );
+    expect(conflict.status).toBe(409);
+    expect(await readJson(conflict)).toMatchObject({ error: "link_conflict" });
+    const identities = await db
+      .select({ accountId: accountIdentities.accountId })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.providerSubject, "google-sub-moved"));
+    expect(identities).toEqual([{ accountId: other.accountId }]);
   });
 
   it("requires a password reset before linking to an unverified password account", async () => {
@@ -500,7 +740,8 @@ describe("google sign-in merging", () => {
       .where(eq(accountIdentities.accountId, accountId));
     expect(identities.map((row) => row.providerKey)).toEqual(["password"]);
 
-    // After the reset flow verifies the email, the same google sign-in links.
+    // After the reset flow verifies the email, the same google sign-in
+    // proceeds to the password confirmation that links it.
     await db
       .update(accountIdentities)
       .set({ emailVerified: true })
@@ -510,7 +751,7 @@ describe("google sign-in merging", () => {
       email_verified: true,
       sub,
     });
-    expect(linked).toEqual({ accountId, created: false, status: "ok" });
+    expect(linked).toEqual({ accountId, email, status: "requires_link_confirmation" });
   });
 
   it("never links when google did not verify the email", async () => {

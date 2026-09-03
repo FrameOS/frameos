@@ -24,9 +24,9 @@ import {
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
   isValidEd25519PublicKey,
-  maxFramesPerAccount,
   redeemClaimToken,
 } from "../../../../src/lib/frames";
+import { accountLimits } from "../../../../src/lib/usage";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken, hashSecret } from "../../../../src/lib/secrets";
 import { reportError } from "../../../../src/lib/log";
@@ -186,7 +186,11 @@ interface EnrollInput {
 // backends/rotate-token uses).
 const rotationGraceWindowSeconds = 5 * 60;
 
-class QuotaExceededError extends Error {}
+class QuotaExceededError extends Error {
+  constructor(readonly maxFrames: number) {
+    super("frame_quota_exceeded");
+  }
+}
 
 async function enrollWithClaimToken(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
@@ -245,11 +249,12 @@ async function enrollWithClaimToken(
         return undefined;
       }
 
-      if (
-        (await countFramesForAccount(tx, token.accountId)) >=
-        maxFramesPerAccount
-      ) {
-        throw new QuotaExceededError();
+      // The plan's frame allowance, not the deployment constant: every
+      // quota reads from accountLimits so the display and the refusal
+      // cannot disagree (§9.2 item 16).
+      const maxFrames = (await accountLimits(tx, token.accountId)).frames;
+      if ((await countFramesForAccount(tx, token.accountId)) >= maxFrames) {
+        throw new QuotaExceededError(maxFrames);
       }
 
       // The claim token's name outranks the device's: the owner typed it at
@@ -298,9 +303,14 @@ async function enrollWithClaimToken(
           // card enrolls many frames, and the token's own frame_id records
           // only the last one, so the intent has to ride the frame row.
           sceneSourceFrameId: token.sceneSourceFrameId,
-          // redeemClaimToken returned the post-spend row, so use_count 1 is
-          // the token's first enrollment.
-          status: token.useCount === 1 ? "active" : "pending",
+          // Only a SINGLE-USE token's enrollment is born active: minting it
+          // was the owner's deliberate act for one device. A multi-use token
+          // is baked into an SD image that may be copied or leaked, and its
+          // first redeemer is whoever booted a card first — not necessarily
+          // the owner. Every card off such an image lands pending, and the
+          // owner's Confirm click is what grants the provisioning scenes and
+          // opens the service-settings pull (both gate on status = active).
+          status: token.maxUses === 1 ? "active" : "pending",
         })
         .returning();
       if (!insertedFrame) {
@@ -320,7 +330,7 @@ async function enrollWithClaimToken(
   } catch (error) {
     if (error instanceof QuotaExceededError) {
       return jsonError("frame_quota_exceeded", 403, {
-        max_frames: maxFramesPerAccount,
+        max_frames: error.maxFrames,
       });
     }
     throw error;
@@ -358,7 +368,8 @@ async function enrollWithClaimToken(
 
   // A single-use enrollment is born active, so the provisioning scene copy
   // ("start with the scenes from <that frame>") runs here instead of at the
-  // Confirm click. The source rides the token the owner minted — the
+  // Confirm click. Multi-use enrollments are pending and get theirs at
+  // /confirm. The source rides the token the owner minted — the
   // unauthenticated caller chooses nothing — and the ownership re-check plus
   // the deploy gates live inside applyProvisioningScenes.
   if (result.frame.status === "active") {
@@ -640,12 +651,10 @@ async function enrollLinkedFrame(
     });
   }
 
-  if (
-    (await countFramesForAccount(db, linkedClient.accountId)) >=
-    maxFramesPerAccount
-  ) {
+  const maxFrames = (await accountLimits(db, linkedClient.accountId)).frames;
+  if ((await countFramesForAccount(db, linkedClient.accountId)) >= maxFrames) {
     return jsonError("frame_quota_exceeded", 403, {
-      max_frames: maxFramesPerAccount,
+      max_frames: maxFrames,
     });
   }
 

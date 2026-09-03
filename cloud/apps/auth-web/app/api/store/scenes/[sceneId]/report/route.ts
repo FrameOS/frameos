@@ -6,10 +6,11 @@ import { csrfResponse } from "../../../../../../src/lib/csrf";
 import {
   jsonError,
   parseOptionalString,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import { notifyDiscord } from "../../../../../../src/lib/discord";
+import { capturePostHogEvent } from "../../../../../../src/lib/posthog-capture";
 import {
   getAccountBaseUrl,
   getScenesBaseUrl,
@@ -24,6 +25,11 @@ import {
   maxReportsPerDay,
 } from "../../../../../../src/lib/store";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
+
+// A reason string.
+const maxReportBodyBytes = 16 * 1024;
+
+const storeSceneReportedEvent = "store scene reported";
 
 export const runtime = "nodejs";
 
@@ -93,7 +99,11 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     return jsonError("scene_not_found", 404);
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxReportBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const reason = parseOptionalString(body.reason)?.slice(
     0,
     maxReportReasonLength,
@@ -128,17 +138,31 @@ async function handlePost(request: NextRequest, context: RouteContext) {
   });
 
   // Heads-up to the moderation channel; the report itself already succeeded.
+  // The PostHog event is the sink of record (a Discord webhook hangs off it
+  // there); the direct Discord post stays until one real report has arrived
+  // through PostHog (docs/todo.md).
   const sceneUrl = new URL(`/s/${scene.slug}`, getScenesBaseUrl()).toString();
   const reportsUrl = new URL("/admin/reports", getAccountBaseUrl()).toString();
-  await notifyDiscord(
-    [
-      `🚩 **Scene reported**: ${scene.name}`,
-      `Scene: <${sceneUrl}>`,
-      `Reporter: ${session.email ?? session.accountId}`,
-      `Reason: ${reason.slice(0, 500)}`,
-      `Review: <${reportsUrl}>`,
-    ].join("\n"),
-  );
+  await Promise.all([
+    capturePostHogEvent(storeSceneReportedEvent, session.accountId, {
+      reason: reason.slice(0, 500),
+      report_id: created.id,
+      reporter_email: session.email,
+      reports_url: reportsUrl,
+      scene_id: scene.id,
+      scene_name: scene.name,
+      scene_url: sceneUrl,
+    }),
+    notifyDiscord(
+      [
+        `🚩 **Scene reported**: ${scene.name}`,
+        `Scene: <${sceneUrl}>`,
+        `Reporter: ${session.email ?? session.accountId}`,
+        `Reason: ${reason.slice(0, 500)}`,
+        `Review: <${reportsUrl}>`,
+      ].join("\n"),
+    ),
+  ]);
 
   return NextResponse.json({ status: "reported" });
 }

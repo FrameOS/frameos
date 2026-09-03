@@ -1,7 +1,10 @@
 # Prebuilt dependency builder
 
 These scripts produce Nim and QuickJS builds for the Raspberry Pi OS and
-Ubuntu LTS variants we care about. They run each build inside a container
+Ubuntu LTS variants we care about. The QuickJS component is
+[quickts](https://github.com/FrameOS/quickts) -- upstream QuickJS plus native
+TypeScript/JSX parsing -- fetched from the source mirror at
+`archive.frameos.net/source/vendor/` (put there with `r2_put_source.py`). They run each build inside a container
 matching one of the following releases and architectures:
 
 - Raspberry Pi OS (Debian **buster**, **bullseye**, **bookworm**, **trixie** preview)
@@ -41,10 +44,10 @@ directories so you can keep several revisions side-by-side, e.g.:
 metadata.json
 nim-2.2.4/bin/*
 nim-2.2.4/lib/*
-quickjs-2026-06-04/include/quickjs/*.h
-quickjs-2026-06-04/lib/libquickjs.a
+quickjs-2026-06-04-quickts.1/include/quickjs/*.h
+quickjs-2026-06-04-quickts.1/lib/libquickjs.a
 nim-2.2.4/.build-info
-quickjs-2026-06-04/.build-info
+quickjs-2026-06-04-quickts.1/.build-info
 ```
 
 You can upload the entire folder as a tarball to your cache server.
@@ -66,7 +69,7 @@ QuickJS from source when no published component matches.
 Override the versions with environment variables when invoking the script:
 
 ```bash
-NIM_VERSION=2.2.4 QUICKJS_VERSION=2026-06-04 ./tools/prebuilt-deps/build.sh
+NIM_VERSION=2.2.4 QUICKJS_VERSION=2026-06-04-quickts.1 ./tools/prebuilt-deps/build.sh
 ```
 
 ## Cloudflare R2 sync helper
@@ -75,7 +78,7 @@ Use `tools/prebuilt-deps/r2_sync.py` to mirror the build outputs to the
 `frameos-archive` Cloudflare R2 bucket. The helper uses the same target
 matrix as `build.sh`, bundles each component into a versioned `tar.gz`
 archive, and stores it under keys like
-`prebuilt-deps/<target>/quickjs-2026-06-04.tar.gz`. A manifest file
+`prebuilt-deps/<target>/quickjs-2026-06-04-quickts.1.tar.gz`. A manifest file
 (`prebuilt-deps/manifest.json`) keeps track of the current build for each
 target so the scripts can discover and download the right artifacts
 automatically. Older archives remain in R2 under their versioned object keys,

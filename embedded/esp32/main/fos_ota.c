@@ -1,6 +1,10 @@
 #include "fos_ota.h"
 
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -12,12 +16,13 @@
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
-#include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "nvs.h"
+#include "sdkconfig.h"
 
 #include "mbedtls/base64.h"
 #include "monocypher.h"
@@ -31,17 +36,20 @@
 #include "frameos_nim.h"
 
 static const char *TAG = "fos_ota";
-#define FOS_OTA_MAX_ATTEMPTS 64
-#define FOS_OTA_HTTP_TIMEOUT_MS 15000
-#define FOS_OTA_RECONNECT_TIMEOUT_MS 30000
-#define FOS_OTA_REQUEST_SIZE (512 * 1024)
-#define FOS_OTA_RETRY_DELAY_MS 1000
-#define FOS_OTA_WIFI_SETTLE_MS 3000
 #define FOS_OTA_BOOT_REQUEST_KEY "ota_req"
 #define FOS_OTA_REBOOT_DELAY_MS 1000
 #define FOS_OTA_REBOOT_TASK_STACK_SIZE 2048
+#define FOS_OTA_MANIFEST_MAX (8 * 1024)
+#define FOS_OTA_CHUNK (8 * 1024)
+/* Transient download failures (a dropped socket, a short read) are retried
+ * this many times within one run, after the Wi-Fi is back; a signature or
+ * image-validation failure is final for the run. Across runs the RTC give-up
+ * counter below stops a frame redialing an image it keeps failing. */
+#define FOS_OTA_DOWNLOAD_ATTEMPTS 3
+#define FOS_OTA_RETRY_DELAY_MS 3000
+#define FOS_OTA_WIFI_RECONNECT_TIMEOUT_MS 30000
+#define FOS_OTA_AUTH_LEN (FOS_CLOUD_TOKEN_LEN + 16)
 
-static char s_auth_header[FOS_STR_LEN + 16];
 static StaticSemaphore_t s_ota_lock_storage;
 static SemaphoreHandle_t s_ota_lock = NULL;
 static portMUX_TYPE s_ota_lock_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -49,11 +57,40 @@ static portMUX_TYPE s_ota_request_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_ota_task_handle = NULL;
 static volatile bool s_ota_busy = false;
 static volatile bool s_ota_reboot_scheduled = false;
+static volatile bool s_cloud_ota_running = false;
 
-typedef struct {
-    char sha[80];
-    char elf_sha[80];
-} ota_manifest_t;
+/* ----------------------------------------------------------- platform
+ * The release publishes one signed app image per chip × flash layout
+ * (ci_build_image.sh, .github/workflows/docker-publish-multi.yml). The
+ * 8 MB S3 and 4 MB C3 layouts ARE the "generic" pair; the others carry the
+ * layout in the name. Sized from what this image was built with, which is
+ * also the partition table the merged image put on the board. */
+const char *fos_ota_platform(void)
+{
+#if CONFIG_IDF_TARGET_ESP32S3
+#if CONFIG_ESPTOOLPY_FLASHSIZE_4MB
+    return "esp32-s3-4mb";
+#elif CONFIG_ESPTOOLPY_FLASHSIZE_16MB
+    return "esp32-s3-16mb";
+#elif CONFIG_ESPTOOLPY_FLASHSIZE_32MB
+    return "esp32-s3-32mb";
+#else
+    return "esp32-s3-generic";
+#endif
+#else
+#if CONFIG_ESPTOOLPY_FLASHSIZE_8MB
+    return "esp32-c3-8mb";
+#elif CONFIG_ESPTOOLPY_FLASHSIZE_16MB
+    return "esp32-c3-16mb";
+#elif CONFIG_ESPTOOLPY_FLASHSIZE_32MB
+    return "esp32-c3-32mb";
+#else
+    return "esp32-c3-generic";
+#endif
+#endif
+}
+
+/* ----------------------------------------------------------- plumbing */
 
 static const char *wifi_state_name(fos_wifi_state_t state)
 {
@@ -118,74 +155,6 @@ static SemaphoreHandle_t ota_lock(void)
     return s_ota_lock;
 }
 
-static bool elf_sha_matches_manifest(const char *running_elf_sha, const char *manifest_elf_sha)
-{
-    size_t running_len = strlen(running_elf_sha);
-    if (running_len < 8 || running_len > strlen(manifest_elf_sha)) return false;
-    return strncmp(running_elf_sha, manifest_elf_sha, running_len) == 0;
-}
-
-static esp_err_t ota_http_init_cb(esp_http_client_handle_t client)
-{
-    return esp_http_client_set_header(client, "Authorization", s_auth_header);
-}
-
-static esp_err_t perform_ota_download(const esp_https_ota_config_t *ota_config,
-                                      int attempt, int max_attempts,
-                                      size_t *resume_bytes)
-{
-    esp_https_ota_handle_t handle = NULL;
-    ESP_LOGW(TAG, "OTA attempt %d/%d begin: resume=%u internal=%u psram=%u wifi=%s",
-             attempt, max_attempts,
-             (unsigned)(resume_bytes ? *resume_bytes : 0),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-             wifi_state_name(fos_wifi_state()));
-
-    esp_err_t err = esp_https_ota_begin(ota_config, &handle);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "OTA begin failed on attempt %d/%d: %s",
-                 attempt, max_attempts, esp_err_to_name(err));
-        return err;
-    }
-
-    ESP_LOGW(TAG, "OTA download started: size=%d bytes",
-             esp_https_ota_get_image_size(handle));
-    int last_progress_bucket = resume_bytes ? (int)(*resume_bytes / (256 * 1024)) : -1;
-    while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
-        int read = esp_https_ota_get_image_len_read(handle);
-        if (resume_bytes && read > 0 && (size_t)read > *resume_bytes) {
-            *resume_bytes = (size_t)read;
-        }
-        int bucket = read / (256 * 1024);
-        if (bucket != last_progress_bucket && read > 0) {
-            last_progress_bucket = bucket;
-            ESP_LOGW(TAG, "OTA download progress: %d/%d bytes",
-                     read, esp_https_ota_get_image_size(handle));
-        }
-    }
-    int read = esp_https_ota_get_image_len_read(handle);
-    if (resume_bytes && read > 0 && (size_t)read > *resume_bytes) {
-        *resume_bytes = (size_t)read;
-    }
-    if (err != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
-        ESP_LOGW(TAG, "OTA download failed on attempt %d/%d at %u bytes: %s",
-                 attempt, max_attempts, (unsigned)(resume_bytes ? *resume_bytes : 0),
-                 esp_err_to_name(err == ESP_OK ? ESP_FAIL : err));
-        esp_https_ota_abort(handle);
-        return err == ESP_OK ? ESP_FAIL : err;
-    }
-
-    ESP_LOGW(TAG, "OTA download complete: %d bytes",
-             esp_https_ota_get_image_len_read(handle));
-    err = esp_https_ota_finish(handle);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "OTA finish failed on attempt %d/%d: %s",
-                 attempt, max_attempts, esp_err_to_name(err));
-    }
-    return err;
-}
-
 void fos_ota_mark_boot_valid(void)
 {
     if (!ota_supported()) return;
@@ -199,92 +168,518 @@ void fos_ota_mark_boot_valid(void)
     }
 }
 
-/* sha256 of the last applied (or first seen) backend OTA artifact */
-static esp_err_t load_applied_sha(char *out, size_t out_len)
+/* ----------------------------------------------------------- the signed path
+ * docs/cloud-frames.md "Signed OTA": the control plane serves a device-authed
+ * manifest carrying a minisign signature (Ed25519 over BLAKE2b-512 of the
+ * image, tools/sign_firmware.py). The image streams to the inactive slot
+ * with incremental hashing; the boot partition switches ONLY after the
+ * signature verifies against the baked release key (fos_ota_pubkey.h).
+ * Rollback protection stays on top: the new image boots pending-verify and
+ * rolls back unless it reaches Wi-Fi. */
+
+/* Where one run pulls from. Both control planes fill one of these; nothing
+ * below knows which plane it serves beyond the log event name. */
+typedef struct {
+    const char *plane;                 /* "backend" | "cloud": the `ota:<plane>` log event */
+    char base_url[FOS_URL_LEN];        /* origin for a relative downloadUrl; the bearer goes here only */
+    char manifest_url[FOS_URL_LEN + 192];
+    char auth[FOS_OTA_AUTH_LEN];       /* "Bearer …" */
+    /* The self-hosted backend may well be plain http on the LAN — the frame
+     * already sends it the same bearer with every scene fetch, so an image
+     * download over that origin's transport refuses nothing new. The cloud
+     * path keeps the strict transport rule for every URL. */
+    bool trust_base_transport;
+} ota_source_t;
+
+/* Consecutive failures for one offered version, kept across deep sleeps and
+ * software resets (not a power cycle — unplugging is how a person says "try
+ * again"). A frame that fails the same image this many times in a row stops
+ * re-downloading it on every wake: a battery frame redialing a 3 MB image
+ * each cycle only to fail again is the expensive way to report one problem.
+ * Logged as status `gave-up` so the control plane shows why nothing happens;
+ * a newer release, or a power cycle, resets it. */
+#define FOS_OTA_MAX_FAILURES 3
+RTC_DATA_ATTR static char s_ota_failed_version[32];
+RTC_DATA_ATTR static uint8_t s_ota_failures;
+
+static void ota_note_failure(const char *version)
 {
-    nvs_handle_t nvs;
-    out[0] = '\0';
-    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return ESP_FAIL;
-    size_t len = out_len;
-    esp_err_t err = nvs_get_str(nvs, "ota_sha", out, &len);
-    nvs_close(nvs);
-    return err;
+    if (strncmp(s_ota_failed_version, version, sizeof(s_ota_failed_version)) != 0) {
+        strlcpy(s_ota_failed_version, version, sizeof(s_ota_failed_version));
+        s_ota_failures = 0;
+    }
+    if (s_ota_failures < 0xFF) s_ota_failures++;
 }
 
-static void store_applied_sha(const char *sha)
+static bool ota_gave_up(const char *version)
 {
-    nvs_handle_t nvs;
-    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
-    nvs_set_str(nvs, "ota_sha", sha);
-    nvs_commit(nvs);
-    nvs_close(nvs);
+    return strncmp(s_ota_failed_version, version, sizeof(s_ota_failed_version)) == 0 &&
+           s_ota_failures >= FOS_OTA_MAX_FAILURES;
 }
 
-/* GET the manifest; returns the app artifact hash and the built ELF hash. */
-static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *manifest)
+/* Parse the first signature line of a .minisig: base64(ED + keyid8 + sig64).
+ * Trusted-comment lines are ignored (the device trusts only the key). */
+static bool parse_minisig(const char *minisig, uint8_t sig_out[64])
 {
-    char url[FOS_URL_LEN + 96];
-    snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/ota/manifest",
-             config->backend_url, (unsigned long)config->frame_id);
-    ESP_LOGI(TAG, "checking OTA manifest: %s", url);
+    const char *line = minisig;
+    while (line != NULL && *line != '\0') {
+        while (*line == '\r' || *line == '\n' || *line == ' ') line++;
+        if (strncmp(line, "untrusted comment:", 18) == 0 ||
+            strncmp(line, "trusted comment:", 16) == 0) {
+            line = strchr(line, '\n');
+            continue;
+        }
+        break;
+    }
+    if (line == NULL || *line == '\0') return false;
+    const char *end = strchr(line, '\n');
+    size_t b64_len = end != NULL ? (size_t)(end - line) : strlen(line);
+    while (b64_len > 0 && (line[b64_len - 1] == '\r' || line[b64_len - 1] == ' ')) b64_len--;
+    uint8_t blob[80];
+    size_t blob_len = 0;
+    if (mbedtls_base64_decode(blob, sizeof(blob), &blob_len,
+                              (const unsigned char *)line, b64_len) != 0) {
+        return false;
+    }
+    if (blob_len != 74 || blob[0] != 'E' || blob[1] != 'D') {
+        ESP_LOGW(TAG, "ota: unsupported signature format");
+        return false;
+    }
+    if (memcmp(blob + 2, FOS_OTA_SIGNING_KEY_ID, 8) != 0) {
+        ESP_LOGW(TAG, "ota: signature key id mismatch");
+        return false;
+    }
+    memcpy(sig_out, blob + 10, 64);
+    return true;
+}
 
-    esp_http_client_config_t http_config = {
-        .url = url,
+/* Every exit names itself in the frame log as a structured `ota:<plane>`
+ * line: "downloading" followed by silence is what a deep-sleep frame used to
+ * leave behind, and the control plane's Logs panel is the only place an owner
+ * can look. */
+static void ota_log(const ota_source_t *src, const char *status, const char *detail)
+{
+    char line[224];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"ota:%s\",\"source\":\"esp32\","
+             "\"status\":\"%s\",\"detail\":\"%s\"}",
+             src->plane, status, detail ? detail : "");
+    frameos_nim_log_hook(line);
+    frameos_nim_flush_logs();
+}
+
+/* Progress every 512 KB, as a structured line the Logs panel shows. */
+static void ota_log_progress(const ota_source_t *src, size_t written, size_t expected)
+{
+    char detail[64];
+    if (expected > 0) {
+        snprintf(detail, sizeof(detail), "%u/%u", (unsigned)written, (unsigned)expected);
+    } else {
+        snprintf(detail, sizeof(detail), "%u", (unsigned)written);
+    }
+    ota_log(src, "progress", detail);
+}
+
+/* "scheme://host[:port]" of an http(s)/ws(s) URL, lowercased, with ws
+ * mapped onto http so a wss:// ws_url compares equal to the https:// origin
+ * it serves. False for any other shape, including userinfo ("a@b"). */
+static bool url_origin(const char *url, char *out, size_t out_len)
+{
+    const char *scheme;
+    const char *rest;
+    if (!url) return false;
+    if (strncasecmp(url, "https://", 8) == 0) { scheme = "https://"; rest = url + 8; }
+    else if (strncasecmp(url, "http://", 7) == 0) { scheme = "http://"; rest = url + 7; }
+    else if (strncasecmp(url, "wss://", 6) == 0) { scheme = "https://"; rest = url + 6; }
+    else if (strncasecmp(url, "ws://", 5) == 0) { scheme = "http://"; rest = url + 5; }
+    else return false;
+    size_t host_len = strcspn(rest, "/?#");
+    if (host_len == 0 || memchr(rest, '@', host_len)) return false;
+    int n = snprintf(out, out_len, "%s%.*s", scheme, (int)host_len, rest);
+    if (n <= 0 || (size_t)n >= out_len) return false;
+    for (char *p = out; *p; p++) *p = (char)tolower((unsigned char)*p);
+    return true;
+}
+
+/* The manifest's downloadUrl may be absolute (a CDN, GitHub). The frame's
+ * bearer is the control plane's credential: it goes only to that plane's own
+ * origin (base_url, or the cloud's enrollment ws_url host), never wherever a
+ * manifest points. */
+static bool download_url_is_first_party(const char *download_url, const ota_source_t *src)
+{
+    char have[FOS_URL_LEN];
+    char want[FOS_URL_LEN];
+    if (!url_origin(download_url, have, sizeof(have))) return false;
+    if (url_origin(src->base_url, want, sizeof(want)) && strcmp(want, have) == 0) return true;
+    const char *ws_url = fos_cloud_ws_url();
+    if (ws_url && ws_url[0] && url_origin(ws_url, want, sizeof(want)) &&
+        strcmp(want, have) == 0) {
+        return true;
+    }
+    return false;
+}
+
+typedef struct {
+    char version[32];
+    char download_url[FOS_URL_LEN + 192];
+    uint8_t sig[64];
+    size_t size;
+} ota_manifest_t;
+
+/* GET the manifest and pull out what the download needs. Returns ESP_OK with
+ * `up_to_date` set when the offered version is the running one. */
+static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out, bool *up_to_date)
+{
+    *up_to_date = false;
+    ESP_LOGI(TAG, "ota (%s): checking manifest %s", src->plane, src->manifest_url);
+    esp_http_client_config_t config = {
+        .url = src->manifest_url,
         .timeout_ms = 20000,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 2048,
+        .buffer_size = 4096,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (!client) {
-        ESP_LOGE(TAG, "OTA manifest client init failed");
-        return ESP_FAIL;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ota_log(src, "error", "no-memory");
+        return ESP_ERR_NO_MEM;
     }
-    esp_http_client_set_header(client, "Authorization", s_auth_header);
-    manifest->sha[0] = '\0';
-    manifest->elf_sha[0] = '\0';
-
+    esp_http_client_set_header(client, "Authorization", src->auth);
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "OTA manifest connect failed: %s", esp_err_to_name(err));
         esp_http_client_cleanup(client);
+        ota_log(src, "error", "manifest-connect-failed");
         return err;
     }
     int64_t content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
-    char body[768];
-    int read = esp_http_client_read(client, body, sizeof(body) - 1);
+    /* Dev servers (and some proxies) send chunked responses with no
+     * Content-Length — read to EOF under the manifest cap either way. */
+    if (status != 200 || content_length > FOS_OTA_MANIFEST_MAX) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        ESP_LOGW(TAG, "ota (%s): manifest HTTP %d (%lld bytes)", src->plane, status,
+                 (long long)content_length);
+        /* 404 = the release carries no OTA app image for this platform; 409 =
+         * it has one but no signature. Both are "nothing to install", and
+         * telling them apart in the log is the difference between waiting for
+         * a release and chasing a bug. */
+        ota_log(src, "error", status == 409   ? "unsigned-release"
+                            : status == 404 ? "no-image-published"
+                                            : "manifest-unavailable");
+        return status == 404 ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+    }
+    char *body = malloc(FOS_OTA_MANIFEST_MAX + 1);
+    if (body == NULL) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        ota_log(src, "error", "no-memory");
+        return ESP_ERR_NO_MEM;
+    }
+    size_t total = 0;
+    while (total < FOS_OTA_MANIFEST_MAX) {
+        int r = esp_http_client_read(client, body + total, FOS_OTA_MANIFEST_MAX - total);
+        if (r <= 0) break;
+        total += (size_t)r;
+    }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    if (status != 200 || read <= 0) {
-        ESP_LOGI(TAG, "no OTA manifest (HTTP %d, length=%lld, read=%d)",
-                 status, content_length, read);
+    body[total] = '\0';
+
+    cJSON *root = cJSON_ParseWithLength(body, total);
+    free(body);
+    if (root == NULL) {
+        ota_log(src, "error", "manifest-unparseable");
+        return ESP_FAIL;
+    }
+    const cJSON *version = cJSON_GetObjectItem(root, "version");
+    const cJSON *minisig = cJSON_GetObjectItem(root, "minisig");
+    const cJSON *download = cJSON_GetObjectItem(root, "downloadUrl");
+    const cJSON *size_item = cJSON_GetObjectItem(root, "size");
+    if (!cJSON_IsString(version) || !cJSON_IsString(minisig) || !cJSON_IsString(download) ||
+        strlen(version->valuestring) >= sizeof(out->version)) {
+        cJSON_Delete(root);
+        ota_log(src, "error", "manifest-incomplete");
+        return ESP_FAIL;
+    }
+    strlcpy(out->version, version->valuestring, sizeof(out->version));
+
+    /* Same image → nothing to do. Release versions have no v prefix. */
+    const char *running = esp_app_get_description()->version;
+    if (running[0] == 'v') running++;
+    if (strcmp(running, out->version) == 0) {
+        ESP_LOGI(TAG, "ota (%s): already on %s", src->plane, out->version);
+        ota_log(src, "up-to-date", out->version);
+        cJSON_Delete(root);
+        *up_to_date = true;
+        return ESP_OK;
+    }
+
+    if (!parse_minisig(minisig->valuestring, out->sig)) {
+        cJSON_Delete(root);
+        ota_log(src, "error", "bad-signature-format");
+        return ESP_FAIL;
+    }
+    if (download->valuestring[0] == '/') {
+        snprintf(out->download_url, sizeof(out->download_url), "%s%s", src->base_url,
+                 download->valuestring);
+    } else {
+        strlcpy(out->download_url, download->valuestring, sizeof(out->download_url));
+    }
+    out->size = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t ota_download_verify(const ota_source_t *src, const char *download_url,
+                                     const char *auth_header, const uint8_t sig[64],
+                                     size_t expected_size)
+{
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    if (target == NULL) {
+        ota_log(src, "error", "no-ota-slot");
         return ESP_ERR_NOT_FOUND;
     }
-    body[read] = '\0';
+    if (expected_size > 0 && expected_size > target->size) {
+        ESP_LOGE(TAG, "ota: image (%u) exceeds slot (%u)",
+                 (unsigned)expected_size, (unsigned)target->size);
+        char detail[64];
+        snprintf(detail, sizeof(detail), "image-exceeds-slot:%u>%u",
+                 (unsigned)expected_size, (unsigned)target->size);
+        ota_log(src, "error", detail);
+        return ESP_ERR_INVALID_SIZE;
+    }
 
-    cJSON *json = cJSON_Parse(body);
-    if (!json) {
-        ESP_LOGW(TAG, "OTA manifest parse failed");
+    esp_http_client_config_t config = {
+        .url = download_url,
+        .timeout_ms = 30000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 4096,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ota_log(src, "error", "no-memory");
+        return ESP_ERR_NO_MEM;
+    }
+    if (auth_header != NULL) {
+        esp_http_client_set_header(client, "Authorization", auth_header);
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        esp_http_client_cleanup(client);
+        char detail[80];
+        snprintf(detail, sizeof(detail), "download-connect-failed:%s", esp_err_to_name(err));
+        ota_log(src, "error", detail);
+        return err;
+    }
+    int64_t content_length = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status != 200) {
+        ESP_LOGW(TAG, "ota: download HTTP %d", status);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        char detail[48];
+        snprintf(detail, sizeof(detail), "download-http-%d", status);
+        ota_log(src, "error", detail);
         return ESP_FAIL;
     }
-    const cJSON *sha_item = cJSON_GetObjectItem(json, "sha256");
-    if (!cJSON_IsString(sha_item) || strlen(sha_item->valuestring) < 32) {
-        cJSON_Delete(json);
-        ESP_LOGW(TAG, "OTA manifest missing sha256");
-        return ESP_FAIL;
+
+    esp_ota_handle_t ota = 0;
+    err = esp_ota_begin(target, content_length > 0 ? (size_t)content_length
+                                                   : OTA_SIZE_UNKNOWN, &ota);
+    if (err != ESP_OK) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        char detail[80];
+        snprintf(detail, sizeof(detail), "ota-begin-failed:%s", esp_err_to_name(err));
+        ota_log(src, "error", detail);
+        return err;
     }
-    strlcpy(manifest->sha, sha_item->valuestring, sizeof(manifest->sha));
-    const cJSON *elf_sha_item = cJSON_GetObjectItem(json, "elfSha256");
-    if (cJSON_IsString(elf_sha_item) && strlen(elf_sha_item->valuestring) >= 32) {
-        strlcpy(manifest->elf_sha, elf_sha_item->valuestring, sizeof(manifest->elf_sha));
+
+    uint8_t *chunk = heap_caps_malloc(FOS_OTA_CHUNK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (chunk == NULL) chunk = malloc(FOS_OTA_CHUNK);
+    if (chunk == NULL) {
+        esp_ota_abort(ota);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        ota_log(src, "error", "no-memory");
+        return ESP_ERR_NO_MEM;
     }
-    cJSON_Delete(json);
-    ESP_LOGI(TAG, "OTA manifest received: image=%.*s… elf=%s%.*s",
-             12, manifest->sha,
-             manifest->elf_sha[0] ? "" : "(none)",
-             manifest->elf_sha[0] ? 12 : 0,
-             manifest->elf_sha);
+
+    crypto_blake2b_ctx hash_ctx;
+    crypto_blake2b_init(&hash_ctx, 64);
+    size_t total = 0;
+    while (true) {
+        int r = esp_http_client_read(client, (char *)chunk, FOS_OTA_CHUNK);
+        if (r < 0) {
+            err = ESP_FAIL;
+            break;
+        }
+        if (r == 0) break;
+        crypto_blake2b_update(&hash_ctx, chunk, (size_t)r);
+        err = esp_ota_write(ota, chunk, (size_t)r);
+        if (err != ESP_OK) break;
+        total += (size_t)r;
+        if ((total % (512 * 1024)) < FOS_OTA_CHUNK) {
+            ESP_LOGW(TAG, "ota: %u bytes written", (unsigned)total);
+            ota_log_progress(src, total, expected_size);
+        }
+    }
+    free(chunk);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK || total == 0 ||
+        (expected_size > 0 && total != expected_size)) {
+        ESP_LOGE(TAG, "ota: download failed at %u bytes (%s)",
+                 (unsigned)total, esp_err_to_name(err));
+        char detail[96];
+        snprintf(detail, sizeof(detail), "download-failed:%s@%u/%u",
+                 err != ESP_OK ? esp_err_to_name(err) : "short-read",
+                 (unsigned)total, (unsigned)expected_size);
+        ota_log(src, "error", detail);
+        esp_ota_abort(ota);
+        return err != ESP_OK ? err : ESP_FAIL;
+    }
+
+    uint8_t digest[64];
+    crypto_blake2b_final(&hash_ctx, digest);
+    if (crypto_ed25519_check(sig, FOS_OTA_SIGNING_PUBKEY, digest, sizeof(digest)) != 0) {
+        ESP_LOGE(TAG, "ota: SIGNATURE VERIFICATION FAILED — image rejected");
+        esp_ota_abort(ota);
+        ota_log(src, "error", "signature-rejected");
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    err = esp_ota_end(ota);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota: image validation failed: %s", esp_err_to_name(err));
+        char detail[80];
+        snprintf(detail, sizeof(detail), "image-rejected:%s", esp_err_to_name(err));
+        ota_log(src, "error", detail);
+        return ESP_ERR_INVALID_CRC;
+    }
+    err = esp_ota_set_boot_partition(target);
+    if (err != ESP_OK) {
+        char detail[80];
+        snprintf(detail, sizeof(detail), "set-boot-failed:%s", esp_err_to_name(err));
+        ota_log(src, "error", detail);
+        return err;
+    }
+    ESP_LOGW(TAG, "ota: %u bytes verified and staged in %s; rebooting",
+             (unsigned)total, target->label);
     return ESP_OK;
+}
+
+/* One complete run: manifest → version check → download + verify → reboot.
+ * Returns ESP_OK both when an image was staged (the device restarts before
+ * the caller sees it) and when it was already up to date. */
+static esp_err_t ota_run_signed(const ota_source_t *src)
+{
+    if (!ota_supported()) {
+        ESP_LOGI(TAG, "no OTA app partition in this flash layout; skipping OTA");
+        ota_log(src, "skipped", "no-ota-slot");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
+        ESP_LOGW(TAG, "ota (%s): Wi-Fi state=%s; OTA requires connected station mode",
+                 src->plane, wifi_state_name(fos_wifi_state()));
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ota_manifest_t manifest;
+    bool up_to_date = false;
+    esp_err_t err = ota_fetch_manifest(src, &manifest, &up_to_date);
+    if (err != ESP_OK || up_to_date) return err;
+
+    if (ota_gave_up(manifest.version)) {
+        char detail[64];
+        snprintf(detail, sizeof(detail), "%s:%u-failures", manifest.version,
+                 (unsigned)s_ota_failures);
+        ota_log(src, "gave-up", detail);
+        return ESP_FAIL;
+    }
+
+    /* Same transport rule as cloud_url itself: https anywhere, plain http
+     * only to localhost / .local / private-network hosts (development) —
+     * unless the download comes from the control plane's own origin and that
+     * plane is trusted on its own transport (a LAN backend). A manifest
+     * cannot send the image fetch over cleartext to the internet. */
+    const bool first_party = download_url_is_first_party(manifest.download_url, src);
+    const char *transport_why = NULL;
+    if (!(first_party && src->trust_base_transport) &&
+        !fos_cloud_url_transport_ok(manifest.download_url, &transport_why)) {
+        ESP_LOGW(TAG, "ota (%s): refusing downloadUrl: %s", src->plane,
+                 transport_why ? transport_why : "bad transport");
+        ota_log(src, "error", "download-url-transport");
+        ota_note_failure(manifest.version);
+        return ESP_FAIL;
+    }
+    if (!first_party) {
+        ESP_LOGI(TAG, "ota (%s): downloadUrl is off-origin; fetching without credentials", src->plane);
+    }
+    ESP_LOGW(TAG, "ota (%s): %s -> %s from %s", src->plane,
+             esp_app_get_description()->version, manifest.version, manifest.download_url);
+    ota_log(src, "downloading", manifest.version);
+
+    err = ESP_FAIL;
+    for (int attempt = 1; attempt <= FOS_OTA_DOWNLOAD_ATTEMPTS; attempt++) {
+        if (attempt > 1) {
+            vTaskDelay(pdMS_TO_TICKS(FOS_OTA_RETRY_DELAY_MS));
+            if (!wait_for_wifi_connected(FOS_OTA_WIFI_RECONNECT_TIMEOUT_MS)) {
+                ESP_LOGW(TAG, "ota: retry %d skipped, Wi-Fi %s", attempt,
+                         wifi_state_name(fos_wifi_state()));
+                continue;
+            }
+        }
+        err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
+                                  manifest.sig, manifest.size);
+        if (err == ESP_OK || err == ESP_ERR_INVALID_CRC || err == ESP_ERR_INVALID_SIZE ||
+            err == ESP_ERR_NO_MEM) {
+            break; /* staged, or a failure no retry can fix */
+        }
+        ESP_LOGW(TAG, "ota: attempt %d/%d failed: %s", attempt, FOS_OTA_DOWNLOAD_ATTEMPTS,
+                 esp_err_to_name(err));
+    }
+    if (err == ESP_OK) {
+        s_ota_failures = 0;
+        ota_log(src, "verified", "rebooting");
+        vTaskDelay(pdMS_TO_TICKS(750)); /* flush the log line */
+        esp_restart();
+        return ESP_OK;
+    }
+    /* download_verify named the failure already; here it only counts. */
+    ota_note_failure(manifest.version);
+    return err;
+}
+
+/* ----------------------------------------------------------- backend plane
+ * A backend-managed frame asks its backend for the release manifest
+ * (`/embedded/ota/manifest?platform=…`, bearer = the frame API key) and
+ * downloads through the backend's proxy of the release asset. The backend
+ * holds no signing key either: it relays the release's minisig, and the
+ * device verifies against the same baked release key as the cloud path. */
+
+static bool backend_source(ota_source_t *src)
+{
+    const fos_config_t *config = fos_config();
+    if (!config->backend_url[0] || config->frame_id == 0) {
+        ESP_LOGW(TAG, "no backend configured, skipping OTA check");
+        return false;
+    }
+    if (!config->api_key[0]) {
+        ESP_LOGW(TAG, "no frame API key configured, skipping OTA check");
+        return false;
+    }
+    memset(src, 0, sizeof(*src));
+    src->plane = "backend";
+    strlcpy(src->base_url, config->backend_url, sizeof(src->base_url));
+    snprintf(src->manifest_url, sizeof(src->manifest_url),
+             "%s/api/frames/%lu/embedded/ota/manifest?platform=%s",
+             config->backend_url, (unsigned long)config->frame_id, fos_ota_platform());
+    snprintf(src->auth, sizeof(src->auth), "Bearer %s", config->api_key);
+    src->trust_base_transport = true;
+    return true;
 }
 
 static esp_err_t ota_check_and_apply_locked(void)
@@ -294,139 +689,32 @@ static esp_err_t ota_check_and_apply_locked(void)
         ESP_LOGI(TAG, "no OTA app partition in this flash layout; skipping OTA check");
         return ESP_ERR_NOT_SUPPORTED;
     }
-
-    fos_config_t *config = fos_config();
-    if (!config->backend_url[0] || config->frame_id == 0) {
-        ESP_LOGW(TAG, "no backend configured, skipping OTA check");
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (!config->api_key[0]) {
-        ESP_LOGW(TAG, "no frame API key configured, skipping OTA check");
-        return ESP_ERR_INVALID_STATE;
-    }
-    fos_wifi_state_t wifi_state = fos_wifi_state();
-    if (wifi_state != FOS_WIFI_CONNECTED) {
+    ota_source_t src;
+    if (!backend_source(&src)) return ESP_ERR_INVALID_STATE;
+    if (!wait_for_wifi_connected(5000)) {
         ESP_LOGW(TAG, "Wi-Fi state=%s; OTA requires connected station mode",
-                 wifi_state_name(wifi_state));
+                 wifi_state_name(fos_wifi_state()));
         return ESP_ERR_INVALID_STATE;
     }
-    snprintf(s_auth_header, sizeof(s_auth_header), "Bearer %s", config->api_key);
 
-    ota_manifest_t manifest;
-    esp_err_t err = fetch_manifest(config, &manifest);
-    if (err != ESP_OK) {
-        if (err != ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG, "OTA manifest check failed: %s", esp_err_to_name(err));
-        }
-        return err == ESP_ERR_NOT_FOUND ? ESP_OK : err;
-    }
-
-    char running_elf_sha[80];
-    running_elf_sha[0] = '\0';
-    esp_app_get_elf_sha256(running_elf_sha, sizeof(running_elf_sha));
-
-    char applied_sha[80];
-    bool has_applied_sha = load_applied_sha(applied_sha, sizeof(applied_sha)) == ESP_OK && applied_sha[0];
-    bool manifest_has_elf_sha = manifest.elf_sha[0] != '\0';
-    bool running_matches_manifest = manifest_has_elf_sha &&
-        running_elf_sha[0] != '\0' &&
-        elf_sha_matches_manifest(running_elf_sha, manifest.elf_sha);
-
-    if (running_matches_manifest) {
-        if (!has_applied_sha || strcmp(applied_sha, manifest.sha) != 0) {
-            ESP_LOGI(TAG, "recording current OTA baseline %.*s…", 12, manifest.sha);
-            store_applied_sha(manifest.sha);
-        } else {
-            ESP_LOGI(TAG, "firmware up to date (%.*s…)", 12, manifest.sha);
-        }
-        return ESP_OK;
-    }
-
-    if (!manifest_has_elf_sha && has_applied_sha && strcmp(applied_sha, manifest.sha) == 0) {
-        ESP_LOGI(TAG, "firmware up to date (%.*s…)", 12, manifest.sha);
-        return ESP_OK;
-    }
-    if (manifest_has_elf_sha && !running_elf_sha[0] &&
-        has_applied_sha && strcmp(applied_sha, manifest.sha) == 0) {
-        ESP_LOGW(TAG, "running ELF hash unavailable; trusting stored OTA baseline %.*s…", 12, manifest.sha);
-        return ESP_OK;
-    }
-
-    char url[FOS_URL_LEN + 96];
-    snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/ota/download",
-             config->backend_url, (unsigned long)config->frame_id);
-    if (has_applied_sha) {
-        ESP_LOGI(TAG, "updating %.*s… -> %.*s… from %s",
-                 12, applied_sha, 12, manifest.sha, url);
-    } else {
-        ESP_LOGI(TAG, "applying OTA image %.*s… from %s", 12, manifest.sha, url);
-    }
-
-    esp_http_client_config_t http_config = {
-        .url = url,
-        .timeout_ms = FOS_OTA_HTTP_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .keep_alive_enable = false,
-        .buffer_size = 2048,
-        .buffer_size_tx = 1024,
-    };
-    esp_https_ota_config_t base_ota_config = {
-        .http_config = &http_config,
-        .http_client_init_cb = ota_http_init_cb,
-        .partial_http_download = true,
-        .max_http_request_size = FOS_OTA_REQUEST_SIZE,
-    };
-
+    /* The local HTTP server's sockets and the renderer's buffers are what an
+     * OTA competes with for internal RAM; drop the server for the duration
+     * (the early-boot request path runs before it ever starts). */
     bool stopped_http = false;
-    esp_err_t last_err = ESP_FAIL;
-    size_t resume_bytes = 0;
-    for (int attempt = 1; attempt <= FOS_OTA_MAX_ATTEMPTS; attempt++) {
-        if (!wait_for_wifi_connected(attempt == 1 ? 5000 : FOS_OTA_RECONNECT_TIMEOUT_MS)) {
-            last_err = ESP_ERR_INVALID_STATE;
-            ESP_LOGW(TAG, "OTA attempt %d/%d skipped: Wi-Fi state=%s",
-                     attempt, FOS_OTA_MAX_ATTEMPTS, wifi_state_name(fos_wifi_state()));
-            continue;
-        }
-        if (attempt > 1) {
-            vTaskDelay(pdMS_TO_TICKS(FOS_OTA_WIFI_SETTLE_MS));
-        }
-
-        if (!stopped_http && fos_http_is_running()) {
-            ESP_LOGI(TAG, "stopping local HTTP server for OTA headroom: internal=%u psram=%u",
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-            fos_http_stop();
-            stopped_http = true;
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
-
-        esp_https_ota_config_t ota_config = base_ota_config;
-        ota_config.ota_resumption = resume_bytes > 0;
-        ota_config.ota_image_bytes_written = resume_bytes;
-        last_err = perform_ota_download(&ota_config, attempt, FOS_OTA_MAX_ATTEMPTS,
-                                        &resume_bytes);
-        if (last_err == ESP_OK) {
-            store_applied_sha(manifest.sha);
-            ESP_LOGW(TAG, "OTA update applied, rebooting into new image");
-            vTaskDelay(pdMS_TO_TICKS(500));
-            esp_restart();
-            return ESP_OK;
-        }
-
-        if (attempt < FOS_OTA_MAX_ATTEMPTS) {
-            ESP_LOGW(TAG, "OTA attempt %d/%d failed: %s; retrying after reconnect from %u bytes",
-                     attempt, FOS_OTA_MAX_ATTEMPTS, esp_err_to_name(last_err),
-                     (unsigned)resume_bytes);
-            vTaskDelay(pdMS_TO_TICKS(FOS_OTA_RETRY_DELAY_MS));
-        }
+    if (fos_http_is_running()) {
+        ESP_LOGI(TAG, "stopping local HTTP server for OTA headroom: internal=%u psram=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        fos_http_stop();
+        stopped_http = true;
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
-
-    ESP_LOGE(TAG, "OTA failed after %d attempts: %s",
-             FOS_OTA_MAX_ATTEMPTS, esp_err_to_name(last_err));
+    esp_err_t err = ota_run_signed(&src);
     if (stopped_http) {
         fos_http_start(false);
     }
-    return last_err;
+    /* "Nothing published for this layout" is not a failure of the check. */
+    return err == ESP_ERR_NOT_FOUND ? ESP_OK : err;
 }
 
 esp_err_t fos_ota_check_and_apply(void)
@@ -548,386 +836,24 @@ esp_err_t fos_ota_request_check(void)
     return ESP_OK;
 }
 
-/* ----------------------------------------------------------- cloud OTA
- * docs/cloud-frames.md "Signed OTA": the enrolled provider serves a
- * device-authed manifest carrying a minisign signature (Ed25519 over
- * BLAKE2b-512 of the image, tools/sign_firmware.py). The image streams to
- * the inactive slot with incremental hashing; the boot partition switches
- * ONLY after the signature verifies against the baked public key
- * (fos_ota_pubkey.h). Rollback protection stays on top: the new image
- * boots pending-verify and rolls back unless it reaches Wi-Fi. */
-
-#define FOS_CLOUD_OTA_MANIFEST_MAX (8 * 1024)
-#define FOS_CLOUD_OTA_CHUNK (8 * 1024)
-
-#if CONFIG_IDF_TARGET_ESP32S3
-#define FOS_CLOUD_OTA_PLATFORM "esp32-s3-generic"
-#else
-#define FOS_CLOUD_OTA_PLATFORM "esp32-c3-generic"
-#endif
-
-static volatile bool s_cloud_ota_running = false;
-
-/* Consecutive cloud OTA failures for one offered version, kept across deep
- * sleeps and software resets (not a power cycle — unplugging is how a person
- * says "try again"). A frame that fails the same image this many times in a
- * row stops re-downloading it on every wake: a battery frame redialing a
- * 3 MB image each cycle only to fail again is the expensive way to report
- * one problem. Logged as `ota:cloud` status `gave-up` so the cloud shows
- * why nothing happens; a newer release, or a power cycle, resets it. */
-#define FOS_CLOUD_OTA_MAX_FAILURES 3
-RTC_DATA_ATTR static char s_cloud_ota_failed_version[32];
-RTC_DATA_ATTR static uint8_t s_cloud_ota_failures;
-
-static void cloud_ota_note_failure(const char *version)
-{
-    if (strncmp(s_cloud_ota_failed_version, version, sizeof(s_cloud_ota_failed_version)) != 0) {
-        strlcpy(s_cloud_ota_failed_version, version, sizeof(s_cloud_ota_failed_version));
-        s_cloud_ota_failures = 0;
-    }
-    if (s_cloud_ota_failures < 0xFF) s_cloud_ota_failures++;
-}
-
-static bool cloud_ota_gave_up(const char *version)
-{
-    return strncmp(s_cloud_ota_failed_version, version, sizeof(s_cloud_ota_failed_version)) == 0 &&
-           s_cloud_ota_failures >= FOS_CLOUD_OTA_MAX_FAILURES;
-}
-
-/* Parse the first signature line of a .minisig: base64(ED + keyid8 + sig64).
- * Trusted-comment lines are ignored (the device trusts only the key). */
-static bool parse_minisig(const char *minisig, uint8_t sig_out[64])
-{
-    const char *line = minisig;
-    while (line != NULL && *line != '\0') {
-        while (*line == '\r' || *line == '\n' || *line == ' ') line++;
-        if (strncmp(line, "untrusted comment:", 18) == 0 ||
-            strncmp(line, "trusted comment:", 16) == 0) {
-            line = strchr(line, '\n');
-            continue;
-        }
-        break;
-    }
-    if (line == NULL || *line == '\0') return false;
-    const char *end = strchr(line, '\n');
-    size_t b64_len = end != NULL ? (size_t)(end - line) : strlen(line);
-    while (b64_len > 0 && (line[b64_len - 1] == '\r' || line[b64_len - 1] == ' ')) b64_len--;
-    uint8_t blob[80];
-    size_t blob_len = 0;
-    if (mbedtls_base64_decode(blob, sizeof(blob), &blob_len,
-                              (const unsigned char *)line, b64_len) != 0) {
-        return false;
-    }
-    if (blob_len != 74 || blob[0] != 'E' || blob[1] != 'D') {
-        ESP_LOGW(TAG, "cloud ota: unsupported signature format");
-        return false;
-    }
-    if (memcmp(blob + 2, FOS_OTA_SIGNING_KEY_ID, 8) != 0) {
-        ESP_LOGW(TAG, "cloud ota: signature key id mismatch");
-        return false;
-    }
-    memcpy(sig_out, blob + 10, 64);
-    return true;
-}
-
-static void cloud_ota_log(const char *status, const char *detail)
-{
-    char line[224];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"ota:cloud\",\"source\":\"esp32\","
-             "\"status\":\"%s\",\"detail\":\"%s\"}",
-             status, detail ? detail : "");
-    frameos_nim_log_hook(line);
-    frameos_nim_flush_logs();
-}
-
-/* Progress every 512 KB, as a structured line the cloud Logs panel shows —
- * "downloading" followed by silence was indistinguishable from a frame that
- * died, and on a deep-sleep frame that is exactly what used to happen. */
-static void cloud_ota_log_progress(size_t written, size_t expected)
-{
-    char detail[64];
-    if (expected > 0) {
-        snprintf(detail, sizeof(detail), "%u/%u", (unsigned)written, (unsigned)expected);
-    } else {
-        snprintf(detail, sizeof(detail), "%u", (unsigned)written);
-    }
-    cloud_ota_log("progress", detail);
-}
-
-static esp_err_t cloud_ota_download_verify(const char *download_url,
-                                           const char *auth_header,
-                                           const uint8_t sig[64],
-                                           size_t expected_size)
-{
-    /* Every exit below names itself in the frame log: "downloading" followed
-     * by silence is what a deep-sleep frame used to leave behind, and the
-     * cloud Logs panel is the only place an owner can look. */
-    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
-    if (target == NULL) {
-        cloud_ota_log("error", "no-ota-slot");
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (expected_size > 0 && expected_size > target->size) {
-        ESP_LOGE(TAG, "cloud ota: image (%u) exceeds slot (%u)",
-                 (unsigned)expected_size, (unsigned)target->size);
-        char detail[64];
-        snprintf(detail, sizeof(detail), "image-exceeds-slot:%u>%u",
-                 (unsigned)expected_size, (unsigned)target->size);
-        cloud_ota_log("error", detail);
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    esp_http_client_config_t config = {
-        .url = download_url,
-        .timeout_ms = 30000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 4096,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        cloud_ota_log("error", "no-memory");
-        return ESP_ERR_NO_MEM;
-    }
-    esp_http_client_set_header(client, "Authorization", auth_header);
-
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        char detail[80];
-        snprintf(detail, sizeof(detail), "download-connect-failed:%s", esp_err_to_name(err));
-        cloud_ota_log("error", detail);
-        return err;
-    }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    if (status != 200) {
-        ESP_LOGW(TAG, "cloud ota: download HTTP %d", status);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        char detail[48];
-        snprintf(detail, sizeof(detail), "download-http-%d", status);
-        cloud_ota_log("error", detail);
-        return ESP_FAIL;
-    }
-
-    esp_ota_handle_t ota = 0;
-    err = esp_ota_begin(target, content_length > 0 ? (size_t)content_length
-                                                   : OTA_SIZE_UNKNOWN, &ota);
-    if (err != ESP_OK) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        char detail[80];
-        snprintf(detail, sizeof(detail), "ota-begin-failed:%s", esp_err_to_name(err));
-        cloud_ota_log("error", detail);
-        return err;
-    }
-
-    uint8_t *chunk = heap_caps_malloc(FOS_CLOUD_OTA_CHUNK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (chunk == NULL) chunk = malloc(FOS_CLOUD_OTA_CHUNK);
-    if (chunk == NULL) {
-        esp_ota_abort(ota);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        cloud_ota_log("error", "no-memory");
-        return ESP_ERR_NO_MEM;
-    }
-
-    crypto_blake2b_ctx hash_ctx;
-    crypto_blake2b_init(&hash_ctx, 64);
-    size_t total = 0;
-    while (true) {
-        int r = esp_http_client_read(client, (char *)chunk, FOS_CLOUD_OTA_CHUNK);
-        if (r < 0) {
-            err = ESP_FAIL;
-            break;
-        }
-        if (r == 0) break;
-        crypto_blake2b_update(&hash_ctx, chunk, (size_t)r);
-        err = esp_ota_write(ota, chunk, (size_t)r);
-        if (err != ESP_OK) break;
-        total += (size_t)r;
-        if ((total % (512 * 1024)) < FOS_CLOUD_OTA_CHUNK) {
-            ESP_LOGW(TAG, "cloud ota: %u bytes written", (unsigned)total);
-            cloud_ota_log_progress(total, expected_size);
-        }
-    }
-    free(chunk);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK || total == 0 ||
-        (expected_size > 0 && total != expected_size)) {
-        ESP_LOGE(TAG, "cloud ota: download failed at %u bytes (%s)",
-                 (unsigned)total, esp_err_to_name(err));
-        char detail[96];
-        snprintf(detail, sizeof(detail), "download-failed:%s@%u/%u",
-                 err != ESP_OK ? esp_err_to_name(err) : "short-read",
-                 (unsigned)total, (unsigned)expected_size);
-        cloud_ota_log("error", detail);
-        esp_ota_abort(ota);
-        return err != ESP_OK ? err : ESP_FAIL;
-    }
-
-    uint8_t digest[64];
-    crypto_blake2b_final(&hash_ctx, digest);
-    if (crypto_ed25519_check(sig, FOS_OTA_SIGNING_PUBKEY, digest, sizeof(digest)) != 0) {
-        ESP_LOGE(TAG, "cloud ota: SIGNATURE VERIFICATION FAILED — image rejected");
-        esp_ota_abort(ota);
-        cloud_ota_log("error", "signature-rejected");
-        return ESP_ERR_INVALID_CRC;
-    }
-
-    err = esp_ota_end(ota);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "cloud ota: image validation failed: %s", esp_err_to_name(err));
-        char detail[80];
-        snprintf(detail, sizeof(detail), "image-rejected:%s", esp_err_to_name(err));
-        cloud_ota_log("error", detail);
-        return err;
-    }
-    err = esp_ota_set_boot_partition(target);
-    if (err != ESP_OK) {
-        char detail[80];
-        snprintf(detail, sizeof(detail), "set-boot-failed:%s", esp_err_to_name(err));
-        cloud_ota_log("error", detail);
-        return err;
-    }
-    ESP_LOGW(TAG, "cloud ota: %u bytes verified and staged in %s; rebooting",
-             (unsigned)total, target->label);
-    return ESP_OK;
-}
+/* ----------------------------------------------------------- cloud plane */
 
 static esp_err_t cloud_ota_run(void)
 {
-    char base_url[FOS_URL_LEN];
+    ota_source_t src;
+    memset(&src, 0, sizeof(src));
+    src.plane = "cloud";
     char frame_id[64];
-    char auth[FOS_CLOUD_TOKEN_LEN + 16];
-    if (!fos_cloud_api_access(base_url, sizeof(base_url), frame_id, sizeof(frame_id),
-                              auth, sizeof(auth))) {
-        cloud_ota_log("skipped", "not-enrolled");
+    if (!fos_cloud_api_access(src.base_url, sizeof(src.base_url), frame_id, sizeof(frame_id),
+                              src.auth, sizeof(src.auth))) {
+        ota_log(&src, "skipped", "not-enrolled");
         return ESP_ERR_INVALID_STATE;
     }
-
-    char url[FOS_URL_LEN + 128];
-    snprintf(url, sizeof(url), "%s/api/frames/%s/firmware/manifest?platform=%s",
-             base_url, frame_id, FOS_CLOUD_OTA_PLATFORM);
-    esp_http_client_config_t config = {
-        .url = url,
-        .timeout_ms = 20000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 4096,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) return ESP_ERR_NO_MEM;
-    esp_http_client_set_header(client, "Authorization", auth);
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        cloud_ota_log("error", "manifest-connect-failed");
-        return err;
-    }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    /* Dev servers (and some proxies) send chunked responses with no
-     * Content-Length — read to EOF under the manifest cap either way. */
-    if (status != 200 || content_length > FOS_CLOUD_OTA_MANIFEST_MAX) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        ESP_LOGW(TAG, "cloud ota: manifest HTTP %d (%lld bytes)", status,
-                 (long long)content_length);
-        /* 404 = the release carries no OTA app image for this platform (every
-         * release up to v2026.8.12); 409 = it has one but no signature. Both
-         * are "nothing to install", and telling them apart in the log is the
-         * difference between waiting for a release and chasing a bug. */
-        cloud_ota_log("error", status == 409   ? "unsigned-release"
-                               : status == 404 ? "no-image-published"
-                                               : "manifest-unavailable");
-        return ESP_FAIL;
-    }
-    char *body = malloc(FOS_CLOUD_OTA_MANIFEST_MAX + 1);
-    if (body == NULL) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_ERR_NO_MEM;
-    }
-    size_t total = 0;
-    while (total < FOS_CLOUD_OTA_MANIFEST_MAX) {
-        int r = esp_http_client_read(client, body + total,
-                                     FOS_CLOUD_OTA_MANIFEST_MAX - total);
-        if (r <= 0) break;
-        total += (size_t)r;
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    body[total] = '\0';
-
-    cJSON *root = cJSON_ParseWithLength(body, total);
-    free(body);
-    if (root == NULL) {
-        cloud_ota_log("error", "manifest-unparseable");
-        return ESP_FAIL;
-    }
-    const cJSON *version = cJSON_GetObjectItem(root, "version");
-    const cJSON *minisig = cJSON_GetObjectItem(root, "minisig");
-    const cJSON *download = cJSON_GetObjectItem(root, "downloadUrl");
-    const cJSON *size_item = cJSON_GetObjectItem(root, "size");
-    if (!cJSON_IsString(version) || !cJSON_IsString(minisig) ||
-        !cJSON_IsString(download)) {
-        cJSON_Delete(root);
-        cloud_ota_log("error", "manifest-incomplete");
-        return ESP_FAIL;
-    }
-
-    /* Same image → nothing to do. Release versions have no v prefix. */
-    const char *running = esp_app_get_description()->version;
-    if (running[0] == 'v') running++;
-    if (strcmp(running, version->valuestring) == 0) {
-        ESP_LOGI(TAG, "cloud ota: already on %s", version->valuestring);
-        cloud_ota_log("up-to-date", version->valuestring);
-        cJSON_Delete(root);
-        return ESP_OK;
-    }
-
-    if (cloud_ota_gave_up(version->valuestring)) {
-        char detail[64];
-        snprintf(detail, sizeof(detail), "%s:%u-failures", version->valuestring,
-                 (unsigned)s_cloud_ota_failures);
-        cloud_ota_log("gave-up", detail);
-        cJSON_Delete(root);
-        return ESP_FAIL;
-    }
-
-    uint8_t sig[64];
-    if (!parse_minisig(minisig->valuestring, sig)) {
-        cJSON_Delete(root);
-        cloud_ota_log("error", "bad-signature-format");
-        return ESP_FAIL;
-    }
-
-    char download_url[FOS_URL_LEN + 192];
-    if (download->valuestring[0] == '/') {
-        snprintf(download_url, sizeof(download_url), "%s%s", base_url,
-                 download->valuestring);
-    } else {
-        strlcpy(download_url, download->valuestring, sizeof(download_url));
-    }
-    size_t expected = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
-    char offered[32];
-    strlcpy(offered, version->valuestring, sizeof(offered));
-    cloud_ota_log("downloading", version->valuestring);
-    cJSON_Delete(root);
-
-    err = cloud_ota_download_verify(download_url, auth, sig, expected);
-    if (err == ESP_OK) {
-        s_cloud_ota_failures = 0;
-        cloud_ota_log("verified", "rebooting");
-        vTaskDelay(pdMS_TO_TICKS(750)); /* flush the log line */
-        esp_restart();
-    }
-    /* download_verify named the failure already; here it only counts. */
-    cloud_ota_note_failure(offered);
-    return err;
+    snprintf(src.manifest_url, sizeof(src.manifest_url),
+             "%s/api/frames/%s/firmware/manifest?platform=%s",
+             src.base_url, frame_id, fos_ota_platform());
+    src.trust_base_transport = false;
+    return ota_run_signed(&src);
 }
 
 static void cloud_ota_task(void *arg)

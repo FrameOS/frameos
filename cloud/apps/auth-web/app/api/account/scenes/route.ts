@@ -9,8 +9,9 @@ import { sceneSummary } from "../../../../src/lib/store";
 import { sceneHasImageSql } from "../../../../src/lib/store-listing";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import {
+  defaultJsonBodyBytes,
   jsonError,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import {
@@ -136,7 +137,11 @@ export async function POST(request: NextRequest) {
     return response;
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, defaultJsonBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const requestedName =
     typeof body.name === "string" ? body.name.trim().slice(0, maxSceneNameChars) : "";
   if (!Array.isArray(body.scenes) || body.scenes.length === 0) {

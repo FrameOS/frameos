@@ -47,6 +47,35 @@ suite "request rate limiting":
     check retryAfterSeconds(request, "test:retry") >= 1
     check retryAfterSeconds(request, "test:retry") <= 30
 
+  test "a full table evicts the windows nearest expiry, not everyone":
+    # 512 distinct clients, each already over budget. The first 100 got the
+    # shortest windows, so they are the ones to go when a 513th arrives; a
+    # client with a long window keeps its (exhausted) budget.
+    for index in 0 ..< 512:
+      let request = makeRequest("10.1." & $(index div 256) & "." & $(index mod 256))
+      let window = if index < 100: 30.0 else: 3600.0
+      for _ in 1 .. 4:
+        discard rateLimitExceeded(request, "flood", 3, window)
+    check rateLimitEntryCount() == 512
+    check rateLimitExceeded(makeRequest("10.9.9.9"), "flood", 3, 3600.0) == false
+    check rateLimitEntryCount() <= 512
+    # Still over budget: its window was not the one evicted.
+    check rateLimitExceeded(makeRequest("10.1.1.255"), "flood", 3, 3600.0) == true
+    # The evicted short-window client starts a fresh window.
+    check rateLimitExceeded(makeRequest("10.1.0.0"), "flood", 3, 30.0) == false
+
+  test "a full table drops expired windows first":
+    for index in 0 ..< 512:
+      let request = makeRequest("10.2." & $(index div 256) & "." & $(index mod 256))
+      let window = if index < 10: 0.1 else: 3600.0
+      for _ in 1 .. 4:
+        discard rateLimitExceeded(request, "expiry", 3, window)
+    sleep(150)
+    check rateLimitExceeded(makeRequest("10.9.9.8"), "expiry", 3, 3600.0) == false
+    # Only the ten expired windows were dropped; every long window survived.
+    check rateLimitEntryCount() == 512 - 10 + 1
+    check rateLimitExceeded(makeRequest("10.2.0.10"), "expiry", 3, 3600.0) == true
+
   test "a zero limit disables the check":
     let request = makeRequest("10.0.0.5")
     for _ in 1 .. 50:

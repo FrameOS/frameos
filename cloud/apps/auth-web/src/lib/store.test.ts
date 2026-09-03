@@ -281,6 +281,15 @@ describe("validateSceneZip transparency rejection", () => {
     });
   });
 
+  it("rejects a cover whose bytes carry no image signature", () => {
+    const result = validateSceneZip(
+      sceneZip(Buffer.from("<html><script>alert(1)</script></html>", "utf8")),
+    );
+    expect(result).toEqual({ ok: false, error: "preview_image_not_image" });
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(validateSceneZip(sceneZip(jpeg)).ok).toBe(true);
+  });
+
   it("accepts a zip whose preview has visible pixels", () => {
     const rows = [new Array(4 * 4).fill(0)];
     rows[0]![3] = 255;

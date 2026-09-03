@@ -332,6 +332,25 @@ suite "Scheduler time zone":
     scheduler.handleSchedule(frameLocalTime("UTC", epoch))
     check not eventChannel.tryRecv()[0]
 
+  test "a schedule entry cannot fire uploadScenes":
+    # Schedules are data from frame.json, the backend or the cloud; the
+    # runner's uploadScenes replaces every installed scene with no origin
+    # stamp, so a schedule must not be a way around the push-path guards.
+    var config = new(FrameConfig)
+    config.timeZone = "Europe/Brussels"
+    config.schedule = FrameSchedule(events: @[
+      ScheduledEvent(id: "smuggle", minute: 2, hour: 1, weekday: 0, event: "uploadScenes",
+                     payload: %*{"scenes": []}),
+      ScheduledEvent(id: "nightly", minute: 2, hour: 1, weekday: 0, event: "reboot", payload: %*{})
+    ])
+    let scheduler = Scheduler(frameConfig: config, logger: newLogger(config))
+    while eventChannel.tryRecv()[0]: discard
+    scheduler.handleSchedule(frameLocalTime(config.timeZone, epoch))
+    let (fired, item) = eventChannel.tryRecv()
+    check fired
+    check item[1] == "reboot"
+    check not eventChannel.tryRecv()[0]
+
   test "next due entry is described in the frame's zone":
     let schedule = FrameSchedule(events: @[
       ScheduledEvent(id: "a", minute: 2, hour: 1, weekday: 0, event: "reboot", payload: %*{}),

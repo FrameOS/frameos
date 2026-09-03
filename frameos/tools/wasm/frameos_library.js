@@ -66,9 +66,31 @@ addToLibrary({
         }
       }
 
+      // Scene code is untrusted (it may come from the public store). This
+      // worker shares the app's origin, so a direct request to the app's own
+      // API would carry the user's session cookie and read the answer — a
+      // same-origin target must only ever go through the server-side proxy,
+      // which fetches without cookies and applies the SSRF guard.
+      // (Under Node — the headless renderers — there is no origin to protect;
+      // the guard only applies inside a browser context.)
+      var sameOriginTarget = false
+      var inBrowser = typeof self !== 'undefined' && self && self.location && typeof self.location.href === 'string'
+      if (inBrowser) {
+        try {
+          var resolved = new URL(url, self.location.href)
+          sameOriginTarget =
+            resolved.origin === self.location.origin || (resolved.protocol !== 'http:' && resolved.protocol !== 'https:')
+        } catch (e) {
+          sameOriginTarget = true
+        }
+      }
+
       // Synchronous XHR: the Nim/pixie pipeline is fully synchronous and this
       // module runs in a Web Worker, where sync XHR is permitted.
       var directRequest = function () {
+        if (sameOriginTarget) {
+          throw new Error('frameos: same-origin request refused from scene code')
+        }
         var xhr = new XMLHttpRequest()
         xhr.open(method, url, false)
         try {

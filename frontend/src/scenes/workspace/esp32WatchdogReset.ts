@@ -8,7 +8,7 @@
  * runs over the flasher-stub protocol and never touches the strap pins.
  *
  * Deliberately a leaf module with no imports: it is shared by the workspace
- * flashers (EmbeddedWebFlasher, EmbeddedUsbFirmwareUpdate) and the cloud
+ * flashers (EmbeddedReleaseFlasher, EmbeddedUsbFirmwareUpdate) and the cloud
  * enrollment flasher (cloud-frontend/src/components/Esp32CloudFlasher.tsx),
  * and it must stay importable from every bundle — including the on-device
  * frame_web build — without dragging in kea models or esptool-js itself.

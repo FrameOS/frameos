@@ -9,11 +9,12 @@ import { max, min } from '@visx/vendor/d3-array'
 import { BrushHandleRenderProps } from '@visx/brush/lib/BrushHandle'
 import { AreaChart } from './AreaChart'
 import { WithParentSizeProps } from '@visx/responsive/lib/enhancers/withParentSize'
-import type { MetricPoint, MetricSeries, RebootMarker, TimeRange } from './metricsLogic'
+import type { MetricPoint, RebootMarker, TimeRange } from './metricsLogic'
 import { metricChartThemes, type MetricChartTheme } from './chartTheme'
+import { flattenChartSeries, type ChartSeries } from './chartData'
+import { brushChartMargin as brushMargin } from './chartLayout'
 
 // Initialize some variables
-const brushMargin = { top: 10, bottom: 15, left: 50, right: 20 }
 const chartSeparation = 30
 
 // accessors
@@ -63,16 +64,15 @@ function getBrushPosition(timeRange: TimeRange, scale: (date: Date) => number | 
   }
 }
 
-function flattenSeriesData(series: MetricSeries[], axis?: 'left' | 'right'): MetricPoint[] {
-  return series.filter((chartSeries) => !axis || chartSeries.axis === axis).flatMap((chartSeries) => chartSeries.data)
-}
-
 export type BrushProps = {
   width: number
   height: number
   margin?: { top: number; right: number; bottom: number; left: number }
   compact?: boolean
-  series: MetricSeries[]
+  /** The visible window, already sliced and downsampled for the main plot. */
+  series: ChartSeries[]
+  /** The whole history, downsampled for the overview strip. */
+  overviewSeries: ChartSeries[]
   totalTimeRange: TimeRange | null
   visibleTimeRange: TimeRange | null
   rebootMarkers?: RebootMarker[]
@@ -87,6 +87,7 @@ export function BrushChart({
   width,
   height,
   series,
+  overviewSeries,
   totalTimeRange,
   visibleTimeRange,
   rebootMarkers = [],
@@ -121,7 +122,10 @@ export function BrushChart({
   const yMax = Math.max(topChartHeight, 0)
   const xBrushMax = Math.max(width - brushMargin.left - brushMargin.right, 0)
   const yBrushMax = Math.max(bottomChartHeight - brushMargin.top - brushMargin.bottom, 0)
-  const allData = useMemo(() => flattenSeriesData(series), [series])
+  // The window and the whole history arrive already sliced and thinned to
+  // this chart's width (metricsLogic.visibleChartSeriesByCategory and
+  // overviewChartSeriesByCategory); only the value domains are read here.
+  const allData = useMemo(() => flattenChartSeries(overviewSeries), [overviewSeries])
   const chartTimeRange = visibleTimeRange ?? totalTimeRange ?? getDataTimeRange(allData)
   const brushTimeRangeBase = totalTimeRange ?? chartTimeRange
   const brushTimeRange = visibleTimeRange
@@ -130,22 +134,11 @@ export function BrushChart({
         Math.max(brushTimeRangeBase.end, visibleTimeRange.end)
       )
     : brushTimeRangeBase
-  const filteredSeries = useMemo(
-    () =>
-      series.map((chartSeries) => ({
-        ...chartSeries,
-        data: chartSeries.data.filter((d) => {
-          const timestamp = getDate(d).getTime()
-          return timestamp >= chartTimeRange.start && timestamp <= chartTimeRange.end
-        }),
-      })),
-    [series, chartTimeRange.start, chartTimeRange.end]
-  )
-  const filteredData = useMemo(() => flattenSeriesData(filteredSeries), [filteredSeries])
-  const filteredLeftData = useMemo(() => flattenSeriesData(filteredSeries, 'left'), [filteredSeries])
-  const filteredRightData = useMemo(() => flattenSeriesData(filteredSeries, 'right'), [filteredSeries])
-  const leftData = useMemo(() => flattenSeriesData(series, 'left'), [series])
-  const rightData = useMemo(() => flattenSeriesData(series, 'right'), [series])
+  const filteredData = useMemo(() => flattenChartSeries(series), [series])
+  const filteredLeftData = useMemo(() => flattenChartSeries(series, 'left'), [series])
+  const filteredRightData = useMemo(() => flattenChartSeries(series, 'right'), [series])
+  const leftData = useMemo(() => flattenChartSeries(overviewSeries, 'left'), [overviewSeries])
+  const rightData = useMemo(() => flattenChartSeries(overviewSeries, 'right'), [overviewSeries])
 
   // scales
   const dateScale = useMemo(
@@ -252,7 +245,7 @@ export function BrushChart({
         <rect x={0} y={0} width={width} height={height} fill={chartTheme.background} rx={14} />
         <AreaChart
           hideBottomAxis={compact}
-          series={filteredSeries}
+          series={series}
           width={width}
           margin={{ ...margin, bottom: topChartBottomMargin }}
           yMax={yMax}
@@ -275,7 +268,7 @@ export function BrushChart({
         <AreaChart
           hideBottomAxis
           hideLeftAxis
-          series={series}
+          series={overviewSeries}
           width={width}
           yMax={yBrushMax}
           xScale={brushDateScale}

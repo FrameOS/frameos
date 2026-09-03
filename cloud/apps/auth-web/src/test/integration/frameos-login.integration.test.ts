@@ -308,6 +308,42 @@ describe("frameos login handoff", () => {
     expect((await readJson(startResponse)).error).toBe("insufficient_scope");
   });
 
+  it("bounds state and only takes a backend-relative redirect_to", async () => {
+    const { accessToken } = await linkBackend([
+      "backend:link",
+      "auth:login",
+    ]);
+    const start = (body: Record<string, unknown>) =>
+      startLogin(
+        postJson(
+          "/api/frameos/login/start",
+          {
+            redirect_uri: `${backendOrigin}/api/cloud/login/callback`,
+            state: "state-123",
+            ...body,
+          },
+          bearer(accessToken),
+        ),
+      );
+
+    const longState = await start({ state: "s".repeat(513) });
+    expect(longState.status).toBe(400);
+    expect((await readJson(longState)).error).toBe("invalid_state");
+
+    const absolute = await start({ redirect_to: "https://evil.example/" });
+    expect(absolute.status).toBe(400);
+    expect((await readJson(absolute)).error).toBe("invalid_redirect_to");
+
+    const schemeless = await start({ redirect_to: "//evil.example/" });
+    expect(schemeless.status).toBe(400);
+
+    const longPath = await start({ redirect_to: `/${"p".repeat(2048)}` });
+    expect(longPath.status).toBe(400);
+
+    const relative = await start({ redirect_to: "/frames/42?tab=scenes" });
+    expect(relative.status).toBe(200);
+  });
+
   it("rejects redirect URIs off the linked backend's origin", async () => {
     const { accessToken } = await linkBackend([
       "backend:link",

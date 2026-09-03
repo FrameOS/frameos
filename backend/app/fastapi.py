@@ -39,6 +39,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware)
 app.add_middleware(GzipRequestMiddleware)
+if config.HASSIO_RUN_MODE == "ingress":
+    # Added last = outermost: the ingress routers carry no user auth (Home
+    # Assistant does that), so nothing but the Supervisor's proxy may reach
+    # them — not another add-on on the hassio network, not /ws either.
+    from app.utils.ingress_guard import IngressPeerGuard
+
+    app.add_middleware(IngressPeerGuard)
 
 register_ws_routes(app)
 app.include_router(remote_ws_router)
@@ -146,7 +153,8 @@ if serve_html:
         ):
             return JSONResponse(
                 status_code=exc.status_code,
-                content={"detail": exc.detail or f"Error {exc.status_code}"}
+                content={"detail": exc.detail or f"Error {exc.status_code}"},
+                headers=exc.headers,
             )
         return index_response(request)
 
@@ -159,7 +167,10 @@ if serve_html:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         posthog_capture_exception(exc, request)
-        return JSONResponse(status_code=500, content={"detail": str(exc)})
+        # Starlette re-raises after this handler, so uvicorn logs the full
+        # traceback; the response only echoes it in DEBUG.
+        detail = (str(exc) or exc.__class__.__name__) if config.DEBUG else "Internal server error"
+        return JSONResponse(status_code=500, content={"detail": detail})
 
 if __name__ == '__main__':
     # run migrations

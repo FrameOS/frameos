@@ -281,6 +281,39 @@ describe("config backups", () => {
     expect(listed[0]?.item_key).toBe("frame-7");
   });
 
+  it("stores only an allowlisted content_type, else octet-stream", async () => {
+    const { accessToken } = await linkClient(backupScopes);
+    const save = (contentType: unknown, itemKey: string) =>
+      saveBackup(
+        postJson(
+          "/api/backends/backups",
+          {
+            content_base64: contentBase64("{}"),
+            content_type: contentType,
+            item_key: itemKey,
+            kind: "frames",
+          },
+          bearer(accessToken),
+        ),
+      );
+    const zip = await save("application/zip", "zip");
+    expect(zip.status).toBe(200);
+    expect(((await readJson(zip)).backup as { content_type: string }).content_type).toBe(
+      "application/zip",
+    );
+    // The type is replayed as a download header, so anything the browser
+    // might render inline is stored as an opaque stream instead.
+    const html = await save("text/html; charset=utf-8", "html");
+    expect(html.status).toBe(200);
+    expect(((await readJson(html)).backup as { content_type: string }).content_type).toBe(
+      "application/octet-stream",
+    );
+    const none = await save(undefined, "none");
+    expect(((await readJson(none)).backup as { content_type: string }).content_type).toBe(
+      "application/octet-stream",
+    );
+  });
+
   it("rejects invalid kinds, junk content, and oversized blobs", async () => {
     const { accessToken } = await linkClient(backupScopes);
 

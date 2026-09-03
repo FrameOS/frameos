@@ -3,6 +3,7 @@ import {
   createDb,
   ensurePasswordIdentityForAccount,
   passwordResetTokens,
+  revokeApiTokensForAccount,
   revokeSessionsForAccount,
   setAccountPassword,
 } from "@frameos-cloud/db";
@@ -72,13 +73,27 @@ export async function POST(request: NextRequest) {
   }
 
   await setAccountPassword(db, claimed.accountId, await hashPassword(password));
+  // Every other outstanding link for the account dies with this one: a
+  // request that fired twice, or one an attacker triggered before the owner
+  // did, must not stay live after the owner has chosen a password.
+  await db
+    .update(passwordResetTokens)
+    .set({ usedAt: new Date() })
+    .where(
+      and(
+        eq(passwordResetTokens.accountId, claimed.accountId),
+        isNull(passwordResetTokens.usedAt),
+      ),
+    );
   // Following the emailed link proves control of the address: it verifies an
   // existing password identity, or creates one (already verified) when a
   // Google-first account is adding its first password.
   await ensurePasswordIdentityForAccount(db, claimed.accountId);
   // A reset proves control of the email, not of existing sessions; sign
-  // everything out so a session hijacker is evicted along the way.
+  // everything out so a session hijacker is evicted along the way — API
+  // tokens included, since whoever forced the reset may have minted one.
   await revokeSessionsForAccount(db, claimed.accountId);
+  await revokeApiTokensForAccount(db, claimed.accountId);
 
   await recordAuditEvent(db, {
     accountId: claimed.accountId,

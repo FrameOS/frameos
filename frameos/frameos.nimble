@@ -51,12 +51,17 @@ task build_quickjs, "Build QuickJS":
   if dirExists("quickjs"):
     echo "Using prebuilt QuickJS."
     return
-  echo "Downloading and building QuickJS from source..."
-  exec "curl -L -o quickjs.tar.xz https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz"
-  exec "echo 'b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a  quickjs.tar.xz' | sha256sum -c -"
+  # quickts: upstream QuickJS plus native TypeScript/JSX parsing
+  # (https://github.com/FrameOS/quickts). Keep the version and checksum in
+  # step with tools/install_prebuilt_quickjs.py, tools/build_wasm.sh,
+  # tools/prebuilt-deps/build.sh, the root Dockerfile and
+  # backend/app/tasks/frame_deploy_helpers.py.
+  echo "Downloading and building quickts (QuickJS + TypeScript) from source..."
+  exec "curl -L -o quickjs.tar.xz https://archive.frameos.net/source/vendor/quickjs-2026-06-04-quickts.1.tar.xz"
+  exec "echo '94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f  quickjs.tar.xz' | sha256sum -c -"
   exec "tar -xf quickjs.tar.xz"
   exec "rm quickjs.tar.xz"
-  exec "mv quickjs-2026-06-04 quickjs"
+  exec "mv quickjs-2026-06-04-quickts.1 quickjs"
   exec "cd quickjs && make"
 
 task test, "Run tests":

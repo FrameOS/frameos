@@ -15,6 +15,7 @@ const migrationsDir = path.resolve(
 // against the schema the migration files actually produce.
 export default async function globalSetup() {
   const databaseUrl = resolveTestDatabaseUrl();
+  assertTestDatabaseName(databaseUrl);
   await ensureDatabaseExists(databaseUrl);
 
   const sql = postgres(databaseUrl, { max: 1, onnotice: () => undefined });
@@ -28,6 +29,24 @@ export default async function globalSetup() {
     }
   } finally {
     await sql.end();
+  }
+}
+
+// The setup below drops the public schema of whatever database the URL
+// names. A TEST_DATABASE_URL pointing at a development or production
+// database would be wiped without a prompt, so the name has to say "test".
+function assertTestDatabaseName(databaseUrl: string) {
+  let databaseName = "";
+  try {
+    databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
+  } catch {
+    // Fall through: an unparseable URL has no _test suffix either.
+  }
+  if (!databaseName.endsWith("_test")) {
+    throw new Error(
+      `Refusing to run integration tests against database "${databaseName || databaseUrl}": ` +
+        "the global setup drops its public schema, so the database name must end with _test.",
+    );
   }
 }
 

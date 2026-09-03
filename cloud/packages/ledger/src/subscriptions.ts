@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { subscriptionPeriods, subscriptions } from "@frameos-cloud/db";
 import { postEvent, type PostEventOptions } from "./kernel";
-import { readPlan } from "./plans";
+import { readPlan, type BillingPlan } from "./plans";
+import { divideRoundHalfUp } from "./pricing";
 import {
   subscriptionChargeEventType,
   subscriptionRecognitionEventType,
@@ -9,8 +10,8 @@ import {
 } from "./rules/subscription";
 import { LedgerError, type LedgerExecutor } from "./types";
 
-// The subscription lifecycle: who is on what plan, and the nightly cycle that
-// charges each period at its start and recognizes it at its end.
+// The subscription lifecycle: who is on what plan, and the cycle that charges
+// each period at its start and recognizes it at its end.
 //
 // Everything here is idempotent on a `subscription_periods` row, which is the
 // design: the nightly job may run twice in a night, or not at all for three
@@ -22,6 +23,31 @@ import { LedgerError, type LedgerExecutor } from "./types";
 // Free plans never get a period row. A $0 charge is not an entry worth
 // posting (the kernel refuses a zero amount, and rightly), and an account on
 // PAYG is billed entirely through its metered usage.
+//
+// Three rules that the review (cloud/docs/accounting-todo.md §9.2) added,
+// each one a place the first version was wrong:
+//
+//  * A period never starts before the subscription's `started_at`, and
+//    re-subscribing after a cancellation resets `started_at`. Catch-up still
+//    opens every month the job missed — but only months the account was
+//    subscribed for. It used to bill the gap between a cancellation and a
+//    return (item 2).
+//  * The first period opens and charges when the subscription is taken, not
+//    at the next nightly run: a plan taken and cancelled the same afternoon
+//    used to cost nothing (item 6).
+//  * An upgrade prorates (refund the unearned remainder, close the period
+//    now, open one at the new price); a downgrade waits for the rollover
+//    (`next_plan_code`). Recognition earns `price − refunded`, never the full
+//    price over a refund (item 6, and the deferred-revenue invariant).
+//
+// And one the pre-3b pass (§9.3) added: revenue is recognised DAILY, not
+// only at period end. Each night earns `(price − refunded) × whole days
+// served / period length` less what was already recognised, so a
+// calendar-month P&L no longer lags by up to a month. `recognized_micros`
+// on the period row is the cursor; the final step at period end earns
+// whatever is left and stamps `recognized_at`. Whole days on purpose: a job
+// that runs at 04:20 and again at 04:25 must not post a second entry for
+// five minutes of subscription.
 
 /** One calendar month on from `at`, clamped for short months — a
  *  subscription started on the 31st renews on the 30th, the 28th, and so on,
@@ -48,63 +74,148 @@ export interface SubscriptionRecord {
   accountId: string;
   cancelAt: Date | null;
   id: string;
+  nextPlanCode: string | null;
   planCode: string;
   startedAt: Date;
   status: string;
 }
 
+type SubscriptionRow = typeof subscriptions.$inferSelect;
+type PeriodRow = typeof subscriptionPeriods.$inferSelect;
+
+// Whether a subscription row still means anything: cancelled, or past its
+// cancel_at, is the same as no row.
+function isExpired(row: SubscriptionRow, now: Date): boolean {
+  return (
+    row.status === "canceled" ||
+    (row.cancelAt !== null && row.cancelAt.getTime() <= now.getTime())
+  );
+}
+
 /**
- * Put an account on a plan. Switching plans keeps the same subscription row —
- * the period rows carry the plan they were billed under, so history survives
- * the change without a second subscription to reconcile against.
+ * Put an account on a plan.
  *
- * Moving to PAYG is a cancellation, not a subscription: PAYG costs nothing,
- * so there is nothing to bill and no period to open.
+ * Moving to a free plan is a cancellation, not a subscription: PAYG costs
+ * nothing, so there is nothing to bill and no period to open. Otherwise:
+ *
+ *  - no live subscription: a fresh one from now, with its first period
+ *    opened and charged before this returns;
+ *  - the same plan (perhaps mid-cancellation): the cancellation and any
+ *    pending downgrade are withdrawn, nothing else moves;
+ *  - a dearer plan: the unearned rest of the current period is returned to
+ *    the receivable, the period is closed now, and a period at the new price
+ *    starts now — reverse-and-rebook, prorated;
+ *  - a cheaper plan: noted as `next_plan_code` and applied at the rollover.
+ *    They keep what they paid for until then.
  */
 export async function setAccountPlan(
   db: LedgerExecutor,
   accountId: string,
   planCode: string,
+  options: PostEventOptions & { now?: Date | undefined } = {},
 ): Promise<SubscriptionRecord | null> {
   const plan = await readPlan(db, planCode);
   if (!plan) {
     throw new LedgerError("invalid_draft", `Unknown plan ${planCode}`);
   }
+  const now = options.now ?? new Date();
   if (plan.priceMicros === 0n) {
-    await cancelAccountPlan(db, accountId, { immediately: true });
+    await cancelAccountPlan(db, accountId, { immediately: true, now });
     return null;
   }
 
-  const now = new Date();
+  const [existing] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.accountId, accountId))
+    .limit(1);
+
+  if (!existing || isExpired(existing, now)) {
+    const [row] = await db
+      .insert(subscriptions)
+      .values({ accountId, planCode: plan.code, startedAt: now, status: "active" })
+      .onConflictDoUpdate({
+        set: {
+          cancelAt: null,
+          canceledAt: null,
+          nextPlanCode: null,
+          planCode: plan.code,
+          // A return after a cancellation starts a NEW run of the
+          // subscription: periods before this instant were not served and
+          // must not be opened (§9.2 item 2).
+          startedAt: now,
+          status: "active",
+          updatedAt: now,
+        },
+        target: subscriptions.accountId,
+      })
+      .returning();
+    if (!row) {
+      throw new LedgerError("invalid_draft", "Failed to write the subscription");
+    }
+    await openAndChargePeriodsFor(db, row, now, options);
+    return toRecord(row);
+  }
+
+  const current = await readPlan(db, existing.planCode);
+  const currentPrice = current?.priceMicros ?? 0n;
+
+  if (existing.planCode === plan.code) {
+    // Un-cancel, and withdraw any pending downgrade.
+    const [row] = await db
+      .update(subscriptions)
+      .set({ cancelAt: null, canceledAt: null, nextPlanCode: null, status: "active", updatedAt: now })
+      .where(eq(subscriptions.id, existing.id))
+      .returning();
+    return row ? toRecord(row) : null;
+  }
+
+  if (plan.priceMicros < currentPrice) {
+    // Downgrade: takes effect at the rollover. They keep what they paid for.
+    const [row] = await db
+      .update(subscriptions)
+      .set({ cancelAt: null, canceledAt: null, nextPlanCode: plan.code, status: "active", updatedAt: now })
+      .where(eq(subscriptions.id, existing.id))
+      .returning();
+    return row ? toRecord(row) : null;
+  }
+
+  // Upgrade (or a sideways move): prorate the period in progress and start
+  // the new plan now.
+  const open = await currentPeriod(db, existing.id, now);
+  if (open && open.chargedAt) {
+    const unearned = unearnedMicros(open, now);
+    if (unearned > 0n) {
+      await refundUnearnedPeriod(db, open, unearned, options);
+    }
+    await closePeriodAt(db, open, now);
+  } else if (open) {
+    // Opened but not yet charged (a cycle that has not run): shorten it to
+    // nothing rather than charge a period the account is leaving.
+    await db.delete(subscriptionPeriods).where(eq(subscriptionPeriods.id, open.id));
+  }
   const [row] = await db
-    .insert(subscriptions)
-    .values({ accountId, planCode: plan.code, startedAt: now, status: "active" })
-    .onConflictDoUpdate({
-      set: {
-        // Re-subscribing after a cancellation clears the cancellation: the
-        // row is the account's one subscription, not a log of them.
-        cancelAt: null,
-        canceledAt: null,
-        planCode: plan.code,
-        status: "active",
-        updatedAt: now,
-      },
-      target: subscriptions.accountId,
-    })
+    .update(subscriptions)
+    .set({ cancelAt: null, canceledAt: null, nextPlanCode: null, planCode: plan.code, status: "active", updatedAt: now })
+    .where(eq(subscriptions.id, existing.id))
     .returning();
-  return row ? toRecord(row) : null;
+  if (!row) {
+    throw new LedgerError("invalid_draft", "Failed to write the subscription");
+  }
+  await openAndChargePeriodsFor(db, row, now, options);
+  return toRecord(row);
 }
 
 /**
  * Cancel. By default the plan runs to the end of the period already charged
- * for — they paid for it — and stops there. `immediately` is for downgrades
+ * for — they owe for it — and stops there. `immediately` is for downgrades
  * to a free plan and for operator action; it does not refund on its own
  * (§3.6's refund recipe is a separate, deliberate step).
  */
 export async function cancelAccountPlan(
   db: LedgerExecutor,
   accountId: string,
-  options: { immediately?: boolean | undefined } = {},
+  options: { immediately?: boolean | undefined; now?: Date | undefined } = {},
 ): Promise<void> {
   const [row] = await db
     .select()
@@ -114,11 +225,11 @@ export async function cancelAccountPlan(
   if (!row) {
     return;
   }
-  const now = new Date();
+  const now = options.now ?? new Date();
   if (options.immediately) {
     await db
       .update(subscriptions)
-      .set({ cancelAt: now, canceledAt: now, status: "canceled", updatedAt: now })
+      .set({ cancelAt: now, canceledAt: now, nextPlanCode: null, status: "canceled", updatedAt: now })
       .where(eq(subscriptions.id, row.id));
     return;
   }
@@ -130,23 +241,66 @@ export async function cancelAccountPlan(
     .where(eq(subscriptionPeriods.subscriptionId, row.id))
     .orderBy(desc(subscriptionPeriods.periodEnd))
     .limit(1);
-  const cancelAt = latest ? latest.periodEnd : now;
+  const cancelAt = latest && latest.periodEnd > now ? latest.periodEnd : now;
   await db
     .update(subscriptions)
-    .set({ cancelAt, canceledAt: now, status: "canceling", updatedAt: now })
+    .set({ cancelAt, canceledAt: now, nextPlanCode: null, status: "canceling", updatedAt: now })
     .where(eq(subscriptions.id, row.id));
 }
 
+/**
+ * What account erasure has to do to the books BEFORE the account row goes:
+ * return the unearned rest of the period in progress to the receivable,
+ * close that period so recognition earns only what was served, and end the
+ * subscription. The subscription row itself stays (it holds a bare uuid,
+ * like every ledger row) — what must not happen is a charged period
+ * vanishing with its deferred revenue still on the books (§9.2 item 4).
+ * The receivable that remains is the write-off decision's, not this one's.
+ */
+export async function closeOutSubscriptionForDeletedAccount(
+  db: LedgerExecutor,
+  accountId: string,
+  options: PostEventOptions & { now?: Date | undefined } = {},
+): Promise<void> {
+  const now = options.now ?? new Date();
+  const [row] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.accountId, accountId))
+    .limit(1);
+  if (!row) {
+    return;
+  }
+  const open = await currentPeriod(db, row.id, now);
+  if (open) {
+    if (open.chargedAt) {
+      const unearned = unearnedMicros(open, now);
+      if (unearned > 0n) {
+        await refundUnearnedPeriod(db, open, unearned, options);
+      }
+      await closePeriodAt(db, open, now);
+    } else {
+      await db.delete(subscriptionPeriods).where(eq(subscriptionPeriods.id, open.id));
+    }
+  }
+  await cancelAccountPlan(db, accountId, { immediately: true, now });
+}
+
 export interface SubscriptionCycleResult {
+  // Daily recognition entries posted tonight, and the revenue they earned.
+  accrued: number;
+  accruedMicros: bigint;
   charged: number;
   failures: { error: unknown; periodId: string }[];
   opened: number;
+  // Periods closed out: earned to the end and stamped `recognized_at`.
   recognized: number;
 }
 
 /**
  * The nightly cycle: open the periods that are due, charge the ones that have
- * started, recognize the ones that have ended. Safe to run repeatedly.
+ * started, earn what the running ones have served so far, and close out the
+ * ones that have ended. Safe to run repeatedly.
  */
 export async function runSubscriptionCycle(
   db: LedgerExecutor,
@@ -154,13 +308,21 @@ export async function runSubscriptionCycle(
 ): Promise<SubscriptionCycleResult> {
   const now = options.now ?? new Date();
   const result: SubscriptionCycleResult = {
+    accrued: 0,
+    accruedMicros: 0n,
     charged: 0,
     failures: [],
     opened: 0,
     recognized: 0,
   };
 
-  result.opened = await openDuePeriods(db, now);
+  const active = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.status, "active"));
+  for (const subscription of active) {
+    result.opened += await openDuePeriodsFor(db, subscription, now);
+  }
 
   const uncharged = await db
     .select()
@@ -182,6 +344,32 @@ export async function runSubscriptionCycle(
     }
   }
 
+  // Earn what every running period has served so far. Read after the charge
+  // loop so a period charged tonight accrues tonight too — and only charged
+  // ones, for the same reason the close-out below skips the rest.
+  const running = await db
+    .select()
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        isNotNull(subscriptionPeriods.chargedAt),
+        isNull(subscriptionPeriods.recognizedAt),
+        lte(subscriptionPeriods.periodStart, now),
+      ),
+    )
+    .orderBy(asc(subscriptionPeriods.periodStart));
+  for (const period of running) {
+    try {
+      const earned = await accruePeriod(db, period, now, options);
+      if (earned > 0n) {
+        result.accrued += 1;
+        result.accruedMicros += earned;
+      }
+    } catch (error) {
+      result.failures.push({ error, periodId: period.id });
+    }
+  }
+
   const unrecognized = await db
     .select()
     .from(subscriptionPeriods)
@@ -195,7 +383,7 @@ export async function runSubscriptionCycle(
   for (const period of unrecognized) {
     // A period that was never charged has nothing to recognize — recognizing
     // it would credit revenue against a deferral that does not exist and
-    // break invariant 2 immediately.
+    // break the deferred-revenue invariant immediately.
     if (!period.chargedAt) {
       continue;
     }
@@ -211,66 +399,199 @@ export async function runSubscriptionCycle(
   return result;
 }
 
-// Every active subscription that has no period covering `now` gets one. The
-// new period starts where the last one ended, so a job that missed three days
-// bills a month from the right instant rather than from tonight.
-async function openDuePeriods(db: LedgerExecutor, now: Date): Promise<number> {
-  const rows = await db
+// Every period this subscription is due, from where the last one ended (or
+// from its start), up to `now`. Catch up rather than skip — a job that has
+// not run for two months opens both, because both were served — but never
+// from before `started_at`: a return after a cancellation starts fresh, and
+// the months in between were not served (§9.2 item 2). A pending downgrade
+// takes effect on the first period opened here.
+async function openDuePeriodsFor(
+  db: LedgerExecutor,
+  subscription: SubscriptionRow,
+  now: Date,
+): Promise<number> {
+  let planCode = subscription.planCode;
+  let plan = await readPlan(db, planCode);
+  if (!plan || plan.priceMicros === 0n) {
+    return 0;
+  }
+  const [latest] = await db
     .select()
-    .from(subscriptions)
-    .where(eq(subscriptions.status, "active"));
+    .from(subscriptionPeriods)
+    .where(eq(subscriptionPeriods.subscriptionId, subscription.id))
+    .orderBy(desc(subscriptionPeriods.periodEnd))
+    .limit(1);
+  if (latest && latest.periodEnd > now) {
+    return 0;
+  }
+  let periodStart =
+    latest && latest.periodEnd > subscription.startedAt
+      ? latest.periodEnd
+      : subscription.startedAt;
+
   let opened = 0;
-  for (const subscription of rows) {
-    const plan = await readPlan(db, subscription.planCode);
-    if (!plan || plan.priceMicros === 0n) {
-      continue;
+  let guard = 0;
+  while (periodStart <= now && guard < 24) {
+    if (subscription.nextPlanCode && subscription.nextPlanCode !== planCode) {
+      const next = await readPlan(db, subscription.nextPlanCode);
+      if (next && next.priceMicros > 0n) {
+        planCode = next.code;
+        plan = next;
+        await db
+          .update(subscriptions)
+          .set({ nextPlanCode: null, planCode: next.code, updatedAt: now })
+          .where(eq(subscriptions.id, subscription.id));
+      } else if (next) {
+        // Downgrading to a free plan at the rollover is a cancellation.
+        await db
+          .update(subscriptions)
+          .set({ cancelAt: periodStart, canceledAt: now, nextPlanCode: null, status: "canceled", updatedAt: now })
+          .where(eq(subscriptions.id, subscription.id));
+        return opened;
+      }
     }
-    const [latest] = await db
-      .select()
-      .from(subscriptionPeriods)
-      .where(eq(subscriptionPeriods.subscriptionId, subscription.id))
-      .orderBy(desc(subscriptionPeriods.periodEnd))
-      .limit(1);
-    let periodStart = latest ? latest.periodEnd : subscription.startedAt;
-    if (latest && latest.periodEnd > now) {
-      continue;
-    }
-    // Catch up rather than skip: a job that has not run for two months opens
-    // both months, because both were served.
-    let guard = 0;
-    while (periodStart <= now && guard < 24) {
-      const periodEnd = addMonth(periodStart);
-      await db
-        .insert(subscriptionPeriods)
-        .values({
-          currency: plan.currency,
-          marginBasisPoints: plan.marginBasisPoints,
-          periodEnd,
-          periodStart,
-          planCode: plan.code,
-          priceMicros: plan.priceMicros,
-          subscriptionId: subscription.id,
-        })
-        .onConflictDoNothing({
-          target: [
-            subscriptionPeriods.subscriptionId,
-            subscriptionPeriods.periodStart,
-          ],
-        });
-      opened += 1;
-      periodStart = periodEnd;
-      guard += 1;
-    }
+    const periodEnd = addMonth(periodStart);
+    const inserted = await db
+      .insert(subscriptionPeriods)
+      .values({
+        currency: plan.currency,
+        marginBasisPoints: plan.marginBasisPoints,
+        periodEnd,
+        periodStart,
+        planCode: plan.code,
+        priceMicros: plan.priceMicros,
+        subscriptionId: subscription.id,
+      })
+      .onConflictDoNothing({
+        target: [
+          subscriptionPeriods.subscriptionId,
+          subscriptionPeriods.periodStart,
+        ],
+      })
+      .returning({ id: subscriptionPeriods.id });
+    opened += inserted.length;
+    periodStart = periodEnd;
+    guard += 1;
   }
   return opened;
 }
 
-type PeriodRow = typeof subscriptionPeriods.$inferSelect;
+// Open what is due and charge it at once — the path a new or upgraded
+// subscription takes, so the receivable is right the moment the plan is.
+async function openAndChargePeriodsFor(
+  db: LedgerExecutor,
+  subscription: SubscriptionRow,
+  now: Date,
+  options: PostEventOptions,
+): Promise<void> {
+  await openDuePeriodsFor(db, subscription, now);
+  const due = await db
+    .select()
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        eq(subscriptionPeriods.subscriptionId, subscription.id),
+        isNull(subscriptionPeriods.chargedAt),
+        lte(subscriptionPeriods.periodStart, now),
+      ),
+    )
+    .orderBy(asc(subscriptionPeriods.periodStart));
+  for (const period of due) {
+    await chargePeriod(db, period, options);
+  }
+}
+
+async function currentPeriod(
+  db: LedgerExecutor,
+  subscriptionId: string,
+  now: Date,
+): Promise<PeriodRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        eq(subscriptionPeriods.subscriptionId, subscriptionId),
+        lte(subscriptionPeriods.periodStart, now),
+        sql`${subscriptionPeriods.periodEnd} > ${now.toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(desc(subscriptionPeriods.periodStart))
+    .limit(1);
+  return row;
+}
+
+// What is still sitting in liability:deferred:subscriptions for this period:
+// the price, less what was returned to the customer, less what has already
+// been recognised as revenue. Both a refund and tonight's recognition are
+// bounded by it, which is what keeps the deferred account from going
+// negative whichever order the two happen in.
+export function deferredMicros(period: PeriodRow): bigint {
+  const left = period.priceMicros - period.refundedMicros - period.recognizedMicros;
+  return left > 0n ? left : 0n;
+}
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+// The part of a period's price that has not been earned yet at `at`,
+// pro rata by time, less anything already refunded or recognised. Rounded
+// half up once.
+export function unearnedMicros(period: PeriodRow, at: Date): bigint {
+  const total = BigInt(period.periodEnd.getTime() - period.periodStart.getTime());
+  const remaining = BigInt(
+    Math.max(0, Math.min(period.periodEnd.getTime(), Math.max(period.periodStart.getTime(), at.getTime())) - period.periodStart.getTime()),
+  );
+  if (total <= 0n) {
+    return 0n;
+  }
+  const unearned = divideRoundHalfUp(period.priceMicros * (total - remaining), total);
+  const left = deferredMicros(period);
+  return unearned > left ? left : unearned;
+}
+
+/**
+ * How much of a period has been EARNED by `at`: the earnable amount
+ * (price − refunded) pro rata by whole days served. Whole days, so that the
+ * nightly job posts one entry per day however many times it runs; and the
+ * earnable amount rather than the price, so that a period an upgrade closed
+ * early — whose price − refunded is exactly the served part — is earned over
+ * its shortened length rather than over-recognised on its first night. At
+ * or past the period end it is everything earnable, whatever the rounding
+ * said the night before.
+ */
+export function earnedToDateMicros(period: PeriodRow, at: Date): bigint {
+  const totalMs = period.periodEnd.getTime() - period.periodStart.getTime();
+  const earnable = period.priceMicros - period.refundedMicros;
+  if (totalMs <= 0 || earnable <= 0n) {
+    return earnable > 0n ? earnable : 0n;
+  }
+  const elapsedMs = at.getTime() - period.periodStart.getTime();
+  if (elapsedMs >= totalMs) {
+    return earnable;
+  }
+  if (elapsedMs <= 0) {
+    return 0n;
+  }
+  const servedMs = Math.floor(elapsedMs / dayMs) * dayMs;
+  const earned = divideRoundHalfUp(earnable * BigInt(servedMs), BigInt(totalMs));
+  return earned > earnable ? earnable : earned;
+}
+
+// Ends a period now. What recognition then earns is price − refunded −
+// already recognised, which after a prorated refund is exactly the part
+// that was served and not yet earned.
+async function closePeriodAt(db: LedgerExecutor, period: PeriodRow, at: Date): Promise<void> {
+  const end = at.getTime() > period.periodStart.getTime() ? at : new Date(period.periodStart.getTime() + 1);
+  await db
+    .update(subscriptionPeriods)
+    .set({ periodEnd: end })
+    .where(eq(subscriptionPeriods.id, period.id));
+}
 
 async function subscriptionFor(
   db: LedgerExecutor,
   period: PeriodRow,
-): Promise<typeof subscriptions.$inferSelect | undefined> {
+): Promise<SubscriptionRow | undefined> {
   const [row] = await db
     .select()
     .from(subscriptions)
@@ -280,7 +601,7 @@ async function subscriptionFor(
 }
 
 async function planNameFor(db: LedgerExecutor, code: string): Promise<string> {
-  const plan = await readPlan(db, code);
+  const plan: BillingPlan | undefined = await readPlan(db, code);
   return plan?.name ?? code;
 }
 
@@ -338,16 +659,111 @@ export async function recognizePeriod(
   if (!subscription) {
     throw new LedgerError("invalid_draft", "Period has no subscription");
   }
+  // Re-read: a refund may have landed since the caller loaded the row, and
+  // what is earned is what was not refunded.
+  const [fresh] = await db
+    .select()
+    .from(subscriptionPeriods)
+    .where(eq(subscriptionPeriods.id, period.id))
+    .limit(1);
+  const current = fresh ?? period;
+  // What the daily accruals have not earned yet. With the nightly job
+  // running that is the last day or so; with it broken for a month it is
+  // the whole period, and either way the period ends fully recognised.
+  const earned = deferredMicros(current);
+  if (earned > 0n) {
+    await postEvent(
+      db,
+      {
+        accountId: subscription.accountId,
+        eventType: subscriptionRecognitionEventType,
+        idempotencyKey: `subscription_recognition:${period.id}`,
+        // Recognized at the end of the period it was earned over, not tonight:
+        // a job that runs late must not move revenue into the wrong month.
+        occurredAt: current.periodEnd,
+        payload: {
+          ...periodPayload(current, await planNameFor(db, current.planCode)),
+          priceMicros: earned.toString(),
+          recognizedMicros: current.recognizedMicros.toString(),
+          refundedMicros: current.refundedMicros.toString(),
+        },
+        source: "subscriptions",
+        sourceRef: period.id,
+      },
+      options,
+    );
+  }
+  // A fully refunded period has nothing to recognize; it is still done.
+  await db
+    .update(subscriptionPeriods)
+    .set({
+      recognizedAt: new Date(),
+      recognizedMicros: current.recognizedMicros + earned,
+    })
+    .where(eq(subscriptionPeriods.id, period.id));
+}
+
+/**
+ * The daily step: earn what this period has served up to `now` that has not
+ * been recognised yet, and move the cursor. Returns what it earned tonight.
+ * Idempotent on `recognized_micros`: a second run the same night computes
+ * the same "earned so far", finds the cursor already there, and posts
+ * nothing; a crash between the post and the cursor update replays the same
+ * idempotency key next time and then moves the cursor.
+ */
+export async function accruePeriod(
+  db: LedgerExecutor,
+  period: PeriodRow,
+  now: Date,
+  options: PostEventOptions = {},
+): Promise<bigint> {
+  const subscription = await subscriptionFor(db, period);
+  if (!subscription) {
+    throw new LedgerError("invalid_draft", "Period has no subscription");
+  }
+  if (!period.chargedAt || period.recognizedAt) {
+    return 0n;
+  }
+  // Re-read: a refund since the caller loaded the row changes what is
+  // earnable, and the cursor must be the one the last accrual left.
+  const [fresh] = await db
+    .select()
+    .from(subscriptionPeriods)
+    .where(eq(subscriptionPeriods.id, period.id))
+    .limit(1);
+  const current = fresh ?? period;
+  const earned = earnedToDateMicros(current, now);
+  const delta = earned - current.recognizedMicros;
+  if (delta <= 0n) {
+    return 0n;
+  }
+  // Never past what is still deferred: a refund that landed after an
+  // accrual can leave earned-so-far above the remainder, and the deferred
+  // account must not go negative for it (the close-out invariant, §6 check 9).
+  const left = deferredMicros(current);
+  const amount = delta > left ? left : delta;
+  if (amount <= 0n) {
+    return 0n;
+  }
+  const at = now.getTime() < current.periodEnd.getTime() ? now : current.periodEnd;
   await postEvent(
     db,
     {
       accountId: subscription.accountId,
       eventType: subscriptionRecognitionEventType,
-      idempotencyKey: `subscription_recognition:${period.id}`,
-      // Recognized at the end of the period it was earned over, not tonight:
-      // a job that runs late must not move revenue into the wrong month.
-      occurredAt: period.periodEnd,
-      payload: periodPayload(period, await planNameFor(db, period.planCode)),
+      // One key per cursor position, like refunds: the second accrual is a
+      // second fact, not a replay of the first.
+      idempotencyKey: `subscription_recognition:${period.id}:${current.recognizedMicros.toString()}`,
+      // Tonight, not the period end: this is the entry that puts the revenue
+      // in the month it was served. Capped at the period end so a late job
+      // cannot push a finished period's revenue past it.
+      occurredAt: at,
+      payload: {
+        ...periodPayload(current, await planNameFor(db, current.planCode)),
+        priceMicros: amount.toString(),
+        recognizedMicros: current.recognizedMicros.toString(),
+        refundedMicros: current.refundedMicros.toString(),
+      },
       source: "subscriptions",
       sourceRef: period.id,
     },
@@ -355,14 +771,17 @@ export async function recognizePeriod(
   );
   await db
     .update(subscriptionPeriods)
-    .set({ recognizedAt: new Date() })
+    .set({ recognizedMicros: current.recognizedMicros + amount })
     .where(eq(subscriptionPeriods.id, period.id));
+  return amount;
 }
 
 /**
  * Return the unearned remainder of a period to the customer's balance — the
- * §3.6 recipe, used by an operator granting a mid-period refund. Nets against
- * what they owe rather than sending cash.
+ * §3.6 recipe, used by an upgrade's proration and by an operator granting a
+ * mid-period refund. Nets against what they owe rather than sending cash.
+ * The period remembers what was refunded, so recognition earns the rest and
+ * a second refund cannot exceed what is left.
  */
 export async function refundUnearnedPeriod(
   db: LedgerExecutor,
@@ -374,10 +793,23 @@ export async function refundUnearnedPeriod(
   if (!subscription) {
     throw new LedgerError("invalid_draft", "Period has no subscription");
   }
-  if (amountMicros <= 0n || amountMicros > period.priceMicros) {
+  if (!period.chargedAt) {
+    throw new LedgerError("invalid_draft", "Nothing to refund on a period that was never charged");
+  }
+  if (period.recognizedAt) {
+    throw new LedgerError(
+      "invalid_draft",
+      "This period has already been recognized; refund it with a reversal, not a deferral",
+    );
+  }
+  // What is still deferred, after refunds AND after the daily accruals:
+  // revenue already recognised cannot be handed back from the deferral, it
+  // needs a reversal (a different, deliberate act).
+  const left = deferredMicros(period);
+  if (amountMicros <= 0n || amountMicros > left) {
     throw new LedgerError(
       "invalid_amount",
-      "A refund must be positive and no larger than the period it refunds",
+      `A refund must be positive and no larger than the ${left} micros still deferred for the period`,
     );
   }
   await postEvent(
@@ -385,7 +817,9 @@ export async function refundUnearnedPeriod(
     {
       accountId: subscription.accountId,
       eventType: subscriptionRefundEventType,
-      idempotencyKey: `subscription_refund:${period.id}`,
+      // One key per refund, not per period: a second, smaller refund after
+      // the first is a second fact, not a replay of the first.
+      idempotencyKey: `subscription_refund:${period.id}:${period.refundedMicros.toString()}`,
       occurredAt: new Date(),
       payload: {
         ...periodPayload(period, await planNameFor(db, period.planCode)),
@@ -396,6 +830,10 @@ export async function refundUnearnedPeriod(
     },
     options,
   );
+  await db
+    .update(subscriptionPeriods)
+    .set({ refundedMicros: period.refundedMicros + amountMicros })
+    .where(eq(subscriptionPeriods.id, period.id));
 }
 
 // A cancellation whose date has passed becomes a real cancellation. Done here
@@ -417,11 +855,12 @@ async function closeExpiredSubscriptions(
     );
 }
 
-function toRecord(row: typeof subscriptions.$inferSelect): SubscriptionRecord {
+function toRecord(row: SubscriptionRow): SubscriptionRecord {
   return {
     accountId: row.accountId,
     cancelAt: row.cancelAt,
     id: row.id,
+    nextPlanCode: row.nextPlanCode,
     planCode: row.planCode,
     startedAt: row.startedAt,
     status: row.status,

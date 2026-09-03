@@ -52,6 +52,9 @@ class DummyRedis:
     async def delete(self, *args, **kwargs):
         pass
 
+    async def ttl(self, *args, **kwargs):
+        return -2
+
     async def scan_iter(self, *args, **kwargs):
         if False:
             yield None

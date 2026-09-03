@@ -2080,7 +2080,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [framesPath]: rootRouteHandler,
       [`${framesPath.replace(/\/$/, '')}/`]: rootRouteHandler,
       // Literal paths before /frames/:id — on the cloud that pattern would
-      // otherwise swallow /frames/apps and /frames/settings.
+      // otherwise swallow /frames/apps (same rule in scenes.tsx getRoutes).
       [urls.scenes(':frameId')]: applySceneOrAppRoute,
       [urls.scenes(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId')]: applySceneOrAppRoute,

@@ -54,6 +54,7 @@ import frameos/types
 import frameos/upgrade
 from frameos/config import getConfigFilename
 import frameos/utils/http_client
+import ./contract
 import ./identity
 import ./link_state
 
@@ -375,7 +376,9 @@ proc pendingPersonalization*(pending: JsonNode): JsonNode =
   if name.len > 0:
     result["name"] = %name
   let timeZone = pending{"time_zone"}.getStr("").strip()
-  if timeZone.len > 0:
+  # Only an IANA zone name: this value ends up in frame.json and, via
+  # applySystemTimeZone, joined onto /usr/share/zoneinfo for /etc/localtime.
+  if timeZone.len > 0 and isIanaZone(timeZone):
     result["timezone"] = %timeZone
   # Not an admin-API key: `network` is replaced wholesale by
   # persistFrameApiUpdate, so the caller folds this into the stored network

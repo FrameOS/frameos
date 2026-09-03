@@ -5,8 +5,10 @@ import { useState } from "react";
 
 export type BillingSettingsValues = {
   aiMarginPercent: string;
+  dailyCapMicros: string;
   meteringMode: "live" | "shadow";
   overdraftMicros: string;
+  sharedKeyDailyCapMicros: string;
 };
 
 // The three knobs, and the one warning worth putting in front of a human:
@@ -22,6 +24,8 @@ export function BillingSettingsForm({
   const router = useRouter();
   const [margin, setMargin] = useState(values.aiMarginPercent);
   const [overdraft, setOverdraft] = useState(values.overdraftMicros);
+  const [dailyCap, setDailyCap] = useState(values.dailyCapMicros);
+  const [sharedCap, setSharedCap] = useState(values.sharedKeyDailyCapMicros);
   const [mode, setMode] = useState<"live" | "shadow">(values.meteringMode);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -44,7 +48,9 @@ export function BillingSettingsForm({
         settings: {
           ai_margin_percent: margin,
           ai_metering_mode: mode,
+          payg_daily_cap_micros: dailyCap,
           payg_overdraft_micros: overdraft,
+          shared_key_daily_cap_micros: sharedCap,
         },
       }),
       headers: { "content-type": "application/json" },
@@ -63,7 +69,7 @@ export function BillingSettingsForm({
   return (
     <form className="grid" onSubmit={(event) => void save(event)}>
       <div className="field">
-        <label htmlFor="billing-margin">Margin over provider cost (%)</label>
+        <label htmlFor="billing-margin">Fallback margin over provider cost (%)</label>
         <input
           className="input"
           id="billing-margin"
@@ -72,8 +78,45 @@ export function BillingSettingsForm({
           value={margin}
         />
         <p className="copy">
-          What a metered turn is priced at above what it cost us. Snapshotted
-          into every record it prices, so changing it never re-prices the past.
+          Accounts price at their plan&apos;s margin — an account on no plan
+          is on Pay as you go and uses that row&apos;s rate. This number only
+          applies on a deployment with no plan rows, or to a turn with no
+          account behind it. Snapshotted into every record it prices, so
+          changing it never re-prices the past.
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor="billing-daily-cap">Daily AI cap per account (micro-dollars)</label>
+        <input
+          className="input"
+          id="billing-daily-cap"
+          inputMode="numeric"
+          onChange={(event) => setDailyCap(event.target.value)}
+          value={dailyCap}
+        />
+        <p className="copy">
+          Postpay&apos;s credit limit: a turn is refused once an account&apos;s
+          chargeable AI usage for the UTC day reaches this. 10,000,000 is ten
+          dollars; 0 switches the cap off.
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor="billing-shared-cap">Daily allowance on the shared key (micro-dollars)</label>
+        <input
+          className="input"
+          id="billing-shared-cap"
+          inputMode="numeric"
+          onChange={(event) => setSharedCap(event.target.value)}
+          value={sharedCap}
+        />
+        <p className="copy">
+          The cap for accounts running on the deployment&apos;s shared OpenAI
+          key — the free tier. That usage is our money, not theirs, so it
+          gets its own, usually smaller, number; the refusal tells them it is
+          the operator&apos;s allowance rather than their limit. Falls back
+          to the daily cap above until it is set.
         </p>
       </div>
 
@@ -87,9 +130,10 @@ export function BillingSettingsForm({
           value={overdraft}
         />
         <p className="copy">
-          How far a customer&apos;s credit may go below zero before the next
-          turn is refused. A turn&apos;s cost is unknown until it ends, so this
-          is how much of that overshoot we accept — 1,000,000 is one dollar.
+          How far past the daily cap a turn already in flight may run before
+          it is stopped, and how much overshoot the nightly check tolerates.
+          A turn&apos;s cost is unknown until it ends, so this is the
+          overshoot we accept — 1,000,000 is one dollar.
         </p>
       </div>
 
