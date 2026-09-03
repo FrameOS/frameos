@@ -812,6 +812,7 @@ describe("Esp32CloudFlasher", () => {
     // later asks the OTA manifest for that same layout — so this pick is for
     // good. The download happens after the board has answered, not before.
     mockCloudApi(undefined, {
+      ...metadataPayload,
       assets: [
         ...metadataPayload.assets,
         { name: "frameos-1.2.3-esp32-s3-16mb.bin", platform: "esp32-s3-16mb", size: firmwareBytes.length },
