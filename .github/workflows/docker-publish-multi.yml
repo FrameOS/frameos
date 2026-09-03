@@ -48,9 +48,19 @@ jobs:
         env:
           NEXT_VERSION: ${{ inputs.next_version }}
         run: |
-          args=(--force-project docker)
+          # `docker` is the release itself. `frameos` rides along on purpose:
+          # the runtime binary is compiled with versions.json's `frameos` entry
+          # (frameos/Makefile -> -d:frameosVersion) and reports it to the cloud,
+          # the hub and its own upgrade check. Left to its content hash, a
+          # release that touched nothing under frameos/ (2026.9.2 changed only
+          # this workflow) ships a runtime still stamped with the previous
+          # version: every frame that installed "2026.9.2" came back reporting
+          # 2026.9.1, the cloud kept offering the update, and the upgrade
+          # re-ran to nowhere. The release tag and the runtime's version must
+          # be the same number.
+          args=(--force-project docker --force-project frameos)
           if [ -n "$NEXT_VERSION" ]; then
-            args+=(--force-project frameos --next-version "$NEXT_VERSION")
+            args+=(--next-version "$NEXT_VERSION")
           fi
           python3 tools/update_versions.py "${args[@]}"
 
