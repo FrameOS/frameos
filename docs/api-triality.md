@@ -163,6 +163,15 @@ the runtime types, and its next save would otherwise lose it. Unprivileged
 readers get secrets blanked: access/API keys, TLS material, admin credentials,
 mount passwords, the hotspot password and the agent secret.
 
+On the ESP32 four of those are **write-only for every reader**, admin
+session included: `frame_admin_auth.pass`, `https_proxy.certs.server_key`,
+`server_api_key` and `network.wifiPassword` are accepted on `POST` and come
+back as `""` on `GET` (the backend↔frame hop is plain HTTP by default). The
+device treats `""` on a write as "keep what is stored", and the backend
+fills a blank secret from its own row before comparing or importing
+(`_restore_write_only_secrets` in `frame_sync.py`), so a round-tripped
+payload never clears anything.
+
 `frame.json` itself is parsed straight into the typed config with jsony
 (`frameos/src/frameos/config.nim`): field names are the JSON keys, defaults
 live in `newHook`s, and scalars are read leniently (a quoted number, a

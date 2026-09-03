@@ -127,6 +127,7 @@ esp_err_t fos_config_init(void)
     nvs_get_string(nvs, "assets_path", s_config.assets_path, sizeof(s_config.assets_path));
     nvs_get_string(nvs, "admin_user", s_config.admin_user, sizeof(s_config.admin_user));
     nvs_get_string(nvs, "admin_pass", s_config.admin_pass, sizeof(s_config.admin_pass));
+    nvs_get_string(nvs, "ap_psk", s_config.ap_psk, sizeof(s_config.ap_psk));
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
     size_t gpio_buttons_len = sizeof(gpio_buttons);
     esp_err_t buttons_err = nvs_get_str(nvs, "gpio_buttons", gpio_buttons, &gpio_buttons_len);
@@ -232,6 +233,7 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "assets_path", s_config.assets_path);
     nvs_set_str(nvs, "admin_user", s_config.admin_user);
     nvs_set_str(nvs, "admin_pass", s_config.admin_pass);
+    nvs_set_str(nvs, "ap_psk", s_config.ap_psk);
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
     nvs_set_u16(nvs, "rotate", s_config.rotate);
