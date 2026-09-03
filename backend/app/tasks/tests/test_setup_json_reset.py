@@ -189,6 +189,21 @@ def test_cloud_config_written_to_pending_enroll_state_and_shredded(tmp_path):
     assert "cloud personalization" in (sandbox.boot / "frameos-setup-reset.log").read_text(encoding="utf-8").lower()
 
 
+def test_cloud_enrollment_keeps_the_shared_state_directory_root_owned_and_sticky(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    (sandbox.etc / "passwd").write_text("root:x:0:0:root:/root:/bin/sh\nframeos:x:990:990::/:/bin/false\n")
+    sandbox.write_cloud_file("claim_token=FRCT-state-owner\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sandbox.pending_file.exists()
+    # chown is allowed to fail in this macOS sandbox (there is no frameos
+    # account), but chmod proves the account-detected branch ran. On-device
+    # the preceding chown keeps this directory root:frameos.
+    assert _mode(sandbox.pending_file.parent) == 0o1770
+
+
 def test_cloud_config_time_zone_rides_the_pending_state_and_name_sets_the_hostname(tmp_path):
     sandbox = Sandbox(tmp_path)
     # A `hostname` on PATH that only records the call: the real one needs

@@ -57,8 +57,14 @@ def test_base_bootstrap_overlay_enables_frameos_service(tmp_path):
 
     assert service.is_file()
     service_text = service.read_text(encoding="utf-8")
-    assert "User=root" in service_text
+    # Base images are generic: the runtime runs as `frameos` behind the
+    # privileged door (docs/buildroot-privileges.md §3).
+    assert "User=frameos" in service_text
+    assert "NoNewPrivileges=yes" in service_text
     assert "ExecStart=/srv/frameos/current/frameos" in service_text
+    door = tmp_path / "etc" / "systemd" / "system" / "multi-user.target.wants" / "frameos-privileged.path"
+    assert door.is_symlink()
+    assert (tmp_path / "etc" / "udev" / "rules.d" / "60-frameos-devices.rules").is_file()
     assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in service_text
     assert wants_link.is_symlink()
     assert wants_link.readlink().as_posix() == "../frameos.service"

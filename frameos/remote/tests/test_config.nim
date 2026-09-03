@@ -1,6 +1,13 @@
 import std/[json, os, times]
 import ../src/frameos_remote
 
+block test_remote_upload_chunk_size_is_bounded:
+  doAssert not validFileWriteChunkSize(-1)
+  doAssert not validFileWriteChunkSize(0)
+  doAssert validFileWriteChunkSize(1)
+  doAssert validFileWriteChunkSize(MaxFileWriteChunkBytes)
+  doAssert not validFileWriteChunkSize(MaxFileWriteChunkBytes + 1)
+
 block test_remote_loads_main_frameos_frame_json_payload:
   let tempRoot = getTempDir() / ("frameos-remote-config-" & $epochTime().int64)
   let configPath = tempRoot / "frame.json"

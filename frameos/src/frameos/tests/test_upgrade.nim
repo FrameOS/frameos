@@ -92,6 +92,43 @@ suite "FrameOS upgrade helpers":
     check compareFrameOSVersions("2026.7.0", "2026.6.99") > 0
     check compareFrameOSVersions("v2026.6.27", "2026.6.27+def") == 0
 
+  test "the privileged installer accepts only a strictly newer release":
+    check releaseInstallVersionProblem("2026.8.43", "2026.8.44") == ""
+    check "not newer" in releaseInstallVersionProblem("2026.8.44", "2026.8.44")
+    check "not newer" in releaseInstallVersionProblem("2026.9.0", "2026.8.44")
+    check releaseInstallVersionProblem("unknown", "2026.8.44") == ""
+    check releaseInstallVersionProblem("2026.8.43", "2026..44").len > 0
+
+  test "the root worker requires a buildroot host and matching config mode":
+    let dir = getTempDir() / "frameos-upgrade-os-release-test"
+    createDir(dir)
+    defer: removeDir(dir)
+    let osRelease = dir / "os-release"
+    writeFile(osRelease, "NAME=Buildroot\nID=buildroot\n")
+    check isBuildrootHost(osRelease)
+    check privilegedBuildrootContextProblem("buildroot", osRelease) == ""
+    check "config mode" in privilegedBuildrootContextProblem("rpios", osRelease)
+    writeFile(osRelease, "NAME=Debian\nID=debian\n")
+    check not isBuildrootHost(osRelease)
+    check "only available" in privilegedBuildrootContextProblem("buildroot", osRelease)
+
+  test "the extracted archive root is bound to version and target":
+    let dir = getTempDir() / "frameos-upgrade-archive-root-test"
+    createDir(dir)
+    defer: removeDir(dir)
+    let release = FrameOSReleaseInfo(version: "2026.8.44", target: "debian-bookworm-arm64")
+    let expected = dir / expectedReleaseArchiveRootName(release)
+    createDir(expected)
+    check extractedReleaseRoot(dir, release) == expected
+    writeFile(dir / "unexpected", "x")
+    expect ValueError:
+      discard extractedReleaseRoot(dir, release)
+    removeFile(dir / "unexpected")
+    removeDir(expected)
+    createDir(dir / "frameos-2026.8.43-debian-bookworm-arm64")
+    expect ValueError:
+      discard extractedReleaseRoot(dir, release)
+
   test "latest release status update clears missing or stale errors":
     let release = FrameOSReleaseInfo(
       version: "2026.6.27",

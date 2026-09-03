@@ -70,6 +70,7 @@ from app.tasks.setup_json_reset import (
     setup_json_reset_enabled,
     setup_json_reset_file_path,
 )
+from app.tasks.buildroot_user_merge import FRAMEOS_GID, FRAMEOS_SERVICE_USER, FRAMEOS_UID
 from app.tasks.buildroot_platforms import (
     BUILDROOT_PLATFORMS,
     DEFAULT_BUILDROOT_PLATFORM,
@@ -345,6 +346,27 @@ BUILDROOT_FSTAB_CONTENT = (
     )
     + "\n"
 )
+# Privilege separation (docs/buildroot-privileges.md §3). frameos.service on a
+# generic (standalone / FrameOS Cloud) image runs as this user; root work goes
+# through the privileged door (frameos/src/frameos/privileged.nim). The user's
+# fixed uid/gid and account lines live in buildroot_user_merge.py, which
+# patch-root.sh also embeds to stamp the user into older cached base images.
+BUILDROOT_FRAMEOS_SERVICE_USER = FRAMEOS_SERVICE_USER
+BUILDROOT_FRAMEOS_UID = FRAMEOS_UID
+BUILDROOT_FRAMEOS_GID = FRAMEOS_GID
+# Buildroot users table (BR2_ROOTFS_USERS_TABLES) for base image builds:
+# username uid group gid password home shell groups comment.
+BUILDROOT_USERS_TABLE_WORK_PATH = "/work/frameos-users.txt"
+BUILDROOT_USERS_TABLE_CONTENT = (
+    f"{BUILDROOT_FRAMEOS_SERVICE_USER} {BUILDROOT_FRAMEOS_UID} {BUILDROOT_FRAMEOS_SERVICE_USER} "
+    f"{BUILDROOT_FRAMEOS_GID} * /srv/frameos /bin/false - FrameOS runtime\n"
+)
+BUILDROOT_PRIVILEGED_PATH_UNIT_NAME = "frameos-privileged.path"
+BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME = "frameos-privileged.service"
+BUILDROOT_DEVICE_UDEV_RULES_NAME = "60-frameos-devices.rules"
+BUILDROOT_UNPRIVILEGED_SERVICE_MARKER = "__FRAMEOS_UNPRIVILEGED_SERVICE__"
+# Directories the FRAMEOS partition ships with for the runtime user.
+BUILDROOT_FRAMEOS_RUNTIME_DIRS = ("state", "logs", "tmp", "runtime", "staging", "privileged/results")
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
 # Cross-compile target of the default platform; per-platform targets come
@@ -646,15 +668,30 @@ def render_systemd_service(
     return "\n".join(rendered_lines) + "\n"
 
 
-def render_buildroot_frameos_service(uses_network_manager: bool = True) -> str:
-    service = render_systemd_service(
-        REPO_ROOT / "frameos" / "frameos.service",
-        user="root",
-        environment={
-            "FRAMEOS_HOME": "/srv/frameos/current",
-            "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
-        },
+def render_buildroot_frameos_service(
+    uses_network_manager: bool = True,
+    user: str = BUILDROOT_FRAMEOS_SERVICE_USER,
+) -> str:
+    """
+    The frameos.service a Buildroot image ships.
+
+    Keep in step with renderBuildrootFrameosService in
+    frameos/src/frameos/buildroot_privileges.nim: same template files under
+    frameos/, same three substitutions, so a frame's own `frameos setup`
+    renders the byte-identical unit and never rewrites the read-only rootfs
+    for nothing. A non-root user gets the hardening block spliced in
+    (frameos/frameos.service.unprivileged); root frames — images a
+    self-hosted backend personalizes, and the armv6 wpa_supplicant image —
+    keep the plain unit, because NoNewPrivileges plus an empty bounding set
+    would strip root of the capabilities its own setup code needs.
+    """
+    template = (REPO_ROOT / "frameos" / "frameos.service").read_text(encoding="utf-8")
+    unprivileged = (
+        ""
+        if user == "root"
+        else (REPO_ROOT / "frameos" / "frameos.service.unprivileged").read_text(encoding="utf-8")
     )
+    service = template.replace(BUILDROOT_UNPRIVILEGED_SERVICE_MARKER, unprivileged).replace("%I", user)
     # Platforms without NetworkManager (armv6 runs wpa_supplicant + hostapd
     # instead) must not name the unit at all: a Wants= pointing at a unit
     # that does not exist logs a failed dependency on every boot and buys
@@ -669,18 +706,180 @@ def render_buildroot_frameos_service(uses_network_manager: bool = True) -> str:
     )
 
 
-def stage_buildroot_frameos_service(root: Path, uses_network_manager: bool = True) -> None:
+def buildroot_frameos_service_user_for_platform(platform: BuildrootPlatform, generic_image: bool) -> str:
+    """
+    Which user a composed image's frameos.service runs as.
+
+    Generic release images run as `frameos` wherever NetworkManager exists:
+    the armv6 image drives wpa_supplicant/hostapd from the runtime itself,
+    which is a root network daemon by nature and stays root until that
+    orchestration moves behind the door. Backend-personalized images stay
+    root: the self-hosted backend deploys unsigned custom builds over
+    SSH/Remote as root and writes release directories as root, so a
+    `frameos` runtime could not even open its own frame.json there.
+    """
+    if generic_image and platform.uses_network_manager:
+        return BUILDROOT_FRAMEOS_SERVICE_USER
+    return "root"
+
+
+def stage_buildroot_frameos_service(
+    root: Path,
+    uses_network_manager: bool = True,
+    user: str = BUILDROOT_FRAMEOS_SERVICE_USER,
+) -> None:
     systemd_dir = root / "etc" / "systemd" / "system"
     wants_dir = systemd_dir / "multi-user.target.wants"
     systemd_dir.mkdir(parents=True, exist_ok=True)
     wants_dir.mkdir(parents=True, exist_ok=True)
     (systemd_dir / "frameos.service").write_text(
-        render_buildroot_frameos_service(uses_network_manager), encoding="utf-8"
+        render_buildroot_frameos_service(uses_network_manager, user=user), encoding="utf-8"
     )
     link = wants_dir / "frameos.service"
     if link.exists() or link.is_symlink():
         link.unlink()
     link.symlink_to("../frameos.service")
+
+
+def render_buildroot_privileged_path_unit() -> str:
+    return (REPO_ROOT / "frameos" / BUILDROOT_PRIVILEGED_PATH_UNIT_NAME).read_text(encoding="utf-8")
+
+
+def render_buildroot_privileged_service_unit() -> str:
+    return (REPO_ROOT / "frameos" / BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME).read_text(encoding="utf-8")
+
+
+def render_buildroot_device_udev_rules() -> str:
+    return (REPO_ROOT / "frameos" / BUILDROOT_DEVICE_UDEV_RULES_NAME).read_text(encoding="utf-8")
+
+
+def stage_buildroot_privileged_units(root: Path) -> None:
+    """
+    The privileged door: a .path unit watching /srv/frameos/privileged/queue
+    that starts a root oneshot running `frameos privileged-worker`, plus the
+    udev rule that hands the panel buses to the service group. Enabled on
+    every image — on a root frame the queue simply stays empty.
+    """
+    systemd_dir = root / "etc" / "systemd" / "system"
+    wants_dir = systemd_dir / "multi-user.target.wants"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+    wants_dir.mkdir(parents=True, exist_ok=True)
+    (systemd_dir / BUILDROOT_PRIVILEGED_PATH_UNIT_NAME).write_text(
+        render_buildroot_privileged_path_unit(), encoding="utf-8"
+    )
+    (systemd_dir / BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME).write_text(
+        render_buildroot_privileged_service_unit(), encoding="utf-8"
+    )
+    link = wants_dir / BUILDROOT_PRIVILEGED_PATH_UNIT_NAME
+    if link.exists() or link.is_symlink():
+        link.unlink()
+    link.symlink_to(f"../{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME}")
+    rules_dir = root / "etc" / "udev" / "rules.d"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / BUILDROOT_DEVICE_UDEV_RULES_NAME).write_text(render_buildroot_device_udev_rules(), encoding="utf-8")
+
+
+def stage_buildroot_frameos_runtime_dirs(root: Path) -> None:
+    """The FRAMEOS partition's empty directories (ownership is applied when
+    the partition image is built, see render_frameos_partition_ownership_commands)."""
+    srv_frameos = root / "srv" / "frameos"
+    for name in (*BUILDROOT_FRAMEOS_RUNTIME_DIRS, "privileged/queue", "releases"):
+        (srv_frameos / name).mkdir(parents=True, exist_ok=True)
+
+
+def render_buildroot_user_merge_shell() -> str:
+    """
+    Shell for patch-root.sh: pulls /etc/{passwd,group,shadow} out of the root
+    partition with debugfs, runs buildroot_user_merge.py on them (embedded,
+    because this may execute inside the composer container where the backend
+    package is not importable) and queues the rewritten files onto the
+    debugfs command list in $cmds. Expects $rootfs, $cmds and $service_root
+    from the enclosing script.
+    """
+    merge = (BACKEND_ROOT / "app" / "tasks" / "buildroot_user_merge.py").read_text(encoding="utf-8")
+    return (
+        'mkdir -p "$service_root/etc-current"\n'
+        "for f in passwd group shadow; do\n"
+        '  debugfs -R "cat /etc/$f" "$rootfs" > "$service_root/etc-current/$f" 2>/dev/null || : > "$service_root/etc-current/$f"\n'
+        "done\n"
+        ': > "$cmds"\n'
+        "python3 - \"$service_root/etc-current\" \"$cmds\" <<'FRAMEOS_USER_MERGE_PY'\n"
+        + merge
+        + "FRAMEOS_USER_MERGE_PY\n"
+    )
+
+
+def render_frameos_partition_ownership_commands(
+    frameos_root: Path,
+    *,
+    uid: int = BUILDROOT_FRAMEOS_UID,
+    gid: int = BUILDROOT_FRAMEOS_GID,
+) -> str:
+    """
+    debugfs `sif` commands that give the composed FRAMEOS partition the
+    /srv/frameos layout the runtime user needs (the same layout
+    buildrootOwnershipScript in frameos/src/frameos/buildroot_privileges.nim
+    stamps at runtime):
+
+      releases/<r>            root:frameos 1775  sticky: the runtime may add files
+                                                  but cannot replace root's binary
+      releases/<r>/frameos    root:root    0755
+      releases/<r>/{drivers,scenes,vendor} root:root
+      releases/<r>/*.json*    frameos      0600 / 0644 for scene payloads
+      state                   root:frameos 1770  (NetworkManager/, wpa_supplicant/
+                                                  stay root 0700: NM ignores
+                                                  keyfiles anyone else owns)
+      logs tmp runtime staging root:frameos 1770; contents frameos
+      privileged              root:frameos 0755; queue root:frameos 1770;
+                              results root:frameos 2750
+
+    genimage copies the tree as uid 0 and mke2fs keeps that, so ownership is
+    applied to the finished ext4 image. debugfs needs no root for this.
+    """
+    lines: list[str] = []
+
+    def sif(rel: str, owner: int, group: int, mode: int | None) -> None:
+        lines.append(f"sif {rel} uid {owner}")
+        lines.append(f"sif {rel} gid {group}")
+        if mode is not None:
+            lines.append(f"sif {rel} mode 0{mode:o}")
+
+    for entry in sorted(frameos_root.rglob("*")):
+        if entry.is_symlink():
+            continue
+        rel = "/" + entry.relative_to(frameos_root).as_posix()
+        parts = rel.strip("/").split("/")
+        top = parts[0]
+        if top == "releases":
+            if len(parts) == 2:
+                sif(rel, 0, gid, 0o41775)
+            elif len(parts) >= 3 and parts[2] in ("drivers", "scenes", "vendor"):
+                sif(rel, 0, 0, 0o40755 if entry.is_dir() and len(parts) == 3 else None)
+            elif len(parts) == 3 and entry.is_file():
+                name = parts[2]
+                if name == "frameos":
+                    sif(rel, 0, 0, 0o100755)
+                elif name == "frameos.service":
+                    sif(rel, 0, 0, 0o100644)
+                else:
+                    sif(rel, uid, gid, 0o100600 if name.startswith("frame.json") else 0o100644)
+        elif top == "state":
+            if len(parts) >= 2 and parts[1] in ("NetworkManager", "wpa_supplicant"):
+                continue
+            sif(rel, 0 if len(parts) == 1 else uid, gid, 0o41770 if len(parts) == 1 else None)
+        elif top in ("logs", "tmp", "runtime", "staging"):
+            sif(rel, 0 if len(parts) == 1 else uid, gid, 0o41770 if len(parts) == 1 else None)
+        elif top == "privileged":
+            if len(parts) == 1:
+                sif(rel, 0, gid, 0o40755)
+            elif parts[1] == "queue":
+                sif(rel, 0, gid, 0o41770 if len(parts) == 2 else None)
+            elif parts[1] == "results":
+                result_mode = 0o42750 if len(parts) == 2 else (0o100640 if entry.is_file() else 0o40750)
+                sif(rel, 0, gid, result_mode)
+        elif top == "vendor":
+            sif(rel, 0, 0, 0o40755 if len(parts) == 1 and entry.is_dir() else None)
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def stage_buildroot_network_manager_state(root: Path) -> None:
@@ -1339,6 +1538,7 @@ class BuildrootImageBuilder:
                 post_image_path = temp_dir / "post-image.sh"
                 kernel_fragment_path = temp_dir / "linux-fragment.config"
                 self._write_buildroot_config(config_path, self.platform)
+                self._write_users_table(temp_dir / Path(BUILDROOT_USERS_TABLE_WORK_PATH).name)
                 self._write_kernel_config_fragment(kernel_fragment_path, self.platform)
                 self._write_post_build_script(post_build_path, self.platform)
                 self._write_partition_post_build_script(partition_post_build_path)
@@ -1698,6 +1898,12 @@ class BuildrootImageBuilder:
             build_host=self.build_executor_config,
         ).build(source_dir)
 
+    @property
+    def frameos_service_user(self) -> str:
+        """Backend-personalized images stay root (see
+        buildroot_frameos_service_user_for_platform); release images override."""
+        return buildroot_frameos_service_user_for_platform(self.platform, generic_image=False)
+
     def _stage_overlay(
         self,
         *,
@@ -1706,7 +1912,7 @@ class BuildrootImageBuilder:
         bootstrap_frame: Frame | Any,
         setup_payload: dict[str, Any],
         frameos_build: FrameBinaryBuildResult,
-        remote_binary: str,
+        remote_binary: str | None,
     ) -> None:
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         remote_release_dir = overlay_dir / "srv" / "frameos" / "remote" / "releases" / f"release_{build_id}"
@@ -1718,13 +1924,14 @@ class BuildrootImageBuilder:
 
         for directory in (
             release_dir,
-            remote_release_dir,
+            *([remote_release_dir] if remote_binary else []),
             state_dir,
             assets_dir,
             boot_overlay_dir,
             wants_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
+        stage_buildroot_frameos_runtime_dirs(overlay_dir)
         stage_buildroot_network_manager_state(overlay_dir)
         stage_buildroot_resolved_dropin(overlay_dir)
         stage_buildroot_network_service_dropin(overlay_dir)
@@ -1735,6 +1942,11 @@ class BuildrootImageBuilder:
         shutil.copy2(frameos_build.binary_path, release_dir / "frameos")
         os.chmod(release_dir / "frameos", 0o755)
         self._copy_libraries(frameos_build.driver_library_paths, release_dir / "drivers")
+        # The privileged worker loads code from the current release. Always
+        # create these roots in the composed image so the runtime cannot
+        # pre-plant them in the sticky release directory.
+        (release_dir / "drivers").mkdir(exist_ok=True)
+        (release_dir / "scenes").mkdir(exist_ok=True)
 
         (release_dir / "frame.json").write_text(
             json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
@@ -1762,31 +1974,36 @@ class BuildrootImageBuilder:
         # No console_output: frameos draws to the framebuffer on the same VT,
         # so mirroring its logs to tty1 would scribble over the rendered image.
         (release_dir / "frameos.service").write_text(
-            render_buildroot_frameos_service(self.platform.uses_network_manager),
+            render_buildroot_frameos_service(self.platform.uses_network_manager, user=self.frameos_service_user),
             encoding="utf-8",
         )
 
-        shutil.copy2(remote_binary, remote_release_dir / "frameos_remote")
-        os.chmod(remote_release_dir / "frameos_remote", 0o755)
-        (remote_release_dir / "frame.json").write_text(
-            json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
-            encoding="utf-8",
-        )
-        self._write_service(
-            REPO_ROOT / "frameos" / "remote" / "frameos-remote.service",
-            remote_release_dir / "frameos-remote.service",
-            user="root",
-            environment={
-                "FRAMEOS_HOME": "/srv/frameos/current",
-                "LD_LIBRARY_PATH": "/usr/lib:/usr/local/lib",
-            },
-        )
+        # FrameOS Remote ships only where a backend will talk to it. Generic
+        # release images pass remote_binary=None: no /srv/frameos/remote, no
+        # unit (docs/buildroot-privileges.md §2).
+        if remote_binary:
+            shutil.copy2(remote_binary, remote_release_dir / "frameos_remote")
+            os.chmod(remote_release_dir / "frameos_remote", 0o755)
+            (remote_release_dir / "frame.json").write_text(
+                json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
+                encoding="utf-8",
+            )
+            self._write_service(
+                REPO_ROOT / "frameos" / "remote" / "frameos-remote.service",
+                remote_release_dir / "frameos-remote.service",
+                user="root",
+                environment={
+                    "FRAMEOS_HOME": "/srv/frameos/current",
+                    "LD_LIBRARY_PATH": "/usr/lib:/usr/local/lib",
+                },
+            )
 
         self._relative_symlink(f"releases/release_{build_id}", overlay_dir / "srv" / "frameos" / "current")
-        self._relative_symlink(
-            f"releases/release_{build_id}",
-            overlay_dir / "srv" / "frameos" / "remote" / "current",
-        )
+        if remote_binary:
+            self._relative_symlink(
+                f"releases/release_{build_id}",
+                overlay_dir / "srv" / "frameos" / "remote" / "current",
+            )
         self._relative_symlink("/srv/frameos/state", release_dir / "state")
         self._stage_font_assets(assets_dir)
 
@@ -2058,6 +2275,7 @@ class BuildrootImageBuilder:
                     'BR2_CCACHE_DIR="/cache/ccache"',
                     'BR2_CCACHE_INITIAL_SETUP="--max-size=10G"',
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
+                    f'BR2_ROOTFS_USERS_TABLES="{BUILDROOT_USERS_TABLE_WORK_PATH}"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
                     'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
                     *platform.extra_config_lines,
@@ -2066,6 +2284,10 @@ class BuildrootImageBuilder:
             ),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _write_users_table(path: Path) -> None:
+        path.write_text(BUILDROOT_USERS_TABLE_CONTENT, encoding="utf-8")
 
     @staticmethod
     def _write_kernel_config_fragment(path: Path, platform: BuildrootPlatform) -> None:
@@ -2498,6 +2720,15 @@ image assets.vfat {{
             encoding="utf-8",
         )
 
+        # Ownership for the runtime user goes onto the finished ext4 with
+        # debugfs: genimage copies the tree as uid 0 whatever the staging
+        # host says, and this composer need not be root.
+        ownership_cmds = compose_dir / "frameos-ownership.cmds"
+        if self.frameos_service_user != "root":
+            ownership_cmds.write_text(render_frameos_partition_ownership_commands(frameos_root), encoding="utf-8")
+        else:
+            ownership_cmds.unlink(missing_ok=True)
+
         script_path = compose_dir / "compose-partitions.sh"
         script_path.write_text(
             """#!/usr/bin/env bash
@@ -2506,7 +2737,7 @@ export DEBIAN_FRONTEND=noninteractive
 work_dir="${FRAMEOS_COMPOSE_WORK_DIR:-/work}"
 compose_roots="${FRAMEOS_COMPOSE_ROOTS:-__FRAMEOS_COMPOSE_ROOTS__}"
 trap 'rm -rf "$compose_roots"' EXIT
-if ! command -v genimage >/dev/null 2>&1 || ! command -v mkfs.vfat >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
+if ! command -v genimage >/dev/null 2>&1 || ! command -v mkfs.vfat >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1 || ! command -v debugfs >/dev/null 2>&1; then
   apt-get update
   apt-get install -y --no-install-recommends genimage dosfstools e2fsprogs mtools
 fi
@@ -2515,6 +2746,9 @@ rm -rf "$compose_roots"
 mkdir -p "$compose_roots"
 tar -C "$work_dir/roots" -cf - frameos assets | tar -C "$compose_roots" -xf -
 genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath "$work_dir/images" --outputpath "$work_dir/images" --config "$work_dir/frameos-genimage.cfg"
+if [ -s "$work_dir/frameos-ownership.cmds" ]; then
+  debugfs -w -f "$work_dir/frameos-ownership.cmds" "$work_dir/images/frameos.ext4" >/dev/null
+fi
 """.replace("__FRAMEOS_COMPOSE_ROOTS__", compose_roots),
             encoding="utf-8",
         )
@@ -2646,7 +2880,8 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         if compose_dir.exists():
             shutil.rmtree(compose_dir)
         compose_dir.mkdir(parents=True, exist_ok=True)
-        stage_buildroot_frameos_service(service_root, self.platform.uses_network_manager)
+        stage_buildroot_frameos_service(service_root, self.platform.uses_network_manager, user=self.frameos_service_user)
+        stage_buildroot_privileged_units(service_root)
         stage_postboot_log(service_root)
         # These drop-ins shipped inside the base rootfs long after many cached
         # base images were built. An SD composed from an old base without them
@@ -2763,6 +2998,11 @@ fi
 """
 
         script_path = compose_dir / "patch-root.sh"
+        # The frameos user and group: read the base image's account files,
+        # append the fixed-uid lines unless present, write them back. Older
+        # cached bases predate the user; a base built with the users table
+        # already has it. A plain string spliced into the f-string below.
+        user_merge = render_buildroot_user_merge_shell()
         script_path.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -2795,7 +3035,7 @@ with open(disk_path, "rb") as disk, open(rootfs_path, "wb") as rootfs:
         rootfs.write(chunk)
         remaining -= len(chunk)
 PY
-cat > "$cmds" <<EOF
+{user_merge}cat >> "$cmds" <<EOF
 mkdir /etc
 mkdir /etc/systemd
 mkdir /etc/systemd/system
@@ -2804,6 +3044,16 @@ rm /etc/systemd/system/frameos.service
 write $service_root/etc/systemd/system/frameos.service /etc/systemd/system/frameos.service
 rm /etc/systemd/system/multi-user.target.wants/frameos.service
 symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.service
+rm /etc/systemd/system/{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME}
+write $service_root/etc/systemd/system/{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME} /etc/systemd/system/{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME}
+rm /etc/systemd/system/{BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME}
+write $service_root/etc/systemd/system/{BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME} /etc/systemd/system/{BUILDROOT_PRIVILEGED_SERVICE_UNIT_NAME}
+rm /etc/systemd/system/multi-user.target.wants/{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME}
+symlink /etc/systemd/system/multi-user.target.wants/{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME} ../{BUILDROOT_PRIVILEGED_PATH_UNIT_NAME}
+mkdir /etc/udev
+mkdir /etc/udev/rules.d
+rm /etc/udev/rules.d/{BUILDROOT_DEVICE_UDEV_RULES_NAME}
+write $service_root/etc/udev/rules.d/{BUILDROOT_DEVICE_UDEV_RULES_NAME} /etc/udev/rules.d/{BUILDROOT_DEVICE_UDEV_RULES_NAME}
 rm /etc/hostname
 write $service_root/etc/hostname /etc/hostname
 mkdir /usr
@@ -3486,6 +3736,24 @@ chmod 700 "$frameos_root/state/NetworkManager/system-connections"
 mkdir -p "$frameos_root/state/wpa_supplicant"
 chown 0:0 "$frameos_root/state/wpa_supplicant"
 chmod 700 "$frameos_root/state/wpa_supplicant"
+# The runtime-writable sticky directories (docs/buildroot-privileges.md §3);
+# numeric ids because this runs under fakeroot where the users table is not
+# applied yet. Root owns each directory so the runtime cannot replace a root
+# helper's atomic temporary file before rename.
+for d in logs tmp runtime staging; do
+  mkdir -p "$frameos_root/$d"
+  chown 0:__FRAMEOS_GID__ "$frameos_root/$d"
+  chmod 1770 "$frameos_root/$d"
+done
+chown 0:__FRAMEOS_GID__ "$frameos_root/state"
+chmod 1770 "$frameos_root/state"
+mkdir -p "$frameos_root/privileged/queue"
+chown 0:__FRAMEOS_GID__ "$frameos_root/privileged" "$frameos_root/privileged/queue"
+chmod 755 "$frameos_root/privileged"
+chmod 1770 "$frameos_root/privileged/queue"
+mkdir -p "$frameos_root/privileged/results"
+chown 0:__FRAMEOS_GID__ "$frameos_root/privileged/results"
+chmod 2750 "$frameos_root/privileged/results"
 mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections" "$target_dir/etc/wpa_supplicant"
 chown 0:0 "$target_dir/etc/NetworkManager/system-connections"
 chmod 700 "$target_dir/etc/NetworkManager/system-connections"
@@ -3498,7 +3766,9 @@ grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-con
 cat >> "$tmp_fstab" <<'EOF'
 __FRAMEOS_FSTAB_CONTENT__EOF
 mv "$tmp_fstab" "$fstab"
-""".replace("__FRAMEOS_FSTAB_CONTENT__", BUILDROOT_FSTAB_CONTENT)
+""".replace("__FRAMEOS_FSTAB_CONTENT__", BUILDROOT_FSTAB_CONTENT).replace(
+    "__FRAMEOS_UID__", str(BUILDROOT_FRAMEOS_UID)
+).replace("__FRAMEOS_GID__", str(BUILDROOT_FRAMEOS_GID))
 
 
 def render_post_image_script(platform: BuildrootPlatform) -> str:

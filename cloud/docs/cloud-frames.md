@@ -81,7 +81,7 @@ proxies, ever" rule in `AGENTS.md` at the repo root:
 ┌────────────────────────────┐        ┌──────────────────────────────┐
 │ FrameOS Cloud (this repo)  │        │ Frame (Pi / buildroot / ESP) │
 │                            │  WSS   │                              │
-│  identity + accounts       │◄───────┤  frameos_remote, CLOUD       │
+│  identity + accounts       │◄───────┤  in-binary hub client, CLOUD │
 │  scene store               │ out-   │  profile (restricted verbs)  │
 │  frames table + assignment │ bound  │                              │
 │  WebSocket hub             │ only   │  frameos runtime             │

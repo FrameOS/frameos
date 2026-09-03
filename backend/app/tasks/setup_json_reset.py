@@ -641,6 +641,17 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     fi
     umask "$old_umask"
     chmod 600 "$pending_file"
+    # frameos.service runs as the `frameos` user on generic images
+    # (docs/buildroot-privileges.md §3); the runtime must be able to read
+    # the claim token it is about to redeem. Keep the shared state directory
+    # root-owned and sticky, though, so the runtime cannot replace a root
+    # helper's atomic temporary file before rename. No-op on an older cached
+    # image where the user does not exist yet.
+    if grep -q '^frameos:' "$ETC_DIR"/passwd 2>/dev/null; then
+      chown frameos:frameos "$pending_file" 2>/dev/null || chown frameos "$pending_file" 2>/dev/null || true
+      chown root:frameos "$pending_dir" 2>/dev/null || true
+      chmod 1770 "$pending_dir" 2>/dev/null || true
+    fi
     cloud_enrolled=1
     echo "Wrote cloud enrollment state to $pending_file"
   fi

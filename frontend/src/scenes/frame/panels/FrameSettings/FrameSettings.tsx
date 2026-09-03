@@ -3389,6 +3389,11 @@ export function FrameSettings({
                             then connect to the backend to await further commands.
                           </p>
                           <p>
+                            Buildroot SD images ship without FrameOS Remote: the deploy that turns this on installs it.
+                            A frame with it enabled also runs FrameOS as root rather than the unprivileged
+                            &lsquo;frameos&rsquo; user, because the backend deploys into it as root.
+                          </p>
+                          <p>
                             Note: after enabling FrameOS Remote, you must manually deploy it from the "..." -&gt;
                             "Deploy Remote" menu in the top.
                           </p>
@@ -3405,6 +3410,10 @@ export function FrameSettings({
                           tooltip={
                             <div className="space-y-2">
                               <p>Can FrameOS Remote actually run commands and execute updates?</p>
+                              <p>
+                                This is how deploys reach a frame the backend cannot SSH into. It is a shell on the
+                                device: the frame runs whatever the backend sends it, as root.
+                              </p>
                               <p>
                                 This is a second "are you really sure?" toggle, as this comes with risk when enabled on
                                 an unsecure connection.

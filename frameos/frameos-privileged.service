@@ -1,0 +1,27 @@
+[Unit]
+Description=FrameOS privileged door worker
+Documentation=file:/srv/frameos/current/docs/buildroot-privileges.md
+RequiresMountsFor=/srv/frameos /boot
+After=local-fs.target
+
+[Service]
+# Root on purpose, and the only root the runtime can reach. It executes
+# nothing the `frameos` user can write: /srv/frameos/current resolves inside
+# a root-owned directory to a release root installed after verifying its
+# minisign signature. The worker reads enum requests from the queue, runs
+# exactly those verbs (frameos/src/frameos/privileged_worker.nim), writes the
+# results and exits.
+Type=oneshot
+User=root
+WorkingDirectory=/srv/frameos/current
+Environment=FRAMEOS_HOME=/srv/frameos/current
+# Never search the runtime-writable release root (or a directory it can
+# create) for libraries loaded into this root process.
+Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/usr/lib:/usr/local/lib
+ExecStart=/srv/frameos/current/frameos privileged-worker
+UMask=0027
+# install-release unpacks a release and runs its setup; 30 minutes is far
+# above anything legitimate and still ends a wedged worker.
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal

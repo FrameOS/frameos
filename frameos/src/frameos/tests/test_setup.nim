@@ -380,9 +380,14 @@ block test_first_boot_service_start_is_non_blocking:
     startFrameOSSystemdServices(path)
 
     doAssert commands.anyIt(it.contains("command -v 'systemctl'"))
-    doAssert commands.anyIt(it.contains("systemctl --no-block start frameos.service frameos-remote.service"))
+    # agentEnabled alone no longer starts frameos-remote.service on a
+    # Buildroot frame: generic images do not ship the remote at all, so the
+    # unit is only started where an image (or a backend deploy) installed it
+    # under /srv/frameos/remote/current — which this test host lacks.
+    doAssert commands.anyIt(it.contains("systemctl --no-block start frameos.service") and
+      not it.contains("frameos-remote.service"))
     doAssert not commands.anyIt(
-      it.contains("systemctl start frameos.service frameos-remote.service") and
+      it.contains("systemctl start frameos.service") and
         not it.contains("--no-block")
     )
   finally:

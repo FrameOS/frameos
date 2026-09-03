@@ -1,0 +1,9 @@
+# FrameOS: hand the panel buses to the unprivileged service group.
+# fb, input, tty and dri already carry the video/input/tty/render groups from
+# 50-udev-default.rules; these are the nodes Buildroot's eudev leaves root:root.
+# frameos.service's ExecStartPre applies the same ownership at start-up, so a
+# frame whose rules were not (yet) installed still finds its panel.
+SUBSYSTEM=="spidev", GROUP="frameos", MODE="0660"
+SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="frameos", MODE="0660"
+SUBSYSTEM=="i2c-dev", GROUP="frameos", MODE="0660"
+KERNEL=="vchiq", GROUP="frameos", MODE="0660"

@@ -11,6 +11,7 @@ import frameos/network/supplicant as wpa
 import frameos/cloud/device_flow
 import frameos/cloud/enrollment
 import frameos/cloud/link_state
+import frameos/privileged
 import drivers/drivers as frameDrivers
 
 const
@@ -211,6 +212,17 @@ proc maskedPasswordArgs*(args: seq[string]): seq[string] =
   for i in 0 ..< max(result.len - 1, 0):
     if result[i] == "password":
       result[i + 1] = masked(result[i + 1])
+
+proc door(verb: PrivilegedVerb, args: JsonNode = nil,
+          timeoutMs = portalCommandTimeoutMs): (string, int) {.gcsafe.} =
+  ## The privileged door (frameos/privileged.nim) for what the root-only
+  ## code paths below do with `sudo`: on a Buildroot frame the runtime is
+  ## the `frameos` user and asks the root worker instead. Same (output, rc)
+  ## shape as `run` so the parsers do not care which one answered.
+  let res = requestPrivileged(verb, args, timeoutMs)
+  pLog("portal:privileged", %*{"verb": $verb, "ok": res.ok, "rc": res.exitCode,
+                               "error": res.error, "output": res.output.strip()})
+  (res.output, if res.ok: 0 else: max(res.exitCode, 1))
 
 proc run(cmd: string, loggedCmd: string = ""): (string, int) {.gcsafe.} =
   ## Execute a shell command (through /bin/sh -c) and log the result.
@@ -888,6 +900,9 @@ proc writeHostnameBestEffort(hostname: string) =
   let base = sanitizeHostnameBase(hostname)
   if base.len == 0:
     return
+  if privilegedDoorAvailable():
+    discard door(pvSetHostname, %*{"hostname": base})
+    return
   try:
     writeFile("/etc/hostname", base & "\n")
   except CatchableError:
@@ -904,8 +919,11 @@ proc runDriverSetupFromSavedConfig*(frameOS: FrameOS, options: PortalSetupOption
     rememberError("Display setup failed: runtime path not available.")
     return false
   pLog("portal:setup:driverSetup:start", %*{"device": frameOS.frameConfig.device})
-  let command = "cd " & shQuote(appDir) & " && sudo -n " & shQuote(binary) & " driver-setup --reboot-if-required"
-  let (output, rc) = run(command)
+  let (output, rc) =
+    if privilegedDoorAvailable():
+      door(pvApplyDriverSetup, %*{"rebootIfRequired": true}, timeoutMs = 15 * 60 * 1000)
+    else:
+      run("cd " & shQuote(appDir) & " && sudo -n " & shQuote(binary) & " driver-setup --reboot-if-required")
   if rc == 0:
     pLog("portal:setup:driverSetup:done", %*{"device": frameOS.frameConfig.device})
     return true
@@ -1059,8 +1077,13 @@ proc parseWifiInterfaceFromNmcli(output: string): string =
       return parts[0]
   return ""
 
+proc nmDeviceStatus(): (string, int) {.gcsafe.} =
+  if privilegedDoorAvailable():
+    return door(pvNmDeviceStatus)
+  run("sudo nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true")
+
 proc nmGetWifiDevice(): string =
-  let (output, rc) = run("sudo nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true")
+  let (output, rc) = nmDeviceStatus()
   if rc != 0:
     return "wlan0"
 
@@ -1098,7 +1121,7 @@ proc getReadyWifiDevice(): string =
     # There is no "managed and ready" concept without NetworkManager: the
     # interface either exists or it does not.
     return supplicantWifiDevice()
-  let (output, rc) = run("sudo nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true")
+  let (output, rc) = nmDeviceStatus()
   if rc != 0:
     return ""
   parseWifiInterfaceFromNmcli(output)
@@ -1119,6 +1142,17 @@ proc availableNetworks*(frameOS: FrameOS): seq[string] =
   if activeNetworkBackend() == nbSupplicant:
     return wpa.availableNetworks(networkContext(), supplicantWifiDevice(), networkToolProbe())
 
+  if privilegedDoorAvailable():
+    # nm-wifi-list answers ACTIVE:SSID rows; the SSID may itself contain ':'.
+    let (output, rc) = door(pvNmWifiList)
+    if rc != 0:
+      return @[]
+    for line in output.splitLines():
+      let sep = line.find(':')
+      let ssid = (if sep >= 0: line[sep + 1 .. ^1] else: line).strip()
+      if ssid.len > 0 and ssid notin result:
+        result.add ssid
+    return
   let (output, rc) = run("sudo nmcli --terse --fields SSID device wifi list 2>/dev/null || true")
   if rc != 0:
     return @[]
@@ -1130,6 +1164,12 @@ proc availableNetworks*(frameOS: FrameOS): seq[string] =
 proc hotspotRunning(frameOS: FrameOS): bool =
   if activeNetworkBackend() == nbSupplicant:
     result = wpa.hotspotRunning(networkContext())
+  elif privilegedDoorAvailable():
+    let (output, _) = door(pvNmConnections, %*{"active": true})
+    result = false
+    for line in output.splitLines():
+      if line.strip() == nmHotspotName:
+        result = true
   else:
     let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | grep '^" &
                        nmHotspotName & "$' || true")
@@ -1139,6 +1179,13 @@ proc hotspotRunning(frameOS: FrameOS): bool =
 proc anyWifiConfigured(frameOS: FrameOS): bool =
   if activeNetworkBackend() == nbSupplicant:
     return wpa.anyWifiConfigured(networkContext(), supplicantWifiDevice())
+  if privilegedDoorAvailable():
+    let (output, _) = door(pvNmConnections)
+    for line in output.splitLines():
+      let name = line.strip()
+      if name.len > 0 and name != "lo":
+        return true
+    return false
   let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show | grep -v '^lo$' || true")
   result = output.strip().len > 0
 
@@ -1146,9 +1193,23 @@ proc activeConnectionStatus*(frameOS: FrameOS): JsonNode =
   ## Current SSID / connection state, in one shape for both backends.
   if activeNetworkBackend() == nbSupplicant:
     return wpa.logJson(wpa.status(networkContext(), supplicantWifiDevice(), networkToolProbe()))
-  let (nameOutput, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | head -n1 || true")
-  let (ssidOutput, _) = run(
-    "sudo nmcli --colors no -t -f ACTIVE,SSID device wifi list 2>/dev/null | grep '^yes:' | head -n1 || true")
+  var nameOutput = ""
+  var ssidOutput = ""
+  if privilegedDoorAvailable():
+    let (names, _) = door(pvNmConnections, %*{"active": true})
+    for line in names.splitLines():
+      if line.strip().len > 0:
+        nameOutput = line
+        break
+    let (wifi, _) = door(pvNmWifiList)
+    for line in wifi.splitLines():
+      if line.startsWith("yes:"):
+        ssidOutput = line
+        break
+  else:
+    nameOutput = run("sudo nmcli --colors no -t -f NAME connection show --active | head -n1 || true")[0]
+    ssidOutput = run(
+      "sudo nmcli --colors no -t -f ACTIVE,SSID device wifi list 2>/dev/null | grep '^yes:' | head -n1 || true")[0]
   let connectionName = nameOutput.strip()
   var ssid = ssidOutput.strip()
   if ssid.startsWith("yes:"):
@@ -1169,6 +1230,8 @@ proc stopAp*(frameOS: FrameOS) {.gcsafe.} =
   frameOS.network.hotspotStatus = HotspotStatus.stopping
   if activeNetworkBackend() == nbSupplicant:
     wpa.stopHotspot(networkContext(), supplicantWifiDevice())
+  elif privilegedDoorAvailable():
+    discard door(pvNmHotspotStop)
   else:
     discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
     discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
@@ -1223,17 +1286,46 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
     return
   pLog("portal:startAp")
   frameOS.network.hotspotStatus = HotspotStatus.starting
-  discard run("sudo rfkill unblock wifi || true")
+  let useDoor = privilegedDoorAvailable()
+  if not useDoor:
+    discard run("sudo rfkill unblock wifi || true")
 
   if activeNetworkBackend() == nbSupplicant:
     startApSupplicant(frameOS)
     return
 
-  discard run("sudo nmcli radio wifi on || true")
+  if useDoor:
+    discard door(pvNmRadioOn)
+  else:
+    discard run("sudo nmcli radio wifi on || true")
 
   let wifiHotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
   let wifiHotspotPassword = frameOS.frameConfig.network.wifiHotspotPassword
   let maskedHotspotPassword = masked(wifiHotspotPassword)
+
+  if useDoor:
+    # One verb does the add / modify / up sequence below as root
+    # (privileged_worker.nim, nm-hotspot-start); the psk goes as an argv
+    # entry to nmcli there and never through a shell.
+    for attempt in 1..hotspotStartAttempts:
+      let wifiDevice = waitForReadyWifiDevice()
+      if wifiDevice.len == 0:
+        frameOS.network.hotspotStatus = HotspotStatus.error
+        pLog("portal:startAp:noWifiDevice", %*{"attempt": attempt, "attempts": hotspotStartAttempts})
+        pLog("portal:startAp:error")
+        return
+      let (_, rc) = door(pvNmHotspotStart, %*{
+        "device": wifiDevice, "ssid": wifiHotspotSsid, "psk": wifiHotspotPassword,
+      })
+      if rc == 0:
+        discard finishStartedHotspot(frameOS)
+        return
+      pLog("portal:startAp:retry", %*{"attempt": attempt, "attempts": hotspotStartAttempts})
+      if attempt < hotspotStartAttempts:
+        portalSleepHook(hotspotStartRetryDelayMs)
+    frameOS.network.hotspotStatus = HotspotStatus.error
+    pLog("portal:startAp:error")
+    return
 
   proc buildHotspotAddCmd(wifiDevice: string): string =
     fmt"sudo nmcli connection add type wifi ifname {shQuote(wifiDevice)} " &
@@ -1339,6 +1431,18 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
     sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
     return
 
+  if privilegedDoorAvailable():
+    let wifiDevice = getWifiDevice()
+    let (doorOutput, doorRc) = door(pvNmWifiConnect, %*{"ssid": ssid, "psk": password, "device": wifiDevice})
+    result = doorRc == 0
+    pLog("portal:exec", %*{"cmd": "privileged nm-wifi-connect ssid=" & ssid & " psk=" & masked(password),
+                          "rc": doorRc, "output": doorOutput.strip()})
+    frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
+    if frameOS.network.status == NetworkStatus.connected:
+      portalSleepHook(5000) # give DHCP etc a moment
+    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+    return
+
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
   let wifiDevice = getWifiDevice()
 
@@ -1383,6 +1487,9 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
 # Immediately sync the clock so HTTPS certificates validate
 proc syncClock*() =
   ## Tries the best available tool on the current distro.
+  if privilegedDoorAvailable():
+    discard door(pvSyncClock, timeoutMs = clockSyncTimeoutMs)
+    return
   try:
     # Any systemd host: systemd-timesyncd one-shot
     if fileExists("/run/systemd/system"):

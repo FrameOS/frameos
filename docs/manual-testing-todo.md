@@ -97,11 +97,145 @@ hardware-settings batch) and the battery ADC rounds of #426.
   (not just reloads) and the settings apply. Also confirm the panel only
   shows fields the reported hardware can use, and shows disabled-with-reason
   on pre-2026.8.31 firmware.
-- [ ] **Generic image still adopts with Remote off (#362, `docs/todo.md`):**
-  release images ship `agentEnabled: false` — flash a *generic* Buildroot
-  card, adopt it into a self-hosted backend, verify the backend's first
-  deploy transparently enables FrameOS Remote (`frameos setup` does the
-  `systemctl enable`) and everything works after.
+- [ ] **Generic image still adopts with no Remote on it (`docs/buildroot-privileges.md` §4):**
+  release images no longer ship FrameOS Remote at all — flash a *generic*
+  Buildroot card, adopt it into a self-hosted backend, and verify the
+  backend's first deploy installs and enables the remote itself
+  (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
+  and that everything works after. The deploy also flips the frame back to
+  a root `frameos.service`, so check the unit's `User=` before and after.
+
+## 2b. Privilege separation bench (`docs/buildroot-privileges.md` §4)
+
+Nothing below has run on hardware. Flash a **fresh generic
+`raspberry-pi-64` release image** unless a step says otherwise.
+
+### Context for picking this up cold (written 2026-09-03, PR #415 green, not yet merged)
+
+**What ships in #415:** generic Buildroot images (`raspberry-pi-64`,
+`raspberry-pi-5`) run `frameos.service` as `frameos` (uid 990) behind the
+enum-only root door; `raspberry-pi-32` (armv6, wpa_supplicant) and every
+backend-personalized image (self-hosted backend, Home Assistant add-on) stay
+root on purpose. Releases up to and including **2026.9.2 are root-only**;
+the first release containing the door is the one cut after the merge
+(**2026.9.3**). A Buildroot frame that OTAs from 9.2 to 9.3 performs the
+root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
+§4 "OTA and migration").
+
+**Surfaces and what each one is for here:**
+
+| Surface | Frames | Role in this bench |
+| --- | --- | --- |
+| cloud.frameos.net (production) | 2 Buildroot frames (SPI e-ink — note the panels here: ______), 2 ESP32 | the two Buildroot frames are the **migration** test (9.2 → 9.3 over the air, one at a time); ESP32 frames are untouched by #415 |
+| cloud.frameos.net bench HDMI frames | piw (`raspberry-pi-32`), pi2w (`raspberry-pi-64`), pi5 (`raspberry-pi-5`) | pi2w + pi5: **fresh-image** tests (flash 9.3, reflashable = safe to break) and the framebuffer/`CAP_SYS_TTY_CONFIG` check; piw: **stays root** regression |
+| localhost:8616 self-hosted backend | 2 Waveshare frames | **regression only**: backend deploys its own build from the checkout as root; a deploy after the merge must still work and `User=` must still be root |
+| Home Assistant add-on | a few Waveshare / Pimoroni frames | **regression only**, after the add-on picks up the 9.3 docker image (`docker-publish-multi.yml` publishes it); one frame is enough |
+
+**Sequence (each step is a checkbox further down or here):**
+
+- [ ] **0. Baseline on 2026.9.2, before merging.** Upgrade the two cloud
+  Buildroot frames and the three bench HDMI frames to **2026.9.2** (the last
+  root-only release) via "Upgrade FrameOS". Reason: 9.2 is exactly the
+  "previous release" the migration test needs, and a plain OTA on every
+  frame first separates "OTA is broken" from "the migration is broken".
+  Do **not** jump the Buildroot frames to 9.3 by any other route first — a
+  frame that never ran 9.2 → 9.3 OTA has not tested the migration. ESP32
+  frames: irrelevant to #415, upgrade whenever. Local backend / HA frames:
+  nothing to do now.
+- [ ] **1. Merge #415** (squash or merge, either is fine; CI is green).
+- [ ] **2. New Buildroot base images from main:**
+  `gh workflow run buildroot-base-image.yml --ref main -f platform=all`.
+  The base build is where `BR2_ROOTFS_USERS_TABLES` creates the `frameos`
+  user natively; a release composed from an *older* cached base gets the
+  user through `buildroot_user_merge.py` in `patch-root.sh` instead. Both
+  paths are tested — keep the manifest commit the workflow makes. If the
+  base build is slow or fails for one platform, the release can still be
+  cut from the old bases (the merge path); note which path 9.3 used.
+- [ ] **3. Cut 2026.9.3:** `gh workflow run docker-publish-multi.yml --ref main`
+  (bumps `versions.json` as frameos-bot, builds the binaries, Buildroot SD
+  images, ESP32 firmware, wasm, and publishes the GitHub release). Check the
+  release page has `frameos-2026.9.3-*.tar.gz` + `.minisig` for
+  `debian-bookworm-arm64` (that is what the Buildroot 64-bit frames pull)
+  and the `raspberry-pi-64` / `raspberry-pi-5` `.img.gz`.
+- [ ] **4. Fresh image first (reflashable):** flash `raspberry-pi-5` 9.3 on
+  pi5, enroll into the cloud, run the "boots and renders as `frameos`",
+  "door answers", "hotspot and portal" and "runtime cannot escalate"
+  boxes below. Then `raspberry-pi-64` 9.3 on pi2w for the same boxes.
+- [ ] **5. Migration on one cloud Buildroot frame** (the less important
+  one): "Upgrade FrameOS" 9.2 → 9.3, watch `upgrade-status.json` in the
+  frame's log stream, then the SPI panel refresh time (slow = bit-banged
+  fallback = wrong device group), `journalctl -u frameos-privileged`,
+  `/etc/passwd` has `frameos:x:990:990`, `systemctl show -p User
+  frameos.service`. Only then the second frame.
+- [ ] **6. piw stays root:** OTA 9.2 → 9.3 on piw; `User=root`, no
+  `frameos-privileged.path` active (the unit is installed but disabled on
+  root frames), hotspot/portal still works through `supplicant.nim`.
+- [ ] **7. Regressions:** deploy from localhost:8616 to one Waveshare frame
+  (still root, still renders); after the HA add-on has the 9.3 image, deploy
+  to one HA frame. Neither should have a `frameos` user or the door active.
+- [ ] **8. Link cases** (the last box in this section) on whichever
+  migrated frame is handiest, over SSH.
+- [ ] **9. Afterwards:** tick the boxes here, move anything that broke into
+  `docs/todo.md`, and delete this section once everything passed. If a
+  migrated frame ends up unusable, reflash it with the 9.3 image — the
+  FRAMEOS partition layout is stamped by the composer, so a fresh card is
+  always the known-good state.
+
+- [ ] **It boots and renders as `frameos`.** `systemctl show -p User
+  frameos.service` says `frameos`, `ps -o user= -C frameos` agrees, and a
+  scene renders. Check the panel you have: framebuffer (Pi 5 / HDMI) and at
+  least one SPI e-ink (Waveshare 7.5" or 13.3E, Inky) — the SPI path is the
+  one most likely to trip on `/dev/spidev*` or `/dev/gpiochip*` permissions.
+  `DEV_Config.c` falls back to *bit-banged* SPI when it cannot open spidev,
+  so a panel that works but refreshes slowly means the group is wrong; look
+  for that, do not just trust a picture.
+- [ ] **The GPIO button and evdev input still fire** (groups `frameos` /
+  `input`), and the framebuffer console is claimed (no getty text over the
+  image — that is `CAP_SYS_TTY_CONFIG` working).
+- [ ] **The door answers.** `journalctl -u frameos-privileged` after a
+  reboot from the cloud/admin ("Reboot" button): one `executing reboot` line,
+  then the reboot. `systemctl status frameos-privileged.path` is active.
+- [ ] **Hotspot and portal through the door.** Boot with no Wi-Fi
+  credentials → `FrameOS-Setup` hotspot appears, the portal lists networks,
+  joining one works and survives a reboot. Every one of those is an
+  `nm-*` verb now; the journal shows them.
+- [ ] **OTA from a root-only release (the migration).** Flash an image from
+  the *previous* release, let it enroll, then trigger "Upgrade FrameOS".
+  Expect: the upgrade succeeds, `/etc/passwd` gains `frameos:x:990:990`,
+  the installed unit becomes the hardened one, `/srv/frameos` ownership is
+  root-code/`frameos`-state, and the frame renders after the restart.
+- [ ] **OTA on an already-migrated frame** (unprivileged → door →
+  `install-release`): the status file goes `running` → `success`, the log
+  shows the signature verified *twice* (once unprivileged, once as root),
+  and the frame comes back on the new version.
+- [ ] **The runtime cannot escalate.** As `frameos` on the device (`su -s
+  /bin/sh frameos`): writing `/srv/frameos/current/frameos` fails, writing
+  `/etc/systemd/system/frameos.service` fails, and a queue file with
+  `{"id":"manual-shell","verb":"shell","args":{}}` is refused in the
+  journal rather than run. Also verify
+  `stat -c '%U:%G %a'` reports `root:frameos 1770` for `state`, `logs`,
+  `staging`, and `privileged/queue`, `root:frameos 2750` for
+  `privileged/results`, and that neither a hostile result-path symlink nor a
+  runtime-created `scenes/*.so` is followed by the root worker. After joining
+  Wi-Fi, confirm `journalctl -u frameos-privileged` does not contain the PSK.
+- [ ] **Root follows none of the runtime's links (2026-09-03 review).** As
+  `frameos`, in `/srv/frameos/current`: `mv scenes.json.gz scenes.json.gz.bak
+  && ln -s /srv/frameos/state/NetworkManager/system-connections/frameos-wifi.nmconnection
+  scenes.json.gz`, `ln -s /etc scenes` (expect `ln: File exists`; if it
+  succeeds the composer left the code roots out — a bug), then trigger
+  "Upgrade FrameOS" (or `frameos upgrade`). Expect the upgrade to **fail**
+  with `refusing to follow the symlink at …scenes.json.gz` in
+  `upgrade-status.json` / the journal, no keyfile bytes anywhere under the
+  new release directory, and the old release still `current`. Restore the
+  payload, upgrade again, and expect success. Also `sysctl
+  fs.protected_hardlinks` — note the value in the PR; with `0`, additionally
+  `ln /srv/frameos/current/frameos evil.json` then drive an
+  `apply-driver-setup` (portal display setup) and confirm
+  `stat -c %U evil.json` stays `root` with a "refused to hand a hard-linked
+  file" line in the setup log. Finally `ln -s /etc
+  /srv/frameos/privileged/queue/x.json` and confirm the worker deletes it
+  within a few seconds instead of restarting forever
+  (`systemctl status frameos-privileged.service` settles).
 
 ## 3. Backend (self-hosted) bench
 

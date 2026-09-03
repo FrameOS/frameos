@@ -344,6 +344,8 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert 'shred_remove_file "$CLOUD_FILE"' in script
     assert "dd if=/dev/zero" in script
     assert "cloud_enroll_pending.json" in script
+    assert 'chown root:frameos "$pending_dir"' in script
+    assert 'chmod 1770 "$pending_dir"' in script
     assert "frameos-cloud-wifi.nmconnection" in script
     assert "request_reboot()" in script
     assert "systemctl reboot" in script
@@ -1997,7 +1999,10 @@ def test_stage_buildroot_frameos_service_enables_runtime(tmp_path):
 
     assert service.is_file()
     service_text = service.read_text(encoding="utf-8")
-    assert "User=root" in service_text
+    # Generic images run the runtime as the `frameos` user
+    # (docs/buildroot-privileges.md §3); the hardening block rides along.
+    assert "User=frameos" in service_text
+    assert "NoNewPrivileges=yes" in service_text
     assert "Wants=NetworkManager.service" in service_text
     assert "After=network.target NetworkManager.service" in service_text
     assert "ExecStart=/srv/frameos/current/frameos" in service_text
@@ -2224,7 +2229,10 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     assert nm_connections_dir.is_dir()
     assert oct(nm_connections_dir.stat().st_mode & 0o777) == "0o700"
     frameos_service = (release_dir / "frameos.service").read_text(encoding="utf-8")
+    # A backend-personalized image keeps root: the backend deploys as root
+    # into it (buildroot_frameos_service_user_for_platform).
     assert "User=root" in frameos_service
+    assert "NoNewPrivileges" not in frameos_service
     assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in frameos_service
     assert "/srv/frameos/runtime/frameos-last-exit" in frameos_service
     assert (
@@ -2239,13 +2247,19 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     # After= lines and each Buildroot upgrade tried to rewrite a file on the
     # read-only rootfs — which is what made cloud OTA fail outright.
     installed_root = tmp_path / "installed-unit"
-    stage_buildroot_frameos_service(installed_root, builder.platform.uses_network_manager)
+    stage_buildroot_frameos_service(installed_root, builder.platform.uses_network_manager, user=builder.frameos_service_user)
     assert frameos_service == (
         installed_root / "etc" / "systemd" / "system" / "frameos.service"
     ).read_text(encoding="utf-8")
     assert (remote_release_dir / "frameos-remote.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos-remote.service").exists()
+    # The FRAMEOS partition ships the runtime user's directories and the
+    # door's queue (ownership is stamped onto the ext4 at compose time).
+    for name in ("state", "logs", "tmp", "runtime", "staging", "privileged/queue", "privileged/results"):
+        assert (overlay_dir / "srv" / "frameos" / name).is_dir(), name
+    for name in ("drivers", "scenes"):
+        assert (release_dir / name).is_dir(), name
 
 
 def test_buildroot_boot_config_merge_is_written_to_active_boot_location(tmp_path):
