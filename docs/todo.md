@@ -53,13 +53,14 @@ interim and go away with the builds).
 
 Order of work — each step ships on its own, the builds are deleted last:
 
-1. **Release images per flash layout.** The generic pair covers one
-   partition table each; the per-frame profiles span 2 MB (no OTA), 4 MB
-   (no OTA), 8, 16 and 32 MB on both chips. Add the missing
-   `esp32-{s3,c3}-{4mb,8mb,16mb,32mb}` assets to the release job (the
-   `esp32-c3-16mb` item in the parking lot is the first of these), each
-   with its `.minisig` and `-size.json`. `EMBEDDED_FLASH_PROFILES` becomes a
-   map from board/flash size to release asset, not to a partition table.
+1. ~~**Release images per flash layout.**~~ Shipped in PR #442: the
+   release publishes `esp32-s3-{4mb,16mb,32mb}` and
+   `esp32-c3-{8mb,16mb,32mb}` beside the generic pair (which *is* the S3
+   8 MB / C3 4 MB layout), `EMBEDDED_FLASH_PROFILES[…].releaseAssets` maps
+   each layout to its asset, and the provisioning plan + "Update over USB"
+   pick the layout-matched image when the release carries it. The first
+   release after the merge proves the six new builds; until then the
+   backend falls back to the generic image.
 2. **Everything baked becomes provisioned.** The USB setup screen
    (`EmbeddedUsbSetup.tsx`) provisions only Wi-Fi today; extend it — via the
    existing `usbSet` verbs — to backend URL, API key, frame id, panel, pins /
@@ -242,10 +243,6 @@ Everything else parked:
   key, cached) so users do not need per-service API keys.
 - ESP32 spill follow-ups: a proactive Content-Length trigger; a URL+ETag decode
   cache.
-- Publish a 16MB ESP32-C3 release asset. "Flash latest release" provisions a
-  XTEINK X4 from the 4MB no-OTA generic image today, which works but leaves
-  three quarters of the chip and OTA unused — the flasher warns about exactly
-  this. A `esp32-c3-16mb` asset in the release job removes the warning.
 - ESP32 board nice-to-haves: a portal Wi-Fi scan list and AP password, mDNS
   advertisement, log persistence across offline periods, deep-sleep
   improvements. (Parallel firmware builds and artifact GC drop out with the

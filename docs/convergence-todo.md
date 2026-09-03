@@ -130,14 +130,17 @@ the server; the repo ships none, the browser preview runs `main` while
 frames run the last release, and one skew already shipped a visible lie
 (radialGradient → "No image provided").
 
-- [ ] Build the wasm bundle in the release workflow, version-stamped,
-  published with the release; the cloud installs *that*, not a local
-  build.
-- [ ] Surface the stamp: preview says which runtime version it renders
-  with when it differs from the frame's firmware.
-- [ ] Maintain the interpreter-semantics skew table (browser = main,
-  frame = last release) — one row per feature since the last release,
-  deleted at release.
+- [x] Built and installed (PR #444): the release job attaches a signed
+  `frameos-<version>-wasm.tar.gz`; the cloud pins it from `versions.json`,
+  verifies the minisign signature on every build and installs it
+  (`FRAMEOS_WASM_SOURCE=local` for runtime development); the npm package
+  ships the same bytes. The preview shows "runtime <version>", the render
+  route returns `runtime_version`. First release after the merge proves the
+  job; until then cloud builds fail at prebuild (no asset for 2026.9.0).
+- [ ] The skew is now one direction only — preview = last release, frame =
+  whatever it runs — so the table this bullet wanted collapses to the
+  release notes: every release note lists interpreter changes since the
+  last, and that is the only skew document.
 
 ## 5. Grow the loadable catalog toward the built-in one
 

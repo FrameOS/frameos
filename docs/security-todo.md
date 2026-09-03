@@ -69,19 +69,6 @@ medium / low list below.
   production images (the NVS holds the Wi-Fi PSK, the cloud token, the
   Ed25519 seed, the API key, the admin password, the TLS key and the cached
   service keys).
-- **The ESP32 frame JSON returns secrets** (`GET /api/frames`:
-  `network.wifiPassword`, `admin.pass`, `server_api_key`,
-  `certs.server_key`), and the backend's sync pull list depends on that
-  shape. The unauthenticated path to it is closed, but the
-  backend↔frame transport is plain HTTP by default with a bearer in every
-  request, so anyone with the WPA2 PSK can still read it. Make those fields
-  write-only on the device (return `""`), fix the backend pull list to
-  match, and push `tls_enable` on when material exists.
-- **The ESP32 provisioning AP has no PSK.** It goes down as soon as the
-  stored network answers (#440) and the portal enforces auth once
-  credentials exist, but a fresh device is still provisioned by whoever is
-  nearest. Mint a per-device PSK at first boot and show it on the status
-  screen — the same answer as the Pi hotspot below.
 - **Cloud OTA has no downgrade protection** (only "same version → skip";
   `version` is outside the signed payload). Sign `version || image` and
   refuse `≤ running` unless forced, or enable app anti-rollback.
@@ -98,18 +85,20 @@ medium / low list below.
   decide); device key signs provider-chosen bytes with no domain
   separation; unbounded SD consumption by provider `upload_id`s; console
   is unauthenticated (physical access, document it).
-- **Setup hotspot has a well-known default PSK (`frame1234`) and
-  `POST /setup` is unauthenticated while it is up.** Release images bake the
-  same PSK with `wifiHotspot: "bootOnly"` for 300 s; the setup form accepts
-  `controlMode`, `cloudUrl`, `claimToken`, `serverHost`, `adminUser/Pass`,
-  `runDriverSetup` and persists them to `frame.json` (`portal.nim`
-  `parseSetupOptions` / `persistPortalSetup`). Anyone in radio range during
-  a boot where the home AP is down re-enrols the frame to their own "cloud"
-  (which then owns the `set_schedule` / `uploadScenes` path) or repoints
-  `serverHost` so the backend API key leaks in the log POST. Mint a
-  per-device hotspot PSK at first boot and show it on the panel; require a
-  panel-shown code for control-plane/admin fields; strip current config from
-  the unauthenticated setup page; cache the root `iw scan` / `nmcli` Wi-Fi
+- **`POST /setup` on the Pi hotspot is unauthenticated while it is up**,
+  and the hotspot keeps its well-known default PSK (`frame1234`) — decided
+  2026-09-03: security is layered, the default still deters some, and a Pi
+  with no configured display could not show a minted one (the ESP32 AP got
+  a per-device PSK in #443 because its USB console can always print it).
+  Release images bake the default with `wifiHotspot: "bootOnly"` for
+  300 s; the setup form accepts `controlMode`, `cloudUrl`, `claimToken`,
+  `serverHost`, `adminUser/Pass`, `runDriverSetup` and persists them to
+  `frame.json` (`portal.nim` `parseSetupOptions` / `persistPortalSetup`),
+  so anyone in radio range during a boot where the home AP is down can
+  re-enrol the frame or repoint `serverHost`. Require a panel-shown code
+  for the control-plane/admin fields (a headless frame then needs the
+  local admin password instead); strip current config from the
+  unauthenticated setup page; cache the root `iw scan` / `nmcli` Wi-Fi
   scans behind a rate limit.
 - **The LAN deny and the refused-app list key on transport, not provenance.**
   `allowLocalNetworkAccess` is enforced only in `utils/http_client.nim`;
@@ -134,8 +123,10 @@ medium / low list below.
   runtime, one per JS app node; self-dispatching event loops starve
   rendering (Pi) or recurse synchronously (ESP32). Wall-clock render
   deadline, per-scene heap budget, per-render dispatch budget.
-- Smaller: JS asset API is frame-wide by default (fonts, other scenes'
-  assets, `.frameos/scene_images` writable) — default the `scene` sandbox
+- Smaller: the backend does not push `tls_enable` on when TLS material
+  exists on an ESP32 (the secrets no longer read back since #443, but the
+  bearer still crosses the LAN in clear on http); JS asset API is frame-wide
+  by default (fonts, other scenes' assets, `.frameos/scene_images` writable) — default the `scene` sandbox
   for store-origin scenes; Samba mount target unconfined; `http://`
   providers accepted device-side; `exiftool` runs on untrusted downloads
   (not on Buildroot); the cloud link-code overlay is still drawn into the
