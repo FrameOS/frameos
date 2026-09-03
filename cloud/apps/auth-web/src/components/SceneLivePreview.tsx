@@ -365,6 +365,10 @@ export function SceneLivePreviewPanel({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewRef = useRef<FrameOSPreview | null>(null);
   const [sceneInfo, setSceneInfo] = useState<SceneInfo | null>(null);
+  // Which FrameOS version the runtime is. The cloud installs the bundle from
+  // a release, so this is the last release's interpreter — a frame on newer
+  // or older firmware can render a scene differently.
+  const [runtimeVersion, setRuntimeVersion] = useState<string | null>(null);
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [runtimeState, setRuntimeState] = useState<Record<string, unknown>>({});
   // State-field values edited in the form, overriding the runtime's reported
@@ -549,11 +553,12 @@ export function SceneLivePreviewPanel({
             setAssetsVersion((version) => version + 1);
           }
         },
-        onReady: (info) => {
+        onReady: (info, _assets, runtime) => {
           if (cancelled || !preview) {
             return;
           }
           setSceneInfo(info ?? null);
+          setRuntimeVersion(runtime?.version ?? null);
           setStatus("");
           // Show the scene being edited, not the default one, when the
           // editor has several.
@@ -1316,6 +1321,14 @@ export function SceneLivePreviewPanel({
               deviceMemory.limitBytes - (deviceLimits?.previewOverheadBytes ?? 0)
             )}{" "}
             usable
+          </span>
+        ) : null}
+        {runtimeVersion ? (
+          <span
+            className="viewport-controls__hint"
+            title="The FrameOS version this preview renders with. Frames render with their own firmware; a scene can look different on a frame running another version."
+          >
+            runtime {runtimeVersion}
           </span>
         ) : null}
       </div>

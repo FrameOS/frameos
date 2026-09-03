@@ -71,10 +71,10 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
   const preview = new FrameOSPreview({
     ...options,
     canvas,
-    onReady: (sceneInfo, assets) => {
+    onReady: (sceneInfo, assets, runtime) => {
       status.textContent = ''
       renderControls()
-      options.onReady?.(sceneInfo, assets)
+      options.onReady?.(sceneInfo, assets, runtime)
     },
     onFrame: (frame) => {
       status.textContent = `Rendered ${frame.width}×${frame.height} in ${frame.renderMs} ms`

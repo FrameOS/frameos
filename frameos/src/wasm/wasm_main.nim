@@ -20,6 +20,7 @@ import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/js_runtime/runtime as jsRuntime
 import lib/tz
+import frameos/version
 
 # ------------------------------------------------------------------ JS hooks
 # Implemented in tools/wasm/frameos_library.js and linked by emcc.
@@ -47,6 +48,7 @@ var
   sceneInfoBuffer: string
   sceneStateBuffer: string
   lastErrorBuffer: string
+  versionBuffer: string
   # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
   # before the scene's first render and merged into scene.state at init.
   pendingSceneStates = initTable[string, JsonNode]()
@@ -463,6 +465,14 @@ proc frameos_wasm_scene_state(): cstring {.exportc, cdecl.} =
 
 proc frameos_wasm_last_error(): cstring {.exportc, cdecl.} =
   lastErrorBuffer.cstring
+
+# The FrameOS version this runtime was built from, in the same published form
+# a frame reports ("2026.9.0", no build hash) — so a preview can say which
+# interpreter it renders with, and whether that is the firmware the frame
+# actually runs. Baked at build time (-d:frameosVersion, from versions.json).
+proc frameos_wasm_version(): cstring {.exportc, cdecl.} =
+  versionBuffer = publishedFrameOSVersion(compiledFrameOSVersion())
+  versionBuffer.cstring
 
 # ---------------------------------------------------------------- keep alive
 # Nim/ARC emits destructor calls for every module-level global at the end of

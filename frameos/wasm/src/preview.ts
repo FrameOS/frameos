@@ -4,7 +4,14 @@
 // a canvas, and exposes events/state as callbacks.
 import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
-import type { FrameOSScene, PreviewAssetEntry, PreviewAssetsInfo, PreviewFrame, SceneInfo } from './types'
+import type {
+  FrameOSScene,
+  PreviewAssetEntry,
+  PreviewAssetsInfo,
+  PreviewFrame,
+  PreviewRuntimeInfo,
+  SceneInfo,
+} from './types'
 
 /** What a render cost under a simulated device ceiling. */
 export interface DeviceMemoryUsage {
@@ -54,7 +61,7 @@ export interface FrameOSPreviewOptions {
    * inks or greys (see ./dither). Display only — the scene renders in full
    * colour either way. Null (the default) paints the frame as rendered. */
   panelPalette?: PanelPaletteKey | null
-  onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null) => void
+  onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
   onFrame?: (frame: PreviewFrame) => void
   onState?: (state: Record<string, unknown>) => void
   onLog?: (message: string) => void
@@ -99,6 +106,8 @@ export class FrameOSPreview {
   sceneInfo: SceneInfo | null = null
   /** How the runtime's /srv/assets is backed (set once `ready` fires). */
   assetsInfo: PreviewAssetsInfo | null = null
+  /** Which FrameOS version the runtime is (set once `ready` fires). */
+  runtimeInfo: PreviewRuntimeInfo = { version: null }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
@@ -148,7 +157,8 @@ export class FrameOSPreview {
         if (this.sceneInfo?.currentSceneId) {
           this.currentSceneId = this.sceneInfo.currentSceneId
         }
-        this.options.onReady?.(msg.sceneInfo, this.assetsInfo)
+        this.runtimeInfo = { version: typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null }
+        this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
       case 'frame':
         this.pendingFrame = { width: msg.width, height: msg.height, buffer: msg.buffer }

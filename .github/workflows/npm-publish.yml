@@ -16,10 +16,21 @@ on:
         required: false
         type: string
         default: main
+      runtime_run_id:
+        description: >-
+          Run id of a "Release FrameOS" run whose build-wasm-runtime job
+          built the wasm bundle: download that artifact instead of compiling
+          the runtime here (the release job passes its own id). Leave empty to
+          build from source.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
   id-token: write
+  # `gh run download` of the release run's wasm artifact.
+  actions: read
 
 concurrency:
   group: npm-publish
@@ -57,7 +68,10 @@ jobs:
       # spaced second attempt. Cache the installed toolchain: on a hit the
       # host is never contacted at all; the download (with its one retry
       # below) only runs when this key has never been populated.
+      # The toolchain is only needed when this run compiles the runtime
+      # itself (no runtime_run_id): a release hands over the bundle it built.
       - name: Cache Nim toolchain
+        if: inputs.runtime_run_id == ''
         id: cache_nim_toolchain
         uses: actions/cache@v4
         with:
@@ -67,7 +81,7 @@ jobs:
           key: ${{ runner.os }}-nim-toolchain-2.2.4
 
       - uses: jiro4989/setup-nim-action@v1
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
+        if: inputs.runtime_run_id == '' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
         id: setup_nim
         continue-on-error: true
         with:
@@ -75,26 +89,47 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Retry Nim setup once
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
+        if: inputs.runtime_run_id == '' && steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
         uses: jiro4989/setup-nim-action@v1
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add cached Nim to PATH
-        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
+        if: inputs.runtime_run_id == '' && steps.cache_nim_toolchain.outputs.cache-hit == 'true'
         run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
       - uses: mymindstorm/setup-emsdk@v14
+        if: inputs.runtime_run_id == ''
         with:
           version: 6.0.2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # A release dispatches this workflow with the run id whose
+      # build-wasm-runtime job built the bundle, so the npm package ships
+      # the exact frameos-<version>-wasm.tar.gz the release attached —
+      # extracted to where build_wasm.sh would have written it, so the
+      # package build below does not know the difference.
+      - name: Download the release's wasm runtime
+        if: inputs.runtime_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "frameos-${version}-wasm" --dir release-assets
+          mkdir -p frontend/public/frameos-wasm
+          tar -xzf "release-assets/frameos-${version}-wasm.tar.gz" -C frontend/public/frameos-wasm
+          ls -la frontend/public/frameos-wasm
+
       # The runtime assets (frameos.js/frameos.wasm) are build outputs, not
       # committed — compile them like the Dockerfile does.
       - name: Build the wasm runtime
+        if: inputs.runtime_run_id == ''
         run: |
           cd frameos
           nimble install -d -y

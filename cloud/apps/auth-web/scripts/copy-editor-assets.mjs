@@ -12,6 +12,7 @@ import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRuntimeDir, runtimeFilesIn } from "./lib/wasm-runtime.mjs";
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(join(appDir, "package.json"));
@@ -43,10 +44,18 @@ cpSync(editorDist, target, { recursive: true });
 // The editor's built-in Preview panel loads the frameos-wasm runtime from
 // ./frameos-wasm/ relative to its own directory (the bundle resolves asset
 // URLs against its ingress path), so the runtime assets must sit next to it.
-const wasmAssetsDir = dirname(require.resolve("frameos-wasm/assets/preview-worker.js"));
+// Same source as copy-wasm-assets.mjs: the release's signed bundle, or the
+// local build with FRAMEOS_WASM_SOURCE=local.
+let wasmAssetsDir;
+try {
+  wasmAssetsDir = await resolveRuntimeDir();
+} catch (error) {
+  console.error(`frameos-wasm runtime: ${error.message}`);
+  process.exit(1);
+}
 const wasmTarget = join(target, "frameos-wasm");
 mkdirSync(wasmTarget, { recursive: true });
-for (const file of ["frameos.js", "frameos.wasm", "preview-worker.js"]) {
+for (const file of runtimeFilesIn(wasmAssetsDir)) {
   cpSync(join(wasmAssetsDir, file), join(wasmTarget, file));
 }
-console.log(`Copied frameos-editor assets (with frameos-wasm runtime) to ${target}`);
+console.log(`Copied frameos-editor assets (with the frameos-wasm runtime) to ${target}`);

@@ -134,7 +134,7 @@ FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_tz_offset_seconds,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_version,_frameos_wasm_tz_offset_seconds,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
 # FS lets the render harness preload a virtual frame's assets into MEMFS;
 # IDBFS (linked below with -lidbfs.js) backs the browser preview's
 # /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).
@@ -192,6 +192,26 @@ nim c \
 
 mkdir -p "$OUT_DIR"
 cp "$BUILD_DIR/frameos.js" "$BUILD_DIR/frameos.wasm" "$OUT_DIR/"
+# The stamp the release ships next to the bundle: which FrameOS version the
+# interpreter is (the published form a frame reports), which release the
+# bundle belongs to, and the commit. The runtime also answers it at run time
+# (frameos_wasm_version); this file is for whoever holds the tarball.
+FRAMEOS_RELEASE="$(python3 tools/frameos_version.py --key=docker ../versions.json)"
+WASM_COMMIT="${FRAMEOS_WASM_COMMIT:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+python3 - "$OUT_DIR/version.json" "$FRAMEOS_VERSION" "$FRAMEOS_RELEASE" "$WASM_COMMIT" <<'PY'
+import datetime, json, sys
+out, version, release, commit = sys.argv[1:5]
+published = lambda v: (v[1:] if v.startswith("v") else v).split("+", 1)[0] or "unknown"
+stamp = {
+    "version": published(version),
+    "release": published(release),
+    "commit": commit,
+    "built_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+}
+with open(out, "w") as f:
+    json.dump(stamp, f, indent=2)
+    f.write("\n")
+PY
 if [[ -f "$SCRIPT_DIR/wasm/preview-worker.js" ]]; then
     cp "$SCRIPT_DIR/wasm/preview-worker.js" "$OUT_DIR/"
 fi

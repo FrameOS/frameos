@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { zlibSync } from "fflate";
@@ -72,6 +72,27 @@ export class SceneRenderError extends Error {
 
 export function wasmAssetsDir(): string {
   return path.join(process.cwd(), "public", "frameos-wasm");
+}
+
+// The stamp build_wasm.sh writes next to the bundle and the release tarball
+// carries (scripts/lib/wasm-runtime.mjs installs it with the runtime): which
+// FrameOS version the interpreter is. Frames run their own firmware, so a
+// render's caller can tell whether the two match. Null when the bundle is
+// missing or predates the stamp.
+export function rendererVersion(): string | null {
+  const stampPath = path.join(wasmAssetsDir(), "version.json");
+  if (!existsSync(stampPath)) {
+    return null;
+  }
+  try {
+    const stamp: unknown = JSON.parse(readFileSync(stampPath, "utf8"));
+    if (stamp && typeof stamp === "object" && typeof (stamp as { version?: unknown }).version === "string") {
+      return (stamp as { version: string }).version;
+    }
+  } catch {
+    // unreadable stamp: same answer as no stamp
+  }
+  return null;
 }
 
 export function rendererAvailable(): boolean {

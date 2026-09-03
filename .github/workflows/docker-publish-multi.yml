@@ -83,13 +83,16 @@ jobs:
 
   publish-npm:
     name: Publish FrameOS npm packages
-    needs: update-versions
+    needs: [update-versions, build-wasm-runtime]
     runs-on: ubuntu-latest
     steps:
       # npm auth uses trusted publishing (OIDC), which matches on the
       # top-level workflow file — so publishing lives in npm-publish.yml and
       # is dispatched here rather than run inline. That workflow is also
       # manually dispatchable to re-publish without bumping versions.
+      # The run id lets it download the wasm runtime this run already built
+      # (build-wasm-runtime) instead of compiling a second copy: the npm
+      # package then ships byte-for-byte what the release attached.
       - name: Dispatch npm publish workflow
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,7 +101,8 @@ jobs:
           gh workflow run npm-publish.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
-            -f ref="$RELEASE_SHA"
+            -f ref="$RELEASE_SHA" \
+            -f runtime_run_id="$GITHUB_RUN_ID"
 
   release-notes:
     name: Generate Release Notes
@@ -650,6 +654,88 @@ jobs:
             release-assets/*-${{ matrix.chip }}-*mb-size.json
           if-no-files-found: error
 
+  # The interpreted-scene runtime compiled to WebAssembly: what the cloud's
+  # browser preview and headless renderer run, and what the frameos-wasm npm
+  # package ships. Built once here from the release commit and attached to
+  # the release as frameos-<version>-wasm.tar.gz — signed with the firmware
+  # key in the github-release job like every other .tar.gz — so FrameOS
+  # Cloud installs the runtime frames actually run instead of compiling one
+  # from main (cloud/apps/auth-web/scripts/lib/wasm-runtime.mjs pins the
+  # release version from versions.json and verifies the .minisig). The npm
+  # publish job downloads this artifact rather than building again.
+  build-wasm-runtime:
+    name: Build wasm runtime
+    needs: [update-versions]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      # Same Nim toolchain cache as npm-publish.yml, for the same reason
+      # (nim-lang.org drops connections often enough to fail real runs).
+      - name: Cache Nim toolchain
+        id: cache_nim_toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.choosenim
+            ~/.nimble/bin
+          key: ${{ runner.os }}-nim-toolchain-2.2.4
+
+      - uses: jiro4989/setup-nim-action@v1
+        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
+        id: setup_nim
+        continue-on-error: true
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Retry Nim setup once
+        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
+        uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add cached Nim to PATH
+        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
+        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      # build_wasm.sh writes frameos.js, frameos.wasm, preview-worker.js and
+      # a version.json stamp (interpreter version, release, commit) into the
+      # output directory; the tarball holds those four files at its top
+      # level. Named by the release version like the firmware images, so
+      # the cloud can pin it from versions.json's `docker` entry.
+      - name: Build the wasm runtime
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          FRAMEOS_WASM_COMMIT: ${{ needs.update-versions.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          out="$PWD/release-assets/frameos-$DOCKER_VERSION-wasm"
+          mkdir -p "$out"
+          (cd frameos && nimble install -d -y && ./tools/build_wasm.sh --out "$out")
+          test -f "$out/version.json"
+          tar -czf "release-assets/frameos-$DOCKER_VERSION-wasm.tar.gz" \
+            -C "$out" frameos.js frameos.wasm preview-worker.js version.json
+          rm -rf "$out"
+          ls -lh release-assets/
+
+      - name: Upload wasm runtime
+        uses: actions/upload-artifact@v4
+        with:
+          # frameos-<version>-* so the github-release job picks it up and
+          # signs it with the other archives.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-wasm
+          path: release-assets/*-wasm.tar.gz
+          if-no-files-found: error
+
   # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
   # Pimoroni Inky Frame family). Generic on purpose: UF2s flash over BOOTSEL
   # drag-drop and provision over the USB serial console, the backend never
@@ -854,7 +940,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-esp32-layout-firmware, build-pico-firmware, update-addon-repo, release-notes]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-esp32-layout-firmware, build-wasm-runtime, build-pico-firmware, update-addon-repo, release-notes]
     runs-on: ubuntu-latest
     steps:
       # Shallow: this job only needs a working directory for `gh` and the
