@@ -25,7 +25,7 @@ export default tseslint.config(
       // Same exclusion, same reason: renders the whole deploy drawer.
       "**/src/test/shared-spa/cloud-deploy-dialog.test.tsx",
       // Same exclusion, same reason: mounts EmbeddedWebFlasher.
-      "**/src/test/shared-spa/embedded-web-flasher.test.tsx",
+      "**/src/test/shared-spa/embedded-flash-shared.test.ts",
       // Same exclusion, same reason: mounts EmbeddedReleaseFlasher.
       "**/src/test/shared-spa/embedded-release-flasher.test.tsx",
       // Same exclusion, same reason: builds every logic the embedded editor
