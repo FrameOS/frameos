@@ -147,6 +147,24 @@ Nothing below has run on hardware. Flash a **fresh generic
   `privileged/results`, and that neither a hostile result-path symlink nor a
   runtime-created `scenes/*.so` is followed by the root worker. After joining
   Wi-Fi, confirm `journalctl -u frameos-privileged` does not contain the PSK.
+- [ ] **Root follows none of the runtime's links (2026-09-03 review).** As
+  `frameos`, in `/srv/frameos/current`: `mv scenes.json.gz scenes.json.gz.bak
+  && ln -s /srv/frameos/state/NetworkManager/system-connections/frameos-wifi.nmconnection
+  scenes.json.gz`, `ln -s /etc scenes` (expect `ln: File exists`; if it
+  succeeds the composer left the code roots out — a bug), then trigger
+  "Upgrade FrameOS" (or `frameos upgrade`). Expect the upgrade to **fail**
+  with `refusing to follow the symlink at …scenes.json.gz` in
+  `upgrade-status.json` / the journal, no keyfile bytes anywhere under the
+  new release directory, and the old release still `current`. Restore the
+  payload, upgrade again, and expect success. Also `sysctl
+  fs.protected_hardlinks` — note the value in the PR; with `0`, additionally
+  `ln /srv/frameos/current/frameos evil.json` then drive an
+  `apply-driver-setup` (portal display setup) and confirm
+  `stat -c %U evil.json` stays `root` with a "refused to hand a hard-linked
+  file" line in the setup log. Finally `ln -s /etc
+  /srv/frameos/privileged/queue/x.json` and confirm the worker deletes it
+  within a few seconds instead of restarting forever
+  (`systemctl status frameos-privileged.service` settles).
 
 ## 3. Backend (self-hosted) bench
 

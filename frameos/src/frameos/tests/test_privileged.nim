@@ -1,4 +1,6 @@
 import std/[json, os, strutils, times]
+when defined(posix):
+  from std/posix import link, unlink, getuid, getpwuid
 import ../privileged
 import ../privileged_worker
 import ../buildroot_privileges
@@ -8,6 +10,18 @@ import ../utils/system
 proc tempRoot(tag: string): string =
   result = getTempDir() / ("frameos-privileged-" & tag & "-" & $epochTime().int64)
   createDir(result)
+
+template raisesIOOrOS(body: untyped): bool =
+  ## True when `body` raises IOError or OSError (the no-follow readers do).
+  var raised = false
+  try:
+    when typeof(body) is void:
+      body
+    else:
+      discard body
+  except IOError, OSError:
+    raised = true
+  raised
 
 block test_verb_names_round_trip:
   for verb in PrivilegedVerb:
@@ -245,9 +259,133 @@ block test_ownership_script_covers_what_the_root_worker_writes:
   for path in ["state", "logs", "runtime", "staging"]:
     doAssert ("/srv/frameos'/" & path) in ownership or ("'/srv/frameos'/" & path) in ownership,
       "ownership script does not cover " & path & ": " & ownership
-  doAssert "for p in logs tmp runtime staging" in ownership
+  doAssert "for p in logs tmp runtime staging state" in ownership
   doAssert "chmod 1770" in ownership
   doAssert "chmod 2750" in ownership
+  # The script hands things to root only. Handing files to the runtime user
+  # is chownRuntimeTrees (Nim, descriptor-pinned, refuses hard links): a
+  # `chown frameos:frameos` in busybox sh would follow a runtime-planted hard
+  # link to root's binary, and Buildroot's busybox find has no `-links`.
+  doAssert "frameos:frameos" notin ownership, ownership
+  doAssert "chown -h 'frameos" notin ownership, ownership
+  doAssert "rm -f \"$r/$sub\"" in ownership, "a runtime-planted drivers/scenes/vendor entry is removed, not adopted"
+
+block test_runtime_chown_is_pinned_and_refuses_hard_links:
+  # chownRuntimeTrees is what makes root-written frame.json / upgrade-status
+  # writable by the runtime again. Run as the current user against a temp
+  # layout: a chown to oneself succeeds, so the report shows exactly which
+  # entries would be handed over — and which are refused.
+  when defined(posix):
+    let root = tempRoot("chown")
+    try:
+      let me = $getpwuid(getuid()).pw_name
+      let release = root / "releases" / "release_1"
+      createDir(release / "drivers")
+      createDir(root / "state" / "NetworkManager" / "system-connections")
+      createDir(root / "logs")
+      createDir(root / "tmp")
+      writeFile(release / "frameos", "#!/bin/sh\n")
+      writeFile(release / "frameos.service", "[Unit]\n")
+      writeFile(release / "frame.json", "{}\n")
+      writeFile(release / "scenes.json.gz", "gz")
+      # The attack: a hard link to root's binary under a runtime-looking name.
+      doAssert link(cstring(release / "frameos"), cstring(release / "evil.json")) == 0
+      createSymlink("/etc/hosts", release / "hosts.json")
+      writeFile(root / "state" / "upgrade-status.json", "{}\n")
+      writeFile(root / "state" / "NetworkManager" / "system-connections" / "wifi.nmconnection", "psk=secret\n")
+      writeFile(root / "logs" / "setup.log", "x\n")
+      doAssert link(cstring(root / "logs" / "setup.log"), cstring(root / "tmp" / "sneaky")) == 0
+      let report = chownRuntimeTrees(me, root)
+      doAssert release / "frame.json" in report.changed
+      doAssert release / "scenes.json.gz" in report.changed
+      doAssert root / "state" / "upgrade-status.json" in report.changed
+      doAssert release / "evil.json" in report.skipped, $report
+      doAssert root / "tmp" / "sneaky" in report.skipped, $report
+      doAssert root / "logs" / "setup.log" in report.skipped, "both names of a shared inode are refused"
+      doAssert release / "frameos" notin report.changed and release / "frameos.service" notin report.changed
+      doAssert release / "hosts.json" notin report.skipped, "a symlink is lchown'ed, never followed"
+      var sawKeyfile = false
+      for path in report.changed & report.skipped & report.failed:
+        if "NetworkManager" in path:
+          sawKeyfile = true
+      doAssert not sawKeyfile, "NetworkManager keyfiles are pruned: " & $report
+      doAssert report.failed.len == 0, $report
+      doAssert card(getFilePermissions(release / "frame.json") * {fpGroupRead, fpOthersRead}) == 0, "frame.json is 0600"
+      doAssert raisesIOOrOS(chownRuntimeTrees("no-such-user-frameos-test", root)), "an unknown user raises"
+    finally:
+      removeDir(root)
+
+block test_runtime_planted_code_roots_are_removed:
+  when defined(posix):
+    let root = tempRoot("coderoots")
+    try:
+      let release = root / "releases" / "release_1"
+      createDir(release)
+      createSymlink(root, release / "scenes")
+      writeFile(release / "vendor", "not a directory")
+      # Owned by the current (non-root) user: the runtime made it.
+      createDir(release / "drivers")
+      writeFile(release / "drivers" / "libevil.so", "\x7fELF")
+      let removed = pruneRuntimePlantedCodeRoots(root)
+      doAssert release / "scenes" in removed and release / "vendor" in removed, $removed
+      doAssert not symlinkExists(release / "scenes") and not fileExists(release / "vendor")
+      doAssert dirExists(root), "removing the symlink never touches its target"
+      doAssert (release / "drivers" in removed) == (getuid() != 0), $removed
+      if getuid() != 0:
+        doAssert not dirExists(release / "drivers")
+    finally:
+      removeDir(root)
+
+block test_no_follow_read_refuses_links:
+  when defined(posix):
+    let root = tempRoot("nofollow")
+    try:
+      writeFile(root / "plain", "hello")
+      createSymlink(root / "plain", root / "link")
+      doAssert link(cstring(root / "plain"), cstring(root / "hard")) == 0
+      createDir(root / "dir")
+      # `plain` has two links while `hard` exists, so both names are refused.
+      for name in ["plain", "hard", "link", "dir", "missing"]:
+        doAssert raisesIOOrOS(readFileNoFollow(root / name)), name & " should have been refused"
+      doAssert unlink(cstring(root / "hard")) == 0
+      doAssert readFileNoFollow(root / "plain") == "hello"
+      doAssert readFileNoFollow(root / "plain", 5) == "hello"
+      doAssert raisesIOOrOS(readFileNoFollow(root / "plain", 4)), "the size cap is enforced"
+      copyFileNoFollow(root / "plain", root / "copy")
+      doAssert readFile(root / "copy") == "hello"
+      doAssert raisesIOOrOS(copyFileNoFollow(root / "link", root / "copy2")), "the copy never follows a symlink"
+      doAssert not fileExists(root / "copy2") or readFile(root / "copy2") == ""
+    finally:
+      removeDir(root)
+
+block test_worker_removes_planted_queue_entries:
+  # A symlink or directory named *.json keeps PathExistsGlob true forever and
+  # would restart the root worker every few seconds; the worker deletes them.
+  let root = tempRoot("planted")
+  let queueDir = root / PrivilegedQueueDirName
+  let resultsDir = root / PrivilegedResultsDirName
+  createDir(queueDir)
+  createDir(resultsDir)
+  setPrivilegedExecHookForTest(proc(program: string, args: seq[string], timeoutMs: int): tuple[rc: int, output: string] {.gcsafe.} =
+    (rc: 0, output: ""))
+  try:
+    createSymlink("/etc/hostname", queueDir / "sym.json")
+    createDir(queueDir / "dir.json")
+    writeFile(queueDir / "dir.json" / "inner", "x")
+    writeFile(queueDir / ".keep.json", "temp")
+    doAssert pendingPrivilegedRequestFiles(queueDir).len == 0
+    doAssert symlinkExists(queueDir / "sym.json") and dirExists(queueDir / "dir.json"), "the listing alone deletes nothing"
+    doAssert drainPrivilegedQueue(queueDir, resultsDir) == 0
+    doAssert not symlinkExists(queueDir / "sym.json") and not dirExists(queueDir / "dir.json")
+    doAssert fileExists(queueDir / ".keep.json"), "temp files are still the writer's"
+    # And a request that turned into a symlink between listing and reading is
+    # refused rather than read through.
+    createSymlink("/etc/hostname", queueDir / "late.json")
+    doAssert not handleRequestFile(queueDir / "late.json", resultsDir)
+    doAssert not symlinkExists(queueDir / "late.json")
+  finally:
+    setPrivilegedExecHookForTest(nil)
+    removeDir(root)
 
 block test_hotspot_start_sequence_cleans_up_on_failure:
   var calls: seq[seq[string]] = @[]
@@ -328,7 +466,8 @@ block test_buildroot_user_lines_and_scripts:
   doAssert "for sub in drivers scenes vendor" in ownership
   doAssert "'/srv/frameos'/privileged/queue" in ownership and "chmod 1770" in ownership
   doAssert "'/srv/frameos'/privileged/results" in ownership and "chmod 2750" in ownership
-  doAssert "-path '/srv/frameos'/state/NetworkManager" in ownership, "NetworkManager keyfiles stay root's"
+  doAssert "chown -R root:root '/srv/frameos'/state/$p && chmod 0700 '/srv/frameos'/state/$p" in ownership,
+    "NetworkManager keyfiles stay root's"
   doAssert "PathExistsGlob=/srv/frameos/privileged/queue/*.json" in BuildrootPrivilegedPathUnit
   doAssert "/srv/frameos/current/scenes" notin BuildrootPrivilegedServiceUnit
 

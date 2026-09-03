@@ -556,11 +556,27 @@ proc findFileNamed(root, name: string): string =
       return path
   ""
 
+const
+  ## The files an upgrade carries over from the old release directory belong
+  ## to the runtime user on a Buildroot frame, and the release directory is
+  ## sticky-writable for it. Root copies them, and hands the copies back to
+  ## the runtime — so a symlink (or a hard link) the runtime planted under one
+  ## of these names would turn the copy into "root reads any file for me".
+  ## `readFileNoFollow` refuses both; these caps bound what root will read.
+  MaxCarriedPayloadBytes = 64 * 1024 * 1024
+  MaxCarriedSaltBytes = 4 * 1024
+
+proc readCarriedRuntimeFile*(path: string, maxBytes = MaxCarriedPayloadBytes): string =
+  ## A runtime-owned file the upgrade copies forward, read without following
+  ## symlinks or hard links (utils/system.readFileNoFollow). Exported for the
+  ## tests; every carry-over below goes through it.
+  readFileNoFollow(path, maxBytes)
+
 proc copyCompressedPayload(releaseDir, oldDir, compressedName, plainName: string) =
   if oldDir.len > 0 and fileExists(oldDir / compressedName):
-    copyFile(oldDir / compressedName, releaseDir / compressedName)
+    writeFile(releaseDir / compressedName, readCarriedRuntimeFile(oldDir / compressedName))
   elif oldDir.len > 0 and fileExists(oldDir / plainName):
-    writeFile(releaseDir / compressedName, compress(readFile(oldDir / plainName), dataFormat = dfGzip))
+    writeFile(releaseDir / compressedName, compress(readCarriedRuntimeFile(oldDir / plainName), dataFormat = dfGzip))
   else:
     writeFile(releaseDir / compressedName, compress("[]\n", dataFormat = dfGzip))
 
@@ -573,12 +589,12 @@ proc copyAdminSessionSaltForUpgrade*(releaseDir: string) =
   let sharedSalt = adminSessionSaltPath()
   let legacySalt = currentFrameConfigPath() & ".admin_session_salt"
   if fileExists(sharedSalt):
-    copyFile(sharedSalt, targetSalt)
+    writePrivateFile(targetSalt, readCarriedRuntimeFile(sharedSalt, MaxCarriedSaltBytes))
   elif fileExists(legacySalt):
-    copyFile(legacySalt, targetSalt)
+    writePrivateFile(targetSalt, readCarriedRuntimeFile(legacySalt, MaxCarriedSaltBytes))
 
 proc writeFrameConfigForUpgrade(configPath, destination, version: string) =
-  var payload = parseFile(configPath)
+  var payload = parseJson(readCarriedRuntimeFile(configPath))
   if payload.kind != JObject:
     raise newException(ValueError, "Current frame config is not a JSON object: " & configPath)
   payload["frameosVersion"] = %version
@@ -977,7 +993,7 @@ proc installStagedReleaseArchive*(archivePath, minisig, version: string): JsonNo
     try:
       createDir(workDir)
       setFilePermissions(workDir, {fpUserRead, fpUserWrite, fpUserExec})
-      copyFile(archivePath, workDir / "frameos.tar.gz")
+      copyFileNoFollow(archivePath, workDir / "frameos.tar.gz", MaxReleaseArchiveBytes)
       setupLog("FrameOS upgrade: verifying the staged release signature as root")
       verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
       setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")

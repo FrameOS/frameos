@@ -391,6 +391,10 @@ proc requestPrivileged*(verb: PrivilegedVerb, args: JsonNode = nil,
           result = parsePrivilegedResult(text)
         except CatchableError as e:
           result = privilegedError("unreadable privileged result for " & $verb & ": " & e.msg)
+        # Best effort: on a Buildroot frame `results/` is root:frameos 2750,
+        # so the runtime cannot delete anything there (nothing it writes may
+        # be mistaken for the worker's answer). The worker prunes results
+        # older than an hour whenever it next starts.
         try:
           removeFile(resultPath)
         except CatchableError:
@@ -434,16 +438,33 @@ proc prunePrivilegedResults*(resultsDir: string, maxAgeSeconds = 3600.0): int =
     except CatchableError:
       discard
 
-proc pendingPrivilegedRequestFiles*(queueDir: string): seq[string] =
+proc pendingPrivilegedRequestFiles*(queueDir: string, removeForeign = false): seq[string] =
   ## Regular request files in the queue, oldest first. Temp files (leading
-  ## dot) and anything that is not a regular file are skipped, not deleted:
-  ## the writer may still be renaming them into place.
+  ## dot) are skipped, not deleted: the writer may still be renaming them
+  ## into place.
+  ##
+  ## A `*.json` entry that is not a regular file — a symlink or a directory
+  ## the runtime planted — is never a request, but it keeps matching the
+  ## .path unit's `PathExistsGlob`, which would restart the root worker every
+  ## few seconds until someone cleaned it up. With `removeForeign` (the
+  ## worker's setting) such entries are deleted; the client-side callers only
+  ## look.
   if not dirExists(queueDir):
     return
   var entries: seq[(times.Time, string)] = @[]
   for kind, path in walkDir(queueDir):
     let name = lastPathPart(path)
-    if kind != pcFile or name.startsWith(".") or not name.endsWith(".json"):
+    if name.startsWith(".") or not name.endsWith(".json"):
+      continue
+    if kind != pcFile:
+      if removeForeign:
+        try:
+          if kind == pcDir:
+            removeDir(path)
+          else:
+            removeFile(path)
+        except CatchableError:
+          discard
       continue
     try:
       entries.add((getLastModificationTime(path), path))

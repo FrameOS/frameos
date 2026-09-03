@@ -19,6 +19,7 @@ import frameos/setup
 import frameos/types
 import frameos/upgrade
 import frameos/utils/process
+import frameos/utils/system
 
 const
   ## Keep in step with portal.nim — the runtime asks by role ("wifi",
@@ -250,9 +251,9 @@ proc restoreRuntimeOwnership() =
   ## `state/upgrade-status.json`, log lines and setup output behind. Left
   ## root-owned, the next unprivileged write to that file fails with EACCES
   ## — which would break the *following* upgrade, not this one, and be a
-  ## puzzle to debug. Restore the split ownership model after every request:
-  ## writable contents go back to the runtime, while shared directory roots
-  ## and all code-loading paths stay owned by root.
+  ## puzzle to debug. Restore the split ownership model after such a
+  ## request: writable contents go back to the runtime, while shared
+  ## directory roots and all code-loading paths stay owned by root.
   if not runningAsRoot():
     return
   try:
@@ -270,10 +271,11 @@ proc handleRequestFile*(path: string, resultsDir: string): bool =
   var request: PrivilegedRequest
   var id = ""
   try:
-    let size = getFileSize(path)
-    if size > MaxPrivilegedRequestBytes:
-      raise newException(ValueError, "request file too large (" & $size & " bytes)")
-    text = readFile(path)
+    # The queue is the runtime's directory: between the listing and this
+    # read it may have swapped the entry for a symlink, a FIFO or a hard
+    # link. Open without following, insist on a regular single-link file,
+    # and cap the size in the same call.
+    text = readFileNoFollow(path, MaxPrivilegedRequestBytes)
     try:
       id = parseJson(text){"id"}.getStr("")
     except CatchableError:
@@ -308,7 +310,11 @@ proc handleRequestFile*(path: string, resultsDir: string): bool =
   let res = executePrivilegedRequest(request)
   workerLog($request.verb & " " & (if res.ok: "ok" else: "failed: " & res.error) &
     " in " & formatFloat(epochTime() - started, ffDecimal, 2) & "s")
-  restoreRuntimeOwnership()
+  # Only the verbs that write under /srv/frameos as root need the sweep; the
+  # nm-* verbs the portal issues in bursts touch nothing there, and the sweep
+  # walks the whole state tree (image caches included).
+  if request.verb in {pvInstallRelease, pvApplyDriverSetup}:
+    restoreRuntimeOwnership()
   try:
     writePrivilegedResult(resultsDir, request.id, res)
   except CatchableError as e:
@@ -318,7 +324,7 @@ proc handleRequestFile*(path: string, resultsDir: string): bool =
 proc drainPrivilegedQueue*(queueDir, resultsDir: string): int =
   ## Handles everything currently queued, oldest first. Returns how many
   ## files were processed.
-  for path in pendingPrivilegedRequestFiles(queueDir):
+  for path in pendingPrivilegedRequestFiles(queueDir, removeForeign = true):
     discard handleRequestFile(path, resultsDir)
     inc result
     if workerExitRequested:

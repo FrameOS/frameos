@@ -330,16 +330,43 @@ via `debugfs sif` on the finished ext4), by `PARTITION_POST_BUILD_SCRIPT` for
 base images, and by `buildrootOwnershipScript` in `frameos setup` /
 `install-release` on the device.
 
-Every verb runs as root, so several of them (`install-release`,
-`apply-driver-setup`) leave root-owned files in the runtime's own directories —
-`state/upgrade-status.json` above all, which the unprivileged runtime
-rewrites on the *next* upgrade. The worker therefore re-applies the
-ownership layout after each request; without it the failure would surface
-one upgrade later, as an EACCES on a status file. Shared writable directory
-roots remain `root:frameos 1770` (sticky), and result files remain root-owned
-`0640`; all root-side writes there use randomized same-directory temporary
-files and atomic rename, so the runtime cannot pre-plant a symlink at a
-predictable temporary path.
+Every verb runs as root, and the two that write under `/srv/frameos`
+(`install-release`, `apply-driver-setup`) leave root-owned files in the
+runtime's own directories — `state/upgrade-status.json` above all, which the
+unprivileged runtime rewrites on the *next* upgrade. The worker therefore
+re-applies the ownership layout after those two verbs; without it the failure
+would surface one upgrade later, as an EACCES on a status file. Shared
+writable directory roots remain `root:frameos 1770` (sticky), and result files
+remain root-owned `0640`; all root-side writes there use randomized
+same-directory temporary files and atomic rename, so the runtime cannot
+pre-plant a symlink at a predictable temporary path.
+
+**Root never follows the runtime's links.** Everything the runtime can write
+is also somewhere it can plant a symlink or a hard link, and root touching
+either is the whole game: a `scenes.json.gz` that is really a symlink to the
+NetworkManager keyfile would, copied forward by an upgrade and handed back,
+give the runtime the Wi-Fi PSK; a hard link to root's `frameos` binary under
+a runtime-looking name would, chowned to the runtime by the ownership sweep,
+give it the binary root executes (that needs `fs.protected_hardlinks=0`, but
+the layout does not get to assume the sysctl). So the ownership layout has
+two halves. `buildrootOwnershipScript` (busybox sh) hands things to **root**
+only, sets modes, and removes — never adopts — a `drivers/`, `scenes/` or
+`vendor/` entry the runtime planted in the sticky release root
+(`pruneRuntimePlantedCodeRoots`: a symlink or file is unlinked, a
+runtime-owned directory is renamed aside, never walked). Handing files to
+the **runtime** is `chownRuntimeTrees` in Nim: the walk is
+descriptor-relative (`fdopendir` / `openat`, so a sub-directory the runtime
+swaps for a symlink mid-walk is never entered), each entry is opened
+`O_NOFOLLOW`, `fstat`ed on that descriptor, and `fchown`ed only if it is a
+regular file with exactly one link or a directory; symlinks are chowned with
+`AT_SYMLINK_NOFOLLOW`, never followed. Buildroot's busybox `find` has no
+`-links` and its `stat` no `-c`, which is why this is not shell. Every file root reads back from the runtime goes through
+`readFileNoFollow` / `copyFileNoFollow` (`utils/system.nim`) with the same
+rules and a size cap: the queue request itself, the staged archive before
+its root-side signature check, and the frame.json, scene payloads and session
+salt an upgrade carries into the new release. A `*.json` queue entry that is
+not a regular file (a symlink, a directory) would keep `PathExistsGlob` true
+and restart the worker every few seconds; the worker deletes it.
 
 ### OTA and migration
 
@@ -413,6 +440,26 @@ The two unit renderers (Nim and Python) are covered for all four
 user/NetworkManager combinations plus the door's units and the udev rule; the
 rendered root and unprivileged services and both door units also pass
 `systemd-analyze verify` under systemd 252.
+
+A second review pass (2026-09-03) attacked the door from the runtime's side
+and found the two link problems described under "Root never follows the
+runtime's links": an upgrade used `copyFile` to carry the runtime's scene
+payloads, salt and frame.json into the new release — following a symlink
+the runtime owns, then chowning the copy back to it, which turned the next
+OTA into a root file-read oracle (the Wi-Fi keyfile, `/etc/shadow`) — and the
+ownership sweep's `chown` would have adopted a runtime-planted hard link to
+root's binary wherever `protected_hardlinks` is off. Both are closed by the
+no-follow readers and the descriptor-pinned Nim sweep, and the same pass
+narrowed the sweep to the two verbs that write, made the worker delete
+planted non-file queue entries, and re-verified `install-release`'s downgrade
+refusal (it compares against the *worker binary's* compiled version, not
+frame.json) and the archive-root name binding. The rewritten root-half
+script was executed as root under the real busybox `sh` with a uid 990 user
+that had planted a `scenes -> /etc` symlink and a plain-file `vendor` in the
+sticky release root: both were removed and replaced by root's directories,
+`/etc` untouched, every mode as listed above. The Nim sweep's refusals are
+unit-tested with a genuine hard link and symlink
+(`test_runtime_chown_is_pinned_and_refuses_hard_links`).
 
 ### Not yet verified on hardware
 
