@@ -83,6 +83,28 @@ export async function fetchProvisioningPlan(frameId: FrameId): Promise<EmbeddedP
   return ((await response.json())?.provisioning ?? {}) as EmbeddedProvisioningPlan
 }
 
+// Console keys that arrived with the release-image provisioning work
+// (2026-09-03). A board still on older release firmware answers "unknown key"
+// for them, and would otherwise stop the replay at the first one. They are a
+// warning instead: every one of them also rides the backend's settings pull
+// (hostname as `name`; the admin login, TLS and the HTTP cap on firmware that
+// knows them), so the frame ends up correct once the board is on a current
+// release. Anything else refused is a real failure.
+const OPTIONAL_ON_OLDER_FIRMWARE: ReadonlySet<EmbeddedUsbConfigKey> = new Set<EmbeddedUsbConfigKey>([
+  'hostname',
+  'max_http_response_bytes',
+  'admin_user',
+  'admin_pass',
+  'admin_auth',
+  'tls_enable',
+  'tls_port',
+])
+
+export interface ProvisionOverUsbResult {
+  /** Keys the board refused because its firmware predates them. */
+  skipped: EmbeddedUsbConfigKey[]
+}
+
 /**
  * Replay the plan over the board's USB API, in the order the backend gave it:
  * `set hardware` applies a whole board bundle (panel, EPD wiring, buttons, TF
@@ -99,17 +121,37 @@ export async function provisionOverUsb(
   // has none and lets each command open the board's USB session itself.
   port: SerialPort | null,
   onStatus: (message: string) => void
-): Promise<void> {
+): Promise<ProvisionOverUsbResult> {
   const total = plan.settings.length
+  const skipped: EmbeddedUsbConfigKey[] = []
   for (const [index, setting] of plan.settings.entries()) {
     onStatus(
       `Provisioning the board (${index + 1}/${total}): ${setting.key}${setting.secret ? '' : ` = ${setting.value}`}`
     )
-    await usbSet(frameId, setting.key, setting.value, {
-      ...(port ? { port, keepOpen: true } : {}),
-      timeoutMs: PROVISION_COMMAND_TIMEOUT_MS,
-    })
+    try {
+      await usbSet(frameId, setting.key, setting.value, {
+        ...(port ? { port, keepOpen: true } : {}),
+        timeoutMs: PROVISION_COMMAND_TIMEOUT_MS,
+      })
+    } catch (error) {
+      if (!OPTIONAL_ON_OLDER_FIRMWARE.has(setting.key)) {
+        throw error
+      }
+      skipped.push(setting.key)
+      onStatus(`The board's firmware does not know ${setting.key} yet; it takes effect after a firmware update.`)
+    }
   }
+  return { skipped }
+}
+
+export function skippedSettingsNotice(skipped: EmbeddedUsbConfigKey[]): string | null {
+  if (skipped.length === 0) {
+    return null
+  }
+  return (
+    `This board's firmware predates ${skipped.join(', ')}; those settings apply once it runs a current ` +
+    'FrameOS release (Update over the air, or Update over USB).'
+  )
 }
 
 export function EmbeddedReleaseFlasher({
@@ -273,8 +315,15 @@ export function EmbeddedReleaseFlasher({
         try {
           await sleep(POST_FLASH_BOOT_WAIT_MS)
           port = await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
-          await provisionOverUsb(frame.id, plan, port, setMessage)
-          appendBrowserFlashLog(frame.id, `Provisioned ${plan.settings.length} setting(s) over USB.`)
+          const { skipped } = await provisionOverUsb(frame.id, plan, port, setMessage)
+          appendBrowserFlashLog(
+            frame.id,
+            `Provisioned ${plan.settings.length - skipped.length} of ${plan.settings.length} setting(s) over USB.`
+          )
+          const notice = skippedSettingsNotice(skipped)
+          if (notice) {
+            appendBrowserFlashLog(frame.id, notice)
+          }
 
           // Scenes before the Wi-Fi reboot: the board is up and answering, and
           // pushing them now saves a second boot wait. A frame with none gets

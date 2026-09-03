@@ -9,6 +9,7 @@ import {
   browserTimeZone,
   describeSerialPort,
   Esp32CloudFlasher,
+  layoutMatchedPlatform,
   pinsSpecError,
   wifiInputError,
 } from "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher";
@@ -21,17 +22,25 @@ const esptool = vi.hoisted(() => {
     disconnects: 0,
     main: vi.fn(() => Promise.resolve()),
     writeFlash: vi.fn((_options: unknown) => Promise.resolve()),
+    // The SPI flash id the stub reads; its third byte is the size (0x17 =
+    // 8 MB, 0x18 = 16 MB — esptool's DETECTED_FLASH_SIZES). null = the
+    // fake loader has no readFlashId at all, like an older esptool-js.
+    flashId: null as number | null,
   };
   return {
     calls,
     module: {
       ESPLoader: class {
         chip = { CHIP_NAME: "ESP32-S3" };
+        DETECTED_FLASH_SIZES = { 0x16: "4MB", 0x17: "8MB", 0x18: "16MB", 0x19: "32MB" };
         after() {
           return Promise.resolve();
         }
         main() {
           return calls.main();
+        }
+        readFlashId() {
+          return calls.flashId === null ? Promise.reject(new Error("no flash id")) : Promise.resolve(calls.flashId);
         }
         writeFlash(options: unknown) {
           return calls.writeFlash(options);
@@ -252,6 +261,7 @@ afterEach(() => {
   esptool.calls.main.mockImplementation(() => Promise.resolve());
   esptool.calls.writeFlash.mockReset();
   esptool.calls.writeFlash.mockImplementation(() => Promise.resolve());
+  esptool.calls.flashId = null;
   esptool.calls.disconnects = 0;
   vi.unstubAllGlobals();
   delete (navigator as { serial?: unknown }).serial;
@@ -794,6 +804,47 @@ describe("Esp32CloudFlasher", () => {
       expect.stringMatching(/Nothing at all arrived on this serial port/),
     );
     expect(screen.queryByTestId("esp32-flash-done")).toBeNull();
+  });
+
+  it("flashes the image built for the board's flash layout when the release has it", async () => {
+    // A 16 MB XIAO (flash id third byte 0x18): the release since #442 carries
+    // esp32-s3-16mb, whose partition table uses the whole chip, and the board
+    // later asks the OTA manifest for that same layout — so this pick is for
+    // good. The download happens after the board has answered, not before.
+    mockCloudApi(undefined, {
+      assets: [
+        ...metadataPayload.assets,
+        { name: "frameos-1.2.3-esp32-s3-16mb.bin", platform: "esp32-s3-16mb", size: firmwareBytes.length },
+      ],
+    });
+    esptool.calls.flashId = 0x1840c8;
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
+    clickFlash();
+
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    expect(fetchedUrls()).toContain("/api/frames/firmware?platform=esp32-s3-16mb");
+    expect(fetchedUrls()).not.toContain("/api/frames/firmware?platform=esp32-s3-generic");
+    expect(esptool.calls.writeFlash).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the generic image for the generic layout, an unreadable size, or a release without the match", () => {
+    const assets = [
+      { name: "a", platform: "esp32-s3-generic", size: 1 },
+      { name: "b", platform: "esp32-s3-16mb", size: 1 },
+      { name: "c", platform: "esp32-c3-generic", size: 1 },
+    ];
+    expect(layoutMatchedPlatform("esp32-s3-generic", "8MB", assets)).toBe("esp32-s3-generic");
+    expect(layoutMatchedPlatform("esp32-s3-generic", "16MB", assets)).toBe("esp32-s3-16mb");
+    expect(layoutMatchedPlatform("esp32-s3-generic", "32MB", assets)).toBe("esp32-s3-generic");
+    expect(layoutMatchedPlatform("esp32-s3-generic", null, assets)).toBe("esp32-s3-generic");
+    expect(layoutMatchedPlatform("esp32-s3-generic", "2MB", assets)).toBe("esp32-s3-generic");
+    expect(layoutMatchedPlatform("esp32-c3-generic", "4MB", assets)).toBe("esp32-c3-generic");
+    expect(layoutMatchedPlatform("esp32-c3-generic", "16MB", assets)).toBe("esp32-c3-generic");
   });
 
   it("recovers from a flash that drops part-way by retrying slower", async () => {

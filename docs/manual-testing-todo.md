@@ -175,6 +175,13 @@ hardware-settings batch) and the battery ADC rounds of #426.
   second request answers `up-to-date`. Finally a board still on a
   per-frame image from before this change must OTA onto the release image
   from the new manifest (the legacy `sha256` field) and verify from then on.
+- [ ] **Cloud flasher picks the layout (follow-up to #447):** on a 16 MB
+  XIAO the cloud "Connect & flash" log says `Flash size 16MB: using the
+  esp32-s3-16mb image built for that layout`, the board boots, and its first
+  OTA check asks for `platform=esp32-s3-16mb`. On an 8 MB board it stays on
+  `esp32-s3-generic`. Also: "Flash latest release" / "Apply frame settings"
+  against a board still on 2026.9.2 firmware logs "does not know hostname
+  yet" and finishes instead of stopping there.
 - [ ] **Dual console — reTerminal E1002 over its CH340:** the cloud flasher
   on the "USB Single Serial" port must flash, see `frameos>` and provision
   (this board has no USB-Serial/JTAG port at all). Then on a XIAO ESP32-S3
