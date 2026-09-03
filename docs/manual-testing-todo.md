@@ -142,7 +142,15 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   frame that never ran 9.2 → 9.3 OTA has not tested the migration. ESP32
   frames: irrelevant to #415, upgrade whenever. Local backend / HA frames:
   nothing to do now.
-- [ ] **1. Merge #415** (squash or merge, either is fine; CI is green).
+- [x] **1. Merge #415** — merged 2026-09-04 as `67a1884a`. Found while
+  doing step 0: the 2026.9.2 archive ships a runtime still stamped
+  `2026.9.1` (the release only touched the workflow, and the runtime is
+  compiled with versions.json's per-component `frameos` entry), so frames
+  that "upgraded" to 9.2 report 9.1 and the cloud keeps offering the update.
+  Fixed on main (`2f29a309`, the release workflow now forces `frameos` to the
+  release version). For this bench it changes nothing: 9.1 and 9.2 are the
+  same root-only binary, and 9.3 will be the first properly stamped release,
+  so the migration test is still "whatever the frame runs now → 9.3".
 - [ ] **2. New Buildroot base images from main:**
   `gh workflow run buildroot-base-image.yml --ref main -f platform=all`.
   The base build is where `BR2_ROOTFS_USERS_TABLES` creates the `frameos`
