@@ -159,6 +159,16 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.determine-release-targets.outputs.targets) }}
     steps:
+      # Anonymous git over HTTP/2 is throttled by GitHub from the self-hosted
+      # runner pool's address: nimble's fetch of QRgen died with "expected
+      # flush after ref listing" on all six epyc-8 legs of the 2026.9.1 run
+      # while the GitHub-hosted ARM legs sailed through. HTTP/1.1 from the
+      # same host succeeds every time (frameos-cross.yml and
+      # pull-request-tests.yml carry the same step). Harmless on GitHub-hosted
+      # runners.
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
