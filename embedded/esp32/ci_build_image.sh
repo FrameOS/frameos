@@ -10,9 +10,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Boot-time default panel only: every supported panel driver is compiled into
 # the image and can be selected at runtime (`set panel <key>` / setup portal).
 PANEL="${FRAMEOS_SELECTED_PANEL:-EPD_7in5_V2}"
-# esp32-s3 (default): full firmware with the on-device Nim renderer.
-# esp32-c3: thin-client firmware (no PSRAM on supported C3 boards → no local
-# rendering), built for the 4MB no-OTA layout that fits every C3 target.
+# FRAMEOS_ESP32_PLATFORM names a chip and a flash layout:
+#   esp32-s3            full firmware with the on-device Nim renderer, 8MB
+#                       OTA A/B layout (the generic release image)
+#   esp32-c3            thin-client firmware (no PSRAM on any supported C3
+#                       board → no local rendering), 4MB no-OTA layout (the
+#                       generic release image)
+#   esp32-{s3,c3}-{4mb,8mb,16mb,32mb}
+#                       the same firmware on an explicit layout — one release
+#                       asset per layout, so a board is flashed with the
+#                       partition table its chip actually has instead of the
+#                       generic image's (docs/todo.md, "the self-hosted backend
+#                       flashes what the cloud flashes")
+# The layouts mirror EMBEDDED_FLASH_PROFILES in
+# backend/app/tasks/embedded_firmware.py and the partitions*.csv +
+# sdkconfig.defaults.* files next to this script.
 PLATFORM="${FRAMEOS_ESP32_PLATFORM:-esp32-s3}"
 BUILD_NAME="${FRAMEOS_ESP32_BUILD_DIR:-build-ci}"
 if [[ "$BUILD_NAME" = /* ]]; then
@@ -25,34 +37,76 @@ SDKCONFIG_PATH="${FRAMEOS_ESP32_SDKCONFIG:-$BUILD_DIR/sdkconfig}"
 QEMU_SMOKE="${FRAMEOS_ESP32_QEMU:-0}"
 QEMU_TIMEOUT_SECONDS="${FRAMEOS_ESP32_QEMU_TIMEOUT_SECONDS:-60}"
 case "$PLATFORM" in
-    esp32-s3)
-        IDF_TARGET_NAME="esp32s3"
-        DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults"
-        ;;
-    esp32-s3-32mb)
-        # The 32MB/16MB-PSRAM boards (e.g. ESP32-S3-ePaper-13.3E6): same
-        # firmware as esp32-s3, bigger OTA slots + 24M state partition.
-        # Validated here because nobody else build-tests this layout.
-        IDF_TARGET_NAME="esp32s3"
-        DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.defaults.32mb-ota"
-        if [[ "$QEMU_SMOKE" == "1" ]]; then
-            echo "QEMU smoke only covers the 8MB esp32-s3 layout" >&2
-            exit 1
-        fi
-        ;;
-    esp32-c3)
-        IDF_TARGET_NAME="esp32c3"
-        DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.defaults.4mb-no-ota;$SCRIPT_DIR/sdkconfig.defaults.esp32c3"
-        if [[ "$QEMU_SMOKE" == "1" ]]; then
-            echo "QEMU smoke is only wired up for esp32-s3 (qemu-xtensa)" >&2
-            exit 1
-        fi
-        ;;
+    esp32-s3)              CHIP="esp32-s3"; LAYOUT="8mb" ;;
+    esp32-c3)              CHIP="esp32-c3"; LAYOUT="4mb" ;;
+    esp32-s3-4mb|esp32-s3-8mb|esp32-s3-16mb|esp32-s3-32mb)
+                           CHIP="esp32-s3"; LAYOUT="${PLATFORM#esp32-s3-}" ;;
+    esp32-c3-4mb|esp32-c3-8mb|esp32-c3-16mb|esp32-c3-32mb)
+                           CHIP="esp32-c3"; LAYOUT="${PLATFORM#esp32-c3-}" ;;
     *)
-        echo "Unsupported FRAMEOS_ESP32_PLATFORM: $PLATFORM (expected esp32-s3, esp32-s3-32mb or esp32-c3)" >&2
+        echo "Unsupported FRAMEOS_ESP32_PLATFORM: $PLATFORM (expected esp32-s3, esp32-c3, or esp32-{s3,c3}-{4mb,8mb,16mb,32mb})" >&2
         exit 1
         ;;
 esac
+
+# The flash layout: partition table, sdkconfig overlay, and the sizes the
+# checks below hold the build to. APP_SLOT_BYTES is the app partition's size
+# (factory on 4MB, ota_0/ota_1 elsewhere); a firmware that outgrows it does
+# not fit the chip, whatever the merged image says.
+case "$LAYOUT" in
+    4mb)
+        # 4MB modules cannot hold two app slots plus state: one factory app,
+        # no OTA.
+        LAYOUT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults.4mb-no-ota"
+        PARTITION_TABLE="partitions_4mb.csv"
+        FLASH_SIZE="4MB"
+        OTA_SUPPORTED=0
+        APP_SLOT_BYTES=$((3520 * 1024))
+        ;;
+    8mb)
+        LAYOUT_SDKCONFIG_DEFAULTS=""
+        PARTITION_TABLE="partitions.csv"
+        FLASH_SIZE="8MB"
+        OTA_SUPPORTED=1
+        APP_SLOT_BYTES=$((3520 * 1024))
+        ;;
+    16mb)
+        LAYOUT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults.16mb-ota"
+        PARTITION_TABLE="partitions_ota_16mb.csv"
+        FLASH_SIZE="16MB"
+        OTA_SUPPORTED=1
+        APP_SLOT_BYTES=$((4032 * 1024))
+        ;;
+    32mb)
+        # The 32MB/16MB-PSRAM boards (e.g. ESP32-S3-ePaper-13.3E6): bigger
+        # OTA slots + a 24M state partition.
+        LAYOUT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults.32mb-ota"
+        PARTITION_TABLE="partitions_ota_32mb.csv"
+        FLASH_SIZE="32MB"
+        OTA_SUPPORTED=1
+        APP_SLOT_BYTES=$((4032 * 1024))
+        ;;
+esac
+FLASH_BYTES=$(( ${FLASH_SIZE%MB} * 1024 * 1024 ))
+
+DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults"
+if [[ -n "$LAYOUT_SDKCONFIG_DEFAULTS" ]]; then
+    DEFAULT_SDKCONFIG_DEFAULTS="$DEFAULT_SDKCONFIG_DEFAULTS;$LAYOUT_SDKCONFIG_DEFAULTS"
+fi
+case "$CHIP" in
+    esp32-s3)
+        IDF_TARGET_NAME="esp32s3"
+        ;;
+    esp32-c3)
+        IDF_TARGET_NAME="esp32c3"
+        # The chip overlay applies LAST, after the flash-size profile.
+        DEFAULT_SDKCONFIG_DEFAULTS="$DEFAULT_SDKCONFIG_DEFAULTS;$SCRIPT_DIR/sdkconfig.defaults.esp32c3"
+        ;;
+esac
+if [[ "$QEMU_SMOKE" == "1" && "$PLATFORM" != "esp32-s3" ]]; then
+    echo "QEMU smoke only covers the 8MB esp32-s3 layout (qemu-xtensa)" >&2
+    exit 1
+fi
 SDKCONFIG_DEFAULTS="${FRAMEOS_ESP32_SDKCONFIG_DEFAULTS:-$DEFAULT_SDKCONFIG_DEFAULTS}"
 if [[ "$QEMU_SMOKE" == "1" && -z "${FRAMEOS_ESP32_SDKCONFIG_DEFAULTS:-}" ]]; then
     SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.qemu.defaults"
@@ -129,8 +183,8 @@ cd "$SCRIPT_DIR"
 
 export FRAMEOS_SELECTED_PANEL="$PANEL"
 export IDF_TARGET="$IDF_TARGET_NAME"
-echo "Building FrameOS ESP32 firmware for $PLATFORM (all panels compiled in, default panel $FRAMEOS_SELECTED_PANEL)"
-if [[ "$PLATFORM" == "esp32-c3" ]]; then
+echo "Building FrameOS ESP32 firmware for $PLATFORM ($CHIP, $FLASH_SIZE flash, $PARTITION_TABLE; all panels compiled in, default panel $FRAMEOS_SELECTED_PANEL)"
+if [[ "$CHIP" == "esp32-c3" ]]; then
     # Thin client: leave nimcache empty so the stub links in. A stale Xtensa
     # nimcache from an earlier S3 build must not leak into a RISC-V image.
     ./build_nim.sh clean
@@ -168,21 +222,20 @@ require_line '^CONFIG_ESP_CONSOLE_UART_DEFAULT=y$' "$SDKCONFIG_PATH"
 if [[ "$QEMU_SMOKE" != "1" ]]; then
     require_line '^CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y$' "$SDKCONFIG_PATH"
 fi
-if [[ "$PLATFORM" == "esp32-c3" ]]; then
-    require_line '^CONFIG_IDF_TARGET="esp32c3"$' "$SDKCONFIG_PATH"
-    require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="4MB"$' "$SDKCONFIG_PATH"
-    require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"$' "$SDKCONFIG_PATH"
-elif [[ "$PLATFORM" == "esp32-s3-32mb" ]]; then
+require_line "^CONFIG_IDF_TARGET=\"$IDF_TARGET_NAME\"\$" "$SDKCONFIG_PATH"
+require_line "^CONFIG_ESPTOOLPY_FLASHSIZE=\"$FLASH_SIZE\"\$" "$SDKCONFIG_PATH"
+require_line "^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"$PARTITION_TABLE\"\$" "$SDKCONFIG_PATH"
+if [[ "$OTA_SUPPORTED" == "1" ]]; then
     require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
-    require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="32MB"$' "$SDKCONFIG_PATH"
-    require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_32mb.csv"$' "$SDKCONFIG_PATH"
+elif grep -Eq '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"; then
+    # One factory slot: rollback would have nothing to roll back to.
+    echo "Rollback is enabled in $SDKCONFIG_PATH but the $LAYOUT layout has no OTA slot" >&2
+    exit 1
+fi
+if [[ "$LAYOUT" == "32mb" ]]; then
     # 24M SPIFFS needs 512-byte pages; 256-byte pages cap out at 16MB and the
     # mount fails ESP_ERR_INVALID_ARG at runtime (scene upload 500s).
     require_line '^CONFIG_SPIFFS_PAGE_SIZE=512$' "$SDKCONFIG_PATH"
-else
-    require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
-    require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="8MB"$' "$SDKCONFIG_PATH"
-    require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"$' "$SDKCONFIG_PATH"
 fi
 if [[ "$QEMU_SMOKE" == "1" ]]; then
     require_line '^CONFIG_ESP_CONSOLE_UART_DEFAULT=y$' "$SDKCONFIG_PATH"
@@ -194,35 +247,38 @@ PARTITION_DUMP="$BUILD_DIR/partition-table.generated.csv"
 python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
     "$BUILD_DIR/partition_table/partition-table.bin" > "$PARTITION_DUMP"
 
-if [[ "$PLATFORM" == "esp32-c3" ]]; then
-    require_line '^factory,app,factory,0x10000,3520K,' "$PARTITION_DUMP"
-    require_line '^state,data,spiffs,0x380000,512K,' "$PARTITION_DUMP"
-elif [[ "$PLATFORM" == "esp32-s3-32mb" ]]; then
-    require_line '^otadata,data,ota,0xf000,8K,' "$PARTITION_DUMP"
-    require_line '^ota_0,app,ota_0,0x20000,4032K,' "$PARTITION_DUMP"
-    require_line '^ota_1,app,ota_1,0x410000,4032K,' "$PARTITION_DUMP"
-    require_line '^state,data,spiffs,0x800000,24M,' "$PARTITION_DUMP"
-else
-    require_line '^otadata,data,ota,0xd000,8K,' "$PARTITION_DUMP"
-    require_line '^ota_0,app,ota_0,0x10000,3520K,' "$PARTITION_DUMP"
-    require_line '^ota_1,app,ota_1,0x380000,3520K,' "$PARTITION_DUMP"
-    require_line '^state,data,spiffs,0x6f0000,1M,' "$PARTITION_DUMP"
-fi
+# The partition table the image actually carries, per layout. These are what
+# the flasher's write plan (frontend embeddedFlashImage.ts) and the device's
+# OTA code assume; a partitions*.csv edit that moves them must show up here.
+case "$LAYOUT" in
+    4mb)
+        require_line '^factory,app,factory,0x10000,3520K,' "$PARTITION_DUMP"
+        require_line '^state,data,spiffs,0x380000,512K,' "$PARTITION_DUMP"
+        ;;
+    8mb)
+        require_line '^otadata,data,ota,0xd000,8K,' "$PARTITION_DUMP"
+        require_line '^ota_0,app,ota_0,0x10000,3520K,' "$PARTITION_DUMP"
+        require_line '^ota_1,app,ota_1,0x380000,3520K,' "$PARTITION_DUMP"
+        require_line '^state,data,spiffs,0x6f0000,1M,' "$PARTITION_DUMP"
+        ;;
+    16mb)
+        require_line '^otadata,data,ota,0xf000,8K,' "$PARTITION_DUMP"
+        require_line '^ota_0,app,ota_0,0x20000,4032K,' "$PARTITION_DUMP"
+        require_line '^ota_1,app,ota_1,0x410000,4032K,' "$PARTITION_DUMP"
+        require_line '^state,data,spiffs,0x800000,8M,' "$PARTITION_DUMP"
+        ;;
+    32mb)
+        require_line '^otadata,data,ota,0xf000,8K,' "$PARTITION_DUMP"
+        require_line '^ota_0,app,ota_0,0x20000,4032K,' "$PARTITION_DUMP"
+        require_line '^ota_1,app,ota_1,0x410000,4032K,' "$PARTITION_DUMP"
+        require_line '^state,data,spiffs,0x800000,24M,' "$PARTITION_DUMP"
+        ;;
+esac
 
 APP_BIN="$BUILD_DIR/frameos_esp32.bin"
 MERGED_BIN="$BUILD_DIR/merged-binary.bin"
 BOOTLOADER_BIN="$BUILD_DIR/bootloader/bootloader.bin"
 PARTITION_BIN="$BUILD_DIR/partition_table/partition-table.bin"
-
-APP_SLOT_BYTES=$((3520 * 1024))
-if [[ "$PLATFORM" == "esp32-c3" ]]; then
-    FLASH_BYTES=$((4 * 1024 * 1024))
-elif [[ "$PLATFORM" == "esp32-s3-32mb" ]]; then
-    APP_SLOT_BYTES=$((4032 * 1024))
-    FLASH_BYTES=$((32 * 1024 * 1024))
-else
-    FLASH_BYTES=$((8 * 1024 * 1024))
-fi
 
 APP_BYTES="$(file_size "$APP_BIN")"
 MERGED_BYTES="$(file_size "$MERGED_BIN")"

@@ -86,9 +86,31 @@ export interface ReleaseFirmwareListing {
   release?: string
 }
 
-/** Which published asset fits this frame's hardware. */
+/** Which published asset fits this frame's chip: the generic image, the
+ * answer when nothing better is known (see releaseFirmwarePlatformForFrame). */
 export function releaseFirmwarePlatform(frame: FrameType): string {
   return releasePlatformByHardware[frameHardwarePlatform(frame)] ?? 'esp32-s3-generic'
+}
+
+/** The control plane's own answer for this frame — the image built for its
+ * flash layout (esp32-c3-16mb for a 16MB XTEINK X4, esp32-s3-32mb for a 13.3E6
+ * board) when the release publishes one, which is also the only image whose
+ * partition table matches such a board, so the update's layout check passes.
+ * Falls back to the per-chip generic image wherever the provisioning route
+ * does not exist (the cloud) or cannot answer. */
+export async function releaseFirmwarePlatformForFrame(frame: FrameType): Promise<string> {
+  try {
+    const response = await apiFetch(`/api/frames/${frame.id}/embedded/provisioning`)
+    if (response.ok) {
+      const platform = (await response.json())?.provisioning?.releasePlatform
+      if (typeof platform === 'string' && platform) {
+        return platform
+      }
+    }
+  } catch {
+    // The static per-chip answer below is what this flow always used.
+  }
+  return releaseFirmwarePlatform(frame)
 }
 
 /** The published release and its assets — also how the deploy drawer learns
@@ -210,7 +232,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
       openFrameToolBehindDrawer(frame.id, 'logs')
 
       setPhase('preparing')
-      const platform = releaseFirmwarePlatform(frame)
+      const platform = await releaseFirmwarePlatformForFrame(frame)
       const firmware = await downloadReleaseFirmware(platform, setFlashMessage)
       // Planned before the board is touched: a plan that cannot spare the NVS
       // must fail while nothing has been written.

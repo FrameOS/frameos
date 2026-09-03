@@ -177,6 +177,7 @@ from app.tasks.buildroot_image import (
 from app.codegen.drivers_nim import frame_compilation_mode
 from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_button_defaults
 from app.api.project_scope import project_get_or_404
+from app.api.firmware_release import latest_published_provisioning_assets
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
@@ -3408,8 +3409,12 @@ async def api_frame_embedded_provisioning(
         _not_found()
     if (frame.mode or "rpios") != "embedded":
         _bad_request("Firmware provisioning is only available for embedded frames")
+    # Which images the release carries decides between the layout-matched
+    # asset and the generic one; the listing is the same cached lookup the
+    # flasher's download goes through, so this costs no GitHub request.
+    published_assets = await latest_published_provisioning_assets()
     try:
-        return {"provisioning": embedded_provisioning_plan(frame)}
+        return {"provisioning": embedded_provisioning_plan(frame, published_assets)}
     except ValueError as exc:
         _bad_request(str(exc))
 
