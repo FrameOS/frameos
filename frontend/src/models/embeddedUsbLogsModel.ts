@@ -1159,13 +1159,21 @@ export type EmbeddedUsbConfigKey =
   | 'cloud_url'
   | 'claim_token'
   | 'frame_id'
+  | 'hostname'
   | 'hardware'
   | 'panel'
   | 'render_mode'
   | 'rotate'
   | 'scaling_mode'
+  | 'time_zone'
   | 'interval'
+  | 'max_http_response_bytes'
   | 'server_send_logs'
+  | 'admin_user'
+  | 'admin_pass'
+  | 'admin_auth'
+  | 'tls_enable'
+  | 'tls_port'
   | 'assets_path'
   | 'assets_sd'
   | 'assets_sd_pins'
@@ -1254,7 +1262,7 @@ export function quoteEmbeddedUsbConsoleValue(value: string): string {
 }
 
 /** Config keys whose value must never reach the log view. */
-const USB_SECRET_CONFIG_KEYS = new Set<EmbeddedUsbConfigKey>(['api_key', 'wifi_pass', 'claim_token'])
+const USB_SECRET_CONFIG_KEYS = new Set<EmbeddedUsbConfigKey>(['api_key', 'wifi_pass', 'claim_token', 'admin_pass'])
 
 /**
  * `usb_api set <key> <value>` — persist one config value. The value is quoted,

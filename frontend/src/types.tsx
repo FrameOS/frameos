@@ -196,8 +196,8 @@ export interface FrameType {
      *
      * The cloud pushes these as top-level `set_settings` keys (see
      * deep_sleep/battery_pin/… below); a backend-managed board reads them
-     * from here — baked into the firmware build as compile-time defaults and
-     * re-sent on every settings poll (embedded_frame_settings in
+     * from here — provisioned over the USB console and re-sent on every
+     * settings poll (embedded_frame_settings in
      * backend/app/api/embedded_device.py). Both spellings appear in the wild:
      * the workspace writes camelCase, USB-console provisioning writes
      * snake_case, and the backend reads either. */
@@ -1316,84 +1316,48 @@ export interface FrameEmbeddedConfig {
     panel?: string
     wifi?: string
   }
-  firmware?: {
-    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
-    requestId?: string
-    queueJobId?: string
-    platform?: string
-    flashSize?: FrameEmbeddedFlashSize
-    flashBytes?: number
-    partitionTable?: string
-    otaSupported?: boolean
-    filename?: string
-    path?: string
-    size?: number
-    sha256?: string
-    flashOffset?: string
-    downloadUrl?: string
-    panel?: string
-    otaPath?: string
-    otaSha256?: string
-    otaElfSha256?: string
-    otaSize?: number
-    appSize?: number
-    bootloaderSize?: number
-    partitionTableSize?: number
-    layout?: {
-      flash?: {
-        flashSize?: FrameEmbeddedFlashSize
-        flashBytes?: number
-        partitionTable?: string
-        otaSupported?: boolean
-        flashOffset?: string
-        mergedBinaryBytes?: number | null
-        appBinaryBytes?: number | null
-        otaBinaryBytes?: number | null
-        partitions?: {
-          name: string
-          type?: string
-          subtype?: string
-          offset: number
-          size: number
-          end?: number
-          appSlot?: boolean
-          usedBytes?: number | null
-        }[]
-      }
-      ram?: {
-        psramBytes?: number
-        panel?: string
-        width?: number
-        height?: number
-        pixelFormat?: number
-        pixelFormatName?: string
-        renderMode?: 'local' | 'remote'
-        rgbaBufferBytes?: number
-        canvasBufferBytes?: number
-        canvasBytesPerPixel?: number
-        packedBufferBytes?: number
-        renderReserveBytes?: number
-        renderWorkingBytes?: number
-        quickJsHeapLimitBytes?: number
-        previewSnapshotBytes?: number
-        previewSnapshotReserveBytes?: number
-        previewBmpBytes?: number
-        displayStateBytes?: number
-        httpResponseLimitBytes?: number
-      }
+  /** The board's flash layout (from the release image's partition table)
+   * and the on-device memory plan for its panel. Derived by the backend on
+   * every frame read, never stored — the firmware is a signed release
+   * asset, so there is no per-frame build state to keep. */
+  layout?: {
+    flash?: {
+      flashSize?: FrameEmbeddedFlashSize
+      flashBytes?: number
+      partitionTable?: string | null
+      otaSupported?: boolean
+      flashOffset?: string
+      partitions?: {
+        name: string
+        type?: string
+        subtype?: string
+        offset: number
+        size: number
+        end?: number
+        appSlot?: boolean
+        usedBytes?: number | null
+      }[]
     }
-    queuedAt?: string
-    startedAt?: string
-    lastHeartbeatAt?: string
-    completedAt?: string
-    error?: string
-    /** Ninja's edge count while `status` is "building", republished on the
-     * build's 15-second heartbeat. A first build of a chip target is ~1100
-     * edges, so this is the difference between "slow" and "hung". */
-    buildProgress?: {
-      done: number
-      total: number
-      percent: number
+    ram?: {
+      psramBytes?: number
+      panel?: string
+      width?: number
+      height?: number
+      pixelFormat?: number
+      pixelFormatName?: string
+      renderMode?: 'local' | 'remote'
+      rgbaBufferBytes?: number
+      canvasBufferBytes?: number
+      canvasBytesPerPixel?: number
+      packedBufferBytes?: number
+      renderReserveBytes?: number
+      renderWorkingBytes?: number
+      quickJsHeapLimitBytes?: number
+      previewSnapshotBytes?: number
+      previewSnapshotReserveBytes?: number
+      previewBmpBytes?: number
+      displayStateBytes?: number
+      httpResponseLimitBytes?: number
     }
   }
 }

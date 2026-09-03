@@ -83,9 +83,21 @@ describe("FrameOSPreview init", () => {
     const { preview, worker } = makePreview({ onReady });
     const browserAssets = { maxBytes: 1, mounted: true, persistent: false, root: "/srv/assets" };
     worker.reply({ browserAssets, sceneInfo: { currentSceneId: "scene-1" }, type: "ready" });
-    expect(onReady).toHaveBeenCalledWith({ currentSceneId: "scene-1" }, browserAssets);
+    // The third argument is the runtime the worker booted (#444: the wasm
+    // bundle is a release asset and the preview shows "runtime <version>");
+    // a worker that names none reports null rather than an absent field.
+    expect(onReady).toHaveBeenCalledWith({ currentSceneId: "scene-1" }, browserAssets, { version: null });
     expect(preview.assetsInfo).toEqual(browserAssets);
     expect(preview.currentSceneId).toBe("scene-1");
+    expect(preview.runtimeInfo).toEqual({ version: null });
+  });
+
+  it("names the runtime version the worker reports", () => {
+    const onReady = vi.fn();
+    const { preview, worker } = makePreview({ onReady });
+    worker.reply({ runtimeVersion: "2026.9.2", type: "ready" });
+    expect(onReady).toHaveBeenLastCalledWith(undefined, null, { version: "2026.9.2" });
+    expect(preview.runtimeInfo).toEqual({ version: "2026.9.2" });
   });
 });
 

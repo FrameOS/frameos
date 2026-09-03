@@ -3213,10 +3213,9 @@ export function FrameSettings({
         ) : null}
 
         {/* Power management for a backend-managed ESP32. Same knobs the cloud
-            pushes over set_settings, stored in device_config here: the
-            firmware build bakes them as defaults and the device's settings
-            poll re-reads them, so a change takes effect without a reflash.
-            Before this, backend users had to set them over the USB console. */}
+            pushes over set_settings, stored in device_config here: USB
+            provisioning sends them once and the device's settings poll
+            re-reads them, so a change takes effect without a reflash. */}
         {showEmbeddedPowerSection ? (
           <>
             <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
@@ -3226,7 +3225,7 @@ export function FrameSettings({
               <PowerSettingsFields
                 value={embeddedPowerSettings}
                 onChange={setEmbeddedPowerSettings}
-                footnote="These reach the board on its next settings poll, and are baked into the next firmware build as its defaults. Firmware from 2026.8.21 on applies them live; older firmware picks them up when you reflash."
+                footnote="These reach the board on its next settings poll (firmware from 2026.8.21 on applies them live) and are sent over USB when a board is provisioned."
               />
             </div>
           </>
@@ -3684,7 +3683,7 @@ export function FrameSettings({
             label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
             tooltip={
               isEmbeddedMode
-                ? 'Serve the ESP32 frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. Requires a frame-specific firmware build after changing certificates.'
+                ? 'Serve the ESP32 frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. The certificate and key reach the board on its next settings poll; it restarts to apply them.'
                 : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
             }
           >

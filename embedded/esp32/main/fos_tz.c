@@ -1,6 +1,5 @@
 #include "fos_tz.h"
 #include "fos_config.h"
-#include "fos_defaults.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
@@ -125,9 +124,6 @@ void fos_tz_boot(void)
         return;
     }
     free(stored);
-    if (FRAMEOS_DEFAULT_TZ_DATA[0] && fos_tz_install(FRAMEOS_DEFAULT_TZ_DATA)) {
-        return;
-    }
     ESP_LOGW(TAG, "no tz data for '%s' yet; UTC until a slice arrives", config->time_zone);
 }
 

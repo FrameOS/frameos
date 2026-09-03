@@ -1,22 +1,15 @@
 /*
- * Compile-time config defaults. The backend's per-frame build writes
- * generated_config.h (gitignored) next to this file; a plain checkout
- * builds a generic image that gets everything via provisioning.
+ * Compile-time config defaults for the generic image. Nothing per-frame is
+ * ever compiled in: every value here is what a freshly flashed board starts
+ * with, and provisioning (the USB console `set` verbs, the setup portal, the
+ * backend's /embedded/settings pull, the cloud's set_settings verb) writes
+ * the real ones into NVS, which always wins (fos_config.c).
  *
  * Default pins target the Seeed XIAO ESP32-S3 silk labels:
  *   D2=GPIO3 (CS), D3=GPIO4 (DC), D4=GPIO5 (RST), D5=GPIO6 (BUSY),
  *   D8=GPIO7 (SCK), D10=GPIO9 (MOSI). PWR unused.
- * All remappable at runtime: `set pins rst=...` on the serial console,
- * the setup portal, or NVS.
  */
 #pragma once
-
-#if defined(__has_include)
-#if __has_include("generated_config.h")
-#include "generated_config.h"
-#define FRAMEOS_HAVE_GENERATED_CONFIG 1
-#endif
-#endif
 
 #ifndef FRAMEOS_DEFAULT_WIFI_SSID
 #define FRAMEOS_DEFAULT_WIFI_SSID ""
@@ -45,7 +38,7 @@
 #ifndef FRAMEOS_DEFAULT_PANEL
 /* All panel drivers are always compiled in; FRAMEOS_SELECTED_PANEL only sets
  * the default the device boots with before `set panel` / portal / NVS
- * override it. generated_config.h (backend builds) takes precedence. */
+ * override it. */
 #ifdef FRAMEOS_ENV_DEFAULT_PANEL
 #define FRAMEOS_DEFAULT_PANEL FRAMEOS_ENV_DEFAULT_PANEL
 #else
@@ -58,15 +51,6 @@
 #ifndef FRAMEOS_DEFAULT_ROTATE
 #define FRAMEOS_DEFAULT_ROTATE 0
 #endif
-/* The backend's OTA signing public key (64 hex chars) and its 8-byte key id
- * (16 hex chars), baked by a backend build. Empty in a generic image: the
- * backend OTA path then applies unsigned images, as it always did. */
-#ifndef FRAMEOS_DEFAULT_OTA_PUBKEY
-#define FRAMEOS_DEFAULT_OTA_PUBKEY ""
-#endif
-#ifndef FRAMEOS_DEFAULT_OTA_KEY_ID
-#define FRAMEOS_DEFAULT_OTA_KEY_ID ""
-#endif
 #ifndef FRAMEOS_DEFAULT_SCALING_MODE
 /* "cover" matches what the embedded runtime always hardcoded; the Pi's
  * frame.json default is "contain" — divergence kept deliberately so shipping
@@ -76,12 +60,6 @@
 #ifndef FRAMEOS_DEFAULT_TIME_ZONE
 /* IANA name; "" keeps the pre-2026.8.34 behaviour (UTC). See fos_tz.h. */
 #define FRAMEOS_DEFAULT_TIME_ZONE ""
-#endif
-#ifndef FRAMEOS_DEFAULT_TZ_DATA
-/* The tzdata slice for FRAMEOS_DEFAULT_TIME_ZONE (lib/tz.nim shape, ~1.5 KB),
- * baked by the backend (embedded_firmware.py); "" = fetch it from
- * tz.frameos.net on the first online render pass. See fos_tz.h. */
-#define FRAMEOS_DEFAULT_TZ_DATA ""
 #endif
 #ifndef FRAMEOS_DEFAULT_INTERVAL_SEC
 #define FRAMEOS_DEFAULT_INTERVAL_SEC 300

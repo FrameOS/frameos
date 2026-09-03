@@ -33,27 +33,24 @@ import {
   type FlashLogTerminal,
   type FlashPhase,
   type FlashTraceRecorder,
-} from './EmbeddedWebFlasher'
+} from './embeddedFlashShared'
 import { workspaceLogic } from './workspaceLogic'
 
-// Flash a BLANK board from the published release instead of compiling an
-// image for it.
+// Flash a BLANK board from the published release and provision it over the
+// same cable.
 //
-// The other browser-flash path (EmbeddedWebFlasher) builds a per-frame image,
-// which bakes this frame's Wi-Fi, backend URL, API key, panel and wiring into
-// generated_config.h. Nothing about that is required: every panel driver is
-// compiled into every image, and each of those values has a `set` key on the
-// device's USB console. So this path writes the stock generic image and then
-// tells the board what it is over the same cable — the shape the cloud's
-// enrollment flasher has always used (Esp32CloudFlasher.tsx). What that buys
-// is the first build of a chip target, which is ~1100 ESP-IDF objects: tens of
-// minutes on a NUC, well over an hour on a Home Assistant box.
+// Every panel driver is compiled into every release image, and each value a
+// frame needs has a `set` key on the device's USB console, so the stock
+// generic image for the board's chip and flash layout plus this frame's
+// command list IS this frame — the shape the cloud's enrollment flasher has
+// always used (Esp32CloudFlasher.tsx). The self-hosted backend builds no
+// firmware of its own.
 //
 // The command list is the backend's (embedded_provisioning_plan), not this
-// component's: it comes from the same helpers that generate the header, so the
-// two paths cannot drift into producing different frames. It also reports what
-// this path CANNOT do — a frame terminating TLS with its own certificate has
-// no console key for it — and the button is refused for those frames.
+// component's: the backend knows the frame, and it also reports what cannot
+// go over the cable (the frame's HTTPS certificate rides the first settings
+// pull instead) and what would leave the board unusable (no backend to talk
+// to), for which the button is refused.
 //
 // The counterpart for a board that is already enrolled is
 // EmbeddedUsbFirmwareUpdate: same release bytes, but written around the NVS
@@ -98,7 +95,9 @@ export async function fetchProvisioningPlan(frameId: FrameId): Promise<EmbeddedP
 export async function provisionOverUsb(
   frameId: FrameId,
   plan: EmbeddedProvisioningPlan,
-  port: SerialPort,
+  // The flasher holds the port it just flashed through; the USB setup card
+  // has none and lets each command open the board's USB session itself.
+  port: SerialPort | null,
   onStatus: (message: string) => void
 ): Promise<void> {
   const total = plan.settings.length
@@ -107,8 +106,7 @@ export async function provisionOverUsb(
       `Provisioning the board (${index + 1}/${total}): ${setting.key}${setting.secret ? '' : ` = ${setting.value}`}`
     )
     await usbSet(frameId, setting.key, setting.value, {
-      port,
-      keepOpen: true,
+      ...(port ? { port, keepOpen: true } : {}),
       timeoutMs: PROVISION_COMMAND_TIMEOUT_MS,
     })
   }
@@ -327,8 +325,8 @@ export function EmbeddedReleaseFlasher({
     }
   }
 
-  // Nothing published for this chip (pico, virtual): the card's build path is
-  // the only one, and an explanation nobody asked for is just noise.
+  // Nothing published for this chip (pico, virtual): the card says so on its
+  // own, and an explanation nobody asked for is just noise.
   if (plan && !plan.releasePlatform) {
     return null
   }
@@ -345,7 +343,7 @@ export function EmbeddedReleaseFlasher({
         title={
           plan && !plan.supported
             ? plan.blockers.join(' ')
-            : 'Write the latest published firmware and provision this frame over the same cable — no build needed.'
+            : 'Write the latest published firmware and provision this frame over the same cable.'
         }
         className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
       >
@@ -360,12 +358,12 @@ export function EmbeddedReleaseFlasher({
         <div className="frame-tool-muted text-xs leading-5">{planError}</div>
       ) : plan && !plan.supported ? (
         <div className="frame-tool-muted text-xs leading-5">
-          This frame has to build its own image: {plan.blockers.join(' ')}
+          This frame cannot be flashed yet: {plan.blockers.join(' ')}
         </div>
       ) : plan ? (
         <div className="frame-tool-muted text-xs leading-5">
-          Writes the published {plan.releasePlatform} image and provisions this frame over USB — seconds instead of a
-          firmware build. Everything the board needs is sent over the cable afterwards.
+          Writes the published {plan.releasePlatform} image and provisions this frame over USB. Everything the board
+          needs is sent over the cable afterwards.
           {plan.warnings.length > 0 ? (
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
               {plan.warnings.map((warning) => (

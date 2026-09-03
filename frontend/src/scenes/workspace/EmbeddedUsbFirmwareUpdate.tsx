@@ -29,7 +29,7 @@ import {
   type FlashLogTerminal,
   type FlashPhase,
   type FlashTraceRecorder,
-} from './EmbeddedWebFlasher'
+} from './embeddedFlashShared'
 import {
   ESP32_PARTITION_TABLE_OFFSET,
   ESP32_PARTITION_TABLE_SIZE,

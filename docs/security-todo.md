@@ -55,23 +55,19 @@ medium / low list below.
 
 ### Device runtime (Nim) and ESP32
 
-- **Self-hosted-backend OTA still runs over plain HTTP, and a generic
-  image applies it unsigned.** #440's per-install signature (an Ed25519 key
-  derived from `SECRET_KEY`, baked as `FRAMEOS_DEFAULT_OTA_PUBKEY`) covers
-  integrity on backend-built images only; `CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y`
-  stays, so the bearer `api_key` crosses the LAN in clear on http backends,
-  and a generic image with no baked key takes unsigned backend images until
-  it is reflashed. The fix is step 3 of "the self-hosted backend flashes
-  what the cloud flashes" (`docs/todo.md`): the backend serves the release
-  manifest, the device verifies against the release key on both control
-  planes, and the unsigned `esp_https_ota` path plus the per-install key are
-  deleted. Separately: Secure Boot v2 and flash + NVS encryption for
-  production images (the NVS holds the Wi-Fi PSK, the cloud token, the
-  Ed25519 seed, the API key, the admin password, the TLS key and the cached
-  service keys).
-- **Cloud OTA has no downgrade protection** (only "same version → skip";
-  `version` is outside the signed payload). Sign `version || image` and
-  refuse `≤ running` unless forced, or enable app anti-rollback.
+- **Secure Boot v2 and flash + NVS encryption for production images.** The
+  NVS holds the Wi-Fi PSK, the cloud token, the Ed25519 seed, the API key,
+  the admin password, the TLS key and the cached service keys. (The OTA half
+  of this item shipped: both control planes now relay the signed release
+  manifest and the device verifies the release key before switching slots —
+  `esp_https_ota`, `CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP` and the per-install key
+  are gone. A self-hosted backend reached over plain http still carries the
+  bearer in clear on every request, OTA included; that is the http-backend
+  problem, not an OTA one.)
+- **OTA has no downgrade protection** on either control plane (only "same
+  version → skip"; `version` is outside the signed payload). Sign
+  `version || image` and refuse `≤ running` unless forced, or enable app
+  anti-rollback.
 - **Scene JS on a backend-managed frame has unrestricted LAN egress**
   (`netguard` is armed only when cloud-managed) and holds whatever keys it
   declared. Apply the private-network deny to store-origin scenes on
@@ -123,9 +119,10 @@ medium / low list below.
   runtime, one per JS app node; self-dispatching event loops starve
   rendering (Pi) or recurse synchronously (ESP32). Wall-clock render
   deadline, per-scene heap budget, per-render dispatch budget.
-- Smaller: the backend does not push `tls_enable` on when TLS material
-  exists on an ESP32 (the secrets no longer read back since #443, but the
-  bearer still crosses the LAN in clear on http); JS asset API is frame-wide
+- Smaller: the frame's TLS material and admin login now ride the
+  `/embedded/settings` pull (bearer-authenticated, but in clear on an http
+  backend — same exposure as the API keys that pull already carried; an
+  https backend is the fix); JS asset API is frame-wide
   by default (fonts, other scenes' assets, `.frameos/scene_images` writable) — default the `scene` sandbox
   for store-origin scenes; Samba mount target unconfined; `http://`
   providers accepted device-side; `exiftool` runs on untrusted downloads

@@ -141,22 +141,12 @@ from app.utils.versions import current_frameos_version
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
-    embedded_artifact_dir,
-    cancel_embedded_firmware_ota,
-    ensure_embedded_frame_defaults,
-    pending_frame_commands,
-    embedded_flash_size_for_frame,
-    embedded_ota_supported_for_frame,
-    embedded_toolchain_available,
-    latest_embedded_firmware,
-    embedded_platform_spec_for_frame,
-    embedded_provisioning_plan,
-    is_virtual_frame,
+    embedded_firmware_layout_for_frame,
     normalize_embedded_platform,
-    refresh_embedded_firmware_status,
-    request_or_queue_embedded_firmware_ota,
-    start_embedded_firmware,
-    with_embedded_firmware_layout,
+    embedded_provisioning_plan,
+    ensure_embedded_frame_defaults,
+    is_virtual_frame,
+    request_embedded_firmware_update,
 )
 from app.tasks.buildroot_image import (
     buildroot_artifact_dir,
@@ -1170,17 +1160,16 @@ def _frame_to_response_dict(
 ) -> dict[str, Any]:
     data = frame.to_dict()
     if (frame.mode or "rpios") == "embedded":
+        # The flash layout + on-device memory plan the deploy drawer draws.
+        # Derived, never stored: the frame row carries no build state.
         try:
-            firmware = latest_embedded_firmware(frame) or with_embedded_firmware_layout(frame, {
-                "status": "idle",
-                "platform": normalize_embedded_platform((frame.embedded or {}).get("platform")),
-                "flashSize": embedded_flash_size_for_frame(frame),
-                "otaSupported": embedded_ota_supported_for_frame(frame),
-            })
+            layout = embedded_firmware_layout_for_frame(frame)
         except ValueError:
-            firmware = None
-        if firmware:
-            data["embedded"] = {**(data.get("embedded") or {}), "firmware": firmware}
+            layout = None
+        embedded = {key: value for key, value in (data.get("embedded") or {}).items() if key != "firmware"}
+        if layout:
+            embedded["layout"] = layout
+        data["embedded"] = embedded
     if latest_log_at is not _LATEST_LOG_AT_UNSET:
         data["last_log_at"] = (
             latest_log_at.replace(tzinfo=timezone.utc).isoformat() if isinstance(latest_log_at, datetime) else None
@@ -3365,36 +3354,6 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
     return FileResponse(download_path, media_type="application/gzip", filename=download_filename)
 
 
-@api_project.get("/frames/{id:int}/embedded/firmware")
-async def api_frame_embedded_firmware_status(
-    id: int,
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-):
-    frame = _project_frame(db, id)
-    if not frame:
-        _not_found()
-    if (frame.mode or "rpios") != "embedded":
-        _bad_request("Firmware generation is only available for embedded frames")
-
-    try:
-        platform = normalize_embedded_platform((frame.embedded or {}).get("platform"))
-        firmware = await refresh_embedded_firmware_status(db, redis, frame)
-        flash_size = embedded_flash_size_for_frame(frame)
-        ota_supported = embedded_ota_supported_for_frame(frame)
-    except ValueError as exc:
-        _bad_request(str(exc))
-    return {
-        "firmware": firmware
-        or with_embedded_firmware_layout(frame, {
-            "status": "idle",
-            "platform": platform,
-            "flashSize": flash_size,
-            "otaSupported": ota_supported,
-        })
-    }
-
-
 @api_project.get("/frames/{id:int}/embedded/provisioning")
 async def api_frame_embedded_provisioning(
     id: int,
@@ -3419,85 +3378,16 @@ async def api_frame_embedded_provisioning(
         _bad_request(str(exc))
 
 
-@api_project.post("/frames/{id:int}/embedded/firmware")
-async def api_frame_embedded_firmware(
-    id: int,
-    force: bool = Query(False),
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-):
-    frame = _project_frame(db, id)
-    if not frame:
-        _not_found()
-    if (frame.mode or "rpios") != "embedded":
-        _bad_request("Firmware generation is only available for embedded frames")
-    if not embedded_toolchain_available():
-        _bad_request(
-            "ESP-IDF toolchain not found on the backend. "
-            "Install it and set IDF_PATH (see embedded/esp32/README.md)."
-        )
-
-    try:
-        ensure_embedded_frame_defaults(frame)
-    except ValueError as exc:
-        _bad_request(str(exc))
-
-    db.add(frame)
-    db.commit()
-
-    try:
-        started, firmware = await start_embedded_firmware(db, redis, frame, force=force)
-        if started:
-            message = "Firmware build started"
-        elif firmware.get("status") == "ready":
-            message = "Firmware already ready"
-        else:
-            message = "Firmware build already running"
-        return {
-            "message": message,
-            "firmware": firmware,
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@api_project.get("/frames/{id:int}/embedded/firmware/download")
-async def api_frame_embedded_firmware_download(id: int, db: Session = Depends(get_db)):
-    frame = _project_frame(db, id)
-    if not frame:
-        _not_found()
-    if (frame.mode or "rpios") != "embedded":
-        _bad_request("Firmware downloads are only available for embedded frames")
-
-    firmware = latest_embedded_firmware(frame)
-    if not firmware or firmware.get("status") != "ready":
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No ready firmware image for this frame")
-
-    path = firmware.get("path")
-    if not isinstance(path, str) or not os.path.isfile(path):
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated firmware file not found")
-    # Same rule as the SD image: `embedded.firmware.path` is client-writable
-    # frame state, so the file must live under the firmware artifact directory.
-    _require_artifact_path(path, embedded_artifact_dir())
-
-    filename = str(firmware.get("filename") or f"frameos-esp32-{id}.bin")
-    return FileResponse(
-        path,
-        media_type="application/octet-stream",
-        filename=filename,
-        headers={"Cache-Control": "no-store"},
-    )
-
-
 @api_project.post("/frames/{id:int}/embedded/firmware/ota")
 async def api_frame_embedded_firmware_ota(
     id: int,
-    force: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    """Ask the board to install the latest FrameOS release over the air. The
+    device pulls this backend's relay of the release manifest and installs
+    the signed release image for its flash layout if it runs an older
+    version; progress arrives as ``ota:backend`` log lines."""
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
@@ -3505,20 +3395,11 @@ async def api_frame_embedded_firmware_ota(
         _bad_request("OTA updates are only available for embedded frames")
 
     try:
-        message, firmware, device_payload = await request_or_queue_embedded_firmware_ota(
-            db,
-            redis,
-            frame,
-            force=force,
-        )
+        device_payload = await request_embedded_firmware_update(db, redis, frame)
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
 
-    return {
-        "message": message,
-        "firmware": firmware,
-        "device": device_payload,
-    }
+    return {"message": "Firmware update requested", "device": device_payload}
 
 
 @api_project.get("/frames/{id:int}/commands")
@@ -3526,15 +3407,14 @@ async def api_frame_pending_commands(id: int, db: Session = Depends(get_db)):
     """What is still waiting for this frame to act on it.
 
     Cloud parity endpoint (docs/api-triality.md): the cloud answers this from
-    its durable `frame_commands` queue, the backend from the one action it
-    records instead of pushing immediately — a queued ESP32 OTA request. Same
-    wire shape either way, so the workspace's pending-actions panel is one
-    component.
+    its durable `frame_commands` queue. The backend pushes every action
+    immediately and queues nothing, so this is always empty — kept so the
+    workspace's pending-actions panel is one component.
     """
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
-    return {"commands": pending_frame_commands(frame)}
+    return {"commands": []}
 
 
 @api_project.delete("/frames/{id:int}/commands/{command_id}")
@@ -3542,16 +3422,12 @@ async def api_frame_cancel_pending_command(
     id: int,
     command_id: str,
     db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
-    if not await cancel_embedded_firmware_ota(db, redis, frame, command_id):
-        # Already delivered, already cancelled, or never queued — all "there
-        # is nothing here to stop", and none of them a success.
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
-    return {"status": "cancelled"}
+    # The backend queues nothing (see above): there is never anything to stop.
+    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
 
 
 @api_project.get("/frames/{id:int}/deploy_plan")

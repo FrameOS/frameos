@@ -186,6 +186,23 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("accepts a per-flash-layout platform and 404s when the release lacks that image", async () => {
+    // A 16 MB board flashed with the esp32-s3-16mb image names that layout
+    // (fos_ota_platform); the manifest must answer for it, and must not hand
+    // it the generic 8 MB app image instead when the release predates the
+    // per-layout assets.
+    mockGitHub();
+
+    const response = await manifest("esp32-s3-16mb");
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "ota_image_not_published",
+      platform: "esp32-s3-16mb",
+      release: "v1.2.3",
+    });
+  });
+
   it("allows only the ESP32 platform allow-list", async () => {
     mockGitHub();
 

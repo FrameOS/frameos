@@ -422,8 +422,9 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
-               "cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|time_zone|"
-               "interval|spill_force|debug|fusion|server_send_logs|allow_local_network|"
+               "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|time_zone|"
+               "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
+               "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
@@ -483,6 +484,51 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcmp(key, "claim_token") == 0) strlcpy(config->claim_token, value, sizeof(config->claim_token));
     else if (strcmp(key, "frame_id") == 0) config->frame_id = strtoul(value, NULL, 10);
+    /* DHCP hostname and the frame's display name; applied to the station
+     * netif at the next Wi-Fi (re)connect. */
+    else if (strcmp(key, "hostname") == 0) {
+        if (!value[0] || strchr(value, ' ') != NULL || strlen(value) >= sizeof(config->hostname)) {
+            printf("want a hostname without spaces, e.g. kitchen-frame\n");
+            return 1;
+        }
+        strlcpy(config->hostname, value, sizeof(config->hostname));
+    }
+    /* Cap on one HTTP response body the Nim runtime buffers for a scene;
+     * read once at boot (main.c), so `restart` after changing it. */
+    else if (strcmp(key, "max_http_response_bytes") == 0 || strcmp(key, "max_http") == 0) {
+        uint32_t bytes = strtoul(value, NULL, 10);
+        if (bytes < 1024) {
+            printf("max_http_response_bytes must be at least 1024\n");
+            return 1;
+        }
+        config->max_http_response_bytes = bytes;
+    }
+    /* Local admin auth for the frame's own HTTP API (setup/control routes
+     * outside hotspot mode). Enabling needs a user and password; the
+     * password is never echoed back (`status` prints the user only). */
+    else if (strcmp(key, "admin_auth") == 0) {
+        bool enable = atoi(value) != 0;
+        if (enable && (!config->admin_user[0] || !config->admin_pass[0])) {
+            printf("set admin_user and admin_pass before enabling admin_auth\n");
+            return 1;
+        }
+        config->admin_auth_enabled = enable;
+    }
+    else if (strcmp(key, "admin_user") == 0) strlcpy(config->admin_user, value, sizeof(config->admin_user));
+    else if (strcmp(key, "admin_pass") == 0) strlcpy(config->admin_pass, value, sizeof(config->admin_pass));
+    /* HTTPS for the frame's own HTTP API. The certificate and key are PEMs
+     * far longer than a console line: they arrive through the backend's
+     * /embedded/settings pull (or the local frame POST route) and
+     * persist in NVS; these two only switch the listener and its port. */
+    else if (strcmp(key, "tls_enable") == 0) config->tls_enable = atoi(value) != 0;
+    else if (strcmp(key, "tls_port") == 0) {
+        uint32_t port = strtoul(value, NULL, 10);
+        if (port < 1 || port > 65535) {
+            printf("tls_port must be 1-65535\n");
+            return 1;
+        }
+        config->tls_port = (uint16_t)port;
+    }
     else if (strcmp(key, "hardware") == 0 || strcmp(key, "hardware_preset") == 0) {
         /* Integrated boards are bundles, not just labels: the preset implies
          * the panel, the EPD wiring, the buttons and the TF socket. Apply the

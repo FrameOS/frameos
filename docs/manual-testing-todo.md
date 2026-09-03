@@ -158,18 +158,30 @@ hardware-settings batch) and the battery ADC rounds of #426.
   portal start. Then confirm the backend's frame sync shows no "changed on
   frame" for Wi-Fi password / admin password / API key after a deploy (the
   device now answers `""` for them).
-- [ ] **Layout-matched release image (#442, needs a release after it):**
-  on the XTEINK X4 (16 MB C3), "Flash latest release" picks
+- [ ] **Layout-matched release image (#442; release 2026.9.2 carries the
+  six images):** on the XTEINK X4 (16 MB C3), "Flash latest release" picks
   `esp32-c3-16mb`, the "4MB layout / no OTA" warnings are gone, the board
   boots and later takes an OTA; on a 13.3E6 (32 MB S3) the same with
   `esp32-s3-32mb`.
+- [ ] **The backend flashes what the cloud flashes (needs firmware built
+  after 2026-09-03):** on a blank board, "Flash latest release" from the
+  self-hosted deploy drawer provisions everything — `status` shows the
+  hostname, `admin_auth: enabled`, and after the first settings sync the
+  `https:` line says `cert=yes key=yes` (with HTTPS enabled on the frame)
+  and the API answers on 8443; "Apply frame settings" under USB setup
+  replays the same plan on a board flashed by hand with esptool. Then
+  "Update over the air" / Full deploy: the log shows `ota:backend`
+  `downloading … verified`, the board reboots into the release, and a
+  second request answers `up-to-date`. Finally a board still on a
+  per-frame image from before this change must OTA onto the release image
+  from the new manifest (the legacy `sha256` field) and verify from then on.
 - [ ] **Dual console — reTerminal E1002 over its CH340:** the cloud flasher
   on the "USB Single Serial" port must flash, see `frameos>` and provision
   (this board has no USB-Serial/JTAG port at all). Then on a XIAO ESP32-S3
   confirm the "USB JTAG/serial debug unit" path still provisions and that
   `usb_api` uploads/previews work there. Partial pass 2026-08-26: frame 59
   (13.3E6) answered `frameos>` + `status` over its CH343 "USB Single Serial"
-  port with a local build; opening that port through pyserial/WebSerial
+  port with a locally built image; opening that port through pyserial/WebSerial
   resets the chip (DTR/RTS auto-reset circuit), so open once with DTR/RTS
   low and keep the port open while waiting for the prompt.
 
@@ -187,13 +199,10 @@ hardware-settings batch) and the battery ADC rounds of #426.
 - [x] **The release run is a test (#381):** `docker-publish-multi` has run
   twice since #381 (2026-08-20, both success) — `epyc-32` and the Depot
   esp32-ci path are validated.
-- [ ] **First release after #442 + #444:** the six per-layout ESP32 builds
-  (`build-esp32-layout-firmware`) and the wasm bundle
-  (`build-wasm-runtime`) build, sign and attach; the npm publish downloads
-  the bundle instead of compiling; cloud-ci's `workflow_run` deploy then
-  installs `frameos-<version>-wasm.tar.gz` and the preview shows
-  "runtime <version>". Until that release, cloud-ci fails at prebuild by
-  design — cut it right after merging #444.
+- [x] **First release after #442 + #444:** release 2026.9.2 (2026-09-03)
+  carries the six per-layout ESP32 images with signatures and the signed
+  wasm bundle. Still to eyeball: the npm publish downloaded the bundle and
+  the cloud preview shows "runtime 2026.9.2".
 
 ## Not on the list, deliberately
 

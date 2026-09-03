@@ -13,7 +13,6 @@ export type LongRunningTaskKind =
   | 'remoteDeploy'
   | 'remoteRestart'
   | 'buildrootImage'
-  | 'embeddedFirmware'
   | 'embeddedOta'
 export type LongRunningTaskStatus = 'running' | 'success' | 'error'
 

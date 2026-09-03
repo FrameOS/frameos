@@ -135,8 +135,7 @@ frames run the last release, and one skew already shipped a visible lie
   verifies the minisign signature on every build and installs it
   (`FRAMEOS_WASM_SOURCE=local` for runtime development); the npm package
   ships the same bytes. The preview shows "runtime <version>", the render
-  route returns `runtime_version`. First release after the merge proves the
-  job; until then cloud builds fail at prebuild (no asset for 2026.9.0).
+  route returns `runtime_version`. Release 2026.9.2 proved the job.
 - [ ] The skew is now one direction only — preview = last release, frame =
   whatever it runs — so the table this bullet wanted collapses to the
   release notes: every release note lists interpreter changes since the

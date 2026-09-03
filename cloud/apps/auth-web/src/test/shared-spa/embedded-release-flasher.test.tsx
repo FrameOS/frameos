@@ -219,16 +219,16 @@ describe("EmbeddedReleaseFlasher", () => {
     expect((screen.getByRole("button", { name: /flash latest release/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("refuses a frame whose settings only exist as compile-time defaults", async () => {
+  it("refuses a frame the backend says cannot be provisioned", async () => {
     mockBackendApi(
       plan({
         supported: false,
-        blockers: ["This frame terminates TLS with its own certificate."],
+        blockers: ["This frame has no server host set, so the device would have no backend to talk to."],
       }),
     );
     render(<EmbeddedReleaseFlasher frame={embeddedC3Frame()} />);
 
-    expect(await screen.findByText(/has to build its own image/i)).toBeTruthy();
+    expect(await screen.findByText(/cannot be flashed yet/i)).toBeTruthy();
     expect((screen.getByRole("button", { name: /flash latest release/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 

@@ -19,7 +19,6 @@ from app.tasks.stop_frame import stop_frame_task
 from app.tasks.deploy_remote import deploy_remote_task
 from app.tasks.restart_remote import restart_remote_task
 from app.tasks.buildroot_image import buildroot_sd_image_task
-from app.tasks.embedded_firmware import embedded_firmware_task
 from app.config import config
 from app.redis import close_redis_connection, create_redis_connection
 from app.database import SessionLocal
@@ -94,7 +93,6 @@ class WorkerSettings:
         func(with_db_session(deploy_remote_task),     name="deploy_remote"),
         func(with_db_session(restart_remote_task),    name="restart_remote"),
         func(with_db_session(buildroot_sd_image_task), name="buildroot_sd_image"),
-        func(with_db_session(embedded_firmware_task), name="embedded_firmware"),
     ]
     on_startup = startup
     on_shutdown = shutdown

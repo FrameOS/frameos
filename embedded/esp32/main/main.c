@@ -55,7 +55,7 @@ static const char *TAG = "frameos";
  * blink = running, fast blink = provisioning portal. Only the S3 gets a
  * default: on the C3 boards GPIO 21 is display CS (XTEINK X4) or I2C
  * (TRMNL), so "unconnected GPIO" no longer holds; boards without a plain
- * LED disable the task with -1. generated_config.h may override. */
+ * LED disable the task with -1. */
 #ifndef FRAMEOS_HEARTBEAT_GPIO
 #if CONFIG_IDF_TARGET_ESP32S3
 #define FRAMEOS_HEARTBEAT_GPIO 21

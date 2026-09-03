@@ -29,10 +29,10 @@
     // whole deploy drawer. Vitest still runs it; only tsc leaves it out.
     // (frontend/ typechecks these components itself with its own config.)
     "src/test/shared-spa/cloud-deploy-dialog.test.tsx",
-    // Same story: mounts EmbeddedWebFlasher, whose import graph reaches the
+    // Same story: imports embeddedFlashShared, whose import graph reaches the
     // legacy workspace components (bare JSX namespace, pre-strict typing).
     // Vitest still runs it; only tsc leaves it out.
-    "src/test/shared-spa/embedded-web-flasher.test.tsx",
+    "src/test/shared-spa/embedded-flash-shared.test.ts",
     // Same story: mounts EmbeddedReleaseFlasher, whose import graph reaches
     // the legacy workspace components through framesModel.
     // Vitest still runs it; only tsc leaves it out.

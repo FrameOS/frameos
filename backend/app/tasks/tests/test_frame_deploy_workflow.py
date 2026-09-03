@@ -2419,19 +2419,40 @@ def _embedded_workflow(frame: SimpleNamespace) -> FrameDeployWorkflow:
     )
 
 
+RELEASE_SUMMARY = {
+    "tag": "v2026.9.2",
+    "version": "2026.9.2",
+    "platforms": {"esp32-s3-generic", "esp32-s3-16mb"},
+}
+
+
+def _patch_release_summary(summary=RELEASE_SUMMARY):
+    """The plan names the release the device will be offered; GitHub is not on
+    the test's network."""
+    from unittest.mock import AsyncMock, patch
+
+    return patch("app.api.firmware_release.latest_release_summary",
+                 new_callable=AsyncMock, return_value=summary)
+
+
 @pytest.mark.asyncio
-async def test_plan_full_for_embedded_returns_ota_plan():
+async def test_plan_full_for_embedded_returns_release_ota_plan():
     frame = _embedded_workflow_frame()
     workflow = _embedded_workflow(frame)
 
-    plan = await workflow.plan("full")
+    with _patch_release_summary():
+        plan = await workflow.plan("full")
 
     assert plan.mode == "full"
     assert isinstance(plan.full_deploy, EmbeddedFullDeployPlan)
     assert plan.full_deploy.platform == "esp32-s3"
-    assert plan.full_deploy.needs_firmware_build is True
+    # The backend builds nothing: the plan names the published release and the
+    # image family this board's flash layout takes.
+    assert plan.full_deploy.release_version == "2026.9.2"
+    assert plan.full_deploy.release_platform == "esp32-s3-generic"
     assert plan.frame_dict["mode"] == "embedded"
     assert plan.frame_dict["frameos_version"]
+    assert any("2026.9.2" in note for note in plan.notes)
 
     # The drawer consumes the FullDeployPlanResponse key shape.
     payload = plan.full_deploy.to_dict()
@@ -2443,8 +2464,38 @@ async def test_plan_full_for_embedded_returns_ota_plan():
     }
     assert payload["packages"] == []
     assert payload["binary"]["will_attempt_precompiled"] is False
-    assert payload["embedded"]["action"] == "build_firmware_ota_upload_scenes"
+    assert payload["binary"]["cross_compile_supported"] is False
+    assert payload["embedded"]["action"] == "release_ota_upload_scenes"
     assert payload["embedded"]["otaSupported"] is True
+    assert payload["embedded"]["releasePlatform"] == "esp32-s3-generic"
+    assert payload["embedded"]["releaseVersion"] == "2026.9.2"
+    assert "firmwareStatus" not in payload["embedded"]
+    assert "needsFirmwareBuild" not in payload["embedded"]
+
+
+@pytest.mark.asyncio
+async def test_plan_full_for_embedded_picks_the_image_for_the_flash_layout():
+    frame = _embedded_workflow_frame(embedded={"platform": "esp32-s3", "flashSize": "16MB"})
+
+    with _patch_release_summary():
+        plan = await _embedded_workflow(frame).plan("full")
+
+    assert plan.full_deploy.release_platform == "esp32-s3-16mb"
+
+
+@pytest.mark.asyncio
+async def test_plan_full_for_embedded_survives_an_unreachable_github():
+    """A release listing this backend cannot fetch does not block the deploy:
+    the device asks for the manifest itself and may answer up to date."""
+    frame = _embedded_workflow_frame()
+
+    with _patch_release_summary(summary=None):
+        plan = await _embedded_workflow(frame).plan("full")
+
+    assert plan.full_deploy.release_version is None
+    # No listing still resolves the generic image for the chip.
+    assert plan.full_deploy.release_platform == "esp32-s3-generic"
+    assert any("could not be fetched" in note for note in plan.notes)
 
 
 @pytest.mark.asyncio
@@ -2465,7 +2516,8 @@ async def test_plan_full_for_embedded_rejects_pico_and_no_ota_profiles():
 @pytest.mark.asyncio
 async def test_plan_combined_for_embedded_includes_fast_and_full():
     frame = _embedded_workflow_frame()
-    plan = await _embedded_workflow(frame).plan("combined")
+    with _patch_release_summary():
+        plan = await _embedded_workflow(frame).plan("combined")
 
     assert plan.mode == "combined"
     assert plan.fast_deploy is not None
@@ -2498,17 +2550,18 @@ def _embedded_full_plan_for(frame: SimpleNamespace) -> FrameDeployPlan:
             flash_size="8MB",
             psram_mb=8,
             ota_supported=True,
-            firmware_status="stale",
-            firmware_error=None,
-            needs_firmware_build=True,
+            release_platform="esp32-s3-generic",
+            release_version="2026.9.2",
         ),
     )
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scenes(
+async def test_execute_embedded_full_updates_waits_for_boot_and_uploads_scenes(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """The whole embedded full deploy now: poke the device's updater, wait for
+    the boot that proves it came back, re-upload the scenes."""
     from datetime import datetime, timedelta, timezone
 
     frame = _embedded_workflow_frame()
@@ -2516,11 +2569,6 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
     events: list[str] = []
     http_calls: list[str] = []
-    firmware_statuses = [
-        {"status": "stale"},
-        {"status": "building"},
-        {"status": "ready", "completedAt": datetime.now(timezone.utc).isoformat()},
-    ]
 
     async def fake_update_frame(_db, _redis, _frame):
         return _frame
@@ -2528,17 +2576,10 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
     async def fake_log(_db, _redis, _frame_id, _type, message):
         events.append(message)
 
-    async def fake_refresh(_db, _redis, _frame):
-        return firmware_statuses.pop(0) if len(firmware_statuses) > 1 else firmware_statuses[0]
-
-    async def fake_start(_db, _redis, _frame, **_kwargs):
-        events.append("build-started")
-        return True, {"status": "queued"}
-
-    async def fake_request_ota(_db, _redis, _frame, *_args, **_kwargs):
-        events.append("ota-requested")
-        # The device pulls the image and reboots; its bootup log lands in
-        # frame.embedded.lastBoot.
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
+        events.append("update-requested")
+        # The device pulls the release image and reboots; its bootup log lands
+        # in frame.embedded.lastBoot.
         _frame.embedded = {
             **_frame.embedded,
             "lastBoot": {"at": (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()},
@@ -2552,14 +2593,11 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.start_embedded_firmware", fake_start)
-    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_ota", fake_request_ota)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
     await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
-    assert "build-started" in events
-    assert "ota-requested" in events
+    assert "update-requested" in events
     assert http_calls == ["/uploadScenes", "/reload"]
     assert frame.status == "starting"
     assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
@@ -2568,58 +2606,13 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_ota_timeout_says_it_may_still_complete(
-    monkeypatch: pytest.MonkeyPatch,
-):
+async def test_execute_embedded_full_always_waits_for_a_boot(monkeypatch: pytest.MonkeyPatch):
+    """The updater reboots whatever it decides, so a frame already running the
+    release comes straight back — there is no "skip the wait" branch to get
+    wrong, and a device that never returns is a failed deploy."""
     from datetime import datetime, timezone
 
-    frame = _embedded_workflow_frame(
-        # Last device activity predates the ready build: a reboot is required.
-        last_log_at=datetime(2026, 6, 14, tzinfo=timezone.utc),
-    )
-    workflow = _embedded_workflow(frame)
-    workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
-    workflow.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 0.01
-
-    async def fake_update_frame(_db, _redis, _frame):
-        return _frame
-
-    async def fake_log(_db, _redis, _frame_id, _type, _message):
-        return None
-
-    async def fake_refresh(_db, _redis, _frame):
-        return {"status": "ready", "completedAt": datetime.now(timezone.utc).isoformat()}
-
-    async def fake_request_ota(_db, _redis, _frame, *_args, **_kwargs):
-        return {"ok": True}
-
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_ota", fake_request_ota)
-
-    with pytest.raises(RuntimeError) as exc:
-        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
-
-    assert "may still" in str(exc.value)
-    assert frame.status == "uninitialized"
-
-
-@pytest.mark.asyncio
-async def test_execute_embedded_full_skips_boot_wait_when_device_runs_current_firmware(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    from datetime import datetime, timedelta, timezone
-
-    built_at = datetime(2026, 6, 14, tzinfo=timezone.utc)
-    frame = _embedded_workflow_frame(
-        embedded={
-            "platform": "esp32-s3",
-            "flashSize": "8MB",
-            # Device booted after the ready image finished building.
-            "lastBoot": {"at": (built_at + timedelta(minutes=5)).isoformat()},
-        },
-    )
+    frame = _embedded_workflow_frame(last_log_at=datetime(2026, 6, 14, tzinfo=timezone.utc))
     workflow = _embedded_workflow(frame)
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
     workflow.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 0.01
@@ -2631,41 +2624,35 @@ async def test_execute_embedded_full_skips_boot_wait_when_device_runs_current_fi
     async def fake_log(_db, _redis, _frame_id, _type, _message):
         return None
 
-    async def fake_refresh(_db, _redis, _frame):
-        return {"status": "ready", "completedAt": built_at.isoformat()}
-
-    async def fake_start(_db, _redis, _frame, **_kwargs):
-        raise AssertionError("ready firmware must not be rebuilt")
-
-    async def fake_request_ota(_db, _redis, _frame, *_args, **_kwargs):
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
         return {"ok": True}
 
-    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None, timeout=None):
-        http_calls.append(path)
+    async def fake_fetch_frame_http_bytes(_frame, _redis, **_kwargs):
+        http_calls.append(_kwargs.get("path"))
         return 200, b"{}", {}
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.start_embedded_firmware", fake_start)
-    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_ota", fake_request_ota)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
-    await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+    with pytest.raises(RuntimeError) as exc:
+        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
-    assert http_calls == ["/uploadScenes", "/reload"]
-    assert frame.status == "starting"
+    assert "may still" in str(exc.value)
+    assert "ota:backend" in str(exc.value)
+    assert frame.status == "uninitialized"
+    # Scenes are never uploaded to a frame that did not come back.
+    assert http_calls == []
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_surfaces_build_failure(monkeypatch: pytest.MonkeyPatch):
+async def test_execute_embedded_full_surfaces_an_unreachable_device(monkeypatch: pytest.MonkeyPatch):
+    """The OTA poke is a plain HTTP call to the board. Nothing is queued for
+    later, so a device that will not answer fails the deploy now."""
     frame = _embedded_workflow_frame()
     workflow = _embedded_workflow(frame)
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
-    firmware_statuses = [
-        {"status": "missing"},
-        {"status": "error", "error": "idf.py build failed with exit code 2:\nninja: error"},
-    ]
 
     async def fake_update_frame(_db, _redis, _frame):
         return _frame
@@ -2673,19 +2660,47 @@ async def test_execute_embedded_full_surfaces_build_failure(monkeypatch: pytest.
     async def fake_log(_db, _redis, _frame_id, _type, _message):
         return None
 
-    async def fake_refresh(_db, _redis, _frame):
-        return firmware_statuses.pop(0) if len(firmware_statuses) > 1 else firmware_statuses[0]
-
-    async def fake_start(_db, _redis, _frame, **_kwargs):
-        return True, {"status": "queued"}
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
+        raise ValueError("HTTP 503: busy rendering")
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
-    monkeypatch.setattr("app.tasks.embedded_firmware.refresh_embedded_firmware_status", fake_refresh)
-    monkeypatch.setattr("app.tasks.embedded_firmware.start_embedded_firmware", fake_start)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
     with pytest.raises(RuntimeError) as exc:
         await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
-    assert "ninja: error" in str(exc.value)
+    assert "Could not start the OTA update" in str(exc.value)
+    assert "busy rendering" in str(exc.value)
+    assert frame.status == "uninitialized"
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_full_needs_a_device_that_has_reported_once(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """There is no first flash over the air: a board that has never spoken to
+    this backend has to be flashed over USB."""
+    frame = _embedded_workflow_frame(last_log_at=None)
+    workflow = _embedded_workflow(frame)
+    requested: list[int] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, _type, _message):
+        return None
+
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
+        requested.append(1)
+        return {"ok": True}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
+
+    with pytest.raises(RuntimeError, match="Flash the first firmware over USB"):
+        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+
+    assert requested == []
     assert frame.status == "uninitialized"
