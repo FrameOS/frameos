@@ -14,7 +14,7 @@
 //   {type: 'setFastMode', enabled}         lift (or restore) the 1 fps throttle
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 // Messages out:
-//   {type: 'ready', sceneInfo, browserAssets}
+//   {type: 'ready', sceneInfo, browserAssets, runtimeVersion}   runtimeVersion: FrameOS version of the bundle (null on older bundles)
 //   {type: 'frame', width, height, buffer, renderMs}   buffer: transferred ArrayBuffer (RGBA)
 //   {type: 'state', state}
 //   {type: 'log', message}
@@ -684,6 +684,19 @@ function renderSoonIfRequested() {
   }
 }
 
+// The FrameOS version this bundle was built from ("2026.9.0"), or null for a
+// bundle from before the export existed. The cloud installs the bundle from
+// a release rather than building it, so this is how the preview can say
+// which interpreter it is.
+function runtimeVersion() {
+  try {
+    const version = call('frameos_wasm_version', 'string', [], [])
+    return version && version !== 'unknown' ? version : null
+  } catch (e) {
+    return null
+  }
+}
+
 async function init(msg) {
   try {
     fastMode = Boolean(msg.fastMode)
@@ -745,7 +758,7 @@ async function init(msg) {
     }
     lastPostedState = null
     const sceneInfo = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
-    post({ type: 'ready', sceneInfo, browserAssets: browserAssetsInfo() })
+    post({ type: 'ready', sceneInfo, browserAssets: browserAssetsInfo(), runtimeVersion: runtimeVersion() })
     renderNow()
   } catch (e) {
     post({ type: 'error', message: String(e && e.message ? e.message : e) })

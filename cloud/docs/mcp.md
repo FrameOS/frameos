@@ -72,7 +72,9 @@ How it plugs in (`src/lib/api-tokens.ts`):
 ### Server-side rendering
 
 `src/lib/scene-render.ts` runs the same `frameos-wasm` bundle the browser
-live preview uses (`public/frameos-wasm`, built with `node` in its emscripten
+live preview uses (`public/frameos-wasm` — the signed bundle of the release
+pinned in `versions.json`, not a build of `main`; see `deployment.md`, "The
+wasm runtime is a release asset" — built with `node` in its emscripten
 `ENVIRONMENT`) in a `worker_threads` Worker: init → load scenes → render →
 a 1.5 s settle for scenes that ask to re-render → raw RGBA → PNG (fflate).
 No Chromium. Scene apps' HTTP goes through a synchronous XHR shim that runs
@@ -80,7 +82,10 @@ each request in a short-lived child Node with the same SSRF guard as the
 preview proxy (`src/lib/ssrf.ts`), capped at 24 requests and 10 MB per
 render. Two renders run concurrently, eight queue, 30 s timeout, one fresh
 64 MB wasm heap per render — nothing is shared between two accounts' scenes.
-`renderer_unavailable` (501) means the bundle is not on disk.
+`renderer_unavailable` (501) means the bundle is not on disk. The JSON reply
+carries `runtime_version` (the PNG reply an `x-frameos-runtime-version`
+header): the interpreter version the render used, which is the last release's
+and may differ from a frame's firmware.
 
 ## The MCP server
 

@@ -42,6 +42,7 @@ export {
   type PreviewAssetEntry,
   type PreviewAssetsInfo,
   type PreviewFrame,
+  type PreviewRuntimeInfo,
   type SceneEventButton,
   type SceneInfo,
   type SceneNode,

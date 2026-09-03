@@ -96,5 +96,14 @@ Helpers for building your own UI are exported too: `evaluateShowIf`, `visiblePub
 ## Development (FrameOS repo)
 
 The runtime assets are built by `frameos/tools/build_wasm.sh` into `frontend/public/frameos-wasm`
-and copied into `dist/assets` by `npm run build`. `npm run sync-version` copies the FrameOS
+(plus a `version.json` stamp: the FrameOS version the interpreter is, the release it belongs
+to, and the commit) and copied into `dist/assets` by `npm run build`. Without a runtime build
+`npm run build` still produces the TypeScript half and warns; publishing sets
+`FRAMEOS_WASM_REQUIRE_RUNTIME=1` and fails instead. `npm run sync-version` copies the FrameOS
 version out of the repo's `versions.json`; publishing refuses to run when the two disagree.
+
+Every FrameOS release also attaches the same three files as `frameos-<version>-wasm.tar.gz`
+(+ a minisign `.minisig` from the firmware signing key) — the runtime is a release artifact,
+and FrameOS Cloud installs that signed bundle rather than building from `main`, so its preview
+renders with the interpreter frames actually run. The bundle reports which version it is
+through `frameos_wasm_version()` (`runtimeInfo.version` / the third `onReady` argument here).

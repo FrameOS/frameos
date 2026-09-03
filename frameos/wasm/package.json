@@ -36,7 +36,7 @@
     "build": "tsc -p tsconfig.json && node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "sync-version": "node scripts/sync-version.mjs",
-    "prepublishOnly": "node scripts/sync-version.mjs --check && npm run build",
+    "prepublishOnly": "node scripts/sync-version.mjs --check && FRAMEOS_WASM_REQUIRE_RUNTIME=1 npm run build",
     "build:runtime": "bash ../tools/build_wasm.sh"
   },
   "devDependencies": {

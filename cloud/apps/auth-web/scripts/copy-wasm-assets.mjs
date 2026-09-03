@@ -1,19 +1,28 @@
 // The frameos-wasm runtime runs in a Web Worker and must be served
-// same-origin: copy its assets out of node_modules into public/ (gitignored)
-// before dev/build. See src/components/SceneLivePreview.tsx.
-/* global console */
+// same-origin: install it into public/frameos-wasm (gitignored) before
+// dev/build. See src/components/SceneLivePreview.tsx.
+//
+// Where it comes from is lib/wasm-runtime.mjs's business: by default the
+// signed, version-pinned bundle from the FrameOS release (so the preview
+// renders with the interpreter frames actually run), or the workspace
+// package's own build with FRAMEOS_WASM_SOURCE=local.
+/* global console, process */
 import { copyFileSync, mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRuntimeDir, runtimeFilesIn } from "./lib/wasm-runtime.mjs";
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const require = createRequire(join(appDir, "package.json"));
-const assetsDir = dirname(require.resolve("frameos-wasm/assets/preview-worker.js"));
 const target = join(appDir, "public", "frameos-wasm");
 
-mkdirSync(target, { recursive: true });
-for (const file of ["frameos.js", "frameos.wasm", "preview-worker.js"]) {
-  copyFileSync(join(assetsDir, file), join(target, file));
+try {
+  const source = await resolveRuntimeDir();
+  mkdirSync(target, { recursive: true });
+  for (const file of runtimeFilesIn(source)) {
+    copyFileSync(join(source, file), join(target, file));
+  }
+  console.log(`Installed the frameos-wasm runtime into ${target}`);
+} catch (error) {
+  console.error(`frameos-wasm runtime: ${error.message}`);
+  process.exit(1);
 }
-console.log(`Copied frameos-wasm assets to ${target}`);

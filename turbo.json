@@ -73,7 +73,17 @@
     },
     "@frameos-cloud/auth-web#build": {
       "dependsOn": ["^build"],
-      "env": ["NEXT_PUBLIC_POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_HOST"],
+      "env": [
+        "NEXT_PUBLIC_POSTHOG_KEY",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "FRAMEOS_WASM_SOURCE",
+        "FRAMEOS_WASM_RELEASE_REPO"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "../../../versions.json",
+        "../../../release-assets/firmware-signing.pub"
+      ],
       "outputs": [
         ".next/**",
         "!.next/cache/**",
