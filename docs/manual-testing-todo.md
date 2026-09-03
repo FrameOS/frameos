@@ -168,7 +168,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   release version). For this bench it changes nothing: 9.1 and 9.2 are the
   same root-only binary, and 9.3 will be the first properly stamped release,
   so the migration test is still "whatever the frame runs now → 9.3".
-- [ ] **2. New Buildroot base images from main:**
+- [x] **2. New Buildroot base images from main** — done 2026-09-04, manifest commit `0a2a9927` (all three platforms, fresh builds). Original notes:
   `gh workflow run buildroot-base-image.yml --ref main -f platform=all`.
   The base build is where `BR2_ROOTFS_USERS_TABLES` creates the `frameos`
   user natively; a release composed from an *older* cached base gets the
@@ -176,7 +176,13 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   paths are tested — keep the manifest commit the workflow makes. If the
   base build is slow or fails for one platform, the release can still be
   cut from the old bases (the merge path); note which path 9.3 used.
-- [ ] **3. Cut 2026.9.3:** `gh workflow run docker-publish-multi.yml --ref main`
+- [ ] **3. Cut 2026.9.3** — started 2026-09-04 00:57 UTC from `a3e7e0bf`
+  (run 33815437078). Note: the release commit predates `4337e51d`, so 9.3
+  cards still carry the first-boot driver-setup cwd bug (framebuffer cards
+  unaffected; an SPI panel on a *fresh* 9.3 card gets its overlays from the
+  portal/cloud driver setup, not first boot). DNSSEC is fine on 9.3 cards
+  because the 9.3 bases are fresh builds (overlay carries the drop-in).
+  Original notes: `gh workflow run docker-publish-multi.yml --ref main`
   (bumps `versions.json` as frameos-bot, builds the binaries, Buildroot SD
   images, ESP32 firmware, wasm, and publishes the GitHub release). Check the
   release page has `frameos-2026.9.3-*.tar.gz` + `.minisig` for
