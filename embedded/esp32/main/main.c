@@ -405,7 +405,7 @@ void app_main(void)
         s_blink_period_ms = 400;
         fos_wifi_start_portal();
         fos_http_start(true);
-        fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ip());
+        fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ap_psk(), fos_wifi_ip());
         /* Registered after the portal httpd is up, so a station that comes
          * back right away still ends with httpd in status mode (a recovery
          * before this line is replayed by the call). */

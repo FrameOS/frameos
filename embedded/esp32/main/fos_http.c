@@ -1481,7 +1481,13 @@ static cJSON *frame_api_frame_json(void)
     cJSON *admin = cJSON_CreateObject();
     cJSON_AddBoolToObject(admin, "enabled", config->admin_auth_enabled);
     cJSON_AddStringToObject(admin, "user", config->admin_user);
-    cJSON_AddStringToObject(admin, "pass", config->admin_pass);
+    /* Write-only fields (docs/api-triality.md): the admin password, the TLS
+     * private key, the backend API key and the Wi-Fi passphrase are accepted
+     * on POST and never read back. The backend↔frame hop is plain HTTP by
+     * default, so anyone on the WPA2 network could otherwise read them from
+     * a captured request; the backend keeps its own copy and treats "" from
+     * the device as "unchanged" (frame_sync.py). */
+    cJSON_AddStringToObject(admin, "pass", "");
     cJSON_AddItemToObject(frame, "frame_admin_auth", admin);
 
     cJSON *https = cJSON_CreateObject();
@@ -1490,7 +1496,7 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddBoolToObject(https, "expose_only_port", true);
     cJSON *certs = cJSON_CreateObject();
     cJSON_AddStringToObject(certs, "server", config->tls_server_cert);
-    cJSON_AddStringToObject(certs, "server_key", config->tls_server_key);
+    cJSON_AddStringToObject(certs, "server_key", "");
     cJSON_AddStringToObject(certs, "client_ca", "");
     cJSON_AddItemToObject(https, "certs", certs);
     cJSON_AddNullToObject(https, "server_cert_not_valid_after");
@@ -1503,7 +1509,7 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddItemToObject(frame, "ssh_keys", cJSON_CreateArray());
     cJSON_AddStringToObject(frame, "server_host", config->backend_url);
     cJSON_AddNumberToObject(frame, "server_port", 0);
-    cJSON_AddStringToObject(frame, "server_api_key", config->api_key);
+    cJSON_AddStringToObject(frame, "server_api_key", "");
     cJSON_AddBoolToObject(frame, "server_send_logs", config->server_send_logs);
     cJSON_AddStringToObject(frame, "status", "online");
     cJSON_AddBoolToObject(frame, "archived", false);
@@ -1551,7 +1557,7 @@ static cJSON *frame_api_frame_json(void)
 
     cJSON *network = cJSON_CreateObject();
     cJSON_AddStringToObject(network, "wifiSSID", config->wifi_ssid);
-    cJSON_AddStringToObject(network, "wifiPassword", config->wifi_pass);
+    cJSON_AddStringToObject(network, "wifiPassword", "");
     cJSON_AddItemToObject(frame, "network", network);
 
     cJSON_AddItemToObject(frame, "agent", cJSON_CreateObject());
@@ -1617,6 +1623,19 @@ static bool json_copy_string_item(const cJSON *object, const char *key, char *ou
     return true;
 }
 
+/* A write-only secret: the GET side serves "" for it, so an editor that
+ * round-trips the payload sends "" back, and that must mean "keep what is
+ * stored" rather than "clear it". Clearing goes through the specific route
+ * (admin auth is disabled with `enabled: false`; Wi-Fi is re-set from the
+ * console / portal with `set wifi`). */
+static bool json_copy_secret_item(const cJSON *object, const char *key, char *out, size_t out_len)
+{
+    const cJSON *item = cJSON_GetObjectItem(object, key);
+    if (!cJSON_IsString(item) || !item->valuestring || !item->valuestring[0]) return false;
+    strlcpy(out, item->valuestring, out_len);
+    return true;
+}
+
 static bool json_u32_item(const cJSON *object, const char *key, uint32_t *out)
 {
     const cJSON *item = cJSON_GetObjectItem(object, key);
@@ -1665,7 +1684,7 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
     if (json_u32_item(root, "max_http_response_bytes", &value) && value >= 1024) {
         config->max_http_response_bytes = value;
     }
-    json_copy_string_item(root, "server_api_key", config->api_key, sizeof(config->api_key));
+    json_copy_secret_item(root, "server_api_key", config->api_key, sizeof(config->api_key));
     update_backend_url_from_frame_payload(config, root);
 
     const cJSON *send_logs = cJSON_GetObjectItem(root, "server_send_logs");
@@ -1674,7 +1693,7 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
     const cJSON *network = cJSON_GetObjectItem(root, "network");
     if (cJSON_IsObject(network)) {
         json_copy_string_item(network, "wifiSSID", config->wifi_ssid, sizeof(config->wifi_ssid));
-        json_copy_string_item(network, "wifiPassword", config->wifi_pass, sizeof(config->wifi_pass));
+        json_copy_secret_item(network, "wifiPassword", config->wifi_pass, sizeof(config->wifi_pass));
     }
 
     const cJSON *device_config = cJSON_GetObjectItem(root, "device_config");
@@ -1695,7 +1714,7 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
         strlcpy(next_user, config->admin_user, sizeof(next_user));
         strlcpy(next_pass, config->admin_pass, sizeof(next_pass));
         json_copy_string_item(admin, "user", next_user, sizeof(next_user));
-        json_copy_string_item(admin, "pass", next_pass, sizeof(next_pass));
+        json_copy_secret_item(admin, "pass", next_pass, sizeof(next_pass));
         if (next_enabled && (!next_user[0] || !next_pass[0])) {
             cJSON_Delete(root);
             free(body);
@@ -1716,7 +1735,7 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
         const cJSON *certs = cJSON_GetObjectItem(https, "certs");
         if (cJSON_IsObject(certs)) {
             json_copy_string_item(certs, "server", config->tls_server_cert, sizeof(config->tls_server_cert));
-            json_copy_string_item(certs, "server_key", config->tls_server_key, sizeof(config->tls_server_key));
+            json_copy_secret_item(certs, "server_key", config->tls_server_key, sizeof(config->tls_server_key));
         }
     }
 

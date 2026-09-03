@@ -14,6 +14,7 @@
 #include "esp_err.h"
 
 #define FOS_STR_LEN 128
+#define FOS_AP_PSK_LEN 64          /* WPA2 passphrases are 8-63 characters */
 #define FOS_URL_LEN 256
 #define FOS_TLS_PEM_LEN 4096
 #define FOS_GPIO_BUTTONS_MAX 8
@@ -109,6 +110,12 @@ typedef struct {
     bool admin_auth_enabled;       /* protect setup/control routes outside hotspot mode */
     char admin_user[FOS_STR_LEN];
     char admin_pass[FOS_STR_LEN];
+    /* WPA2 passphrase of the provisioning AP (FrameOS-XXXX). Minted from
+     * hardware entropy the first time the portal starts and kept in NVS, so
+     * a fresh device is not provisioned by whoever is nearest; shown on the
+     * status screen and over the console (`config`), settable with
+     * `set ap_psk`. */
+    char ap_psk[FOS_AP_PSK_LEN];
     char assets_path[FOS_ASSETS_PATH_LEN]; /* VFS mount point for local assets, default /srv/assets */
     fos_assets_sd_config_t assets_sd;
     bool deep_sleep;               /* deep sleep between refreshes */

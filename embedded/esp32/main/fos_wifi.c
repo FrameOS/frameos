@@ -12,6 +12,7 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "lwip/sockets.h"
@@ -344,6 +345,34 @@ void fos_wifi_set_portal_exit_cb(fos_wifi_portal_exit_cb cb)
     if (run_now) cb();
 }
 
+/* Readable and unambiguous on a small e-paper panel: no 0/O, 1/l/I. 31
+ * symbols, so bytes >= 248 (= 8 * 31) are rejected rather than folded, which
+ * would make the first few symbols likelier — this is a WPA2 passphrase. */
+static const char AP_PSK_ALPHABET[] = "abcdefghjkmnpqrstuvwxyz23456789";
+#define AP_PSK_LENGTH 10
+
+const char *fos_wifi_ap_psk(void)
+{
+    fos_config_t *config = fos_config();
+    if (config->ap_psk[0]) return config->ap_psk;
+    size_t n = 0;
+    while (n < AP_PSK_LENGTH) {
+        uint32_t word = esp_random();
+        for (int i = 0; i < 4 && n < AP_PSK_LENGTH; i++) {
+            uint8_t byte = (uint8_t)(word >> (8 * i));
+            if (byte >= 248) continue;
+            config->ap_psk[n++] = AP_PSK_ALPHABET[byte % (sizeof(AP_PSK_ALPHABET) - 1)];
+        }
+    }
+    config->ap_psk[n] = '\0';
+    esp_err_t err = fos_config_save();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "portal passphrase minted but not saved: %s (it changes on the next boot)",
+                 esp_err_to_name(err));
+    }
+    return config->ap_psk;
+}
+
 esp_err_t fos_wifi_start_portal(void)
 {
     if (!s_ap_netif) {
@@ -352,16 +381,19 @@ esp_err_t fos_wifi_start_portal(void)
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     snprintf(s_ap_ssid, sizeof(s_ap_ssid), "FrameOS-%02X%02X", mac[4], mac[5]);
+    const char *psk = fos_wifi_ap_psk();
 
     wifi_config_t ap_config = {
         .ap = {
             .channel = 1,
             .max_connection = 4,
-            .authmode = WIFI_AUTH_OPEN,
+            .authmode = WIFI_AUTH_WPA2_PSK,
+            .pmf_cfg = { .required = false },
         },
     };
     strlcpy((char *)ap_config.ap.ssid, s_ap_ssid, sizeof(ap_config.ap.ssid));
     ap_config.ap.ssid_len = strlen(s_ap_ssid);
+    strlcpy((char *)ap_config.ap.password, psk, sizeof(ap_config.ap.password));
 
     bool keep_sta_retrying = fos_config_wifi_ready();
     ESP_ERROR_CHECK(esp_wifi_set_mode(keep_sta_retrying ? WIFI_MODE_APSTA : WIFI_MODE_AP));

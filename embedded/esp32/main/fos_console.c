@@ -188,6 +188,10 @@ static int cmd_status(int argc, char **argv)
     printf("admin_auth:  %s user=%s\n",
            (config->admin_auth_enabled && config->admin_user[0] && config->admin_pass[0]) ? "enabled" : "disabled",
            config->admin_user[0] ? config->admin_user : "(unset)");
+    /* The provisioning AP's passphrase: the panel shows it, and this is the
+     * other place to read it from (a headless board, or a panel that cannot
+     * be seen). Minted on first use, so a fresh device says so. */
+    printf("ap_psk:      %s\n", config->ap_psk[0] ? config->ap_psk : "(minted when the setup network first starts)");
     printf("hardware:    %s\n", config->hardware_preset[0] ? config->hardware_preset : "(custom)");
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
@@ -423,7 +427,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|pins|gpio_buttons> <value...>\n");
+               "battery_pin|battery_divider|battery_enable_pin|pins|gpio_buttons|ap_psk> <value...>\n");
         return 1;
     }
     fos_config_t *config = fos_config();
@@ -439,6 +443,14 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "wifi_pass") == 0) strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
     else if (strcmp(key, "backend") == 0) strlcpy(config->backend_url, value, sizeof(config->backend_url));
     else if (strcmp(key, "api_key") == 0) strlcpy(config->api_key, value, sizeof(config->api_key));
+    else if (strcmp(key, "ap_psk") == 0) {
+        size_t len = strlen(value);
+        if (len != 0 && (len < 8 || len > 63)) {
+            printf("ap_psk must be 8-63 characters (or empty to mint a new one at the next portal start)\n");
+            return 1;
+        }
+        strlcpy(config->ap_psk, value, sizeof(config->ap_psk));
+    }
     /* Cloud-frame provisioning (browser flasher / manual): the enrollment
      * task picks these up once Wi-Fi is connected. The claim token is single
      * use and never echoed back — check `status` for the enrollment state. */
