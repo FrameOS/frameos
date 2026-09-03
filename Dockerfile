@@ -80,11 +80,24 @@ ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+      bison \
       build-essential \
       ca-certificates \
+      ccache \
+      cmake \
+      dfu-util \
+      flex \
       git \
+      gperf \
+      libgcrypt20 \
       libffi-dev \
+      libglib2.0-0 \
+      libpixman-1-0 \
+      libsdl2-2.0-0 \
       libssl-dev \
+      libslirp0 \
+      libusb-1.0-0 \
+      ninja-build \
       python3 \
       python3-pip \
       python3-setuptools \
@@ -322,31 +335,18 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       bash \
-      bison \
       build-essential \
       ca-certificates \
-      ccache \
-      cmake \
       curl \
-      dfu-util \
       dosfstools \
       e2fsprogs \
-      flex \
       genimage \
       git \
       gnupg \
-      gperf \
       iputils-ping \
-      libgcrypt20 \
       libffi-dev \
-      libglib2.0-0 \
-      libpixman-1-0 \
-      libsdl2-2.0-0 \
       libssl-dev \
-      libslirp0 \
-      libusb-1.0-0 \
       mtools \
-      ninja-build \
       python3-pip \
       python3-setuptools \
       python3-venv \
