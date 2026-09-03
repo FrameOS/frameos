@@ -39,6 +39,7 @@ from app.tasks.embedded_firmware import (
     embedded_pixel_format_for_panel,
     embedded_pixie_path,
     embedded_provisioning_plan,
+    embedded_release_asset_names,
     embedded_required_sdkconfig_for_frame,
     embedded_render_psram_bytes,
     embedded_render_canvas_bytes_per_pixel,
@@ -1407,6 +1408,66 @@ def test_provisioning_plan_warns_about_the_published_images_flash_layout():
     assert any("no OTA slot" in warning for warning in plan["warnings"])
 
 
+def test_provisioning_plan_prefers_the_image_built_for_the_frames_flash_layout():
+    """Once the release publishes per-layout images, a 16MB XTEINK X4 is
+    flashed with the 16MB OTA layout — the whole chip, and OTA — not the
+    generic 4MB image, and neither layout warning applies."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "xteink_x4"}, server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame, published_assets={"esp32-c3-generic", "esp32-c3-16mb"})
+
+    assert plan["releasePlatform"] == "esp32-c3-16mb"
+    assert plan["releaseFlashSize"] == "16MB"
+    assert not any("partition layout" in warning for warning in plan["warnings"])
+    assert not any("no OTA slot" in warning for warning in plan["warnings"])
+
+
+def test_provisioning_plan_falls_back_to_the_generic_image_without_a_layout_match():
+    """An older release (no per-layout images), or no listing at all, keeps
+    flashing the generic image with the same warnings as before."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "xteink_x4"}, server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    for published in ({"esp32-c3-generic", "esp32-s3-generic"}, None):
+        plan = embedded_provisioning_plan(frame, published_assets=published)
+        assert plan["releasePlatform"] == "esp32-c3-generic"
+        assert plan["releaseFlashSize"] == "4MB"
+        assert any("4MB partition layout" in warning for warning in plan["warnings"])
+
+
+def test_provisioning_plan_never_needs_a_listing_for_the_generic_layouts():
+    """The generic images ARE the 8MB S3 and 4MB C3 layouts, so a frame on one
+    of those resolves to them whatever the release lists."""
+    frame = Frame(id=9, device="waveshare.EPD_7in5_V2", server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame, published_assets=set())
+
+    assert plan["releasePlatform"] == "esp32-s3-generic"
+    assert plan["releaseFlashSize"] == "8MB"
+
+
+def test_release_asset_names_cover_every_flash_layout_once():
+    names = embedded_release_asset_names()
+    # Generic first: they are the fallback and what the cloud flasher ships.
+    assert names[:2] == ["esp32-s3-generic", "esp32-c3-generic"]
+    assert len(names) == len(set(names))
+    assert set(names) == {
+        "esp32-s3-generic",
+        "esp32-c3-generic",
+        "esp32-s3-4mb",
+        "esp32-s3-16mb",
+        "esp32-s3-32mb",
+        "esp32-c3-8mb",
+        "esp32-c3-16mb",
+        "esp32-c3-32mb",
+    }
+
+
 def test_provisioning_plan_sends_sd_card_pins_before_enabling_the_socket():
     frame = Frame(
         id=9,
@@ -1492,7 +1553,16 @@ def test_provisioning_plan_warns_when_the_hostname_cannot_be_provisioned():
 async def test_provisioning_endpoint_returns_the_plan(async_client):
     frame = await create_embedded_frame(async_client)
 
-    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/provisioning")
+    # The route consults the cached release listing to pick a layout-matched
+    # image; GitHub is not on the test's network.
+    from unittest.mock import AsyncMock, patch
+
+    from app.api import firmware_release
+
+    firmware_release.clear_release_cache()
+    with patch("app.api.firmware_release._fetch_latest_release", new_callable=AsyncMock, return_value=None):
+        response = await async_client.get(f"/api/frames/{frame['id']}/embedded/provisioning")
+    firmware_release.clear_release_cache()
 
     assert response.status_code == 200, response.text
     plan = response.json()["provisioning"]

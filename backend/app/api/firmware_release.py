@@ -42,19 +42,24 @@ import httpx
 from fastapi import HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from app.tasks.embedded_firmware import embedded_release_asset_names
+
 from . import api_project
 
 RELEASE_API_URL = "https://api.github.com/repos/FrameOS/frameos/releases/latest"
 
-# Explicit allow-list of platform -> exact asset suffix, kept in sync with
-# firmware-release.ts provisioningAssets (which is kept in sync with the esp32
-# job in .github/workflows/docker-publish-multi.yml). These are the MERGED
-# provisioning images (bootloader at 0x0, partition table, blank otadata, app)
-# — what a flasher writes to a board, not the bare OTA app image.
+# Explicit allow-list of platform -> exact asset suffix. The ESP32 entries
+# come from the flash profiles (EMBEDDED_FLASH_PROFILES.releaseAssets, one
+# image per chip and flash layout, generic first) — the same table the
+# provisioning plan picks from, so the listing and the plan cannot disagree
+# about what exists. The cloud's firmware-release.ts provisioningAssets lists
+# only the generic pair; the esp32 jobs in
+# .github/workflows/docker-publish-multi.yml publish all of them. These are
+# the MERGED provisioning images (bootloader at 0x0, partition table, blank
+# otadata, app) — what a flasher writes to a board, not the bare OTA app image.
 PROVISIONING_ASSETS: list[dict[str, str]] = [
-    {"platform": "esp32-s3-generic", "suffix": "-esp32-s3-generic.bin"},
+    *({"platform": asset, "suffix": f"-{asset}.bin"} for asset in embedded_release_asset_names()),
     {"platform": "esp32-s3-epd7in5v2", "suffix": "-esp32-s3-epd7in5v2.bin"},
-    {"platform": "esp32-c3-generic", "suffix": "-esp32-c3-generic.bin"},
     {"platform": "raspberry-pi-32", "suffix": "-raspberry-pi-32-buildroot.img.gz"},
     {"platform": "raspberry-pi-64", "suffix": "-raspberry-pi-64-buildroot.img.gz"},
     {"platform": "raspberry-pi-5", "suffix": "-raspberry-pi-5-buildroot.img.gz"},
@@ -64,9 +69,7 @@ PROVISIONING_ASSETS: list[dict[str, str]] = [
 # gigabyte-sized buildroot SD images appear in the listing but are not
 # streamable through this route.
 STREAMABLE_PLATFORMS = {
-    "esp32-s3-generic",
-    "esp32-s3-epd7in5v2",
-    "esp32-c3-generic",
+    entry["platform"] for entry in PROVISIONING_ASSETS if entry["platform"].startswith("esp32-")
 }
 
 # Development / self-hosted escape hatch: point this at a locally built merged
@@ -128,6 +131,20 @@ async def _latest_release_cached() -> Optional[dict[str, Any]]:
     _release_cache["at"] = now
     _release_cache["release"] = release
     return release
+
+
+def published_provisioning_assets(release: Optional[dict[str, Any]]) -> Optional[set[str]]:
+    """The provisioning platforms a release listing actually carries, or None
+    when there is no listing to read (the provisioning plan then falls back
+    to the generic image rather than guessing)."""
+    if release is None:
+        return None
+    return {entry["platform"] for entry in PROVISIONING_ASSETS if _find_asset(release, entry["suffix"])}
+
+
+async def latest_published_provisioning_assets() -> Optional[set[str]]:
+    """Same, for the cached latest release — what the provisioning route asks."""
+    return published_provisioning_assets(await _latest_release_cached())
 
 
 def _find_asset(release: dict[str, Any], suffix: str) -> Optional[dict[str, Any]]:

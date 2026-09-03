@@ -82,6 +82,54 @@ async def test_firmware_listing(async_client):
     second_fetch.assert_not_awaited()
 
 
+def _asset(name: str, size: int) -> dict:
+    return {
+        "name": name,
+        "size": size,
+        "browser_download_url": f"https://github.com/FrameOS/frameos/releases/download/v1.3.0/{name}",
+    }
+
+
+@pytest.mark.asyncio
+async def test_firmware_listing_includes_the_per_layout_images(async_client):
+    # A release since docs/todo.md step 1 carries one image per chip and flash
+    # layout next to the generic pair; the listing names each by its platform
+    # and still never lists a bare -app.bin.
+    release = {
+        "tag_name": "v1.3.0",
+        "assets": [
+            *RELEASE["assets"],
+            _asset("frameos-1.3.0-esp32-s3-32mb.bin", 70),
+            _asset("frameos-1.3.0-esp32-s3-32mb-app.bin", 50),
+            _asset("frameos-1.3.0-esp32-c3-16mb.bin", 40),
+        ],
+    }
+    with patch_release(release=release):
+        response = await async_client.get("/api/frames/firmware")
+
+    assert response.status_code == 200, response.text
+    assert [asset["platform"] for asset in response.json()["assets"]] == [
+        "esp32-s3-generic",
+        "esp32-c3-generic",
+        "esp32-c3-16mb",
+        "esp32-s3-32mb",
+        "raspberry-pi-64",
+    ]
+    assert firmware_release_module.published_provisioning_assets(release) == {
+        "esp32-s3-generic",
+        "esp32-c3-generic",
+        "esp32-c3-16mb",
+        "esp32-s3-32mb",
+        "raspberry-pi-64",
+    }
+    # No listing at all is "unknown", not "nothing published".
+    assert firmware_release_module.published_provisioning_assets(None) is None
+    # Every per-layout image is streamable like the generic ones.
+    assert "esp32-c3-16mb" in firmware_release_module.STREAMABLE_PLATFORMS
+    assert "esp32-s3-32mb" in firmware_release_module.STREAMABLE_PLATFORMS
+    assert "raspberry-pi-64" not in firmware_release_module.STREAMABLE_PLATFORMS
+
+
 @pytest.mark.asyncio
 async def test_firmware_listing_502_when_github_unreachable(async_client):
     with patch_release(release=None):

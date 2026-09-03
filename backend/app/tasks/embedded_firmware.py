@@ -569,6 +569,15 @@ EMBEDDED_PANEL_FORMATS = {
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
 EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
+# One entry per flash layout. Two things live here, on their way to being
+# one: the partition table + sdkconfig overlay the per-frame builds still
+# compile with, and ``releaseAssets`` — the published release image (per
+# chip) built with exactly that layout, which is what a board is flashed
+# with instead of a build (docs/todo.md, "the self-hosted backend flashes
+# what the cloud flashes"; the builds go in its step 4, the assets stay).
+# The asset names are the esp32 jobs' in .github/workflows/docker-publish-
+# multi.yml via embedded/esp32/ci_build_image.sh; the generic images ARE
+# the 8MB (S3) and 4MB (C3) layouts, so those entries name them.
 EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
     # Pico W (RP2040). Informational only: pico-family firmware is a generic
     # UF2 flashed over BOOTSEL, the backend never builds or partitions it.
@@ -578,6 +587,7 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
         "sdkconfigDefaults": (),
         "partitionTable": None,
         "otaSupported": False,
+        "releaseAssets": {},
     },
     "4MB": {
         "flashSize": "4MB",
@@ -585,6 +595,7 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
         "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.4mb-no-ota"),
         "partitionTable": "partitions_4mb.csv",
         "otaSupported": False,
+        "releaseAssets": {"esp32-s3": "esp32-s3-4mb", "esp32-c3": "esp32-c3-generic"},
     },
     "8MB": {
         "flashSize": "8MB",
@@ -592,6 +603,7 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
         "sdkconfigDefaults": ("sdkconfig.defaults",),
         "partitionTable": "partitions.csv",
         "otaSupported": True,
+        "releaseAssets": {"esp32-s3": "esp32-s3-generic", "esp32-c3": "esp32-c3-8mb"},
     },
     "16MB": {
         "flashSize": "16MB",
@@ -599,6 +611,7 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
         "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.16mb-ota"),
         "partitionTable": "partitions_ota_16mb.csv",
         "otaSupported": True,
+        "releaseAssets": {"esp32-s3": "esp32-s3-16mb", "esp32-c3": "esp32-c3-16mb"},
     },
     "32MB": {
         "flashSize": "32MB",
@@ -606,18 +619,55 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
         "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.32mb-ota"),
         "partitionTable": "partitions_ota_32mb.csv",
         "otaSupported": True,
+        "releaseAssets": {"esp32-s3": "esp32-s3-32mb", "esp32-c3": "esp32-c3-32mb"},
     },
 }
 # The published GENERIC images (release assets), and the layout each is built
-# with — the esp32 job in .github/workflows/docker-publish-multi.yml, via
-# embedded/esp32/ci_build_image.sh. They carry no per-frame configuration at
-# all: a board flashed with one is told what it is over the USB console
-# afterwards (embedded_provisioning_plan). Keep in sync with
-# PROVISIONING_ASSETS in app/api/firmware_release.py.
+# with. They carry no per-frame configuration at all: a board flashed with
+# one is told what it is over the USB console afterwards
+# (embedded_provisioning_plan). These are the fallback when a release predates
+# the per-layout assets above, and what the cloud flasher ships. Keep in sync
+# with PROVISIONING_ASSETS in app/api/firmware_release.py.
 EMBEDDED_RELEASE_FIRMWARE: dict[str, dict[str, str]] = {
     "esp32-s3": {"asset": "esp32-s3-generic", "flashSize": "8MB"},
     "esp32-c3": {"asset": "esp32-c3-generic", "flashSize": "4MB"},
 }
+
+
+def embedded_release_asset_names() -> list[str]:
+    """Every release asset the flash profiles name, generic ones first."""
+    names = [release["asset"] for release in EMBEDDED_RELEASE_FIRMWARE.values()]
+    for profile in EMBEDDED_FLASH_PROFILES.values():
+        for asset in profile["releaseAssets"].values():
+            if asset not in names:
+                names.append(asset)
+    return names
+
+
+def embedded_release_firmware_for_frame(
+    frame: Frame, published_assets: Optional[set[str]] = None
+) -> Optional[dict[str, Any]]:
+    """The release image to flash this frame with: the one built for its
+    flash layout when the release publishes it, else the chip's generic image.
+
+    ``published_assets`` is the set of provisioning platforms the current
+    release actually carries (app/api/firmware_release.py). None means
+    "unknown" (GitHub unreachable, or a caller with no listing) and resolves
+    to the generic image, which every release since the flasher exists has
+    shipped — the size-matched assets only started with docs/todo.md step 1,
+    so an older release must keep flashing.
+    """
+    platform = embedded_platform_for_frame(frame)
+    generic = EMBEDDED_RELEASE_FIRMWARE.get(platform)
+    if generic is None:
+        return None
+    flash_size = embedded_flash_size_for_frame(frame)
+    profile = EMBEDDED_FLASH_PROFILES[flash_size]
+    asset = profile["releaseAssets"].get(platform)
+    if asset and (asset == generic["asset"] or (published_assets is not None and asset in published_assets)):
+        return {"asset": asset, "flashSize": flash_size, "otaSupported": bool(profile["otaSupported"])}
+    generic_profile = EMBEDDED_FLASH_PROFILES[generic["flashSize"]]
+    return {**generic, "otaSupported": bool(generic_profile["otaSupported"])}
 # Memory guardrail (M4): the on-device renderer composites into a pixie canvas
 # (frameos/src/embedded/embedded_runtime.nim `renderCanvas`), packs it to the
 # selected panel format, and needs headroom for the Nim heap + QuickJS. The
@@ -1686,8 +1736,8 @@ def _provisioning_setting(key: str, value: object, secret: bool = False) -> dict
     return {"key": key, "value": str(value), "secret": secret}
 
 
-def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
-    """What the published GENERIC firmware has to be told to become this frame.
+def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]] = None) -> dict[str, Any]:
+    """What the published firmware has to be told to become this frame.
 
     The browser flasher's other path builds a per-frame image, which bakes
     every setting below into generated_config.h — a full ESP-IDF compile, tens
@@ -1708,9 +1758,13 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
     frame that needs one cannot be provisioned this way at all and has to build
     an image. ``warnings`` are differences the user should know about but that
     still leave a working frame.
+
+    ``published_assets`` — which provisioning images the current release
+    carries — picks the image built for this frame's flash layout over the
+    generic one (embedded_release_firmware_for_frame).
     """
     platform = embedded_platform_for_frame(frame)
-    release = EMBEDDED_RELEASE_FIRMWARE.get(platform)
+    release = embedded_release_firmware_for_frame(frame, published_assets)
     blockers: list[str] = []
     warnings: list[str] = []
     settings: list[dict[str, Any]] = []
@@ -1833,13 +1887,12 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
 
     if release is not None:
         frame_flash_size = embedded_flash_size_for_frame(frame)
-        release_profile = EMBEDDED_FLASH_PROFILES[release["flashSize"]]
         if frame_flash_size != release["flashSize"]:
             warnings.append(
                 f"The published image uses the {release['flashSize']} partition layout; this frame is configured "
                 f"for {frame_flash_size} flash, so the rest of the chip stays unused."
             )
-        if embedded_ota_supported_for_frame(frame) and not release_profile["otaSupported"]:
+        if embedded_ota_supported_for_frame(frame) and not release["otaSupported"]:
             warnings.append(
                 "The published image has no OTA slot, so future firmware updates need the USB cable again."
             )

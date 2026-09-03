@@ -523,6 +523,133 @@ jobs:
             release-assets/*-esp32-c3-generic-size.json
           if-no-files-found: error
 
+  # The same firmware on every other flash layout a board can have: one signed
+  # image per chip × {4mb,8mb,16mb,32mb}, minus the two the generic pair
+  # already IS (esp32-s3 = 8MB, esp32-c3 = 4MB). A backend then flashes a
+  # 16MB XTEINK X4 or a 32MB 13.3E6 board with the partition table it actually
+  # has instead of the generic image's, which is step 1 of docs/todo.md "the
+  # self-hosted backend flashes what the cloud flashes". One job per chip on
+  # GitHub-hosted runners (the three layouts share one build tree and, on the
+  # S3, one Nim compile) so nothing here queues behind the epyc pool; the
+  # generic job above stays exactly as it was — the cloud flasher depends on
+  # its assets and its Depot layer cache.
+  build-esp32-layout-firmware:
+    name: Build ESP32 firmware per flash layout
+    needs: [update-versions]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: esp32-s3
+            layouts: "4mb 16mb 32mb"
+          - chip: esp32-c3
+            layouts: "8mb 16mb 32mb"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
+
+      # Byte-identical in its cache-relevant inputs to the esp32-ci builds in
+      # this workflow's generic job and in e2e-docker.yml, so it only ever
+      # pulls the warm image (see the generic job's comment).
+      - name: Build ESP32 CI Docker image
+        uses: depot/build-push-action@v1
+        with:
+          project: rsbh2wrlkj
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          target: esp32-ci
+          tags: frameos-esp32-ci
+          load: true
+          push: false
+
+      - name: Build firmware
+        timeout-minutes: 60
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          CHIP: ${{ matrix.chip }}
+          LAYOUTS: ${{ matrix.layouts }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          # Values reach the container through the environment, never spliced
+          # into the inner script (same reason as the generic job).
+          docker run --rm \
+            -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            -e DOCKER_VERSION \
+            -e CHIP \
+            -e LAYOUTS \
+            -e FRAMEOS_VERSION="$DOCKER_VERSION" \
+            -v "$PWD/release-assets:/release-assets" \
+            frameos-esp32-ci \
+            bash -lc '
+              set -euo pipefail
+              for layout in $LAYOUTS; do
+                platform="$CHIP-$layout"
+                # Fresh build dir per layout (the script refuses to reuse one);
+                # the Nim side is shared through nimcache.
+                FRAMEOS_ESP32_PLATFORM="$platform" \
+                  FRAMEOS_ESP32_BUILD_DIR="build-ci-$layout" \
+                  bash embedded/esp32/ci_build_image.sh
+                # Same trio as the generic assets, same meaning: the merged
+                # image is what a USB flasher writes from 0x0, -app.bin is the
+                # bare app image an OTA slot accepts, -size.json is the
+                # size-report baseline for this layout.
+                cp "embedded/esp32/build-ci-$layout/merged-binary.bin" \
+                  "/release-assets/frameos-$DOCKER_VERSION-$platform.bin"
+                cp "embedded/esp32/build-ci-$layout/frameos_esp32.bin" \
+                  "/release-assets/frameos-$DOCKER_VERSION-$platform-app.bin"
+                cp "embedded/esp32/build-ci-$layout/firmware-size.json" \
+                  "/release-assets/frameos-$DOCKER_VERSION-$platform-size.json"
+              done
+            '
+          ls -lh release-assets/
+
+      # Same signing step as the generic job: every image gets its .minisig,
+      # a missing secret fails the release.
+      - name: Sign ESP32 firmware
+        env:
+          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
+            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned firmware"
+            exit 1
+          fi
+          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
+            || python3 -m pip install --quiet cryptography==50.0.0
+          keyfile=$(mktemp)
+          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
+          status=0
+          python3 tools/sign_firmware.py sign --secret "$keyfile" \
+            release-assets/frameos-*.bin || status=$?
+          shred -u "$keyfile"
+          [ "$status" -eq 0 ] || exit "$status"
+          for bin in release-assets/frameos-*.bin; do
+            python3 tools/sign_firmware.py verify \
+              --public release-assets/firmware-signing.pub "$bin"
+          done
+          ls -lh release-assets/
+
+      - name: Upload ESP32 firmware
+        uses: actions/upload-artifact@v4
+        with:
+          # Downloaded by the github-release job by the frameos-<version>-*
+          # name pattern.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-${{ matrix.chip }}-layouts
+          path: |
+            release-assets/*-${{ matrix.chip }}-*mb.bin
+            release-assets/*-${{ matrix.chip }}-*mb.bin.minisig
+            release-assets/*-${{ matrix.chip }}-*mb-app.bin
+            release-assets/*-${{ matrix.chip }}-*mb-app.bin.minisig
+            release-assets/*-${{ matrix.chip }}-*mb-size.json
+          if-no-files-found: error
+
   # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
   # Pimoroni Inky Frame family). Generic on purpose: UF2s flash over BOOTSEL
   # drag-drop and provision over the USB serial console, the backend never
@@ -727,7 +854,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-pico-firmware, update-addon-repo, release-notes]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-esp32-layout-firmware, build-pico-firmware, update-addon-repo, release-notes]
     runs-on: ubuntu-latest
     steps:
       # Shallow: this job only needs a working directory for `gh` and the

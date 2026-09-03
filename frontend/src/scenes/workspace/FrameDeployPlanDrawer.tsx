@@ -83,6 +83,7 @@ import {
   fetchReleaseFirmwareListing,
   hasReleaseFirmwarePlatform,
   releaseFirmwarePlatform,
+  releaseFirmwarePlatformForFrame,
 } from './EmbeddedUsbFirmwareUpdate'
 import { registeredFramePanel } from './addFramePanelRegistry'
 import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
@@ -2191,12 +2192,11 @@ function useCloudFirmwareRelease(frame: FrameType, enabled: boolean): CloudFirmw
     }
     let cancelled = false
     setInfo({ loading: true, error: null, release: null, assetSize: null })
-    fetchReleaseFirmwareListing()
-      .then((listing) => {
+    Promise.all([fetchReleaseFirmwareListing(), releaseFirmwarePlatformForFrame(frame)])
+      .then(([listing, platform]) => {
         if (cancelled) {
           return
         }
-        const platform = releaseFirmwarePlatform(frame)
         const asset = listing.assets?.find((entry) => entry.platform === platform)
         setInfo({
           loading: false,
