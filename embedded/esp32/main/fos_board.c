@@ -48,11 +48,11 @@ const char *fos_board_target(void)
 
 const char *fos_board_module(const char *hardware_preset)
 {
-    /* The backend bakes the preset key into main/generated_config.h when it
-     * builds an image for a specific frame (and the setup portal can override
-     * it in NVS), so on any board provisioned through FrameOS this is the
-     * exact answer: "xteink_x4", "trmnl_og", "waveshare_esp32_s3_photopainter".
-     * The generic published binary has no preset, so fall back to the chip. */
+    /* Provisioning (`set hardware` over the console, the setup portal) stores
+     * the preset key in NVS, so on any board provisioned through FrameOS this
+     * is the exact answer: "xteink_x4", "trmnl_og",
+     * "waveshare_esp32_s3_photopainter". A board nobody has provisioned has
+     * no preset, so fall back to the chip. */
     if (hardware_preset && hardware_preset[0]) return hardware_preset;
     return fos_board_target();
 }

@@ -21,11 +21,10 @@ main/                     boot orchestration + platform modules
   fos_wifi.c              STA connect, SoftAP portal, DNS hijack, SNTP
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
-  fos_ota.c               OTA manifest check + esp_https_ota when an OTA partition exists
+  fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
-  fos_defaults.h          compile-time defaults; generated_config.h (from the
-                          backend's per-frame build) overrides them
+  fos_defaults.h          compile-time defaults of the generic image (NVS wins)
 components/
   frameos_display/        DEV_Config on ESP-IDF (spi_master/gpio, runtime pin remap);
                           one selected root Waveshare EPD_*.c symlinked at
@@ -50,24 +49,12 @@ git clone --depth 1 --branch v5.5.4 --recursive --shallow-submodules \
 cd esp-idf && ./install.sh esp32s3,esp32c3
 ```
 
-The backend finds the toolchain via the `IDF_PATH` env var, falling back to
-`~/esp/esp-idf`. The on-device Nim runtime additionally needs `nim` (>= 2.2) on
-the worker's PATH; without it the firmware builds in thin-client-only mode.
-
-The FrameOS Docker image includes ESP-IDF at `/opt/esp/esp-idf`, native ESP-IDF
-host tools under `/opt/esp/idf-tools`, and the Nim toolchain, so firmware builds
-started from the packaged backend run inside the container without mounting a
-separate host toolchain.
-
-Backend builds put their `build-<platform>-<flash>/` directories next to this
-README. `FRAMEOS_EMBEDDED_BUILD_ROOT` moves them elsewhere — the Docker
-entrypoint points it at a volume (`/data` under the Home Assistant add-on,
-`/app/db` otherwise), because a build directory on the container's writable
-layer is discarded on every restart and a cold build is ~1300 objects. The same
-entrypoint parks `CCACHE_DIR` there; `ccache` on the worker's PATH is enough for
-the backend to enable it, and it is what makes a second frame's image cheap.
-A slow host is worth checking before assuming a build has wedged: progress
-reaches the frame log as `Compiling firmware: N/M`.
+Only the release job and local development build firmware: the self-hosted
+backend and the cloud flash the signed generic release image for a board's
+chip and flash layout and never compile. `ci_build_image.sh` is the release
+recipe (`FRAMEOS_ESP32_PLATFORM=esp32-{s3,c3}[-{4,8,16,32}mb]`); the on-device
+Nim runtime needs `nim` (>= 2.2) on PATH, without it the S3 image builds in
+thin-client-only mode.
 
 ## Build and flash by hand
 
@@ -76,14 +63,14 @@ reaches the frame log as `Compiling firmware: N/M`.
 ./build_nim.sh             # compile the Nim runtime to C (optional but recommended)
 idf.py set-target esp32s3
 FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
-# reconfigure picks up new nimcache/generated_config.h. Every supported panel
-# driver is compiled in; FRAMEOS_SELECTED_PANEL only sets the boot-time
-# default panel (optional — `set panel <key>` switches at runtime).
+# reconfigure picks up a new nimcache. Every supported panel driver is
+# compiled in; FRAMEOS_SELECTED_PANEL only sets the boot-time default panel
+# (optional — `set panel <key>` switches at runtime).
 idf.py -p /dev/tty.usbmodem* flash monitor
 ```
 
-Or flash the single merged image produced by `idf.py merge-bin` (what the backend
-serves and the browser flasher writes):
+Or flash the single merged image produced by `idf.py merge-bin` (what the
+release publishes and the browser flashers write):
 
 ```bash
 esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash 0x0 merged-binary.bin
@@ -180,10 +167,10 @@ have.
 
 Unprovisioned devices start a captive portal: join the `FrameOS-XXXX` Wi-Fi network
 and any page redirects to the setup form (Wi-Fi, backend URL, frame ID/API key,
-panel, render mode). Backend-built images arrive fully provisioned via
-`main/generated_config.h`, including Wi-Fi from the frame's per-frame `network`
-settings (the same place the Pi flows keep it) and optional native HTTPS using
-the same per-frame certificate material as Raspberry Pi Caddy proxies.
+panel, render mode). A board flashed from a FrameOS backend or the cloud is
+provisioned over the USB console instead (below) and never sees the portal;
+the frame's HTTPS certificate — the same per-frame material Raspberry Pi
+Caddy proxies use — arrives with its first `/embedded/settings` pull.
 
 The serial console (115200) is always available and quicker for development.
 It answers on whichever USB port the board brings out: the chip's own
@@ -210,24 +197,23 @@ frameos> ota                             # check for an OTA update now
 frameos> factory-reset
 ```
 
-## Self-hosted provisioning (no per-frame build)
+## Provisioning from a self-hosted backend
 
-A self-hosted backend can flash a blank board two ways, and the deploy
-drawer's firmware card offers both:
+A self-hosted backend flashes a blank board exactly like the cloud does:
+the deploy drawer's **Flash latest release** writes the published image for
+the board's chip and flash layout
+(`frameos-<version>-esp32-{s3,c3}-{generic,4mb,8mb,16mb,32mb}.bin`; the
+generic pair is the 8 MB S3 / 4 MB C3 layout) and then sends this frame's
+settings over the USB console. Nothing is compiled. **Apply frame settings**
+under USB setup replays the same list on a board flashed by hand, and the
+device pulls whatever a console line cannot carry (its HTTPS certificate and
+key, the service API keys, the schedule) from `/embedded/settings` once it is
+on Wi-Fi.
 
-* **Flash latest release** writes the published *generic* image
-  (`frameos-<version>-esp32-{s3,c3}-generic.bin`) and then sends this frame's
-  settings over the USB console. Nothing has to be compiled.
-* **Flash from browser** compiles a per-frame image with those settings baked
-  into `main/generated_config.h`. The first build of a chip target is ~1100
-  ESP-IDF objects — tens of minutes on a NUC, over an hour on a Home
-  Assistant box.
-
-The two produce the same frame because every panel driver is compiled into
-every image and each baked value has a `set` key here. The command list the
-first path replays comes from the backend (`embedded_provisioning_plan` in
-`backend/app/tasks/embedded_firmware.py`), built from the same helpers that
-generate the header, so the two cannot drift. By hand it is:
+Every panel driver is compiled into every image and each frame value has a
+`set` key here, so the command list — the backend's
+`embedded_provisioning_plan` (`backend/app/tasks/embedded_firmware.py`) —
+is the whole difference between a stock image and this frame. By hand it is:
 
 ```
 frameos> set hardware xteink_x4          # board bundle FIRST: panel, wiring, buttons, TF socket
@@ -696,17 +682,18 @@ the backend baked in). It also reports `memory.internalLargestBlock` next to
 a failed allocation.
 
 When connected, the device serves `GET /status` (heap/PSRAM/Wi-Fi/render stats JSON)
-and `POST /api/action/render` / `POST /api/action/ota` on port 80. If
-`https_proxy.enable` is baked into the image, the same API is also served over
-native ESP-IDF HTTPS on the configured `https_proxy.port` (8443 by default).
+and `POST /api/action/render` / `POST /api/action/ota` on port 80. With
+`tls_enable` on and certificate material present (`set tls_enable 1`, the
+material from the settings pull), the same API is also served over native
+ESP-IDF HTTPS on `tls_port` (8443 by default).
 
 ## OTA
 
 The default 8MB flash profile has an A/B OTA partition table: two 3520K app
 slots (about 3.44MiB each) and a 1M `/state` SPIFFS partition at the end of
 flash for scenes and other user data. The current size-tuned firmware fits in
-either OTA slot, so devices can update through `esp_https_ota` instead of only
-USB/browser flashing the merged image.
+either OTA slot, so devices update over the air instead of only USB/browser
+flashing the merged image.
 
 For other flash sizes, append the matching defaults file:
 
@@ -723,9 +710,21 @@ SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.32mb-ota" \
 
 OTA profiles boot new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
 the app marks itself valid once the network is up, otherwise the next reset rolls
-back to the previous slot. The device polls `/api/frames/{id}/embedded/ota/manifest`
-daily (or on `ota`) and applies new builds via `esp_https_ota`. The 4MB profile
-has no OTA partition, so firmware updates must be flashed over USB.
+back to the previous slot. One signed path serves both control planes
+(`main/fos_ota.c`): a backend-managed device polls
+`/api/frames/{id}/embedded/ota/manifest?platform=<its layout>` daily (or on
+`ota`, or when the backend asks over `POST /api/action/ota`), a cloud-managed
+one fetches `/api/frames/{id}/firmware/manifest` on `notify_update_available`.
+Both answer `{platform, version, size, minisig, downloadUrl}` — the release
+relayed, never a binary the control plane built — and the device streams the
+image into the inactive slot, BLAKE2b-hashes it as it goes and verifies the
+minisign signature against the release key baked into every image
+(`fos_ota_pubkey.h`, from `release-assets/firmware-signing.pub`) before it
+switches the boot slot. `fos_ota_platform()` names the layout this image was
+built for, so a 16 MB board asks for the 16 MB image. Progress is logged as
+`ota:backend` / `ota:cloud` lines; three failures on one version stop the
+retries until a newer release or a power cycle. The 4MB profile has no OTA
+partition, so firmware updates must be flashed over USB.
 
 ## Adding a panel
 

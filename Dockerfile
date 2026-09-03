@@ -80,24 +80,11 @@ ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-      bison \
       build-essential \
       ca-certificates \
-      ccache \
-      cmake \
-      dfu-util \
-      flex \
       git \
-      gperf \
-      libgcrypt20 \
       libffi-dev \
-      libglib2.0-0 \
-      libpixman-1-0 \
-      libsdl2-2.0-0 \
       libssl-dev \
-      libslirp0 \
-      libusb-1.0-0 \
-      ninja-build \
       python3 \
       python3-pip \
       python3-setuptools \
@@ -327,8 +314,6 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV VIRTUAL_ENV=/app/backend/.venv
 ENV FRAMEOS_JS_CHECK=/app/frameos/build/js_check
-ENV IDF_PATH=/opt/esp/esp-idf
-ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
 ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"
 
 WORKDIR /app
@@ -387,10 +372,6 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=nim-toolchain /opt/nim /opt/nim
-COPY --from=esp-idf-toolchain /opt/esp /opt/esp
-
-# Only reads /opt/esp, so keep it above the copies that change every build.
-RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; qemu-system-xtensa --version'
 
 RUN mkdir -p /app/db
 
@@ -399,7 +380,9 @@ COPY --from=python-deps /app/backend/.venv /app/backend/.venv
 
 COPY docker-entrypoint.sh ./
 COPY backend backend
-COPY embedded embedded
+# Only the ESP32 partition tables are read at runtime (the flash-layout
+# report); the firmware itself is a signed release asset, never built here.
+COPY embedded/esp32/partitions*.csv embedded/esp32/
 COPY repo/apps repo/apps
 COPY repo/scenes repo/scenes
 COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json

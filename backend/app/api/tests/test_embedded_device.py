@@ -1,11 +1,13 @@
 import struct
 
+import httpx
 import pytest
+from unittest.mock import AsyncMock, patch
 
-from app.models.frame import Frame
+from app.api import firmware_release
+from app.models.frame import Frame, normalize_frame_admin_auth
 from app.models.settings import Settings
 from app.tasks.embedded_firmware import (
-    EMBEDDED_FIRMWARE_VERSION,
     FOS_PIXEL_1BPP,
     FOS_PIXEL_2BPP_BWYR,
     FOS_PIXEL_2BPP_GRAY,
@@ -13,10 +15,73 @@ from app.tasks.embedded_firmware import (
     FOS_PIXEL_4BPP_GRAY,
     FOS_PIXEL_4BPP_SPECTRA6,
     FOS_PIXEL_DUAL_1BPP_RED,
-    embedded_firmware_config_hash,
-    embedded_panel_for_frame,
     ensure_embedded_frame_defaults,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_release_cache():
+    """The OTA routes read the same in-process release cache as the flasher
+    listing; a release mocked in one test must not leak into the next."""
+    firmware_release.clear_release_cache()
+    yield
+    firmware_release.clear_release_cache()
+
+
+RELEASE_TAG = 'v2026.9.2'
+
+
+def release_asset(name: str, size: int) -> dict:
+    return {
+        'name': name,
+        'size': size,
+        'browser_download_url': (
+            f'https://github.com/FrameOS/frameos/releases/download/{RELEASE_TAG}/{name}'
+        ),
+    }
+
+
+def release_with(*platforms: str, minisig: bool = True, tag: str = RELEASE_TAG) -> dict:
+    """A GitHub release listing carrying the merged provisioning image, the
+    bare OTA app image and its minisign signature for each platform."""
+    version = tag[1:]
+    assets = []
+    for index, platform in enumerate(platforms):
+        assets.append(release_asset(f'frameos-{version}-{platform}.bin', 900 + index))
+        assets.append(release_asset(f'frameos-{version}-{platform}-app.bin', 700 + index))
+        if minisig:
+            assets.append(release_asset(f'frameos-{version}-{platform}-app.bin.minisig', 120))
+    return {'tag_name': tag, 'assets': assets}
+
+
+MINISIG_TEXT = (
+    'untrusted comment: signature from minisign secret key\n'
+    'RUQf6LRCGA9i559r3g5aCzCVKMRZ9F4qpZ6E1234567890abcdefghijklmnopqrstuvwxyz==\n'
+)
+
+
+def mocked_httpx(handler):
+    """Answer every outbound httpx request from ``handler`` — the release
+    asset pipe builds its own client, so there is nothing else to patch."""
+    real_async_client = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs.pop('timeout', None)
+        kwargs.pop('follow_redirects', None)
+        return real_async_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    return patch.object(httpx, 'AsyncClient', factory)
+
+
+def patch_release(release):
+    """Both halves of a release lookup: the listing and the small text asset
+    fetch that carries the .minisig body."""
+    return (
+        patch('app.api.firmware_release._fetch_latest_release', new_callable=AsyncMock,
+              return_value=release),
+        patch('app.api.firmware_release.fetch_release_asset_text', new_callable=AsyncMock,
+              return_value=MINISIG_TEXT),
+    )
 
 
 async def create_embedded_frame(async_client) -> dict:
@@ -296,6 +361,22 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     db.add(frame)
     db.commit()
 
+    admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    # Every embedded frame is created with a generated device login and its
+    # own self-signed certificate; both reach a stock release image through
+    # this poll, because neither fits on a USB console line.
+    expected_admin_auth = {
+        'enabled': True,
+        'user': admin_auth['user'],
+        'pass': admin_auth['pass'],
+    }
+    expected_tls = {
+        'enable': True,
+        'port': 8443,
+        'cert': frame.https_proxy['certs']['server'],
+        'key': frame.https_proxy['certs']['server_key'],
+    }
+
     response = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
     assert response.status_code == 200, response.text
@@ -314,6 +395,9 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'contain',
+        'maxHttpResponseBytes': 4 * 1024 * 1024,
+        'adminAuth': expected_admin_auth,
+        'tls': expected_tls,
     }
 
     # Defaults: local render on PSRAM boards, power flags off, and an unset
@@ -339,7 +423,57 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'cover',
+        'maxHttpResponseBytes': 4 * 1024 * 1024,
+        'adminAuth': expected_admin_auth,
+        'tls': expected_tls,
     }
+
+
+@pytest.mark.asyncio
+async def test_settings_carry_what_a_console_line_cannot(async_client, no_auth_client, db):
+    """The three settings a stock release image can only learn from this poll:
+    the HTTP response cap (kilobyte-scale integer, but read once at boot), the
+    board's own admin login, and its HTTPS listener + PEM material."""
+    frame = await device_frame(async_client, db)
+    frame.max_http_response_bytes = 512 * 1024
+    frame.frame_admin_auth = {'enabled': True, 'user': 'kitchen', 'pass': 's3cret'}
+    frame.https_proxy = {
+        'enable': True,
+        'port': 9443,
+        'certs': {
+            'server': '-----BEGIN CERTIFICATE-----\nserver\n-----END CERTIFICATE-----\n',
+            'server_key': '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n',
+            'client_ca': '-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n',
+        },
+    }
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    settings = response.json()['frame']
+    assert settings['maxHttpResponseBytes'] == 512 * 1024
+    assert settings['adminAuth'] == {'enabled': True, 'user': 'kitchen', 'pass': 's3cret'}
+    assert settings['tls'] == {
+        'enable': True,
+        'port': 9443,
+        'cert': '-----BEGIN CERTIFICATE-----\nserver\n-----END CERTIFICATE-----\n',
+        'key': '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n',
+        # The client CA is the backend's business, never the device's.
+    }
+
+    # The device refuses admin auth enabled without credentials, so the
+    # backend must not ask for it either.
+    frame.frame_admin_auth = {'enabled': True, 'user': 'kitchen', 'pass': ''}
+    frame.https_proxy = {'enable': False, 'certs': {}}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    settings = response.json()['frame']
+    assert settings['adminAuth'] == {'enabled': False, 'user': 'kitchen', 'pass': ''}
+    assert settings['tls'] == {'enable': False, 'port': 8443, 'cert': '', 'key': ''}
 
 
 @pytest.mark.asyncio
@@ -409,105 +543,203 @@ async def test_settings_etag_supports_cheap_polling(async_client, no_auth_client
 
 
 @pytest.mark.asyncio
-async def test_ota_manifest_404_without_build(async_client, no_auth_client, db):
+async def test_ota_manifest_relays_the_published_release(async_client, no_auth_client, db):
+    """The backend builds nothing: the manifest is the GitHub release's, for
+    the flash layout the device names, with the download pointed back here."""
     frame = await device_frame(async_client, db)
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/ota/manifest', headers=auth(frame))
-    assert response.status_code == 404
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
-    assert response.status_code == 404
+    listing, text = patch_release(release_with('esp32-s3-generic'))
 
+    with listing, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
+            headers=auth(frame))
 
-@pytest.mark.asyncio
-async def test_ota_manifest_serves_ready_artifact(async_client, no_auth_client, db, tmp_path):
-    frame = await device_frame(async_client, db)
-    ota_file = tmp_path / 'frameos-ota.bin'
-    ota_file.write_bytes(b'\xe9firmware-bytes')
-
-    embedded = dict(frame.embedded or {})
-    embedded['firmware'] = {
-        'status': 'ready',
-        'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,  # anything else is rewritten to "stale"
-        'path': str(ota_file),
-        'otaPath': str(ota_file),
-        'otaSha256': 'ab' * 32,
-        'otaElfSha256': 'cd' * 32,
-        'otaSize': ota_file.stat().st_size,
-        'panel': embedded_panel_for_frame(frame),
-        'configHash': embedded_firmware_config_hash(frame),
-    }
-    frame.embedded = embedded
-    db.add(frame)
-    db.commit()
-
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/ota/manifest', headers=auth(frame))
     assert response.status_code == 200, response.text
     manifest = response.json()
-    assert manifest['sha256'] == 'ab' * 32
-    assert manifest['elfSha256'] == 'cd' * 32
-    assert manifest['size'] == ota_file.stat().st_size
-
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
-    assert response.status_code == 200
-    assert response.content == b'\xe9firmware-bytes'
-    assert response.headers['cache-control'] == 'no-store'
-
-    response = await no_auth_client.head(
-        f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
-    assert response.status_code == 200
-    assert response.headers['content-length'] == str(ota_file.stat().st_size)
-    assert response.content == b''
+    assert manifest['platform'] == 'esp32-s3-generic'
+    assert manifest['version'] == '2026.9.2'
+    assert manifest['size'] == 700
+    assert manifest['minisig'] == MINISIG_TEXT
+    assert manifest['downloadUrl'] == (
+        f'/api/frames/{frame.id}/embedded/ota/download?platform=esp32-s3-generic'
+    )
+    # Legacy identifier for firmware from before the signed release OTA: it
+    # compares the sha against the image it last applied, so a stable
+    # per-release token is what moves those boards onto the release image.
+    import hashlib
+    assert manifest['sha256'] == hashlib.sha256(b'2026.9.2:esp32-s3-generic').hexdigest()
+    assert response.headers['cache-control'] == 'private, max-age=300'
 
 
 @pytest.mark.asyncio
-async def test_ota_manifest_404_for_ready_4mb_no_ota_build(async_client, no_auth_client, db, tmp_path):
+async def test_ota_manifest_serves_the_layout_the_device_asks_for(async_client, no_auth_client, db):
+    """Firmware since the signed release OTA names its own flash layout, and
+    that — not the backend's idea of the board — picks the image."""
     frame = await device_frame(async_client, db)
-    firmware_file = tmp_path / 'frameos-4mb.bin'
-    firmware_file.write_bytes(b'\xe9firmware-bytes')
+    listing, text = patch_release(release_with('esp32-s3-generic', 'esp32-s3-16mb'))
 
-    embedded = dict(frame.embedded or {})
-    embedded['flashSize'] = '4MB'
-    embedded['firmware'] = {
-        'status': 'ready',
-        'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
-        'flashSize': '4MB',
-        'otaSupported': False,
-        'path': str(firmware_file),
-        'panel': embedded_panel_for_frame(frame),
-        'configHash': embedded_firmware_config_hash(frame),
+    with listing, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-16mb',
+            headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    manifest = response.json()
+    assert manifest['platform'] == 'esp32-s3-16mb'
+    assert manifest['size'] == 701  # the -16mb app image, not the generic one
+    assert manifest['downloadUrl'].endswith('platform=esp32-s3-16mb')
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_without_a_platform_uses_the_frames_layout(async_client, no_auth_client, db):
+    """Older firmware sends no platform. The fallback resolves the frame's
+    own release image — and with no listing to consult it is the generic one
+    for the chip, which for an 8MB S3 IS its layout."""
+    frame = await device_frame(async_client, db)
+    frame.embedded = {**(frame.embedded or {}), 'flashSize': '16MB'}
+    db.add(frame)
+    db.commit()
+
+    listing, text = patch_release(release_with('esp32-s3-generic', 'esp32-s3-16mb'))
+    with listing, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest', headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    # embedded_release_firmware_for_frame is called without a published-asset
+    # listing here, so it can only offer the generic image for the chip.
+    assert response.json()['platform'] == 'esp32-s3-generic'
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_rejects_an_unknown_platform(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    listing, text = patch_release(release_with('esp32-s3-generic'))
+
+    with listing, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s9-mega',
+            headers=auth(frame))
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'invalid_platform'
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_404_when_the_release_has_no_app_image(async_client, no_auth_client, db):
+    """A release from before the per-layout OTA images: nothing to install."""
+    frame = await device_frame(async_client, db)
+    release = {
+        'tag_name': RELEASE_TAG,
+        'assets': [release_asset('frameos-2026.9.2-esp32-s3-generic.bin', 900)],
     }
-    frame.embedded = embedded
-    db.add(frame)
-    db.commit()
+    listing, text = patch_release(release)
 
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/ota/manifest', headers=auth(frame))
+    with listing, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
+            headers=auth(frame))
+
     assert response.status_code == 404
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
-    assert response.status_code == 404
+    assert response.json()['detail'] == 'ota_image_not_published'
 
 
 @pytest.mark.asyncio
-async def test_generated_config_uses_frame_network_wifi(async_client, db):
-    from app.tasks.embedded_firmware import _generated_config_header, embedded_wifi_credentials
-
+async def test_ota_manifest_409_for_an_unsigned_release(async_client, no_auth_client, db):
+    """The device verifies against the release key baked into every image, so
+    an app image without its .minisig is one it could never install."""
     frame = await device_frame(async_client, db)
-    frame.network = {'wifiSSID': 'MyWifi', 'wifiPassword': 'hunter2'}
-    db.add(frame)
-    db.commit()
+    listing, text = patch_release(release_with('esp32-s3-generic', minisig=False))
 
-    ssid, password = embedded_wifi_credentials(frame)
-    assert (ssid, password) == ('MyWifi', 'hunter2')
+    with listing, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
+            headers=auth(frame))
 
-    header = _generated_config_header(frame, wifi_ssid=ssid, wifi_password=password)
-    assert '#define FRAMEOS_DEFAULT_WIFI_SSID "MyWifi"' in header
-    assert '#define FRAMEOS_DEFAULT_WIFI_PASS "hunter2"' in header
-    assert f'#define FRAMEOS_DEFAULT_FRAME_ID {frame.id}' in header
-    assert '#define FRAMEOS_DEFAULT_PANEL "EPD_7in5_V2"' in header
+    assert response.status_code == 409
+    assert response.json()['detail'] == 'unsigned_release'
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_502_when_github_is_unreachable(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    listing, text = patch_release(None)
+
+    with listing, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
+            headers=auth(frame))
+
+    assert response.status_code == 502
+    assert response.json()['detail'] == 'release_lookup_failed'
+
+
+@pytest.mark.asyncio
+async def test_ota_download_streams_the_release_app_image(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    image = b'\xe9' + b'\x5a' * 63
+    requested: list[tuple[str, str | None]] = []
+
+    def handler(request):
+        requested.append((str(request.url), request.headers.get('range')))
+        return httpx.Response(200, content=image,
+                              headers={'content-length': str(len(image))})
+
+    listing, text = patch_release(release_with('esp32-s3-generic'))
+    with listing, text, mocked_httpx(handler):
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/download?platform=esp32-s3-generic',
+            headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    assert response.content == image
+    assert response.headers['content-type'] == 'application/octet-stream'
+    assert response.headers['accept-ranges'] == 'bytes'
+    assert response.headers['x-frameos-image-name'] == 'frameos-2026.9.2-esp32-s3-generic-app.bin'
+    assert requested == [
+        ('https://github.com/FrameOS/frameos/releases/download/v2026.9.2/'
+         'frameos-2026.9.2-esp32-s3-generic-app.bin', None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ota_download_forwards_a_range_request(async_client, no_auth_client, db):
+    """Firmware from before the signed release OTA resumes its download in
+    512 KB ranges; it must keep updating, or it never reaches the release
+    image at all."""
+    frame = await device_frame(async_client, db)
+    forwarded: list[str | None] = []
+
+    def handler(request):
+        forwarded.append(request.headers.get('range'))
+        return httpx.Response(
+            206,
+            content=b'\x5a' * 16,
+            headers={'content-length': '16', 'content-range': 'bytes 0-15/64'},
+        )
+
+    listing, text = patch_release(release_with('esp32-s3-generic'))
+    with listing, text, mocked_httpx(handler):
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/download?platform=esp32-s3-generic',
+            headers={**auth(frame), 'Range': 'bytes=0-15'})
+
+    assert response.status_code == 206, response.text
+    assert response.content == b'\x5a' * 16
+    assert response.headers['content-range'] == 'bytes 0-15/64'
+    assert forwarded == ['bytes=0-15']
+
+
+@pytest.mark.asyncio
+async def test_ota_routes_require_device_auth(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    for path in ('ota/manifest', 'ota/download'):
+        response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/{path}')
+        assert response.status_code == 401, path
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/{path}',
+            headers={'Authorization': 'Bearer wrong-key'})
+        assert response.status_code == 401, path
 
 
 def _unpack_levels(packed: bytes, width: int, height: int, bits: int) -> list[int]:

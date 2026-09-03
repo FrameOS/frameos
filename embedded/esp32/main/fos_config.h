@@ -2,9 +2,11 @@
  * FrameOS embedded config store.
  *
  * One NVS namespace ("frameos") holding everything a frame needs to run.
- * Compile-time defaults come from generated_config.h when the backend bakes
- * a per-frame image, else from the neutral fallbacks below. NVS always wins,
- * so a device reconfigured in the field keeps its settings across OTA.
+ * Compile-time defaults are the neutral fallbacks in fos_defaults.h; NVS
+ * always wins, so a device provisioned in the field keeps its settings
+ * across OTA. The TLS server certificate and key are stored as NVS blobs
+ * (a PEM exceeds the NVS string limit); everything else is a string or a
+ * scalar under a short key.
  */
 #pragma once
 

@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useValues } from 'kea'
 import clsx from 'clsx'
-import { ArrowPathIcon, CheckCircleIcon, LockClosedIcon, TrashIcon, WifiIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowPathIcon,
+  CheckCircleIcon,
+  Cog6ToothIcon,
+  LockClosedIcon,
+  TrashIcon,
+  WifiIcon,
+} from '@heroicons/react/24/outline'
 
 import { Spinner } from '../../components/Spinner'
 import { TextInput } from '../../components/TextInput'
@@ -20,8 +27,9 @@ import {
 } from '../../models/embeddedUsbLogsModel'
 import type { FrameType } from '../../types'
 import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
-import { EmbeddedUsbConnectionButton } from './EmbeddedWebFlasher'
-import { isEsp32CloudFrame } from './workspaceSurfaces'
+import { fetchProvisioningPlan, provisionOverUsb } from './EmbeddedReleaseFlasher'
+import { EmbeddedUsbConnectionButton } from './embeddedFlashShared'
+import { isEsp32CloudFrame, workspaceMode } from './workspaceSurfaces'
 
 // fos_wifi_state_t in embedded/esp32/main/fos_wifi.h
 const WIFI_STATE_LABELS = ['offline', 'connecting', 'connected', 'captive portal'] as const
@@ -88,15 +96,22 @@ export function EmbeddedUsbSetup({
   const [ssid, setSsid] = useState('')
   const [password, setPassword] = useState('')
   const [applyBusy, setApplyBusy] = useState(false)
+  const [settingsBusy, setSettingsBusy] = useState(false)
   const [restartBusy, setRestartBusy] = useState(false)
   const [factoryResetBusy, setFactoryResetBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const statusAutoLoadedRef = useRef(false)
 
-  const busy = statusBusy || scanBusy || applyBusy || restartBusy || factoryResetBusy
+  const busy = statusBusy || scanBusy || applyBusy || settingsBusy || restartBusy || factoryResetBusy
   const frameName = frame.name || frameHost(frame)
   const cloudManaged = isEsp32CloudFrame(frame)
+  // The backend's provisioning plan — what a stock release image is told to
+  // become this frame. Offered here so a board flashed by hand, or one whose
+  // hardware settings changed, is provisioned without a reflash. The cloud
+  // pushes its settings over the hub instead, and a device's own admin bundle
+  // has no plan to fetch.
+  const canApplyFrameSettings = !cloudManaged && workspaceMode() === 'backend'
 
   const refreshStatus = async (): Promise<void> => {
     setStatusBusy(true)
@@ -158,6 +173,28 @@ export function EmbeddedUsbSetup({
       setError(`Applying Wi-Fi settings failed: ${errorDetail(applyError)}`)
     } finally {
       setApplyBusy(false)
+    }
+  }
+
+  const applyFrameSettings = async (): Promise<void> => {
+    setSettingsBusy(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const plan = await fetchProvisioningPlan(frame.id)
+      if (!plan.supported) {
+        setError(`This frame cannot be provisioned yet: ${plan.blockers.join(' ')}`)
+        return
+      }
+      await provisionOverUsb(frame.id, plan, null, setMessage)
+      setMessage(`Sent ${plan.settings.length} settings to the board; restarting it to apply them.`)
+      await usbRestart(frame.id)
+      setMessage(`Sent ${plan.settings.length} settings to the board. It rebooted and is applying them.`)
+      await refreshStatus()
+    } catch (settingsError) {
+      setError(`Applying the frame's settings failed: ${errorDetail(settingsError)}`)
+    } finally {
+      setSettingsBusy(false)
     }
   }
 
@@ -364,6 +401,28 @@ export function EmbeddedUsbSetup({
               Saves the credentials over USB and restarts the device so it joins the network.
             </div>
           </div>
+
+          {canApplyFrameSettings ? (
+            <div className="space-y-2 border-t border-[color:var(--tool-border)] pt-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+                Frame settings
+              </div>
+              <div className="frame-tool-muted text-xs leading-4">
+                Send this frame’s backend address, API key, panel, wiring, buttons and the rest of its hardware
+                settings to the board over USB, then restart it. Use it after flashing a release image by hand, or
+                when the hardware settings changed.
+              </div>
+              <button
+                type="button"
+                onClick={applyFrameSettings}
+                disabled={busy}
+                className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                {settingsBusy ? <Spinner /> : <Cog6ToothIcon className="h-4 w-4" />}
+                {settingsBusy ? 'Sending settings' : 'Apply frame settings'}
+              </button>
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--tool-border)] pt-3">
             <button

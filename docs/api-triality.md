@@ -16,7 +16,7 @@ The long-term contract is not three independent APIs. It is one canonical frame-
 - Runtime config can stay native. Pi stores runtime config in camelCase `frame.json`, scenes in `scenes.json(.gz)`, and exposes/saves the canonical API shape through translation helpers.
 - A local frame is a single-frame API. `GET /api/frames` still returns a list, but only with the local frame.
 - Legacy Pi/ESP32 routes such as `/uploadScenes`, `/reload`, `/state`, and `/image` are aliases for compatibility. New UI code should prefer `/api/frames/:id/...`.
-- Backend-only operations, such as deploy, buildroot image creation, SSH key installation, and firmware generation, remain backend-only until a concrete standalone implementation exists.
+- Backend-only operations, such as deploy, buildroot image creation and SSH key installation, remain backend-only until a concrete standalone implementation exists.
 
 ## Abstractions
 
@@ -89,12 +89,12 @@ Status legend:
 | Buildroot SD image | `GET/POST /api/frames/:id/buildroot/sd_image`, download route | Backend only | N/A | N/A | Backend-only image generation. |
 | TLS generation | `POST /api/frames/:id/tls/generate` | Backend only | N/A | N/A | Backend-owned certificate management. |
 | SSH keys | `POST /api/frames/:id/ssh_keys` | Backend only | N/A | N/A | Backend-only SSH operation. |
-| Embedded firmware status/build/download/OTA | `/api/frames/:id/embedded/firmware...` | Backend only | N/A | N/A as local API | Backend creates artifacts; ESP32 consumes OTA download through device routes. |
+| Embedded provisioning plan / OTA request | `GET /api/frames/:id/embedded/provisioning`, `POST /api/frames/:id/embedded/firmware/ota` | Backend only | Cloud flasher provisions from its own plan; `notify_update_available` | N/A as local API | Neither plane builds firmware: both flash and offer the signed release image. |
 | Embedded USB deploy complete | `POST /api/frames/:id/embedded/usb_deploy_complete` | Backend only | N/A | N/A | Backend bookkeeping after USB flashing. |
 | Embedded render fetch | `GET /api/frames/:id/embedded/render` | Device-facing backend route | N/A | Full consumer | ESP32 pulls packed bitmap from backend. Requires bearer auth. |
 | Embedded scene fetch | `GET /api/frames/:id/embedded/scenes` | Device-facing backend route | N/A | Full consumer | ESP32 pulls canonical deployed scenes JSON. Requires bearer auth. |
 | Embedded settings fetch | `GET /api/frames/:id/embedded/settings` | Device-facing backend route | N/A | Full consumer | ESP32 pulls device settings. Requires bearer auth. |
-| Embedded OTA manifest/download | `GET/HEAD /api/frames/:id/embedded/ota/...` | Device-facing backend route | N/A | Full consumer | ESP32 checks and downloads firmware. Requires bearer auth. |
+| Embedded OTA manifest/download | `GET/HEAD /api/frames/:id/embedded/ota/...?platform=` | Device-facing backend route | `GET /api/frames/:id/firmware/{manifest,download}` | Full consumer | Same manifest shape on both planes (`platform, version, size, minisig, downloadUrl`): the release relayed, verified on the device. Requires bearer auth. |
 | Local setup | `POST /api/setup` | N/A | N/A | Full | ESP32 captive portal setup route. Target: eventually mirror enough canonical save behavior for local UI. |
 | Local scene metadata | `GET /api/scenes`, `GET /api/scene-state` | N/A | Alias/legacy equivalents exist through canonical state routes | Full simple routes | Keep for simple portals and diagnostics. Shared UI should use canonical state routes. |
 | Legacy upload | `POST /uploadScenes` | N/A | Alias | Alias | Keep as frame runtime compatibility target; backend forwards hot uploads here internally. |
@@ -211,7 +211,7 @@ Hot upload:
 
 ## Current Gaps
 
-- ESP32 `POST /api/frames/:id` persists embedded-owned fields and scenes, but it does not yet support every backend/Pi field such as full asset management, timezone updater config, or backend build/deploy settings.
+- ESP32 `POST /api/frames/:id` persists embedded-owned fields and scenes, but it does not yet support every backend/Pi field such as full asset management, timezone updater config, or backend deploy settings.
 - ESP32 image routes currently return BMP previews. Shared UI should continue to use browser image loading and avoid assuming PNG.
 - Pi asset mutation has admin routes, but the canonical `/api/frames/:id/assets/...` mutation aliases are not complete. Add them before enabling full local asset management in the shared UI.
 - Standalone adoption is explicit: `POST /api/frames/adopt` (backend) logs into the frame's local admin API, reads `GET /api/frames/1`, imports scenes/config, then writes backend server credentials back through `POST /api/frames/1` (`adopt_standalone_frame`, `backend/app/api/frame_sync.py`). It requires the frame's admin login; ESP32 frames have no admin-session login and stay out of scope. Logs start flowing after the frame's next restart or deploy — the device log shipper binds its target at process start.

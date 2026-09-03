@@ -85,6 +85,28 @@ static void nvs_get_string(nvs_handle_t nvs, const char *key, char *out, size_t 
     }
 }
 
+/* PEM material lives in a blob: NVS strings top out at ~4000 bytes, and a
+ * certificate chain can be longer than that. Absent or oversized keeps the
+ * default (empty); the buffer is always NUL-terminated. */
+static void nvs_get_pem(nvs_handle_t nvs, const char *key, char *out, size_t out_len)
+{
+    size_t len = out_len - 1;
+    if (nvs_get_blob(nvs, key, out, &len) == ESP_OK) {
+        out[len] = '\0';
+    } else {
+        out[0] = '\0';
+    }
+}
+
+static void nvs_set_pem(nvs_handle_t nvs, const char *key, const char *pem)
+{
+    if (pem[0]) {
+        nvs_set_blob(nvs, key, pem, strlen(pem));
+    } else {
+        nvs_erase_key(nvs, key);
+    }
+}
+
 esp_err_t fos_config_init(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -102,13 +124,7 @@ esp_err_t fos_config_init(void)
     nvs_handle_t nvs;
     err = nvs_open(NVS_NS, NVS_READONLY, &nvs);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGI(TAG, "no stored config, using %s defaults",
-#ifdef FRAMEOS_HAVE_GENERATED_CONFIG
-                 "frame-specific baked"
-#else
-                 "generic"
-#endif
-        );
+        ESP_LOGI(TAG, "no stored config, using generic defaults");
         return ESP_OK;
     }
     if (err != ESP_OK) {
@@ -170,6 +186,8 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
+    nvs_get_pem(nvs, "tls_cert", s_config.tls_server_cert, sizeof(s_config.tls_server_cert));
+    nvs_get_pem(nvs, "tls_key", s_config.tls_server_key, sizeof(s_config.tls_server_key));
     int8_t i8;
     if (nvs_get_u8(nvs, "assets_sd", &u8) == ESP_OK) s_config.assets_sd.enabled = u8 != 0;
     if (nvs_get_u8(nvs, "sd_autofmt", &u8) == ESP_OK) s_config.assets_sd.autoformat = u8 != 0;
@@ -249,6 +267,8 @@ esp_err_t fos_config_save(void)
     nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
     nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
     nvs_set_u32(nvs, "tls_port", s_config.tls_port);
+    nvs_set_pem(nvs, "tls_cert", s_config.tls_server_cert);
+    nvs_set_pem(nvs, "tls_key", s_config.tls_server_key);
     nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0);
     nvs_set_u8(nvs, "sd_autofmt", s_config.assets_sd.autoformat ? 1 : 0);
     nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs);

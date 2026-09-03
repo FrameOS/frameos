@@ -26,7 +26,10 @@
 
 static const char *TAG = "fos_settings";
 
-#define SETTINGS_MAX_BYTES (16 * 1024)
+/* Service-settings groups plus the `frame` object; the latter can carry two
+ * PEMs (the frame's own HTTPS certificate and key, ~2-4 KB each) next to the
+ * tzdata slice, hence the headroom. */
+#define SETTINGS_MAX_BYTES (32 * 1024)
 #define SETTINGS_ETAG_LEN 96
 /* Provider error bodies are a bare {"error": "…"}. */
 #define SETTINGS_ERROR_MAX_BYTES 512
@@ -512,6 +515,85 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    const cJSON *max_http = cJSON_GetObjectItem(frame, "maxHttpResponseBytes");
+    if (cJSON_IsNumber(max_http) && max_http->valuedouble >= 1024 &&
+        max_http->valuedouble <= 512.0 * 1024 * 1024 &&
+        config->max_http_response_bytes != (uint32_t)max_http->valuedouble) {
+        config->max_http_response_bytes = (uint32_t)max_http->valuedouble;
+        /* Handed to the Nim runtime once at init (main.c). */
+        s_restart_after_apply = true;
+        changed = true;
+    }
+
+    /* Local admin auth for the frame's own HTTP API. The backend is the
+     * source of truth for a backend-managed frame; an enabled flag without
+     * both credentials is refused, matching the local POST route. */
+    const cJSON *admin = cJSON_GetObjectItem(frame, "adminAuth");
+    if (cJSON_IsObject(admin)) {
+        const cJSON *enabled = cJSON_GetObjectItem(admin, "enabled");
+        const cJSON *user = cJSON_GetObjectItem(admin, "user");
+        const cJSON *pass = cJSON_GetObjectItem(admin, "pass");
+        char next_user[FOS_STR_LEN];
+        char next_pass[FOS_STR_LEN];
+        strlcpy(next_user, config->admin_user, sizeof(next_user));
+        strlcpy(next_pass, config->admin_pass, sizeof(next_pass));
+        if (cJSON_IsString(user) && strlen(user->valuestring) < sizeof(next_user)) {
+            strlcpy(next_user, user->valuestring, sizeof(next_user));
+        }
+        if (cJSON_IsString(pass) && strlen(pass->valuestring) < sizeof(next_pass)) {
+            strlcpy(next_pass, pass->valuestring, sizeof(next_pass));
+        }
+        bool next_enabled = cJSON_IsBool(enabled) ? (bool)cJSON_IsTrue(enabled)
+                                                  : config->admin_auth_enabled;
+        if (next_enabled && (!next_user[0] || !next_pass[0])) {
+            ESP_LOGW(TAG, "settings: adminAuth enabled without user+pass; ignored");
+        } else if (next_enabled != config->admin_auth_enabled ||
+                   strcmp(next_user, config->admin_user) != 0 ||
+                   strcmp(next_pass, config->admin_pass) != 0) {
+            config->admin_auth_enabled = next_enabled;
+            strlcpy(config->admin_user, next_user, sizeof(config->admin_user));
+            strlcpy(config->admin_pass, next_pass, sizeof(config->admin_pass));
+            changed = true; /* checked per request (fos_http.c), no restart */
+        }
+    }
+
+    /* HTTPS for the frame's own HTTP API: the listener flag, its port and
+     * the PEM material. The material is what a generic image cannot get any
+     * other way (a PEM does not fit a console line), so this pull is its
+     * provisioning path; it persists in NVS (fos_config.c) and the server
+     * is (re)started with it after the restart below. */
+    const cJSON *tls = cJSON_GetObjectItem(frame, "tls");
+    if (cJSON_IsObject(tls)) {
+        bool tls_changed = false;
+        const cJSON *enable = cJSON_GetObjectItem(tls, "enable");
+        if (cJSON_IsBool(enable) && config->tls_enable != (bool)cJSON_IsTrue(enable)) {
+            config->tls_enable = cJSON_IsTrue(enable);
+            tls_changed = true;
+        }
+        const cJSON *port = cJSON_GetObjectItem(tls, "port");
+        if (cJSON_IsNumber(port) && port->valuedouble >= 1 && port->valuedouble <= 65535 &&
+            config->tls_port != (uint16_t)port->valuedouble) {
+            config->tls_port = (uint16_t)port->valuedouble;
+            tls_changed = true;
+        }
+        const cJSON *cert = cJSON_GetObjectItem(tls, "cert");
+        if (cJSON_IsString(cert) && strlen(cert->valuestring) < sizeof(config->tls_server_cert) &&
+            strcmp(config->tls_server_cert, cert->valuestring) != 0) {
+            strlcpy(config->tls_server_cert, cert->valuestring, sizeof(config->tls_server_cert));
+            tls_changed = true;
+        }
+        const cJSON *key = cJSON_GetObjectItem(tls, "key");
+        if (cJSON_IsString(key) && strlen(key->valuestring) < sizeof(config->tls_server_key) &&
+            strcmp(config->tls_server_key, key->valuestring) != 0) {
+            strlcpy(config->tls_server_key, key->valuestring, sizeof(config->tls_server_key));
+            tls_changed = true;
+        }
+        if (tls_changed) {
+            s_restart_after_apply = true;
+            changed = true;
+        }
+    }
+
     return changed;
 }
 
@@ -597,6 +679,16 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     if (before->max_http_response_bytes != after->max_http_response_bytes) {
         change_append_int(out, out_len, "max_http_response_bytes",
                           (long)after->max_http_response_bytes);
+    }
+    if (before->admin_auth_enabled != after->admin_auth_enabled ||
+        strcmp(before->admin_user, after->admin_user) != 0 ||
+        strcmp(before->admin_pass, after->admin_pass) != 0) {
+        change_append(out, out_len, "admin_auth", after->admin_auth_enabled ? "true" : "false");
+    }
+    if (before->tls_enable != after->tls_enable || before->tls_port != after->tls_port ||
+        strcmp(before->tls_server_cert, after->tls_server_cert) != 0 ||
+        strcmp(before->tls_server_key, after->tls_server_key) != 0) {
+        change_append(out, out_len, "tls", after->tls_enable ? "true" : "false");
     }
     char buttons_before[FOS_GPIO_BUTTONS_SPEC_LEN];
     char buttons_after[FOS_GPIO_BUTTONS_SPEC_LEN];
@@ -833,7 +925,7 @@ esp_err_t fos_settings_sync(bool force)
     }
     if (s_restart_after_apply) {
         s_restart_after_apply = false;
-        ESP_LOGW(TAG, "rotation changed; restarting to re-init the renderer");
+        ESP_LOGW(TAG, "settings need a restart (rotation, battery wiring, TLS or the HTTP cap); restarting");
         if (xTaskCreate(settings_restart_task, "fos_set_restart", 2048, NULL, 5, NULL) != pdPASS) {
             esp_restart();
         }

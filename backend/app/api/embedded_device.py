@@ -10,10 +10,16 @@ token (same scheme as ``/api/log``). Device endpoints:
   sandboxed inside wasm, no outbound network. Otherwise (or on any render
   failure) a diagnostic card is served so the device always gets a frame.
   Boards with PSRAM normally render on-device via the Nim runtime instead.
-- ``GET /api/frames/{id}/embedded/ota/manifest`` — sha256/size of the latest
-  OTA app image so the device can decide whether to update.
-- ``GET /api/frames/{id}/embedded/ota/download`` — the OTA app image
-  (``frameos_esp32.bin``, not the merged flash image).
+- ``GET /api/frames/{id}/embedded/ota/manifest?platform=…`` — the latest
+  FrameOS release's OTA manifest for the device's flash layout, relayed from
+  the GitHub release (version, size, minisign signature, download URL); the
+  same shape the cloud serves. The backend holds no signing key: the device
+  verifies the image against the release key baked into every firmware.
+- ``GET /api/frames/{id}/embedded/ota/download?platform=…`` — the release's
+  bare OTA app image (``…-app.bin``, not the merged flash image), proxied.
+- ``GET /api/frames/{id}/embedded/settings`` — live frame settings the
+  device polls (interval, name, power, rotation, time zone, the frame's own
+  HTTPS certificate and key, admin login, service API keys, schedule).
 - ``GET /api/frames/{id}/embedded/scenes`` — the frame's scenes as a JSON
   array (interpreted scenes: QuickJS + AOT app library on-device). The
   ETag is the payload's sha256; devices poll with ``If-None-Match`` and get
@@ -28,21 +34,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import struct
 from datetime import datetime, timezone
 from http import HTTPStatus
 
-from fastapi import Depends, Header, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, Header, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.utils.tz_slice import tz_slice
 from app.database import get_db
 from app.drivers.devices import device_dimensions
-from app.models.frame import Frame, get_frame_json
+from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
 from app.redis import get_redis
 from app.utils.embedded_render import render_scene_rgba
+from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
     FOS_PIXEL_1BPP,
     FOS_PIXEL_2BPP_BWYR,
@@ -53,10 +59,11 @@ from app.tasks.embedded_firmware import (
     FOS_PIXEL_DUAL_1BPP_RED,
     FOS_PIXEL_DUAL_1BPP_YELLOW,
     embedded_buffer_size,
+    embedded_max_http_response_bytes_for_frame,
     embedded_panel_for_frame,
     embedded_pixel_format_for_panel,
+    embedded_release_firmware_for_frame,
     embedded_scaling_mode_for_frame,
-    latest_embedded_firmware,
 )
 from . import api_public
 
@@ -373,15 +380,17 @@ async def api_embedded_device_scenes(
 
 
 def embedded_frame_settings(frame: Frame) -> dict:
-    """Live frame settings the device polls between firmware builds.
+    """Live frame settings the device polls once per render pass.
 
-    Mirrors what the firmware build bakes as compile-time defaults
-    (``_generated_config_header``): the interval, name, render mode, and the
-    power-management flags from ``device_config``, so a settings change takes
-    effect on the next poll instead of the next reflash. ``renderMode`` is
-    derived by the same ``embedded_render_mode_for_frame`` that feeds
-    ``FRAMEOS_DEFAULT_RENDER_MODE``, serialized as the "local"/"remote"
-    string the device parser (fos_settings.c) expects.
+    Everything a frame is, minus what only the USB console provisions (Wi-Fi,
+    backend URL, API key, frame id, panel, pins, buttons, SD wiring): the
+    interval, name, render mode, the power-management flags from
+    ``device_config``, rotation, time zone, the HTTP response cap, the
+    device's own admin login and its HTTPS material — so a settings change
+    takes effect on the next poll, and a board flashed with the stock release
+    image finishes provisioning itself on its first sync. ``renderMode`` is
+    serialized as the "local"/"remote" string the device parser
+    (fos_settings.c) expects.
     """
     from app.tasks.embedded_firmware import (
         EMBEDDED_RENDER_REMOTE,
@@ -449,6 +458,37 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # firmware without fos_tz applies this flat offset to UTC. Sent as
         # the CURRENT offset, so a DST shift propagates on the next poll.
         "utcOffsetMinutes": _frame_utc_offset_minutes(frame),
+        # Cap on one HTTP response body the on-device runtime buffers for a
+        # scene; the device restarts to apply it (read once at boot).
+        "maxHttpResponseBytes": embedded_max_http_response_bytes_for_frame(frame),
+        # The board's own web UI login. The device refuses enabled-without-
+        # credentials, so the shape here matches its local POST route.
+        "adminAuth": _embedded_admin_auth_settings(frame),
+        # The frame's HTTPS listener and its PEM material — the one thing a
+        # console line cannot carry (a PEM is kilobytes), so this pull is how
+        # a stock release image gets it. Persisted on the device (NVS), and
+        # the device restarts to (re)start the listener when any of it changes.
+        "tls": _embedded_tls_settings(frame),
+    }
+
+
+def _embedded_admin_auth_settings(frame: Frame) -> dict:
+    admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    return {
+        "enabled": bool(admin_auth["enabled"] and admin_auth["user"] and admin_auth["pass"]),
+        "user": admin_auth["user"] or "",
+        "pass": admin_auth["pass"] or "",
+    }
+
+
+def _embedded_tls_settings(frame: Frame) -> dict:
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    certs = https_proxy.get("certs") if isinstance(https_proxy.get("certs"), dict) else {}
+    return {
+        "enable": bool(https_proxy.get("enable")),
+        "port": int(https_proxy.get("port") or 8443),
+        "cert": str(certs.get("server") or ""),
+        "key": str(certs.get("server_key") or ""),
     }
 
 
@@ -498,46 +538,57 @@ async def api_embedded_device_settings(
 # for in-browser previews only, never for frames.
 
 
+def _embedded_ota_platform(frame: Frame, platform: str | None) -> str:
+    """The release image family the device asks for. Firmware since the
+    signed release OTA names its own flash layout (fos_ota_platform);
+    older firmware sends nothing and gets the frame's configured layout —
+    which, for a board it was flashed to match, is the same answer."""
+    if platform:
+        return platform
+    release = embedded_release_firmware_for_frame(frame)
+    if release is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="ota_image_not_published")
+    return str(release["asset"])
+
+
 @api_public.get("/frames/{id:int}/embedded/ota/manifest")
 async def api_embedded_device_ota_manifest(
     id: int,
+    platform: str | None = Query(None),
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
+    """The latest release's OTA manifest, relayed (docs/cloud-frames.md
+    "Signed OTA"): ``{platform, version, size, minisig, downloadUrl}``.
+
+    Also carries a ``sha256`` identifier for firmware from before the signed
+    release OTA (per-frame backend builds): that updater compares it against
+    the sha of the image it last applied and downloads when they differ, so
+    a stable per-release token is what moves those boards onto the release
+    image — after which they verify like every other board.
+    """
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    firmware = latest_embedded_firmware(frame) or {}
-    ota_path = firmware.get("otaPath")
-    if (firmware.get("status") != "ready" or not isinstance(ota_path, str)
-            or not os.path.isfile(ota_path)):
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No OTA image available")
-    return {
-        "sha256": firmware.get("otaSha256"),
-        "elfSha256": firmware.get("otaElfSha256"),
-        "size": firmware.get("otaSize"),
-        "firmwareVersion": firmware.get("firmwareVersion"),
-        # minisign blobs over the image (app/utils/embedded_ota_signing):
-        # the device verifies with the key baked into the image it runs.
-        "minisig": firmware.get("otaMinisig"),
-        "minisigs": firmware.get("otaMinisigs") or {},
-    }
+    platform = _embedded_ota_platform(frame, platform)
+    manifest = await latest_release_ota_manifest(
+        platform, f"/api/frames/{frame.id}/embedded/ota/download?platform={platform}"
+    )
+    legacy_id = hashlib.sha256(f"{manifest['version']}:{platform}".encode("utf-8")).hexdigest()
+    return Response(
+        content=json.dumps({**manifest, "sha256": legacy_id}, separators=(",", ":")),
+        media_type="application/json",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @api_public.head("/frames/{id:int}/embedded/ota/download")
 @api_public.get("/frames/{id:int}/embedded/ota/download")
 async def api_embedded_device_ota_download(
     id: int,
+    platform: str | None = Query(None),
     db: Session = Depends(get_db),
     authorization: str = Header(None),
+    range: str | None = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    firmware = latest_embedded_firmware(frame) or {}
-    ota_path = firmware.get("otaPath")
-    if (firmware.get("status") != "ready" or not isinstance(ota_path, str)
-            or not os.path.isfile(ota_path)):
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No OTA image available")
-    return FileResponse(
-        ota_path,
-        media_type="application/octet-stream",
-        filename=os.path.basename(ota_path),
-        headers={"Cache-Control": "no-store"},
-    )
+    platform = _embedded_ota_platform(frame, platform)
+    return await stream_latest_release_ota_image(platform, range_header=range)

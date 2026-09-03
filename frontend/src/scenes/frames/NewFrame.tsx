@@ -1364,8 +1364,9 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
       ) : addFrameMode === 'embedded' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Build a firmware image for an ESP32 microcontroller and flash it over USB serial or from the browser. The
-            firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the air.
+            Flash the published FrameOS firmware onto an ESP32 microcontroller from the browser and set it up over
+            the same USB cable. The firmware renders scenes on-device, drives SPI e-ink panels, and updates itself
+            over the air.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input

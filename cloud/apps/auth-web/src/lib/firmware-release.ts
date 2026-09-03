@@ -17,19 +17,32 @@ import { jsonError } from "./device-flow";
 export const releaseApiUrl =
   "https://api.github.com/repos/FrameOS/frameos/releases/latest";
 
+// One signed image per chip × flash layout (embedded/esp32/ci_build_image.sh,
+// the esp32 jobs in .github/workflows/docker-publish-multi.yml). The generic
+// pair IS the 8 MB S3 / 4 MB C3 layout; the others carry the layout in the
+// name. Every image carries every panel driver and selects one at runtime
+// (`set panel` over serial / NVS). The self-hosted backend keeps the same
+// table in EMBEDDED_FLASH_PROFILES (backend/app/tasks/embedded_firmware.py),
+// and a device names its own entry when it asks for an OTA manifest
+// (fos_ota_platform in embedded/esp32/main/fos_ota.c).
+export const esp32ReleasePlatforms = [
+  "esp32-s3-generic",
+  "esp32-c3-generic",
+  "esp32-s3-4mb",
+  "esp32-s3-16mb",
+  "esp32-s3-32mb",
+  "esp32-c3-8mb",
+  "esp32-c3-16mb",
+  "esp32-c3-32mb",
+] as const;
+
 // Explicit allow-list of platform -> exact asset suffix. The upstream host and
 // path are never taken from user input, so this cannot be steered into an SSRF.
-// esp32-s3-generic carries every supported panel driver and selects one at
-// runtime (`set panel` over serial / NVS); esp32-s3-epd7in5v2 is the older
-// single-panel build kept so deployments running this code against an old
-// release still flash something. Keep in sync with the esp32 job in
-// .github/workflows/docker-publish-multi.yml.
+// esp32-s3-epd7in5v2 is the older single-panel build kept so deployments
+// running this code against an old release still flash something.
 export const provisioningAssets = [
-  { platform: "esp32-s3-generic", suffix: "-esp32-s3-generic.bin" },
+  ...esp32ReleasePlatforms.map((platform) => ({ platform, suffix: `-${platform}.bin` })),
   { platform: "esp32-s3-epd7in5v2", suffix: "-esp32-s3-epd7in5v2.bin" },
-  // Thin-client build for PSRAM-less ESP32-C3 boards (TRMNL OG/BWRY,
-  // XTEINK X4): all panel drivers, no on-device renderer.
-  { platform: "esp32-c3-generic", suffix: "-esp32-c3-generic.bin" },
   {
     platform: "raspberry-pi-32",
     suffix: "-raspberry-pi-32-buildroot.img.gz",
@@ -52,17 +65,17 @@ export const provisioningAssets = [
 // esp_app_desc at offset 0x20, and the merged image has the BOOTLOADER there,
 // so a device offered one downloads several MB and then rejects it at the last
 // step — every time, on every release. The release publishes both; the
-// device-authed manifest/download routes serve this one.
+// device-authed manifest/download routes serve this one, for the flash layout
+// the device names (a 4 MB layout has no OTA slot; its image is published and
+// served only for completeness).
 //
 // Releases from before the `-app.bin` assets shipped have no OTA image at all;
 // those answer 404 ota_image_not_published rather than falling back to the
 // merged image, which could only ever fail on the device.
-export const otaAssets = [
-  { platform: "esp32-s3-generic", suffix: "-esp32-s3-generic-app.bin" },
-  // 4MB single-slot layout — no OTA partition on the device, so this is
-  // published (and served) only for completeness.
-  { platform: "esp32-c3-generic", suffix: "-esp32-c3-generic-app.bin" },
-] as const;
+export const otaAssets = esp32ReleasePlatforms.map((platform) => ({
+  platform,
+  suffix: `-${platform}-app.bin`,
+}));
 
 /** The bare app image for a platform, or undefined on an older release. */
 export function findOtaAsset(release: Release, platform: string) {
@@ -74,9 +87,8 @@ export function findOtaAsset(release: Release, platform: string) {
 // gigabyte-sized SD images go through app/api/frames/sd-image with its own
 // much tighter budget.
 export const streamablePlatforms = new Set<string>([
-  "esp32-s3-generic",
+  ...esp32ReleasePlatforms,
   "esp32-s3-epd7in5v2",
-  "esp32-c3-generic",
 ]);
 
 export interface ReleaseAsset {

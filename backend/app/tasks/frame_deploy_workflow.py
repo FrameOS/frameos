@@ -83,16 +83,6 @@ def _apply_frame_sync_deploy_revision(frame: Frame, frame_dict: dict[str, Any]) 
     setattr(frame, "_frame_sync_deploy_revision", revision)
 
 
-def _parse_embedded_utc(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def _embedded_status_failure_context(body: bytes) -> str | None:
     try:
         status = json.loads(body.decode("utf-8", errors="replace"))
@@ -353,25 +343,19 @@ class FullDeployPlan:
 
 @dataclass(slots=True)
 class EmbeddedFullDeployPlan:
-    """Full deploy for an embedded (ESP32) frame: rebuild the firmware image
-    when it is stale or missing, deliver it over the air (the backend pokes
-    ``POST /api/action/ota`` and the device pulls manifest + image), wait for
-    the post-OTA bootup, then re-upload scenes like a fast deploy.
-
-    ``to_dict`` keeps the key shape the deploy drawer's FullDeployPlanResponse
-    consumer expects (target/binary/packages/...), with the embedded specifics
-    under an extra ``embedded`` key.
-    """
+    """An ESP32 full deploy: the board installs the latest FrameOS release
+    over the air (the release image for its own flash layout, verified
+    against the release signing key on the device), then the scenes are
+    re-uploaded. The backend builds nothing and holds no image."""
 
     platform: str
     idf_target: str
     flash_size: str
     psram_mb: int
     ota_supported: bool
-    firmware_status: str
-    firmware_error: str | None
-    needs_firmware_build: bool
-    action: str = "build_firmware_ota_upload_scenes"
+    release_platform: str | None
+    release_version: str | None
+    action: str = "release_ota_upload_scenes"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -386,7 +370,7 @@ class EmbeddedFullDeployPlan:
             "binary": {
                 "will_attempt_cross_compile": False,
                 "will_attempt_precompiled": False,
-                "cross_compile_supported": True,
+                "cross_compile_supported": False,
                 "build_host_configured": False,
             },
             "packages": [],
@@ -404,9 +388,8 @@ class EmbeddedFullDeployPlan:
                 "idfTarget": self.idf_target,
                 "flashSize": self.flash_size,
                 "otaSupported": self.ota_supported,
-                "firmwareStatus": self.firmware_status,
-                "firmwareError": self.firmware_error,
-                "needsFirmwareBuild": self.needs_firmware_build,
+                "releasePlatform": self.release_platform,
+                "releaseVersion": self.release_version,
                 "action": self.action,
             },
         }
@@ -949,13 +932,14 @@ class FrameDeployWorkflow:
         frame_dict: dict[str, Any],
         previous_frameos_version: str | None,
     ) -> FrameDeployPlan:
+        from app.api.firmware_release import latest_release_summary
         from app.tasks.embedded_firmware import (
             embedded_flash_size_for_frame,
             embedded_module_psram_bytes,
             embedded_ota_supported_for_frame,
             embedded_platform_for_frame,
             embedded_platform_spec_for_frame,
-            latest_embedded_firmware,
+            embedded_release_firmware_for_frame,
         )
 
         frame = self.frame
@@ -976,13 +960,18 @@ class FrameDeployWorkflow:
                 "single app slot without OTA support. Flash the firmware over USB instead."
             )
 
-        firmware = latest_embedded_firmware(frame) or {}
-        firmware_status = str(firmware.get("status") or "missing")
-        firmware_error = firmware.get("error") if isinstance(firmware.get("error"), str) else None
-        needs_firmware_build = firmware_status != "ready"
-
         frame_dict["mode"] = "embedded"
         frame_dict["frameos_version"] = current_frameos_version()
+
+        # The release the device will be offered: named here for the plan,
+        # decided on the device (it asks the manifest for its own flash
+        # layout). GitHub being unreachable does not block the plan — the
+        # device may still have the manifest cached, or answer up-to-date.
+        release = await latest_release_summary()
+        release_version = release["version"] if release else None
+        release_platform = embedded_release_firmware_for_frame(
+            frame, release["platforms"] if release else None
+        )
 
         platform = embedded_platform_for_frame(frame)
         full_deploy = EmbeddedFullDeployPlan(
@@ -991,21 +980,20 @@ class FrameDeployWorkflow:
             flash_size=embedded_flash_size_for_frame(frame),
             psram_mb=embedded_module_psram_bytes(frame) // (1024 * 1024),
             ota_supported=True,
-            firmware_status=firmware_status,
-            firmware_error=firmware_error,
-            needs_firmware_build=needs_firmware_build,
+            release_platform=release_platform["asset"] if release_platform else None,
+            release_version=release_version,
         )
 
         notes = [
             f"Embedded target: {platform} ({full_deploy.flash_size} flash).",
-            "Full deploy rebuilds the firmware image when it is stale, updates the frame over the air (OTA), "
-            "then re-uploads the interpreted scenes.",
+            "Full deploy asks the frame to install the latest FrameOS release over the air (OTA) — "
+            "the signed release image for its flash layout, verified on the device — then re-uploads "
+            "the interpreted scenes.",
         ]
-        if needs_firmware_build:
-            detail = f": {firmware_error}" if firmware_error else ""
-            notes.append(f"Firmware image needs a rebuild ({firmware_status}{detail}).")
+        if release_version:
+            notes.append(f"Latest published release: {release_version}; the frame skips the download if it already runs it.")
         else:
-            notes.append("Firmware image is up to date; the device is asked to pull it only if it runs an older build.")
+            notes.append("The release listing could not be fetched right now; the frame checks the release itself.")
 
         return FrameDeployPlan(
             mode="full",
@@ -1018,10 +1006,9 @@ class FrameDeployWorkflow:
             notes=notes,
         )
 
-    # Bounded waits for the embedded full deploy. Firmware builds stream their
-    # own progress into the frame log; the deploy job polls status. Class
-    # attributes so tests (and desperate operators) can shorten them.
-    EMBEDDED_BUILD_WAIT_TIMEOUT_SECONDS = 45 * 60
+    # Bounded waits for the embedded full deploy: the device downloads the
+    # release image on its own and reports back with a boot. Class attributes
+    # so tests (and desperate operators) can shorten them.
     EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 10 * 60
     EMBEDDED_POLL_INTERVAL_SECONDS = 5.0
 
@@ -1057,37 +1044,6 @@ class FrameDeployWorkflow:
             if aware > since:
                 return True
         return False
-
-    async def _await_embedded_firmware_build(self) -> dict[str, Any]:
-        from app.tasks.embedded_firmware import refresh_embedded_firmware_status
-
-        deadline = time.monotonic() + self.EMBEDDED_BUILD_WAIT_TIMEOUT_SECONDS
-        last_status: str | None = None
-        while True:
-            frame = self._refresh_frame()
-            firmware = await refresh_embedded_firmware_status(self.db, self.redis, frame) or {}
-            status = firmware.get("status")
-            if status != last_status:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Firmware build status: {status or 'unknown'}")
-                last_status = status
-            if status == "ready":
-                return firmware
-            if status == "error":
-                # The build task stores the idf.py output tail in the error.
-                raise RuntimeError(
-                    f"Embedded firmware build failed: {firmware.get('error') or 'unknown error'}"
-                )
-            if status not in {"queued", "building"}:
-                raise RuntimeError(
-                    f"Embedded firmware build ended in unexpected state '{status or 'missing'}'"
-                )
-            if time.monotonic() >= deadline:
-                raise RuntimeError(
-                    "Timed out waiting for the embedded firmware build; "
-                    "check the frame logs and start the deploy again once it finishes."
-                )
-            await asyncio.sleep(self.EMBEDDED_POLL_INTERVAL_SECONDS)
 
     async def _await_embedded_boot(self, since: datetime) -> bool:
         deadline = time.monotonic() + self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS
@@ -1168,11 +1124,7 @@ class FrameDeployWorkflow:
             raise
 
     async def _execute_embedded_full(self, plan: FrameDeployPlan) -> None:
-        from app.tasks.embedded_firmware import (
-            refresh_embedded_firmware_status,
-            request_embedded_firmware_ota,
-            start_embedded_firmware,
-        )
+        from app.tasks.embedded_firmware import request_embedded_firmware_update
 
         if not isinstance(plan.full_deploy, EmbeddedFullDeployPlan):
             raise RuntimeError("Embedded full deploy plan missing")
@@ -1188,34 +1140,12 @@ class FrameDeployWorkflow:
                     "render log. Flash the first firmware over USB from the deploy drawer."
                 )
 
-            # 1. Firmware image: rebuild when stale/missing, reuse when ready.
-            firmware = await refresh_embedded_firmware_status(self.db, self.redis, frame) or {}
-            rebuilt = False
-            if firmware.get("status") != "ready":
-                reason = firmware.get("error") or firmware.get("status") or "missing"
-                await log(self.db, self.redis, int(frame.id), "stdinfo",
-                          f"{icon} Firmware image is not ready ({reason}); building a fresh image")
-                await start_embedded_firmware(self.db, self.redis, frame)
-                firmware = await self._await_embedded_firmware_build()
-                rebuilt = True
-            else:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Firmware image is up to date; skipping rebuild")
-            frame = self._refresh_frame()
-
-            # If nothing was rebuilt and the device already booted after this
-            # image finished building, it is running the current firmware: the
-            # OTA poke below is a no-op the device answers without rebooting,
-            # so a reboot must not be required.
-            firmware_completed_at = _parse_embedded_utc(firmware.get("completedAt"))
-            boot_required = rebuilt or firmware_completed_at is None or not self._embedded_device_active_after(
-                frame, firmware_completed_at
-            )
-
-            # 2. Deliver over the air: the device pulls manifest + image.
+            # 1. Deliver over the air: the device reboots into its updater,
+            #    pulls this backend's relay of the release manifest and, when
+            #    its version differs, the signed release image.
             ota_requested_at = datetime.now(timezone.utc)
             try:
-                await request_embedded_firmware_ota(self.db, self.redis, frame)
+                await request_embedded_firmware_update(self.db, self.redis, frame)
             except ValueError as exc:
                 raise RuntimeError(
                     f"Could not start the OTA update: {exc}. "
@@ -1223,25 +1153,21 @@ class FrameDeployWorkflow:
                 )
             frame = self._refresh_frame()
 
-            # 3. Confirm via the device's post-OTA bootup.
-            if boot_required:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} OTA update requested; waiting for the frame to boot the new firmware")
-                if not await self._await_embedded_boot(ota_requested_at):
-                    raise RuntimeError(
-                        "OTA update requested, but the frame did not report a new boot within "
-                        f"{int(self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS // 60)} minutes. "
-                        "The device retries the OTA download on its own, so the update may still "
-                        "complete; check the frame logs and re-run the deploy to confirm."
-                    )
-                frame = self._refresh_frame()
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Frame booted after the OTA update")
-            else:
-                await log(self.db, self.redis, int(frame.id), "stdout",
-                          f"{icon} Frame already runs the current firmware; not waiting for a reboot")
+            # 2. Confirm via the device's post-update bootup. The updater
+            #    always reboots (an up-to-date frame just comes straight back).
+            await log(self.db, self.redis, int(frame.id), "stdout",
+                      f"{icon} Update requested; waiting for the frame to boot")
+            if not await self._await_embedded_boot(ota_requested_at):
+                raise RuntimeError(
+                    "Update requested, but the frame did not report a new boot within "
+                    f"{int(self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS // 60)} minutes. "
+                    "The device retries the download on its own, so the update may still "
+                    "complete; check the frame logs (ota:backend lines) and re-run the deploy to confirm."
+                )
+            frame = self._refresh_frame()
+            await log(self.db, self.redis, int(frame.id), "stdout", f"{icon} Frame booted")
 
-            # 4. Leave scenes fresh, exactly like a fast deploy.
+            # 3. Leave scenes fresh, exactly like a fast deploy.
             await self._upload_embedded_scenes_and_reload(frame)
 
             frame.status = "starting"

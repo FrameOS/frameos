@@ -34,7 +34,6 @@ idf_component_register(
         esp_http_server
         esp_https_server
         esp_http_client
-        esp_https_ota
         esp-tls
         app_update
         spi_flash
@@ -50,11 +49,10 @@ idf_component_register(
         monocypher
 )
 
-# Default panel for images built without a backend-generated
-# main/generated_config.h (e.g. the published generic release binary). All
-# panel drivers are compiled in regardless; this only picks the boot-time
-# default before `set panel` / the setup portal / NVS override it.
-# generated_config.h wins when present (fos_defaults.h checks it first).
+# Default panel for a local development build. All panel drivers are
+# compiled in regardless; this only picks the boot-time default before
+# `set panel` / the setup portal / NVS override it. The published release
+# images leave it unset ("none").
 if(DEFINED ENV{FRAMEOS_SELECTED_PANEL}
    AND NOT "$ENV{FRAMEOS_SELECTED_PANEL}" STREQUAL ""
    AND NOT "$ENV{FRAMEOS_SELECTED_PANEL}" STREQUAL "none")
