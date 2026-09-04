@@ -248,3 +248,9 @@ def test_user_merge_shell_embeds_the_module_verbatim():
     # The merge module must stay importable without the backend package: it
     # runs as `python3 -` inside the composer container.
     assert "from app." not in module and "import app" not in module
+    # $service_root is bind-mounted read-only into the composer container;
+    # the 2026.9.3 release run died on every platform with "mkdir: cannot
+    # create directory '/root-service/etc-current': Read-only file system".
+    # Scratch files go to a mktemp directory the enclosing cleanup removes.
+    assert "$service_root" not in shell
+    assert 'etc_tmp="$(mktemp -d)"' in shell

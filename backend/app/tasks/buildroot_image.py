@@ -793,17 +793,23 @@ def render_buildroot_user_merge_shell() -> str:
     partition with debugfs, runs buildroot_user_merge.py on them (embedded,
     because this may execute inside the composer container where the backend
     package is not importable) and queues the rewritten files onto the
-    debugfs command list in $cmds. Expects $rootfs, $cmds and $service_root
-    from the enclosing script.
+    debugfs command list in $cmds. Expects $rootfs and $cmds from the
+    enclosing script; works in a scratch directory of its own ($etc_tmp, which
+    the enclosing cleanup removes) because $service_root is a read-only mount
+    inside the composer container.
     """
     merge = (BACKEND_ROOT / "app" / "tasks" / "buildroot_user_merge.py").read_text(encoding="utf-8")
     return (
-        'mkdir -p "$service_root/etc-current"\n'
+        # A scratch directory of its own: $service_root is bind-mounted
+        # read-only into the composer container (the 2026.9.3 release run
+        # failed on every platform with "mkdir: cannot create directory
+        # '/root-service/etc-current': Read-only file system").
+        'etc_tmp="$(mktemp -d)"\n'
         "for f in passwd group shadow; do\n"
-        '  debugfs -R "cat /etc/$f" "$rootfs" > "$service_root/etc-current/$f" 2>/dev/null || : > "$service_root/etc-current/$f"\n'
+        '  debugfs -R "cat /etc/$f" "$rootfs" > "$etc_tmp/$f" 2>/dev/null || : > "$etc_tmp/$f"\n'
         "done\n"
         ': > "$cmds"\n'
-        "python3 - \"$service_root/etc-current\" \"$cmds\" <<'FRAMEOS_USER_MERGE_PY'\n"
+        "python3 - \"$etc_tmp\" \"$cmds\" <<'FRAMEOS_USER_MERGE_PY'\n"
         + merge
         + "FRAMEOS_USER_MERGE_PY\n"
     )
@@ -3018,7 +3024,7 @@ rootfs="$(mktemp)"
 cmds="$(mktemp)"
 firmware_tmp="$(mktemp -d)"
 cleanup_root_patch() {{
-  rm -rf "$rootfs" "$cmds" "$firmware_tmp"
+  rm -rf "$rootfs" "$cmds" "$firmware_tmp" "${{etc_tmp:-}}"
 }}
 trap cleanup_root_patch EXIT
 python3 - "$disk" "$rootfs" {root_partition["start"]} {root_partition["size"]} <<'PY'
