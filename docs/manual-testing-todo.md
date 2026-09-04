@@ -222,7 +222,37 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   release page has `frameos-2026.9.3-*.tar.gz` + `.minisig` for
   `debian-bookworm-arm64` (that is what the Buildroot 64-bit frames pull)
   and the `raspberry-pi-64` / `raspberry-pi-5` `.img.gz`.
-- [~] **4. Fresh image first (reflashable)** — the `raspberry-pi-64` half PASSED 2026-09-04 on the fresh 2026.9.6 uus2w card (Zero 2 W): boots and renders as `frameos` (uid 990 in `/etc/passwd`, `User=frameos`, index screen on HDMI), `frameos-privileged.path` active, state/queue `root:frameos 1770`, results `2750`, the scheduled reboot executed through the door while the runtime was uid 990 (see the §2 re-flash box), `/` `ro` from the second boot on (`rw` on the first, by design), all three persistent bind mounts (`/etc/NetworkManager/system-connections`, `/var/lib/NetworkManager`, `/var/lib/systemd/timesync`) active from fstab on both boots, and "runtime cannot escalate" re-run: writes to `current/frameos` and the unit → `Permission denied`, a `shell` verb in the queue → `refusing manual-shell.json: Unknown privileged verb: shell`, `handled 1 request(s)`. Not re-run on this card: hotspot/portal (verified 12:39 the same day on this frame type after the bind-mount fix, which this card ships). **Still open: the `raspberry-pi-5` half** — Cloud-5 was migrated by hand, never flashed fresh; reflash it from the cloud builder and run the same boxes. Original text: flash `raspberry-pi-5` 9.3 on
+- [x] **4. Fresh image first (reflashable)** — BOTH halves passed 2026-09-04.
+  **`raspberry-pi-5` half, 20:02 local, Cloud-5 reflashed from the cloud
+  builder (2026.9.6, framebuffer 800×480, Europe/Brussels, SSH key):** first
+  boot read `frameos-cloud.txt` (Wi-Fi, `hostname cloud-5`, display applied,
+  keys, enrolment state), `driver setup: complete`, the card's clock started
+  at the 2025 floor (no persisted timesync file yet on a fresh card) so
+  `networkCheck` attempts 1-2 failed on name resolution, timesyncd's `Initial
+  clock synchronization` landed at +4 s and attempt 3 succeeded — **no
+  `sync-clock` storm, no hotspot**, `cloud:enroll:boot` → `personalization`
+  applied `{name: Cloud-5, timezone: Europe/Brussels}` → connected, same frame
+  record re-adopted. Runs as uid 990 (`User=frameos`, `/etc/passwd`), door
+  `.path` active, state/queue `1770`, results `2750`, all three persistent
+  bind mounts up from fstab, dropbear key under state, "cannot escalate"
+  re-run (`Permission denied`, `refusing manual-shell.json: Unknown
+  privileged verb: shell`). Door answers: cloud Reboot → runtime `cloud:audit
+  verb reboot ok:true` at 18:09:06 UTC → back with uptime 15 s at 18:09:34,
+  `/` **ro** on the second boot, reconnected on attempt 3 again (Pi 5 Wi-Fi
+  bring-up timing, not the clock: `DNSSEC validation` lines 0, no cert
+  errors), scheduler on Europe/Brussels. Not on this frame: `/dev/fb0` does
+  not exist without an HDMI cable (`render:driver` 0.03 ms no-op) — known,
+  predates everything. **Found on this card: (1)** the same `/etc/localtime`
+  = UTC as uus2w — the runtime's `withWritableMount` + `install /etc/timezone`
+  + `timedatectl` ladder all died on `sudo: no new privileges` (fixed on main
+  earlier tonight, `set-timezone` door verb); **(2) cloud-side:** the frame
+  record kept `timezone: null` although the builder minted the bound token
+  with Europe/Brussels — `rebindEnrollment` (re-flash of an existing frame)
+  only re-keyed the row, while a fresh enrolment stores and pushes
+  `token.timezone`. Fixed on main the same evening: rebind merges the token's
+  zone into `settings` and queues the same `set_settings` push
+  (`frames.integration.test.ts` "takes the bound token's time zone onto the
+  existing frame"). `raspberry-pi-64` half, earlier: PASSED 2026-09-04 on the fresh 2026.9.6 uus2w card (Zero 2 W): boots and renders as `frameos` (uid 990 in `/etc/passwd`, `User=frameos`, index screen on HDMI), `frameos-privileged.path` active, state/queue `root:frameos 1770`, results `2750`, the scheduled reboot executed through the door while the runtime was uid 990 (see the §2 re-flash box), `/` `ro` from the second boot on (`rw` on the first, by design), all three persistent bind mounts (`/etc/NetworkManager/system-connections`, `/var/lib/NetworkManager`, `/var/lib/systemd/timesync`) active from fstab on both boots, and "runtime cannot escalate" re-run: writes to `current/frameos` and the unit → `Permission denied`, a `shell` verb in the queue → `refusing manual-shell.json: Unknown privileged verb: shell`, `handled 1 request(s)`. Not re-run on this card: hotspot/portal (verified 12:39 the same day on this frame type after the bind-mount fix, which this card ships). **Still open: the `raspberry-pi-5` half** — Cloud-5 was migrated by hand, never flashed fresh; reflash it from the cloud builder and run the same boxes. Original text: flash `raspberry-pi-5` 9.3 on
   pi5, enroll into the cloud, run the "boots and renders as `frameos`",
   "door answers", "hotspot and portal" and "runtime cannot escalate"
   boxes below. Then `raspberry-pi-64` 9.3 on pi2w for the same boxes.

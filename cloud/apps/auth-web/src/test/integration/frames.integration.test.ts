@@ -998,6 +998,27 @@ describe("frame re-enrollment (frame-bound claim tokens)", () => {
     );
   }
 
+  it("takes the bound token's time zone onto the existing frame and pushes it", async () => {
+    // A re-flashed SD card: the builder mints a token FOR this frame with the
+    // browser's zone, the card applies it on the device, and the record here
+    // has to follow (it stayed null on a real re-flash, 2026-09-04).
+    const frame = await enrolledFrame();
+    const mint = await mintBoundToken(frame.frame_id, { timezone: "Europe/Brussels" });
+    expect(mint.status).toBe(200);
+    const minted = (await mint.json()) as { claim_token: string };
+    const replacement = deviceKeypair();
+    const response = await enroll(minted.claim_token, replacement.publicKeyBase64);
+    expect(response.status).toBe(200);
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.frame_id));
+    expect(row?.settings).toEqual({ timezone: "Europe/Brussels" });
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame.frame_id));
+    const push = commands.find((command) => command.type === "set_settings");
+    expect(push?.payload).toEqual({ settings: { timezone: "Europe/Brussels" } });
+  });
+
   it("re-keys the frame in place, keeping its id, name and scenes", async () => {
     const frame = await enrolledFrame();
     await confirmFrame(

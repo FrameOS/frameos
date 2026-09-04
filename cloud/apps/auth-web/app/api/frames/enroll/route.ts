@@ -538,13 +538,28 @@ async function rebindEnrollment(
     return jsonError("invalid_claim_token", 400);
   }
 
+  // The zone the minting browser was in, exactly as a fresh enrollment
+  // takes it: a re-flashed card carries `time_zone=` in frameos-cloud.txt and
+  // applies it on the device, and the workspace must not keep showing the
+  // record's old (or empty) zone next to a frame that runs another one
+  // (2026-09-04, Cloud-5 re-flashed with Europe/Brussels stayed `null` here).
+  const settings = token.timezone
+    ? { ...(row.frame.settings ?? {}), timezone: token.timezone }
+    : row.frame.settings;
+  const rebound = {
+    ...row.frame,
+    frameosVersion: input.frameosVersion ?? row.frame.frameosVersion,
+    hardware: input.hardware ?? row.frame.hardware,
+    settings,
+  };
   await db.transaction(async (tx) => {
     await tx
       .update(frames)
       .set({
-        frameosVersion: input.frameosVersion ?? row.frame.frameosVersion,
-        hardware: input.hardware ?? row.frame.hardware,
+        frameosVersion: rebound.frameosVersion,
+        hardware: rebound.hardware,
         publicKey: input.publicKey,
+        settings: rebound.settings,
         updatedAt: new Date(),
       })
       .where(eq(frames.id, row.frame.id));
@@ -566,6 +581,11 @@ async function rebindEnrollment(
       .set({ frameId: row.frame.id })
       .where(eq(frameEnrollmentTokens.id, token.id));
   });
+
+  if (token.timezone && frameSupportsTimeZoneSetting(rebound)) {
+    // Same push and firmware gate as the fresh-enrollment path above.
+    await enqueueFrameSettingsPush(db, rebound, { timezone: token.timezone });
+  }
 
   // Wake the hub: a socket the OLD device still holds was authenticated with
   // the credential just replaced, and the hub's session check compares the
