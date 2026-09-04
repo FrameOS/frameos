@@ -539,7 +539,10 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   Discord and the cloud deploy all ran. The cloud offered it ~10 min after
   publish (in-process 5-min cache behind Next's own 5-min fetch cache).
   Rollout at 15:44 UTC to every frame: Wood7.3, SuurESP, Cloud-W, uus2w
-  (door, see §2b), Cloud-5 (9.4 → 9.6 directly through the door), E1004 and
+  (door, see §2b), Cloud-5 (9.4 → 9.6 directly through the door — its journal shows
+  `driver:shared … loaded: true` for frameBuffer.so and evdev.so from the
+  9.6 release dir at 15:44:33, so the fix also heals a frame that skipped
+  9.5), E1004 and
   E1002 (both took it on their next battery wake within minutes) — all on
   9.6 by 15:48 UTC; Cloud-2W has been offline since 2026-08-21.
 
