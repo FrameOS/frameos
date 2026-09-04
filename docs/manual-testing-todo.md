@@ -350,7 +350,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
 - [x] **The door answers** — uus2w 2026-09-04 11:51: cloud Reboot → `FrameOS privileged: executing reboot (…)` → `> sh -c '(sleep 2; systemctl reboot || reboot) …'` → connection closed; `.path` active before and after. Original text: `journalctl -u frameos-privileged` after a
   reboot from the cloud/admin ("Reboot" button): one `executing reboot` line,
   then the reboot. `systemctl status frameos-privileged.path` is active.
-- [ ] **Hotspot and portal through the door.** FAILED on 2026.9.4 (uus2w,
+- [x] **Hotspot and portal through the door** — PASSED 2026-09-04 12:39–12:44 on uus2w once the `/var/lib/NetworkManager` bind mount (the fix below) was applied by hand: Wi-Fi profile deleted → reboot → door `nm-radio-on`, `nm-device-status`, `nm-hotspot-start ok in 2.48s` → `FrameOS-Setup` on the air (Cloud-5's radio: channel 11, WPA) → phone joined, portal listed networks via `nm-wifi-list` (twelve calls while browsing) → `POST /setup` → `nm-hotspot-stop` → `nm-wifi-connect` "Device 'wlan0' successfully activated" → `networkCheck success` → `cloud:hub:connected`; profile saved as `frameos-wifi.nmconnection` on the persistent partition; reboot → rejoined on its own, mounts up from fstab, check attempt 1 success. The door journal shows no PSK; the runtime's `portal:http post /setup` line logs the Wi-Fi password masked (`le****…`, the existing masking keeps the first two characters). First attempt the same day FAILED on stock 2026.9.4 (uus2w,
   2026-09-04 12:30): with the Wi-Fi profile deleted the door ran
   `nm-radio-on`, `nm-device-status`, `nm-hotspot-start` (all `ok`,
   `managed,add,modify,up`), the portal screen rendered, and NetworkManager
