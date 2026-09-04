@@ -444,12 +444,12 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   2026-09-01 on the 8 MB board — low-water free PSRAM was 34 KB with the
   transpiler's three token copies alive and 873 KB after the fix; the
   1.5 MiB reserve stands.
-- [ ] **Battery ADC rounds (#426):** hardware-unverified. The misread is
+- [~] **Battery ADC rounds (#426):** partial 2026-09-04 — E1004's 45 metrics samples since midnight (3.3 h of them on 2026.9.4) show `batteryMillivolts` steady at 4006–4020 mV, no `batteryRawMillivolts` field on any sample, no critical parking. Needs the day-or-two watch below to count as verified. Original text: hardware-unverified. The misread is
   intermittent (~9 of the E1004's ~400 daily on-battery samples read
   ~2 V instead of ~3.95 V), so confirming it means watching
   `batteryRawMillivolts` appear without `batteryMillivolts` moving for a
   day or two on a frame on battery, and no spurious "critical" parking.
-- [ ] **Sleep-aware cloud side (#409):** the device half was captured over
+- [x] **Sleep-aware cloud side (#409)** — passed 2026-09-04 on E1004 (2026.9.4, on battery, 15-min naps): an `image_get` queued at 10:51:27 UTC while asleep got `expires_at` 11:01:18 = `next_wake_at` (10:59:18) + 2 min instead of the plain 5-min TTL; the frame woke at 10:59:21 (`cloud:session_ready`), the command was delivered and acked (queue empty), the log shows `sleep:held reason: image` after `render:done` and the board slept again 30 s later. Original text: the device half was captured over
   three boots on the E1004; the hub half — the frame's `render`
   announcement → a queued `image_get`, and command TTLs stretched past
   `next_wake_at` — was not exercised before deploy. On a deep-sleeping
