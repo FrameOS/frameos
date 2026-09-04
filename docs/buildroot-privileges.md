@@ -416,7 +416,10 @@ The permission model is not a design note; it was run. `mke2fs -d` builds a
 FRAMEOS-shaped ext4 the way the composer does, the generated `debugfs sif`
 commands are applied to it, and `e2fsck` passes: release directory
 `root:frameos 1775`, `frameos` binary and `drivers/`/`scenes/`/`vendor/`
-`root:root` untouched, `frame.json` `frameos 0600`, `state` and the other
+`root:root` untouched (and `0755`/`0644` — set explicitly by the sweep, not
+inherited: the door worker unpacks under `UMask=0027`, and 2026.9.5 installed
+through it left `drivers/*.so` `0640`, unreadable to the runtime that dlopens
+them), `frame.json` `frameos 0600`, `state` and the other
 runtime-writable roots `root:frameos 1770`, NetworkManager keyfiles `root 0600`
 behind a `root 0700` directory, `privileged/queue` `root:frameos 1770`, and
 `privileged/results` `root:frameos 2750` with root-owned `0640` results. The

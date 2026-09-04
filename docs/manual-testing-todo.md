@@ -376,7 +376,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   Expect: the upgrade succeeds, `/etc/passwd` gains `frameos:x:990:990`,
   the installed unit becomes the hardened one, `/srv/frameos` ownership is
   root-code/`frameos`-state, and the frame renders after the restart.
-- [ ] **OTA on an already-migrated frame** (unprivileged → door →
+- [~] **OTA on an already-migrated frame** — ran 2026-09-04 16:49 local on uus2w (9.4 → 9.5, the first release OTA'd *through the door*): `upgrade.log` shows `verifying the release signature` → `signature OK (key 27c4c7f5df300370); asking the privileged door to install`; the door journal shows `install-release ok in 32.05s`, release activation, the ownership sweep and `Restarting services`; `upgrade-status.json` ended `up_to_date` / `compiled_version 2026.9.5+e0ee71ef…`; the cloud saw `cloud:upgrade success` then a replayed `scheduled` → `up_to_date` from the new binary. **Found: the frame came back blind.** The door worker runs with `UMask=0027`, so `tar --no-same-permissions` + `copyDir` left `drivers/` `0750` and every `*.so` `0640`, then the ownership sweep chowned them `root:root` → the `frameos` runtime logged `driver:shared:error … Unable to load driver library` for `frameBuffer.so` and `evdev.so`, `render:driver` became a 0.01 ms no-op and the status screen spun at ~4 renders/s ("Rendering fast"). 9.4 had escaped because it was installed by the root-only 9.2 runtime (umask 022). Hand-fixed on the bench (`chmod -R u=rwX,go=rX drivers vendor scenes; chmod 0644 frameos.service; systemctl restart frameos` → `consoleClaimed`, 371 ms framebuffer writes); fixed on main by making `buildrootOwnershipScript` set the code-root modes explicitly (`chmod -R u=rwX,go=rX` after the root chown, `0644` on the unit copy) — every migrated frame self-heals on its next setup run. Re-run this box on the release after 2026.9.5. Recorded, not fixed: with no display driver loaded the status screen re-renders every ~230 ms. Original text: (unprivileged → door →
   `install-release`): the status file goes `running` → `success`, the log
   shows the signature verified *twice* (once unprivileged, once as root),
   and the frame comes back on the new version.
@@ -517,8 +517,22 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   esp32-ci path are validated.
 - [x] **First release after #442 + #444:** release 2026.9.2 (2026-09-03)
   carries the six per-layout ESP32 images with signatures and the signed
-  wasm bundle. Still to eyeball: the npm publish downloaded the bundle and
-  the cloud preview shows "runtime 2026.9.2".
+  wasm bundle. Eyeballed on 2026.9.5 (below): the npm publish downloaded the
+  run's bundle and the preview says "runtime 2026.9.5".
+- [x] **Release 2026.9.5 (2026-09-04, run 33879206436):** every job green;
+  75 assets, the same set as 9.4; the runtime in the amd64 archive is
+  stamped `2026.9.5+e0ee71ef…` (the forced `frameos` entry works) and the
+  ESP32 app images carry `2026.9.5` + their own platform string
+  (`esp32-s3-32mb`); npm-publish run 33879498435 used `RUNTIME_RUN_ID`
+  33879206436 and published frameos-wasm / frameos-editor 2026.9.5; Discord
+  posted; the `workflow_run` cloud deploy (33881094450) went to production
+  and `/s/<scene>` shows "runtime 2026.9.5"; the cloud offered the release
+  to frames within the 5-min release cache. Rollout: Wood7.3 took it on its
+  own OTA check at 14:07 UTC (before anyone pressed anything, ~70 s
+  download, `bootedFrom ota_0`, `version 2026.9.5`); Cloud-W (armv6, root)
+  `scheduled → running → success` in 2 min; uus2w through the door — see
+  §2b for the driver-mode bug it found. Not upgraded: SuurESP, Cloud-5,
+  E1004 (battery), E1002 (kept on 9.4 for the USB-update test).
 
 ## Not on the list, deliberately
 

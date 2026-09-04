@@ -318,6 +318,13 @@ block test_ownership_script_covers_what_the_root_worker_writes:
   doAssert "frameos:frameos" notin ownership, ownership
   doAssert "chown -h 'frameos" notin ownership, ownership
   doAssert "rm -f \"$r/$sub\"" in ownership, "a runtime-planted drivers/scenes/vendor entry is removed, not adopted"
+  # The door worker unpacks releases under UMask=0027, and the runtime must
+  # still dlopen drivers/*.so and read vendor/: modes are set, not inherited.
+  # (2026.9.5 through the door: drivers/ 0750, *.so 0640, no driver loaded.)
+  doAssert "chown -R root:root \"$r/$sub\"; chmod -R u=rwX,go=rX \"$r/$sub\"" in ownership,
+    "code roots must be made world-readable after the root chown"
+  doAssert "chmod 0644 \"$r/frameos.service\"" in ownership
+  doAssert "chmod -R u=rwX,go=rX '/srv/frameos'/vendor" in ownership
 
 block test_runtime_chown_is_pinned_and_refuses_hard_links:
   # chownRuntimeTrees is what makes root-written frame.json / upgrade-status

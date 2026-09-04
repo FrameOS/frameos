@@ -175,7 +175,9 @@ proc buildrootOwnershipScript*(user = BuildrootServiceUser, installDir = "/srv/f
   ##   /srv/frameos/releases/<r>          root:USER  1775   sticky: USER may add
   ##                                                        files, not replace root's
   ##   /srv/frameos/releases/<r>/frameos  root:root  0755   what root executes
-  ##   /srv/frameos/releases/<r>/{drivers,scenes,vendor} root:root
+  ##   /srv/frameos/releases/<r>/{drivers,scenes,vendor} root:root 0755/0644:
+  ##                                                        root's, world-readable
+  ##                                                        (the runtime loads them)
   ##   /srv/frameos/releases/<r>/*.json*  USER:USER         frame.json, salt
   ##   /srv/frameos/current               root-owned symlink
   ##   /srv/frameos/{state,logs,tmp,runtime,staging}  root:USER 1770; contents USER
@@ -202,15 +204,20 @@ proc buildrootOwnershipScript*(user = BuildrootServiceUser, installDir = "/srv/f
     "for r in " & d & "/releases/*/; do [ -d \"$r\" ] || continue; " &
       "chown " & rg & " \"$r\"; chmod 1775 \"$r\"; " &
       "[ -f \"$r/frameos\" ] && [ ! -L \"$r/frameos\" ] && chown root:root \"$r/frameos\" && chmod 0755 \"$r/frameos\"; " &
-      "[ -f \"$r/frameos.service\" ] && [ ! -L \"$r/frameos.service\" ] && chown root:root \"$r/frameos.service\"; " &
+      "[ -f \"$r/frameos.service\" ] && [ ! -L \"$r/frameos.service\" ] && chown root:root \"$r/frameos.service\" && chmod 0644 \"$r/frameos.service\"; " &
       # Code-loading roots: root's directories, never something the runtime
-      # dropped under the same name in the sticky release root.
+      # dropped under the same name in the sticky release root. Root owns
+      # them, but the RUNTIME reads them (dlopen of drivers/*.so, fonts under
+      # vendor/), and the door worker that unpacked them runs with
+      # UMask=0027 — so every mode is set here explicitly: 2026.9.5 was
+      # installed through the door with drivers/ 0750 and *.so 0640, and the
+      # unprivileged runtime could not load a single driver.
       "for sub in drivers scenes vendor; do " &
         "if [ -L \"$r/$sub\" ] || { [ -e \"$r/$sub\" ] && [ ! -d \"$r/$sub\" ]; }; then rm -f \"$r/$sub\"; fi; " &
-        "mkdir -p \"$r/$sub\"; chown -R root:root \"$r/$sub\"; done; " &
+        "mkdir -p \"$r/$sub\"; chown -R root:root \"$r/$sub\"; chmod -R u=rwX,go=rX \"$r/$sub\"; done; " &
     "done; " &
     "[ -L " & d & "/current ] && chown -h root:root " & d & "/current; " &
-    "[ -d " & d & "/vendor ] && chown -R root:root " & d & "/vendor; " &
+    "[ -d " & d & "/vendor ] && chown -R root:root " & d & "/vendor && chmod -R u=rwX,go=rX " & d & "/vendor; " &
     "for p in logs tmp runtime staging state; do " &
       "chown " & rg & " " & d & "/$p; chmod 1770 " & d & "/$p; done; " &
     "for p in NetworkManager wpa_supplicant; do [ -d " & d & "/state/$p ] && chown -R root:root " & d &
