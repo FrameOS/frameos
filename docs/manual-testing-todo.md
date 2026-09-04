@@ -106,10 +106,10 @@ hardware-settings batch) and the battery ADC rounds of #426.
 - [ ] **Panel link code (#379):** boot an unclaimed frame in cloud mode with
   no claim code → the panel renders the link code + QR → complete the claim
   from an account, and confirm the code retires once connected.
-- [ ] **Scheduled reboot on Pi (#376):** add a `reboot` schedule entry from
+- [x] **Scheduled reboot on Pi (#376)** — passed 2026-09-04 on uus2w (2026.9.4, `frameos` user): a `reboot` entry for 12:15 Europe/Brussels pushed from the cloud → `scheduler:loaded … nextDue Fri 12:15 reboot` → at 12:15:00 local `scheduler:fire {id, action: reboot}` → door `executing reboot` → the Pi rebooted and came back. Original text: add a `reboot` schedule entry from
   the cloud and watch a real Pi reboot at the scheduled time. Floor is
   2026.8.32 — needs the new firmware.
-- [ ] **Hardware settings batch (#374):** push palette / partial-refresh
+- [x] **Hardware settings batch (#374)** — passed 2026-09-04 12:12 on uus2w (2026.9.4, migrated `frameos` user): `gpio_buttons: [{pin: 17, label: Bench}]` pushed from the cloud → `event:restart` → systemd "Scheduled restart job, restart counter is at 1" (a real restart, new pid) → `driver:gpioButton Listening on GPIO 17 (Bench)` loaded from the release's `gpioButton.so` as the unprivileged user (`/dev/gpiochip0` is `root:frameos`). Palette / partial-refresh `device_config` need an e-ink frame; the disabled-with-reason display on pre-2026.8.31 firmware was not checked (no such frame left). Original text: push palette / partial-refresh
   `device_config` / `gpio_buttons` from the cloud panel → runtime restarts
   (not just reloads) and the settings apply. Also confirm the panel only
   shows fields the reported hardware can use, and shows disabled-with-reason
