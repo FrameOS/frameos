@@ -7,6 +7,7 @@ import frameos/types
 import frameos/channels
 import frameos/utils/local_time
 import sequtils
+import os
 
 # Events a schedule entry may fire. Everything else the runner understands is a
 # runtime verb (uploadScenes) reserved for the server/hub paths that stamp an
@@ -79,6 +80,38 @@ proc logScheduleSummary*(self: Scheduler, dt: DateTime) =
     payload["nextDue"] = %nextDueDescription(schedule, dt)
   log(payload)
 
+proc minuteKey(dt: DateTime): int64 =
+  dt.toTime().toUnix() div 60
+
+# A scheduled reboot/restart persists the minute it fired in. The runtime is
+# back well within a minute on a fast Pi, still inside that minute, and the
+# in-memory marker is gone with the old process — the entry would fire again
+# (the ESP32 did exactly that on 2026-09-04; uus2w escaped by three seconds).
+# Only a marker from the last few minutes is honoured on start.
+const SCHEDULER_FIRED_MARKER_PATH* = "./state/scheduler-last-fired"
+const schedulerRebootEvents = ["reboot", "restart"]
+const schedulerFiredMarkerMaxAgeMinutes = 3'i64
+var schedulerFiredMarkerPath* = SCHEDULER_FIRED_MARKER_PATH
+
+proc persistFiredMinute*(minute: int64, path = schedulerFiredMarkerPath) =
+  try:
+    createDir(parentDir(path))
+    writeFile(path, $minute)
+  except CatchableError:
+    discard
+
+proc resumeLastFiredMinute*(nowMinute: int64, path = schedulerFiredMarkerPath): int64 =
+  ## The persisted marker when it is from the current or a very recent minute
+  ## (a reboot the schedule itself caused), else int64.low: never fired.
+  result = int64.low
+  try:
+    if fileExists(path):
+      let stored = parseBiggestInt(readFile(path).strip())
+      if nowMinute >= stored and nowMinute - stored <= schedulerFiredMarkerMaxAgeMinutes:
+        result = stored
+  except CatchableError:
+    discard
+
 proc handleSchedule*(self: Scheduler, dt: DateTime) =
   # do everything except sleeping or looping
   # Read through the config every minute: a reload swaps the schedule object
@@ -123,10 +156,10 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
       "timeZone": self.frameConfig.timeZone,
       "payload": ev.payload,
     })
+    if ev.event in schedulerRebootEvents:
+      {.gcsafe.}:
+        persistFiredMinute(minuteKey(dt))
     sendEvent(ev.event, ev.payload)
-
-proc minuteKey(dt: DateTime): int64 =
-  dt.toTime().toUnix() div 60
 
 proc start*(self: Scheduler) =
   # NTP step corrections (routine on RTC-less Pis) can replay or repeat a
@@ -134,6 +167,8 @@ proc start*(self: Scheduler) =
   # a step backwards of more than two minutes is accepted as a clock
   # correction and scheduling resumes from the new time.
   var lastFiredMinute = int64.low
+  {.gcsafe.}:
+    lastFiredMinute = resumeLastFiredMinute(minuteKey(frameLocalNow(self.frameConfig.timeZone)))
   var lastSchedule: FrameSchedule = nil
   while true:
     let dt = frameLocalNow(self.frameConfig.timeZone)

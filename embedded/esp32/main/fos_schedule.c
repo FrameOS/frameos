@@ -45,6 +45,35 @@ static int s_event_count = 0;
 static int s_utc_offset_minutes = 0;
 static int64_t s_last_fired_minute = -1;
 
+/* A scheduled reboot/restart persists the minute it fired in: the board is
+ * back within seconds, still inside that minute, and without the marker it
+ * fired the same entry again (2026-09-04, Wood7.3: two reboots in one
+ * minute). Only a marker from the last few minutes is honoured at boot; an
+ * older one would make the catch-up replay hours of stale scene changes. */
+#define SCHEDULE_FIRED_NVS_KEY "sched_fired"
+#define SCHEDULE_FIRED_MARKER_MAX_MINUTES 3
+
+static void persist_fired_minute(int64_t minute)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_i64(nvs, SCHEDULE_FIRED_NVS_KEY, minute);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+static int64_t load_persisted_fired_minute(void)
+{
+    int64_t minute = -1;
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) == ESP_OK) {
+        if (nvs_get_i64(nvs, SCHEDULE_FIRED_NVS_KEY, &minute) != ESP_OK) minute = -1;
+        nvs_close(nvs);
+    }
+    return minute;
+}
+
 static bool ensure_lock(void)
 {
     if (s_lock == NULL) s_lock = xSemaphoreCreateMutex();
@@ -286,6 +315,7 @@ static void fire_event(const schedule_event_t *event)
          * line. One process here, so restarting the runtime and rebooting
          * the board are the same thing. The log line above is what the owner
          * sees; flush it and let the upload go out before the reset. */
+        persist_fired_minute(s_last_fired_minute);
         frameos_nim_flush_logs();
         vTaskDelay(pdMS_TO_TICKS(1500));
         esp_restart();
@@ -315,15 +345,22 @@ bool fos_schedule_tick(void)
     int offset_minutes = fos_tz_active() ? fos_tz_offset_minutes(now) : s_utc_offset_minutes;
     time_t local = now + (time_t)offset_minutes * 60;
     int64_t minute_key = (int64_t)local / 60;
-    if (minute_key == s_last_fired_minute) return false;
     /* First tick with a valid clock (boot, or SNTP landing late): treat the
-     * current minute as un-evaluated. A quick reboot may re-fire an event
-     * from the same minute — harmless for idempotent scene selects — but the
-     * alternative (arming ON the minute) swallowed events whose minute
-     * arrived while the clock was still syncing or a render was running. */
+     * current minute as un-evaluated — the alternative (arming ON the minute)
+     * swallowed events whose minute arrived while the clock was still syncing
+     * or a render was running. The one exception is the minute a scheduled
+     * reboot itself fired in (persisted below): re-evaluating it rebooted the
+     * board again. */
     if (s_last_fired_minute < 0) {
-        s_last_fired_minute = minute_key - 1;
+        int64_t persisted = load_persisted_fired_minute();
+        if (persisted >= 0 && minute_key >= persisted &&
+            minute_key - persisted <= SCHEDULE_FIRED_MARKER_MAX_MINUTES) {
+            s_last_fired_minute = persisted;
+        } else {
+            s_last_fired_minute = minute_key - 1;
+        }
     }
+    if (minute_key == s_last_fired_minute) return false;
     int64_t from = s_last_fired_minute + 1;
     if (minute_key - from >= SCHEDULE_CATCH_UP_MAX_MINUTES) {
         /* A very long gap (deep sleep, NTP step): evaluate only the recent

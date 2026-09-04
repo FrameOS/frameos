@@ -455,7 +455,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `next_wake_at` — was not exercised before deploy. On a deep-sleeping
   E1004: the fleet tile's image updates after a wake, and an `image_get`
   queued mid-sleep survives the 15-minute nap instead of expiring.
-- [ ] **Scheduled reboot on ESP32 (#376):** same schedule-entry test as the
+- [x] **Scheduled reboot on ESP32 (#376)** — fired 2026-09-04 on Wood7.3 (2026.9.4, Europe/Brussels): entry 12:53 → `schedule:fire {hour 12, minute 53, name reboot}` at 10:53:00 UTC → `cloud:session_ready uptimeSeconds 9`. **Found: it fired twice.** The board was back at 10:53:13, still inside minute 12:53, and fired the same entry again at 10:53:52 → second reboot at 10:54:03. The ESP32 keeps its last-fired marker in RAM, so a reboot/restart entry re-fires for the rest of its minute (a slower board could loop 2–3 times). The Pi (uus2w, 12:15) came back at 12:15:57 and did not re-fire — three seconds from the same bug. Fixed on main 2026-09-04: both schedulers persist the minute a reboot/restart entry fired in (NVS `sched_fired` on ESP32, `state/scheduler-last-fired` on the Pi) and honour it for up to 3 minutes at start (`test_scheduler.nim`). Also covers the ESP32 time-zone box's scheduler half: the entry fired at the local time. Original text: same schedule-entry test as the
   Pi, on a board.
 - [ ] **WPA2 provisioning AP (#443):** erase Wi-Fi on a board → the portal
   screen shows "Wi-Fi: FrameOS-XXXX" and a "Password:" line; a phone joins

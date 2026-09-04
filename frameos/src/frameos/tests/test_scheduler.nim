@@ -2,6 +2,7 @@ import unittest
 import options
 import std/times
 import std/json
+import std/os
 import ../scheduler
 import ../utils/local_time
 import ../types
@@ -293,6 +294,52 @@ suite "Scheduler Tests (Various Time Configurations)":
     let events = drainEvents()
     check events.len == 1
     check events[0][1] == "evtMidnight"
+
+  test "a scheduled reboot persists its minute and the marker is honoured only briefly":
+    # 2026-09-04, Wood7.3: the board was back inside the minute a scheduled
+    # reboot fired in and rebooted again. The marker survives the process.
+    let dir = getTempDir() / ("frameos-sched-marker-" & $epochTime().int64)
+    createDir(dir)
+    let previousPath = schedulerFiredMarkerPath
+    schedulerFiredMarkerPath = dir / "scheduler-last-fired"
+    try:
+      var config = new(FrameConfig)
+      config.debug = false
+      config.schedule = FrameSchedule(events: @[
+        ScheduledEvent(id: "nightly", minute: 2, hour: 1, weekday: 0, event: "reboot", payload: %*{}),
+        ScheduledEvent(id: "scene", minute: 2, hour: 1, weekday: 0, event: "setCurrentScene",
+          payload: %*{"sceneId": "x"}),
+      ])
+      let logger = newLogger(config)
+      var scheduler = Scheduler(frameConfig: config, logger: logger)
+      clearEventChannel()
+      let fired = dateTime(2026, mSep, 4, 1, 2, 30)
+      scheduler.handleSchedule(fired)
+      check drainEvents().len == 2
+      check fileExists(schedulerFiredMarkerPath)
+      let minute = fired.toTime().toUnix() div 60
+      check readFile(schedulerFiredMarkerPath) == $minute
+      # The new process starts in the same minute: that minute is done.
+      check resumeLastFiredMinute(minute) == minute
+      check resumeLastFiredMinute(minute + 3) == minute
+      # Long after, or before (clock stepped back): a fresh start.
+      check resumeLastFiredMinute(minute + 4) == int64.low
+      check resumeLastFiredMinute(minute - 1) == int64.low
+      # A scene-only minute writes no marker.
+      removeFile(schedulerFiredMarkerPath)
+      config.schedule = FrameSchedule(events: @[
+        ScheduledEvent(id: "scene", minute: 5, hour: 1, weekday: 0, event: "setCurrentScene",
+          payload: %*{"sceneId": "x"}),
+      ])
+      clearEventChannel()
+      scheduler.handleSchedule(dateTime(2026, mSep, 4, 1, 5, 0))
+      check drainEvents().len == 1
+      check not fileExists(schedulerFiredMarkerPath)
+      # No marker at all: never fired.
+      check resumeLastFiredMinute(minute) == int64.low
+    finally:
+      schedulerFiredMarkerPath = previousPath
+      removeDir(dir)
 
 suite "Scheduler time zone":
   # 2026-08-21 23:02 UTC = 2026-08-22 01:02 CEST (Europe/Brussels, DST).
