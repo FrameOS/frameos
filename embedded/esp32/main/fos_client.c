@@ -1238,6 +1238,17 @@ static void client_task(void *arg)
         }
     }
     while (true) {
+        /* The provisioning portal owns the panel: its screen carries the
+         * hotspot name and passphrase, and the first scene render painted
+         * straight over it (2026-09-04, E1002 showed the word clock while
+         * the owner was looking for the hotspot details). Hold here until
+         * the stored network answers — on_portal_exit renders — or the
+         * portal is left for good. Signals that arrive meanwhile (a button,
+         * a schedule tick) are honoured by the pass after that. */
+        if (fos_wifi_state() == FOS_WIFI_PORTAL) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
         int64_t cycle_start = esp_timer_get_time();
 
         /* Interpreted scenes: pick up backend changes and any payload

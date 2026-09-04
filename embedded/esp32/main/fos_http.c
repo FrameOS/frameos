@@ -595,8 +595,14 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         "<form method='POST' action='/api/setup'>") != ESP_OK) return ESP_FAIL;
 
     if (send_input(req, "Wi-Fi network", "ssid", "text", config->wifi_ssid, " required") != ESP_OK) return ESP_FAIL;
+    /* "Leave blank to keep current" is only true when there is a current
+     * password. With none stored (a fresh device, or `wifi <ssid>` on the
+     * console with no password) the blank kept an empty password and the
+     * join failed with no_ap_found_with_compatible_security (2026-09-04). */
     if (send_input(req, "Wi-Fi password", "pass", "password", "",
-                   " autocomplete='new-password' placeholder='Leave blank to keep current password'") != ESP_OK) {
+                   config->wifi_pass[0]
+                       ? " autocomplete='new-password' placeholder='Leave blank to keep current password'"
+                       : " autocomplete='new-password' placeholder='No password saved: enter it (blank = open network)'") != ESP_OK) {
         return ESP_FAIL;
     }
     if (send_input(req, "Backend URL", "backend", "text", config->backend_url,
@@ -665,10 +671,17 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     }
     if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
 
-    if (sendstr(req, "<label for='render_mode'>Render mode</label><select id='render_mode' name='render_mode'>") != ESP_OK) return ESP_FAIL;
-    if (send_option(req, "0", "On device (Nim runtime)", config->render_mode == FOS_RENDER_LOCAL) != ESP_OK) return ESP_FAIL;
-    if (send_option(req, "1", "Thin client (backend renders)", config->render_mode == FOS_RENDER_REMOTE) != ESP_OK) return ESP_FAIL;
-    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+    /* Thin-client rendering exists for boards that cannot run the Nim
+     * runtime (no PSRAM: the C3 thin clients). Where the runtime is
+     * present and in use the choice is noise — a field left out of the form
+     * keeps its current value in the POST handler — so it only shows when it
+     * can matter: no runtime in this image, or the frame is already remote. */
+    if (!frameos_nim_available() || config->render_mode == FOS_RENDER_REMOTE) {
+        if (sendstr(req, "<label for='render_mode'>Render mode</label><select id='render_mode' name='render_mode'>") != ESP_OK) return ESP_FAIL;
+        if (send_option(req, "0", "On device (Nim runtime)", config->render_mode == FOS_RENDER_LOCAL) != ESP_OK) return ESP_FAIL;
+        if (send_option(req, "1", "Thin client (backend renders)", config->render_mode == FOS_RENDER_REMOTE) != ESP_OK) return ESP_FAIL;
+        if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+    }
 
     if (sendstr(req, "<label for='server_send_logs'>Backend logs</label><select id='server_send_logs' name='server_send_logs'>") != ESP_OK) return ESP_FAIL;
     if (send_option(req, "1", "Send render/runtime logs", config->server_send_logs) != ESP_OK) return ESP_FAIL;
