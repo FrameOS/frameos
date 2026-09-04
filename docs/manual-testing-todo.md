@@ -130,7 +130,33 @@ hardware-settings batch) and the battery ADC rounds of #426.
   the first-boot journal shows `FrameOS setup: driver setup: complete`
   (and, for an SPI panel, `dtoverlay`/`dtparam` lines in `/boot/config.txt`
   on the very first boot).
-- [ ] **Panel link code (#379):** boot an unclaimed frame in cloud mode with
+- [ ] **Panel link code (#379)** — IN PROGRESS 2026-09-04 21:45 local on
+  uus2w: a cloud-builder card with the `claim_token=` line blanked
+  (`~/Downloads/…-linkcode.img.gz`, region kept at 4096 bytes) booted
+  standalone on Wi-Fi with the SSH key (`no claim_token in
+  frameos-cloud.txt; skipping cloud enrollment state`, as the first-boot
+  script says). **Two findings on the way:** (1) the panel said "Open
+  http://frame.local:8787 to add one" — `system/index/scene.nim` prints
+  frame.json's `frameHost`, still the image default, while the card's mDNS
+  name is `uus2w.local`; fixed on main: the index derives `<hostname>.local`
+  from `/etc/hostname` when `frameHost` is the default and the hint carries
+  the plain IP URL too. (2) that URL answers a bare `401 Unauthorized` from
+  the LAN with no way in: `frameAccess: private` + a minted `frameAccessKey`
+  + no admin credentials → the admin panel is disabled, `/` has nowhere to
+  redirect (`web_routes.nim:78`), and `/setup` GET/POST are served **only
+  while the hotspot is active** — so nothing on the LAN can queue the panel
+  link code the box asks for. User's decision (the key must stay; an
+  untrusted LAN gets nothing without it): the index screen prints the
+  `/?k=<accessKey>` link in the "open this" hint while the frame is still
+  unconfigured (no admin login); fixed on main in the same scene. For this
+  run the link was queued over SSH by writing the file the portal writes
+  (`state/cloud_link_code_pending.json` = `{"provider_url": …, "starts": 0}`,
+  owned by `frameos`); the hub thread started the device flow within
+  seconds (`cloud:linkCode:shown start:1`, `verification_uri_complete:
+  https://cloud.frameos.net/device?user_code=6XGN-Q8B4`), and the panel
+  code rotates every ~10 minutes (`LINK_CODE_MAX_STARTS` = 12) while nobody
+  claims it — start 7 by 21:45. Claim + retire still to be observed.
+  Original text: boot an unclaimed frame in cloud mode with
   no claim code → the panel renders the link code + QR → complete the claim
   from an account, and confirm the code retires once connected.
 - [x] **Scheduled reboot on Pi (#376)** — passed 2026-09-04 on uus2w (2026.9.4, `frameos` user): a `reboot` entry for 12:15 Europe/Brussels pushed from the cloud → `scheduler:loaded … nextDue Fri 12:15 reboot` → at 12:15:00 local `scheduler:fire {id, action: reboot}` → door `executing reboot` → the Pi rebooted and came back. Original text: add a `reboot` schedule entry from

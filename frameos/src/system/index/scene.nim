@@ -107,6 +107,23 @@ proc defaultRouteInterface*(): string =
     discard
   ""
 
+proc mdnsHostname*(): string =
+  ## `<hostname>.local` for the name the system actually carries (first boot
+  ## writes /etc/hostname from the card's frame name); empty for the image
+  ## default `frame`, so callers fall back to whatever frame.json says.
+  when defined(frameosWasm) or defined(frameosEmbedded):
+    ""
+  else:
+    var name = ""
+    try:
+      if fileExists("/etc/hostname"):
+        name = readFile("/etc/hostname").strip()
+    except CatchableError:
+      discard
+    if name.len == 0 or name == "frame" or name == "localhost" or name.contains('.'):
+      return ""
+    name & ".local"
+
 proc primaryIpAddress*(): string =
   ## The local address the kernel would route external traffic through:
   ## "connect" a UDP socket to a public address (no packet is sent) and read
@@ -235,12 +252,42 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
       "not connected"
   # 0.0.0.0 means "listening everywhere" — as a URL it helps nobody, so show
   # the address the network actually reaches this frame on when we know it.
+  # The image default `frame.local` is just as useless once first boot has
+  # given the card its own hostname (a cloud card is named after its frame,
+  # `uus2w.local`, and two cards on one network cannot both be frame.local):
+  # advertise the name the network really resolves.
   let configuredFrameHost = if frameConfig.frameHost.len > 0: frameConfig.frameHost else: "0.0.0.0"
+  let mdnsHost = mdnsHostname()
   let frameHost =
     if configuredFrameHost == "0.0.0.0" and ipAddress.len > 0: ipAddress
+    elif configuredFrameHost in ["0.0.0.0", "frame.local"] and mdnsHost.len > 0: mdnsHost
     else: configuredFrameHost
   let framePort = if publicPort(frameConfig) > 0: $publicPort(frameConfig) else: "?"
   let frameUrl = &"{publicScheme(frameConfig)}://{frameHost}:{framePort}"
+  # A name that needs mDNS to resolve is not always enough (phones, VPNs,
+  # Windows without Bonjour), so the "open this" hint also carries the plain
+  # address when the two differ.
+  let ipUrl =
+    if ipAddress.len > 0 and frameHost != ipAddress: &"{publicScheme(frameConfig)}://{ipAddress}:{framePort}"
+    else: ""
+  # A private frame with no admin login answers that URL with a bare 401 and
+  # nothing on the page says why: the only key that opens it is
+  # frameAccessKey, which nothing ever shows the owner (2026-09-04, a cloud
+  # card booted without a claim token). Decision: while the frame is still
+  # unconfigured — nothing installed, nobody managing it — the panel prints
+  # the `?k=` link. Whoever can read the display may set the frame up, which
+  # is the same trust the setup hotspot extends; the moment an admin login
+  # exists `/` redirects to it instead, so the key stays off the panel.
+  let adminAuth = if frameConfig.frameAdminAuth == nil: newJObject() else: frameConfig.frameAdminAuth
+  let adminPanel = adminAuth{"enabled"}.getBool(false) and
+    adminAuth{"user"}.getStr("").len > 0 and adminAuth{"pass"}.getStr("").len > 0
+  let accessQuery =
+    if frameConfig.frameAccess == "private" and not adminPanel and frameConfig.frameAccessKey.len > 0:
+      "/?k=" & frameConfig.frameAccessKey
+    else: ""
+  let openHint =
+    if ipUrl.len > 0: &"{frameUrl}{accessQuery} (or {ipUrl}{accessQuery})"
+    else: frameUrl & accessQuery
   # Cloud-managed frames take remote commands over the provider link even
   # when the self-hosted agent flag is off — "disabled" would be a lie there.
   let linkState = loadCloudLinkState()
@@ -277,7 +324,7 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
       if cloudConnected: "Connected to FrameOS Cloud. Add a scene from the workspace to get started."
       elif cloudManaged: "Connecting to FrameOS Cloud…"
       elif managedVia.startsWith("self-hosted"): "Waiting for the backend to deploy a scene."
-      else: &"No scenes installed yet. Open {frameUrl} to add one."
+      else: &"No scenes installed yet. Open {openHint} to add one."
     result.notes = @["No scenes installed yet."]
   else:
     result.status =
