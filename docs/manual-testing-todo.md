@@ -176,7 +176,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   paths are tested — keep the manifest commit the workflow makes. If the
   base build is slow or fails for one platform, the release can still be
   cut from the old bases (the merge path); note which path 9.3 used.
-- [ ] **3. Cut 2026.9.3** — started 2026-09-04 00:57 UTC from `a3e7e0bf`
+- [x] **3. Cut the release** — 2026.9.3 failed to compose (read-only $service_root in the user merge, fixed 4827756e); 2026.9.4 is the first published door release. Original notes: — started 2026-09-04 00:57 UTC from `a3e7e0bf`
   (run 33815437078). Note: the release commit predates `4337e51d`, so 9.3
   cards still carry the first-boot driver-setup cwd bug (framebuffer cards
   unaffected; an SPI panel on a *fresh* 9.3 card gets its overlays from the
@@ -192,15 +192,27 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   pi5, enroll into the cloud, run the "boots and renders as `frameos`",
   "door answers", "hotspot and portal" and "runtime cannot escalate"
   boxes below. Then `raspberry-pi-64` 9.3 on pi2w for the same boxes.
-- [ ] **5. Migration on one cloud Buildroot frame** (the less important
-  one): "Upgrade FrameOS" 9.2 → 9.3, watch `upgrade-status.json` in the
-  frame's log stream, then the SPI panel refresh time (slow = bit-banged
-  fallback = wrong device group), `journalctl -u frameos-privileged`,
-  `/etc/passwd` has `frameos:x:990:990`, `systemctl show -p User
-  frameos.service`. Only then the second frame.
-- [ ] **6. piw stays root:** OTA 9.2 → 9.3 on piw; `User=root`, no
-  `frameos-privileged.path` active (the unit is installed but disabled on
-  root frames), hotspot/portal still works through `supplicant.nim`.
+- [ ] **5. Migration to the `frameos` user on a NetworkManager frame** —
+  NOT yet done. This needs a raspberry-pi-64 / pi-5 frame (Cloud-W is
+  armv6, so it stays root and does not exercise the flip). As of the
+  2026-09-04 fleet OTA the NM Buildroot frames were: `uus2w` on 2026.9.4
+  and connected (a candidate — needs SSH to confirm `User=frameos`,
+  uid 990, `/srv/frameos/privileged/queue` present, door `.path` active),
+  `Cloud-5` still on 2026.9.1 and disconnected (never took the OTA — bring
+  it online and retry), `Cloud-2W` on 2026.8.26 offline since Aug 21.
+  When run: watch `upgrade-status.json`, then SPI panel refresh time
+  (slow = bit-banged fallback = wrong device group), `journalctl -u
+  frameos-privileged`, `/etc/passwd` has `frameos:x:990:990`,
+  `systemctl show -p User frameos.service` = `frameos`.
+- [x] **6. armv6 stays root** — verified 2026-09-04 on Cloud-W (Zero W,
+  raspberry-pi-32) after the fleet OTA to 2026.9.4. `systemctl show -p User
+  frameos.service` = `root`, runtime + udhcpc run as root, no `frameos`
+  user in /etc/passwd, `/srv/frameos/privileged` does not exist. The door
+  units and udev rule are installed but `frameos-privileged.path` is
+  `disabled`/`inactive` — exactly the root-frame shape. Binary stamped
+  `2026.9.4+9a032fcb` and reports 2026.9.4 (the version fix works end to
+  end). Renders on framebuffer after the restart. Still to try on a real
+  bench piw: the hotspot/portal round trip through supplicant.nim.
 - [ ] **7. Regressions:** deploy from localhost:8616 to one Waveshare frame
   (still root, still renders); after the HA add-on has the 9.3 image, deploy
   to one HA frame. Neither should have a `frameos` user or the door active.
