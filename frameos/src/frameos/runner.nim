@@ -340,10 +340,15 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       currentScene.isRendering = true
       self.triggerRenderNext = false # used to debounce render events received while rendering
 
-      let interval = currentScene.refreshInterval
       var renderResult = self.renderSceneImage(exportedScene.get(), currentScene)
       var lastRotatedImage = renderResult[0]
       let nextSleep = renderResult[1]
+      # Read the interval AFTER the render: a scene that paces itself while
+      # drawing (the animated status screen sets `refreshInterval` from the
+      # measured frame cost) must be honoured on its very first frame. Read
+      # before, the first cycle after every runtime start slept the scene's
+      # init default — five static minutes of logo before the animation began.
+      let interval = currentScene.refreshInterval
       reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
       # Refresh the scene's snapshot on a switch, and otherwise whenever the
       # one on disk has gone stale. Writing it only once per scene — which is

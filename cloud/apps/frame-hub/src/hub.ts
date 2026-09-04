@@ -441,9 +441,15 @@ export async function startFrameHub(
 
   // Delivery is at-least-once. The device acks by command id and every command
   // type is idempotent on the device side (set_scenes/set_settings overwrite,
-  // render/reboot/restart_runtime repeat an action that is safe to repeat and
-  // carry a 5-minute TTL that expireStaleCommands enforces), so redelivering
-  // an unacked command is preferable to stranding it.
+  // render repeats an action that is safe to repeat, and all carry a 5-minute
+  // TTL that expireStaleCommands enforces), so redelivering an unacked command
+  // is preferable to stranding it.
+  //
+  // The exceptions are reboot and restart_runtime: a device that received one
+  // of those goes down, and the disconnect is the expected effect, not a lost
+  // write. Redelivering one on every reconnect rebooted a bench frame in a loop
+  // until the command's TTL ran out (2026-09-04), so once written to a socket
+  // they are never requeued.
   //
   // Two ways a command in "sent" needs redelivering: the socket died between
   // the write and the ack (caught on reconnect, cutoff = now, because nothing
@@ -451,6 +457,17 @@ export async function startFrameHub(
   // still-live connection (caught by the sweep, cutoff = now minus the grace
   // period).
   async function redeliverSentCommands(frameId: string, cutoff: Date) {
+    await db
+      .update(frameCommands)
+      .set({ error: "delivered_once", status: "expired" })
+      .where(
+        and(
+          eq(frameCommands.frameId, frameId),
+          eq(frameCommands.status, "sent"),
+          lt(frameCommands.sentAt, cutoff),
+          inArray(frameCommands.type, ["reboot", "restart_runtime"]),
+        ),
+      );
     // supersedePendingCommands (auth-web) only rewrites "pending" rows, so a
     // set_scenes that was written but never acked can still be sitting in
     // "sent" when a newer one is queued. Redelivering the stale one first

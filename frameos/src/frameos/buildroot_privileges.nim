@@ -105,12 +105,20 @@ proc buildrootServiceUser*(frameConfig: FrameConfig, installedUser: string,
   ## writes release directories as root, so a `frameos` runtime could not
   ## even open its own frame.json there. `FRAMEOS_BUILDROOT_SERVICE_USER`
   ## overrides both, for recovery over a console.
+  ##
+  ## "Backend-managed" means a backend can actually reach the frame: a
+  ## `serverHost`, or an enabled agent *with* a shared secret. Generic
+  ## images from before 2026-08-21 shipped `agentEnabled: true` with an
+  ## empty secret as a default, which no backend can use — treating that
+  ## as managed kept a FrameOS Cloud frame (Cloud-5, 2026-09-04) on root
+  ## through the 9.4 upgrade instead of migrating it.
   let override = getEnv("FRAMEOS_BUILDROOT_SERVICE_USER").strip()
   if override.len > 0:
     return override
+  let agentUsable = frameConfig != nil and frameConfig.agent != nil and
+    frameConfig.agent.agentEnabled and frameConfig.agent.agentSharedSecret.strip().len > 0
   let backendManaged = frameConfig != nil and (
-    frameConfig.serverHost.strip().len > 0 or
-    (frameConfig.agent != nil and frameConfig.agent.agentEnabled))
+    frameConfig.serverHost.strip().len > 0 or agentUsable)
   if backendManaged:
     return if installedUser.len > 0: installedUser else: "root"
   if not usesNetworkManager:

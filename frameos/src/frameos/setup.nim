@@ -577,6 +577,60 @@ proc setupNetworkServiceEth0Guard*(liveApply = true, dropinPath = networkService
   else:
     setupLog("FrameOS setup: network.service eth0 guard: deferring restart; applies at the next reboot")
 
+const dropbearHostKeyDropinPath = "/etc/systemd/system/dropbear.service.d/10-frameos-hostkey.conf"
+const dropbearHostKeyDir = "/srv/frameos/state/dropbear"
+const dropbearHostKeyDropin = """# FrameOS: the root filesystem is read-only, so dropbear's own -R could never
+# write a host key into /etc/dropbear and every SSH connection died at key
+# exchange (2026-09-04 bench: uus2w, Cloud-5). Keep the host key on the
+# persistent FrameOS partition instead. $DROPBEAR_ARGS still comes from
+# /etc/default/dropbear, so the root-password / key-only toggle is untouched.
+[Unit]
+RequiresMountsFor=/srv/frameos
+[Service]
+ExecStartPre=/bin/sh -c 'mkdir -p -m 700 """ & dropbearHostKeyDir & """ && { test -s """ &
+  dropbearHostKeyDir & """/dropbear_ed25519_host_key || /usr/bin/dropbearkey -t ed25519 -f """ &
+  dropbearHostKeyDir & """/dropbear_ed25519_host_key; }'
+ExecStart=
+ExecStart=/usr/sbin/dropbear -F -r """ & dropbearHostKeyDir & """/dropbear_ed25519_host_key $DROPBEAR_ARGS
+"""
+
+proc setupDropbearHostKey*(liveApply = true, dropinPath = dropbearHostKeyDropinPath): SetupResult =
+  ## Buildroot images run dropbear with `-R` on a read-only rootfs, so the host
+  ## key it would generate on the first connection never lands and SSH fails
+  ## at key exchange. This drop-in generates an ed25519 key on the persistent
+  ## partition before start and hands it to dropbear with `-r`.
+  result = setupOk()
+  if not commandExists("systemctl"):
+    setupLog("FrameOS setup: dropbear host key: systemctl not found, skipping")
+    return
+  if not commandSucceeds("systemctl cat dropbear.service >/dev/null 2>&1"):
+    setupLog("FrameOS setup: dropbear host key: no dropbear.service on this image, skipping")
+    return
+  var current = ""
+  try:
+    if fileExists(dropinPath):
+      current = readFile(dropinPath)
+  except CatchableError:
+    discard
+  if current.contains(dropbearHostKeyDir):
+    setupLog("FrameOS setup: dropbear host key: already in place")
+    return
+  setupLog("FrameOS setup: dropbear host key: installing drop-in")
+  withWritableMount(dropinPath):
+    discard runSetupCommand(privilegedCommand("install -d -m 755 " & shellQuote(parentDir(dropinPath))),
+      raiseOnError = false)
+    writePrivilegedFile(dropinPath, dropbearHostKeyDropin)
+  if liveApply:
+    discard runSetupCommand(privilegedCommand("systemctl daemon-reload"), raiseOnError = false)
+    # A restart kills dropbear's control group, i.e. every SSH session
+    # including the one a deploy may be running over. Only restart a unit
+    # that is already failed (nothing to cut); a running dropbear picks the
+    # drop-in up on the next boot.
+    if commandSucceeds("systemctl is-failed --quiet dropbear.service"):
+      discard runSetupCommand(privilegedCommand("systemctl restart dropbear.service"), raiseOnError = false)
+  else:
+    setupLog("FrameOS setup: dropbear host key: deferring restart; applies at the next reboot")
+
 proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
   let normalizedDir = currentDir.strip(chars = {'/'})
   if normalizedDir.len == 0:
@@ -719,11 +773,15 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     # Retrofits for frames flashed from base images that predate the rootfs
     # fixes: DNSSEC validation off (Buildroot's resolved default breaks all
     # DNS behind many consumer routers) and no phantom failed network.service
-    # on boards without eth0. New images ship both in the rootfs, making
-    # these steps no-ops there.
+    # on boards without eth0, and dropbear's host key on the persistent
+    # partition (the rootfs is read-only, so `-R` could never write one).
+    # New images ship all three in the rootfs, making these steps no-ops
+    # there.
     addSetupResult(result, runSetupStep("resolved DNSSEC off", proc(): SetupResult = setupResolvedDnssec(liveApply)))
     addSetupResult(result, runSetupStep("network.service eth0 guard",
       proc(): SetupResult = setupNetworkServiceEth0Guard(liveApply)))
+    addSetupResult(result, runSetupStep("dropbear host key",
+      proc(): SetupResult = setupDropbearHostKey(liveApply)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if frameOS.frameConfig.mode == "buildroot":
     # Last, after everything above may have created root-owned files under

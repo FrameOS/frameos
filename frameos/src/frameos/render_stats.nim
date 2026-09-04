@@ -21,9 +21,12 @@ proc lastDriverRenderSeconds*(): float {.gcsafe.} =
       result = driverRenderSeconds
 
 proc pacedRenderInterval*(sceneSeconds: float, driverSeconds: float,
-    dutyCycle = 0.2, minSeconds = 0.1, maxSeconds = 3.0): float =
+    dutyCycle = 0.2, minSeconds = 0.1, maxSeconds = 1.0): float =
   ## Seconds to wait between animation frames so that drawing + pushing a
   ## frame takes at most `dutyCycle` of the time: a fast board animates
-  ## smoothly, a slow one steps — neither pegs its CPU showing a logo.
+  ## smoothly, a slow one steps — neither pegs its CPU showing a logo. The
+  ## ceiling is one step a second: a Zero 2 W pushing 1080p (~0.65 s a
+  ## frame) spends most of one of its four cores on the logo rather than
+  ## stepping every three seconds, which reads as broken.
   let cost = max(sceneSeconds, 0.0) + max(driverSeconds, 0.0)
   clamp(cost / dutyCycle, minSeconds, maxSeconds)

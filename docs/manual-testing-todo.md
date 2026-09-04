@@ -192,14 +192,115 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   pi5, enroll into the cloud, run the "boots and renders as `frameos`",
   "door answers", "hotspot and portal" and "runtime cannot escalate"
   boxes below. Then `raspberry-pi-64` 9.3 on pi2w for the same boxes.
-- [ ] **5. Migration to the `frameos` user on a NetworkManager frame** —
-  NOT yet done. This needs a raspberry-pi-64 / pi-5 frame (Cloud-W is
-  armv6, so it stays root and does not exercise the flip). As of the
-  2026-09-04 fleet OTA the NM Buildroot frames were: `uus2w` on 2026.9.4
-  and connected (a candidate — needs SSH to confirm `User=frameos`,
-  uid 990, `/srv/frameos/privileged/queue` present, door `.path` active),
-  `Cloud-5` still on 2026.9.1 and disconnected (never took the OTA — bring
-  it online and retry), `Cloud-2W` on 2026.8.26 offline since Aug 21.
+- [~] **5. Migration to the `frameos` user on a NetworkManager frame** —
+  IN PROGRESS 2026-09-04 on `Cloud-5` (Pi 5, `raspberry-pi-5`, framebuffer
+  800×480, NetworkManager). It took the OTA 2026.9.1 → 2026.9.4 at
+  07:49 UTC (`cloud:upgrade running`, target `debian-bookworm-arm64`), the
+  runtime restarted and reported 2026.9.4 with one metrics packet, then the
+  frame went **disconnected at 07:49:40** and stayed off for minutes while
+  every other 9.4 frame was connected — SSH verification pending. (It was
+  already logging `render:driver:retry` for the framebuffer every 60 s for
+  hours on 9.1, so an unlit HDMI there predates the migration.) Other NM
+  Buildroot frames: `uus2w` on 2026.9.4 and connected (second candidate —
+  needs SSH to confirm `User=frameos`, uid 990,
+  `/srv/frameos/privileged/queue` present, door `.path` active), `Cloud-2W`
+  on 2026.8.26 offline since Aug 21.
+  **uus2w verified offline 2026-09-04** (its SD card read on a Mac with
+  debugfs, no SSH on the card yet): it OTA'd 2026.9.1 → 2026.9.4 at
+  07:43 UTC; `state/upgrade-status.json` = `success` ("FrameOS upgraded to
+  2026.9.4. Restarting services."); `/etc/passwd` has
+  `frameos:x:990:990:FrameOS runtime:/srv/frameos:/bin/false`, `/etc/group`
+  `frameos:x:990:`; `/etc/systemd/system/frameos.service` is the hardened
+  unit (`User=frameos`, `Group=frameos`, `SupplementaryGroups=video input`,
+  `AmbientCapabilities=CAP_SYS_TTY_CONFIG`, `ProtectSystem=strict`, the
+  `ExecStartPre=+` chgrp/chmod pass); `frameos-privileged.service` +
+  `.path` installed and the `.path` linked from `multi-user.target.wants`;
+  `60-frameos-devices.rules` present; on `/srv/frameos`: `state`, `logs`,
+  `staging`, `runtime`, `tmp`, `privileged/queue` = `root:990 1770`,
+  `privileged/results` = `root:990 2750`, `privileged` = `root:990 0755`,
+  `releases/` + `current` root-owned. The post-boot journal capture
+  (`/boot/frameos-postboot-2min.log`) of the 08:11 UTC reboot shows the
+  unprivileged runtime booting, the network check passing, `nm-connections`
+  answered through the door (`portal:privileged ok`), the console claimed
+  (`driver:frameBuffer:consoleClaimed graphicsMode:true` — the keyboard is
+  swallowed with it, so a USB keyboard cannot reach the tty1 getty), and it
+  rendering + reconnecting to the cloud. Still to do over SSH once the key
+  works: `ps -o user= -C frameos`, `journalctl -u frameos-privileged`, the
+  link cases. Found on the way: `/etc/dropbear` on that card is empty and
+  dropbear closes every connection at key exchange (`-R` never generated
+  a host key); a `dropbear.service.d/10-hostkey.conf` drop-in running
+  `dropbearkey` was added by hand — and failed the same way, because
+  **the root filesystem is read-only on these images** (`withWritableMount`
+  in setup.nim is how `frameos setup` writes /etc): dropbear's `-R` can
+  never write `/etc/dropbear/`, so SSH on a generic Buildroot card only
+  works if the host key happened to be generated during a boot where root
+  was rw (Cloud-W: the first-boot script's `mount -o remount,rw /` is never
+  undone). Fix applied to both bench cards by hand and to be shipped: keep
+  the host key under `/srv/frameos/state/dropbear/` (`DROPBEAR_ARGS="-s -g
+  -r …"` + a `dropbear.service.d` drop-in that runs `dropbearkey` there).
+  **`Cloud-5` (Pi 5) took the same OTA at 07:49 UTC and has been
+  disconnected since — explained by its card's post-boot capture of the
+  08:30 UTC reboot:** the clock was still at 2025-06 (no RTC battery;
+  timesyncd's clock file cannot persist on the ro root), the network check
+  hit `certificate verify failed`, and the runtime's `syncClock()` → door
+  `sync-clock` → `systemctl restart systemd-timesyncd` was fired every 3 s,
+  nine times in 27 s, so timesyncd never completed a sync before the 30 s
+  budget ran out → `No network. Starting the setup hotspot…` →
+  `system/wifiHotspot` with a 3600 s sleep. The frame is alive (metrics in
+  its file log 08:16–08:32 UTC) but off the cloud for an hour at a time.
+  Fix needed: `sync-clock` must wait for timesyncd (or do one bounded
+  `ntpd -gq`/`sntp` step) instead of restarting it per retry, and the
+  cert-failure retry loop must not call it again while a sync is pending.
+  **Cloud-5's card read offline (11:20 local):** it never migrated at all —
+  no `frameos` user, unit `User=root`, no `/srv/frameos/privileged`,
+  `upgrade-status.json` stuck at `running` although `current` points at
+  the installed 9.4 release dir. Cause 1 (by the code's rule, wrong for
+  this frame): its `frame.json` carries `agent.agentEnabled=true` with an
+  empty `agentSharedSecret` (the Aug-16 image default; `frameos-remote.service`
+  is enabled on that card), and `buildrootServiceUser` treats any enabled
+  agent as backend-managed → keeps the installed user (root). A cloud frame
+  from a generic card must not be classified that way — tightened to
+  require a shared secret (a backend cannot use an agent without one).
+  Cause 2 (why the status never finalised): `upgrade.log` ends with the
+  9.1 runtime's `FRAMEOS_SERVICE_USER='root' ./frameos setup` of the 9.4
+  binary and not one line of that setup's output — the upgrade child was
+  killed when the service restarted, so the status stayed `running` and
+  no unit was rewritten; the runtime that came up was 9.4 as root. Cause 3
+  (why it then fell off the cloud): its boot clock. The Pi 5 has no RTC
+  battery and timesyncd's clock file on the ro root is 0 bytes dated
+  Aug 16, so every cold boot floors at Aug 16 → the cloud's current TLS
+  cert is "not yet valid" → the sync-clock restart loop above → hotspot
+  for an hour, then 5 min of index, then hotspot again (runtime log
+  08:06–08:10 UTC). Hand fix on the card: the clock file's mtime bumped to
+  now. Real fix: keep timesyncd's clock file on the persistent partition
+  (bind mount or `SystemdTimesyncClockFile`-style drop-in), and the
+  sync-clock fix above. Both bench cards also got `/root/.ssh/authorized_keys`
+  and the dropbear host-key drop-in by hand.
+  **Cloud-5 migrated by hand 2026-09-04 11:56 local** (over SSH, after
+  `agentEnabled` was set to false in its frame.json on the card): a
+  `frameos.service.d/10-wait-clock.conf` drop-in (hold the runtime up to
+  90 s until `date +%Y` ≥ 2026) fixed the cold boot — timesyncd synced at
+  09:54:25 UTC, the runtime started at :26, network check attempt 1 =
+  success, no hotspot. Then `./frameos setup` from `/srv/frameos/current`
+  ran the whole migration ladder (`frameos.service runs as frameos`,
+  `creating user frameos (uid 990)`, door units enabled, ownership applied,
+  the legacy `frameos-remote.service` wants link removed) and after
+  `daemon-reload` + `restart`: `User=frameos`, `ps` = `frameos 1090
+  frameos`, `.path` active + enabled, state/logs/staging/queue `root:frameos
+  1770`, results `2750`, `/` still `ro`, `cloud:hub:connected` at 09:57:21
+  UTC and the workspace shows it connected on 2026.9.4. So both NM bench
+  frames are migrated; the OTA-driven path did it on uus2w, the manual
+  `frameos setup` (same ladder) on Cloud-5. Still unlit: `/dev/fb0` does not
+  exist on this Pi 5 without an HDMI cable (`render:driver:retry` every
+  60 s) — predates everything above.
+  **Cloud reboot verb replays (found on uus2w 11:51):** the frame acks
+  `reboot` then reboots 2 s later through the door, but the hub kept the
+  command in `sent` and re-delivered it on every reconnect → a reboot loop
+  until the command's 5-min TTL (cancelled by hand via
+  `frame_command_cancel`). Fix: the hub must treat a `reboot` /
+  `restart_runtime` ack as terminal, or the runtime must wait for the ack
+  flush before rebooting (`hub_client.nim` "Delayed so the ack still
+  flushes" is not enough).
   When run: watch `upgrade-status.json`, then SPI panel refresh time
   (slow = bit-banged fallback = wrong device group), `journalctl -u
   frameos-privileged`, `/etc/passwd` has `frameos:x:990:990`,
@@ -224,7 +325,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   FRAMEOS partition layout is stamped by the composer, so a fresh card is
   always the known-good state.
 
-- [ ] **It boots and renders as `frameos`.** `systemctl show -p User
+- [x] **It boots and renders as `frameos`** — uus2w live 2026-09-04 11:48 (SSH after the dropbear fix): `User=frameos`, `ps` shows `frameos 262 frameos`, `/` mounted `ro`, `/srv/frameos` `rw`, `/dev/fb0` `/dev/tty1` `/dev/gpiochip0` are `root:frameos 660`, framebuffer renders (172 ms scene + 481 ms driver at 1080p). SPI panel not yet checked (no SPI frame with SSH). Original text: `systemctl show -p User
   frameos.service` says `frameos`, `ps -o user= -C frameos` agrees, and a
   scene renders. Check the panel you have: framebuffer (Pi 5 / HDMI) and at
   least one SPI e-ink (Waveshare 7.5" or 13.3E, Inky) — the SPI path is the
@@ -232,10 +333,10 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `DEV_Config.c` falls back to *bit-banged* SPI when it cannot open spidev,
   so a panel that works but refreshes slowly means the group is wrong; look
   for that, do not just trust a picture.
-- [ ] **The GPIO button and evdev input still fire** (groups `frameos` /
+- [ ] **The GPIO button and evdev input still fire** (uus2w has no buttons; the console claim itself is verified: `driver:frameBuffer:consoleClaimed graphicsMode:true`, no getty text over the image — and a USB keyboard cannot reach the getty, see step 5) (groups `frameos` /
   `input`), and the framebuffer console is claimed (no getty text over the
   image — that is `CAP_SYS_TTY_CONFIG` working).
-- [ ] **The door answers.** `journalctl -u frameos-privileged` after a
+- [x] **The door answers** — uus2w 2026-09-04 11:51: cloud Reboot → `FrameOS privileged: executing reboot (…)` → `> sh -c '(sleep 2; systemctl reboot || reboot) …'` → connection closed; `.path` active before and after. Original text: `journalctl -u frameos-privileged` after a
   reboot from the cloud/admin ("Reboot" button): one `executing reboot` line,
   then the reboot. `systemctl status frameos-privileged.path` is active.
 - [ ] **Hotspot and portal through the door.** Boot with no Wi-Fi
@@ -251,7 +352,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `install-release`): the status file goes `running` → `success`, the log
   shows the signature verified *twice* (once unprivileged, once as root),
   and the frame comes back on the new version.
-- [ ] **The runtime cannot escalate.** As `frameos` on the device (`su -s
+- [x] **The runtime cannot escalate** — uus2w 2026-09-04 11:49: as `frameos`, appending to `/srv/frameos/current/frameos` → `Permission denied`; to `/etc/systemd/system/frameos.service` → `Read-only file system`; queue file `{"id":"manual-shell","verb":"shell","args":{}}` → journal `refusing manual-shell.json: Unknown privileged verb: shell` (a malformed file is refused too: `input(1, 3) Error: { expected`); `stat` = `root:frameos 1770` for state/logs/staging/queue, `2750` results; door journal has 0 `psk`/`password` hits after the Wi-Fi join; `ln -s /etc …/queue/x.json` → worker ran once (`handled 0 request(s)`), removed it, settled `inactive`. Not yet: the result-path symlink and runtime-created `scenes/*.so` cases. Original text: As `frameos` on the device (`su -s
   /bin/sh frameos`): writing `/srv/frameos/current/frameos` fails, writing
   `/etc/systemd/system/frameos.service` fails, and a queue file with
   `{"id":"manual-shell","verb":"shell","args":{}}` is refused in the

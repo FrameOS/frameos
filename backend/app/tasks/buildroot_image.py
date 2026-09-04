@@ -947,6 +947,32 @@ ExecStop=/bin/sh -c 'if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifdown -a; f
 """
 
 
+BUILDROOT_DROPBEAR_HOSTKEY_DIR = "/srv/frameos/state/dropbear"
+BUILDROOT_DROPBEAR_DROPIN_PATH = "/etc/systemd/system/dropbear.service.d/10-frameos-hostkey.conf"
+BUILDROOT_DROPBEAR_DROPIN = f"""# FrameOS: the root filesystem is read-only, so dropbear's own -R could never
+# write a host key into /etc/dropbear, and every SSH connection to a generic
+# card died at key exchange (2026-09-04 bench: uus2w, Cloud-5 - the only
+# frame with a key was the one whose first boot had left / remounted rw).
+# Generate an ed25519 key on the persistent FrameOS partition before start
+# and hand it to dropbear with -r. $DROPBEAR_ARGS still comes from
+# /etc/default/dropbear, so the key-only / root-password toggle is untouched.
+# `frameos setup` installs the same drop-in on frames flashed before this.
+[Unit]
+RequiresMountsFor=/srv/frameos
+[Service]
+ExecStartPre=/bin/sh -c 'mkdir -p -m 700 {BUILDROOT_DROPBEAR_HOSTKEY_DIR} && {{ test -s {BUILDROOT_DROPBEAR_HOSTKEY_DIR}/dropbear_ed25519_host_key || /usr/bin/dropbearkey -t ed25519 -f {BUILDROOT_DROPBEAR_HOSTKEY_DIR}/dropbear_ed25519_host_key; }}'
+ExecStart=
+ExecStart=/usr/sbin/dropbear -F -r {BUILDROOT_DROPBEAR_HOSTKEY_DIR}/dropbear_ed25519_host_key $DROPBEAR_ARGS
+"""
+
+
+def stage_buildroot_dropbear_dropin(root: Path) -> None:
+    path = root / BUILDROOT_DROPBEAR_DROPIN_PATH.lstrip("/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(BUILDROOT_DROPBEAR_DROPIN, encoding="utf-8")
+    os.chmod(path, 0o644)
+
+
 def stage_buildroot_network_service_dropin(root: Path) -> None:
     path = root / BUILDROOT_NETWORK_SERVICE_DROPIN_PATH.lstrip("/")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1941,6 +1967,7 @@ class BuildrootImageBuilder:
         stage_buildroot_network_manager_state(overlay_dir)
         stage_buildroot_resolved_dropin(overlay_dir)
         stage_buildroot_network_service_dropin(overlay_dir)
+        stage_buildroot_dropbear_dropin(overlay_dir)
         stage_postboot_log(overlay_dir)
 
         if not frameos_build.binary_path:
@@ -2898,6 +2925,7 @@ fi
         # that derails the diagnosis. Refresh them here like the units above.
         stage_buildroot_resolved_dropin(service_root)
         stage_buildroot_network_service_dropin(service_root)
+        stage_buildroot_dropbear_dropin(service_root)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         # Refresh the first-boot setup script/unit and fstab on the root
         # partition so images composed from older cached base images pick up
@@ -3068,6 +3096,9 @@ write $service_root{BUILDROOT_RESOLVED_DROPIN_PATH} {BUILDROOT_RESOLVED_DROPIN_P
 mkdir /etc/systemd/system/network.service.d
 rm {BUILDROOT_NETWORK_SERVICE_DROPIN_PATH}
 write $service_root{BUILDROOT_NETWORK_SERVICE_DROPIN_PATH} {BUILDROOT_NETWORK_SERVICE_DROPIN_PATH}
+mkdir /etc/systemd/system/dropbear.service.d
+rm {BUILDROOT_DROPBEAR_DROPIN_PATH}
+write $service_root{BUILDROOT_DROPBEAR_DROPIN_PATH} {BUILDROOT_DROPBEAR_DROPIN_PATH}
 mkdir /usr
 mkdir /usr/local
 mkdir /usr/local/bin

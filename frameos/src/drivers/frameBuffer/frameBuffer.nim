@@ -417,38 +417,68 @@ proc render*(self: Driver, image: Image) =
       return
     let pixels = cast[ptr UncheckedArray[ColorRGBX]](unsafeAddr source.data[0])
 
+    # The conversion below is the runtime's hottest loop on an HDMI frame
+    # (2 M pixels a frame at 1080p, several frames a second while the status
+    # screen animates), so it runs on raw pointers with the layout decided
+    # once per frame, not per pixel. Every byte of the buffer is written by
+    # the loops (padding included), so no zeroing pass either.
     if self.renderBuffer.len != bufferLen:
       self.renderBuffer = newSeq[uint8](bufferLen)
-    else:
-      zeroMem(addr self.renderBuffer[0], bufferLen)
+    let buffer = cast[ptr UncheckedArray[uint8]](addr self.renderBuffer[0])
+    let padding = lineLength - rowBytes
     if bitsPerPixel == 16:
       for y in 0 ..< height:
         var j = y * lineLength
+        let row = y * width
         for x in 0 ..< width:
-          let color = pixels[y * width + x]
+          let color = pixels[row + x]
           let pixel = ((uint16(color.r) shr 3) shl 11) or ((uint16(
               color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
-          self.renderBuffer[j] = uint8(pixel and 0xff)
-          self.renderBuffer[j + 1] = uint8(pixel shr 8)
+          buffer[j] = uint8(pixel and 0xff)
+          buffer[j + 1] = uint8(pixel shr 8)
           j += 2
+        if padding > 0:
+          zeroMem(addr buffer[j], padding)
     else:
       let redByte = int(self.screenInfo.redOffset) div 8
       let greenByte = int(self.screenInfo.greenOffset) div 8
       let blueByte = int(self.screenInfo.blueOffset) div 8
       let alphaByte = int(self.screenInfo.alphaOffset) div 8
+      # A 32bpp framebuffer with no alpha channel (the common Pi case) still
+      # has a fourth byte per pixel; it is written as 0 rather than left to a
+      # separate zeroing pass over the whole buffer.
+      let hasAlpha = self.screenInfo.alphaLength > 0
+      let fillByte = if bytesPerPixel == 4 and not hasAlpha:
+          6 - redByte - greenByte - blueByte # the one offset not taken by a colour
+        else: -1
       for y in 0 ..< height:
         var j = y * lineLength
-        for x in 0 ..< width:
-          let color = pixels[y * width + x]
-          self.renderBuffer[j + redByte] = color.r
-          self.renderBuffer[j + greenByte] = color.g
-          self.renderBuffer[j + blueByte] = color.b
-
-          # Framebuffer could be 32bpp with 0 length alpha (effectively 24bpp)
-          # or 24bpp with 0 length alpha
-          if self.screenInfo.alphaLength > 0:
-            self.renderBuffer[j + alphaByte] = color.a
-          j += bytesPerPixel
+        let row = y * width
+        if hasAlpha:
+          for x in 0 ..< width:
+            let color = pixels[row + x]
+            buffer[j + redByte] = color.r
+            buffer[j + greenByte] = color.g
+            buffer[j + blueByte] = color.b
+            buffer[j + alphaByte] = color.a
+            j += bytesPerPixel
+        elif fillByte >= 0:
+          for x in 0 ..< width:
+            let color = pixels[row + x]
+            buffer[j + redByte] = color.r
+            buffer[j + greenByte] = color.g
+            buffer[j + blueByte] = color.b
+            buffer[j + fillByte] = 0
+            j += 4
+        else:
+          for x in 0 ..< width:
+            let color = pixels[row + x]
+            buffer[j + redByte] = color.r
+            buffer[j + greenByte] = color.g
+            buffer[j + blueByte] = color.b
+            j += bytesPerPixel
+        if padding > 0:
+          zeroMem(addr buffer[j], padding)
 
     discard fb.writeBuffer(addr self.renderBuffer[0], self.renderBuffer.len)
     fb.flushFile()

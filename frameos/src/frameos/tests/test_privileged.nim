@@ -1,4 +1,4 @@
-import std/[json, os, strutils, times]
+import std/[json, os, sequtils, strutils, times]
 when defined(posix):
   from std/posix import link, unlink, getuid, getpwuid
 import ../privileged
@@ -203,6 +203,55 @@ block test_atomic_write_replaces_a_symlink_without_touching_its_target:
       doAssert readFile(destination) == "safe"
     finally:
       removeDir(root)
+
+block test_sync_clock_waits_for_timesyncd_instead_of_restarting_it:
+  # 2026-09-04, Cloud-5: restarting timesyncd on every retry of the boot
+  # network check never let a sync finish. A running timesyncd is left alone;
+  # the verb succeeds once the synchronized marker appears.
+  let root = tempRoot("syncclock")
+  let systemdDir = root / "systemd"
+  let marker = root / "synchronized"
+  createDir(systemdDir)
+  var calls: seq[seq[string]] = @[]
+  setPrivilegedExecHookForTest(proc(program: string, args: seq[string], timeoutMs: int): tuple[rc: int, output: string] {.gcsafe.} =
+    {.gcsafe.}:
+      calls.add(@[program] & args)
+    (rc: 0, output: ""))
+  setClockSyncProbeForTest(systemdDir, marker, 3000)
+  try:
+    # Already synchronized: no restart, immediate ok.
+    writeFile(marker, "")
+    var res = executePrivilegedRequest(PrivilegedRequest(id: "c1", verb: pvSyncClock, args: newJObject()))
+    doAssert res.ok, res.error
+    doAssert calls.anyIt(it == @["systemctl", "is-active", "--quiet", "systemd-timesyncd.service"])
+    doAssert not calls.anyIt("restart" in it), "a running timesyncd must not be restarted: " & $calls
+    doAssert not calls.anyIt("start" in it)
+
+    # Not synchronized and the deadline passes: an error, still no restart.
+    removeFile(marker)
+    calls = @[]
+    res = executePrivilegedRequest(PrivilegedRequest(id: "c2", verb: pvSyncClock, args: newJObject()))
+    doAssert not res.ok
+    doAssert res.error.contains("not synchronized")
+    doAssert not calls.anyIt("restart" in it)
+
+    # timesyncd inactive: it is started (not restarted), then waited for.
+    calls = @[]
+    setPrivilegedExecHookForTest(proc(program: string, args: seq[string], timeoutMs: int): tuple[rc: int, output: string] {.gcsafe.} =
+      {.gcsafe.}:
+        calls.add(@[program] & args)
+      if args.len > 0 and args[0] == "is-active":
+        return (rc: 3, output: "")
+      (rc: 0, output: ""))
+    writeFile(marker, "")
+    res = executePrivilegedRequest(PrivilegedRequest(id: "c3", verb: pvSyncClock, args: newJObject()))
+    doAssert res.ok, res.error
+    doAssert calls.anyIt(it == @["systemctl", "start", "systemd-timesyncd.service"])
+    doAssert not calls.anyIt("restart" in it)
+  finally:
+    setPrivilegedExecHookForTest(nil)
+    setClockSyncProbeForTest("/run/systemd/system", "/run/systemd/timesync/synchronized", 45 * 1000)
+    removeDir(root)
 
 block test_worker_drains_queue_and_refuses_junk:
   let root = tempRoot("worker")
@@ -442,6 +491,14 @@ block test_buildroot_service_user_rule:
     "a generic frame upgraded from a root-only release migrates"
   doAssert buildrootServiceUser(config, "root", usesNetworkManager = false) == "root",
     "the wpa_supplicant image stays root"
+  # An enabled agent with no shared secret is the old generic-image default,
+  # not a backend: such a frame still migrates.
+  config = parseFrameConfig("""{"mode": "buildroot", "serverHost": "", "agent": {"agentEnabled": true, "agentSharedSecret": ""}}""")
+  doAssert buildrootServiceUser(config, "root", usesNetworkManager = true) == "frameos",
+    "agentEnabled without a secret is not backend-managed"
+  config = parseFrameConfig("""{"mode": "buildroot", "serverHost": "", "agent": {"agentEnabled": true, "agentSharedSecret": "s3cret"}}""")
+  doAssert buildrootServiceUser(config, "root", usesNetworkManager = true) == "root",
+    "an agent a backend can use keeps the installed user"
   config = parseFrameConfig("""{"mode": "buildroot", "serverHost": "backend.local", "agent": {"agentEnabled": true}}""")
   doAssert buildrootServiceUser(config, "root", usesNetworkManager = true) == "root"
   doAssert buildrootServiceUser(config, "", usesNetworkManager = true) == "root"

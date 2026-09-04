@@ -158,6 +158,40 @@ proc frameOSUpgradeInFlight*(): bool =
   except CatchableError:
     result = false
 
+const UpgradeInterruptedMinAge = initDuration(minutes = 10)
+
+proc reconcileInterruptedUpgradeStatus*(): bool =
+  ## Called once at runtime start. The restart that brings a runtime up is
+  ## normally the *last* thing an upgrade does, after it wrote "success", so a
+  ## status still "starting"/"running" here belongs to an upgrade process that
+  ## died without a verdict — Cloud-5 (2026-09-04) sat on "running" for hours
+  ## after its upgrade child was killed mid-setup, and the workspace kept
+  ## reporting an upgrade in progress. Only entries older than ten minutes
+  ## are rewritten (to "failed", keeping the release details), so a runtime
+  ## that crashed while a detached root-path upgrade is still downloading
+  ## does not lie about it. Returns true when it rewrote the file.
+  let payload = readUpgradeStatus()
+  let status = payload{"status"}.getStr("")
+  if status notin ["starting", "running"]:
+    return false
+  let updatedAt = payload{"updated_at"}.getStr("")
+  var stale = updatedAt.len == 0
+  if not stale:
+    try:
+      let stamped = parse(updatedAt, "yyyy-MM-dd'T'HH:mm:ss'Z'", utc()).toTime()
+      stale = getTime() - stamped >= UpgradeInterruptedMinAge
+    except CatchableError:
+      stale = true
+  if not stale:
+    return false
+  var updated = payload.copy()
+  updated["status"] = %"failed"
+  updated["message"] = %("FrameOS upgrade was interrupted before it finished (status '" & status &
+    "' since " & (if updatedAt.len > 0: updatedAt else: "an unknown time") & ").")
+  updated["interrupted"] = %true
+  writeUpgradeStatus(updated)
+  true
+
 proc normalizeReleaseVersion*(value: string): string =
   publishedFrameOSVersion(value)
 

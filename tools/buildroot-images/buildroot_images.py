@@ -48,6 +48,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
     BUILDROOT_VERSION,
     BuildrootImageBuilder,
+    stage_buildroot_dropbear_dropin,
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
     ensure_buildroot_base_image,
@@ -518,6 +519,13 @@ def write_base_bootstrap_overlay(overlay: Path, platform: BuildrootPlatform | No
     )
     (overlay / "etc" / "default").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "default" / "dropbear").write_text('DROPBEAR_ARGS="-s -g"\n', encoding="utf-8")
+    # The rootfs is read-only, so dropbear's own -R can never write a host
+    # key into /etc/dropbear and every SSH connection would die at key
+    # exchange. Generate an ed25519 key on the persistent FrameOS partition
+    # before start and hand it to dropbear with -r ($DROPBEAR_ARGS still
+    # carries the key-only / root-password toggle from /etc/default/dropbear).
+    # `frameos setup` installs the same drop-in on frames flashed before this.
+    stage_buildroot_dropbear_dropin(overlay)
     (overlay / "etc" / "fstab").write_text(BUILDROOT_FSTAB_CONTENT, encoding="utf-8")
     (overlay / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "profile.d" / "frameos.sh").write_text(

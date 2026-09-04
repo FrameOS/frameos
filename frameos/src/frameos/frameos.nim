@@ -17,6 +17,7 @@ import frameos/timezone_updater
 import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
+from frameos/upgrade import reconcileInterruptedUpgradeStatus
 import frameos/cloud/hub_client
 import frameos/tls_proxy
 import frameos/setup_proxy
@@ -298,6 +299,12 @@ proc start*(self: FrameOS) {.async.} =
   if rebootInfo.len > 0:
     message["reboot"] = rebootInfo
   self.logger.log(message)
+  try:
+    if reconcileInterruptedUpgradeStatus():
+      self.logger.log(%*{"event": "upgrade:interrupted",
+        "message": "upgrade-status.json still said an upgrade was in flight; marked it failed"})
+  except CatchableError as e:
+    self.logger.log(%*{"event": "upgrade:interrupted", "error": e.msg})
   netportal.setLogger(self.logger)
   self.renderBootScreen("Starting up…")
   if bootScreenSupported(self.frameConfig):

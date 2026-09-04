@@ -1485,16 +1485,38 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
   sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
 # Immediately sync the clock so HTTPS certificates validate
+const clockSyncMarkerPath = "/run/systemd/timesync/synchronized"
+const clockSyncWaitMs = 45 * 1000
+
+proc waitForClockSync*(maxMs = clockSyncWaitMs): bool {.gcsafe.} =
+  ## True once timesyncd has marked the clock synchronized (it touches
+  ## /run/systemd/timesync/synchronized on every successful sync), polling for
+  ## up to `maxMs`. Sliced through the tick hook so the boot screen keeps
+  ## moving while a frame with no RTC waits for its first NTP answer.
+  let deadline = getMonoTime() + initDuration(milliseconds = maxMs)
+  while true:
+    if fileExists(clockSyncMarkerPath):
+      return true
+    if getMonoTime() >= deadline:
+      return false
+    {.gcsafe.}:
+      waitBetweenNetworkAttempts(1000)
+
 proc syncClock*() =
-  ## Tries the best available tool on the current distro.
+  ## Tries the best available tool on the current distro. On a systemd host a
+  ## running timesyncd is left alone and waited for: restarting it on every
+  ## retry (2026-09-04, Cloud-5) killed the sync it was about to complete.
   if privilegedDoorAvailable():
     discard door(pvSyncClock, timeoutMs = clockSyncTimeoutMs)
     return
   try:
-    # Any systemd host: systemd-timesyncd one-shot
+    # Any systemd host: systemd-timesyncd, started if it is not running
     if fileExists("/run/systemd/system"):
-      discard runShellWithParentStreams("sudo systemctl restart systemd-timesyncd.service",
-                                        timeoutMs = clockSyncTimeoutMs)
+      if runShellWithParentStreams("systemctl is-active --quiet systemd-timesyncd.service",
+                                   timeoutMs = clockSyncTimeoutMs).exitCode != 0:
+        discard runShellWithParentStreams("sudo systemctl start systemd-timesyncd.service",
+                                          timeoutMs = clockSyncTimeoutMs)
+      discard waitForClockSync()
     # Classic Debian / Raspberry Pi OS: one‑shot ntpd
     elif findExe("ntpd") != "":
       discard runShellWithParentStreams("sudo ntpd -gq",
@@ -1568,9 +1590,13 @@ proc checkNetwork*(self: FrameOS): bool =
 
   let url = self.frameConfig.network.networkCheckUrl
   let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
-  let timer = getMonoTime()
+  var timer = getMonoTime()
   var attempt = 1
   var diagnosticsLogged = false
+  # One clock sync per check. Before 2026-09-04 every certificate failure
+  # kicked timesyncd again 3 s later, nine times inside the 30 s budget, so a
+  # frame with no RTC battery could never sync and booted into its hotspot.
+  var clockSyncTried = false
   # A station repair that just succeeded earns one probe past the deadline:
   # the repair itself can run the clock out, and giving up on an address
   # that is seconds old would be the very failure it just fixed.
@@ -1606,18 +1632,23 @@ proc checkNetwork*(self: FrameOS): bool =
     except CatchableError as e:
       self.network.status = NetworkStatus.error
 
-      # Error with SSL certificates. Most likely means the clock is wrong after a long downtime.
-      if e.msg.contains("certificate verify failed") or e.msg.contains("error:0A000086"):
+      # Error with SSL certificates. Most likely means the clock is wrong after a long downtime
+      # (or a cold boot with no RTC battery). Sync it once and wait for the sync to land; that
+      # wait is the network's proof of life, not its failure, so it does not eat the budget.
+      let certificateProblem = e.msg.contains("certificate verify failed") or e.msg.contains("error:0A000086")
+      if certificateProblem and not clockSyncTried:
+        clockSyncTried = true
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg,
             "action": "syncing clock and trying again"})
+        let syncStarted = getMonoTime()
         syncClock()
-        waitBetweenNetworkAttempts(min(max(3, attempt), 60) * 1000)
+        timer = timer + (getMonoTime() - syncStarted)
+        waitBetweenNetworkAttempts(1000)
         continue
-      else:
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
-        if not diagnosticsLogged:
-          diagnosticsLogged = true
-          logNetworkDiagnostics("first error: " & e.msg)
+      self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+      if not diagnosticsLogged:
+        diagnosticsLogged = true
+        logNetworkDiagnostics("first error: " & e.msg)
 
     finally:
       client.close()

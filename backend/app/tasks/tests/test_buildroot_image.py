@@ -1289,6 +1289,11 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
         "write $service_root/etc/systemd/resolved.conf.d/10-frameos.conf /etc/systemd/resolved.conf.d/10-frameos.conf"
     ) in captured["root_patch_script"]
     assert "mkdir /etc/systemd/system/network.service.d" in captured["root_patch_script"]
+    assert "mkdir /etc/systemd/system/dropbear.service.d" in captured["root_patch_script"]
+    assert (
+        "write $service_root/etc/systemd/system/dropbear.service.d/10-frameos-hostkey.conf "
+        "/etc/systemd/system/dropbear.service.d/10-frameos-hostkey.conf"
+    ) in captured["root_patch_script"]
     assert (
         "write $service_root/etc/systemd/system/network.service.d/10-frameos.conf "
         "/etc/systemd/system/network.service.d/10-frameos.conf"
@@ -1687,6 +1692,11 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
         "write $service_root/etc/systemd/resolved.conf.d/10-frameos.conf /etc/systemd/resolved.conf.d/10-frameos.conf"
     ) in captured["root_patch_script"]
     assert "mkdir /etc/systemd/system/network.service.d" in captured["root_patch_script"]
+    assert "mkdir /etc/systemd/system/dropbear.service.d" in captured["root_patch_script"]
+    assert (
+        "write $service_root/etc/systemd/system/dropbear.service.d/10-frameos-hostkey.conf "
+        "/etc/systemd/system/dropbear.service.d/10-frameos-hostkey.conf"
+    ) in captured["root_patch_script"]
     assert (
         "write $service_root/etc/systemd/system/network.service.d/10-frameos.conf "
         "/etc/systemd/system/network.service.d/10-frameos.conf"

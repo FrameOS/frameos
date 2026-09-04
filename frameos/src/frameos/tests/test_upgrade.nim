@@ -1,4 +1,4 @@
-import std/[base64, json, os, strutils, tables, unittest]
+import std/[base64, json, os, strutils, tables, times, unittest]
 
 import ../device_setup
 import ../ota_pubkey
@@ -404,3 +404,48 @@ suite "staging verifies the signature before anything runs":
     # anything derived from) bytes the key check refused.
     for command in commands:
       check not command.contains("tar ")
+
+suite "interrupted upgrade status":
+  test "a stale running status is marked failed at runtime start, a fresh one is kept":
+    let tempDir = getTempDir() / ("frameos-upgrade-interrupted-" & $epochTime().int64)
+    createDir(tempDir)
+    let hadFrameosDir = existsEnv("FRAMEOS_DIR")
+    let oldFrameosDir = if hadFrameosDir: getEnv("FRAMEOS_DIR") else: ""
+    try:
+      putEnv("FRAMEOS_DIR", tempDir)
+      # Nothing on disk: nothing to reconcile.
+      check not reconcileInterruptedUpgradeStatus()
+      # A terminal status is left alone.
+      writeUpgradeStatus(%*{"status": "success", "message": "done"})
+      check not reconcileInterruptedUpgradeStatus()
+      check readUpgradeStatus(){"status"}.getStr("") == "success"
+      # A "running" status stamped just now is believed (a runtime that
+      # crashed while a detached upgrade is still downloading).
+      writeUpgradeStatus(%*{"status": "running", "message": "FrameOS upgrade is running.",
+        "latest_version": "2026.9.4"})
+      check not reconcileInterruptedUpgradeStatus()
+      check readUpgradeStatus(){"status"}.getStr("") == "running"
+      # The same status stamped hours ago is an upgrade that died: failed,
+      # release details kept, a stale-safe message.
+      var stale = readUpgradeStatus()
+      stale["updated_at"] = %"2026-09-04T07:49:12Z"
+      writeFile(frameosUpgradeStatusPath(), $stale)
+      check reconcileInterruptedUpgradeStatus()
+      let after = readUpgradeStatus()
+      check after{"status"}.getStr("") == "failed"
+      check after{"interrupted"}.getBool(false)
+      check after{"latest_version"}.getStr("") == "2026.9.4"
+      check after{"message"}.getStr("").contains("interrupted")
+      check after{"message"}.getStr("").contains("2026-09-04T07:49:12Z")
+      # And it is terminal now: a second pass changes nothing.
+      check not reconcileInterruptedUpgradeStatus()
+      # A "running" status with no timestamp at all is stale by definition.
+      writeFile(frameosUpgradeStatusPath(), """{"status": "starting"}""")
+      check reconcileInterruptedUpgradeStatus()
+      check readUpgradeStatus(){"status"}.getStr("") == "failed"
+    finally:
+      if hadFrameosDir:
+        putEnv("FRAMEOS_DIR", oldFrameosDir)
+      else:
+        delEnv("FRAMEOS_DIR")
+      removeDir(tempDir)

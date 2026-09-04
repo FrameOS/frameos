@@ -9,7 +9,7 @@
 ## Every verb is a fixed piece of code with validated arguments. Nothing in a
 ## request is ever passed to a shell; nmcli and friends get argv entries.
 
-import std/[json, os, strutils, times]
+import std/[json, monotimes, os, strutils, times]
 
 import frameos/buildroot_privileges
 import frameos/config
@@ -137,10 +137,37 @@ proc execSetHostname(args: JsonNode): PrivilegedResult =
     return PrivilegedResult(ok: false, exitCode: 1, error: problems.join("; "))
   privilegedOk(hostname)
 
+# timesyncd touches this file on every successful sync, so its presence is
+# "the kernel clock has been set from the network at least once this boot".
+var clockSyncSystemdDir = "/run/systemd/system"
+var clockSyncMarkerPath = "/run/systemd/timesync/synchronized"
+var clockSyncWaitMs = 45 * 1000
+
+proc setClockSyncProbeForTest*(systemdDir, markerPath: string, waitMs: int) =
+  clockSyncSystemdDir = systemdDir
+  clockSyncMarkerPath = markerPath
+  clockSyncWaitMs = waitMs
+
 proc execSyncClock(): PrivilegedResult =
-  ## Same ladder as portal.nim's syncClock, minus sudo.
-  if fileExists("/run/systemd/system"):
-    return resultOf(exec("systemctl", @["restart", "systemd-timesyncd.service"], ClockSyncTimeoutMs))
+  ## Same ladder as portal.nim's syncClock, minus sudo. A running timesyncd is
+  ## left alone: restarting it on every retry of the boot network check
+  ## (2026-09-04, Cloud-5: nine restarts in 27 s) killed the very sync that
+  ## was about to land, and the frame ended up in its setup hotspot with a
+  ## 2025 clock. Start it only when it is not running, then wait for it to
+  ## mark the clock synchronized.
+  if dirExists(clockSyncSystemdDir):
+    if exec("systemctl", @["is-active", "--quiet", "systemd-timesyncd.service"]).rc != 0:
+      let started = exec("systemctl", @["start", "systemd-timesyncd.service"], ClockSyncTimeoutMs)
+      if started.rc != 0:
+        return resultOf(started)
+    let deadline = getMonoTime() + initDuration(milliseconds = clockSyncWaitMs)
+    while true:
+      if fileExists(clockSyncMarkerPath):
+        return privilegedOk("clock synchronized")
+      if getMonoTime() >= deadline:
+        return PrivilegedResult(ok: false, exitCode: 1, output: "",
+          error: "clock not synchronized within " & $(clockSyncWaitMs div 1000) & " s")
+      sleep(1000)
   if findExe("ntpd") != "":
     return resultOf(exec("ntpd", @["-gq"], ClockSyncTimeoutMs))
   if findExe("sntp") != "":

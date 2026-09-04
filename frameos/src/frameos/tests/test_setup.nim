@@ -693,6 +693,73 @@ block test_network_service_guard_does_not_restart_a_healthy_unit:
     resetSetupCommandRunnerForTest()
     removeDir(dropinDir)
 
+block test_dropbear_host_key_dropin_installs_and_restarts_only_a_failed_unit:
+  let dropinDir = getTempDir() / ("frameos-dropbear-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos-hostkey.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    # dropbear.service present and failed (no host key on a ro root) ->
+    # drop-in + daemon-reload + restart.
+    discard setupDropbearHostKey(liveApply = true, dropinPath = dropinPath)
+    doAssert fileExists(dropinPath)
+    let dropin = readFile(dropinPath)
+    doAssert dropin.contains("RequiresMountsFor=/srv/frameos")
+    doAssert dropin.contains("dropbearkey -t ed25519 -f /srv/frameos/state/dropbear/dropbear_ed25519_host_key")
+    doAssert dropin.contains("ExecStart=/usr/sbin/dropbear -F -r /srv/frameos/state/dropbear/dropbear_ed25519_host_key $DROPBEAR_ARGS")
+    doAssert commands.anyIt(it.contains("daemon-reload"))
+    doAssert commands.anyIt(it.contains("restart dropbear.service"))
+
+    # Idempotent on the second pass.
+    commands = @[]
+    discard setupDropbearHostKey(liveApply = true, dropinPath = dropinPath)
+    doAssert not commands.anyIt(it.contains("daemon-reload"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
+block test_dropbear_host_key_dropin_does_not_cut_a_running_sshd:
+  # A restart kills every SSH session in dropbear's control group, the
+  # deploy's own included: a healthy unit is left alone until the next boot.
+  let dropinDir = getTempDir() / ("frameos-dropbear-healthy-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos-hostkey.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("is-failed --quiet dropbear.service"):
+      return ("", 1)
+    ("", 0)
+  )
+  try:
+    discard setupDropbearHostKey(liveApply = true, dropinPath = dropinPath)
+    doAssert fileExists(dropinPath)
+    doAssert commands.anyIt(it.contains("daemon-reload"))
+    doAssert not commands.anyIt(it.contains("restart dropbear.service"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
+block test_dropbear_host_key_dropin_skips_without_the_unit:
+  let dropinDir = getTempDir() / ("frameos-dropbear-absent-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos-hostkey.conf"
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    if command.contains("systemctl cat dropbear.service"):
+      return ("", 1)
+    ("", 0)
+  )
+  try:
+    discard setupDropbearHostKey(liveApply = true, dropinPath = dropinPath)
+    doAssert not fileExists(dropinPath)
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
 block test_network_service_guard_skips_without_the_unit:
   let dropinDir = getTempDir() / ("frameos-netguard-absent-" & $epochTime().int64)
   createDir(dropinDir)
