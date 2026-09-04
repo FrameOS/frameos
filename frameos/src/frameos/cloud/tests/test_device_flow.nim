@@ -209,6 +209,20 @@ suite "queued panel link code":
     discard deviceFlowTick(standaloneConfig())
     check not pendingLinkCodeQueued()
 
+  test "a managed frame never starts a queued code, and drops the marker":
+    clearLinkState()
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      state["mode"] = %"managed"
+      state["status"] = %"disconnected"
+      saveCloudLinkState(state)
+    setStubResponse("/api/device/start", 200, startResponse())
+    let before = requestCount("/api/device/start")
+    check writePendingLinkCode(providerUrl)
+    discard deviceFlowTick(standaloneConfig())
+    check requestCount("/api/device/start") == before
+    check not pendingLinkCodeQueued()
+    check not activeLinkCode().active
   test "a permanent provider refusal retires the queued marker":
     clearLinkState()
     setStubResponse("/api/device/start", 400, %*{"error": "invalid_request"})

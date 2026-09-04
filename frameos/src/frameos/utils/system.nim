@@ -186,3 +186,32 @@ else:
       finally:
         discard close(fd)
     return -1
+
+
+# ---------------------------------------------------------------------------
+# The name the system carries. First boot writes /etc/hostname from the SD
+# card's frame name (cloud cards) or the backend's hostname file, so it is
+# the one identity a card has before anything else is configured.
+import std/strutils as system_strutils
+
+var systemHostnameOverride = ""
+
+proc setSystemHostnameForTest*(name: string) =
+  systemHostnameOverride = name
+
+proc systemHostname*(): string =
+  ## /etc/hostname, or "" when it is missing, empty, dotted, or an image
+  ## default (`frame`, `localhost`) that identifies nothing.
+  if systemHostnameOverride.len > 0:
+    return systemHostnameOverride
+  when defined(frameosWasm) or defined(frameosEmbedded):
+    ""
+  else:
+    try:
+      if fileExists("/etc/hostname"):
+        let name = readFile("/etc/hostname").strip()
+        if name.len > 0 and name notin ["frame", "localhost"] and '.' notin name:
+          return name
+    except CatchableError:
+      discard
+    ""

@@ -130,7 +130,32 @@ hardware-settings batch) and the battery ADC rounds of #426.
   the first-boot journal shows `FrameOS setup: driver setup: complete`
   (and, for an SPI panel, `dtoverlay`/`dtparam` lines in `/boot/config.txt`
   on the very first boot).
-- [ ] **Panel link code (#379)** — IN PROGRESS 2026-09-04 21:45 local on
+- [x] **Panel link code (#379)** — PASSED 2026-09-04 ~22:35 local on uus2w.
+  The user claimed the code shown on the panel from the workspace:
+  `cloud:enroll:linkCode ok:true` → `cloud:hub:connected`, link state
+  `mode: managed, status: connected, frame_id 7cae8131-…`, the code left the
+  panel, and the workspace shows the new record connected. (The claim came
+  while the previous run's 12th code had just lapsed — `linkCode:gaveUp
+  starts:12` — and a restart from SSH had minted `start:1` again, which is
+  the code that was claimed.) **Three more findings, all fixed on main:**
+  (4) the record enrolled as **"FrameOS Setup"** — the release image's
+  `frame.json` name (`tools/buildroot-images/buildroot_images.py:301`)
+  went up as the frame's name; now `frameDisplayName()` treats the image
+  placeholders as no name and falls back to the hostname first boot gave
+  the card (`uus2w`), for the enrol request and both device-flow starts
+  (`test_enrollment.nim`). (5) the queued marker
+  `state/cloud_link_code_pending.json` **survived the successful claim** —
+  the tick that would retire it never runs once this thread has become the
+  hub session — and a stale marker restarts a link code on a managed frame
+  whose socket is merely down; now the managed-enrol success clears it and
+  the tick refuses to start a code while `mode` is `managed`
+  (`test_device_flow.nim`). (6) not fixed, recorded: with no claim token the
+  first-boot script drops the card's `name=` and `time_zone=` entirely
+  (only the hostname survives), so this frame's record has `timezone: null`
+  and its frame.json no zone — the no-token path should still apply the
+  card's personalisation locally. Also for the operator: the earlier
+  `uus2w` record (9d67a9fe-…) is now orphaned by this card and the new one
+  is named "FrameOS Setup" until renamed. Earlier notes: IN PROGRESS 2026-09-04 21:45 local on
   uus2w: a cloud-builder card with the `claim_token=` line blanked
   (`~/Downloads/…-linkcode.img.gz`, region kept at 4096 bytes) booted
   standalone on Wi-Fi with the SSH key (`no claim_token in

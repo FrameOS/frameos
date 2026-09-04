@@ -20,6 +20,7 @@
 ## in module-level vars touched only by the hub thread.
 
 import json
+from frameos/cloud/enrollment import frameDisplayName
 import locks
 import os
 import strutils
@@ -189,6 +190,8 @@ type DeviceFlowPoll* = object
   changed*: bool    # the link left `connecting` (connected, denied, expired)
   startHub*: bool   # managed enrollment succeeded: the caller starts the hub
 
+proc clearPendingLinkCode*() {.gcsafe.}
+
 proc pollDeviceFlow*(frameConfig: FrameConfig): DeviceFlowPoll {.gcsafe.} =
   ## One poll of a pending device flow. No-op unless the link is `connecting`.
   ## On approval: stores the token, syncs inventory/grants, and — when
@@ -284,6 +287,11 @@ proc pollDeviceFlow*(frameConfig: FrameConfig): DeviceFlowPoll {.gcsafe.} =
         let outcome = enrollManagedFrame(providerUrl, "", syncAccessToken, "", frameConfig)
         if outcome.ok:
           result.startHub = true
+          # The queued panel code is spent. This thread becomes the hub
+          # session from here, so no later tick would retire the marker —
+          # and a marker left behind restarts the code on a managed frame
+          # the next time its socket is down (2026-09-04, uus2w).
+          clearPendingLinkCode()
         else:
           log(%*{"event": "cloud:enroll:error", "flow": "device_flow",
                  "status": outcome.status, "error": outcome.error})
@@ -383,6 +391,7 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
   ## the caller should make sure the hub session starts.
   {.gcsafe.}:
     var status = ""
+    var mode = ""
     var intervalSeconds = 5
     withLock cloudLinkLock:
       let state = loadCloudLinkState()
@@ -390,6 +399,7 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
         saveCloudLinkState(state)
         requestRender()
       status = state{"status"}.getStr("disconnected")
+      mode = state{"mode"}.getStr("")
       intervalSeconds = max(1, state{"interval_seconds"}.getInt(5))
     let now = epochTime()
     case status
@@ -405,6 +415,12 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
         clearPendingLinkCode()
     else:
       nextDeviceFlowPollAt = 0.0
+      if mode == "managed":
+        # Already enrolled, socket merely down: a link code here would offer
+        # the frame to whoever reads the panel. Retire any stale marker.
+        if pendingLinkCodeQueued():
+          clearPendingLinkCode()
+        return false
       if now < nextLinkCodeStartAt:
         return false
       let pending = loadPendingLinkCode()
@@ -418,8 +434,9 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
         clearPendingLinkCode()
         return false
       var displayName = "FrameOS frame"
-      if frameConfig != nil and frameConfig.name.len > 0:
-        displayName = "FrameOS frame (" & frameConfig.name & ")"
+      let ownName = frameDisplayName(frameConfig)
+      if ownName.len > 0:
+        displayName = "FrameOS frame (" & ownName & ")"
       let outcome = startDeviceFlow(
         pending{"provider_url"}.getStr(DEFAULT_CLOUD_PROVIDER_URL),
         displayName, headlessLocalOrigin(frameConfig), LINK_CODE_DEFAULT_SCOPES)

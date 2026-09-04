@@ -3,6 +3,7 @@
 ## ./state/cloud_link.json paths stay isolated from the repo checkout.
 
 import std/[json, locks, net, os, strutils, times, unittest]
+from frameos/utils/system import setSystemHostnameForTest
 import mummy
 import mummy/routers
 
@@ -400,3 +401,14 @@ suite "board detection":
 # crashes it the same way every time. The stub server dies with the process,
 # which is all this test needs.
 removeDir(workDir)
+
+suite "frame display name":
+  test "the image placeholder yields to the hostname first boot gave the card":
+    setSystemHostnameForTest("uus2w")
+    try:
+      check frameDisplayName(FrameConfig(name: "FrameOS Setup")) == "uus2w"
+      check frameDisplayName(FrameConfig(name: "")) == "uus2w"
+      check frameDisplayName(nil) == "uus2w"
+      check frameDisplayName(FrameConfig(name: "Kitchen")) == "Kitchen"
+    finally:
+      setSystemHostnameForTest("")

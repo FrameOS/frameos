@@ -4,6 +4,7 @@ import std/monotimes
 import std/times
 import std/uri
 import zippy
+from frameos/utils/system import systemHostname
 import QRgen
 import QRgen/renderer
 from frameos/cloud/device_flow import activeLinkCode
@@ -116,18 +117,8 @@ proc mdnsHostname*(): string =
   ## `<hostname>.local` for the name the system actually carries (first boot
   ## writes /etc/hostname from the card's frame name); empty for the image
   ## default `frame`, so callers fall back to whatever frame.json says.
-  when defined(frameosWasm) or defined(frameosEmbedded):
-    ""
-  else:
-    var name = ""
-    try:
-      if fileExists("/etc/hostname"):
-        name = readFile("/etc/hostname").strip()
-    except CatchableError:
-      discard
-    if name.len == 0 or name == "frame" or name == "localhost" or name.contains('.'):
-      return ""
-    name & ".local"
+  let name = systemHostname()
+  if name.len == 0: "" else: name & ".local"
 
 proc primaryIpAddress*(): string =
   ## The local address the kernel would route external traffic through:

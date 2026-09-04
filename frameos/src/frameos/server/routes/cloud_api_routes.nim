@@ -235,8 +235,9 @@ proc addCloudApiRoutes*(router: var Router) =
           return
         let fromBody = normalizeProviderUrl(payload{"provider_url"}.getStr(""))
         providerUrl = if fromBody.len > 0: fromBody else: providerUrlFromState(state)
-      if globalFrameConfig != nil and globalFrameConfig.name.len > 0:
-        displayName = "FrameOS frame (" & globalFrameConfig.name & ")"
+      let ownName = frameDisplayName(globalFrameConfig)
+      if ownName.len > 0:
+        displayName = "FrameOS frame (" & ownName & ")"
 
       # The shared start (cloud/device_flow.nim) also puts the code on the
       # panel and lets the hub thread poll, so closing this browser tab no

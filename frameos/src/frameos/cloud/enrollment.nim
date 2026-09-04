@@ -42,6 +42,7 @@
 ## for either transition.
 
 import json
+from frameos/utils/system import systemHostname
 import locks
 import os
 import strutils
@@ -57,6 +58,22 @@ import frameos/utils/http_client
 import ./contract
 import ./identity
 import ./link_state
+
+const ImagePlaceholderNames = ["FrameOS Setup", "FrameOS frame"]
+
+proc frameDisplayName*(frameConfig: FrameConfig): string =
+  ## The name a frame introduces itself with to a provider: frame.json's
+  ## `name` unless it is still the image's placeholder, then the hostname
+  ## first boot gave the card (a cloud card is named after its frame), else
+  ## "" and the provider picks. A link-code enrolment used to hand the
+  ## release image's "FrameOS Setup" to the cloud as the frame's name
+  ## (2026-09-04, uus2w).
+  if frameConfig != nil:
+    let name = frameConfig.name.strip()
+    if name.len > 0 and name notin ImagePlaceholderNames:
+      return name
+  systemHostname()
+
 
 const
   CLOUD_ENROLL_PENDING_PATH = "./state/cloud_enroll_pending.json"
@@ -214,8 +231,8 @@ proc enrollManagedFrame*(providerUrl, claimToken, bearerToken, name: string,
     if claimToken.len > 0:
       body["claim_token"] = %claimToken
     var frameName = name
-    if frameName.len == 0 and frameConfig != nil:
-      frameName = frameConfig.name
+    if frameName.len == 0:
+      frameName = frameDisplayName(frameConfig)
     if frameName.len > 0:
       body["name"] = %frameName
 
