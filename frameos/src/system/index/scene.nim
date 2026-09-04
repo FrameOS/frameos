@@ -4,6 +4,9 @@ import std/monotimes
 import std/times
 import std/uri
 import zippy
+import QRgen
+import QRgen/renderer
+from frameos/cloud/device_flow import activeLinkCode
 
 import frameos/values
 import frameos/types
@@ -40,6 +43,8 @@ const
   staticRefreshSeconds = 300.0
 
 type Scene* = ref object of FrameScene
+  linkQr: Image      ## The pending link code's QR, kept while the payload is unchanged.
+  linkQrKey: string
 
 proc loadInterpretedSceneOptions(): seq[(SceneId, string)] =
   var data = ""
@@ -304,6 +309,36 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
   result.dark = true
   result.markPhase = if animating: markPhaseAt(epoch) else: 0.0
   result.bar = self.lastButtonLine()
+  # A pending FrameOS Cloud link code lives IN this screen, beside the rows,
+  # instead of the runner painting it over whatever is showing (which on this
+  # screen meant over the rows). The runner still overlays it on real scenes.
+  let linkCode = activeLinkCode()
+  if linkCode.active and linkCode.userCode.len > 0:
+    result.aside.title = "Connect to FrameOS Cloud"
+    result.aside.code = linkCode.userCode
+    result.aside.hint =
+      if linkCode.verificationUri.len > 0: "Scan, or enter the code at " & linkCode.verificationUri
+      else: ""
+    let payload =
+      if linkCode.verificationUriComplete.len > 0: linkCode.verificationUriComplete
+      else: linkCode.verificationUri
+    if payload.len > 0:
+      # A third of the shorter edge, whole modules: sharp on the panel and
+      # never resized by the renderer on the layouts it is made for.
+      let unit = min(frameConfig.width, frameConfig.height)
+      let target = max(96, int(unit.float * 0.34))
+      let key = payload & ":" & $target
+      if self.linkQr == nil or self.linkQrKey != key:
+        try:
+          let qr = newQR(payload)
+          let modules = qr.drawing.size.int + 4 # two modules of quiet zone each side
+          let pixels = max(2, target div modules) * modules
+          self.linkQr = qr.renderImg(light = "#ffffff", dark = "#000000", pixels = pixels.uint32, padding = 2'u8)
+          self.linkQrKey = key
+        except CatchableError:
+          self.linkQr = nil
+          self.linkQrKey = ""
+      result.aside.qr = self.linkQr
   result.rows = @[
     ("Name", deviceName),
     ("Device", deviceLine),

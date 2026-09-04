@@ -36,6 +36,14 @@ import frameos/utils/font as fontUtils
 
 type
   StatusRow* = tuple[label: string, value: string]
+  StatusAside* = object
+    ## Something to read off the panel and type or scan elsewhere — the
+    ## FrameOS Cloud link code. On a landscape panel it takes a column on
+    ## the right, beside the rows; on a portrait one it follows the notes.
+    title*: string         ## "Connect to FrameOS Cloud"
+    code*: string          ## The code itself, drawn large.
+    hint*: string          ## Where to enter it, small.
+    qr*: Image             ## Optional QR of the same, drawn at its own pixel size or smaller.
   StatusScreen* = object
     status*: string        ## The line under the wordmark: what the frame is doing.
     rows*: seq[StatusRow]  ## Label / value facts, drawn in two columns.
@@ -44,6 +52,10 @@ type
     bar*: string           ## Bottom-left, in the same band as the footer (last button press).
     dark*: bool            ## White on black (true) or black on white.
     markPhase*: float      ## 0 (the default): static brand colours; 0..1: animation phase (markSquareColorsAt).
+    aside*: StatusAside    ## A code + QR beside the rows; empty when there is none.
+
+proc hasAside*(screen: StatusScreen): bool =
+  screen.aside.code.len > 0 or screen.aside.qr != nil
 
 const
   frameosMarkSvg = staticRead("status_screen/frameos_mark.svg")
@@ -121,6 +133,14 @@ proc statusScreenText*(screen: StatusScreen): string =
     lines.add("")
     for note in screen.notes:
       lines.add(note)
+  if screen.hasAside():
+    lines.add("")
+    if screen.aside.title.len > 0:
+      lines.add(screen.aside.title)
+    if screen.aside.code.len > 0:
+      lines.add(screen.aside.code)
+    if screen.aside.hint.len > 0:
+      lines.add(screen.aside.hint)
   if screen.bar.len > 0 or screen.footer.len > 0:
     lines.add("")
   if screen.bar.len > 0:
@@ -154,6 +174,11 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
   let padding = max(16.0'f32, unit * 0.06)
   let innerWidth = width.float32 - 2 * padding
   let innerHeight = height.float32 - 2 * padding
+  # The aside takes a right-hand column on a landscape panel; a portrait
+  # panel has no width to spare, so there it follows the notes instead.
+  let asideColumn = screen.hasAside() and width.float32 >= height.float32 * 1.15
+  let asideWidth = if asideColumn: max(innerWidth * 0.32, 96.0'f32) else: 0.0'f32
+  let contentWidth = if asideColumn: innerWidth - asideWidth - padding else: innerWidth
 
   # Everything hangs off the mark's height; `shrink` pulls the whole block
   # down when a long scene list would run past the bottom.
@@ -186,7 +211,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
       labelColumn += rowFontSize * 1.2
     # A value wider than its column wraps (portrait panels, long cloud
     # hosts); the row grows with it instead of the next row painting over it.
-    let valueWidth = max(innerWidth - labelColumn, 10.0'f32)
+    let valueWidth = max(contentWidth - labelColumn, 10.0'f32)
     valueArrangements = @[]
     rowHeights = @[]
     for (_, value) in screen.rows:
@@ -200,6 +225,11 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
       result += rowHeight
     if screen.notes.len > 0:
       result += gap + screen.notes.len.float32 * noteLineHeight
+    if screen.hasAside() and not asideColumn:
+      # Title, code and hint as lines, plus a QR no wider than a third of the panel.
+      result += gap + statusFontSize * 1.5 + headlineFontSize * 1.3 + footerFontSize * 1.4
+      if screen.aside.qr != nil:
+        result += gap * 0.5 + min(screen.aside.qr.width.float32, innerWidth * 0.34)
     if screen.footer.len > 0 or screen.bar.len > 0:
       result += gap + footerFontSize * 1.4
 
@@ -220,7 +250,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
   let headlineFont = makeFont(typeface, headlineFontSize, fg)
   let statusFont = makeFont(typeface, statusFontSize, muted)
   let textX = padding + mark.width.float32 + mh * 0.3
-  let textWidth = max(innerWidth - mark.width.float32 - mh * 0.3, 10.0'f32)
+  let textWidth = max(contentWidth - mark.width.float32 - mh * 0.3, 10.0'f32)
   let headlineHeight = headlineFontSize * 1.25
   var statusHeight = 0.0'f32
   var statusArrangement: Arrangement
@@ -236,6 +266,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
   if screen.status.len > 0:
     image.fillText(statusArrangement, translate(vec2(textX, headerTextY + headlineHeight)))
   y += headerHeight + gap
+  let contentTop = y
 
   # Rows and notes stop above the bottom band rather than running under it.
   let hasBand = screen.footer.len > 0 or screen.bar.len > 0
@@ -262,10 +293,53 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
     for note in screen.notes:
       if y + noteLineHeight > bottomLimit:
         break
-      image.fillText(noteFont.typeset(note, bounds = vec2(innerWidth, noteLineHeight),
+      image.fillText(noteFont.typeset(note, bounds = vec2(contentWidth, noteLineHeight),
         vAlign = MiddleAlign), translate(vec2(padding, y)))
       y += noteLineHeight
-
+  if screen.hasAside():
+    # Title (muted), the code large, the QR, the hint small — top-aligned
+    # with the rows in its column, or under the notes when there is no column.
+    let asideX = if asideColumn: width.float32 - padding - asideWidth else: padding
+    let asideW = if asideColumn: asideWidth else: innerWidth
+    var ay = if asideColumn: contentTop else: y + gap
+    let titleFont = makeFont(typeface, statusFontSize, muted)
+    let codeFont = makeFont(typeface, headlineFontSize, fg)
+    let hintFont = makeFont(typeface, footerFontSize, muted)
+    # Title and hint wrap on a narrow column ("Connect to FrameOS / Cloud");
+    # measure them so nothing lands on the line below.
+    var titleArrangement, hintArrangement: Arrangement
+    var titleHeight, hintHeight = 0.0'f32
+    if screen.aside.title.len > 0:
+      titleArrangement = titleFont.typeset(screen.aside.title, bounds = vec2(asideW, 0))
+      titleHeight = max(titleArrangement.layoutBounds().y, statusFontSize * 1.3) + statusFontSize * 0.2
+    if screen.aside.hint.len > 0:
+      hintArrangement = hintFont.typeset(screen.aside.hint, bounds = vec2(asideW, 0))
+      hintHeight = max(hintArrangement.layoutBounds().y, footerFontSize * 1.2) + footerFontSize * 0.2
+    if titleHeight > 0 and ay + titleHeight <= bottomLimit:
+      image.fillText(titleArrangement, translate(vec2(asideX, ay)))
+      ay += titleHeight
+    if screen.aside.code.len > 0 and ay + headlineFontSize * 1.3 <= bottomLimit:
+      image.fillText(codeFont.typeset(screen.aside.code, bounds = vec2(asideW, headlineFontSize * 1.3),
+        vAlign = MiddleAlign), translate(vec2(asideX, ay)))
+      ay += headlineFontSize * 1.3
+    if screen.aside.qr != nil:
+      # The QR takes what is left above the hint. On a small panel the two
+      # compete; a code you can scan beats a line telling you where to type
+      # it, so the hint goes first when the QR would end up under ~100 px.
+      let qrMax = if asideColumn: asideW else: innerWidth * 0.34
+      var room = bottomLimit - ay - gap * 0.5 - hintHeight - (if hintHeight > 0: gap * 0.25 else: 0.0'f32)
+      if hintHeight > 0 and min(screen.aside.qr.width.float32, qrMax) > room and room < 100:
+        hintHeight = 0
+        room = bottomLimit - ay - gap * 0.5
+      let qrSize = min(min(screen.aside.qr.width.float32, qrMax), room)
+      if qrSize >= 24:
+        ay += gap * 0.5
+        let qr = if int(qrSize) == screen.aside.qr.width: screen.aside.qr
+                 else: screen.aside.qr.resize(int(qrSize), int(qrSize))
+        image.draw(qr, translate(vec2(asideX, ay)))
+        ay += qrSize + gap * 0.25
+    if hintHeight > 0 and ay + hintHeight <= bottomLimit + 1:
+      image.fillText(hintArrangement, translate(vec2(asideX, ay)))
   if hasBand:
     if screen.dark:
       var bandPath = newPath()

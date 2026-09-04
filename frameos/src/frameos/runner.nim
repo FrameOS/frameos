@@ -200,8 +200,10 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # A pending FrameOS Cloud link code (cloud/device_flow.nim): the user code
     # plus a QR of the claim URL, drawn over the scene for the same reason as
     # the presence code — reading it off the panel is the ownership proof.
+    # The status screen (system/index) draws the code itself, beside its
+    # rows; painting it over that screen too covered the very facts it shows.
     let linkCode = activeLinkCode()
-    if linkCode.active:
+    if linkCode.active and scene.id.string != "system/index":
       let qrPayload = if linkCode.verificationUriComplete.len > 0:
           linkCode.verificationUriComplete
         else:
