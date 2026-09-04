@@ -50,7 +50,7 @@ hardware-settings batch) and the battery ADC rounds of #426.
   change, and the whole boot (network check included) now draws on HDMI.
   Both gaps from that boot are fixed on the branch (browser time zone +
   slugified name ride `frameos-cloud.txt` into `frame.json` / `/etc/hostname`).
-- [x] **Re-flash check (this branch)** — PASSED on attempt 2, 2026-09-04 19:41 local, on the cloud-composed 2026.9.6 `raspberry-pi-64` card: first boot read `frameos-cloud.txt` (`Installing NetworkManager WiFi connection from cloud personalization`, `Setting hostname from cloud personalization: uus2w`, `Applied display device 'framebuffer' to frame.json`, `Installing authorized keys`, `Wrote cloud enrollment state`), `networkCheck attempt 1 success`, `cloud:enroll:boot` → `cloud:enroll:personalization` applied `{name: uus2w, timezone: Europe/Brussels}` → `cloud:hub:connected`; the SAME frame record re-adopted (no duplicate). `frame.json` = framebuffer 1920×1080, `hostname` = `uus2w`, the workspace shows it on 2026.9.6 / Europe/Brussels, and the user confirmed the panel itself shows Europe/Brussels on the index screen (the runtime's own zone from frame.json — which is why the `/etc/localtime` finding below was invisible from the panel). Scheduled reboot: a `reboot` entry at 19:49 Europe/Brussels pushed from the cloud → `scheduler:loaded entries 1 nextDue Fri 19:49 reboot` → `scheduler:fire id bench-reboot action reboot localTime 2026-09-04 19:49 timeZone Europe/Brussels` at 17:49:00 UTC → `Rebooting the device` → `bootup` 25 s later, `/` now `ro`, `scheduler-last-fired` persisted (nextDue moved to *Sat* 19:49, no re-fire in the same minute). **Found and fixed on main the same evening (needs the next release):** the runtime's post-enrolment `timedatectl set-timezone` runs as uid 990 under `NoNewPrivileges` → `sudo: The "no new privileges" flag is set` → `/etc/localtime` stayed `Etc/UTC` although frame.json, the scheduler (`scheduler:loaded timeZone Europe/Brussels`) and the cloud all say Europe/Brussels; anything reading the OS zone (journal stamps, QuickJS `Date` in scenes) is on UTC until a root `frameos setup` (an OTA) runs. Now a `set-timezone` door verb (`setupTimezone` asks the door when not root; `test_setup.nim`, `test_privileged.nim`, verb table in `docs/buildroot-privileges.md`). Re-check `/etc/localtime` on a fresh card from the next release. *(attempt 1, 2026-09-04 18:48: the
+- [x] **Re-flash check (this branch)** — PASSED on attempt 2, 2026-09-04 19:41 local, on the cloud-composed 2026.9.6 `raspberry-pi-64` card: first boot read `frameos-cloud.txt` (`Installing NetworkManager WiFi connection from cloud personalization`, `Setting hostname from cloud personalization: uus2w`, `Applied display device 'framebuffer' to frame.json`, `Installing authorized keys`, `Wrote cloud enrollment state`), `networkCheck attempt 1 success`, `cloud:enroll:boot` → `cloud:enroll:personalization` applied `{name: uus2w, timezone: Europe/Brussels}` → `cloud:hub:connected`; the SAME frame record re-adopted (no duplicate). `frame.json` = framebuffer 1920×1080, `hostname` = `uus2w`, the workspace shows it on 2026.9.6 / Europe/Brussels, and the user confirmed the panel itself shows Europe/Brussels on the index screen (the runtime's own zone from frame.json — which is why the `/etc/localtime` finding below was invisible from the panel). Scheduled reboot: a `reboot` entry at 19:49 Europe/Brussels pushed from the cloud → `scheduler:loaded entries 1 nextDue Fri 19:49 reboot` → `scheduler:fire id bench-reboot action reboot localTime 2026-09-04 19:49 timeZone Europe/Brussels` at 17:49:00 UTC → `Rebooting the device` → `bootup` 25 s later, `/` now `ro`, `scheduler-last-fired` persisted (nextDue moved to *Sat* 19:49, no re-fire in the same minute). **Found and fixed on main the same evening (needs the next release):** the runtime's post-enrolment `timedatectl set-timezone` runs as uid 990 under `NoNewPrivileges` → `sudo: The "no new privileges" flag is set` → `/etc/localtime` stayed `Etc/UTC` although frame.json, the scheduler (`scheduler:loaded timeZone Europe/Brussels`) and the cloud all say Europe/Brussels; anything reading the OS zone (journal stamps, QuickJS `Date` in scenes) is on UTC until a root `frameos setup` (an OTA) runs. Now a `set-timezone` door verb (`setupTimezone` asks the door when not root; `test_setup.nim`, `test_privileged.nim`, verb table in `docs/buildroot-privileges.md`). **Verified on 2026.9.7, 2026-09-05 01:20-02:25 local on uus2w** (OTA'd 9.6 → 9.7 by the user, then over SSH): the 9.7 OTA's root `frameos setup` set `/etc/localtime` → `Europe/Brussels` at 01:20:23 (`FrameOS setup: checking timezone` → `timedatectl set-timezone` as uid 0), and the door verb itself was then exercised on the path that actually failed — a cloud `set_settings` `{timezone: Europe/Helsinki}` reached the uid-990 runtime, which logged `FrameOS setup: timezone: set Europe/Helsinki through the privileged door` after `FrameOS privileged: executing set-timezone (1788564295693-…)` / `set-timezone ok in 1.60s` in the root worker; `/etc/localtime` flipped, `date` read `EEST`, `scheduler:loaded timeZone Europe/Helsinki` followed, and a push back to Europe/Brussels did the same in reverse (frame left on Brussels). **Minor, not fixed:** `/etc/timezone` still reads `Etc/UTC` on both paths — `setupTimezone`'s `timedatectl` branch returns before the `withWritableMount` block that writes it, so only the no-timedatectl fallback keeps that file in step (`lib/tz.nim` only falls back to it when `/etc/localtime` cannot be read, so nothing on the frame is wrong today). Still to see on a fresh card from 2026.9.7: the *enrolment* half (personalization → `applySystemTimeZone`, same proc) on a card whose first boot never ran a root setup for that zone. *(attempt 1, 2026-09-04 18:48: the
   card came up "standalone", no cloud, no scenes — because it had been flashed
   with `~/Downloads/frameos-5-raspberry-pi-64-lpoollssypuv 2.img`, the
   self-hosted HA backend's 2026.9.0 image for "Vannituba" (hyperpixel2r
@@ -784,6 +784,36 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   9.5), E1004 and
   E1002 (both took it on their next battery wake within minutes) — all on
   9.6 by 15:48 UTC; Cloud-2W has been offline since 2026-08-21.
+- [x] **Release 2026.9.7 (2026-09-04, run 33921158592):** every job green
+  (25/25); 75 assets, the same set as 9.5/9.6; the runtime in the
+  bookworm-amd64 archive is stamped `2026.9.7+bb883a31` and matches
+  `versions.json` (the forced `frameos` entry still works). npm published
+  `frameos-wasm@2026.9.7` (`frameos-editor` stayed 2026.9.5 — `versions.json`
+  did not bump it); Discord posted; the `workflow_run` Cloud CI deploy
+  (33923510280) went to production and prod `/frameos-wasm/version.json`
+  reads 2026.9.7 / commit `fb6f501f`; the cloud offers the release
+  (`update_available: true`, all 8 ESP32 layout images + 3 buildroot
+  `.img.gz`). **Slower pickup than 9.5:** 80 minutes after publish no frame
+  had taken it on its own (9.5 was picked up ~9 min in) and Wood7.3's log had
+  no `ota` line since its 20:39 session start; uus2w was updated by hand at
+  01:20 CEST. Its upgrade ran through the door — `FrameOS privileged:
+  install-release ok in 32.88s`, `release activation` symlinked
+  `release_upgrade_20260904231950_2026_9_7`, both `driver:shared` lines
+  `loaded: true` off `drivers/*.so` at 0644 — and afterwards `User=frameos`,
+  `Uid: 990`, `Groups: 28 108 990`, `CapEff: …04000000`, `frameos --version`
+  prints `2026.9.7+bb883a31…` and exits 0 (#2257fc5f), `system/index` renders
+  163 ms once a second at 24% of one core. The reworked index screen was
+  captured from the cloud: rows `Name uus2w` / `Device framebuffer ·
+  1920×1080` / live `Time` with seconds / `Time zone` / `Network 10.8.0.62
+  (wlan0)` / `Managed via FrameOS Cloud (cloud.frameos.net, connected)` /
+  `Frame http://uus2w.local:8787` / `Remote control enabled — over an
+  encrypted HTTPS connection`, footer `FrameOS v2026.9.7`; `uus2w.local`
+  resolves from the Mac (10.4.0.47 → 10.8.0.62) so the advertised link is
+  real, and its bare 401 is by design (the `?k=` access link is only printed
+  for an unmanaged frame). **Noticed, not filed:** the cloud `upgrade`
+  command runs twice — the old process restarts before acking, so the new
+  runtime re-runs `frameos upgrade --yes` at 01:20:28 and answers
+  `up_to_date` at 01:20:34. Harmless, one wasted release check.
 
 ## Not on the list, deliberately
 
