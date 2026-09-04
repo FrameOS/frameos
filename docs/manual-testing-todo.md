@@ -68,8 +68,8 @@ hardware-settings batch) and the battery ADC rounds of #426.
   tick it in the SD image builder, boot the card → `ssh root@<frame>` works
   with that key. Older images log "Ignoring unknown key 'authorized_key'"
   and boot without it.
-- [ ] **ESP32 time zone (#388 + #416, needs firmware built after
-  2026-08-30):** set Europe/Brussels from the cloud settings panel → weather
+- [~] **ESP32 time zone (#388 + #416)** — 2026-09-04 on 2026.9.4: console `status` on E1002 shows `time_zone: Europe/Brussels` / `tz_data: CET-1CEST,M3.5.0,M10.5.0/3`; a schedule entry on Wood7.3 fired at 12:53 *local* (`schedule:fire hour 12 minute 53` at 10:53 UTC). Not eyeballed: weather-scene hours and a code node's `format()` (E1004, the weather frame, has no zone set). Original text (needs firmware built after
+  2026-08-30): set Europe/Brussels from the cloud settings panel → weather
   scene hours match local time (a code node's `format()` too), schedule
   entries fire in local time, `config` on the console shows it.
 - [~] **First-boot cloud enrollment on a router that strips DNSSEC (#384,
@@ -457,7 +457,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   queued mid-sleep survives the 15-minute nap instead of expiring.
 - [x] **Scheduled reboot on ESP32 (#376)** — fired 2026-09-04 on Wood7.3 (2026.9.4, Europe/Brussels): entry 12:53 → `schedule:fire {hour 12, minute 53, name reboot}` at 10:53:00 UTC → `cloud:session_ready uptimeSeconds 9`. **Found: it fired twice.** The board was back at 10:53:13, still inside minute 12:53, and fired the same entry again at 10:53:52 → second reboot at 10:54:03. The ESP32 keeps its last-fired marker in RAM, so a reboot/restart entry re-fires for the rest of its minute (a slower board could loop 2–3 times). The Pi (uus2w, 12:15) came back at 12:15:57 and did not re-fire — three seconds from the same bug. Fixed on main 2026-09-04: both schedulers persist the minute a reboot/restart entry fired in (NVS `sched_fired` on ESP32, `state/scheduler-last-fired` on the Pi) and honour it for up to 3 minutes at start (`test_scheduler.nim`). Also covers the ESP32 time-zone box's scheduler half: the entry fired at the local time. Original text: same schedule-entry test as the
   Pi, on a board.
-- [ ] **WPA2 provisioning AP (#443):** erase Wi-Fi on a board → the portal
+- [x] **WPA2 provisioning AP (#443)** — verified 2026-09-04 on E1002 (2026.9.4) over the CH340 console + Cloud-5's radio + a phone: `wifi <bogus>` → portal → `status` shows `ap_psk: 9z5zpugcz5` (`config` is not a command; `status` is where it prints); the AP is `FrameOS-9F39` (station MAC + 1), 192.168.4.1, **WPA2-PSK CCMP, no PMF flag** (nmcli RSN flags), phone joined without a prompt; the portal listed networks and the saved network came back; `status` printed the same `ap_psk`; `set ap_psk ""` + the next portal start minted `akufe4xujn`. The backend "changed on frame" check was not run (no self-hosted deploy in this session). **Found on the way, fixed on main 2026-09-04 (next release):** (1) in APSTA retry mode (stored Wi-Fi failing) every station retry is an all-channel scan that takes the AP off the air — one scan in three saw it and the phone lost it mid-join → retries now every 30 s; (2) with admin auth on, the hotspot portal demanded Basic auth, which the phone's captive browser cannot show ("Authentication required" and nothing else) — hotspot requests (192.168.4.0/24) are exempt now, the minted PSK is the credential and secrets are write-only since #443; (3) the form pre-selected "Enabled with admin username/password" whenever none was configured, so a Wi-Fi-only save was refused until an admin login was invented — now it reflects the current setting. **Recorded, not fixed:** the scene render overwrites the portal info screen on a frame that has scenes (the render loop runs in portal mode by design; the AP info is only on the panel until the first render); "leave blank to keep current" keeps an *empty* Wi-Fi password without saying so (the console `wifi <ssid>` with no password blanks it); the render-mode selector (thin client / on device) is shown on an S3 where thin-client is moot; the SSID field kept grabbing focus on the phone (nothing in the page sets focus — most likely the captive-portal helper re-opening the page; unconfirmed). Original text: erase Wi-Fi on a board → the portal
   screen shows "Wi-Fi: FrameOS-XXXX" and a "Password:" line; a phone joins
   with it (WPA2, no PMF prompt) and reaches the portal; `config` over USB
   prints the same `ap_psk`; `set ap_psk ""` mints a new one at the next
@@ -488,7 +488,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `esp32-s3-generic`. Also: "Flash latest release" / "Apply frame settings"
   against a board still on 2026.9.2 firmware logs "does not know hostname
   yet" and finishes instead of stopping there.
-- [ ] **Dual console — reTerminal E1002 over its CH340:** the cloud flasher
+- [~] **Dual console — reTerminal E1002 over its CH340** — console half verified 2026-09-04 on 2026.9.4: `/dev/cu.wchusbserial10` at 115200 with DTR/RTS held low answers `frameos>`, `status`, `help`, `buttons` (the board deep-sleeps between renders on USB too — `onBattery: true`, no VBUS sense — so catch it on a timed wake or a button press; the first console line arms the 3-min keep-awake). Not done: the browser flash + provisioning over that port (would reflash the enrolled bench frame). Original text: the cloud flasher
   on the "USB Single Serial" port must flash, see `frameos>` and provision
   (this board has no USB-Serial/JTAG port at all). Then on a XIAO ESP32-S3
   confirm the "USB JTAG/serial debug unit" path still provisions and that

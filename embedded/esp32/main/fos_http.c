@@ -37,6 +37,7 @@
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
+#include "lwip/sockets.h"
 
 static const char *TAG = "fos_http";
 
@@ -357,18 +358,48 @@ static void log_http_denied(httpd_req_t *req, int status)
     frameos_nim_log_hook(log_line);
 }
 
+/* True when the request came in over the provisioning hotspot (the soft-AP
+ * hands out 192.168.4.x). */
+static bool request_from_hotspot(httpd_req_t *req)
+{
+    int fd = httpd_req_to_sockfd(req);
+    if (fd < 0) return false;
+    struct sockaddr_storage peer;
+    socklen_t peer_len = sizeof(peer);
+    if (getpeername(fd, (struct sockaddr *)&peer, &peer_len) != 0) return false;
+    if (peer.ss_family == AF_INET) {
+        uint32_t ip = ntohl(((struct sockaddr_in *)&peer)->sin_addr.s_addr);
+        return (ip & 0xFFFFFF00u) == 0xC0A80400u; /* 192.168.4.0/24 */
+    }
+#if LWIP_IPV6
+    if (peer.ss_family == AF_INET6) {
+        const struct sockaddr_in6 *p6 = (const struct sockaddr_in6 *)&peer;
+        const uint8_t *a = (const uint8_t *)&p6->sin6_addr;
+        static const uint8_t v4mapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+        if (memcmp(a, v4mapped, sizeof(v4mapped)) == 0) {
+            return a[12] == 192 && a[13] == 168 && a[14] == 4;
+        }
+    }
+#endif
+    return false;
+}
+
 static esp_err_t require_protected_access(httpd_req_t *req)
 {
     fos_config_t *config = fos_config();
 
-    /* The provisioning portal is open on purpose for a device that holds no
-     * credentials yet — there is nothing to prove them with. A device that
-     * already has an API key or admin login keeps demanding them even on the
-     * portal: the portal also comes up when the stored Wi-Fi simply fails to
-     * answer at boot (router down, out of range, deauthed), on an open access
-     * point, and its /api/frames answer carries the Wi-Fi password, the API
-     * key and the admin login. Those must never be one unauthenticated GET
-     * away from anyone in radio range. */
+    /* Inside the provisioning hotspot the credential is the hotspot itself:
+     * a WPA2 passphrase minted per device and shown on the panel (#443), so
+     * whoever is on it has physical access, and every secret the GET routes
+     * used to carry is write-only now ("" on the way out). Demanding the
+     * admin login there on top locked people out of their own frame: the
+     * captive-portal browser on a phone cannot show a Basic-auth prompt, so
+     * the setup page rendered as a bare "Authentication required", and a
+     * forgotten admin password meant a factory reset to change Wi-Fi
+     * (2026-09-04, E1002). The LAN side keeps the gate: the portal httpd
+     * also serves the station interface for a moment when the stored
+     * network answers after all, and that path is not physical access. */
+    if (s_portal_mode && request_from_hotspot(req)) return ESP_OK;
     bool credentials_configured = config->api_key[0] != '\0' || admin_auth_configured(config);
     if (s_portal_mode && !credentials_configured) return ESP_OK;
 
@@ -587,13 +618,16 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     }
 
     bool has_admin_auth = admin_auth_configured(config);
+    /* Shown as advice, not pre-selected: with "Enabled" pre-selected a
+     * Wi-Fi-only save was refused ("admin username and password required")
+     * until the person invented an admin login on the spot (2026-09-04). */
     if (!has_admin_auth) {
         if (sendstr(req, "<p class='warn'>Set an admin username and password before joining normal Wi-Fi. Without them, setup and control routes stay locked outside hotspot mode.</p>") != ESP_OK) {
             return ESP_FAIL;
         }
     }
     if (sendstr(req, "<label for='admin_auth'>Setup/control protection</label><select id='admin_auth' name='admin_auth'>") != ESP_OK) return ESP_FAIL;
-    bool protect_setup = config->admin_auth_enabled || !has_admin_auth;
+    bool protect_setup = config->admin_auth_enabled;
     if (send_option(req, "1", "Enabled with admin username/password", protect_setup) != ESP_OK) return ESP_FAIL;
     if (send_option(req, "0", "Disabled (locked outside hotspot unless backend token is used)", !protect_setup) != ESP_OK) return ESP_FAIL;
     if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
