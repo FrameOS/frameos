@@ -350,7 +350,24 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
 - [x] **The door answers** — uus2w 2026-09-04 11:51: cloud Reboot → `FrameOS privileged: executing reboot (…)` → `> sh -c '(sleep 2; systemctl reboot || reboot) …'` → connection closed; `.path` active before and after. Original text: `journalctl -u frameos-privileged` after a
   reboot from the cloud/admin ("Reboot" button): one `executing reboot` line,
   then the reboot. `systemctl status frameos-privileged.path` is active.
-- [ ] **Hotspot and portal through the door.** Boot with no Wi-Fi
+- [ ] **Hotspot and portal through the door.** FAILED on 2026.9.4 (uus2w,
+  2026-09-04 12:30): with the Wi-Fi profile deleted the door ran
+  `nm-radio-on`, `nm-device-status`, `nm-hotspot-start` (all `ok`,
+  `managed,add,modify,up`), the portal screen rendered, and NetworkManager
+  logged `Started Wi-Fi Hotspot "FrameOS-Setup"` … `Activation: successful`
+  — then `dnsmasq: cannot open or create lease file
+  /var/lib/NetworkManager/dnsmasq-wlan0.leases: Read-only file system`,
+  `dnsmasq exited with error`, `activated -> failed (ip-config-unavailable)`,
+  `AP-DISABLED` two seconds after `AP-ENABLED`. No SSID on the air (two other
+  frames' radios confirmed). Cloud-5's 08:30 capture has the same dnsmasq
+  line, so the setup hotspot has only ever worked on a card's *first* boot
+  (the first-boot script leaves `/` remounted rw). The door path itself is
+  fine. Fixed on main 2026-09-04: `/var/lib/NetworkManager` (and
+  `/var/lib/systemd/timesync`, for the clock floor) are bind-mounted onto
+  `/srv/frameos/state/…` via fstab in new images, the compose path, and a
+  `frameos setup` "persistent state mounts" step. Recovery of the bench frame:
+  the deleted profile was restored from `state/wifi-backup/` on the card. To
+  re-run once the mount is on the frame: Boot with no Wi-Fi
   credentials → `FrameOS-Setup` hotspot appears, the portal lists networks,
   joining one works and survives a reboot. Every one of those is an
   `nm-*` verb now; the journal shows them.

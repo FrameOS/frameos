@@ -312,6 +312,30 @@ BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE = (
     f"{BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR} {BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR} none "
     "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"
 )
+# NetworkManager's own state (DHCP leases, seen BSSIDs, timestamps — and the
+# dnsmasq lease file its shared-IPv4 hotspot needs). The rootfs is read-only,
+# so without this bind the setup hotspot came up and died two seconds later:
+# "dnsmasq: cannot open or create lease file /var/lib/NetworkManager/
+# dnsmasq-wlan0.leases: Read-only file system" → "activated -> failed
+# (ip-config-unavailable)" (2026-09-04, uus2w and Cloud-5). It only ever
+# worked on a card's very first boot, when the first-boot script had left /
+# remounted read-write.
+BUILDROOT_NETWORK_MANAGER_VARLIB_DIR = "/var/lib/NetworkManager"
+BUILDROOT_NETWORK_MANAGER_STATE_VARLIB_DIR = "/srv/frameos/state/NetworkManager/var-lib"
+BUILDROOT_NETWORK_MANAGER_VARLIB_FSTAB_LINE = (
+    f"{BUILDROOT_NETWORK_MANAGER_STATE_VARLIB_DIR} {BUILDROOT_NETWORK_MANAGER_VARLIB_DIR} none "
+    "bind,nofail,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"
+)
+# systemd-timesyncd's clock file: timesyncd floors the clock at that file's
+# mtime on every start, so on a read-only root a Pi with no RTC battery boots
+# into the image's build date forever and fails every TLS handshake until NTP
+# answers. On the persistent partition the floor moves forward with each sync.
+BUILDROOT_TIMESYNC_DIR = "/var/lib/systemd/timesync"
+BUILDROOT_TIMESYNC_STATE_DIR = "/srv/frameos/state/timesync"
+BUILDROOT_TIMESYNC_FSTAB_LINE = (
+    f"{BUILDROOT_TIMESYNC_STATE_DIR} {BUILDROOT_TIMESYNC_DIR} none "
+    "bind,nofail,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=systemd-timesyncd.service 0 0"
+)
 # armv6 (Pi Zero W) images have no NetworkManager - its Kconfig deps do not
 # resolve on ARM1176 - so frameos drives wpa_supplicant/hostapd there instead
 # (frameos/src/frameos/network/supplicant.nim). Its generated
@@ -342,6 +366,8 @@ BUILDROOT_FSTAB_CONTENT = (
             "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0",
             BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
             BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE,
+            BUILDROOT_NETWORK_MANAGER_VARLIB_FSTAB_LINE,
+            BUILDROOT_TIMESYNC_FSTAB_LINE,
         ]
     )
     + "\n"
@@ -894,6 +920,8 @@ def stage_buildroot_network_manager_state(root: Path) -> None:
         # Mount point for the wpa_supplicant backend used by images without
         # NetworkManager; empty on a NetworkManager image, harmless there.
         (BUILDROOT_WPA_SUPPLICANT_STATE_DIR, BUILDROOT_WPA_SUPPLICANT_DIR),
+        (BUILDROOT_NETWORK_MANAGER_STATE_VARLIB_DIR, BUILDROOT_NETWORK_MANAGER_VARLIB_DIR),
+        (BUILDROOT_TIMESYNC_STATE_DIR, BUILDROOT_TIMESYNC_DIR),
     ):
         state_dir = root / state_path.lstrip("/")
         connections_dir = root / etc_path.lstrip("/")
@@ -3776,6 +3804,16 @@ fi
 mkdir -p "$frameos_root/state/NetworkManager/system-connections"
 chown 0:0 "$frameos_root/state/NetworkManager" "$frameos_root/state/NetworkManager/system-connections"
 chmod 700 "$frameos_root/state/NetworkManager/system-connections"
+mkdir -p "$frameos_root/state/NetworkManager/var-lib" "$frameos_root/state/timesync"
+chown 0:0 "$frameos_root/state/NetworkManager/var-lib"
+chmod 700 "$frameos_root/state/NetworkManager/var-lib"
+# timesyncd runs as its own user and writes the clock file itself.
+timesync_uid=$(awk -F: '$1=="systemd-timesync"{print $3}' "$target_dir/etc/passwd" 2>/dev/null)
+timesync_gid=$(awk -F: '$1=="systemd-timesync"{print $3}' "$target_dir/etc/group" 2>/dev/null)
+if [ -n "$timesync_uid" ] && [ -n "$timesync_gid" ]; then
+  chown "$timesync_uid:$timesync_gid" "$frameos_root/state/timesync"
+fi
+chmod 755 "$frameos_root/state/timesync"
 mkdir -p "$frameos_root/state/wpa_supplicant"
 chown 0:0 "$frameos_root/state/wpa_supplicant"
 chmod 700 "$frameos_root/state/wpa_supplicant"
@@ -3805,7 +3843,7 @@ chmod 700 "$target_dir/etc/wpa_supplicant"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
 touch "$fstab"
-grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections|/etc/wpa_supplicant)[[:space:]]' "$fstab" > "$tmp_fstab" || true
+grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections|/etc/wpa_supplicant|/var/lib/NetworkManager|/var/lib/systemd/timesync)[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
 __FRAMEOS_FSTAB_CONTENT__EOF
 mv "$tmp_fstab" "$fstab"

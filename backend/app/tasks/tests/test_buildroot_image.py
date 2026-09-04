@@ -29,6 +29,8 @@ from app.tasks.buildroot_image import (
     BUILDROOT_WPA_SUPPLICANT_CONF_NAME,
     BUILDROOT_WPA_SUPPLICANT_DIR,
     BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE,
+    BUILDROOT_NETWORK_MANAGER_VARLIB_FSTAB_LINE,
+    BUILDROOT_TIMESYNC_FSTAB_LINE,
     BUILDROOT_WPA_SUPPLICANT_STATE_DIR,
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
@@ -726,10 +728,14 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in partition_post_build
     assert (
         "[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections"
-        "|/etc/wpa_supplicant)[[:space:]]"
+        "|/etc/wpa_supplicant|/var/lib/NetworkManager|/var/lib/systemd/timesync)[[:space:]]"
         in partition_post_build
     )
     assert BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE in partition_post_build
+    assert BUILDROOT_NETWORK_MANAGER_VARLIB_FSTAB_LINE in partition_post_build
+    assert BUILDROOT_TIMESYNC_FSTAB_LINE in partition_post_build
+    assert 'mkdir -p "$frameos_root/state/NetworkManager/var-lib" "$frameos_root/state/timesync"' in partition_post_build
+    assert "/var/lib/NetworkManager|/var/lib/systemd/timesync" in partition_post_build
     assert 'mkdir -p "$frameos_root/state/wpa_supplicant"' in partition_post_build
     assert 'chmod 700 "$target_dir/etc/wpa_supplicant"' in partition_post_build
     assert 'mkdir -p "$frameos_root/state/NetworkManager/system-connections"' in partition_post_build
@@ -897,6 +903,10 @@ def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkey
     fstab_text = (overlay / "etc" / "fstab").read_text(encoding="utf-8")
     assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in fstab_text
     assert BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE in fstab_text
+    assert BUILDROOT_NETWORK_MANAGER_VARLIB_FSTAB_LINE in fstab_text
+    assert BUILDROOT_TIMESYNC_FSTAB_LINE in fstab_text
+    assert (overlay / "srv/frameos/state/NetworkManager/var-lib").is_dir()
+    assert (overlay / "var/lib/systemd/timesync").is_dir()
     # /boot must be root-only: it can hold one-time provisioning secrets.
     assert "LABEL=BOOT /boot vfat defaults,noatime,umask=077 0 0" in fstab_text
     assert "umask=000 0 0\nLABEL=FRAMEOS" not in fstab_text

@@ -693,6 +693,65 @@ block test_network_service_guard_does_not_restart_a_healthy_unit:
     resetSetupCommandRunnerForTest()
     removeDir(dropinDir)
 
+block test_persistent_state_mounts_are_added_once_and_mounted_live:
+  # The read-only rootfs left NetworkManager's dnsmasq and timesyncd with no
+  # writable state (2026-09-04): both directories get a bind mount onto the
+  # persistent partition, written to fstab once and mounted right away.
+  let root = getTempDir() / ("frameos-statemounts-" & $epochTime().int64)
+  createDir(root)
+  let fstabPath = root / "fstab"
+  writeFile(fstabPath, "LABEL=BOOT /boot vfat defaults,noatime,umask=077 0 0\n" &
+    "/srv/frameos/state/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind 0 0\n")
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("mountpoint -q"):
+      return ("", 1) # not mounted yet
+    ("", 0)
+  )
+  try:
+    discard setupPersistentStateMounts(liveApply = true, fstabPath = fstabPath)
+    let fstab = readFile(fstabPath)
+    doAssert fstab.contains("/srv/frameos/state/NetworkManager/var-lib /var/lib/NetworkManager none bind,nofail,")
+    doAssert fstab.contains("/srv/frameos/state/timesync /var/lib/systemd/timesync none bind,nofail,")
+    doAssert fstab.contains("x-systemd.before=NetworkManager.service"), "the mount must precede NetworkManager"
+    doAssert fstab.contains("x-systemd.before=systemd-timesyncd.service")
+    doAssert fstab.startsWith("LABEL=BOOT"), "existing lines are kept"
+    doAssert commands.anyIt(it.contains("install -d -m 700 '/srv/frameos/state/NetworkManager/var-lib'"))
+    doAssert commands.anyIt(it.contains("chown 'systemd-timesync:systemd-timesync' '/srv/frameos/state/timesync'"))
+    doAssert commands.anyIt(it.contains("mount --bind '/srv/frameos/state/NetworkManager/var-lib' '/var/lib/NetworkManager'"))
+    doAssert commands.anyIt(it.contains("mount --bind '/srv/frameos/state/timesync' '/var/lib/systemd/timesync'"))
+    doAssert commands.anyIt(it.contains("daemon-reload"))
+
+    # Idempotent: a second pass neither rewrites fstab nor mounts again.
+    commands = @[]
+    let before = readFile(fstabPath)
+    discard setupPersistentStateMounts(liveApply = true, fstabPath = fstabPath)
+    doAssert readFile(fstabPath) == before
+    doAssert not commands.anyIt(it.contains("mount --bind"))
+    doAssert before.count("/var/lib/NetworkManager none") == 1
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(root)
+
+block test_persistent_state_mounts_defer_when_not_live:
+  let root = getTempDir() / ("frameos-statemounts-deferred-" & $epochTime().int64)
+  createDir(root)
+  let fstabPath = root / "fstab"
+  writeFile(fstabPath, "")
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    discard setupPersistentStateMounts(liveApply = false, fstabPath = fstabPath)
+    doAssert readFile(fstabPath).contains("/var/lib/NetworkManager none bind")
+    doAssert not commands.anyIt(it.contains("mount --bind"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(root)
+
 block test_dropbear_host_key_dropin_installs_and_restarts_only_a_failed_unit:
   let dropinDir = getTempDir() / ("frameos-dropbear-" & $epochTime().int64)
   createDir(dropinDir)

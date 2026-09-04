@@ -631,6 +631,81 @@ proc setupDropbearHostKey*(liveApply = true, dropinPath = dropbearHostKeyDropinP
   else:
     setupLog("FrameOS setup: dropbear host key: deferring restart; applies at the next reboot")
 
+# Bind mounts that give NetworkManager and timesyncd a writable state directory
+# on the persistent FrameOS partition. The Buildroot rootfs is read-only, so
+# without them the setup hotspot died two seconds after it came up (dnsmasq
+# could not create its lease file under /var/lib/NetworkManager) and a Pi with
+# no RTC battery booted into the image's build date (timesyncd floors the
+# clock at its clock file's mtime). Keep the lines byte-identical to
+# BUILDROOT_NETWORK_MANAGER_VARLIB_FSTAB_LINE / BUILDROOT_TIMESYNC_FSTAB_LINE in
+# backend/app/tasks/buildroot_image.py — new images ship them in /etc/fstab and
+# this step is a no-op there.
+type PersistentStateMount = object
+  state: string   # on /srv/frameos
+  mount: string   # on the read-only rootfs
+  owner: string   # "" = root, else the service user to chown the state dir to
+  mode: string
+  fstabLine: string
+
+const persistentStateMounts = [
+  PersistentStateMount(state: "/srv/frameos/state/NetworkManager/var-lib", mount: "/var/lib/NetworkManager",
+    owner: "", mode: "700",
+    fstabLine: "/srv/frameos/state/NetworkManager/var-lib /var/lib/NetworkManager none " &
+      "bind,nofail,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"),
+  PersistentStateMount(state: "/srv/frameos/state/timesync", mount: "/var/lib/systemd/timesync",
+    owner: "systemd-timesync", mode: "755",
+    fstabLine: "/srv/frameos/state/timesync /var/lib/systemd/timesync none " &
+      "bind,nofail,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=systemd-timesyncd.service 0 0"),
+]
+
+proc fstabMentionsMount(fstab, mount: string): bool =
+  for line in fstab.splitLines():
+    let parts = line.strip().splitWhitespace()
+    if parts.len >= 2 and not parts[0].startsWith("#") and parts[1] == mount:
+      return true
+  false
+
+proc setupPersistentStateMounts*(liveApply = true, fstabPath = "/etc/fstab"): SetupResult =
+  result = setupOk()
+  if not commandExists("mount"):
+    setupLog("FrameOS setup: persistent state mounts: mount not found, skipping")
+    return
+  var fstab = ""
+  try:
+    if fileExists(fstabPath):
+      fstab = readFile(fstabPath)
+  except CatchableError:
+    discard
+  var missing: seq[PersistentStateMount] = @[]
+  for entry in persistentStateMounts:
+    if not fstabMentionsMount(fstab, entry.mount):
+      missing.add(entry)
+  if missing.len == 0:
+    setupLog("FrameOS setup: persistent state mounts: already in fstab")
+    return
+  for entry in missing:
+    setupLog("FrameOS setup: persistent state mounts: adding " & entry.mount & " -> " & entry.state)
+    discard runSetupCommand(privilegedCommand("install -d -m " & entry.mode & " " & shellQuote(entry.state)),
+      raiseOnError = false)
+    if entry.owner.len > 0 and commandSucceeds("id -u " & shellQuote(entry.owner) & " >/dev/null 2>&1"):
+      discard runSetupCommand(privilegedCommand("chown " & shellQuote(entry.owner & ":" & entry.owner) & " " &
+        shellQuote(entry.state)), raiseOnError = false)
+  var updated = fstab
+  if updated.len > 0 and not updated.endsWith("\n"):
+    updated.add("\n")
+  for entry in missing:
+    updated.add(entry.fstabLine & "\n")
+  withWritableMount(fstabPath):
+    writePrivilegedFile(fstabPath, updated)
+  if liveApply:
+    discard runSetupCommand(privilegedCommand("systemctl daemon-reload"), raiseOnError = false)
+    for entry in missing:
+      if not commandSucceeds("mountpoint -q " & shellQuote(entry.mount)):
+        discard runSetupCommand(privilegedCommand("mount --bind " & shellQuote(entry.state) & " " &
+          shellQuote(entry.mount)), raiseOnError = false)
+  else:
+    setupLog("FrameOS setup: persistent state mounts: deferring the bind mounts; they apply at the next reboot")
+
 proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
   let normalizedDir = currentDir.strip(chars = {'/'})
   if normalizedDir.len == 0:
@@ -782,6 +857,8 @@ proc setupFrameOS*(configPath = ""): SetupResult =
       proc(): SetupResult = setupNetworkServiceEth0Guard(liveApply)))
     addSetupResult(result, runSetupStep("dropbear host key",
       proc(): SetupResult = setupDropbearHostKey(liveApply)))
+    addSetupResult(result, runSetupStep("persistent state mounts",
+      proc(): SetupResult = setupPersistentStateMounts(liveApply)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if frameOS.frameConfig.mode == "buildroot":
     # Last, after everything above may have created root-owned files under
