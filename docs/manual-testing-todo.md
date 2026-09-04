@@ -248,9 +248,13 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   budget ran out → `No network. Starting the setup hotspot…` →
   `system/wifiHotspot` with a 3600 s sleep. The frame is alive (metrics in
   its file log 08:16–08:32 UTC) but off the cloud for an hour at a time.
-  Fix needed: `sync-clock` must wait for timesyncd (or do one bounded
-  `ntpd -gq`/`sntp` step) instead of restarting it per retry, and the
-  cert-failure retry loop must not call it again while a sync is pending.
+  FIXED on main 2026-09-04 (after 2026.9.4, commit 1b3ad730): the door's
+  `sync-clock` leaves a running timesyncd alone, starts it only if it is
+  down, and waits up to 45 s for `/run/systemd/timesync/synchronized`; the
+  network check syncs once per check and gives the wait back to its 30 s
+  budget (`test_privileged.nim` sync-clock block). Verify on the next
+  release with a cold-booted Pi 5: `networkCheck attempt 1 success` after
+  one `syncing clock` line, no hotspot.
   **Cloud-5's card read offline (11:20 local):** it never migrated at all —
   no `frameos` user, unit `User=root`, no `/srv/frameos/privileged`,
   `upgrade-status.json` stuck at `running` although `current` points at
@@ -265,7 +269,12 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   9.1 runtime's `FRAMEOS_SERVICE_USER='root' ./frameos setup` of the 9.4
   binary and not one line of that setup's output — the upgrade child was
   killed when the service restarted, so the status stayed `running` and
-  no unit was rewritten; the runtime that came up was 9.4 as root. Cause 3
+  no unit was rewritten; the runtime that came up was 9.4 as root.
+  Mitigated on main 2026-09-04 (commit 1b3ad730): at runtime start a
+  `starting`/`running` status older than 10 min is rewritten to `failed`
+  ("interrupted", release details kept; `test_upgrade.nim` "interrupted
+  upgrade status"), so the workspace stops reporting a phantom upgrade and a
+  new one can be triggered. Why that particular child died is still unknown. Cause 3
   (why it then fell off the cloud): its boot clock. The Pi 5 has no RTC
   battery and timesyncd's clock file on the ro root is 0 bytes dated
   Aug 16, so every cold boot floors at Aug 16 → the cloud's current TLS
@@ -297,10 +306,12 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `reboot` then reboots 2 s later through the door, but the hub kept the
   command in `sent` and re-delivered it on every reconnect → a reboot loop
   until the command's 5-min TTL (cancelled by hand via
-  `frame_command_cancel`). Fix: the hub must treat a `reboot` /
-  `restart_runtime` ack as terminal, or the runtime must wait for the ack
-  flush before rebooting (`hub_client.nim` "Delayed so the ack still
-  flushes" is not enough).
+  `frame_command_cancel`). FIXED on the hub 2026-09-04 (`redeliverSentCommands`,
+  commit 1b3ad730): a `reboot` / `restart_runtime` already written to a
+  socket is expired as `delivered_once` instead of requeued, pinned by the
+  "does not redeliver a reboot after the socket it was sent on died"
+  integration test. Applies as soon as the hub is deployed, no firmware
+  needed.
   When run: watch `upgrade-status.json`, then SPI panel refresh time
   (slow = bit-banged fallback = wrong device group), `journalctl -u
   frameos-privileged`, `/etc/passwd` has `frameos:x:990:990`,
