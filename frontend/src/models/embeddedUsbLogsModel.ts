@@ -276,6 +276,27 @@ async function withUsbApiCommandLock<T>(frameId: FrameId, operation: () => Promi
   }
 }
 
+/**
+ * Resolves once no USB API command is running for this frame.
+ *
+ * A command opens the board's port itself and only hands it back when it is
+ * done — to the log stream it interrupted, or closed. A flasher that takes
+ * the port from `requestPort()` while a `status` probe or a `restart` is
+ * still in flight therefore opens it a second time and fails with "The port
+ * is already open" (seen on the bench 2026-09-04: a timed-out `restart`
+ * held the port through the first "Update firmware" click). Waits for the
+ * whole queue, never throws.
+ */
+export async function waitForEmbeddedUsbApiIdle(frameId: FrameId): Promise<void> {
+  for (;;) {
+    const lock = usbApiCommandLocks.get(frameId)
+    if (!lock) {
+      return
+    }
+    await lock.catch(() => {})
+  }
+}
+
 export function embeddedUsbApiCanUse(frameId: FrameId): boolean {
   // Only claim USB is usable when the remembered port is still connected —
   // a port granted earlier in the session goes stale once the board is

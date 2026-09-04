@@ -16,7 +16,9 @@ import {
   deviceLayoutMatchesPlan,
   esp32NvsPartition,
   firmwareUpdateWritePlan,
+  layoutPlatformForPartitions,
   parseEsp32PartitionTable,
+  partitionTableFlashMb,
   partitionTableFromMergedImage,
 } from "../../../../../../frontend/src/scenes/workspace/embeddedFlashImage";
 // Image/table builders shared with embedded-web-flasher.test.tsx.
@@ -136,5 +138,72 @@ describe("deviceLayoutMatchesPlan", () => {
 
     expect(deviceLayoutMatchesPlan(sixteenMb, plan)).toBe(false);
     expect(deviceLayoutMatchesPlan([], plan)).toBe(false);
+  });
+});
+
+// "Update firmware" fetches the image built for the layout already on the
+// board — the only image whose NVS hole lands where the board's NVS is. The
+// cloud used to fetch the generic image unconditionally and then refuse any
+// board enrolled on a 16/32 MB image as "partitioned differently".
+describe("partitionTableFlashMb", () => {
+  it("reads the chip size a table was generated for from its extent", () => {
+    expect(partitionTableFlashMb(defaultLayout)).toBe(8);
+    expect(
+      partitionTableFlashMb([
+        { name: "nvs", type: 1, subtype: 2, offset: 0x9000, size: 24 * 1024 },
+        { name: "ota_0", type: 0, subtype: 0x10, offset: 0x20000, size: 0x3f0000 },
+        { name: "ota_1", type: 0, subtype: 0x11, offset: 0x410000, size: 0x3f0000 },
+        { name: "state", type: 1, subtype: 0x82, offset: 0x800000, size: 24 * 1024 * 1024 },
+      ]),
+    ).toBe(32);
+    expect(
+      partitionTableFlashMb([
+        { name: "nvs", type: 1, subtype: 2, offset: 0x9000, size: 16 * 1024 },
+        { name: "factory", type: 0, subtype: 0, offset: 0x10000, size: 0x370000 },
+        { name: "state", type: 1, subtype: 0x82, offset: 0x380000, size: 512 * 1024 },
+      ]),
+    ).toBe(4);
+  });
+
+  it("answers null for an empty table or one past every published layout", () => {
+    expect(partitionTableFlashMb([])).toBeNull();
+    expect(
+      partitionTableFlashMb([{ name: "huge", type: 1, subtype: 0x82, offset: 0x10000, size: 64 * 1024 * 1024 }]),
+    ).toBeNull();
+  });
+});
+
+describe("layoutPlatformForPartitions", () => {
+  const assets = [
+    { platform: "esp32-s3-generic" },
+    { platform: "esp32-s3-16mb" },
+    { platform: "esp32-s3-32mb" },
+    { platform: "esp32-c3-generic" },
+    { platform: "esp32-c3-8mb" },
+  ];
+  const layout32 = [
+    { name: "nvs", type: 1, subtype: 2, offset: 0x9000, size: 24 * 1024 },
+    { name: "state", type: 1, subtype: 0x82, offset: 0x800000, size: 24 * 1024 * 1024 },
+  ];
+  const layout16 = [
+    { name: "nvs", type: 1, subtype: 2, offset: 0x9000, size: 24 * 1024 },
+    { name: "state", type: 1, subtype: 0x82, offset: 0x800000, size: 8 * 1024 * 1024 },
+  ];
+
+  it("keeps the generic image for the generic layout", () => {
+    expect(layoutPlatformForPartitions("esp32-s3", defaultLayout, assets)).toBe("esp32-s3-generic");
+    // The C3's generic layout is the 4 MB one; its 8 MB image carries the size.
+    expect(layoutPlatformForPartitions("esp32-c3", defaultLayout, assets)).toBe("esp32-c3-8mb");
+  });
+
+  it("names the layout image a bigger board is running", () => {
+    expect(layoutPlatformForPartitions("esp32-s3", layout32, assets)).toBe("esp32-s3-32mb");
+    expect(layoutPlatformForPartitions("esp32-s3", layout16, assets)).toBe("esp32-s3-16mb");
+  });
+
+  it("falls back to the generic image when the release has no image for the layout", () => {
+    expect(layoutPlatformForPartitions("esp32-c3", layout32, assets)).toBe("esp32-c3-generic");
+    expect(layoutPlatformForPartitions("esp32-s3", layout32, undefined)).toBe("esp32-s3-generic");
+    expect(layoutPlatformForPartitions("esp32-s3", [], assets)).toBe("esp32-s3-generic");
   });
 });

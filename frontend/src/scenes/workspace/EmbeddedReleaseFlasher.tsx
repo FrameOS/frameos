@@ -13,6 +13,7 @@ import {
   usbProvisionWifi,
   usbRestart,
   usbSet,
+  waitForEmbeddedUsbApiIdle,
   type EmbeddedUsbConfigKey,
 } from '../../models/embeddedUsbLogsModel'
 import { framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
@@ -237,6 +238,14 @@ export function EmbeddedReleaseFlasher({
         return
       }
       await prepareSerialPortReconnect(port)
+      // A USB API command still in flight (a `status` probe, a `restart`)
+      // holds the port and resumes the log stream on it when it ends; opening
+      // it underneath fails with "The port is already open". Wait it out,
+      // then take the port back from the stream it may have restarted.
+      await waitForEmbeddedUsbApiIdle(frame.id)
+      if (embeddedUsbLogStreamSessionPort(frame.id)) {
+        port = (await stopEmbeddedUsbLogStream(frame.id)) ?? port
+      }
       openFrameToolBehindDrawer(frame.id, 'logs')
 
       setPhase('preparing')

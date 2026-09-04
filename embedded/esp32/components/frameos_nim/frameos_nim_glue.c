@@ -22,7 +22,9 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_spiffs.h"
 #include "esp_system.h"
+#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -285,6 +287,37 @@ size_t fos_psram_free_bytes(void)
 size_t fos_psram_largest_free_block(void)
 {
     return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+/* Free bytes on the filesystem holding `path`, for the Nim side's
+ * getAvailableDiskSpace (utils/system.nim): the spool checks it before
+ * spilling an image, so a 1.5 MB canvas is never written onto a 1 MB state
+ * partition (it filled the partition, failed, and disabled the disk tier
+ * every boot on the generic 8 MB layout). newlib has no statvfs on the
+ * ESP-IDF VFS, so the answer comes from the two mounts the firmware makes:
+ * the SPIFFS state partition and the FAT SD card at the assets root. -1 for
+ * anything else — "unknown", and the write itself stays the last check. */
+int64_t fos_vfs_free_bytes(const char *path)
+{
+    if (path == NULL || path[0] != '/') return -1;
+    if (strncmp(path, "/state", 6) == 0 && (path[6] == '\0' || path[6] == '/')) {
+        size_t total = 0, used = 0;
+        if (esp_spiffs_info("state", &total, &used) != ESP_OK) return -1;
+        return total > used ? (int64_t)(total - used) : 0;
+    }
+    /* esp_vfs_fat_info wants the mount point itself; walk up from the path
+     * until a mount answers (the spool dir is <assets>/.cache). */
+    char base[128];
+    snprintf(base, sizeof(base), "%s", path);
+    for (;;) {
+        uint64_t total = 0, free_bytes = 0;
+        if (esp_vfs_fat_info(base, &total, &free_bytes) == ESP_OK) {
+            return free_bytes > (uint64_t)INT64_MAX ? INT64_MAX : (int64_t)free_bytes;
+        }
+        char *slash = strrchr(base, '/');
+        if (slash == NULL || slash == base) return -1;
+        *slash = '\0';
+    }
 }
 
 /* --------------------------------------------- emergency heap reserve

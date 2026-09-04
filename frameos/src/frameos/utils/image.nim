@@ -1408,6 +1408,10 @@ proc spillImageToSpool*(image: Image, name: string, preferredDir = ""): ImageSpo
   let path = newSpillFilePath(name, preferredDir)
   if path.len == 0:
     return nil
+  # The file is width*height*4 whatever the image's own format; a spill that
+  # will not fit is refused here rather than filling the filesystem first.
+  if spoolHeadroomShortfall(path.parentDir, image.width * image.height * 4).len > 0:
+    return nil
   var file: File
   if not file.open(path, fmWrite):
     return nil

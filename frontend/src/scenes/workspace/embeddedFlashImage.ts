@@ -146,3 +146,55 @@ export function deviceLayoutMatchesPlan(
   const deviceNvs = esp32NvsPartition(devicePartitions)
   return Boolean(deviceNvs && deviceNvs.offset === plan.preserved.offset && deviceNvs.size === plan.preserved.size)
 }
+
+/** The flash sizes a release publishes a layout for (embedded/esp32/ci_build_image.sh). */
+const RELEASE_LAYOUT_MB = [4, 8, 16, 32] as const
+
+/**
+ * The flash size a partition table was generated for: the smallest published
+ * layout the table fits in. Every FrameOS layout ends with a `state` partition
+ * that runs to the end of the chip, so the table's extent IS the chip size
+ * the image was built for. null when the table is empty or spans more than
+ * the largest published layout.
+ */
+export function partitionTableFlashMb(partitions: readonly Esp32Partition[]): number | null {
+  let extent = 0
+  for (const partition of partitions) {
+    extent = Math.max(extent, partition.offset + partition.size)
+  }
+  if (extent <= 0) {
+    return null
+  }
+  return RELEASE_LAYOUT_MB.find((mb) => extent <= mb * 1024 * 1024) ?? null
+}
+
+/**
+ * The release image whose partition table matches the one already on the
+ * board — the only image the NVS-sparing update can write. The release
+ * publishes one merged image per chip × flash layout; the generic pair IS
+ * the 8 MB S3 / 4 MB C3 layout, the rest carry the size in their name
+ * (cloud-frontend's layoutMatchedPlatform picks the same names from the
+ * chip's flash id when a blank board is enrolled).
+ *
+ * Unreadable table, a size the release has no image for, or a listing without
+ * that asset: the generic image — which the caller's layout check then
+ * accepts or refuses on its own merits.
+ */
+export function layoutPlatformForPartitions(
+  chipPlatform: string,
+  partitions: readonly Esp32Partition[],
+  assets?: readonly { platform: string }[]
+): string {
+  const chip = chipPlatform.startsWith('esp32-c3') ? 'esp32-c3' : 'esp32-s3'
+  const generic = `${chip}-generic`
+  const mb = partitionTableFlashMb(partitions)
+  if (mb === null) {
+    return generic
+  }
+  const genericMb = chip === 'esp32-c3' ? 4 : 8
+  if (mb === genericMb) {
+    return generic
+  }
+  const candidate = `${chip}-${mb}mb`
+  return assets?.some((asset) => asset.platform === candidate) ? candidate : generic
+}

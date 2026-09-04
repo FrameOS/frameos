@@ -12,6 +12,7 @@ import {
   prepareSerialPortReconnect,
   startEmbeddedUsbLogStream,
   stopEmbeddedUsbLogStream,
+  waitForEmbeddedUsbApiIdle,
 } from '../../models/embeddedUsbLogsModel'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
@@ -35,7 +36,10 @@ import {
   ESP32_PARTITION_TABLE_SIZE,
   deviceLayoutMatchesPlan,
   firmwareUpdateWritePlan,
+  layoutPlatformForPartitions,
   parseEsp32PartitionTable,
+  partitionTableFlashMb,
+  type Esp32Partition,
   type FirmwareUpdateWritePlan,
 } from './embeddedFlashImage'
 import { workspaceLogic } from './workspaceLogic'
@@ -92,12 +96,13 @@ export function releaseFirmwarePlatform(frame: FrameType): string {
   return releasePlatformByHardware[frameHardwarePlatform(frame)] ?? 'esp32-s3-generic'
 }
 
-/** The control plane's own answer for this frame — the image built for its
+/** The fallback when the board's own partition table cannot be read: the
+ * control plane's answer for this frame — the image built for its configured
  * flash layout (esp32-c3-16mb for a 16MB XTEINK X4, esp32-s3-32mb for a 13.3E6
- * board) when the release publishes one, which is also the only image whose
- * partition table matches such a board, so the update's layout check passes.
- * Falls back to the per-chip generic image wherever the provisioning route
- * does not exist (the cloud) or cannot answer. */
+ * board) when the release publishes one — and the per-chip generic image
+ * wherever the provisioning route does not exist (the cloud) or cannot
+ * answer. With a readable table the update picks the image by the table
+ * itself (layoutPlatformForPartitions), which is the only one it can write. */
 export async function releaseFirmwarePlatformForFrame(frame: FrameType): Promise<string> {
   try {
     const response = await apiFetch(`/api/frames/${frame.id}/embedded/provisioning`)
@@ -126,9 +131,10 @@ export async function fetchReleaseFirmwareListing(): Promise<ReleaseFirmwareList
 
 export async function downloadReleaseFirmware(
   platform: string,
-  log: (message: string) => void
+  log: (message: string) => void,
+  knownListing?: ReleaseFirmwareListing
 ): Promise<{ bytes: Uint8Array; name: string; release: string }> {
-  const listing = await fetchReleaseFirmwareListing()
+  const listing = knownListing ?? (await fetchReleaseFirmwareListing())
   const asset = listing.assets?.find((entry) => entry.platform === platform)
   if (!asset) {
     throw new Error(`Release ${listing.release || '?'} publishes no ${platform} firmware to update to.`)
@@ -144,30 +150,52 @@ export async function downloadReleaseFirmware(
 }
 
 /**
- * Refuse the update when the board is partitioned differently from the image:
- * the hole this plan leaves would then land somewhere other than the board's
- * NVS, wiping the credentials it exists to protect. An unreadable table is not
- * treated as a mismatch — some chips/stubs decline flash reads — but it is
- * logged, because then the guarantee rests on the image alone.
+ * The partition table on the board, or null when it cannot be read — some
+ * chips/stubs decline flash reads, and a blank board has none. It decides two
+ * things: which release image to fetch (the one built for this layout, see
+ * layoutPlatformForPartitions) and whether the NVS-sparing plan is safe to
+ * write (assertDeviceLayoutMatches).
  */
-async function assertDeviceLayoutMatches(
+async function readDevicePartitionTable(
   loader: { readFlash?: (address: number, size: number) => Promise<Uint8Array> },
-  plan: FirmwareUpdateWritePlan,
   log: (message: string) => void
-): Promise<void> {
+): Promise<Esp32Partition[] | null> {
   if (typeof loader.readFlash !== 'function') {
-    return
+    return null
   }
   let table: Uint8Array
   try {
     table = await loader.readFlash(ESP32_PARTITION_TABLE_OFFSET, ESP32_PARTITION_TABLE_SIZE)
   } catch (error) {
     log("Could not read the board's partition table; trusting the image's own layout.")
-    return
+    return null
   }
   const partitions = parseEsp32PartitionTable(table)
   if (partitions.length === 0) {
     log("The board has no readable partition table yet; trusting the image's own layout.")
+    return null
+  }
+  return partitions
+}
+
+/** 'esp32-c3' / 'esp32-s3' for this frame: what it reported at enrollment,
+ * else what esptool just said it is talking to. */
+function chipPlatformFor(frame: FrameType, chipDescription: string): string {
+  const known = frameHardwarePlatform(frame)
+  if (known) {
+    return known
+  }
+  return /esp32-c3/i.test(chipDescription) ? 'esp32-c3' : 'esp32-s3'
+}
+
+/**
+ * Refuse the update when the board is partitioned differently from the image:
+ * the hole this plan leaves would then land somewhere other than the board's
+ * NVS, wiping the credentials it exists to protect. An unreadable table is not
+ * treated as a mismatch, but then the guarantee rests on the image alone.
+ */
+function assertDeviceLayoutMatches(partitions: Esp32Partition[] | null, plan: FirmwareUpdateWritePlan): void {
+  if (!partitions) {
     return
   }
   if (!deviceLayoutMatchesPlan(partitions, plan)) {
@@ -229,14 +257,18 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
         return
       }
       await prepareSerialPortReconnect(port)
+      // A USB API command still in flight (a `status` probe, a `restart`)
+      // holds the port and resumes the log stream on it when it ends; opening
+      // it underneath fails with "The port is already open". Wait it out,
+      // then take the port back from the stream it may have restarted.
+      await waitForEmbeddedUsbApiIdle(frame.id)
+      if (embeddedUsbLogStreamSessionPort(frame.id)) {
+        port = (await stopEmbeddedUsbLogStream(frame.id)) ?? port
+      }
       openFrameToolBehindDrawer(frame.id, 'logs')
 
       setPhase('preparing')
-      const platform = await releaseFirmwarePlatformForFrame(frame)
-      const firmware = await downloadReleaseFirmware(platform, setFlashMessage)
-      // Planned before the board is touched: a plan that cannot spare the NVS
-      // must fail while nothing has been written.
-      const plan = firmwareUpdateWritePlan(firmware.bytes)
+      const listing = await fetchReleaseFirmwareListing()
 
       // Loaded on demand: esptool-js adds ~380KB we only need when flashing.
       const { ESPLoader, Transport } = await loadEsptoolForFlash()
@@ -247,7 +279,33 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
       setFlashMessage('Connecting to the board')
       const loader = new ESPLoader({ transport, baudrate: 460800, enableTracing: true, terminal: flashTerminal })
       const chip = await loader.main()
-      await assertDeviceLayoutMatches(loader, plan, (line) => appendBrowserFlashLog(frame.id, line))
+
+      // The board's own partition table picks the image: an update must keep
+      // the layout the board has (that is what spares its NVS), and the
+      // release publishes one image per layout — a board enrolled on the
+      // 16/32 MB image gets that image again, not the generic one, which
+      // this flow used to fetch unconditionally on the cloud and then refuse
+      // as "partitioned differently". The backend's provisioning answer /
+      // the per-chip generic image only when the table cannot be read.
+      const log = (line: string): void => appendBrowserFlashLog(frame.id, line)
+      const devicePartitions = await readDevicePartitionTable(loader, log)
+      let platform: string
+      if (devicePartitions) {
+        platform = layoutPlatformForPartitions(chipPlatformFor(frame, chip), devicePartitions, listing.assets)
+        const mb = partitionTableFlashMb(devicePartitions)
+        log(
+          mb === null
+            ? `The board's partition table matches no published layout; using the ${platform} image.`
+            : `The board is partitioned for ${mb}MB: updating with the ${platform} image.`
+        )
+      } else {
+        platform = await releaseFirmwarePlatformForFrame(frame)
+      }
+      const firmware = await downloadReleaseFirmware(platform, setFlashMessage, listing)
+      // Planned and checked against the board before anything is written: a
+      // plan that cannot spare the NVS must fail while the flash is untouched.
+      const plan = firmwareUpdateWritePlan(firmware.bytes)
+      assertDeviceLayoutMatches(devicePartitions, plan)
 
       setPhase('flashing')
       setFlashMessage(

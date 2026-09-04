@@ -14,7 +14,7 @@ if(NIM_GENERATED_SRCS)
         # frameos_quickjs: the Nim js_runtime binds QuickJS (include path +
         # fos_js_new_runtime); esp_http_client/mbedtls back the Nim HTTP HAL;
         # lwip is fos_netguard.c's getaddrinfo().
-        PRIV_REQUIRES esp_timer pthread frameos_quickjs esp_http_client esp-tls mbedtls lwip
+        PRIV_REQUIRES esp_timer pthread frameos_quickjs esp_http_client esp-tls mbedtls lwip spiffs fatfs
     )
     # Nim's generated C is not warning-clean; it's machine output. Nim also
     # passes long* where the overflow builtins want int* (same width on

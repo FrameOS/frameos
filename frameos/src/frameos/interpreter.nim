@@ -116,6 +116,16 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
   if bytes > cap:
     return refuse($(bytes div 1024) & "K is over the " &
       $(cap div 1024) & "K spill cap")
+  # Room on the storage, with its own reason: this is the everyday answer on
+  # the ESP32's generic 8 MB layout (a 1 MB state partition, no SD card) and
+  # it must neither disable the tier — free space comes and goes — nor read
+  # as a storage failure.
+  let dir = spoolScratchDir(spoolDir(scene.frameConfig))
+  if dir.len == 0:
+    return refuse("no writable spill storage")
+  let shortfall = spoolHeadroomShortfall(dir, image.width * image.height * 4)
+  if shortfall.len > 0:
+    return refuse(shortfall)
   result = spillImageToSpool(image, "node" & $nodeId.int & "-cache.rgbx",
     spoolDir(scene.frameConfig))
   if result.isNil:

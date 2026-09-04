@@ -163,9 +163,17 @@ proc blocksToBytes*(blocks, blockSize: int64): int64 =
     return 0
   blocks * blockSize
 
-when defined(frameosEmbedded) or defined(frameosWasm) or not defined(posix):
+when defined(frameosEmbedded):
+  proc fos_vfs_free_bytes(path: cstring): int64 {.importc, cdecl.}
   proc getAvailableDiskSpace*(path: string): int64 =
-    ## No statvfs on the embedded VFS; callers treat -1 as "unknown".
+    ## No statvfs on the ESP-IDF VFS; the firmware answers for the filesystems
+    ## it mounts (the SPIFFS state partition, the SD card at the assets root —
+    ## frameos_nim_glue.c) and -1 for anything else. Callers treat -1 as
+    ## "unknown".
+    fos_vfs_free_bytes(path.cstring)
+elif defined(frameosWasm) or not defined(posix):
+  proc getAvailableDiskSpace*(path: string): int64 =
+    ## No filesystem to ask; callers treat -1 as "unknown".
     -1
 else:
   proc getAvailableDiskSpace*(path: string): int64 =

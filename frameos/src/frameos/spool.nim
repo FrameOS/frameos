@@ -19,6 +19,7 @@
 ## behave exactly as they did before.
 
 import std/[os, strutils]
+import frameos/utils/system
 
 const
   DefaultWindowBytes* = 8 * 1024
@@ -230,33 +231,82 @@ proc materialize*(spool: Spool, maxBytes = 0): string =
       result.add(window)
 
 proc usableScratchDir(path: string): bool =
-  ## Existence first, then a leaf-only mkdir. Never `createDir`: it mkdirs
-  ## every path component, and on the ESP32 the SD card is mounted wholesale
-  ## at "/srv/assets" — "/srv" is not a directory in any filesystem, just
-  ## the name prefix the VFS matches — so the recursive walk fails on it and
-  ## a perfectly writable, already-existing spill dir reads as "no storage".
-  ## Found live by the disk tier's refusal log; the leaf mkdir under the
-  ## mount point is what the filesystem actually supports.
+  ## Existence first, then a leaf-only mkdir, then a probe file. Never
+  ## `createDir`: it mkdirs every path component, and on the ESP32 the SD
+  ## card is mounted wholesale at "/srv/assets" — "/srv" is not a directory
+  ## in any filesystem, just the name prefix the VFS matches — so the
+  ## recursive walk fails on it and a perfectly writable, already-existing
+  ## spill dir reads as "no storage". Found live by the disk tier's refusal
+  ## log; the leaf mkdir under the mount point is what the filesystem
+  ## actually supports. The probe is for SPIFFS (the ESP32's state
+  ## partition): it has no directories at all — a slash is just a character
+  ## in a file name — so neither `dirExists` nor `mkdir` can say yes there,
+  ## but a file under the prefix opens fine.
   if path.len == 0:
     return false
   try:
     if dirExists(path):
       return true
-    discard existsOrCreateDir(path)
+    try:
+      discard existsOrCreateDir(path)
+    except CatchableError:
+      discard
+    let probe = path / ".spool-probe"
+    var file: File
+    if not file.open(probe, fmWrite):
+      return false
+    file.close()
+    removeFile(probe)
     true
   except CatchableError:
     false
 
+proc spoolFallbackDir(): string =
+  ## Where a spool goes when the caller's storage of choice is not usable:
+  ## the platform temp dir on a host; on the ESP32, which has no /tmp, a
+  ## name prefix on the SPIFFS state partition (the firmware's own HTTP body
+  ## spill uses "/state" the same way, main.c). Whether the partition can
+  ## actually take a spill is the free-space check below, not the choice of
+  ## directory — the generic 8 MB layout's 1 MB state partition cannot hold
+  ## an 800×480 canvas, the 16/32 MB layouts' 8/24 MB partitions can.
+  when defined(frameosEmbedded):
+    "/state/spool"
+  else:
+    getTempDir() / "frameos-spool"
+
 proc spoolScratchDir*(preferred = ""): string =
   ## Where a file-backed spool lives. `preferred` is the caller's storage of
   ## choice — the SD card's `.cache` on embedded — and is used only if it is
-  ## or can be made usable; otherwise the platform temp dir, which on a host
-  ## is always there and on embedded is the internal filesystem.
+  ## or can be made usable; otherwise the fallback above.
   if usableScratchDir(preferred):
     return preferred
-  let fallback = getTempDir() / "frameos-spool"
+  let fallback = spoolFallbackDir()
   if usableScratchDir(fallback):
     return fallback
+  ""
+
+const SpoolFreeMarginBytes* = 256 * 1024
+  ## What a spill must leave free besides its own bytes: the state partition
+  ## also holds the scene store and its updates, and SPIFFS needs slack to
+  ## garbage-collect; an SD card is never this tight.
+
+var spoolFreeSpaceProbe*: proc(dir: string): int64 {.nimcall, gcsafe.} = getAvailableDiskSpace
+  ## How the spool asks a directory's filesystem for its free bytes (-1 for
+  ## "unknown"). A variable so tests can stand in a filesystem of any size.
+
+proc spoolHeadroomShortfall*(dir: string, bytes: int): string =
+  ## "" when `bytes` fit under `dir` with the margin to spare, otherwise why
+  ## not — the refusal reason the interpreter logs. Unknown free space is not
+  ## a shortfall: a filesystem that cannot answer is still written to, and the
+  ## write itself stays the last check.
+  let free = spoolFreeSpaceProbe(dir)
+  if free < 0:
+    return ""
+  let needed = bytes.int64 + SpoolFreeMarginBytes
+  if free < needed:
+    return $(free div 1024) & "K free under " & dir & " cannot hold the " &
+      $(bytes div 1024) & "K spill with " & $(SpoolFreeMarginBytes div 1024) &
+      "K to spare"
   ""
 
 proc sweepSpoolScratchDir*(preferred = ""): int =
@@ -271,8 +321,8 @@ proc sweepSpoolScratchDir*(preferred = ""): int =
   let chosen = spoolScratchDir(preferred)
   if chosen.len > 0:
     dirs.add(chosen)
-  let fallback = getTempDir() / "frameos-spool"
-  if fallback != chosen and dirExists(fallback):
+  let fallback = spoolFallbackDir()
+  if fallback != chosen and (dirExists(fallback) or usableScratchDir(fallback)):
     dirs.add(fallback)
   for dir in dirs:
     try:

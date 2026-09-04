@@ -1,4 +1,4 @@
-import std/[os, unittest]
+import std/[os, strutils, unittest]
 import pixie
 import ../spool
 import ../utils/image
@@ -90,3 +90,36 @@ suite "image spool ownership and failure":
 
   test "nowhere to write answers nil and nothing raises":
     check spillImageToSpool(nil, "nil.rgbx", ScratchDir).isNil
+
+suite "spill headroom":
+  # The spool asks the filesystem before it writes: a spill that will not
+  # fit (the ESP32's 1 MB state partition versus a 1.5 MB canvas) is refused
+  # with nothing on disk, an unknown answer is not a refusal, and the margin
+  # is what keeps the scene store's own updates possible.
+  let saved = spoolFreeSpaceProbe
+  test "a spill that will not fit is refused before any write":
+    spoolFreeSpaceProbe = proc(dir: string): int64 = 100 * 1024
+    try:
+      check spoolHeadroomShortfall(ScratchDir, 8 * 6 * 4).contains("cannot hold")
+      check spillImageToSpool(patterned(8, 6), "short.rgbx", ScratchDir).isNil
+      var written = 0
+      for _, path in walkDir(ScratchDir):
+        if path.contains("short.rgbx"):
+          inc written
+      check written == 0
+    finally:
+      spoolFreeSpaceProbe = saved
+  test "unknown free space is not a shortfall":
+    spoolFreeSpaceProbe = proc(dir: string): int64 = -1
+    try:
+      check spoolHeadroomShortfall(ScratchDir, 1 shl 30) == ""
+    finally:
+      spoolFreeSpaceProbe = saved
+  test "the margin counts":
+    spoolFreeSpaceProbe = proc(dir: string): int64 = 1024 + SpoolFreeMarginBytes - 1
+    try:
+      check spoolHeadroomShortfall(ScratchDir, 1024) != ""
+      spoolFreeSpaceProbe = proc(dir: string): int64 = 1024 + SpoolFreeMarginBytes
+      check spoolHeadroomShortfall(ScratchDir, 1024) == ""
+    finally:
+      spoolFreeSpaceProbe = saved

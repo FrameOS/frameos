@@ -255,6 +255,19 @@ in-memory limit, and a hit materializes it back — the same swept `.cache`
 directory, naming scheme and ownership rules as the byte spool (`=destroy`
 removes the file; a replaced entry deletes its predecessor's).
 
+Where the file goes: the assets root's `.cache` (the SD card on an ESP32)
+when it is usable, else the platform temp dir on a host and `/state/spool` on
+the ESP32 — a name prefix on the SPIFFS state partition, which has no
+directories (the scratch-dir probe writes a file to find out). Before any
+write the spool asks the filesystem for its free bytes
+(`spoolHeadroomShortfall`; `fos_vfs_free_bytes` in the firmware glue answers
+for SPIFFS and the FAT card) and refuses a spill that would not leave 256 KB
+over. That refusal is the everyday answer on the generic 8 MB layout — a 1 MB
+state partition cannot hold an 800×480 canvas — and it neither disables the
+tier nor reads as a storage failure; the 16/32 MB layouts' 8/24 MB partitions
+take the spill. Before this check (2026-09-04) the tier filled the partition,
+failed the write and disabled itself on every boot of the bench E1002.
+
 Three rules make it correct rather than merely plausible:
 
 - **Only pixels the producer alone wrote are spilled.** An owned scratch or a
