@@ -19,6 +19,7 @@ proc printHelp() =
   echo ""
   echo "Available commands:"
   echo "  start   Start FrameOS (default)"
+  echo "  version Print the compiled version and exit (--version, -v)"
   echo "  check   Verify the binary can start"
   echo "  setup   Run device setup for this build"
   echo "         --with-setup=/boot/frameos-setup.json[.gz] to install from first-boot setup JSON"
@@ -41,7 +42,12 @@ proc printHelp() =
 when isMainModule:
   try:
     let args = commandLineParams()
-    if args.len > 0 and args[0] == "check":
+    if args.len > 0 and args[0] in ["version", "--version", "-v"]:
+      # Printed and nothing else: `frameos --version` used to fall through to
+      # the start branch below (every unrecognised `--flag` does) and boot a
+      # second runtime alongside the running service.
+      echo compiledFrameOSVersion()
+    elif args.len > 0 and args[0] == "check":
       echo "FrameOS check: passed 🎉"
     elif args.len > 0 and args[0] in ["help", "--help", "-h"]:
       printHelp()

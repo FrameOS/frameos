@@ -59,6 +59,25 @@ proc runSetupCommand*(command: string, raiseOnError = true): SetupCommandResult 
   if raiseOnError and result.exitCode != 0:
     raise newException(OSError, "Command failed with exit code " & $result.exitCode & ": " & command)
 
+proc runSetupCommandRetrying*(command: string, attempts = 3, pauseMs = 2000): SetupCommandResult =
+  ## For idempotent commands that talk to a daemon which may still be coming
+  ## up — `systemctl` on a first boot runs while systemd is busy starting the
+  ## rest of the system, and one failed round trip there took a whole card's
+  ## setup down with it. Retried on any non-zero exit (-1 is our own
+  ## timeout/spawn failure, not the command's), raising like runSetupCommand
+  ## only after the last attempt, so a systemd that is really broken still
+  ## fails loudly.
+  for attempt in 1 .. attempts:
+    result = runSetupCommand(command, raiseOnError = false)
+    if result.exitCode == 0:
+      return
+    if attempt < attempts:
+      setupLog("FrameOS setup: attempt " & $attempt & " of " & $attempts & " failed with exit code " &
+        $result.exitCode & "; retrying in " & $pauseMs & " ms: " & command)
+      sleep(pauseMs)
+  raise newException(OSError, "Command failed with exit code " & $result.exitCode & " after " &
+    $attempts & " attempts: " & command)
+
 proc commandSucceeds*(command: string): bool =
   commandRunner(command).exitCode == 0
 

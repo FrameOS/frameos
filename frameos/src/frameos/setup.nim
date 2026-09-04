@@ -339,8 +339,12 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
         raise newException(OSError, "FrameOS setup: cannot create the " & user & " user for frameos.service")
       installBuildrootPrivilegedUnits(user)
 
-    discard runSetupCommand(privilegedCommand("systemctl daemon-reload"))
-    discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
+    # Both talk to PID 1, which on a first boot is still starting the rest of
+    # the system; a single failed round trip must not abort the whole setup
+    # (seen 2026-09-04: `daemon-reload` -1 about 100 s into a Zero 2 W's first
+    # boot left the card unconfigured with frameos-setup.json still on it).
+    discard runSetupCommandRetrying(privilegedCommand("systemctl daemon-reload"))
+    discard runSetupCommandRetrying(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
     discard runSetupCommand(scheduleLegacyRemoteCleanupCommand(), raiseOnError = false)
 
   result = setupOk()

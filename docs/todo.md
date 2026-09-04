@@ -210,3 +210,11 @@ Everything else parked:
   allocations to PSRAM (`JS_NewRuntime2` with PSRAM-backed
   `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384`) and cJSON
   likewise (`cJSON_InitHooks`). Measure first.
+- **Vannituba (Pimoroni HyperPixel 2r, 480×480) shows a blank screen** on
+  the HA backend's 2026.9.0 SD image (seen 2026-09-04, parked by the user).
+  Lead from that card's `frameos-setup-reset.log`: the driver's setup step
+  ran `cd /srv/frameos/vendor/inkyHyperPixel2r` → `No such file or
+  directory`, so its python venv was never built — the release image ships
+  `inkyHyperPixel2rLegacyFb.so` but not the vendor tree it needs. Check
+  whether the composer/release archive should carry `vendor/inkyHyperPixel2r`
+  for that driver, then re-test on the panel.

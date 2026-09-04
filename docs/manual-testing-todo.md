@@ -50,20 +50,39 @@ hardware-settings batch) and the battery ADC rounds of #426.
   change, and the whole boot (network check included) now draws on HDMI.
   Both gaps from that boot are fixed on the branch (browser time zone +
   slugified name ride `frameos-cloud.txt` into `frame.json` / `/etc/hostname`).
-- [ ] **Re-flash check (this branch):** HDMI boot screen draws during the
+- [ ] **Re-flash check (this branch):** *(attempt 1, 2026-09-04 18:48: the
+  card came up "standalone", no cloud, no scenes — because it had been flashed
+  with `~/Downloads/frameos-5-raspberry-pi-64-lpoollssypuv 2.img`, the
+  self-hosted HA backend's 2026.9.0 image for "Vannituba" (hyperpixel2r
+  480×480), not the cloud download. The cloud image
+  `frameos-raspberry-pi-64-uus2w-2026.9.6.img.gz` was opened on the Mac and
+  its 4096-byte region is correctly patched: claim_token, name=uus2w, wifi,
+  wifi_country=GB, device=framebuffer 1920×1080, time_zone=Europe/Brussels,
+  one authorized_key. Found in that wrong card's `frameos-setup-reset.log`
+  and fixed on main the same evening: first-boot setup aborted at
+  `systemctl daemon-reload` with exit -1 (our timeout/spawn code, ~100 s into
+  boot while systemd was still starting tmpfiles/resolved/timesyncd) and
+  `frameos-firstboot-setup.service` ended `failed` with
+  `frameos-setup.json` left on the card — `setup.nim` ran that one
+  `daemon-reload` fatally while every sibling call tolerated failure. Now
+  `runSetupCommandRetrying` (3 attempts, 2 s apart, tests in
+  `test_device_setup.nim`) wraps both `daemon-reload` and `systemctl enable`.
+  Re-flash with the `.img.gz` and run the box as written; a release after
+  2026.9.6 carries the retry.)* HDMI boot screen draws during the
   network check; `frame.json` ends up with the display's native mode (4K on
   a Pi 4/5, 1080p on a Zero 2 W) and the cloud workspace shows it; panel
   says the cloud frame name + Europe/Brussels; hostname is the slugified
   name; a scheduled 01:02 reboot logs `scheduler:fire` at 01:02 *local*.
-- [~] **HDMI status screen, animated (this branch):** *(partial, 2026-09-04
-  on uus2w / 2026.9.6, 1080p HDMI, Zero 2 W, no scenes assigned so it sits on
-  `system/index`: the CPU half checks out — `render:done sceneId system/index`
-  every second at 165-182 ms scene + ~372 ms framebuffer write, and `top`
-  showed the runtime at 14-23% of one core across two samples on a 4-core
-  board, i.e. well under a core as the box expects. Not eyeballed yet: the
-  three squares cycling brand colours, the live clock's seconds, and the
-  "Last button" band — those need eyes on the panel, and the button band needs
-  a button.)* on a framebuffer
+- [x] **HDMI status screen, animated (this branch)** — passed 2026-09-04 on
+  uus2w (2026.9.6, Zero 2 W, 1080p HDMI, no scenes assigned so it sits on
+  `system/index`). **Eyeballed by the user on the panel:** the mark's squares
+  cycle colour every second and the clock ticks live. **Measured over SSH:**
+  `render:done sceneId system/index` once a second at 165-182 ms scene +
+  ~372 ms framebuffer write, and `top` put the runtime at 14-23% of one core
+  across two samples on a 4-core board — well under a core, as the box
+  expects. Not covered: the "Last button: <label> (GPIO n)" band, which needs a
+  button fitted (uus2w has none — same wire caveat as the GPIO/evdev box in
+  §2b). Original text: on a framebuffer
   frame the mark's three squares cycle the brand colours during the boot
   network check and on `system/index` (no scenes); `top` on the Pi should
   show frameos well under a core — the frame rate is paced to ~20% duty
@@ -207,14 +226,33 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   pi5, enroll into the cloud, run the "boots and renders as `frameos`",
   "door answers", "hotspot and portal" and "runtime cannot escalate"
   boxes below. Then `raspberry-pi-64` 9.3 on pi2w for the same boxes.
-- [~] **5. Migration to the `frameos` user on a NetworkManager frame** —
-  **both NM bench frames are migrated (uus2w by OTA, Cloud-5 by hand) and
-  both are on 2026.9.6 and connected. ONE THING REMAINS in this box:** cold-boot
-  the Pi 5 (`Cloud-5`, no RTC battery) on 9.6 and confirm the clock fixes from
-  `1b3ad730` hold — `networkCheck attempt 1 success` after a single
-  `syncing clock` line, no `sync-clock` restart storm, no setup hotspot, and
-  `/var/lib/systemd/timesync` persisting across the boot via the bind mount.
-  Everything else below is history. Original note: IN PROGRESS 2026-09-04 on `Cloud-5` (Pi 5, `raspberry-pi-5`, framebuffer
+- [x] **5. Migration to the `frameos` user on a NetworkManager frame** —
+  **CLOSED 2026-09-04.** Both NM bench frames are migrated (uus2w by OTA,
+  Cloud-5 by hand), both run 2026.9.6 as `frameos` and are connected. The last
+  open item — the Pi 5 cold boot — **passed on a user-triggered reboot of
+  `Cloud-5` at 15:44:02 UTC**, and better than the box asked for:
+  `/var/lib/systemd/timesync` is bind-mounted from
+  `/dev/mmcblk0p3[/state/timesync]` (so is
+  `/etc/NetworkManager/system-connections`, matching uus2w), timesyncd logged
+  `System clock time unset or jumped backwards, restored from recorded
+  timestamp: Fri 2026-09-04 15:44:02 UTC` — the correct *date*, not the old
+  Aug-16 floor — so TLS validated on the first try. `networkCheck` succeeded on
+  attempt 3 at +6 s (attempts 1-2 failed only on `Temporary failure in name
+  resolution`, i.e. DNS not up yet, **not** on `certificate verify failed`),
+  and `cloud:hub:connected` landed at +7 s. **Zero** `syncing clock` /
+  `sync-clock` lines in the boot journal and **zero** hotspot lines — the
+  restart storm that used to park this frame on `system/wifiHotspot` for an
+  hour cannot happen now, because the clock never needs fixing. NTP then
+  corrected the ~1 h staleness of the recorded timestamp at 16:44:23
+  (`Initial clock synchronization to …16:44:23`), which is the expected
+  behaviour of timesyncd's periodically-written clock file, not a fault.
+  **Recorded, not fixed:** `/etc/NetworkManager/system-connections` on Cloud-5
+  still holds litter from the failed 08:11 hotspot attempt on read-only root —
+  a **0-byte** `frameos-hotspot.nmconnection` (NM logs `failed to load
+  connection: invalid connection: connection.type: property is missing` on
+  every boot), two leftover `.nmconnection.XXXXXX` write temps, and a
+  UUID-suffixed duplicate. Harmless but noisy; delete them on the next bench
+  visit. Original note: IN PROGRESS 2026-09-04 on `Cloud-5` (Pi 5, `raspberry-pi-5`, framebuffer
   800×480, NetworkManager). It took the OTA 2026.9.1 → 2026.9.4 at
   07:49 UTC (`cloud:upgrade running`, target `debian-bookworm-arm64`), the
   runtime restarted and reported 2026.9.4 with one metrics packet, then the

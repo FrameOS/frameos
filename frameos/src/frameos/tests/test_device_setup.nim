@@ -4,6 +4,50 @@ import ../../drivers/inkyPython/inkyPython as inkyPythonDriver
 import ../../drivers/noSpi/noSpi as noSpiDriver
 import ../../drivers/spi/spi as spiDriver
 
+block test_retrying_setup_command_succeeds_after_a_transient_failure:
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    # -1 is what runShellCapture reports for a timeout or a spawn failure.
+    if commands.len == 1: ("", -1) else: ("", 0)
+  )
+  try:
+    let res = runSetupCommandRetrying("systemctl daemon-reload", attempts = 3, pauseMs = 0)
+    doAssert res.exitCode == 0
+    doAssert commands == @["systemctl daemon-reload", "systemctl daemon-reload"]
+  finally:
+    resetSetupCommandRunnerForTest()
+
+block test_retrying_setup_command_stops_at_the_first_success:
+  var calls = 0
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    inc calls
+    ("", 0)
+  )
+  try:
+    doAssert runSetupCommandRetrying("systemctl enable frameos.service", attempts = 3, pauseMs = 0).exitCode == 0
+    doAssert calls == 1
+  finally:
+    resetSetupCommandRunnerForTest()
+
+block test_retrying_setup_command_raises_after_the_last_attempt:
+  var calls = 0
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    inc calls
+    ("", 1)
+  )
+  try:
+    var raised = ""
+    try:
+      discard runSetupCommandRetrying("systemctl daemon-reload", attempts = 3, pauseMs = 0)
+    except OSError as e:
+      raised = e.msg
+    doAssert calls == 3
+    doAssert raised.contains("after 3 attempts"), raised
+    doAssert raised.contains("systemctl daemon-reload"), raised
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_boot_config_adds_and_removes_lines:
   let applied = applyBootConfigLines(
     "dtparam=spi=on\nkeep=1\n",
