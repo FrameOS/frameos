@@ -50,7 +50,7 @@ hardware-settings batch) and the battery ADC rounds of #426.
   change, and the whole boot (network check included) now draws on HDMI.
   Both gaps from that boot are fixed on the branch (browser time zone +
   slugified name ride `frameos-cloud.txt` into `frame.json` / `/etc/hostname`).
-- [ ] **Re-flash check (this branch):** *(attempt 1, 2026-09-04 18:48: the
+- [x] **Re-flash check (this branch)** — PASSED on attempt 2, 2026-09-04 19:41 local, on the cloud-composed 2026.9.6 `raspberry-pi-64` card: first boot read `frameos-cloud.txt` (`Installing NetworkManager WiFi connection from cloud personalization`, `Setting hostname from cloud personalization: uus2w`, `Applied display device 'framebuffer' to frame.json`, `Installing authorized keys`, `Wrote cloud enrollment state`), `networkCheck attempt 1 success`, `cloud:enroll:boot` → `cloud:enroll:personalization` applied `{name: uus2w, timezone: Europe/Brussels}` → `cloud:hub:connected`; the SAME frame record re-adopted (no duplicate). `frame.json` = framebuffer 1920×1080, `hostname` = `uus2w`, the workspace shows it on 2026.9.6 / Europe/Brussels, and the user saw the index screen. Scheduled reboot: a `reboot` entry at 19:49 Europe/Brussels pushed from the cloud → `scheduler:loaded entries 1 nextDue Fri 19:49 reboot` → `scheduler:fire id bench-reboot action reboot localTime 2026-09-04 19:49 timeZone Europe/Brussels` at 17:49:00 UTC → `Rebooting the device` → `bootup` 25 s later, `/` now `ro`, `scheduler-last-fired` persisted (nextDue moved to *Sat* 19:49, no re-fire in the same minute). **Found and fixed on main the same evening (needs the next release):** the runtime's post-enrolment `timedatectl set-timezone` runs as uid 990 under `NoNewPrivileges` → `sudo: The "no new privileges" flag is set` → `/etc/localtime` stayed `Etc/UTC` although frame.json, the scheduler (`scheduler:loaded timeZone Europe/Brussels`) and the cloud all say Europe/Brussels; anything reading the OS zone (journal stamps, QuickJS `Date` in scenes) is on UTC until a root `frameos setup` (an OTA) runs. Now a `set-timezone` door verb (`setupTimezone` asks the door when not root; `test_setup.nim`, `test_privileged.nim`, verb table in `docs/buildroot-privileges.md`). Re-check `/etc/localtime` on a fresh card from the next release. *(attempt 1, 2026-09-04 18:48: the
   card came up "standalone", no cloud, no scenes — because it had been flashed
   with `~/Downloads/frameos-5-raspberry-pi-64-lpoollssypuv 2.img`, the
   self-hosted HA backend's 2026.9.0 image for "Vannituba" (hyperpixel2r
@@ -90,8 +90,8 @@ hardware-settings batch) and the battery ADC rounds of #426.
   second or two while a Pi 5 glides. The index screen shows a live clock
   (seconds on HDMI, minutes elsewhere) and, after a GPIO press, "Last
   button: <label> (GPIO n) at hh:mm:ss" in the grey bottom band.
-- [ ] **Cloud SD card with SSH keys (this branch, needs a buildroot release
-  image built from it):** add a key under Settings → SSH Keys on the cloud,
+- [x] **Cloud SD card with SSH keys** — passed 2026-09-04 19:43 on the fresh uus2w card: the cloud-account RSA key ticked in the SD builder rode `authorized_key=` in `frameos-cloud.txt` (`Installing authorized keys from cloud personalization`) and `ssh root@10.8.0.62` from the Mac's agent worked at once; the image ships dropbear's host key under `/srv/frameos/state/dropbear/` (the hand fix from step 5, now in the release). Original text: (this branch, needs a buildroot release
+  image built from it): add a key under Settings → SSH Keys on the cloud,
   tick it in the SD image builder, boot the card → `ssh root@<frame>` works
   with that key. Older images log "Ignoring unknown key 'authorized_key'"
   and boot without it.
@@ -99,8 +99,8 @@ hardware-settings batch) and the battery ADC rounds of #426.
   2026-08-30): set Europe/Brussels from the cloud settings panel → weather
   scene hours match local time (a code node's `format()` too), schedule
   entries fire in local time, `config` on the console shows it.
-- [~] **First-boot cloud enrollment on a router that strips DNSSEC (#384,
-  #420):** half verified 2026-09-04 on the Zero W `Cloud-W`
+- [x] **First-boot cloud enrollment on a router that strips DNSSEC (#384,
+  #420)** — closed 2026-09-04 19:41 on the fresh uus2w card composed from 2026.9.6: `/etc/systemd/resolved.conf.d/10-frameos.conf` present with a compose-time stamp (2026-09-04 15:28:15 UTC, before first boot), `journalctl -b | grep -c DNSSEC` = 0 on both the first and the second boot, `networkCheck attempt 1 success`, enrolled within seconds, no hotspot. Earlier half: half verified 2026-09-04 on the Zero W `Cloud-W`
   (`raspberry-pi-32`, 2026.9.2 card composed 2026-09-03 from the 2026.8.33
   cached base): network check passed on attempt 7 (23 s of 30 s, all
   station-repair retries), enrolled 2 s later, personalization applied
@@ -120,7 +120,7 @@ hardware-settings batch) and the battery ADC rounds of #426.
   recovered on its own later, consistent with `allow-downgrade` eventually
   coping — the drop-in is belt and braces, not the only thing between a
   frame and the cloud.
-- [ ] **First-boot driver setup actually runs (fixed on main 2026-09-04):**
+- [x] **First-boot driver setup actually runs** — passed 2026-09-04 19:41 on the fresh uus2w card (framebuffer): `Running driver setup for device 'framebuffer'` → `FrameOS setup: driver setup: starting` → `FrameOS setup: driver setup: complete`, no `cannot open: ./frame.json`. The SPI-panel half (`dtoverlay`/`dtparam` in `/boot/config.txt` on the very first boot) still wants a fresh card in an e-ink frame. Original text: (fixed on main 2026-09-04):
   the same Zero W boot logged `Running driver setup for device 'framebuffer'`
   → `FrameOS fatal: cannot open: ./frame.json` → `Warning: driver setup
   failed; run it again from the setup portal` (`frameos-setup-reset.sh`
@@ -222,7 +222,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   release page has `frameos-2026.9.3-*.tar.gz` + `.minisig` for
   `debian-bookworm-arm64` (that is what the Buildroot 64-bit frames pull)
   and the `raspberry-pi-64` / `raspberry-pi-5` `.img.gz`.
-- [ ] **4. Fresh image first (reflashable):** flash `raspberry-pi-5` 9.3 on
+- [~] **4. Fresh image first (reflashable)** — the `raspberry-pi-64` half PASSED 2026-09-04 on the fresh 2026.9.6 uus2w card (Zero 2 W): boots and renders as `frameos` (uid 990 in `/etc/passwd`, `User=frameos`, index screen on HDMI), `frameos-privileged.path` active, state/queue `root:frameos 1770`, results `2750`, the scheduled reboot executed through the door while the runtime was uid 990 (see the §2 re-flash box), `/` `ro` from the second boot on (`rw` on the first, by design), all three persistent bind mounts (`/etc/NetworkManager/system-connections`, `/var/lib/NetworkManager`, `/var/lib/systemd/timesync`) active from fstab on both boots, and "runtime cannot escalate" re-run: writes to `current/frameos` and the unit → `Permission denied`, a `shell` verb in the queue → `refusing manual-shell.json: Unknown privileged verb: shell`, `handled 1 request(s)`. Not re-run on this card: hotspot/portal (verified 12:39 the same day on this frame type after the bind-mount fix, which this card ships). **Still open: the `raspberry-pi-5` half** — Cloud-5 was migrated by hand, never flashed fresh; reflash it from the cloud builder and run the same boxes. Original text: flash `raspberry-pi-5` 9.3 on
   pi5, enroll into the cloud, run the "boots and renders as `frameos`",
   "door answers", "hotspot and portal" and "runtime cannot escalate"
   boxes below. Then `raspberry-pi-64` 9.3 on pi2w for the same boxes.

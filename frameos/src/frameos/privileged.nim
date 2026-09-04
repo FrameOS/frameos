@@ -30,6 +30,7 @@
 
 import std/[algorithm, json, os, strutils, sysrand, times]
 import frameos/utils/system
+from frameos/cloud/contract import isIanaZone
 
 when not defined(windows):
   from std/posix import geteuid
@@ -51,6 +52,7 @@ type
     pvApplyDriverSetup = "apply-driver-setup"
     pvInstallRelease = "install-release"
     pvSetHostname = "set-hostname"
+    pvSetTimezone = "set-timezone"
     pvSyncClock = "sync-clock"
     pvNmDeviceStatus = "nm-device-status"
     pvNmWifiList = "nm-wifi-list"
@@ -224,6 +226,7 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
     of pvApplyDriverSetup: @["rebootIfRequired"]
     of pvInstallRelease: @["archive", "signature", "version"]
     of pvSetHostname: @["hostname"]
+    of pvSetTimezone: @["zone"]
     of pvSyncClock, pvNmDeviceStatus, pvNmWifiList, pvNmRadioOn, pvNmHotspotStop: @[]
     of pvNmConnections: @["active"]
     of pvNmHotspotStart: @["device", "ssid", "psk"]
@@ -258,6 +261,11 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
   of pvSetHostname:
     if sanitizeHostname(argStr(args, "hostname")).len == 0:
       return "hostname is empty after sanitizing"
+  of pvSetTimezone:
+    # Joined onto /usr/share/zoneinfo and linked to /etc/localtime as root,
+    # so only an IANA-shaped name may pass (no "../../etc/shadow").
+    if not isIanaZone(argStr(args, "zone")):
+      return "zone must be an IANA zone name"
   of pvNmConnections:
     if hasArg(args, "active") and args["active"].kind != JBool:
       return "active must be a boolean"

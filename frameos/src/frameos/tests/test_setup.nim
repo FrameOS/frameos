@@ -1,6 +1,7 @@
 import std/[json, os, sequtils, strutils, times]
 import zippy
 import ../device_setup
+import ../privileged
 import ../samba_mounts
 import ../setup
 import ../types
@@ -73,6 +74,31 @@ block test_load_all_scenes_prefers_full_scene_payload:
     delEnv("FRAMEOS_ALL_SCENES_JSON")
     delEnv("FRAMEOS_SCENES_JSON")
     removeDir(tempRoot)
+
+block test_timezone_goes_through_the_door_when_it_is_available:
+  # The zone must differ from this machine's and exist in /usr/share/zoneinfo,
+  # or setupTimezone returns before it would ever ask anyone.
+  var commands: seq[string] = @[]
+  var doorRequests: seq[PrivilegedRequest] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  setPrivilegedRequestHookForTest(proc(request: PrivilegedRequest): PrivilegedResult {.gcsafe.} =
+    {.gcsafe.}:
+      doorRequests.add(request)
+    privilegedOk("Pacific/Auckland"))
+  try:
+    doAssert privilegedDoorAvailable(), "the hook forces the door on"
+    discard setupTimezone("Pacific/Auckland")
+    doAssert doorRequests.len == 1, $doorRequests.len
+    doAssert doorRequests[0].verb == pvSetTimezone
+    doAssert doorRequests[0].args["zone"].getStr() == "Pacific/Auckland"
+    doAssert not commands.anyIt(it.contains("timedatectl")), "never sudo from the runtime: " & $commands
+    doAssert not commands.anyIt(it.contains("/etc/localtime")), $commands
+  finally:
+    resetPrivilegedRequestHookForTest()
+    resetSetupCommandRunnerForTest()
 
 block test_setup_apt_packages_installs_only_missing_packages:
   var commands: seq[string] = @[]

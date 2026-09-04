@@ -20,6 +20,8 @@ import frameos/types
 import frameos/upgrade
 import frameos/utils/process
 import frameos/utils/system
+import lib/tz
+from frameos/cloud/contract import isIanaZone
 
 const
   ## Keep in step with portal.nim — the runtime asks by role ("wifi",
@@ -137,6 +139,21 @@ proc execSetHostname(args: JsonNode): PrivilegedResult =
     return PrivilegedResult(ok: false, exitCode: 1, error: problems.join("; "))
   privilegedOk(hostname)
 
+proc execSetTimezone(args: JsonNode): PrivilegedResult =
+  ## The unprivileged runtime cannot change /etc/localtime (its unit carries
+  ## NoNewPrivileges, so `sudo timedatectl` fails), which left a fresh cloud
+  ## card on UTC after enrolment personalised it to Europe/Brussels
+  ## (2026-09-04, uus2w). Same setup step as root; the zone was validated on
+  ## both sides of the door.
+  let zone = argStr(args, "zone")
+  if not isIanaZone(zone):
+    return privilegedError("zone must be an IANA zone name")
+  discard setupTimezone(zone)
+  let now = detectSystemTimeZone()
+  if now != zone:
+    return privilegedError("system zone is " & now & " after setup, not " & zone)
+  privilegedOk(zone)
+
 # timesyncd touches this file on every successful sync, so its presence is
 # "the kernel clock has been set from the network at least once this boot".
 var clockSyncSystemdDir = "/run/systemd/system"
@@ -251,6 +268,7 @@ proc executePrivilegedRequest*(request: PrivilegedRequest): PrivilegedResult =
     of pvApplyDriverSetup: execApplyDriverSetup(request.args)
     of pvInstallRelease: execInstallRelease(request.args)
     of pvSetHostname: execSetHostname(request.args)
+    of pvSetTimezone: execSetTimezone(request.args)
     of pvSyncClock: execSyncClock()
     of pvNmDeviceStatus: resultOf(nmcli(@["-t", "-f", "DEVICE,TYPE,STATE", "device", "status"]))
     of pvNmWifiList: resultOf(nmcli(@["--colors", "no", "-t", "-f", "ACTIVE,SSID", "device", "wifi", "list"]))

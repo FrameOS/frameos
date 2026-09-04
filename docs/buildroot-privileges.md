@@ -296,6 +296,7 @@ path outside `/srv/frameos/staging`:
 | `apply-driver-setup` | `rebootIfRequired` | `setupFrameOSDrivers` in-process as root (fixed driver setup from root-owned libraries) |
 | `install-release` | `archive` (under `/srv/frameos/staging`, no symlinks), `signature` (minisig text), `version` | requires a strictly newer three-part version, copies the archive to a root-owned dir, **re-verifies the minisign signature against the key in this binary**, requires its sole top-level directory to match that version and this device target, then unpacks, activates, runs setup, and restarts or reboots |
 | `set-hostname` | `hostname` (sanitized again on the root side) | `/etc/hostname`, `/boot/frameos-hostname`, `hostname` |
+| `set-timezone` | `zone` (IANA name shape, validated on both sides) | `setupTimezone` as root — `timedatectl set-timezone`, else `/etc/timezone` + the `/etc/localtime` link under the writable mount; reports failure unless the system zone reads back as requested |
 | `sync-clock` | — | `systemctl restart systemd-timesyncd` / `ntpd -gq` / `sntp` |
 | `nm-device-status`, `nm-wifi-list`, `nm-connections` (`active`) | — | fixed `nmcli` queries |
 | `nm-radio-on` | — | `rfkill unblock wifi`, `nmcli radio wifi on` |

@@ -756,6 +756,18 @@ proc setupTimezone*(timeZone: string): SetupResult =
     setupLog("FrameOS setup: timezone: already " & normalized)
     return setupOk()
 
+  # As the unprivileged runtime (cloud enrolment personalisation, a settings
+  # push) neither timedatectl nor the /etc/localtime link is ours to write:
+  # the hardened unit sets NoNewPrivileges, so `sudo -n` cannot even start.
+  # Ask the root worker, which runs this same proc.
+  if privilegedDoorAvailable():
+    let res = requestPrivileged(pvSetTimezone, %*{"zone": normalized}, timeoutMs = 30_000)
+    if res.ok:
+      setupLog("FrameOS setup: timezone: set " & normalized & " through the privileged door")
+    else:
+      setupLog("FrameOS setup: timezone: privileged door failed: " & res.error)
+    return setupOk()
+
   if commandExists("timedatectl"):
     let timedateResult = runSetupCommand(
       privilegedCommand("timedatectl set-timezone " & shellQuote(normalized)),

@@ -52,6 +52,11 @@ block test_argument_validation:
       "archive": "/srv/frameos/staging/x/frameos.tar.gz", "signature": "sig", "version": malformed}).len > 0
   doAssert validatePrivilegedArgs(pvSetHostname, %*{"hostname": "My Frame"}) == ""
   doAssert validatePrivilegedArgs(pvSetHostname, %*{"hostname": "---"}).len > 0
+  doAssert validatePrivilegedArgs(pvSetTimezone, %*{"zone": "Europe/Brussels"}) == ""
+  doAssert validatePrivilegedArgs(pvSetTimezone, %*{"zone": "UTC"}) == ""
+  doAssert validatePrivilegedArgs(pvSetTimezone, %*{"zone": "../../etc/shadow"}).len > 0, "no path shapes"
+  doAssert validatePrivilegedArgs(pvSetTimezone, %*{"zone": ""}).len > 0
+  doAssert validatePrivilegedArgs(pvSetTimezone, %*{"zone": "UTC", "extra": 1}).len > 0, "unknown keys are refused"
   doAssert validatePrivilegedArgs(pvNmWifiConnect, %*{"ssid": "Home Wifi", "psk": "hunter2hunter2"}) == ""
   doAssert validatePrivilegedArgs(pvNmWifiConnect, %*{"ssid": "Open", "psk": ""}) == "", "open networks have no psk"
   doAssert validatePrivilegedArgs(pvNmWifiConnect, %*{"ssid": "Home", "psk": "short"}).len > 0
