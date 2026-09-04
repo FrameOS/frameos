@@ -155,7 +155,12 @@ hardware-settings batch) and the battery ADC rounds of #426.
   seconds (`cloud:linkCode:shown start:1`, `verification_uri_complete:
   https://cloud.frameos.net/device?user_code=6XGN-Q8B4`), and the panel
   code rotates every ~10 minutes (`LINK_CODE_MAX_STARTS` = 12) while nobody
-  claims it — start 7 by 21:45. Claim + retire still to be observed.
+  claims it — start 8 by 21:57. **Finding 3, fixed on main (`39f80d83`):** the
+  code + QR were painted by the runner *over* the index screen, on top of the
+  rows ("it looks bad" — user). The status-screen model now has an `aside`;
+  `system/index` fills it from `activeLinkCode()` and draws the QR itself in a
+  right-hand column (under the notes on portrait panels), and the runner
+  only overlays real scenes. Claim + retire still to be observed.
   Original text: boot an unclaimed frame in cloud mode with
   no claim code → the panel renders the link code + QR → complete the claim
   from an account, and confirm the code retires once connected.
