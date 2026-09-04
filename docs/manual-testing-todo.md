@@ -55,7 +55,15 @@ hardware-settings batch) and the battery ADC rounds of #426.
   a Pi 4/5, 1080p on a Zero 2 W) and the cloud workspace shows it; panel
   says the cloud frame name + Europe/Brussels; hostname is the slugified
   name; a scheduled 01:02 reboot logs `scheduler:fire` at 01:02 *local*.
-- [ ] **HDMI status screen, animated (this branch):** on a framebuffer
+- [~] **HDMI status screen, animated (this branch):** *(partial, 2026-09-04
+  on uus2w / 2026.9.6, 1080p HDMI, Zero 2 W, no scenes assigned so it sits on
+  `system/index`: the CPU half checks out — `render:done sceneId system/index`
+  every second at 165-182 ms scene + ~372 ms framebuffer write, and `top`
+  showed the runtime at 14-23% of one core across two samples on a 4-core
+  board, i.e. well under a core as the box expects. Not eyeballed yet: the
+  three squares cycling brand colours, the live clock's seconds, and the
+  "Last button" band — those need eyes on the panel, and the button band needs
+  a button.)* on a framebuffer
   frame the mark's three squares cycle the brand colours during the boot
   network check and on `system/index` (no scenes); `top` on the Pi should
   show frameos well under a core — the frame rate is paced to ~20% duty
@@ -150,7 +158,14 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
 
 **Sequence (each step is a checkbox further down or here):**
 
-- [ ] **0. Baseline on 2026.9.2, before merging.** Upgrade the two cloud
+- [x] **0. Baseline on 2026.9.2, before merging** — **obsolete, closed
+  2026-09-04.** It served its purpose (step 1 was found while doing it) and
+  there is no longer anything to baseline: every cloud Buildroot frame is on
+  2026.9.6 and migrated, and the one remaining "root-only" record in the
+  workspace (`Cloud-2W`, 2026.8.26, offline since 2026-08-21) is a **stale
+  duplicate of `uus2w`** — the same SD card, reflashed and re-enrolled under
+  the new name. No root-only frame exists on the bench. Original text:
+  Upgrade the two cloud
   Buildroot frames and the three bench HDMI frames to **2026.9.2** (the last
   root-only release) via "Upgrade FrameOS". Reason: 9.2 is exactly the
   "previous release" the migration test needs, and a plain OTA on every
@@ -193,7 +208,13 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   "door answers", "hotspot and portal" and "runtime cannot escalate"
   boxes below. Then `raspberry-pi-64` 9.3 on pi2w for the same boxes.
 - [~] **5. Migration to the `frameos` user on a NetworkManager frame** —
-  IN PROGRESS 2026-09-04 on `Cloud-5` (Pi 5, `raspberry-pi-5`, framebuffer
+  **both NM bench frames are migrated (uus2w by OTA, Cloud-5 by hand) and
+  both are on 2026.9.6 and connected. ONE THING REMAINS in this box:** cold-boot
+  the Pi 5 (`Cloud-5`, no RTC battery) on 9.6 and confirm the clock fixes from
+  `1b3ad730` hold — `networkCheck attempt 1 success` after a single
+  `syncing clock` line, no `sync-clock` restart storm, no setup hotspot, and
+  `/var/lib/systemd/timesync` persisting across the boot via the bind mount.
+  Everything else below is history. Original note: IN PROGRESS 2026-09-04 on `Cloud-5` (Pi 5, `raspberry-pi-5`, framebuffer
   800×480, NetworkManager). It took the OTA 2026.9.1 → 2026.9.4 at
   07:49 UTC (`cloud:upgrade running`, target `debian-bookworm-arm64`), the
   runtime restarted and reported 2026.9.4 with one metrics packet, then the
@@ -328,8 +349,9 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
 - [ ] **7. Regressions:** deploy from localhost:8616 to one Waveshare frame
   (still root, still renders); after the HA add-on has the 9.3 image, deploy
   to one HA frame. Neither should have a `frameos` user or the door active.
-- [ ] **8. Link cases** (the last box in this section) on whichever
-  migrated frame is handiest, over SSH.
+- [x] **8. Link cases** — done 2026-09-04 on uus2w over SSH; see the
+  "Root follows none of the runtime's links" box below for the full record
+  (all four cases passed, plus the restore-and-retry upgrade).
 - [ ] **9. Afterwards:** tick the boxes here, move anything that broke into
   `docs/todo.md`, and delete this section once everything passed. If a
   migrated frame ends up unusable, reflash it with the 9.3 image — the
@@ -344,7 +366,33 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `DEV_Config.c` falls back to *bit-banged* SPI when it cannot open spidev,
   so a panel that works but refreshes slowly means the group is wrong; look
   for that, do not just trust a picture.
-- [ ] **The GPIO button and evdev input still fire** (uus2w has no buttons; the console claim itself is verified: `driver:frameBuffer:consoleClaimed graphicsMode:true`, no getty text over the image — and a USB keyboard cannot reach the getty, see step 5) (groups `frameos` /
+- [x] **The GPIO button and evdev input still fire** — passed 2026-09-04
+  18:11-18:13 on uus2w (2026.9.6). The runtime's supplementary groups are real:
+  `/proc/<pid>/status` on the running service shows `Uid: 990`, `Groups: 28 108
+  990` (`video`, `input`, `frameos`) and `CapEff: 0000000004000000` =
+  `CAP_SYS_TTY_CONFIG` and nothing else. **evdev, end to end:** uus2w has no
+  input hardware, so a virtual one was made — `modprobe uinput` plus a small
+  static aarch64 uinput injector (cross-built in an arm64 alpine container,
+  streamed over ssh, since the frame has no compiler or interpreter) created
+  "FrameOS bench virtual keyboard" at `/dev/input/event0` (`root:input 0660`
+  from eudev's default rules). After a `systemctl restart frameos`, the
+  unprivileged runtime enumerated it and delivered real events into the scene
+  loop: `{"event":"event:keyDown","payload":{"key":"KEY_A","code":30}}` /
+  `event:keyUp` once a second for the life of the device — so uid 990 reaching
+  `/dev/input/event*` through group `input` works. Removing the device was
+  handled cleanly too (`read error -19, closing device` → `All input devices
+  gone, stopping evdev driver`). Bench left clean: injector killed, `uinput`
+  rmmod'd, `/dev/input` back to `mice`. **gpioButton:** its privilege-sensitive
+  half was already proven on 2026-09-04 12:12 — as uid 990 the driver opened
+  `/dev/gpiochip0` (`root:frameos 0660` from the udev rule),
+  `lgGpioClaimInput` + `lgGpioClaimAlert` both succeeded on GPIO 17 and it
+  logged `Listening on GPIO 17 (Bench)` with no claim error. What is left is
+  purely electrical (short GPIO 17 / physical pin 11 to GND / pin 9 and watch
+  for a `button` event); uus2w has no button fitted and that is not a
+  permissions question. **Console claim:** verified —
+  `driver:frameBuffer:consoleClaimed graphicsMode:true`, no getty text over the
+  image, and a USB keyboard cannot reach the tty1 getty while frameos holds it
+  (see step 5). Original text: (groups `frameos` /
   `input`), and the framebuffer console is claimed (no getty text over the
   image — that is `CAP_SYS_TTY_CONFIG` working).
 - [x] **The door answers** — uus2w 2026-09-04 11:51: cloud Reboot → `FrameOS privileged: executing reboot (…)` → `> sh -c '(sleep 2; systemctl reboot || reboot) …'` → connection closed; `.path` active before and after. Original text: `journalctl -u frameos-privileged` after a
@@ -371,7 +419,23 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   credentials → `FrameOS-Setup` hotspot appears, the portal lists networks,
   joining one works and survives a reboot. Every one of those is an
   `nm-*` verb now; the journal shows them.
-- [ ] **OTA from a root-only release (the migration).** Flash an image from
+- [x] **OTA from a root-only release (the migration)** — closed 2026-09-04
+  on the evidence already recorded in step 5: `uus2w` took the OTA
+  2026.9.1 → 2026.9.4 at 07:43 UTC and came out migrated — `upgrade-status.json`
+  `success`, `/etc/passwd` gained `frameos:x:990:990`, the installed unit is
+  the hardened one (`User=frameos`, `SupplementaryGroups=video input`,
+  `AmbientCapabilities=CAP_SYS_TTY_CONFIG`, `ProtectSystem=strict`), ownership
+  came out root-code / `frameos`-state (`state`/`logs`/`staging`/`queue`
+  `root:990 1770`, `results` `2750`, `releases/` + `current` root-owned) and it
+  rendered and reconnected after the restart. The second run of the same path,
+  `Cloud-5`, failed three separate ways (agent-classification, the killed
+  upgrade child, the Pi 5 boot clock) — **all three fixed on main in
+  `1b3ad730` and shipped in 2026.9.5/9.6, but the migration has not been
+  re-run end to end on a frame carrying those fixes**, because no root-only
+  frame is left: `Cloud-2W` is a stale cloud record for the card that is now
+  `uus2w`. To re-test it properly you need a card flashed from a ≤2026.9.2
+  image; carry that into the §A fresh-card session if you want it re-proven,
+  otherwise this is closed on the uus2w run. Original text: Flash an image from
   the *previous* release, let it enroll, then trigger "Upgrade FrameOS".
   Expect: the upgrade succeeds, `/etc/passwd` gains `frameos:x:990:990`,
   the installed unit becomes the hardened one, `/srv/frameos` ownership is
@@ -390,7 +454,58 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `privileged/results`, and that neither a hostile result-path symlink nor a
   runtime-created `scenes/*.so` is followed by the root worker. After joining
   Wi-Fi, confirm `journalctl -u frameos-privileged` does not contain the PSK.
-- [ ] **Root follows none of the runtime's links (2026-09-03 review).** As
+- [x] **Root follows none of the runtime's links (2026-09-03 review)** —
+  PASSED 2026-09-04 18:04-18:10 on uus2w (2026.9.6, `User=frameos`, uid 990),
+  all four cases.
+  **(1) The symlink at `scenes.json.gz`.** As `frameos` in
+  `/srv/frameos/current` (the release dir is `drwxrwxr-t root:frameos`, and
+  `scenes.json.gz` is runtime-owned, so the swap is genuinely available to a
+  compromised runtime): `mv scenes.json.gz scenes.json.gz.bak` then
+  `ln -s /srv/frameos/state/NetworkManager/system-connections/frameos-wifi.nmconnection
+  scenes.json.gz`. The runtime cannot read that keyfile itself (`Permission
+  denied`; it is `root:root 0600` under a `0700` dir) — the whole point is to
+  make root read it on the runtime's behalf. Then an upgrade was triggered.
+  It **failed** exactly as designed: `upgrade.log` ends
+  `FrameOS upgrade failed: refusing to follow the symlink at
+  /srv/frameos/releases/release_upgrade_20260904174415_2026_9_6/scenes.json.gz`,
+  `upgrade-status.json` = `failed` with that same message and `exit_code: 1`,
+  and `current` still pointed at the old release. The staged release directory
+  was left with `all_scenes.json.gz` (copied just before the raise) and **no
+  `scenes.json.gz` at all**; a `grep -rF` for the PSK across the staged release
+  and the staged remote dir found nothing. `readFileNoFollow`'s `O_NOFOLLOW`
+  is what fires (ELOOP), inside `copyScenePayloads` →
+  `assembleReleaseFromArchive`.
+  **(2) Restore and retry.** `mv scenes.json.gz.bak scenes.json.gz` then the
+  same upgrade: `success`, "FrameOS upgraded to 2026.9.6. Restarting services."
+  The frame came back healthy — `User=frameos`, `drivers/` `0755`, `*.so`
+  `0644`, `frameos.service` `0644` (the post-9.5 ownership fix, applied by the
+  *new* binary's `frameos setup` during activation), framebuffer writes at
+  ~372 ms, connected to the cloud on 2026.9.6.
+  **(3) `ln -s /etc scenes`** — refused, and by a better mechanism than the box
+  predicted. `scenes` already exists as a root-owned directory, so the shell
+  resolved the link *into* it and got `ln: failed to create symbolic link
+  '.../scenes/etc': Permission denied`. Either way the runtime cannot replace a
+  code root, so the "if it succeeds the composer left the code roots out" bug
+  condition does not hold here.
+  **(4) Hardlinks.** `sysctl fs.protected_hardlinks` = **1** (and
+  `fs.protected_symlinks` = 1), so per this box the `apply-driver-setup`
+  sub-case does not apply. Confirmed the kernel is what stops it:
+  `ln /srv/frameos/current/frameos evil.json` as `frameos` →
+  `Operation not permitted`, no file created.
+  **(5) `ln -s /etc /srv/frameos/privileged/queue/x.json`** — the `.path` unit
+  woke the worker, which logged `pruned 3 stale result(s)` then
+  `done, handled 0 request(s)`, deleted the link, and
+  `frameos-privileged.service` settled `inactive` within 3 s while
+  `frameos-privileged.path` stayed `active`. Root never opened `/etc` as a
+  request.
+  *Method note:* the trigger was `frameos upgrade` run from the 9.5 binary
+  still on the card (`installedFrameOSVersion()` is the compiled-in constant,
+  so the 9.5 binary sees 9.6 as an update while the frame stays on 9.6). That
+  runs the assembly as root directly rather than through the door, but it is
+  the identical `assembleReleaseFromArchive` the door's `install-release`
+  calls, so the guard under test is the same one. Bench left clean: aborted
+  release dirs removed, payload restored, temp files deleted.
+  Original text: As
   `frameos`, in `/srv/frameos/current`: `mv scenes.json.gz scenes.json.gz.bak
   && ln -s /srv/frameos/state/NetworkManager/system-connections/frameos-wifi.nmconnection
   scenes.json.gz`, `ln -s /etc scenes` (expect `ln: File exists`; if it
