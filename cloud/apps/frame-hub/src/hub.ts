@@ -445,11 +445,18 @@ export async function startFrameHub(
   // TTL that expireStaleCommands enforces), so redelivering an unacked command
   // is preferable to stranding it.
   //
-  // The exceptions are reboot and restart_runtime: a device that received one
-  // of those goes down, and the disconnect is the expected effect, not a lost
-  // write. Redelivering one on every reconnect rebooted a bench frame in a loop
-  // until the command's TTL ran out (2026-09-04), so once written to a socket
-  // they are never requeued.
+  // The exceptions are the commands whose own effect takes the session down:
+  // reboot, restart_runtime and notify_update_available. The disconnect is the
+  // expected effect there, not a lost write. Redelivering one on every
+  // reconnect rebooted a bench frame in a loop until the command's TTL ran out
+  // (2026-09-04), so once written to a socket they are never requeued.
+  //
+  // notify_update_available joined them on 2026-09-05: a successful upgrade
+  // restarts FrameOS before the ack can flush, so the nudge came back on the
+  // new session and the freshly upgraded frame spent another release check
+  // resolving `up_to_date` (uus2w, 9.6 -> 9.7). A nudge genuinely lost in
+  // flight is not worth a second one either — the device checks for releases
+  // on its own, and the owner can press the button again.
   //
   // Two ways a command in "sent" needs redelivering: the socket died between
   // the write and the ack (caught on reconnect, cutoff = now, because nothing
@@ -465,7 +472,11 @@ export async function startFrameHub(
           eq(frameCommands.frameId, frameId),
           eq(frameCommands.status, "sent"),
           lt(frameCommands.sentAt, cutoff),
-          inArray(frameCommands.type, ["reboot", "restart_runtime"]),
+          inArray(frameCommands.type, [
+            "reboot",
+            "restart_runtime",
+            "notify_update_available",
+          ]),
         ),
       );
     // supersedePendingCommands (auth-web) only rewrites "pending" rows, so a

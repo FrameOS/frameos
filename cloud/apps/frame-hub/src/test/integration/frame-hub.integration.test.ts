@@ -642,50 +642,55 @@ describe("command redelivery", () => {
     second.ws.close();
   });
 
-  it("does not redeliver a reboot after the socket it was sent on died", async () => {
-    // The disconnect is the reboot's expected effect: redelivering it on the
-    // reconnect rebooted a frame in a loop until the command's TTL ran out.
-    const { frame, privateKey, token } = await createFrameFixture();
-    const first = await openDevice(token);
-    await handshake(first, privateKey);
+  it.each(["reboot", "notify_update_available"])(
+    "does not redeliver a %s after the socket it was sent on died",
+    async (type) => {
+      // The disconnect is the command's expected effect: redelivering a reboot on
+      // the reconnect rebooted a frame in a loop until the command's TTL ran out,
+      // and redelivering an update nudge spent a second release check on a frame
+      // that had just finished upgrading.
+      const { frame, privateKey, token } = await createFrameFixture();
+      const first = await openDevice(token);
+      await handshake(first, privateKey);
 
-    const command = await enqueueFrameCommand(db, {
-      frameId: frame.id,
-      payload: {},
-      type: "reboot",
-    });
-    await first.next(
-      (msg) => msg.id === command?.id,
-      "reboot on the first socket",
-    );
-    await waitFor(async () => {
+      const command = await enqueueFrameCommand(db, {
+        frameId: frame.id,
+        payload: {},
+        type,
+      });
+      await first.next(
+        (msg) => msg.id === command?.id,
+        `${type} on the first socket`,
+      );
+      await waitFor(async () => {
+        const [row] = await db
+          .select()
+          .from(frameCommands)
+          .where(eq(frameCommands.id, String(command?.id)));
+        return row?.status === "sent" ? row : undefined;
+      }, `${type} marked sent`);
+
+      first.ws.terminate();
+      await waitFor(async () => {
+        const [row] = await db
+          .select()
+          .from(frames)
+          .where(eq(frames.id, frame.id));
+        return row && !row.connected ? row : undefined;
+      }, "frame marked disconnected");
+
+      const second = await openDevice(token);
+      const ready = await handshake(second, privateKey);
+      expect(ready.pending_commands).toBe(0);
       const [row] = await db
         .select()
         .from(frameCommands)
         .where(eq(frameCommands.id, String(command?.id)));
-      return row?.status === "sent" ? row : undefined;
-    }, "reboot marked sent");
-
-    first.ws.terminate();
-    await waitFor(async () => {
-      const [row] = await db
-        .select()
-        .from(frames)
-        .where(eq(frames.id, frame.id));
-      return row && !row.connected ? row : undefined;
-    }, "frame marked disconnected");
-
-    const second = await openDevice(token);
-    const ready = await handshake(second, privateKey);
-    expect(ready.pending_commands).toBe(0);
-    const [row] = await db
-      .select()
-      .from(frameCommands)
-      .where(eq(frameCommands.id, String(command?.id)));
-    expect(row?.status).toBe("expired");
-    expect(row?.error).toBe("delivered_once");
-    second.ws.close();
-  });
+      expect(row?.status).toBe("expired");
+      expect(row?.error).toBe("delivered_once");
+      second.ws.close();
+    },
+  );
 
   it("does not redeliver a sent command superseded by a newer one", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
