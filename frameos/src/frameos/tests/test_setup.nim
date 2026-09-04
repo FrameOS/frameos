@@ -75,6 +75,37 @@ block test_load_all_scenes_prefers_full_scene_payload:
     delEnv("FRAMEOS_SCENES_JSON")
     removeDir(tempRoot)
 
+block test_timezone_keeps_etc_timezone_in_step:
+  # /etc/localtime is systemd's to write; /etc/timezone is the plain-text copy
+  # `lib/tz.nim` falls back to, and only the no-timedatectl branch used to
+  # touch it — so every systemd frame kept the image's zone there (uus2w on
+  # 2026.9.7 said Etc/UTC while /etc/localtime said Europe/Brussels). Whatever
+  # branch sets the zone, this file follows.
+  let tzPath = getTempDir() / ("frameos-etc-timezone-" & $epochTime().int64)
+  writeFile(tzPath, "Etc/UTC\n")
+  putEnv("FRAMEOS_ETC_TIMEZONE", tzPath)
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult = ("", 0))
+  try:
+    discard setupTimezone("Pacific/Auckland")
+    doAssert readFile(tzPath).strip() == "Pacific/Auckland", readFile(tzPath)
+  finally:
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_ETC_TIMEZONE")
+    removeFile(tzPath)
+
+block test_timezone_leaves_a_missing_etc_timezone_alone:
+  # A system that keeps no /etc/timezone does not get one invented for it.
+  let tzPath = getTempDir() / ("frameos-etc-timezone-absent-" & $epochTime().int64)
+  removeFile(tzPath)
+  putEnv("FRAMEOS_ETC_TIMEZONE", tzPath)
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult = ("", 0))
+  try:
+    discard setupTimezone("Pacific/Auckland")
+    doAssert not fileExists(tzPath)
+  finally:
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_ETC_TIMEZONE")
+
 block test_timezone_goes_through_the_door_when_it_is_available:
   # The zone must differ from this machine's and exist in /usr/share/zoneinfo,
   # or setupTimezone returns before it would ever ask anyone.

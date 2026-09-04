@@ -731,6 +731,33 @@ proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
 
   result = setupOk()
 
+proc etcTimezonePath(): string =
+  ## Overridable like FRAMEOS_BOOT_CONFIG, so the test can watch the write
+  ## without a real /etc.
+  getEnv("FRAMEOS_ETC_TIMEZONE", "/etc/timezone")
+
+proc syncEtcTimezone(normalized: string) =
+  ## systemd writes /etc/localtime and nothing else; /etc/timezone is the
+  ## Debian-era plain-text copy `lib/tz.nim` falls back to when the symlink
+  ## cannot be read. Only the fallback branch below ever wrote it, so a frame
+  ## whose zone was set by `timedatectl` — every systemd frame, including the
+  ## root worker behind the privileged door — kept whatever the image shipped
+  ## (`Etc/UTC` on Buildroot; seen on uus2w, 2026.9.7). Keep the two in step.
+  ##
+  ## Only when the file is already there: creating it on a system that does
+  ## not keep one would be inventing state, and the fallback branch (which
+  ## does write it) is the one that runs where that file is the mechanism.
+  ## Best effort — the zone is already set, so nothing here is worth failing.
+  let path = etcTimezonePath()
+  if not fileExists(path):
+    return
+  try:
+    # writePrivilegedFile is a no-op when the content already matches and
+    # brings its own writable mount.
+    writePrivilegedFile(path, normalized & "\n")
+  except CatchableError as error:
+    setupLog("FrameOS setup: timezone: could not update " & path & ": " & error.msg)
+
 proc setupTimezone*(timeZone: string): SetupResult =
   let normalized = timeZone.strip()
   if normalized.len == 0:
@@ -774,12 +801,13 @@ proc setupTimezone*(timeZone: string): SetupResult =
       raiseOnError = false,
     )
     if timedateResult.exitCode == 0:
+      syncEtcTimezone(normalized)
       return setupOk()
 
   setupLog("FrameOS setup: timezone: setting " & normalized)
   withWritableMount("/etc/localtime"):
-    writePrivilegedFile("/etc/timezone", normalized & "\n")
     discard runSetupCommand(privilegedCommand("ln -sfn " & shellQuote(zoneinfoPath) & " /etc/localtime"))
+  syncEtcTimezone(normalized)
   result = setupOk()
 
 proc startFrameOSSystemdServices*(configPath = "") =
