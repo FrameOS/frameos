@@ -72,15 +72,17 @@ Two rules that shape most entries:
   nothing a push could clobber; any other mismatch stays the owner's deploy.
   Verified on SuurESP: state partition erased, boot, five scenes back
   without a hand on the workspace.
-- **A scene that OOM-aborts on every render boot-loops the board** (seen
-  2026-09-05 provoking `memory:oomAbort` on SuurESP with a 300 K-rune text
-  scene): the second abort restarts as designed, the device restores its
-  last scene at boot and renders it *before* the cloud session is up, so a
-  cloud `set_current_scene` only lands after another abort has leaked ~1.5
-  MB (the birds scene that followed failed its SVG). Fix: persist the
-  aborting scene id next to the restart (NVS `oom_scene`); on boot, skip the
-  last-scene restore when it names that scene (fall through to the first
-  scene / status screen) and clear the mark on the next healthy render.
+- **A scene that OOM-aborts on every render boot-looped the board — fixed
+  (2026.9.9).** Found provoking `memory:oomAbort` on SuurESP with a 300 K-rune
+  text scene: the second abort restarts as designed, but the store's index
+  reactivated the same scene at boot and rendered it before the cloud
+  session was up, so every boot leaked ~1.5 MB again and a cloud switch never
+  won. Now `fos_scenes_mark_oom_restart()` runs right before the restart
+  (NVS `oom_scene`), and `activate_from_index` consumes the mark once: a
+  marked last scene is skipped for the next scene of the payload
+  (`scenes:restore skipped oom-restart`; a lone scene is retried). Verified
+  on the board: abort, abort, restart, "starting on" the birds scene, 6.07 MB
+  free, no third abort.
 - Console: `ota` printed `ota: UNKNOWN ERROR (cloud)` on every outcome
   because `CONFIG_ESP_ERR_TO_NAME_LOOKUP` is off; it now prints
   `check requested` / `request failed 0x…`.

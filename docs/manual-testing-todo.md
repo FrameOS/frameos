@@ -789,7 +789,19 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `firmware/manifest?platform=esp32-s3-32mb` (09:18:01 UTC; the 02:02 OTA
   had asked for `esp32-s3-generic`). Idle PSRAM after a photo render 5.91 MB,
   after Weather 5.36 MB — the 24 MB SPIFFS costs ~0.5 MB against the old
-  8 MB-layout baseline.
+  8 MB-layout baseline. *(4) `memory:oomAbort` and the leak-percent restart,
+  provoked 11:26 UTC:* a private "OOM probe (bench)" scene (render/text fed
+  300 K runes) aborted its first render (`memory:oomAbort … status leaked,
+  streak 1`, free PSRAM 6.09 → 4.51 MB, largest block 1.47 MB), the retry
+  needed the emergency reserve, and the second abort logged `status
+  restarting` at 2.28 MB free (under half the 6.16 MB baseline) and rebooted.
+  Found and fixed the same hour: the board came back INTO the probe (the
+  store's index reactivates the last scene before the cloud session) and
+  leaked again; with the `oom_scene` guard the reboot logs `scenes:restore
+  skipped oom-restart` and starts on the next scene. *(5) empty-store
+  resync, hub half:* after 4b313f47 the hub answers an empty hello checksum
+  by re-queuing the assigned set itself (integration-tested; prod deploy
+  pending at the time of writing).
 
 - [x] **E1004 first render after a cold boot (2026.9.8):** closed 2026-09-05 07:56 UTC. Every deep-sleep wake on this board is a full boot (`cloud:session_ready … uptimeSeconds: 6` at every 15-minute wake), so every render since 02:21 has been a first-render-after-boot, all full size; a commanded cloud `reboot` on the 07:55 wake (second session at 07:55:21, `uptimeSeconds: 9`) rendered at 07:56:17 with the chart filling the lower cell, and the log has never carried a `render:degraded` line. The 02:06 capture was the one render *during* the OTA boot itself; whatever it showed did not recur across ~20 boots.
 

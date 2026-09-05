@@ -461,6 +461,11 @@ static void nim_note_healthy_render(void)
     }
 }
 
+/* main/fos_scenes.c; main/ is not on this component's include path, and the
+ * one symbol is not worth a dependency edge. Linked in every build that
+ * links this glue (the C3 thin client links the stub, which never aborts). */
+void fos_scenes_mark_oom_restart(void);
+
 static void nim_oom_abort_note(const char *what)
 {
     s_nim_oom_abort_streak++;
@@ -489,6 +494,10 @@ static void nim_oom_abort_note(const char *what)
     frameos_nim_log_hook(line);
     if (restart) {
         ESP_LOGE("fos_nim", "OOM aborts have leaked the Nim heap beyond recovery; restarting");
+        /* Do not come back into the same scene: the boot-time restore runs
+         * before the cloud session, so a scene that aborts every time would
+         * loop the board with nobody able to switch it. */
+        fos_scenes_mark_oom_restart();
         frameos_nim_flush_logs();
         vTaskDelay(pdMS_TO_TICKS(1500)); /* let the log lines drain, cloud included */
         esp_restart();

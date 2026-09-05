@@ -453,6 +453,41 @@ bool fos_scenes_from_cloud(void)
  * persisted scene only appears when the cached or backend payload lands. */
 static bool s_last_scene_settled = false;
 
+/* The scene an out-of-memory restart was rendering (fos_scenes_mark_oom_restart).
+ * Read and erased once, on the first restore after that boot. */
+#define OOM_SCENE_NVS_KEY "oom_scene"
+
+static char s_resident_scene_id[SCENE_ID_LEN]; /* defined with the slot store below */
+
+void fos_scenes_mark_oom_restart(void)
+{
+    if (!s_resident_scene_id[0]) return;
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    if (nvs_set_str(nvs, OOM_SCENE_NVS_KEY, s_resident_scene_id) == ESP_OK) {
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
+/* Returns true when `scene_id` is the scene the last OOM restart was
+ * rendering; the mark is consumed either way, so one boot skips it and a
+ * later restore (a fresh boot, a cloud switch back) may try it again. */
+static bool consume_oom_scene_mark(const char *scene_id)
+{
+    char marked[SCENE_ID_LEN] = "";
+    size_t len = sizeof(marked);
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return false;
+    bool present = nvs_get_str(nvs, OOM_SCENE_NVS_KEY, marked, &len) == ESP_OK && marked[0];
+    if (present) {
+        nvs_erase_key(nvs, OOM_SCENE_NVS_KEY);
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return present && strcmp(marked, scene_id) == 0;
+}
+
 static void restore_last_scene(void)
 {
     if (s_last_scene_settled) return;
@@ -465,6 +500,18 @@ static void restore_last_scene(void)
     nvs_close(nvs);
     if (err != ESP_OK || scene_id[0] == '\0') {
         s_last_scene_settled = true; /* nothing persisted */
+        return;
+    }
+    if (consume_oom_scene_mark(scene_id)) {
+        /* The scene that drove the last restart out of memory: leave the
+         * payload's first scene active so the board renders something and
+         * the cloud can switch it, instead of aborting again before the
+         * session is even up (13.3" bench, 2026-09-05). */
+        s_last_scene_settled = true;
+        ESP_LOGW(TAG, "last scene %s aborted out of memory before the restart; keeping default",
+                 scene_id);
+        log_scene_event("scenes:restore", "skipped", "nvs", scene_id, "oom-restart",
+                        0, 0, 0, ESP_OK);
         return;
     }
 
@@ -713,7 +760,7 @@ static int load_scene_index(void)
 /* Make one scene resident from its slot file. */
 /* Which scene the Nim runtime currently holds parsed, so re-selecting it can
  * be recognised as a no-op. Empty means "nothing resident". */
-static char s_resident_scene_id[SCENE_ID_LEN] = "";
+static char s_resident_scene_id[SCENE_ID_LEN]; /* forward-declared above */
 
 static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
 {
@@ -765,6 +812,27 @@ static bool activate_from_index(const char *origin)
         nvs_close(nvs);
     }
     int slot = slot_for_scene(scene_id);
+    if (slot >= 0 && consume_oom_scene_mark(scene_id)) {
+        /* The scene that drove the last restart out of memory. Rendering it
+         * again here — before the cloud session is even up — would loop the
+         * board; start on the next scene of the payload instead (a lone
+         * scene has no alternative and is retried). */
+        int other = -1;
+        for (int i = 0; i < s_slot_count; i++) {
+            if (strcmp(s_slots[i].id, scene_id) != 0) {
+                other = i;
+                break;
+            }
+        }
+        if (other >= 0) {
+            ESP_LOGW(TAG, "last scene %s aborted out of memory before the restart; starting on %s",
+                     scene_id, s_slots[other].id);
+            log_scene_event("scenes:restore", "skipped", "nvs", scene_id, "oom-restart",
+                            0, 0, 0, ESP_OK);
+            slot = s_slots[other].slot;
+            snprintf(scene_id, sizeof(scene_id), "%s", s_slots[other].id);
+        }
+    }
     if (slot < 0) {
         /* Nothing persisted, or that scene is gone from the new payload. */
         slot = s_slots[0].slot;

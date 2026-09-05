@@ -88,3 +88,10 @@ const char *fos_scenes_etag(void);
  * wiped state partition — a SPIFFS autoformat after corruption, a flash
  * relayout — even when NVS still remembers what used to be there. */
 bool fos_scenes_stored(void);
+
+/* Called right before an out-of-memory restart (frameos_nim_glue.c): remember
+ * the scene that was resident, so the boot-time restore does not put the same
+ * scene straight back on the panel — a scene that aborts on every render
+ * would otherwise loop the board (abort, leak, abort, restart, restore,
+ * …) faster than the cloud can switch it away. */
+void fos_scenes_mark_oom_restart(void);
