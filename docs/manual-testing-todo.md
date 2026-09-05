@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-05 10:15 UTC, after release 2026.9.8.
+empty. Last refreshed 2026-09-05 12:30 UTC, after release 2026.9.8.
 
 ## Open
 
@@ -18,18 +18,6 @@ empty. Last refreshed 2026-09-05 10:15 UTC, after release 2026.9.8.
   (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
   and that everything works after. The deploy also flips the frame back to
   a root `frameos.service`, so check the unit's `User=` before and after.
-
-- [ ] **uus2w `/etc/timezone` after the next release (661abf5d):** on 2026.9.8
-  it still reads `Etc/UTC` because `setupTimezone` returned at "already
-  Europe/Brussels" before the sync ran (fixed on main: the early return syncs
-  too). After the OTA: `cat /etc/timezone` on uus2w says `Europe/Brussels`.
-
-- [ ] **Door-upgrade device half (50fcbcc2) at the next OTA from 2026.9.8:**
-  on a door frame (uus2w, Cloud-5) the `"status":"scheduled"` line must
-  follow `cloud:updateAvailable` within a second and the hub must log no
-  `device.heartbeat_timeout` for it. The 9.7 → 9.8 OTA could not show this —
-  the 9.7 binary ran it and uus2w still timed out once. Hub half (no
-  redelivery) is already verified, see the 2026.9.8 entry below.
 
 ### Privilege separation bench (`docs/buildroot-privileges.md` §4)
 
@@ -86,9 +74,12 @@ Done section for this bench below.
   NVS-cached `cloud_scn_sum` without checking `/state/scenes.json` exists
   (`fos_cloud.c`), so the hub never re-pushed and `set_current_scene`
   failed `scene not found`; recovered by reordering the assignment. Same
-  trap for a SPIFFS autoformat after corruption — in `docs/todo.md`. Still
-  open here: the browser "Add frame → Connect & flash" click-through on a
-  32 MB board, and a later OTA landing on the new layout.)* on the XTEINK
+  trap for a SPIFFS autoformat after corruption — in `docs/todo.md`. The
+  OTA half landed with 2026.9.9 at 12:21 UTC: `ota:cloud downloading` →
+  3,147,104 bytes in 58 s → `verified, rebooting` → `cloud:session_ready
+  version 2026.9.9 bootedFrom ota_1` and the SD-card scene rendering with
+  6.5 MB PSRAM free. Still open here: the browser "Add frame → Connect &
+  flash" click-through on a 32 MB board.)* on the XTEINK
   X4 (16 MB C3), "Flash latest release" picks `esp32-c3-16mb`, the "4MB
   layout / no OTA" warnings are gone, the board boots and later takes an
   OTA; on a 13.3E6 (32 MB S3) the same with `esp32-s3-32mb`.
@@ -318,6 +309,21 @@ Done section for this bench below.
   (not just reloads) and the settings apply. Also confirm the panel only
   shows fields the reported hardware can use, and shows disabled-with-reason
   on pre-2026.8.31 firmware.
+
+- [x] **uus2w `/etc/timezone` after 2026.9.9 (661abf5d):** closed 2026-09-05
+  12:25 UTC — before the OTA it read `Etc/UTC` with `/etc/localtime` →
+  Europe/Brussels; after the 9.8 → 9.9 upgrade (release dir
+  `release_upgrade_20260905142240_2026_9_9`, service up 14:23:19 CEST)
+  `cat /etc/timezone` says `Europe/Brussels`.
+
+- [x] **Door-upgrade device half (50fcbcc2) at the 9.8 → 9.9 OTA:** closed
+  2026-09-05 — Cloud-5 logged `cloud:upgrade scheduled` at 12:21:32.357, three
+  seconds after the fleet-wide `frame_firmware_update` at 12:21:29, `running`
+  1.5 s later and `success` at 12:22:51; the hub journal from 12:21 on has no
+  `device.heartbeat_timeout` and no `command.redelivering` for uus2w, Cloud-5
+  or any other frame, only the post-restart reconnects. (uus2w's own log
+  stream answered nothing to the logs API during this window — its upgrade is
+  evidenced by the release dir, the service restart and the activity feed.)
 
 ### Privilege separation bench (`docs/buildroot-privileges.md` §4)
 
@@ -800,8 +806,14 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   leaked again; with the `oom_scene` guard the reboot logs `scenes:restore
   skipped oom-restart` and starts on the next scene. *(5) empty-store
   resync, hub half:* after 4b313f47 the hub answers an empty hello checksum
-  by re-queuing the assigned set itself (integration-tested; prod deploy
-  pending at the time of writing).
+  by re-queuing the assigned set itself — verified live 11:52-11:58 UTC:
+  state partition erased, boot, `frame.scenes_resynced` (empty_store) in
+  the activity feed at 11:56:16 ahead of `frame.connected`, and
+  `frame.scenes_applied` with the assigned checksum at 11:57:49, nobody
+  touching the workspace. Seen twice on those first renders and not chased:
+  the private "Random SVG birds" scene logs `Error rendering SVG: Failed to
+  render SVG.` on the first render after a boot (6.1 MB free, so not
+  memory) and renders normally from the second.
 
 - [x] **E1004 first render after a cold boot (2026.9.8):** closed 2026-09-05 07:56 UTC. Every deep-sleep wake on this board is a full boot (`cloud:session_ready … uptimeSeconds: 6` at every 15-minute wake), so every render since 02:21 has been a first-render-after-boot, all full size; a commanded cloud `reboot` on the 07:55 wake (second session at 07:55:21, `uptimeSeconds: 9`) rendered at 07:56:17 with the chart filling the lower cell, and the log has never carried a `render:degraded` line. The 02:06 capture was the one render *during* the OTA boot itself; whatever it showed did not recur across ~20 boots.
 
@@ -1001,6 +1013,16 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `Etc/UTC` — `setupTimezone` returned at "already Europe/Brussels" before the
   sync ran. Fixed on main the same night (the early return syncs too;
   `test_setup` pins it; `661abf5d`, in the next release).
+
+- [x] **Release 2026.9.9 (2026-09-05, run 33964845342, dispatched from
+  21f28e79 after Run Tests + E2E Docker Image were green):** every job green
+  in 20 minutes; 75 assets; `versions.json` stamps `frameos
+  2026.9.9+b5bdb09a`; the cloud offered it within a minute. Carries the pixie
+  4:4:4 clamp (pixie#8), the wiped-state hello fix, the OOM boot-loop guard,
+  the console `ota` print and the `/etc/timezone` sync. Rollout by hand at
+  12:21:29 UTC: SuurESP (32 MB layout, ota_1), Cloud-5 and uus2w (door),
+  Cloud-W and Wood7.3 all on 9.9 by 12:24; E1004 and E1002 queued for their
+  12:28 / 13:00 wakes.
 
 ## Not on the list, deliberately
 

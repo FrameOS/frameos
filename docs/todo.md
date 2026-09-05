@@ -45,8 +45,10 @@ Two rules that shape most entries:
   and no full-width strip seam (the RGBX canvas draws no strips). Idle PSRAM
   now sits ~0.5 MB below the old ~6.9 MB baseline — the 24 MB SPIFFS state
   partition's cache, measured 6.15 MB free at boot with no scene loaded.
-  Still to provoke deliberately: `memory:oomAbort` and the leak-percent
-  restart. The 8 MB E1004 half was done 2026-09-01 (#428).
+  `memory:oomAbort` and the leak-percent restart were provoked on
+  2026-09-05 (a 300 K-rune text scene): first abort "leaked", second
+  "restarting" under half the baseline, restart — evidence in the bench
+  file. The 8 MB E1004 half was done 2026-09-01 (#428).
 - **4:4:4 JPEGs degraded to half resolution on the 13.3" — fixed in the
   pixie fork (FrameOS/pixie#8, lock bumped to fe417a0).** Found 2026-09-05
   on SuurESP: the `koduraam` photos are 4:4:4 exports and every one logged
