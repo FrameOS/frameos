@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
 import { Esp32CloudFlasher } from './Esp32CloudFlasher'
+import { LinkRunningFrameForm, takeStashedLinkCode } from './LinkRunningFrameForm'
 import { SdImageBuilder } from './SdImageBuilder'
 
 // Known error codes from POST /api/frames/claim-tokens. "Could not prepare the
@@ -98,8 +99,12 @@ const pathChoices: {
 ]
 
 export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddFramePanelProps): ReactElement {
+  // A link code parked by LinkRunningFrameForm before a re-authentication
+  // round trip: the reauth page returns to the workspace with the drawer
+  // closed, so the panel reopens on that path with the code already in.
+  const [stashedLinkCode] = useState(() => takeStashedLinkCode())
   // undefined = the chooser stage; a key = that path's form.
-  const [path, setPath] = useState<AddFramePath | undefined>()
+  const [path, setPath] = useState<AddFramePath | undefined>(stashedLinkCode ? 'link' : undefined)
   const [claimToken, setClaimToken] = useState<string | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [installCopied, setInstallCopied] = useState(false)
@@ -472,17 +477,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
               <QrCodeIcon aria-hidden className="h-5 w-5" />
               Link a frame that already runs
             </h3>
-            <p className="frameos-muted text-xs">
-              Already have FrameOS running and on your network? Open its admin page (Settings → FrameOS Cloud →
-              Connect). The frame shows a short code; type it on the{' '}
-              <a className="frameos-link underline" href="/device">
-                device page
-              </a>{' '}
-              to approve it.
-            </p>
-            <p className="frameos-muted mt-2 text-xs">
-              The frame asks and you approve — nothing to copy from here, and the code proves you can see the device.
-            </p>
+            <LinkRunningFrameForm initialCode={stashedLinkCode} />
           </section>
         ) : null}
 

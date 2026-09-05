@@ -12,6 +12,11 @@ import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddFramePanel } from "../../../../../../cloud-frontend/src/components/AddFramePanel";
+import {
+  LinkRunningFrameForm,
+  stashLinkCode,
+  takeStashedLinkCode,
+} from "../../../../../../cloud-frontend/src/components/LinkRunningFrameForm";
 
 vi.mock(
   "../../../../../../cloud-frontend/src/components/SdImageBuilder",
@@ -272,6 +277,154 @@ describe("AddFramePanel", () => {
     openPath(/sd card image/i);
     expect(screen.getByTestId("sd-builder")).toBeDefined();
     expect(screen.queryByTestId("esp32-flasher")).toBeNull();
+  });
+
+  // "Link a frame that already runs" used to be a paragraph pointing at
+  // /device. The device-flow approval now happens in the drawer: look the
+  // frame's code up, approve it, and open the frame once it has enrolled.
+  describe("linking a frame that already runs", () => {
+    function routeFetch(handlers: Record<string, () => Response>) {
+      fetchMock.mockImplementation((input) => {
+        const url = String(input);
+        for (const [prefix, handler] of Object.entries(handlers)) {
+          if (url.includes(prefix)) {
+            return Promise.resolve(handler());
+          }
+        }
+        return Promise.resolve(
+          Response.json({ claim_token: "FRCT_from_server", expires_at: "2030-01-01T00:00:00Z" }),
+        );
+      });
+    }
+
+    it("looks the code up, approves it and opens the frame once it enrols", async () => {
+      const requests: string[] = [];
+      let framesListed = 0;
+      routeFetch({
+        "/api/device/request": () =>
+          Response.json({
+            client_kind: "frame",
+            expires_at: "2030-01-01T00:00:00Z",
+            local_origin: "http://uus2w.local:8787",
+            public_display_name: "uus2w",
+            requested_scopes: [],
+            signed_in: true,
+            status: "pending",
+            user_code: "H7LU-JLWN",
+          }),
+        "/api/device/authorize": () => {
+          requests.push("authorize");
+          return Response.json({ linked_client_id: "lc-1", status: "approved" });
+        },
+        // Baseline (before approving): nothing. First poll after: the frame.
+        "/api/frames": () => {
+          framesListed += 1;
+          return Response.json({
+            frames:
+              framesListed === 1
+                ? []
+                : [{ created_at: "2026-09-05T00:00:00Z", id: "frame-new", name: "uus2w", status: "active" }],
+          });
+        },
+      });
+      const onLinked = vi.fn();
+      render(
+        <LinkRunningFrameForm onLinked={onLinked} />,
+      );
+
+      fireEvent.change(screen.getByLabelText("Code from the frame"), { target: { value: "h7lu-jlwn" } });
+      fireEvent.click(screen.getByRole("button", { name: /find frame/i }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(await screen.findByText("uus2w")).toBeDefined();
+      expect(screen.getByText(/A FrameOS frame at http:\/\/uus2w.local:8787/)).toBeDefined();
+      const lookupCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/device/request"));
+      expect(String(lookupCall?.[0])).toContain("user_code=h7lu-jlwn");
+
+      fireEvent.click(screen.getByRole("button", { name: /link this frame/i }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(requests).toEqual(["authorize"]);
+      expect(await screen.findByTestId("link-frame-enrollment")).toBeDefined();
+
+      // The watch polls the frames list (at once on activation, then every
+      // few seconds); the frame beyond the pre-approval baseline is the one
+      // this code linked, and the caller is handed it to open.
+      expect(await screen.findByTestId("link-frame-open")).toHaveProperty(
+        "href",
+        expect.stringContaining("/frames/frame-new"),
+      );
+      expect(onLinked).toHaveBeenCalledWith(expect.objectContaining({ id: "frame-new", name: "uus2w" }));
+    });
+
+    it("explains an unknown code instead of the raw error", async () => {
+      routeFetch({
+        "/api/device/request": () => Response.json({ error: "invalid_user_code" }, { status: 404 }),
+      });
+      render(<LinkRunningFrameForm />);
+      fireEvent.change(screen.getByLabelText("Code from the frame"), { target: { value: "nope" } });
+      fireEvent.click(screen.getByRole("button", { name: /find frame/i }));
+      expect(await screen.findByRole("alert")).toHaveProperty(
+        "textContent",
+        expect.stringContaining("No frame is waiting with that code"),
+      );
+    });
+
+    it("parks the code and goes to reauth when approving needs fresh credentials", async () => {
+      routeFetch({
+        "/api/device/request": () =>
+          Response.json({
+            client_kind: "frame",
+            expires_at: "2030-01-01T00:00:00Z",
+            public_display_name: "uus2w",
+            requested_scopes: [],
+            signed_in: true,
+            status: "pending",
+            user_code: "H7LU-JLWN",
+          }),
+        "/api/device/authorize": () => Response.json({ error: "reauth_required" }, { status: 403 }),
+        "/api/frames": () => Response.json({ frames: [] }),
+      });
+      const assign = vi.fn();
+      const location = window.location;
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...location, assign, href: "https://cloud.frameos.net/frames" },
+      });
+      try {
+        render(<LinkRunningFrameForm />);
+        fireEvent.change(screen.getByLabelText("Code from the frame"), { target: { value: "H7LU-JLWN" } });
+        fireEvent.click(screen.getByRole("button", { name: /find frame/i }));
+        await screen.findByText("uus2w");
+        fireEvent.click(screen.getByRole("button", { name: /link this frame/i }));
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(assign).toHaveBeenCalledWith(
+          "/login/reauth?return_to=" + encodeURIComponent("https://cloud.frameos.net/frames"),
+        );
+        // Back from reauth, the panel reopens on this path with the code in.
+        expect(takeStashedLinkCode()).toBe("H7LU-JLWN");
+      } finally {
+        Object.defineProperty(window, "location", { configurable: true, value: location });
+      }
+    });
+
+    it("reopens on the link path with a parked code", () => {
+      stashLinkCode("H7LU-JLWN");
+      routeFetch({
+        "/api/device/request": () => Response.json({ error: "invalid_user_code" }, { status: 404 }),
+      });
+      renderPanel();
+      expect((screen.getByLabelText("Code from the frame") as HTMLInputElement).value).toBe("H7LU-JLWN");
+      // One-shot: a second panel does not inherit it.
+      expect(takeStashedLinkCode()).toBeUndefined();
+    });
   });
 
   it("closes through the drawer that owns its open state", () => {
