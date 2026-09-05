@@ -20,6 +20,8 @@ esp_err_t fos_http_start(bool portal_mode);
  * a credential is not the secret. */
 bool fos_consttime_eq(const char *a, const char *b);
 bool fos_http_is_running(void);
+/* "running", "off", "no certificate", "skipped: low memory", "failed: ...". */
+const char *fos_http_https_state(void);
 void fos_http_stop(void);
 /* Wired by main: "render now" and "check OTA now" triggers. */
 void fos_http_set_actions(fos_action_cb render_now, fos_action_cb ota_now);

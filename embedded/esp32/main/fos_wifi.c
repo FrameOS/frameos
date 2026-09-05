@@ -243,6 +243,16 @@ esp_err_t fos_wifi_init(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    /* The driver mirrors every setting it is given (~45 `nvs.net80211` items:
+     * ap.*, sta.*, PMK cache) into NVS, next to the copy FrameOS already
+     * keeps in its own namespace and re-applies below on every boot. On the
+     * 16 KB NVS of the 4 MB / 8 MB layouts that mirror plus a backend TLS
+     * certificate and key (~2.9 KB of PEM) filled the partition: the driver
+     * logged `wifi_nvs_set fail ... ret=4357` (ESP_ERR_NVS_NOT_ENOUGH_SPACE),
+     * `wifi <ssid>` no longer persisted, and the PHY calibration store failed
+     * (4 MB C3, 2026-09-05). RAM storage drops the mirror; the credentials
+     * FrameOS stores are the only copy, as they always effectively were. */
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     configure_wifi_country();
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                                         &wifi_event_handler, NULL, NULL));

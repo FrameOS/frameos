@@ -150,6 +150,10 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_13in3e', label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' },
     ],
   },
+  {
+    label: 'OLED',
+    options: [{ value: 'oled.ssd1306_72x40', label: 'SSD1306 0.42" OLED 72x40 (ESP32 I2C)' }],
+  },
 ]
 
 export const partialRefreshDevices = new Set(['waveshare.EPD_7in5_V2', 'waveshare.EPD_13in3b'])

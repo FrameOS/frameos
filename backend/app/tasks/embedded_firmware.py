@@ -198,6 +198,20 @@ EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_BATTERY = {
     "batteryDivider": 2.0,
     "batteryEnablePin": 6,
 }
+# ESP32-C3 dev board with a 0.42" SSD1306 OLED (sold as "HW-675", the 01Space
+# ESP32-C3-0.42LCD layout): I2C SDA GPIO5 / SCL GPIO6, carried on the mosi/sck
+# pin slots (the firmware's I2C panels reuse them as SDA/SCL), BOOT button on
+# GPIO9. 4 MB flash, no PSRAM, USB-Serial/JTAG, no battery sensing.
+EMBEDDED_ESP32_C3_042_OLED_PINS = {
+    "rst": -1,
+    "dc": -1,
+    "cs": -1,
+    "cs2": -1,
+    "busy": -1,
+    "sck": 6,
+    "mosi": 5,
+    "pwr": -1,
+}
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
     "batteryDivider": 2.0,
@@ -407,6 +421,14 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "gpioButtons": [{"pin": 3, "label": "POWER"}],
         **EMBEDDED_XTEINK_X4_BATTERY,
     },
+    "esp32_c3_042_oled": {
+        "device": "oled.ssd1306_72x40",
+        "platform": "esp32-c3",
+        "flashSize": "4MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_ESP32_C3_042_OLED_PINS,
+        "gpioButtons": [{"pin": 9, "label": "BOOT"}],
+    },
     "seeed_reterminal_sticky": {
         "device": "waveshare.EPD_3in97",
         "flashSize": "32MB",
@@ -548,6 +570,16 @@ EMBEDDED_PANEL_FORMATS = {
     and convert_waveshare_source(key).color_option in EMBEDDED_PIXEL_FORMAT_BY_COLOR
 }
 # Must mirror components/frameos_display/generate_panel_table.py.
+# Panels compiled into the firmware that are not Waveshare e-paper — mirrors
+# EXTRA_PANELS in embedded/esp32/components/frameos_display/generate_panel_table.py.
+EMBEDDED_EXTRA_PANELS = {
+    "OLED_SSD1306_72x40": FOS_PIXEL_1BPP,
+}
+EMBEDDED_PANEL_FORMATS.update(EMBEDDED_EXTRA_PANELS)
+# Device keys for those panels (the `waveshare.<key>` convention does not fit).
+EMBEDDED_DEVICE_PANELS = {
+    "oled.ssd1306_72x40": "OLED_SSD1306_72x40",
+}
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
 EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
@@ -758,21 +790,26 @@ def embedded_ota_supported_for_frame(frame: Frame) -> bool:
     return bool(embedded_flash_profile_for_frame(frame)["otaSupported"])
 
 
-def embedded_panel_for_frame(frame: Frame) -> str:
-    """Map the frame's device string to a firmware panel name."""
-    preset_key = embedded_hardware_preset_for_frame(frame)
-    if preset_key and not frame.device:
-        frame_device = str(EMBEDDED_HARDWARE_PRESETS[preset_key]["device"])
-        if frame_device.startswith("waveshare."):
-            panel = frame_device.split(".", 1)[1]
-            if panel in EMBEDDED_SUPPORTED_PANELS:
-                return panel
-    device = str(frame.device or "")
+def embedded_panel_for_device(device: str | None) -> str | None:
+    """The firmware panel name for a device string, None when the firmware has no driver for it."""
+    device = str(device or "")
+    if device in EMBEDDED_DEVICE_PANELS:
+        return EMBEDDED_DEVICE_PANELS[device]
     if device.startswith("waveshare."):
         panel = device.split(".", 1)[1]
         if panel in EMBEDDED_SUPPORTED_PANELS:
             return panel
-    return "none"
+    return None
+
+
+def embedded_panel_for_frame(frame: Frame) -> str:
+    """Map the frame's device string to a firmware panel name."""
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key and not frame.device:
+        panel = embedded_panel_for_device(EMBEDDED_HARDWARE_PRESETS[preset_key]["device"])
+        if panel:
+            return panel
+    return embedded_panel_for_device(frame.device) or "none"
 
 
 def embedded_module_psram_bytes(frame: Frame) -> int:

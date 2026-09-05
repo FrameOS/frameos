@@ -195,6 +195,13 @@ size_t fos_display_render_psram_bytes(void)
 static esp_err_t ensure_module(void)
 {
     if (s_module_ready) return ESP_OK;
+    /* I2C panels (the SSD1306 OLED) own their bus and reuse the sck/mosi pins
+     * as SCL/SDA; bringing up the EPD SPI module on the same GPIOs would take
+     * them away. */
+    if (s_panel && s_panel->bus == 1) {
+        s_module_ready = true;
+        return ESP_OK;
+    }
     if (DEV_Module_Init() != 0) {
         return ESP_FAIL;
     }

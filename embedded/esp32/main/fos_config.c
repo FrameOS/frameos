@@ -98,13 +98,13 @@ static void nvs_get_pem(nvs_handle_t nvs, const char *key, char *out, size_t out
     }
 }
 
-static void nvs_set_pem(nvs_handle_t nvs, const char *key, const char *pem)
+static esp_err_t nvs_set_pem(nvs_handle_t nvs, const char *key, const char *pem)
 {
     if (pem[0]) {
-        nvs_set_blob(nvs, key, pem, strlen(pem));
-    } else {
-        nvs_erase_key(nvs, key);
+        return nvs_set_blob(nvs, key, pem, strlen(pem));
     }
+    esp_err_t err = nvs_erase_key(nvs, key);
+    return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
 }
 
 esp_err_t fos_config_init(void)
@@ -233,68 +233,106 @@ esp_err_t fos_config_save(void)
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &nvs);
     if (err != ESP_OK) return err;
 
-    nvs_set_str(nvs, "wifi_ssid", s_config.wifi_ssid);
-    nvs_set_str(nvs, "wifi_pass", s_config.wifi_pass);
-    nvs_set_str(nvs, "backend_url", s_config.backend_url);
-    nvs_set_str(nvs, "api_key", s_config.api_key);
-    nvs_set_str(nvs, "cloud_url", s_config.cloud_url);
+    /* Every write is checked: a full partition fails a `set` with
+     * ESP_ERR_NVS_NOT_ENOUGH_SPACE while the commit still succeeds, which
+     * used to pass as a saved config (the board came back with its old
+     * Wi-Fi network after `wifi <ssid>`; 4 MB C3 with a TLS pair in a 16 KB
+     * NVS, 2026-09-05). The first failure is reported with its key; the
+     * remaining keys are still attempted so an unrelated setting is not
+     * lost to an earlier one. */
+    esp_err_t first_err = ESP_OK;
+    const char *first_key = NULL;
+#define FOS_NVS_SET(call, key_name)                                           \
+    do {                                                                      \
+        esp_err_t set_err_ = (call);                                          \
+        if (set_err_ != ESP_OK && first_err == ESP_OK) {                      \
+            first_err = set_err_;                                             \
+            first_key = (key_name);                                           \
+        }                                                                     \
+    } while (0)
+    FOS_NVS_SET(nvs_set_str(nvs, "wifi_ssid", s_config.wifi_ssid), "wifi_ssid");
+    FOS_NVS_SET(nvs_set_str(nvs, "wifi_pass", s_config.wifi_pass), "wifi_pass");
+    FOS_NVS_SET(nvs_set_str(nvs, "backend_url", s_config.backend_url), "backend_url");
+    FOS_NVS_SET(nvs_set_str(nvs, "api_key", s_config.api_key), "api_key");
+    FOS_NVS_SET(nvs_set_str(nvs, "cloud_url", s_config.cloud_url), "cloud_url");
     /* The claim token is single use: once enrollment consumes it the struct
      * field is cleared and the NVS key must disappear, not persist as "". */
     if (s_config.claim_token[0]) {
-        nvs_set_str(nvs, "claim_token", s_config.claim_token);
+        FOS_NVS_SET(nvs_set_str(nvs, "claim_token", s_config.claim_token), "claim_token");
     } else {
         nvs_erase_key(nvs, "claim_token");
     }
-    nvs_set_str(nvs, "hostname", s_config.hostname);
-    nvs_set_str(nvs, "hardware", s_config.hardware_preset);
-    nvs_set_str(nvs, "panel", s_config.panel);
-    nvs_set_str(nvs, "assets_path", s_config.assets_path);
-    nvs_set_str(nvs, "admin_user", s_config.admin_user);
-    nvs_set_str(nvs, "admin_pass", s_config.admin_pass);
-    nvs_set_str(nvs, "ap_psk", s_config.ap_psk);
-    nvs_set_u32(nvs, "frame_id", s_config.frame_id);
-    nvs_set_u32(nvs, "interval", s_config.interval_sec);
-    nvs_set_u16(nvs, "rotate", s_config.rotate);
-    nvs_set_str(nvs, "scaling", s_config.scaling_mode);
-    nvs_set_str(nvs, "time_zone", s_config.time_zone);
-    nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
-    nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes);
-    nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
-    nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);
-    nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0);
-    nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0);
-    nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0);
-    nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
-    nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
-    nvs_set_u32(nvs, "tls_port", s_config.tls_port);
-    nvs_set_pem(nvs, "tls_cert", s_config.tls_server_cert);
-    nvs_set_pem(nvs, "tls_key", s_config.tls_server_key);
-    nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0);
-    nvs_set_u8(nvs, "sd_autofmt", s_config.assets_sd.autoformat ? 1 : 0);
-    nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs);
-    nvs_set_i8(nvs, "sd_sck", s_config.assets_sd.sck);
-    nvs_set_i8(nvs, "sd_miso", s_config.assets_sd.miso);
-    nvs_set_i8(nvs, "sd_mosi", s_config.assets_sd.mosi);
-    nvs_set_u32(nvs, "sd_freq", s_config.assets_sd.max_freq_khz);
-    nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0);
-    nvs_set_u8(nvs, "sleep_batt", s_config.deep_sleep_on_battery ? 1 : 0);
-    nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0);
-    nvs_set_u32(nvs, "wake_check", s_config.wake_check_sec);
-    nvs_set_i8(nvs, "batt_pin", s_config.battery_pin);
-    nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f));
-    nvs_set_i8(nvs, "batt_en", s_config.battery_enable_pin);
+    FOS_NVS_SET(nvs_set_str(nvs, "hostname", s_config.hostname), "hostname");
+    FOS_NVS_SET(nvs_set_str(nvs, "hardware", s_config.hardware_preset), "hardware");
+    FOS_NVS_SET(nvs_set_str(nvs, "panel", s_config.panel), "panel");
+    FOS_NVS_SET(nvs_set_str(nvs, "assets_path", s_config.assets_path), "assets_path");
+    FOS_NVS_SET(nvs_set_str(nvs, "admin_user", s_config.admin_user), "admin_user");
+    FOS_NVS_SET(nvs_set_str(nvs, "admin_pass", s_config.admin_pass), "admin_pass");
+    FOS_NVS_SET(nvs_set_str(nvs, "ap_psk", s_config.ap_psk), "ap_psk");
+    FOS_NVS_SET(nvs_set_u32(nvs, "frame_id", s_config.frame_id), "frame_id");
+    FOS_NVS_SET(nvs_set_u32(nvs, "interval", s_config.interval_sec), "interval");
+    FOS_NVS_SET(nvs_set_u16(nvs, "rotate", s_config.rotate), "rotate");
+    FOS_NVS_SET(nvs_set_str(nvs, "scaling", s_config.scaling_mode), "scaling");
+    FOS_NVS_SET(nvs_set_str(nvs, "time_zone", s_config.time_zone), "time_zone");
+    FOS_NVS_SET(nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes), "max_http");
+    FOS_NVS_SET(nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes), "spill_force");
+    FOS_NVS_SET(nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode), "render_mode");
+    FOS_NVS_SET(nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0), "send_logs");
+    FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
+    FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
+    FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
+    FOS_NVS_SET(nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0), "tls_enable");
+    FOS_NVS_SET(nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0), "admin_auth");
+    FOS_NVS_SET(nvs_set_u32(nvs, "tls_port", s_config.tls_port), "tls_port");
+    FOS_NVS_SET(nvs_set_pem(nvs, "tls_cert", s_config.tls_server_cert), "tls_cert");
+    FOS_NVS_SET(nvs_set_pem(nvs, "tls_key", s_config.tls_server_key), "tls_key");
+    FOS_NVS_SET(nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0), "assets_sd");
+    FOS_NVS_SET(nvs_set_u8(nvs, "sd_autofmt", s_config.assets_sd.autoformat ? 1 : 0), "sd_autofmt");
+    FOS_NVS_SET(nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs), "sd_cs");
+    FOS_NVS_SET(nvs_set_i8(nvs, "sd_sck", s_config.assets_sd.sck), "sd_sck");
+    FOS_NVS_SET(nvs_set_i8(nvs, "sd_miso", s_config.assets_sd.miso), "sd_miso");
+    FOS_NVS_SET(nvs_set_i8(nvs, "sd_mosi", s_config.assets_sd.mosi), "sd_mosi");
+    FOS_NVS_SET(nvs_set_u32(nvs, "sd_freq", s_config.assets_sd.max_freq_khz), "sd_freq");
+    FOS_NVS_SET(nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0), "deep_sleep");
+    FOS_NVS_SET(nvs_set_u8(nvs, "sleep_batt", s_config.deep_sleep_on_battery ? 1 : 0), "sleep_batt");
+    FOS_NVS_SET(nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0), "wake_sched");
+    FOS_NVS_SET(nvs_set_u32(nvs, "wake_check", s_config.wake_check_sec), "wake_check");
+    FOS_NVS_SET(nvs_set_i8(nvs, "batt_pin", s_config.battery_pin), "batt_pin");
+    FOS_NVS_SET(nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f)), "batt_div_m");
+    FOS_NVS_SET(nvs_set_i8(nvs, "batt_en", s_config.battery_enable_pin), "batt_en");
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN];
     fos_config_format_gpio_buttons(&s_config, gpio_buttons, sizeof(gpio_buttons));
-    nvs_set_str(nvs, "gpio_buttons", gpio_buttons);
+    FOS_NVS_SET(nvs_set_str(nvs, "gpio_buttons", gpio_buttons), "gpio_buttons");
     char pins[FOS_STR_LEN];
     fos_config_format_pins(&s_config.pins, pins, sizeof(pins));
-    nvs_set_str(nvs, "pins", pins);
+    FOS_NVS_SET(nvs_set_str(nvs, "pins", pins), "pins");
 
     err = nvs_commit(nvs);
     nvs_close(nvs);
+#undef FOS_NVS_SET
+    if (first_err != ESP_OK) {
+        nvs_stats_t stats = {0};
+        nvs_get_stats(NULL, &stats);
+        ESP_LOGW(TAG, "config save: %s not stored: %s (nvs %u/%u entries used, %u free)",
+                 first_key, esp_err_to_name(first_err), (unsigned)stats.used_entries,
+                 (unsigned)stats.total_entries, (unsigned)stats.free_entries);
+        return first_err;
+    }
     ESP_LOGI(TAG, "config saved");
     return err;
 }
+
+esp_err_t fos_config_nvs_stats(size_t *used_entries, size_t *free_entries, size_t *total_entries)
+{
+    nvs_stats_t stats = {0};
+    esp_err_t err = nvs_get_stats(NULL, &stats);
+    if (used_entries) *used_entries = stats.used_entries;
+    if (free_entries) *free_entries = stats.free_entries;
+    if (total_entries) *total_entries = stats.total_entries;
+    return err;
+}
+
+
 
 esp_err_t fos_config_erase(void)
 {

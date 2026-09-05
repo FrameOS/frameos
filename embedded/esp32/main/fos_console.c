@@ -180,11 +180,13 @@ static int cmd_status(int argc, char **argv)
     printf("net_policy:  scene HTTP to private addresses %s%s\n",
            fos_netguard_policy_active() ? "BLOCKED (cloud-managed)" : "allowed",
            config->allow_local_network ? " [allow_local_network=1]" : "");
-    printf("https:       %s port=%u cert=%s key=%s\n",
+    printf("hostname:    %s\n", config->hostname[0] ? config->hostname : "(unset)");
+    printf("https:       %s port=%u cert=%s key=%s server=%s\n",
            config->tls_enable ? "enabled" : "disabled",
            (unsigned)config->tls_port,
            config->tls_server_cert[0] ? "yes" : "no",
-           config->tls_server_key[0] ? "yes" : "no");
+           config->tls_server_key[0] ? "yes" : "no",
+           fos_http_https_state());
     printf("admin_auth:  %s user=%s\n",
            (config->admin_auth_enabled && config->admin_user[0] && config->admin_pass[0]) ? "enabled" : "disabled",
            config->admin_user[0] ? config->admin_user : "(unset)");
@@ -261,6 +263,11 @@ static int cmd_status(int argc, char **argv)
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     bool too_low = internal_free < FOS_CLOUD_WS_MIN_INTERNAL_FREE ||
                    internal_block < FOS_CLOUD_WS_MIN_INTERNAL_BLOCK;
+    size_t nvs_used = 0, nvs_free = 0, nvs_total = 0;
+    if (fos_config_nvs_stats(&nvs_used, &nvs_free, &nvs_total) == ESP_OK) {
+        printf("nvs:         %u/%u entries used, %u free\n",
+               (unsigned)nvs_used, (unsigned)nvs_total, (unsigned)nvs_free);
+    }
     printf("heap:        internal %u free (%u largest block), psram %u free\n",
            (unsigned)internal_free, (unsigned)internal_block,
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
@@ -589,6 +596,13 @@ static int cmd_set(int argc, char **argv)
               "rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1",
               "3:POWER",
               "", 0, 2.0f, -1, 0, 0 },
+            /* ESP32-C3 dev board with the 0.42" SSD1306 OLED (HW-675 / 01Space):
+             * I2C on SDA GPIO5 / SCL GPIO6 carried as mosi/sck, BOOT on GPIO9,
+             * 4 MB flash, no PSRAM, no battery. */
+            { "esp32_c3_042_oled", "OLED_SSD1306_72x40",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=6,mosi=5,pwr=-1",
+              "9:BOOT",
+              "", -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). */
             { "seeed_reterminal_sticky", "EPD_3in97",
               "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",

@@ -116,6 +116,8 @@ DEVICE_GPIO_BUTTON_DEFAULTS = {
 }
 
 NATIVE_DEVICE_DIMENSIONS = {
+    # ESP32 thin-client OLED (embedded/esp32 OLED_SSD1306_72x40); no Pi driver.
+    "oled.ssd1306_72x40": (72, 40),
     "pimoroni.inky_impression_7_3": (800, 480),
     "pimoroni.inky_impression_7_color": (800, 480),
     "pimoroni.inky_impression_5_7": (600, 448),

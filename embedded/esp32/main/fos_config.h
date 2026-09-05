@@ -139,6 +139,9 @@ esp_err_t fos_config_init(void);
 /* The live config; mutate + fos_config_save() to persist. */
 fos_config_t *fos_config(void);
 esp_err_t fos_config_save(void);
+/* NVS occupancy (32-byte entries) for the `status` line: a partition near
+ * full is why a setting "took" on the console and was gone after a reboot. */
+esp_err_t fos_config_nvs_stats(size_t *used_entries, size_t *free_entries, size_t *total_entries);
 esp_err_t fos_config_erase(void);
 bool fos_config_wifi_ready(void);
 /* Normalize a rotation onto the four the renderer supports. Any equivalent

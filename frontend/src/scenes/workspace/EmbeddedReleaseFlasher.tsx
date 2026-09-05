@@ -20,7 +20,12 @@ import { framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/
 import type { FrameId, FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
-import { downloadReleaseFirmware, releaseFirmwarePlatform } from './EmbeddedUsbFirmwareUpdate'
+import { detectFlashSize, layoutMatchedPlatform } from './embeddedFlashImage'
+import {
+  downloadReleaseFirmware,
+  fetchReleaseFirmwareListing,
+  releaseFirmwarePlatform,
+} from './EmbeddedUsbFirmwareUpdate'
 import {
   POST_FLASH_BOOT_WAIT_MS,
   appendBrowserFlashLog,
@@ -145,6 +150,33 @@ export async function provisionOverUsb(
   return { skipped }
 }
 
+/** Store the flash size esptool read off the board on the frame, so the
+ * backend's OTA and provisioning answers describe the chip that is actually
+ * there. Logs and carries on when the update fails. */
+async function recordDetectedFlashSize(
+  frame: FrameType,
+  flashSize: string,
+  log: (message: string) => void
+): Promise<void> {
+  try {
+    // `layout` and `firmware` on the loaded frame are derived by the backend
+    // per response; echoing them back would store a stale snapshot.
+    const { layout: _layout, firmware: _firmware, ...embedded } = (frame.embedded ?? {}) as Record<string, unknown>
+    const response = await apiFetch(`/api/frames/${frame.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ embedded: { ...embedded, flashSize } }),
+    })
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    log(`Saved the board's ${flashSize} flash size on this frame.`)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    log(`Could not save the board's ${flashSize} flash size on this frame (${detail}); set it under Frame settings.`)
+  }
+}
+
 export function skippedSettingsNotice(skipped: EmbeddedUsbConfigKey[]): string | null {
   if (skipped.length === 0) {
     return null
@@ -217,6 +249,8 @@ export function EmbeddedReleaseFlasher({
     let flashTerminal: FlashLogTerminal | null = null
     let traceRecorder: FlashTraceRecorder | null = null
     let flashed = false
+    let detectedFlashSize: string | null = null
+    let flashSizeDiffersFromFrame = false
     const setFlashMessage = (nextMessage: string | null): void => {
       setMessage(nextMessage)
       if (nextMessage) {
@@ -249,8 +283,7 @@ export function EmbeddedReleaseFlasher({
       openFrameToolBehindDrawer(frame.id, 'logs')
 
       setPhase('preparing')
-      const releasePlatform = plan.releasePlatform || releaseFirmwarePlatform(frame)
-      const firmware = await downloadReleaseFirmware(releasePlatform, setFlashMessage)
+      const listing = await fetchReleaseFirmwareListing()
 
       // Loaded on demand: esptool-js adds ~380KB we only need when flashing.
       const { ESPLoader, Transport } = await loadEsptoolForFlash()
@@ -262,6 +295,34 @@ export function EmbeddedReleaseFlasher({
       setFlashMessage('Connecting to the board')
       const loader = new ESPLoader({ transport, baudrate: 460800, enableTracing: true, terminal: flashTerminal })
       const chip = await loader.main()
+
+      // The image is picked by the chip in front of us, not by the frame's
+      // configured flash size: a merged image carries its partition table and
+      // a flash-size header, and one built for a bigger chip boot-loops on a
+      // smaller one ("Detected size(4096k) smaller than the size in the binary
+      // image header(8192k)" — a 4 MB C3 dev board on a frame left at the
+      // 8 MB default, 2026-09-05). The frame's own answer is the fallback when
+      // the size cannot be read, the same order the cloud flasher uses.
+      setPhase('preparing')
+      const configuredPlatform = plan.releasePlatform || releaseFirmwarePlatform(frame)
+      detectedFlashSize = await detectFlashSize(loader)
+      const releasePlatform = detectedFlashSize
+        ? layoutMatchedPlatform(releaseFirmwarePlatform(frame), detectedFlashSize, listing.assets)
+        : configuredPlatform
+      if (!detectedFlashSize) {
+        setFlashMessage(
+          `Could not read the board's flash size; using the ${releasePlatform} image this frame is configured for.`
+        )
+      } else if (releasePlatform === configuredPlatform) {
+        setFlashMessage(`Flash size ${detectedFlashSize}: using the ${releasePlatform} image.`)
+      } else {
+        flashSizeDiffersFromFrame = true
+        setFlashMessage(
+          `Flash size ${detectedFlashSize}: this frame is set up for a ${plan.releaseFlashSize ?? 'different'} chip, ` +
+            `so using the ${releasePlatform} image built for the board instead of ${configuredPlatform}.`
+        )
+      }
+      const firmware = await downloadReleaseFirmware(releasePlatform, setFlashMessage, listing)
 
       setPhase('flashing')
       setFlashMessage(`Flashing ${firmware.name} to ${chip}`)
@@ -322,6 +383,13 @@ export function EmbeddedReleaseFlasher({
       }
       if (flashed && port) {
         try {
+          if (flashSizeDiffersFromFrame && detectedFlashSize) {
+            // The board now runs the layout for its real chip; the frame record
+            // is what the OTA offer and the next provisioning plan read, so it
+            // follows the chip. Best effort: a failure here leaves a note, not
+            // a half-provisioned board.
+            await recordDetectedFlashSize(frame, detectedFlashSize, setFlashMessage)
+          }
           await sleep(POST_FLASH_BOOT_WAIT_MS)
           port = await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
           const { skipped } = await provisionOverUsb(frame.id, plan, port, setMessage)
@@ -420,8 +488,8 @@ export function EmbeddedReleaseFlasher({
         </div>
       ) : plan ? (
         <div className="frame-tool-muted text-xs leading-5">
-          Writes the published {plan.releasePlatform} image and provisions this frame over USB. Everything the board
-          needs is sent over the cable afterwards.
+          Writes the published {plan.releasePlatform} image (or the one built for the flash size the board reports) and
+          provisions this frame over USB. Everything the board needs is sent over the cable afterwards.
           {plan.warnings.length > 0 ? (
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
               {plan.warnings.map((warning) => (

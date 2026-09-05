@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from app.models.frame import Frame
 from app.tasks import embedded_firmware as embedded_firmware_module
 from app.tasks.embedded_firmware import (
+    FOS_PIXEL_1BPP,
     EMBEDDED_DEFAULT_FLASH_SIZE,
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     EMBEDDED_RENDER_REMOTE,
@@ -562,6 +563,25 @@ def test_embedded_hardware_preset_for_trmnl_og():
     assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
     assert embedded_flash_size_for_frame(frame) == "4MB"
     assert embedded_ota_supported_for_frame(frame) is False
+
+
+def test_embedded_hardware_preset_for_esp32_c3_042_oled():
+    frame = Frame(id=11, embedded={"hardwarePreset": "esp32_c3_042_oled"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "oled.ssd1306_72x40"
+    assert embedded_panel_for_frame(frame) == "OLED_SSD1306_72x40"
+    assert embedded_platform_for_frame(frame) == "esp32-c3"
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    assert embedded_pixel_format_for_panel(embedded_panel_for_frame(frame)) == FOS_PIXEL_1BPP
+    assert embedded_buffer_size(72, 40, FOS_PIXEL_1BPP) == 360
+    assert frame.device_config["pins"]["sck"] == 6
+    assert frame.device_config["pins"]["mosi"] == 5
+    assert "batteryPin" not in frame.device_config
+
+
+def test_embedded_panel_for_oled_device_without_preset():
+    frame = Frame(id=12, device="oled.ssd1306_72x40", embedded={"platform": "esp32-c3"})
+    assert embedded_panel_for_frame(frame) == "OLED_SSD1306_72x40"
 
 
 def test_embedded_hardware_preset_for_trmnl_bwry():

@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-05 12:30 UTC, after release 2026.9.8.
+empty. Last refreshed 2026-09-05 19:30 UTC, after release 2026.9.9.
 
 ## Open
 
@@ -43,19 +43,69 @@ Done section for this bench below.
 
 ### ESP32 bench
 
-- [ ] **C3 render-failure counting (#368):** flash a C3 (XTEINK X4), make
-  the server unreachable, force two failed renders → **no reboot, no pause**
-  (previously every failure counted as a PSRAM rescue). Then OTA a
-  currently-paused C3 → it comes up rendering. Eyeball the new `heap ...`
-  lines on X4 boot.
+### ESP32-C3 dev board bench (2026-09-05, 01Space-style ESP32-C3 + 0.42" OLED, 4 MB, no PSRAM, USB-Serial/JTAG)
 
-- [ ] **Thin-client framebuffer reserve (#366):** in the X4 boot log, find
-  `framebuffer reserved: 96000 bytes held for the panel, N internal bytes
-  left` — N should land near 190 KB, and a frame that previously OOMed
-  should now render.
+Stood in for the XTEINK X4 nobody has: a bare C3 is enough for the thin-client
+and flasher boxes, and on the self-hosted backend it is a real frame
+(`bench-c3`, id 66, `EPD_7in5_V2` configured, nothing wired). What it found,
+all fixed on main the same day unless noted:
+
+- **"Flash latest release" wrote the wrong image.** The self-hosted flasher
+  took the release asset from the frame record's flash size — 8 MB, the
+  default for custom hardware — and wrote `esp32-c3-8mb` onto a 4 MB chip:
+  boot loop on `spi_flash: Detected size(4096k) smaller than the size in the
+  binary image header(8192k)` + `assert failed`. The cloud flasher never did
+  this (it reads the flash id first). Now `EmbeddedReleaseFlasher` connects
+  first, reads the flash id, picks the layout-matched image
+  (`layoutMatchedPlatform` / `detectFlashSize` moved into
+  `embeddedFlashImage.ts`, shared with the cloud flasher), logs the mismatch
+  and saves the detected size on the frame after a successful flash.
+- **C3 parked in download mode after a flash.** `watchdogResetAfterFlash`
+  only knew the S3's registers; every other chip got the DTR/RTS pulse that
+  latches a USB-Serial/JTAG chip into ROM download mode. Per-chip register
+  table now (C3 added); unit test in the auth-web shared-spa suite.
+- **16 KB NVS is full once the backend's TLS pair lands.** After the first
+  settings sync (RSA-2048 cert 1135 B + key ≈ 2.9 KB of PEM) the partition
+  had 3 of 4 pages full: `wifi_nvs_set fail ... ret=4357`
+  (ESP_ERR_NVS_NOT_ENOUGH_SPACE), `phy_init: store_cal_data_to_nvs_handle
+  ... failed(0x1105)`, and `wifi bogus` on the console "took" but the board
+  came back on the old network — `fos_config_save` never checked a single
+  `nvs_set_*`. Fixes: the Wi-Fi driver keeps its config in RAM
+  (`esp_wifi_set_storage(WIFI_STORAGE_RAM)`, FrameOS re-applies the stored
+  credentials at boot anyway — drops ~45 mirrored `nvs.net80211` items),
+  every write in `fos_config_save` is checked and the first failing key is
+  logged with the NVS occupancy, and `status` prints an `nvs:` line. The
+  4 MB / 8 MB layouts keep their 16 KB NVS (the 16/32 MB ones have 24 KB);
+  an EC server key on the backend would shrink the pair 3× — `docs/todo.md`.
+- **`status` said `https: enabled cert=yes key=yes` while 8443 was dead.**
+  On this board the server is skipped for heap (`https server skipped:
+  internal=46044 largest=36864 min_internal=49152`); `status` now appends
+  `server=running|skipped: low memory|no certificate|failed: …`. Also added
+  a `hostname:` line — the box below asked for one and the printer had none
+  (the value only travelled as `name` in JSON).
+- Not a bug, worth knowing: the release image logs at WARN, so the INFO
+  `framebuffer reserved: …` line never shows on a release build.
+- Verified on the fixed build (local `esp32-c3` build of main, flashed by
+  esptool, re-provisioned through "Apply frame settings" + the console
+  `wifi`): after the settings sync brought the TLS pair back, `status` read
+  `https: enabled port=8443 cert=yes key=yes server=skipped: low memory`
+  and `nvs: 233/504 entries used, 271 free` (the API counts the spare
+  page; before the fix the three data pages were full at 118 items), and
+  `set ap_psk …` + `restart` came back with the new value — the write that
+  silently vanished on the release build. `hostname:` is overwritten by the
+  backend's `name` push on every boot, so it is not a persistence probe.
+- **The OLED itself (same day):** panel `OLED_SSD1306_72x40` (I2C driver,
+  `bus` flag in the panel table), device `oled.ssd1306_72x40`, preset
+  `esp32_c3_042_oled` — the board renders the backend's 72x40 1-bpp frames
+  (`render #4 done in 493 ms`, "HI 72x40" from a one-node text scene). Found
+  on the way: a stale `frame:{id}:active_scene` in redis (a scene the frame
+  no longer has) made the wasm harness fail instantly and the thin client
+  showed the diagnostic card on every poll — the endpoint now ignores a
+  cached id that is not in the frame's scenes.
+
 
 - [ ] **Layout-matched release image (#442; release 2026.9.2 carries the
-  six images):** *(2026-09-04: E1002 is still on the generic 8 MB layout —
+  six images):** *(2026-09-05, C3 half: no X4 to hand; a 4 MB C3 dev board through the self-hosted "Flash latest release" got `esp32-c3-generic` by flash-id detection — after the fix above; before it the frame's 8 MB default picked `esp32-c3-8mb` and boot-looped. The 16 MB C3 pick itself still needs a 16 MB C3.)* *(2026-09-04: E1002 is still on the generic 8 MB layout —
   `flashBytes 8388608`, `otaSlotBytes 3604480`, OTA check asks for
   `esp32-s3-generic`; "Update firmware" keeps whatever layout the board has,
   so only "Add frame" → Connect & flash exercises this. The 8 MB half of the
@@ -85,7 +135,7 @@ Done section for this bench below.
   OTA; on a 13.3E6 (32 MB S3) the same with `esp32-s3-32mb`.
 
 - [ ] **The backend flashes what the cloud flashes (needs firmware built
-  after 2026-09-03):** on a blank board, "Flash latest release" from the
+  after 2026-09-03):** *(2026-09-05, provisioning half PASSED on the C3 after two fixes — see the C3 bench in Done: flash-id detection logged `Flash size 4MB: this frame is set up for a 8MB chip, so using the esp32-c3-generic image`, the board rebooted on the RTC watchdog, "Provisioned 15 of 15 setting(s)", "Saved the board's 4MB flash size on this frame", joined Wi-Fi, and after the first settings sync `status` read `hostname: frame66` (line added today), `admin_auth: enabled user=admin`, `https: enabled port=8443 cert=yes key=yes` — but 8443 does NOT answer on this board (server skipped for heap; `status` now says so), port 80 answers 401 behind admin auth. "Apply frame settings" on a board flashed by hand with esptool also passed (the 2026.9.2 run below). Still open: the OTA half — `ota:backend downloading … verified`, reboot, `up-to-date`, and the per-frame-image → release-manifest upgrade — needs an OTA-capable board on the self-hosted backend, which the 4 MB C3 is not.)* on a blank board, "Flash latest release" from the
   self-hosted deploy drawer provisions everything — `status` shows the
   hostname, `admin_auth: enabled`, and after the first settings sync the
   `https:` line says `cert=yes key=yes` (with HTTPS enabled on the frame)
@@ -97,18 +147,13 @@ Done section for this bench below.
   per-frame image from before this change must OTA onto the release image
   from the new manifest (the legacy `sha256` field) and verify from then on.
 
-- [ ] **Cloud flasher picks the layout (follow-up to #447):** on a 16 MB
+- [ ] **Cloud flasher picks the layout (follow-up to #447):** *(2026-09-05, second half PASSED: "Apply frame settings" against the C3 on 2026.9.2 logged `unknown key "hostname"` / `admin_user` / `admin_pass` / `admin_auth` as `set failed` lines, carried on through the remaining keys, joined Wi-Fi and restarted; the card finished with the "predates hostname, …" notice. The 16 MB XIAO half still needs a 16 MB XIAO.)* on a 16 MB
   XIAO the cloud "Connect & flash" log says `Flash size 16MB: using the
   esp32-s3-16mb image built for that layout`, the board boots, and its first
   OTA check asks for `platform=esp32-s3-16mb`. On an 8 MB board it stays on
   `esp32-s3-generic`. Also: "Flash latest release" / "Apply frame settings"
   against a board still on 2026.9.2 firmware logs "does not know hostname
   yet" and finishes instead of stopping there.
-
-- [ ] **Portal SSID field keeps grabbing focus (recorded 2026-09-04, not
-  fixed):** re-check the hotspot portal from a normal browser tab rather than
-  a phone's captive-portal helper; nothing in the page sets focus, so the
-  helper is the suspect. Details in the WPA2 provisioning AP entry below.
 
 ## Done
 
@@ -776,6 +821,23 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   (`systemctl status frameos-privileged.service` settles).
 
 ### ESP32 bench
+
+- [x] **Portal SSID field keeps grabbing focus** — closed 2026-09-05 on the C3 hotspot (`FrameOS-7111`, blank board after a factory reset) from an iPhone: through the captive-portal helper the "Wi-Fi network" field is focused the moment the page opens, once, and nothing moves afterwards; the same page in Safari/Chrome on the phone focuses nothing. So it is the helper, as suspected, and it stays. What the helper's focus exposed and is fixed on main (next release): the page zoomed into the field because `input,select` had no `font-size` (iOS zooms into any focused control under 16 px) — now `1rem`. Original text: re-check the hotspot portal from a normal browser tab rather than
+  a phone's captive-portal helper; nothing in the page sets focus, so the
+  helper is the suspect. Details in the WPA2 provisioning AP entry below.
+
+
+
+- [x] **Thin-client framebuffer reserve (#366)** — closed 2026-09-05 on the generic C3 by effect, not by the line: release images log at WARN, so the INFO `framebuffer reserved: …` line is invisible without a debug build (no console switch raises the level). What the box exists for held: the 48000-byte `EPD_7in5_V2` buffer was reserved silently at boot (no `framebuffer not reserved` warning, which is a W line and would show), every backend render blitted (`render #2 done in 805 ms`) with `status` at 46–52 KB internal free, and nothing ever said "out of memory for … byte framebuffer". Original text: in the X4 boot log, find
+  `framebuffer reserved: 96000 bytes held for the panel, N internal bytes
+  left` — N should land near 190 KB, and a frame that previously OOMed
+  should now render.
+
+- [x] **C3 render-failure counting (#368)** — first half passed 2026-09-05 on the generic 4 MB C3 (2026.9.9, backend-managed thin client): `set backend http://10.4.0.99:1` then four `render`s → four `remote render: connect failed` / `render #2 failed at complete: render-cycle-failed` at uptimes 124 s, 158 s, 191 s, 225 s — the uptime kept climbing (no reboot), no `render:paused`, `status` still answering with 46 KB free. The code path is explicit (`fos_client.c`: no PSRAM → no rescue, streak in RTC memory cleared). The second half — OTA a *currently paused* C3 — has no board to run on: this C3 is the 4 MB no-OTA layout and no paused C3 exists any more; a fresh 2026.9.x boot clears the streak by design. Original text: flash a C3 (XTEINK X4), make
+  the server unreachable, force two failed renders → **no reboot, no pause**
+  (previously every failure counted as a PSRAM rescue). Then OTA a
+  currently-paused C3 → it comes up rendering. Eyeball the new `heap ...`
+  lines on X4 boot.
 
 - [x] **SuurESP on the 32 MB layout + the two fixes it surfaced (2026-09-05,
   dev build 2026.9.8+471e8e3f on branch `esp32-stale-checksum-and-444-jpeg`,

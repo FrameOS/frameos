@@ -47,6 +47,30 @@ UNSUPPORTED_PANELS = {
     "EPD_7in5b_V2_old",
 }
 
+# Panels that are not Waveshare e-paper: hand-written drivers in this
+# component with the same init/clear/display/sleep shape. `bus` 1 = I2C — the
+# display layer skips the shared SPI module init for those (their pins are the
+# EPD sck/mosi lines reused as SCL/SDA). Mirrored by EMBEDDED_EXTRA_PANELS in
+# backend/app/tasks/embedded_firmware.py.
+EXTRA_PANELS = [
+    {
+        "name": "OLED_SSD1306_72x40",
+        "width": 72,
+        "height": 40,
+        "format": 1,  # FOS_PIXEL_1BPP
+        "bus": 1,
+        "header": "oled_ssd1306.h",
+        "init": "fos_oled_ssd1306_72x40_init",
+        "clear": "fos_oled_ssd1306_72x40_clear",
+        "display": "fos_oled_ssd1306_72x40_display",
+        "sleep": "fos_oled_ssd1306_72x40_sleep",
+    },
+]
+
+FOS_PANEL_BUS_SPI = 0
+FOS_PANEL_BUS_I2C = 1
+
+
 def c_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -144,6 +168,7 @@ typedef struct {
     int height;
     int format;         /* fos_pixel_format_t */
     int requires_cs2;   /* dual chip-select panels (EPD_13in3e) */
+    int bus;            /* 0 = the shared EPD SPI module, 1 = I2C on sck/mosi (driver owns the bus) */
     int (*driver_init)(void);
     void (*clear)(void);
     void (*display)(uint8_t *buf);
@@ -211,6 +236,7 @@ def generate(repo_root: Path, out_dir: Path) -> None:
         "",
     ]
     parts.extend(f'#include "{header.name}"' for header in headers)
+    parts.extend(f'#include "{panel["header"]}"' for panel in EXTRA_PANELS)
     parts.append("")
     for key in keys:
         parts.append(f"/* {key} */")
@@ -219,14 +245,27 @@ def generate(repo_root: Path, out_dir: Path) -> None:
     for key in keys:
         variant = variants[key]
         parts.append(
-            "    { %s, %d, %d, %d, %d, fos_init_%s, fos_clear_%s, fos_show_%s, fos_sleep_%s },"
+            "    { %s, %d, %d, %d, %d, %d, fos_init_%s, fos_clear_%s, fos_show_%s, fos_sleep_%s },"
             % (
                 c_string(key),
                 int(variant.width),
                 int(variant.height),
                 PIXEL_FORMAT_BY_COLOR[variant.color_option],
                 1 if key == "EPD_13in3e" else 0,
+                FOS_PANEL_BUS_SPI,
                 key, key, key, key,
+            )
+        )
+    for panel in EXTRA_PANELS:
+        parts.append(
+            "    { %s, %d, %d, %d, 0, %d, %s, %s, %s, %s },"
+            % (
+                c_string(panel["name"]),
+                int(panel["width"]),
+                int(panel["height"]),
+                int(panel["format"]),
+                int(panel["bus"]),
+                panel["init"], panel["clear"], panel["display"], panel["sleep"],
             )
         )
     parts.append("};")

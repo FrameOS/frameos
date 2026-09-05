@@ -76,10 +76,17 @@ def build_groups():
                 "label": 'Waveshare 7.3" RPi Zero PhotoPainter -800x480 Spectra 6 Color',
             })
 
+    # Small displays the ESP32 firmware drives that are not Waveshare e-paper
+    # (EMBEDDED_DEVICE_PANELS in app/tasks/embedded_firmware.py).
+    oled_devices = [
+        {"value": "oled.ssd1306_72x40", "label": 'SSD1306 0.42" OLED 72x40 (ESP32 I2C)'},
+    ]
+
     return [
         {"label": "Generic", "options": generic_devices},
         {"label": "Pimoroni", "options": pimoroni_devices},
         {"label": "Waveshare", "options": waveshare_devices},
+        {"label": "OLED", "options": oled_devices},
     ]
 
 

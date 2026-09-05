@@ -297,7 +297,15 @@ async def _active_scene_id(redis, frame: Frame) -> str | None:
         return None
     if isinstance(value, bytes):
         value = value.decode("utf-8", errors="replace")
-    return value or None
+    if not value:
+        return None
+    # The cache outlives the scene: after the scene is deleted or replaced
+    # (a scenes.json overwrite, a workspace that activated something that
+    # is gone) the wasm harness fails "scene not found" on every poll and the
+    # thin client shows the diagnostic card until someone activates another
+    # scene (bench-c3, 2026-09-05). A stale id is the same as no id.
+    known = {scene.get("id") for scene in (frame.scenes or []) if isinstance(scene, dict)}
+    return value if value in known else None
 
 
 @api_public.get("/frames/{id:int}/embedded/render")

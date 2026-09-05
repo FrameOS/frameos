@@ -321,6 +321,16 @@ const XIAO_EPAPER_DRIVER_BOARD_PINS: NonNullable<NonNullable<NewFrameFormType['d
   mosi: 9,
   pwr: -1,
 }
+const ESP32_C3_042_OLED_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: 6,
+  mosi: 5,
+  pwr: -1,
+}
 const XTEINK_X4_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 5,
   dc: 4,
@@ -476,6 +486,15 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     psramMB: 0,
     pins: XTEINK_X4_PINS,
     gpioButtons: [{ pin: 3, label: 'POWER' }],
+  },
+  esp32_c3_042_oled: {
+    label: 'ESP32-C3 0.42" OLED dev board (I2C, thin client)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'oled.ssd1306_72x40',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: ESP32_C3_042_OLED_PINS,
+    gpioButtons: [{ pin: 9, label: 'BOOT' }],
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
@@ -636,6 +655,8 @@ const embeddedDevices = [
   ...(devices
     .find((group) => group.label === 'Waveshare')
     ?.options.filter((device) => !unsupportedEmbeddedWaveshareDevices.has(device.value)) ?? []),
+  // Non-Waveshare panels the firmware drives (EMBEDDED_DEVICE_PANELS in the backend).
+  ...(devices.find((group) => group.label === 'OLED')?.options ?? []),
 ]
 
 function renderEmbeddedDeviceOptions(): JSX.Element[] {
@@ -1364,9 +1385,9 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
       ) : addFrameMode === 'embedded' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Flash the published FrameOS firmware onto an ESP32 microcontroller from the browser and set it up over
-            the same USB cable. The firmware renders scenes on-device, drives SPI e-ink panels, and updates itself
-            over the air.
+            Flash the published FrameOS firmware onto an ESP32 microcontroller from the browser and set it up over the
+            same USB cable. The firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the
+            air.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input

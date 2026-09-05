@@ -51,6 +51,10 @@ static const char *TAG = "fos_http";
 
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
+/* Why 8443 is or is not answering, for `status`: "enabled cert=yes key=yes"
+ * said nothing about the server being skipped for heap (a PSRAM-less C3 with
+ * ~46 KB free never starts it). */
+static const char *s_https_state = "off";
 static bool s_portal_mode = false;
 static fos_action_cb s_render_cb = NULL;
 static fos_action_cb s_ota_cb = NULL;
@@ -550,7 +554,10 @@ static const char *SETUP_PAGE_HEAD =
     "<title>FrameOS setup</title>"
     "<style>body{font-family:system-ui,sans-serif;max-width:34rem;margin:2rem auto;padding:0 1rem}"
     "label{display:block;margin:.8rem 0 .2rem;font-weight:600}"
-    "input,select{width:100%;padding:.5rem;box-sizing:border-box}"
+    /* 1rem, not the ~13px control default: iOS zooms the page into any
+     * focused field under 16px, and the captive-portal helper focuses the
+     * SSID field on open (seen 2026-09-05). */
+    "input,select{width:100%;padding:.5rem;box-sizing:border-box;font-size:1rem}"
     "button{margin-top:1.2rem;padding:.6rem 1.4rem;font-size:1rem}"
     ".row{display:flex;gap:.7rem;flex-wrap:wrap}.row>*{flex:1 1 10rem}"
     ".preview,.panel{margin:1.6rem 0;padding-top:1rem;border-top:1px solid #ddd}"
@@ -2985,6 +2992,7 @@ esp_err_t fos_http_start(bool portal_mode)
         fos_config_t *frame_config = fos_config();
         bool has_tls_material = frame_config->tls_server_cert[0] && frame_config->tls_server_key[0];
         if (frame_config->tls_enable && has_tls_material) {
+            s_https_state = "skipped: low memory";
             if (https_heap_ready()) {
                 httpd_ssl_config_t tls_config = HTTPD_SSL_CONFIG_DEFAULT();
                 configure_httpd_defaults(&tls_config.httpd);
@@ -3007,18 +3015,29 @@ esp_err_t fos_http_start(bool portal_mode)
                         ESP_LOGE(TAG, "https route registration failed: %s", esp_err_to_name(err));
                         httpd_ssl_stop(s_https_server);
                         s_https_server = NULL;
+                        s_https_state = "failed: routes";
                     } else {
                         ESP_LOGI(TAG, "https server up on port %u", (unsigned)tls_config.port_secure);
+                        s_https_state = "running";
                     }
                 } else {
                     ESP_LOGE(TAG, "httpd_ssl_start failed: %s", esp_err_to_name(err));
+                    s_https_state = "failed: start";
                 }
             }
         } else if (frame_config->tls_enable) {
             ESP_LOGW(TAG, "https requested but TLS certificate or key is missing");
+            s_https_state = "no certificate";
+        } else {
+            s_https_state = "off";
         }
     }
     return ESP_OK;
+}
+
+const char *fos_http_https_state(void)
+{
+    return s_https_server ? "running" : s_https_state;
 }
 
 bool fos_http_is_running(void)

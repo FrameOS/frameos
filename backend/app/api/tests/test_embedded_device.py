@@ -193,6 +193,30 @@ async def test_render_uses_wasm_scene_render_when_available(async_client, no_aut
     assert payload == b'\x00' * len(payload)
 
 
+class _FakeRedis:
+    def __init__(self, value):
+        self._value = value
+
+    async def get(self, key):
+        return self._value
+
+
+@pytest.mark.asyncio
+async def test_active_scene_id_ignores_a_cached_scene_the_frame_no_longer_has():
+    """A stale frame:{id}:active_scene (the scene was deleted or scenes.json
+    was replaced) made the wasm harness fail "scene not found" on every poll,
+    so the thin client showed the diagnostic card until another activation."""
+    from app.api.embedded_device import _active_scene_id
+
+    frame = Frame(id=66, scenes=[{'id': 'oled-hello', 'name': 'x', 'nodes': [], 'edges': []}])
+    assert await _active_scene_id(_FakeRedis(b'oled-hello'), frame) == 'oled-hello'
+    assert await _active_scene_id(_FakeRedis('oled-hello'), frame) == 'oled-hello'
+    assert await _active_scene_id(_FakeRedis(b'aa342667-gone'), frame) is None
+    assert await _active_scene_id(_FakeRedis(None), frame) is None
+    assert await _active_scene_id(None, frame) is None
+    assert await _active_scene_id(_FakeRedis(b'oled-hello'), Frame(id=67, scenes=None)) is None
+
+
 @pytest.mark.asyncio
 async def test_render_falls_back_to_diagnostic_when_scene_render_fails(
     async_client, no_auth_client, db, monkeypatch

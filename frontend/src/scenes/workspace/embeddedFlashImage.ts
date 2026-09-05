@@ -198,3 +198,53 @@ export function layoutPlatformForPartitions(
   const candidate = `${chip}-${mb}mb`
   return assets?.some((asset) => asset.platform === candidate) ? candidate : generic
 }
+
+/**
+ * The release image for a chip and the flash size esptool just read off the
+ * board — the blank-board twin of layoutPlatformForPartitions, for the
+ * enrollment and provisioning flashers that write the whole chip and so get
+ * to choose its layout. The generic pair IS the 8 MB S3 / 4 MB C3 layout. A
+ * board flashed with its own layout uses the whole chip and later asks the
+ * OTA manifest for that same layout, so the pick here decides what the board
+ * runs for good. Unknown size, or a release without that image: the generic
+ * one, which every board boots.
+ */
+export function layoutMatchedPlatform(
+  chipPlatform: string,
+  detectedFlashSize: string | null,
+  assets?: readonly { platform: string }[]
+): string {
+  const chip = chipPlatform.startsWith('esp32-c3') ? 'esp32-c3' : 'esp32-s3'
+  const size = (detectedFlashSize ?? '').trim().toUpperCase()
+  if (!/^(4|8|16|32)MB$/.test(size)) {
+    return chipPlatform
+  }
+  const genericSize = chip === 'esp32-c3' ? '4MB' : '8MB'
+  if (size === genericSize) {
+    return chipPlatform
+  }
+  const candidate = `${chip}-${size.toLowerCase()}`
+  return assets?.some((asset) => asset.platform === candidate) ? candidate : chipPlatform
+}
+
+/** esptool-js reads the SPI flash id once the stub is up; the size lives in
+ * its third byte (esptool's DETECTED_FLASH_SIZES table). null when the board
+ * or the library cannot say — the generic image is always a valid answer. */
+export async function detectFlashSize(loader: unknown): Promise<string | null> {
+  const candidate = loader as {
+    readFlashId?: () => Promise<number>
+    DETECTED_FLASH_SIZES?: Record<number, string>
+  }
+  if (typeof candidate.readFlashId !== 'function' || !candidate.DETECTED_FLASH_SIZES) {
+    return null
+  }
+  try {
+    const flashId = await candidate.readFlashId()
+    if (flashId === 0xffffff || flashId === 0) {
+      return null
+    }
+    return candidate.DETECTED_FLASH_SIZES[(flashId >> 16) & 0xff] ?? null
+  } catch {
+    return null
+  }
+}

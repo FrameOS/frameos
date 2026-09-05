@@ -133,6 +133,7 @@ or the preset dropdown in the frontends — the authoritative table is
 | `waveshare_esp32_s3_epaper_13_3e6` | S3 | EPD_13in3e 13.3" Spectra | dual CS, TF socket |
 | `trmnl_og` | C3 | EPD_7in5_V2 7.5" mono | TRMNL OG; battery GPIO3 ÷2 |
 | `trmnl_bwry` | C3 | EPD_7in5yr 7.5" BWRY | TRMNL BWRY; battery GPIO3 ÷2 |
+| `esp32_c3_042_oled` | C3 | OLED_SSD1306_72x40 0.42" OLED (I2C) | HW-675 / 01Space C3 dev board; SDA5/SCL6 as mosi/sck, BOOT GPIO9; thin client, 4 MB |
 | `trmnl_og_diy_kit` | S3 | EPD_7in5_V2 | Seeed XIAO ePaper Driver Board; battery GPIO1 ÷2, switch GPIO6 |
 | `trmnl_4in26_diy_kit` | S3 | EPD_4in26 4.26" | Seeed XIAO ePaper Driver Board; battery GPIO1 ÷2, switch GPIO6 |
 | `xteink_x4` | C3 | EPD_4in26 4.26" | XTEINK X4 reader; TF shares EPD SPI, SD assets off; battery GPIO0 ÷2 |
