@@ -47,16 +47,22 @@ medium / low list below.
   the API answers `plain_http` + a warning the drawer shows when the
   script URL is `http://` (the key and Remote secret cross the LAN in
   clear, once).
-- Smaller: cross-project leak via the first-loaded project's MQTT broker in
-  `ha/sync.py`; `replayEnrollment`-style sync pulls `mode` / `agent` /
-  `frame_admin_auth` / `https_proxy.server_key` from the device; `?token=`
-  JWT in WebSocket query strings (dormant); no Origin check on WebSocket
-  handshakes (SameSite=Lax is the only defence); `TrustedHostMiddleware`
-  absent (DNS rebinding reaches `/api/cloud/setup/*` on a fresh install);
-  predictable unverified precompiled cache under `/tmp`; a device `bootup`
-  event may still move `frame_host` on embedded frames when the claimed IP
-  matches the request peer or `embedded.followBootIp` is set (deliberate:
-  ESP32 DHCP follow).
+- Smaller, what is left: a device `bootup` event may still move
+  `frame_host` on embedded frames when the claimed IP matches the request
+  peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).
+  Closed 2026-09-06 — the HA sync connects to one broker per run and shares
+  only the projects that configured that broker (others are logged and
+  skipped; `partition_projects_by_broker`); the frame sync never pulls
+  `mode`, `agent` or `frame_admin_auth` from a device and drops certificate
+  material from `https_proxy` (`FRAME_SYNC_BACKEND_OWNED_KEYS`); WebSocket
+  handshakes are cookie-only (the dormant `?token=` JWT form is gone) and
+  refuse a cross-site `Origin` before reading the cookie; the unauthenticated
+  `/api/cloud/setup/*` routes answer only on IP literals and local names
+  (`.local`, `.lan`, `.home.arpa`, …) or `FRAMEOS_SETUP_ALLOWED_HOSTS`, which
+  is what a DNS-rebinding page cannot present; the precompiled release cache
+  under `/tmp` keeps each archive's `.minisig` beside it and verifies the
+  signature on download and on every hit (a planted archive is discarded and
+  fetched again).
 
 ### Device runtime (Nim) and ESP32
 

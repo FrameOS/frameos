@@ -41,6 +41,7 @@ Behind a reverse proxy, also set:
 |---|---|
 | `FRAMEOS_PUBLIC_URL` | The origin this install is reached at, e.g. `https://frameos.example`. It becomes the login `redirect_uri` and the logout `return_to`, so setting it explicitly is what stops a caller choosing them through `X-Forwarded-Host` |
 | `FRAMEOS_TRUSTED_PROXIES` | Comma-separated proxy addresses whose `X-Forwarded-*` headers are honoured. Empty means loopback and private-range peers only |
+| `FRAMEOS_SETUP_ALLOWED_HOSTS` | Comma-separated hostnames on which the unauthenticated first-run setup (`/api/cloud/setup/*`, before any user exists) answers. IP literals, single-label names and local suffixes (`.local`, `.lan`, `.home.arpa`, …) always do; a public DNS name is refused unless listed, which is what a DNS-rebinding page cannot present |
 
 (`FRAMEOS_AUTH_PROVIDER_URL` is accepted as a fallback name.) The provider URL
 can also be edited in the UI while disconnected; the edited value is stored

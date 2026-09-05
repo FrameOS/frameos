@@ -11,6 +11,7 @@ from app.tasks.precompiled_remote import (
     precompiled_remote_release_url,
 )
 from app.tasks.precompiled_frameos import release_version
+from app.tasks.tests.release_signing_helpers import signing_download, trust_test_key
 
 
 def test_precompiled_remote_release_url_uses_release_version():
@@ -39,14 +40,14 @@ async def test_download_precompiled_remote_release_extracts_binary(
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(source_root, arcname=source_root.name)
 
-    async def fake_download(_url: str, destination: Path, _timeout: float) -> None:
-        shutil.copy2(archive, destination)
+    fake_download = signing_download(archive)
 
     logs: list[tuple[str, str]] = []
 
     async def logger(level: str, message: str) -> None:
         logs.append((level, message))
 
+    trust_test_key(monkeypatch)
     monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr("app.tasks.precompiled_frameos._download", fake_download)
 

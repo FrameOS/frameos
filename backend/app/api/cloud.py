@@ -617,9 +617,52 @@ SETUP_CLAIM_COOKIE = "frameos_setup_claim"
 SETUP_CLAIM_TTL_SECONDS = 60 * 60
 
 
-def _require_setup_mode(db: Session) -> None:
+# Hostname suffixes that only resolve on a LAN. A fresh install is set up
+# from the same network it lives on, by IP or a local name; a public DNS name
+# in the Host header of a setup request means a browser was pointed at a
+# domain the attacker controls that resolves to this backend's LAN address
+# (DNS rebinding) — the one way the unauthenticated setup routes could be
+# driven from outside before a user exists.
+LOCAL_HOST_SUFFIXES = (".local", ".localhost", ".lan", ".home", ".internal", ".localdomain", ".home.arpa", ".fritz.box")
+
+
+def setup_host_allowed(host_header: str | None) -> bool:
+    host = (host_header or "").strip().lower()
+    if not host:
+        return False
+    if host.startswith("["):
+        host = host[1 : host.find("]")] if "]" in host else host[1:]
+    elif host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    if "." not in host or host == "localhost":
+        return True
+    if any(host.endswith(suffix) for suffix in LOCAL_HOST_SUFFIXES):
+        return True
+    allowed = {entry.strip().lower() for entry in app_config.config.FRAMEOS_SETUP_ALLOWED_HOSTS.split(",") if entry.strip()}
+    return host in allowed
+
+
+def _require_setup_mode(request: Request, db: Session) -> None:
     if db.query(User).first() is not None:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Setup is complete; log in first")
+    # Behind Home Assistant's ingress the Supervisor's proxy is the only peer
+    # (IngressPeerGuard) and the Host is Home Assistant's own, so the name
+    # check does not apply there.
+    if app_config.config.HASSIO_RUN_MODE != "ingress" and not setup_host_allowed(request.headers.get("host")):
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=(
+                "First-run setup is served on the local network only: open this backend by its IP address or a "
+                ".local name, or list this hostname in FRAMEOS_SETUP_ALLOWED_HOSTS."
+            ),
+        )
 
 
 def _setup_claim_matches(request: Request, link: CloudBackendLink | None) -> bool:
@@ -655,7 +698,7 @@ def _require_setup_claim(request: Request, db: Session) -> CloudBackendLink | No
 
 @api_open.get("/cloud/setup/status", response_model=CloudStatusResponse)
 async def setup_cloud_status(request: Request, db: Session = Depends(get_db)):
-    _require_setup_mode(db)
+    _require_setup_mode(request, db)
     link = current_cloud_backend_link(db)
     payload = _status_payload(db, link)
     if not _setup_claim_matches(request, link):
@@ -671,7 +714,7 @@ async def setup_cloud_status(request: Request, db: Session = Depends(get_db)):
 async def setup_cloud_provider(
     request: Request, data: CloudProviderUpdateRequest, db: Session = Depends(get_db)
 ):
-    _require_setup_mode(db)
+    _require_setup_mode(request, db)
     _require_setup_claim(request, db)
     return await _update_provider(data, db)
 
@@ -680,7 +723,7 @@ async def setup_cloud_provider(
 async def setup_cloud_connect(
     request: Request, response: Response, data: CloudConnectRequest, db: Session = Depends(get_db)
 ):
-    _require_setup_mode(db)
+    _require_setup_mode(request, db)
     _require_setup_claim(request, db)
     payload = await _start_connect(request, data, db)
     # Claim the flow for this browser. Issued per connect, so a takeover after
@@ -696,14 +739,14 @@ async def setup_cloud_connect(
 
 @api_open.post("/cloud/setup/poll", response_model=CloudStatusResponse)
 async def setup_cloud_poll(request: Request, db: Session = Depends(get_db)):
-    _require_setup_mode(db)
+    _require_setup_mode(request, db)
     _require_setup_claim(request, db)
     return await _poll_link(db)
 
 
 @api_open.post("/cloud/setup/disconnect", response_model=CloudStatusResponse)
 async def setup_cloud_disconnect(request: Request, db: Session = Depends(get_db)):
-    _require_setup_mode(db)
+    _require_setup_mode(request, db)
     # Deliberately not claim-gated: a browser that lost its cookie (or a second
     # one taking over) must be able to clear a half-finished link, and on an
     # install with no users there is nothing yet to protect.

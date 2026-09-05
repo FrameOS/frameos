@@ -21,6 +21,7 @@ from app.models.frame import Frame
 from app.utils.scene_execution import scene_is_interpreted
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.versions import get_versions
+from app.utils.release_signing import verify_release_archive_signature
 
 RELEASE_BASE_URL = os.environ.get(
     "FRAMEOS_PRECOMPILED_RELEASE_BASE_URL",
@@ -148,6 +149,37 @@ def precompiled_frameos_cache_path(url: str) -> Path:
     return precompiled_frameos_cache_dir() / f"{digest}-{safe_filename}"
 
 
+def precompiled_frameos_signature_path(cache_path: Path) -> Path:
+    return cache_path.with_name(cache_path.name + ".minisig")
+
+
+def _cached_archive_verifies(cache_path: Path) -> bool:
+    """A cache hit is only a hit if the archive still matches its signature.
+
+    The cache lives under tempfile.gettempdir() by default — a path every
+    local user can write to and predict (sha256 of the URL) — so the check
+    that runs when the archive is downloaded has to run again before the
+    bytes are handed to a frame. A miss here is treated as no cache at all:
+    both files are removed and the release is fetched afresh.
+    """
+    signature_path = precompiled_frameos_signature_path(cache_path)
+    if not _has_cached_archive(cache_path) or not _has_cached_archive(signature_path):
+        return False
+    try:
+        verify_release_archive_signature(cache_path, signature_path.read_text(encoding="utf-8"))
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _discard_cached_archive(cache_path: Path) -> None:
+    for path in (cache_path, precompiled_frameos_signature_path(cache_path)):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 async def _cached_release_archive(
     url: str,
     target: str,
@@ -156,17 +188,22 @@ async def _cached_release_archive(
     label: str = "FrameOS",
 ) -> tuple[Path, bool]:
     cache_path = precompiled_frameos_cache_path(url)
+    signature_path = precompiled_frameos_signature_path(cache_path)
     if _has_cached_archive(cache_path):
-        await logger("stdout", f"Using cached precompiled {label} release for {target}")
-        return cache_path, True
+        if _cached_archive_verifies(cache_path):
+            await logger("stdout", f"Using cached precompiled {label} release for {target} (signature verified)")
+            return cache_path, True
+        await logger(
+            "stdout",
+            f"Cached precompiled {label} release for {target} fails its signature check; downloading it again",
+        )
+        _discard_cached_archive(cache_path)
 
     await logger("stdout", f"Downloading precompiled {label} release for {target}")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    if _has_cached_archive(cache_path):
-        await logger("stdout", f"Using cached precompiled {label} release for {target}")
-        return cache_path, True
 
     temp_path: Path | None = None
+    temp_signature_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             prefix=f".{cache_path.name}.",
@@ -175,13 +212,33 @@ async def _cached_release_archive(
             delete=False,
         ) as temp_file:
             temp_path = Path(temp_file.name)
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{signature_path.name}.",
+            suffix=".part",
+            dir=cache_path.parent,
+            delete=False,
+        ) as temp_file:
+            temp_signature_path = Path(temp_file.name)
         await _download(url, temp_path, timeout)
         if not _has_cached_archive(temp_path):
             raise RuntimeError("Downloaded precompiled FrameOS release was empty")
+        # The detached minisign signature published beside every release
+        # asset; verified against the key baked into the device runtimes
+        # (app/utils/release_signing.py) before anything trusts the archive.
+        await _download(f"{url}.minisig", temp_signature_path, timeout)
+        minisig = temp_signature_path.read_text(encoding="utf-8", errors="replace")
+        try:
+            verify_release_archive_signature(temp_path, minisig)
+        except ValueError as exc:
+            raise RuntimeError(f"Precompiled {label} release for {target} failed its signature check: {exc}") from exc
+        os.replace(temp_signature_path, signature_path)
+        temp_signature_path = None
         os.replace(temp_path, cache_path)
+        temp_path = None
     finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+        for leftover in (temp_path, temp_signature_path):
+            if leftover is not None:
+                leftover.unlink(missing_ok=True)
     return cache_path, False
 
 

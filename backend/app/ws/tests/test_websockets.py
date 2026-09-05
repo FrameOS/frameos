@@ -97,22 +97,62 @@ def test_ws_missing_token(client: TestClient) -> None:
     assert exc.value.reason == "Missing token"
 
 
-def test_ws_invalid_token(client: TestClient) -> None:
+def test_ws_query_token_is_not_a_credential(client: TestClient) -> None:
+    # The `?token=` form is gone: a bearer in a URL lands in logs, and the SPA
+    # never sent one. It is simply ignored, so the cookie check speaks.
     with pytest.raises(WebSocketDisconnect) as exc:
         with client.websocket_connect("/ws?token=bad"):
             pass
     assert exc.value.code == 1008
-    assert exc.value.reason == "Invalid token"
+    assert exc.value.reason == "Missing token"
 
 
-def test_ws_valid_token_echo(client: TestClient) -> None:
+def test_ws_refuses_a_cross_site_origin_before_looking_at_the_cookie(client: TestClient) -> None:
+    create_user()
+    login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
+    assert login_resp.status_code == 200
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws", headers={"origin": "https://evil.example"}):
+            pass
+    assert exc.value.code == 1008
+    assert exc.value.reason == "Origin not allowed"
+
+
+def test_ws_accepts_the_same_origin(client: TestClient) -> None:
+    create_user()
+    login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
+    assert login_resp.status_code == 200
+    # TestClient dials host "testserver"; a page served from it says so.
+    with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+        ws.send_text("ping")
+        assert json.loads(ws.receive_text())["event"] == "pong"
+
+
+def test_terminal_ws_refuses_a_cross_site_origin(client: TestClient) -> None:
+    project_id = create_user()
+    login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
+    assert login_resp.status_code == 200
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(
+            f"/ws/projects/{project_id}/terminal/1", headers={"origin": "https://evil.example"}
+        ):
+            pass
+    assert exc.value.code == 1008
+    assert exc.value.reason == "Origin not allowed"
+
+
+def test_ws_valid_jwt_in_the_query_string_is_ignored(client: TestClient) -> None:
+    # Even a genuine access token does nothing in the URL: only the session
+    # cookie authenticates a socket. Clearing the cookie jar proves it.
     create_user()
     login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
     token = login_resp.json()["access_token"]
-    with client.websocket_connect(f"/ws?token={token}") as ws:
-        ws.send_text("ping")
-        data = ws.receive_json()
-    assert data == {"event": "pong", "payload": "ping"}
+    client.cookies.clear()
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"/ws?token={token}"):
+            pass
+    assert exc.value.code == 1008
+    assert exc.value.reason == "Missing token"
 
 
 def test_ws_session_cookie_echo(client: TestClient) -> None:
@@ -153,7 +193,8 @@ def test_terminal_ws_invalid_token(client: TestClient) -> None:
         with client.websocket_connect("/ws/projects/1/terminal/1?token=bad"):
             pass
     assert exc.value.code == 1008
-    assert exc.value.reason == "Invalid token"
+    # The query token is ignored (cookie only), so the cookie check speaks.
+    assert exc.value.reason == "Missing token"
 
 
 def test_terminal_ws_frame_not_found(client: TestClient) -> None:

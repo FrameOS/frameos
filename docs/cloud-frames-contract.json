@@ -30,7 +30,14 @@
     "WHOLE verb on a key it does not know). `rule` inside a profile overrides",
     "the top-level rule for that profile. `restart` = applying it restarts the",
     "runtime (Linux) or reboots the chip (ESP32). `companion` = only valid next",
-    "to that other key in the same push."
+    "to that other key in the same push.",
+    "",
+    "`parity` (2026-09-06): a key accepted by one profile only MUST carry",
+    "`parity: {only, why}` naming the plane and the reason the other cannot",
+    "take it; a key both accept must not. The generator refuses the file",
+    "otherwise, so no new key ships single-plane silently. Each key that",
+    "goes both-planes deletes its parity entry; the count of entries IS the",
+    "measured parity gap (docs/convergence-todo.md item 6)."
   ],
   "version": 1,
   "profiles": ["linux", "esp32"],
@@ -59,7 +66,8 @@
       "$comment": "The zone's tzdata slice for a chip without a tz database; command payload only, never a stored setting. null = fetch it yourself.",
       "rule": {"anyOf": [{"type": "object", "open": true}, {"type": "null"}]},
       "companion": "timezone",
-      "profiles": {"esp32": {"since": "2026.8.34"}}
+      "profiles": {"esp32": {"since": "2026.8.34"}},
+      "parity": {"only": "esp32", "why": "The POSIX TZ string for the chip's libc; the Pi has tzdata and takes `timezone` alone."}
     },
     "debug": {
       "rule": {"type": "bool"},
@@ -67,7 +75,8 @@
     },
     "flip": {
       "rule": {"type": "string", "enum": ["", "horizontal", "vertical", "both"]},
-      "profiles": {"linux": {"since": "2026.8.30"}}
+      "profiles": {"linux": {"since": "2026.8.30"}},
+      "parity": {"only": "linux", "why": "The Pi runtime flips the framebuffer in pixie; the ESP32 render path has rotate only, no flip stage (fos_http.c reports \"\")."}
     },
     "error_behavior": {
       "$comment": "The frontend/backend spelling; the runtime maps it onto errorBehavior in frame.json.",
@@ -82,7 +91,8 @@
           "silent_window_minutes": {"type": "number", "min": 1, "max": 10080}
         }
       },
-      "profiles": {"linux": {"since": "2026.8.30"}}
+      "profiles": {"linux": {"since": "2026.8.30"}},
+      "parity": {"only": "linux", "why": "The Pi runtime's scene-error retry policy (safe mode, retry windows); the ESP32 restarts the scene on an error and has no such state machine."}
     },
     "control_code": {
       "$comment": "The runtime's controlCode shape: a bool, numbers and #rrggbb colours — not the SPA form's string spellings.",
@@ -99,12 +109,14 @@
           "backgroundColor": {"type": "string", "format": "html_hex_color"}
         }
       },
-      "profiles": {"linux": {"since": "2026.8.30"}}
+      "profiles": {"linux": {"since": "2026.8.30"}},
+      "parity": {"only": "linux", "why": "Renders the local-presence pairing code overlay on the Pi; the ESP32 has no on-device pairing UI (its console prints what it needs)."}
     },
     "metrics_interval": {
       "$comment": "0 disables the sampler; anything else is a period in seconds.",
       "rule": {"type": "number", "min": 0, "max": 86400},
-      "profiles": {"linux": {"since": "2026.8.30"}}
+      "profiles": {"linux": {"since": "2026.8.30"}},
+      "parity": {"only": "linux", "why": "The Pi runtime pushes metrics on its own timer; the ESP32 pushes them on its render cadence and reports a fixed 60 (fos_http.c)."}
     },
     "max_http_response_bytes": {
       "$comment": "A per-request memory bound. The Linux ceiling is the runtime's own default (64 MiB) so a push can only lower it; the chip takes 1 KiB up.",
@@ -120,12 +132,14 @@
         {"type": "bool"},
         {"type": "map", "values": {"type": "bool"}, "maxEntries": 64, "keyMinLen": 1, "keyMaxLen": 64}
       ]},
-      "profiles": {"linux": {"since": "2026.8.30"}}
+      "profiles": {"linux": {"since": "2026.8.30"}},
+      "parity": {"only": "linux", "why": "Caches downloaded images into the Pi's assets directory; the ESP32 has no writable assets cache beyond the optional SD card."}
     },
     "timezone_updater": {
       "$comment": "enabled/hour only: the download URL is never a provider's to set.",
       "rule": {"type": "object", "keys": {"enabled": {"type": "bool"}, "hour": {"type": "int", "min": 0, "max": 23}}},
-      "profiles": {"linux": {"since": "2026.8.30"}}
+      "profiles": {"linux": {"since": "2026.8.30"}},
+      "parity": {"only": "linux", "why": "A Pi cron/systemd timer refreshing tzdata; the ESP32 receives its zone as timezone_data instead."}
     },
     "palette": {
       "$comment": "frame.json's palette: #rrggbb colours plus optional display name and per-colour names. An empty colour list hands the panel back its built-in palette.",
@@ -139,7 +153,8 @@
         "required": ["colors"]
       },
       "extraChecks": ["colorNames, when present, has exactly as many entries as colors"],
-      "profiles": {"linux": {"since": "2026.8.31", "restart": true}}
+      "profiles": {"linux": {"since": "2026.8.31", "restart": true}},
+      "parity": {"only": "linux", "why": "Custom dithering palette for the Pi renderer; ESP32 panels dither to their driver's fixed palette."}
     },
     "device_config": {
       "$comment": "STRICTLY the partial-refresh policy; the rest of deviceConfig is hardware wiring and stays the device's own (the persist path patches).",
@@ -152,7 +167,8 @@
         },
         "minKeys": 1
       },
-      "profiles": {"linux": {"since": "2026.8.31", "restart": true}}
+      "profiles": {"linux": {"since": "2026.8.31", "restart": true}},
+      "parity": {"only": "linux", "why": "Pi driver knobs (partial refresh, VCOM, …); on the ESP32 the panel table carries them per board."}
     },
     "gpio_buttons": {
       "$comment": "[{pin, label}] — the whole list, replaced; an empty list unbinds every button. The chip's table is smaller, and the firmware refuses (invalid_settings) any pin that is an SPI flash / PSRAM pad or already a driver's on that chip (fos_config_gpio_pin_reserved): the range here is chip-agnostic, the reservation is not.",
@@ -173,30 +189,36 @@
     },
     "deep_sleep": {
       "rule": {"type": "bool"},
-      "profiles": {"esp32": {"since": null}}
+      "profiles": {"esp32": {"since": null}},
+      "parity": {"only": "esp32", "why": "ESP32 power management; a Pi has no deep sleep."}
     },
     "deep_sleep_on_battery": {
       "rule": {"type": "bool"},
-      "profiles": {"esp32": {"since": null}}
+      "profiles": {"esp32": {"since": null}},
+      "parity": {"only": "esp32", "why": "ESP32 power management; a Pi has no deep sleep or battery sense."}
     },
     "wake_check_seconds": {
       "$comment": "0 = only wake to render; the firmware clamps 1..59 up to 60 (sub-minute check-ins drain a battery for nothing).",
       "rule": {"type": "int", "min": 0, "max": 86400},
-      "profiles": {"esp32": {"since": null}}
+      "profiles": {"esp32": {"since": null}},
+      "parity": {"only": "esp32", "why": "ESP32 deep-sleep wake cadence; a Pi never sleeps."}
     },
     "battery_pin": {
       "$comment": "ADC GPIO; -1 = no battery sense. Read at boot. The firmware refuses (invalid_settings) an SPI flash / PSRAM pad or a driver-claimed pin for its chip.",
       "rule": {"type": "int", "min": -1, "max": 48},
-      "profiles": {"esp32": {"since": null, "restart": true}}
+      "profiles": {"esp32": {"since": null, "restart": true}},
+      "parity": {"only": "esp32", "why": "ESP32 ADC battery sense; a Pi has no ADC."}
     },
     "battery_divider": {
       "rule": {"type": "number", "min": 0.5, "max": 20},
-      "profiles": {"esp32": {"since": null, "restart": true}}
+      "profiles": {"esp32": {"since": null, "restart": true}},
+      "parity": {"only": "esp32", "why": "ESP32 ADC battery sense; a Pi has no ADC."}
     },
     "battery_enable_pin": {
       "$comment": "GPIO driven high to switch the divider on while sampling (reTerminal E1004: 21); -1 = always on. Same reserved-pin refusal as battery_pin.",
       "rule": {"type": "int", "min": -1, "max": 48},
-      "profiles": {"esp32": {"since": "2026.8.39", "restart": true}}
+      "profiles": {"esp32": {"since": "2026.8.39", "restart": true}},
+      "parity": {"only": "esp32", "why": "ESP32 ADC battery sense; a Pi has no ADC."}
     }
   },
   "formats": {

@@ -36,6 +36,33 @@ SCENE_CHANGE_EVENTS = ("render:scene", "render:sceneChange", "event:setCurrentSc
 IMAGE_PUBLISH_MIN_INTERVAL = 2.0
 
 
+def partition_projects_by_broker(
+    resolved: dict[int, Optional[MqttConfig]],
+) -> tuple[Optional[MqttConfig], list[int], list[int]]:
+    """Pick the broker this run connects to and split projects by it.
+
+    Returns (broker, project ids on that broker, project ids on any other
+    broker). The broker is the first project's (dict order = load order); a
+    project that resolved to no broker at all counts as skipped too, since
+    nothing could be published for it. Pure, so the leak rule is unit-tested
+    without a broker or a Redis.
+    """
+    chosen: Optional[MqttConfig] = None
+    kept: list[int] = []
+    skipped: list[int] = []
+    for project_id, broker in resolved.items():
+        if broker is None:
+            skipped.append(project_id)
+            continue
+        if chosen is None:
+            chosen = broker
+        if broker == chosen:
+            kept.append(project_id)
+        else:
+            skipped.append(project_id)
+    return chosen, kept, skipped
+
+
 class HomeAssistantSync:
     def __init__(self):
         self._mqtt: Any = None  # aiomqtt.Client while connected
@@ -84,10 +111,28 @@ class HomeAssistantSync:
 
                 mqtt_config = None
                 if self._enabled:
-                    # One broker for the whole install: the Supervisor's Mosquitto
-                    # service as an add-on, or the settings-configured broker.
-                    any_settings = next(iter(self._enabled.values()))
-                    mqtt_config = await resolve_mqtt_config(http, any_settings)
+                    # One broker per run. As an add-on every project resolves to
+                    # the Supervisor's Mosquitto; self-hosted, each project may
+                    # name its own broker — and frames must only ever be
+                    # published to the broker their own project configured, or
+                    # project A's frames land on project B's MQTT (a
+                    # cross-project leak, docs/security-todo.md). Projects on
+                    # any other broker are left out of this run and said so.
+                    resolved = {
+                        project_id: await resolve_mqtt_config(http, ha_settings)
+                        for project_id, ha_settings in self._enabled.items()
+                    }
+                    mqtt_config, kept, skipped = partition_projects_by_broker(resolved)
+                    if skipped:
+                        print(
+                            "🟡 Home Assistant sync: projects "
+                            + ", ".join(str(project_id) for project_id in skipped)
+                            + " configure a different MQTT broker than the one this run connects to "
+                            + (f"({mqtt_config.host}:{mqtt_config.port})" if mqtt_config else "")
+                            + "; their frames are not shared. One broker per install is supported."
+                        )
+                        self._enabled = {project_id: self._enabled[project_id] for project_id in kept}
+                        self._rest = {project_id: rest for project_id, rest in self._rest.items() if project_id in kept}
 
                 if mqtt_config:
                     import aiomqtt

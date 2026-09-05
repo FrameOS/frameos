@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import os
 import shutil
 import subprocess
@@ -72,3 +74,26 @@ def test_fos_cloud_contract_fixtures_pass(tmp_path: Path):
     run_result = subprocess.run([str(binary), str(FIXTURES)], capture_output=True, text=True)
     assert run_result.returncode == 0, run_result.stdout + run_result.stderr
     assert "0 failures" in run_result.stdout
+
+
+def test_single_plane_settings_carry_a_parity_reason():
+    """docs/convergence-todo.md item 6: the linux-only / esp32-only split is the
+    measured parity gap, and no key may be single-plane without saying why."""
+    doc = json.loads((REPO_ROOT / "docs" / "cloud-frames-contract.json").read_text(encoding="utf-8"))
+    every = set(doc["profiles"])
+    single = {name: spec for name, spec in doc["settings"].items() if set(spec["profiles"]) != every}
+    both = {name for name, spec in doc["settings"].items() if set(spec["profiles"]) == every}
+    for name, spec in single.items():
+        parity = spec.get("parity")
+        assert isinstance(parity, dict), f"{name} is single-plane and carries no parity entry"
+        assert set(spec["profiles"]) == {parity["only"]}, name
+        assert len(parity["why"].strip()) >= 20, name
+    for name in both:
+        assert "parity" not in doc["settings"][name], f"{name} is accepted on both planes; drop its parity entry"
+    # The gap as measured today. Shrinking is progress and needs no ceremony;
+    # growing it is a decision that belongs in the contract, not here.
+    by_plane = {}
+    for spec in single.values():
+        by_plane[spec["parity"]["only"]] = by_plane.get(spec["parity"]["only"], 0) + 1
+    assert by_plane.get("linux", 0) <= 8, by_plane
+    assert by_plane.get("esp32", 0) <= 7, by_plane

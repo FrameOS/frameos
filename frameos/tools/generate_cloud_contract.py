@@ -46,10 +46,37 @@ def load():
             if profile not in doc["profiles"]:
                 raise SystemExit(f"setting {name!r}: unknown profile {profile!r}")
         validate_rule(spec["rule"], f"settings.{name}")
+        validate_parity(doc, name, spec)
         for profile, pspec in spec["profiles"].items():
             if "rule" in pspec:
                 validate_rule(pspec["rule"], f"settings.{name}.profiles.{profile}")
     return doc
+
+
+def validate_parity(doc, name, spec):
+    """A single-plane key must say why it is single-plane; a both-planes key must not.
+
+    The point (docs/convergence-todo.md item 6): the 8-linux / 7-esp32 split
+    is the measured parity gap between the device planes, and no new key may
+    widen it without a contract entry saying so. `parity` is documentation for
+    the generated tables' readers; none of the walkers consumes it.
+    """
+    present = set(spec["profiles"])
+    every = set(doc["profiles"])
+    parity = spec.get("parity")
+    if present == every:
+        if parity is not None:
+            raise SystemExit(f"settings.{name}: accepted by every profile, so it must not carry `parity`")
+        return
+    if not isinstance(parity, dict) or set(parity) != {"only", "why"}:
+        raise SystemExit(
+            f"settings.{name}: accepted by {sorted(present)} only — add "
+            f'`parity: {{"only": "<profile>", "why": "<reason the other plane cannot take it>"}}`'
+        )
+    if len(present) != 1 or parity["only"] not in present:
+        raise SystemExit(f"settings.{name}: parity.only must name the one profile that accepts the key ({sorted(present)})")
+    if not isinstance(parity["why"], str) or len(parity["why"].strip()) < 20:
+        raise SystemExit(f"settings.{name}: parity.why must be a sentence, not {parity['why']!r}")
 
 
 def validate_rule(rule, where):
