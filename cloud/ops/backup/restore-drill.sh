@@ -148,7 +148,10 @@ echo "-- pg_restore exit=$restore_status errors=$restore_errors"
 
 # Row counts alone would pass on a dump whose bytea columns were truncated,
 # so the blob tables are summed by length(): that forces Postgres to read
-# every byte back out of the restored TOAST storage.
+# every byte back out of the restored TOAST storage. Those sums are zero
+# since the bytes moved to the object store (migration 0032); the object
+# keys next to them are what a restore now depends on, and the assertion
+# below checks each row has one or the other.
 echo "-- contents"
 psql -d "$scratch_db" -v ON_ERROR_STOP=1 --pset=pager=off <<'SQL'
 SELECT 'accounts' AS table, count(*) AS rows FROM accounts
@@ -191,9 +194,12 @@ FROM (
   UNION ALL
   SELECT 'no migrations recorded' WHERE (SELECT count(*) FROM schema_migrations) = 0
   UNION ALL
-  SELECT 'scene image bytes are null/zero despite scene image rows'
-    WHERE (SELECT count(*) FROM store_scene_images) > 0
-      AND (SELECT coalesce(sum(length(content)), 0) FROM store_scene_images) = 0
+  -- Since migration 0032 the bytes live in the object store and a row
+  -- carries an object_key instead of content; a row with neither is a
+  -- truncated dump (or a bug), so that is what the assertion looks for.
+  SELECT 'scene image rows with neither content nor an object key'
+    WHERE (SELECT count(*) FROM store_scene_images
+           WHERE object_key IS NULL AND coalesce(length(content), 0) = 0) > 0
   UNION ALL
   -- A dump taken while the app was mid-write would still restore; a dump
   -- taken from the wrong (empty/dev) database would not have real history.

@@ -246,11 +246,12 @@ so the drill also sums `length(content)` over the blob tables — that forces
 Postgres to read every byte back out of restored TOAST storage — and asserts
 that an empty-but-valid restore fails rather than looking like a pass.
 
-That sum is **zero** now — the blob bytes live in the object store. Keep the
-check (it is what would catch a truncated dump if bytes ever came back), but
-read it for what it is: a green drill no longer says anything about whether the
-blobs are recoverable. That question belongs to the object store, and is not
-yet rehearsed.
+That sum is **zero** now — the blob bytes live in the object store, and the
+drill's assertion is that every scene image row has either bytes or an
+`object_key` (the first encrypted-backup drill on 2026-09-05 tripped the
+older "bytes are zero" form, a false alarm from before the move). A green
+drill says the rows and keys are back; whether the blobs behind the keys are
+recoverable is the object store's question, rehearsed separately below.
 
 ### Bucket lock: `store-lock`, prefix `store/`, 30 days (enabled 2026-08-17)
 
