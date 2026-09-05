@@ -27,6 +27,7 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks import precompiled_frameos
 from app.tasks.frame_deploy_workflow import FrameDeployPlan, FrameDeployWorkflow
 from app.tasks.precompiled_frameos import release_version
+from app.tasks.tests.release_signing_helpers import minisig_for, trust_test_key
 from app.tasks.utils import find_nim_v2
 from app.tenancy import ensure_default_project
 
@@ -431,7 +432,11 @@ def _build_precompiled_release_archive(
     archive_path = release_dir / f"frameos-{version}-{precompiled_target}.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
         archive.add(artifact_root, arcname=archive_root_name)
-    _say(f"packaged local precompiled release archive {archive_path}")
+    # The release pipeline publishes a detached minisign signature beside every
+    # archive and the backend refuses an archive without one; this local
+    # release is signed with the test key the test trusts (trust_test_key).
+    archive_path.with_name(archive_path.name + ".minisig").write_text(minisig_for(archive_path), encoding="utf-8")
+    _say(f"packaged and signed local precompiled release archive {archive_path}")
     return archive_path
 
 
@@ -486,6 +491,7 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
         os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or str(os.cpu_count() or 2),
     )
     monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "precompiled-cache"))
+    trust_test_key(monkeypatch)
 
     with _phase("full deploy with compile on device"):
         remote_frame = _frame(

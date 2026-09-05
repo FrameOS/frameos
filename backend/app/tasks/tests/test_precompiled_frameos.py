@@ -15,42 +15,10 @@ from app.tasks.precompiled_frameos import download_precompiled_frameos_release, 
 import base64
 import hashlib
 
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
-from app.utils import release_signing
+from app.tasks.tests.release_signing_helpers import signing_download as _signing_download, trust_test_key as _trust_test_key
 
-
-# Every archive the fakes hand out is signed with a key minted here, and the
-# module's trusted key is pointed at it: the cache verifies the signature both
-# on download and on every hit (the cache dir is world-writable /tmp by
-# default), so an unsigned fake would never be used.
-_TEST_SIGNING_KEY = ed25519.Ed25519PrivateKey.generate()
-_TEST_SIGNING_PUBLIC_KEY_BASE64 = base64.b64encode(
-    _TEST_SIGNING_KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-).decode()
-
-
-def _minisig_for(archive: Path) -> str:
-    digest = hashlib.blake2b(archive.read_bytes(), digest_size=64).digest()
-    blob = b"ED" + b"\x01" * 8 + _TEST_SIGNING_KEY.sign(digest)
-    return "untrusted comment: test\n" + base64.b64encode(blob).decode() + "\n"
-
-
-def _trust_test_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(release_signing, "RELEASE_SIGNING_PUBLIC_KEY_BASE64", _TEST_SIGNING_PUBLIC_KEY_BASE64)
-
-
-def _signing_download(archive: Path, calls: list[str] | None = None):
-    async def fake_download(url: str, destination: Path, _timeout: float) -> None:
-        if calls is not None:
-            calls.append(url)
-        if url.endswith(".minisig"):
-            destination.write_text(_minisig_for(archive), encoding="utf-8")
-        else:
-            shutil.copy2(archive, destination)
-
-    return fake_download
 
 
 def test_frame_compiled_scene_count_treats_missing_execution_as_interpreted():
