@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Nightly off-Cloudflare copy of the blob store. Installed as
+# Nightly off-Cloudflare copy of the blob store, encrypted on the way out
+# (rclone crypt — see cloud/ops/backup/rclone.conf.example). Installed as
 # /usr/local/bin/frameos-cloud-object-backup by ops/backup/install.sh and run
 # by frameos-cloud-object-backup.timer. Runbook: cloud/docs/backups.md.
 #
@@ -21,7 +22,7 @@ set -euo pipefail
 # To run manually: `systemctl start frameos-cloud-object-backup.service` — the
 # R2 credentials come from the unit's EnvironmentFile, not from here.
 
-rclone_remote="${OBJECT_BACKUP_REMOTE:-storagebox:frameos-cloud-objects}"
+rclone_remote="${OBJECT_BACKUP_REMOTE:-boxcrypt:objects}"
 source_remote="${OBJECT_STORE_REMOTE:-r2:frameos-cloud}"
 healthchecks_url="${OBJECT_BACKUP_HEALTHCHECKS_URL:-}"
 
@@ -41,6 +42,14 @@ ping_healthcheck "/start"
 command -v rclone >/dev/null || fail "rclone is not installed"
 rclone listremotes | grep -qx "${source_remote%%:*}:" || fail "rclone remote '${source_remote%%:*}' is not configured"
 rclone listremotes | grep -qx "${rclone_remote%%:*}:" || fail "rclone remote '${rclone_remote%%:*}' is not configured"
+# Same rule as the database backup: nothing leaves the box in clear. The
+# copy goes through an rclone crypt remote (names and bytes encrypted with a
+# key the Storage Box never sees); a plaintext destination is refused unless
+# ALLOW_PLAINTEXT_REMOTE=1, which is for rehearsal VMs only.
+if [ "${ALLOW_PLAINTEXT_REMOTE:-0}" != "1" ] &&
+  ! rclone config show "${rclone_remote%%:*}" 2>/dev/null | grep -qE '^type *= *crypt$'; then
+  fail "OBJECT_BACKUP_REMOTE=${rclone_remote} is not an rclone crypt remote — refusing to ship plaintext copies off the box"
+fi
 
 echo "Copying $source_remote -> $rclone_remote"
 rclone copy "$source_remote" "$rclone_remote" \

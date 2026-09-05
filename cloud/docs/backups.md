@@ -20,7 +20,8 @@ answer:
   bytes, and nothing ever overwrites one with different content, so the store
   only ever grows within an account's quota. There is no point-in-time
   problem to solve, only a durability one.
-- **The object store has its own nightly copy**, to the same Storage Box:
+- **The object store has its own nightly copy**, to the same Storage Box
+  and through the same crypt remote (`boxcrypt:objects`):
   `frameos-cloud-object-backup.timer` at 05:17 UTC, an hour after the database
   job so the object copy can only ever be newer than the rows referencing it.
   It **copies, never syncs** — a sync would mirror a deletion in R2 onto the
@@ -38,6 +39,20 @@ answer:
   everywhere; a database backup carries the rows, the keys and the recorded
   sizes, and none of the bytes.
 
+**Nothing leaves the box in clear (since 2026-09-05).** Every off-site
+artifact is encrypted on the host with a key Hetzner never sees: the
+nightly dump, the host tarball and the object copy go through an rclone
+`crypt` remote (`boxcrypt`, names and bytes encrypted; NaCl secretbox with
+a scrypt-derived key), and the pgBackRest repository uses its own
+client-side cipher (`repo1-cipher-type=aes-256-cbc`). Three passphrases,
+all in the password manager under "FrameOS Cloud backup"; on the box in
+`/root/.config/rclone/rclone.conf` (obscured — `rclone reveal` shows them)
+and `/etc/pgbackrest/pgbackrest.conf`. Neither file is in any backup: a
+backup must not carry the key that opens it. Losing the password manager
+entry *and* the box loses every off-site copy; that is the trade, and it
+is why the entry exists. `pg-backup.sh` and `object-store-backup.sh`
+refuse a destination that is not a crypt remote.
+
 Two independent layers ship to the Hetzner Storage Box
 (`u651211.your-storagebox.de`, SFTP port 23, SSH-key auth):
 
@@ -47,7 +62,10 @@ Two independent layers ship to the Hetzner Storage Box
    and daily differential base backups. Recovery point: minutes; recovery
    window: ~4 weeks (`repo1-retention-full=4`). Repo config:
    `/etc/pgbackrest/pgbackrest.conf`, stanza `frameos`, repo path
-   `/home/pgbackrest` on the box. Timers:
+   `/home/pgbackrest-enc` on the box, encrypted with the repo cipher (the
+   pre-encryption repo at `/home/pgbackrest` is frozen — nothing writes to
+   it — and is deleted on 2026-10-03, once the encrypted repo has held a
+   full four-week window of its own). Timers:
    `frameos-cloud-pgbackrest-full.timer` (Sun 02:47 UTC) and
    `frameos-cloud-pgbackrest-diff.timer` (Mon–Sat 02:47 UTC), both running
    as `postgres`.
@@ -56,12 +74,17 @@ Two independent layers ship to the Hetzner Storage Box
    `cloud/ops/backup/pg-backup.sh`): a `pg_dump` custom-format dump
    (verified with `pg_restore --list` before upload) plus a tarball of
    everything on the host that is in neither the repo nor the database
-   (2026-08 audit): `/etc/frameos-cloud`, nginx, letsencrypt, postgres,
-   pgbackrest and ufw config, the systemd units, all of `/usr/local/bin`,
-   `/root` ops scripts and logs, the rclone/SSH backup credentials, the
-   release stamps, and a generated rebuild manifest (installed packages,
-   enabled units, tool versions). Shipped with rclone to
-   `storagebox:frameos-cloud-backups` and pruned after 30 days. The logical
+   (2026-08 audit): `/etc/frameos-cloud`, nginx, letsencrypt's renewal
+   configs and ACME account (not `live/`, `archive/` or `keys/` — TLS
+   private keys are reissued, not restored), postgres, pgbackrest and ufw
+   config, the systemd units, all of `/usr/local/bin`, `/root` ops scripts
+   and logs, the release stamps, and a generated rebuild manifest
+   (installed packages, enabled units, tool versions). Deliberately NOT in
+   it: `/root/.ssh`, `/root/.config/rclone` and `/var/lib/postgresql/.ssh`
+   — the Storage Box key and the crypt passphrases, which the laptop and
+   the password manager hold. Shipped with rclone to `boxcrypt:backups`
+   (on the box: `frameos-cloud-encrypted/…`, ciphertext names) and pruned
+   after 30 days. The logical
    dump is deliberately redundant with pgBackRest: it survives a pgBackRest
    repo bug, restores across Postgres major versions, and makes
    single-table recovery easy. It supersedes the older local-only
@@ -84,6 +107,15 @@ runbook).
   postgres-owned copy at `/var/lib/postgresql/.ssh/hetzner-storage.key`
   (pgBackRest `archive-push`/`backup` run as `postgres`). Local original:
   `~/.ssh/hetzner-storage.key` on the laptop.
+- Encryption passphrases (three): the rclone crypt `password` and
+  `password2` for `boxcrypt`, and pgBackRest's `repo1-cipher-pass`. Source
+  of truth is the password manager; the box holds working copies in
+  `/root/.config/rclone/rclone.conf` (obscured) and
+  `/etc/pgbackrest/pgbackrest.conf`. They are not in the host tarball. To
+  rotate: a new crypt remote (new folder, new passphrases), let 30 days of
+  nightly runs fill it, then delete the old folder; pgBackRest cannot
+  re-key a repo, so a rotation there is a new `repo1-path` + `stanza-create`
+  + a full backup, exactly how the move to encryption was done.
 - The key's public half must be registered on the Storage Box (Hetzner
   console → Storage Box → SSH keys). Host keys are pinned in each user's
   `known_hosts` (`ssh-keyscan -p 23`).
@@ -97,7 +129,8 @@ runbook).
 ssh <host> pgbackrest --stanza=frameos info          # base backups + WAL coverage
 ssh <host> systemctl list-timers 'frameos-cloud-*' --no-pager
 ssh <host> journalctl -u frameos-cloud-backup -n 50
-ssh <host> rclone lsl storagebox:frameos-cloud-backups
+ssh <host> rclone lsl boxcrypt:backups                # readable names, via the crypt layer
+ssh <host> rclone lsl storagebox:frameos-cloud-encrypted/backups   # what Hetzner sees
 ```
 
 `pgbackrest info` is the health check that matters for the live layer: the
@@ -146,7 +179,7 @@ Omit `--type=time --target=...` to restore to the latest archived WAL
 
 ```sh
 systemctl stop 'frameos-cloud-auth-web@*.service' frameos-cloud-frame-hub.service
-rclone copy storagebox:frameos-cloud-backups/db-<stamp>.dump /root/restore/
+rclone copy boxcrypt:backups/db-<stamp>.dump /root/restore/
 pg_restore --clean --if-exists --no-owner \
   -d "$DATABASE_URL" /root/restore/db-<stamp>.dump
 systemctl start "frameos-cloud-auth-web@$(cat /etc/frameos-cloud/active-port).service" frameos-cloud-frame-hub.service
@@ -159,18 +192,24 @@ throws away everything newer in every other table.
 ### Whole box (host dead or unreachable)
 
 1. Provision a fresh server ([deployment.md](deployment.md) — same OS,
-   Node 22, Postgres, nginx) and put the Storage Box key on it.
-2. Fetch the newest `host-<stamp>.tar.gz` from
-   `storagebox:frameos-cloud-backups` and unpack at `/`: restores all env
-   secrets, nginx/postgres/pgbackrest/ufw config, letsencrypt state, the
-   systemd units, `/usr/local/bin` scripts, and the backup credentials.
+   Node 22, Postgres, nginx). From the laptop / password manager, put on
+   it: the Storage Box key (`/root/.ssh/hetzner-storage.key`, plus a
+   postgres-owned copy, `known_hosts` via `ssh-keyscan -p 23`) and an
+   `rclone.conf` built from `ops/backup/rclone.conf.example` with the
+   `boxcrypt` passphrases. Nothing in the backups substitutes for this
+   step — that is the point of them being encrypted.
+2. Fetch the newest `host-<stamp>.tar.gz` from `boxcrypt:backups` and
+   unpack at `/`: restores all env secrets, nginx/postgres/pgbackrest/ufw
+   config, letsencrypt renewal state, the systemd units and the
+   `/usr/local/bin` scripts. Then `certbot certonly` (or `certbot renew
+   --force-renewal`) for the TLS keys, which the tarball no longer carries.
    Its `var/backups/frameos-cloud/manifest.txt` lists the packages and
    enabled units the old box had — the checklist for step 1.
-3. Restore the database: install pgbackrest, copy
-   `/etc/pgbackrest/pgbackrest.conf` from the host tarball's era or this
-   doc, then `pgbackrest --stanza=frameos restore` into an empty data
-   directory (or use the newest nightly dump as above if you prefer
-   logical).
+3. Restore the database: install pgbackrest; `/etc/pgbackrest/pgbackrest.conf`
+   comes out of the host tarball with the repo cipher passphrase in it (or
+   rebuild it from this doc plus the password manager), then
+   `pgbackrest --stanza=frameos restore` into an empty data directory (or
+   use the newest nightly dump as above if you prefer logical).
 4. Point `FRAMEOS_CLOUD_DEPLOY_HOST` at the new box and `pnpm deploy:prod`.
 5. Move DNS. Re-enable the backup timers so the new box backs itself up.
 
@@ -186,13 +225,20 @@ Quarterly, and after any change to the schema or the backup job:
 
 ```sh
 # From a machine that is NOT the prod box — this also proves the backups are
-# readable from somewhere other than the host that wrote them, which is the
-# case that matters when the host is the thing that died.
-sudo -u postgres ./restore-drill.sh --sftp --sftp-key ~/.ssh/hetzner-storage.key
+# readable (and decryptable) from somewhere other than the host that wrote
+# them, which is the case that matters when the host is the thing that died.
+# rclone.conf: ops/backup/rclone.conf.example with the Storage Box key and
+# the boxcrypt passphrases from the password manager filled in.
+sudo -u postgres RCLONE_CONFIG=/path/to/rclone.conf ./restore-drill.sh
 
-# On the prod box (rclone config lives under root, postgres has no copy):
-sudo -u postgres RCLONE_CONFIG=/root/.config/rclone/rclone.conf \
-  /usr/local/bin/frameos-cloud-restore-drill
+# On the prod box: root fetches through the crypt remote (the config lives
+# under /root), postgres restores. /root is 0700, so stage the dump where
+# postgres can read it.
+d="$(mktemp -d /tmp/restore-drill.XXXXXX)"; chmod 755 "$d"
+rclone copy "boxcrypt:backups/$(rclone lsf boxcrypt:backups --include 'db-*.dump' | sort | tail -1)" "$d"
+chmod 644 "$d"/db-*.dump
+sudo -u postgres /usr/local/bin/frameos-cloud-restore-drill --dump "$d"/db-*.dump
+rm -rf "$d"
 ```
 
 Row counts alone would pass on a dump whose `bytea` columns were truncated,
@@ -200,11 +246,12 @@ so the drill also sums `length(content)` over the blob tables — that forces
 Postgres to read every byte back out of restored TOAST storage — and asserts
 that an empty-but-valid restore fails rather than looking like a pass.
 
-That sum is **zero** now — the blob bytes live in the object store. Keep the
-check (it is what would catch a truncated dump if bytes ever came back), but
-read it for what it is: a green drill no longer says anything about whether the
-blobs are recoverable. That question belongs to the object store, and is not
-yet rehearsed.
+That sum is **zero** now — the blob bytes live in the object store, and the
+drill's assertion is that every scene image row has either bytes or an
+`object_key` (the first encrypted-backup drill on 2026-09-05 tripped the
+older "bytes are zero" form, a false alarm from before the move). A green
+drill says the rows and keys are back; whether the blobs behind the keys are
+recoverable is the object store's question, rehearsed separately below.
 
 ### Bucket lock: `store-lock`, prefix `store/`, 30 days (enabled 2026-08-17)
 
@@ -268,10 +315,10 @@ collect under `store/`, or the lock is no longer on.
 
 What a full recovery needs today, in order: restore Postgres (either path
 above), then restore the objects the rows point at — from R2 if it still has
-them, otherwise from `storagebox:frameos-cloud-objects`:
+them, otherwise from the encrypted copy (rclone decrypts on the way back):
 
 ```sh
-rclone copy storagebox:frameos-cloud-objects r2:frameos-cloud
+rclone copy boxcrypt:objects r2:frameos-cloud
 ```
 
 Copying the whole backup back is safe and is usually the right move: the store
@@ -335,8 +382,19 @@ consistent-but-stale database, which reads exactly like a partial restore.
   production secret**, and rotating keys per
   [operational-runbooks.md](operational-runbooks.md) does not retire the
   copies inside retained backups.
-- Everything is chmod 600/700 on-box and transported over SSH.
-- Optional hardening: wrap the rclone remote in an `rclone crypt` layer
-  and/or pgBackRest `repo1-cipher-type=aes-256-cbc` (client-side
-  encryption; the passphrase then becomes a secret you must keep OUTSIDE
-  the backups), or restrict the Storage Box to Hetzner-internal access.
+- Everything is chmod 600/700 on-box, transported over SSH, and — since
+  2026-09-05 — encrypted before it leaves the box (see the top of this
+  file): `boxcrypt` for the three rclone-shipped sets, the repo cipher for
+  pgBackRest. Hetzner holds ciphertext with ciphertext names. The
+  passphrases are the secret to keep OUTSIDE the backups; they are.
+- What the encryption does not cover: the Postgres data directory and the
+  env files on the box itself (that is the box's own disk, protected by
+  its SSH access), and the R2 bucket (Cloudflare-side encryption at rest
+  only; the objects are the store's published content plus per-account
+  previews).
+- Left over from before encryption, deliberately: the frozen plaintext
+  pgBackRest repo at `/home/pgbackrest` on the Storage Box — delete it
+  on **2026-10-03** (`rclone purge storagebox:pgbackrest`), by which time
+  the encrypted repo has a four-week window of its own. The old plaintext
+  nightly folders (`frameos-cloud-backups`, `frameos-cloud-objects`) were
+  removed the day the encrypted copies were verified.

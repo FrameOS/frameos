@@ -8,19 +8,29 @@ set -euo pipefail
 # live database — everything lands in a scratch database that is dropped
 # again at the end (--keep leaves it for poking around).
 #
+# The off-site copy is encrypted (rclone crypt), so fetching it needs an
+# rclone config with the [storagebox] remote AND the [boxcrypt] layer — the
+# Storage Box key plus the two crypt passphrases from the password manager.
+# There is no raw-SFTP shortcut any more: the names on the box are
+# ciphertext too.
+#
 # Where to run it:
 #
-#   On the prod box   sudo -u postgres RCLONE_CONFIG=/root/.config/rclone/rclone.conf \
-#                       /path/to/restore-drill.sh
-#                     (needs rclone's config; the postgres user has no copy)
+#   On the prod box   d=$(mktemp -d /tmp/restore-drill.XXXXXX); chmod 755 "$d"
+#                     rclone copy boxcrypt:backups/db-<stamp>.dump "$d"; chmod 644 "$d"/*
+#                     sudo -u postgres /usr/local/bin/frameos-cloud-restore-drill \
+#                       --dump "$d"/db-<stamp>.dump
+#                     (root fetches — the crypt config lives under /root — and
+#                     postgres restores from a directory it can read)
 #
-#   Off-box, e.g. a   sudo -u postgres ./restore-drill.sh --sftp \
-#   throwaway VM        --sftp-key /path/to/hetzner-storage.key
-#                     Fetches over SFTP so no rclone config is required. Use
-#                     this shape for the quarterly drill: it also proves the
-#                     backups are readable from somewhere that is not the box
-#                     that wrote them, which is the case that matters when
-#                     the box is the thing that died.
+#   Off-box, e.g. a   sudo -u postgres RCLONE_CONFIG=/path/to/rclone.conf \
+#   throwaway VM        ./restore-drill.sh
+#                     rclone.conf built from ops/backup/rclone.conf.example
+#                     with the key and passphrases filled in. Use this shape
+#                     for the quarterly drill: it also proves the backups are
+#                     readable (and decryptable) from somewhere that is not
+#                     the box that wrote them, which is the case that matters
+#                     when the box is the thing that died.
 #
 #   Against a file    ./restore-drill.sh --dump /var/backups/frameos-cloud/db-<stamp>.dump
 #
@@ -29,18 +39,14 @@ set -euo pipefail
 # procedure live in cloud/docs/backups.md.
 
 scratch_db="${DRILL_DATABASE:-frameos_cloud_restore_test}"
-rclone_remote="${RCLONE_REMOTE:-storagebox:frameos-cloud-backups}"
-sftp_host="${STORAGE_BOX_SFTP:-u651211@u651211.your-storagebox.de}"
-sftp_port="${STORAGE_BOX_SFTP_PORT:-23}"
-sftp_path="${STORAGE_BOX_SFTP_PATH:-frameos-cloud-backups}"
-sftp_key="${STORAGE_BOX_SSH_KEY:-}"
+rclone_remote="${RCLONE_REMOTE:-boxcrypt:backups}"
 dump_file=""
 fetch_mode="rclone"
 keep=false
 work_dir=""
 
 usage() {
-  sed -n '4,32p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '4,39p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -48,8 +54,6 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dump) dump_file="${2:?--dump needs a path}"; fetch_mode="file"; shift 2 ;;
     --remote) rclone_remote="${2:?--remote needs an rclone remote}"; shift 2 ;;
-    --sftp) fetch_mode="sftp"; shift ;;
-    --sftp-key) sftp_key="${2:?--sftp-key needs a path}"; fetch_mode="sftp"; shift 2 ;;
     --database) scratch_db="${2:?--database needs a name}"; shift 2 ;;
     --keep) keep=true; shift ;;
     -h | --help) usage 0 ;;
@@ -91,7 +95,12 @@ case "$fetch_mode" in
     ;;
   rclone)
     command -v rclone >/dev/null || {
-      echo "rclone not found — pass --dump FILE or use --sftp" >&2
+      echo "rclone not found — install it, or pass --dump FILE" >&2
+      exit 2
+    }
+    rclone listremotes 2>/dev/null | grep -qx "${rclone_remote%%:*}:" || {
+      echo "rclone remote '${rclone_remote%%:*}' is not configured (RCLONE_CONFIG=$(rclone config file 2>/dev/null | tail -1))" >&2
+      echo "the off-site copy is encrypted: the config needs the [storagebox] and [boxcrypt] sections from ops/backup/rclone.conf.example" >&2
       exit 2
     }
     work_dir="$(mktemp -d)"
@@ -99,23 +108,6 @@ case "$fetch_mode" in
     [ -n "$newest" ] || { echo "no db-*.dump found in $rclone_remote" >&2; exit 2; }
     echo "-- fetching $newest from $rclone_remote"
     rclone copy "$rclone_remote/$newest" "$work_dir"
-    dump_file="$work_dir/$newest"
-    ;;
-  sftp)
-    work_dir="$(mktemp -d)"
-    sftp_opts=(-q -P "$sftp_port" -o BatchMode=yes)
-    [ -n "$sftp_key" ] && sftp_opts+=(-i "$sftp_key")
-    # sftp echoes each command back as "sftp> ls -1 …" before its output, so
-    # the echoed glob would otherwise be picked up as a filename.
-    newest="$(
-      printf 'cd %s\nls -1 db-*.dump\n' "$sftp_path" |
-        sftp "${sftp_opts[@]}" "$sftp_host" 2>/dev/null |
-        grep -v '^sftp>' | tr -d '\r' | sed 's#.*/##' |
-        grep '^db-.*\.dump$' | sort | tail -1
-    )"
-    [ -n "$newest" ] || { echo "no db-*.dump found on $sftp_host:$sftp_path" >&2; exit 2; }
-    echo "-- fetching $newest over sftp from $sftp_host"
-    sftp "${sftp_opts[@]}" "$sftp_host:$sftp_path/$newest" "$work_dir/" >/dev/null
     dump_file="$work_dir/$newest"
     ;;
 esac
@@ -156,7 +148,10 @@ echo "-- pg_restore exit=$restore_status errors=$restore_errors"
 
 # Row counts alone would pass on a dump whose bytea columns were truncated,
 # so the blob tables are summed by length(): that forces Postgres to read
-# every byte back out of the restored TOAST storage.
+# every byte back out of the restored TOAST storage. Those sums are zero
+# since the bytes moved to the object store (migration 0032); the object
+# keys next to them are what a restore now depends on, and the assertion
+# below checks each row has one or the other.
 echo "-- contents"
 psql -d "$scratch_db" -v ON_ERROR_STOP=1 --pset=pager=off <<'SQL'
 SELECT 'accounts' AS table, count(*) AS rows FROM accounts
@@ -199,9 +194,12 @@ FROM (
   UNION ALL
   SELECT 'no migrations recorded' WHERE (SELECT count(*) FROM schema_migrations) = 0
   UNION ALL
-  SELECT 'scene image bytes are null/zero despite scene image rows'
-    WHERE (SELECT count(*) FROM store_scene_images) > 0
-      AND (SELECT coalesce(sum(length(content)), 0) FROM store_scene_images) = 0
+  -- Since migration 0032 the bytes live in the object store and a row
+  -- carries an object_key instead of content; a row with neither is a
+  -- truncated dump (or a bug), so that is what the assertion looks for.
+  SELECT 'scene image rows with neither content nor an object key'
+    WHERE (SELECT count(*) FROM store_scene_images
+           WHERE object_key IS NULL AND coalesce(length(content), 0) = 0) > 0
   UNION ALL
   -- A dump taken while the app was mid-write would still restore; a dump
   -- taken from the wrong (empty/dev) database would not have real history.
