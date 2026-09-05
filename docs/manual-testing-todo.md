@@ -741,8 +741,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   resets the chip (DTR/RTS auto-reset circuit), so open once with DTR/RTS
   low and keep the port open while waiting for the prompt.
 
-- [ ] **E1004 Weather hourly chart at full size (ac99f449, needs the next
-  release):** on 2026.9.7 the hourly panel — a JS-app SVG in the lower
+- [x] **E1004 Weather hourly chart at full size (ac99f449 + pixie#7 / 4120fc4d, shipped in 2026.9.8):** verified 2026-09-05 02:36 UTC — E1004 took 9.8 on its 02:04 wake; a debug-mode render at 02:36 shows both `render/image` nodes with `fusion: {applied: true, claimed: true, tier: liveCanvas, fit: center}` and the hourly `weatherPanel` (node 15) returning a **1200×960** image (`valueBytes 2304000`, the 565 cell view) instead of the 286×229 standalone raster; the panel capture shows the chart filling the lower cell, no `render:degraded` line (the cell was painted directly, no rung needed). Caveat: the very first render after the OTA reboot (02:06, freePsram 2.06 MB) still showed the small chart in the cloud capture — either the capture raced the refresh or the tighter post-boot headroom refused both rungs silently; the 02:21 and 02:36 renders are full size, so watch one more cold boot before calling that closed. Original text: on 2026.9.7 the hourly panel — a JS-app SVG in the lower
   `render/split` cell — rendered at 286×229 centred in a 1200×960 cell of
   black (user report 2026-09-05; the browser preview never showed it). Cause:
   since 8f8ea8ef / 2026.9.0 the SVG size went through
@@ -859,6 +858,25 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   sync now runs on that branch too. Also noted: Cloud-5 shows `in_sync:
   false` because it has no `/dev/fb0` (no HDMI cable), reports
   `scenes_checksum: ""` and sits on `system/index` — bench quirk, not 9.7.
+- [x] **Release 2026.9.8 (2026-09-05, run 33936898925, dispatched after the
+  a9288f82 CI set was green):** every job green (25/25); 75 assets; runtime in
+  the bookworm-amd64 archive stamped `2026.9.8+411cae43` = `versions.json`;
+  `frameos-wasm@2026.9.8` on npm; Discord posted; the `workflow_run` Cloud CI
+  deploy landed prod on `56a93c5f` at 02:06 UTC; the cloud offered the
+  release within a minute. Rollout by hand at 02:02 UTC: uus2w (door,
+  `install-release ok in 31.50s`), Cloud-5 (door, 11.00 s), Cloud-W (root),
+  Wood7.3, SuurESP at once; E1004 on its 02:04 wake, E1002 on its 02:41 wake.
+  **Hub half of the door-upgrade fix verified:** both door frames reconnected
+  with `pendingCommands: 0`, no `command.redelivering`, and neither ran a
+  second `upgrade --yes`. The device half (50fcbcc2, the un-blocked cloud
+  thread) cannot show on this OTA — the 9.7 binary ran it, so uus2w still
+  produced one `device.heartbeat_timeout` 52 s after the nudge; verify at the
+  9.8 → next OTA: a `"status":"scheduled"` line within a second of
+  `cloud:updateAvailable`, no heartbeat timeout. **`/etc/timezone`:** Cloud-5
+  now reads Europe/Brussels (set by the 9.7 fallback branch); uus2w still
+  `Etc/UTC` — `setupTimezone` returned at "already Europe/Brussels" before the
+  sync ran. Fixed on main the same night (the early return syncs too;
+  `test_setup` pins it) — commit pending a Secretive signing approval.
 
 ## Not on the list, deliberately
 
