@@ -816,6 +816,34 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   `frameos upgrade --yes` at 01:20:28 and answered `up_to_date` at 01:20:34.
   `notify_update_available` now joins reboot/restart_runtime in
   `redeliverSentCommands` — written to a socket once, never requeued.
+  **Rollout 2026-09-05 00:44-01:03 UTC (all by hand from the MCP; the ESP32
+  periodic check is 24 h — `fos_ota_start_periodic_task` default — so 9.5's
+  9-minute pickup was the tick landing by luck):** Cloud-W (armv6, root,
+  `systemd-run`) 9.6 → 9.7 in 97 s with exactly one `updateAvailable` /
+  `scheduled`; Cloud-5 (Pi 5, door) `install-release ok in 13.65s`, drivers
+  loaded, `User=frameos`; Wood7.3 and SuurESP acked within a second and
+  came back on 9.7; E1004 took it on its 00:01 wake; E1002 queued for its
+  00:41 wake. **Three findings, all fixed on main the same night:** (1) the
+  hub fix above had NOT reached production — Cloud CI for `2a17e13d` stood
+  down because a docs-only commit (`0c64d38f`) moved main, and a docs-only
+  tip gets no run of its own, so prod stayed on `fb6f501f`; the freshness
+  step now ships the tip when the commits in between touch none of the
+  workflow's inputs. (2) The reason the door frames ever saw a second nudge:
+  on the door path `scheduleFrameOSUpgrade` ran `sh -c 'nohup … &'` through
+  the *captured* runner, the backgrounded child inherited the runner's stdout
+  pipe, and `runProcessPiped` waited for an EOF that only came with the
+  restart — the cloud session thread sat there for the whole upgrade (Cloud-5:
+  `> sh -c nohup` at 01:52:25.755, no `scheduled` line ever, restart at
+  :53; uus2w: `device.heartbeat_timeout` on the hub 36 s after the nudge),
+  so the ack never went out and the hub redelivered on reconnect. Root
+  frames never had it (`systemd-run` inherits nothing). Now
+  `runSetupCommandDetached` (parent streams, `</dev/null`), with a
+  `test_upgrade` case that fails at 20 s on the old code. (3) On Cloud-5's
+  root setup `timedatectl set-timezone` failed with `Read-only file system`
+  and the `ln -sfn` fallback set the zone — handled, and the `/etc/timezone`
+  sync now runs on that branch too. Also noted: Cloud-5 shows `in_sync:
+  false` because it has no `/dev/fb0` (no HDMI cable), reports
+  `scenes_checksum: ""` and sits on `system/index` — bench quirk, not 9.7.
 
 ## Not on the list, deliberately
 
