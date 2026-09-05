@@ -13,6 +13,7 @@ import {
   validateFrameSettings,
 } from '../../../../../src/lib/frames'
 import { rateLimitResponse } from '../../../../../src/lib/rate-limit'
+import { cloudRenderedMinIntervalSeconds, hardwareIsCloudRendered } from '../../../../../src/lib/usage'
 import { readSession } from '../../../../../src/lib/session'
 
 export const runtime = 'nodejs'
@@ -77,6 +78,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // (and so a push toward an offline device is not lost from the UI). The
   // name lands in frames.name, everything else in frames.settings, merged
   // onto what was there so a one-key push does not blank the rest.
+  // §0.2 (cloud/docs/accounting-todo.md): a frame the cloud renders for is
+  // entitled as N frames AND a refresh floor, because renders per day is the
+  // cost. The plan sells "N frames"; this is where the other half bites.
+  if (
+    typeof settings.interval === 'number' &&
+    hardwareIsCloudRendered(frame.hardware) &&
+    settings.interval < cloudRenderedMinIntervalSeconds
+  ) {
+    return jsonError('interval_below_plan_floor', 400, { min_interval: cloudRenderedMinIntervalSeconds })
+  }
+
   const mergedSettings = mergeFrameSettings(frame.settings, settings)
   if (typeof settings.name === 'string' || mergedSettings) {
     await db

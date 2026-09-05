@@ -178,7 +178,7 @@ static int cmd_status(int argc, char **argv)
      * when the deny is on, a scene calling a local API fails with a message
      * that looks like a network fault, and this is where that gets explained. */
     printf("net_policy:  scene HTTP to private addresses %s%s\n",
-           fos_netguard_policy_active() ? "BLOCKED (cloud-managed)" : "allowed",
+           fos_netguard_policy_active() ? "BLOCKED (cloud-managed or store-origin scenes)" : "allowed",
            config->allow_local_network ? " [allow_local_network=1]" : "");
     printf("hostname:    %s\n", config->hostname[0] ? config->hostname : "(unset)");
     printf("https:       %s port=%u cert=%s key=%s server=%s\n",
@@ -1045,6 +1045,15 @@ static esp_err_t ota_request_for_control_plane(const char **plane_out)
 static int cmd_ota(int argc, char **argv)
 {
     const char *plane = "backend";
+    if (argc > 1 && strcmp(argv[1], "downgrade") == 0) {
+        /* The one way past the downgrade refusal in fos_ota.c: a person at
+         * the console asking for it. Armed for a single manifest fetch. */
+        fos_ota_allow_downgrade_once();
+        printf("ota: an older release offered by the control plane will be installed this once\n");
+    } else if (argc > 1) {
+        printf("usage: ota [downgrade]\n");
+        return 1;
+    }
     esp_err_t err = ota_request_for_control_plane(&plane);
     /* CONFIG_ESP_ERR_TO_NAME_LOOKUP is off (flash budget), so every code —
      * ESP_OK included — would print as "UNKNOWN ERROR" here. */
@@ -1688,7 +1697,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "event", .help = "event <name> [json] — send a scene event by hand (e.g. event button {\"label\":\"A\"})", .func = cmd_event},
         {.command = "display_test", .help = "display_test [bands|black|white|red|green|blue|yellow] — draw direct panel test", .func = cmd_display_test},
         {.command = "sd", .help = "sd [status|remount|format] — SD assets card; format ERASES an unreadable card and is never automatic", .func = cmd_sd},
-        {.command = "ota", .help = "Check for OTA update now", .func = cmd_ota},
+        {.command = "ota", .help = "ota [downgrade] — check for an OTA update now; `downgrade` lets the next offer be an older release", .func = cmd_ota},
         {.command = "scenes", .help = "Show loaded scenes + sync from backend", .func = cmd_scenes},
         {.command = "scene_state", .help = "Show current interpreted scene state JSON", .func = cmd_scene_state},
         {.command = "scene", .help = "scene <id> — select a loaded scene and render", .func = cmd_scene},

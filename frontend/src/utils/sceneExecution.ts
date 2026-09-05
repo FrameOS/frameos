@@ -18,7 +18,11 @@ export function sceneExecutionForFrame(
   if (frameRunsScenesInterpreted(mode)) {
     return 'interpreted'
   }
-  return scene?.settings?.execution ?? 'interpreted'
+  // Through normalizeSceneExecution, not the raw stored value: an unknown
+  // stamp ("banana") must read as interpreted here exactly as
+  // scene_execution does on the backend, or this plane would compile a scene
+  // the other one interprets (docs/scene-execution-fixtures.json pins it).
+  return normalizeSceneExecution(scene)
 }
 
 export function sceneIsCompiledForFrame(

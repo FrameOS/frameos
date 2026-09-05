@@ -26,7 +26,7 @@ import {
   isValidEd25519PublicKey,
   redeemClaimToken,
 } from "../../../../src/lib/frames";
-import { accountLimits } from "../../../../src/lib/usage";
+import { accountLimits, countCloudRenderedFramesForAccount, hardwareIsCloudRendered } from "../../../../src/lib/usage";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken, hashSecret } from "../../../../src/lib/secrets";
 import { reportError } from "../../../../src/lib/log";
@@ -192,6 +192,31 @@ class QuotaExceededError extends Error {
   }
 }
 
+// §0.2 (cloud/docs/accounting-todo.md): a board the cloud would have to
+// render for — no PSRAM, no on-device renderer — enrolls only against the
+// plan's cloud_rendered_frames entitlement, which is zero on the free tier.
+// Checked at frame creation, on both enrollment flows, inside the same
+// transaction as the frame quota so N concurrent thin clients cannot all pass.
+class CloudRenderedQuotaExceededError extends Error {
+  constructor(readonly maxCloudRenderedFrames: number) {
+    super("cloud_rendered_frame_quota_exceeded");
+  }
+}
+
+async function assertCloudRenderedQuota(
+  db: Parameters<typeof accountLimits>[0],
+  accountId: string,
+  hardware: Record<string, unknown> | null,
+  limits: Awaited<ReturnType<typeof accountLimits>>,
+): Promise<void> {
+  if (!hardwareIsCloudRendered(hardware)) {
+    return;
+  }
+  if ((await countCloudRenderedFramesForAccount(db, accountId)) >= limits.cloudRenderedFrames) {
+    throw new CloudRenderedQuotaExceededError(limits.cloudRenderedFrames);
+  }
+}
+
 async function enrollWithClaimToken(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
   wsUrl: string | undefined,
@@ -252,10 +277,12 @@ async function enrollWithClaimToken(
       // The plan's frame allowance, not the deployment constant: every
       // quota reads from accountLimits so the display and the refusal
       // cannot disagree (§9.2 item 16).
-      const maxFrames = (await accountLimits(tx, token.accountId)).frames;
+      const limits = await accountLimits(tx, token.accountId);
+      const maxFrames = limits.frames;
       if ((await countFramesForAccount(tx, token.accountId)) >= maxFrames) {
         throw new QuotaExceededError(maxFrames);
       }
+      await assertCloudRenderedQuota(tx, token.accountId, input.hardware, limits);
 
       // The claim token's name outranks the device's: the owner typed it at
       // mint time (the ESP32 flasher's "Frame name" field), while the
@@ -331,6 +358,11 @@ async function enrollWithClaimToken(
     if (error instanceof QuotaExceededError) {
       return jsonError("frame_quota_exceeded", 403, {
         max_frames: error.maxFrames,
+      });
+    }
+    if (error instanceof CloudRenderedQuotaExceededError) {
+      return jsonError("cloud_rendered_frame_quota_exceeded", 403, {
+        max_cloud_rendered_frames: error.maxCloudRenderedFrames,
       });
     }
     throw error;
@@ -671,11 +703,22 @@ async function enrollLinkedFrame(
     });
   }
 
-  const maxFrames = (await accountLimits(db, linkedClient.accountId)).frames;
+  const limits = await accountLimits(db, linkedClient.accountId);
+  const maxFrames = limits.frames;
   if ((await countFramesForAccount(db, linkedClient.accountId)) >= maxFrames) {
     return jsonError("frame_quota_exceeded", 403, {
       max_frames: maxFrames,
     });
+  }
+  try {
+    await assertCloudRenderedQuota(db, linkedClient.accountId, input.hardware, limits);
+  } catch (error) {
+    if (error instanceof CloudRenderedQuotaExceededError) {
+      return jsonError("cloud_rendered_frame_quota_exceeded", 403, {
+        max_cloud_rendered_frames: error.maxCloudRenderedFrames,
+      });
+    }
+    throw error;
   }
 
   // The device-flow consent screen already proved ownership → born active.

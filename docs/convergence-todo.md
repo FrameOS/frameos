@@ -113,10 +113,17 @@ proxy), and the money question is answered in
 entitlement, N frames *and* a minimum refresh interval (proposal 5 min),
 none on the free tier. What is left is code:
 
-- [ ] Enforce the entitlement: a count check at frame creation plus the
-  refresh-interval floor (the plan row already carries the number,
-  enforced nowhere). Until it exists, C3 boards stay out of the cloud
-  flasher — decide, don't drift.
+- [x] Enforce the entitlement — shipped 2026-09-06: both enrollment flows
+  count a board with no on-device renderer (`hardware.platform`
+  `esp32-c3*` / `pico*`, or `localRenderSupported: false`) against the
+  plan's `cloud_rendered_frames` inside the frame-quota transaction
+  (`403 cloud_rendered_frame_quota_exceeded`, claim-token budget
+  untouched), and the settings push holds such a frame to
+  `FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS` (300 s;
+  `400 interval_below_plan_floor`). `/api/account/usage` reports the pool.
+  C3 boards can go back into the cloud flasher once the hub actually
+  renders for them — the entitlement no longer blocks that, the missing
+  renderer does.
 - [ ] Then: the capability line is data, not per-board fights. New boards
   declare PSRAM and get a renderer assigned; the fat path stops being
   re-earned 8 MB board by 8 MB board.
@@ -161,12 +168,13 @@ The cloud-frames contract works (20 verbs on both device planes, one
 generated table, shared fixtures, three thin validators). The same rule
 is *not* pinned elsewhere it already matters:
 
-- [ ] The scene-execution rule (`scene_requires_compilation` /
-  `sceneRequiresCompilation` / cloud `compiledSceneNames`, plus
-  `frame_compilation_mode` and its TS mirror): one fixture file of
-  scenes/frames with expected outcomes, run by pytest, the frontend tests
-  and the cloud tests — the `cloud-frames-fixtures.json` pattern applied
-  to this rule, so drift is a test failure, not a bug report.
+- [x] The scene-execution rule — `docs/scene-execution-fixtures.json`
+  (2026-09-06), run by `backend/app/utils/tests/test_scene_execution_fixtures.py`
+  and `cloud/apps/auth-web/src/test/shared-spa/scene-execution-fixtures.test.ts`
+  (the shared SPA, the converter package and the cloud store's refusal
+  list in one runner). Its first run found a drift: the SPA read an
+  unknown `settings.execution` stamp as compiled while the backend read
+  it as interpreted. New cases go in the JSON first.
 - [ ] The 8-both / 8-linux / 7-esp32 settings-key split is the measured
   parity gap between the device planes. Each key that goes
   both-planes deletes a row; no new key ships single-plane without a

@@ -270,6 +270,12 @@ var
   # uploads. Trust-boundary metadata, not the template-provenance
   # `scene.origin` the editor writes.
   uploadedScenesSource {.guard: uploadedScenePayloadLock.} = ""
+  # Whether any resident uploaded scene carries a store provenance stamp
+  # (`origin.storeSceneId`, written by the cloud when a store scene is read,
+  # never by the editor for a scene the owner wrote). A store scene is
+  # anyone's code however it arrived — cloud push, backend deploy, local
+  # upload — so the LAN deny keys on this as well as on the source.
+  uploadedScenesStoreOrigin {.guard: uploadedScenePayloadLock.} = false
   uploadedStateCleanupRan = false
 
 # Lets the cloud module recompute the LAN-deny policy when the uploaded scene
@@ -284,6 +290,36 @@ proc setUploadedScenePayload*(payload: string) =
 proc setUploadedScenesSource(source: string) =
   withLock uploadedScenePayloadLock:
     uploadedScenesSource = source
+
+proc scenePayloadHasStoreOrigin*(scenePayload: JsonNode): bool =
+  ## True when any scene in the array carries `origin.storeSceneId`.
+  if scenePayload == nil or scenePayload.kind != JArray:
+    return false
+  for scene in scenePayload:
+    if scene == nil or scene.kind != JObject:
+      continue
+    # `{}` yields nil for a missing key, and `.kind` on nil is a crash.
+    let origin = scene{"origin"}
+    if origin == nil or origin.kind != JObject:
+      continue
+    let storeSceneId = origin{"storeSceneId"}
+    if storeSceneId != nil and storeSceneId.kind == JString and storeSceneId.getStr("").len > 0:
+      return true
+  false
+
+proc setUploadedScenesStoreOrigin(storeOrigin: bool) =
+  withLock uploadedScenePayloadLock:
+    uploadedScenesStoreOrigin = storeOrigin
+
+proc storeOriginScenesResident*(): bool =
+  ## True while any resident uploaded scene came from the scene store, on any
+  ## control plane. hub_client.refreshLocalNetworkPolicy arms the
+  ## private-network deny on this too — provenance, not transport.
+  {.gcsafe.}:
+    var storeOrigin = false
+    withLock uploadedScenePayloadLock:
+      storeOrigin = uploadedScenesStoreOrigin
+    storeOrigin
 
 proc cloudUploadedScenesResident*(): bool =
   ## True while the resident uploaded scene set was pushed by a cloud
@@ -453,6 +489,7 @@ proc updateUploadedScenesFromPayload*(
   updateUploadedScenes(newScenes)
   setUploadedScenePayload(payloadString)
   setUploadedScenesSource(payloadSource)
+  setUploadedScenesStoreOrigin(scenePayloadHasStoreOrigin(scenePayload))
   # The LAN-deny policy keys on the recorded origin; recompute it now rather
   # than on the next hub tick (the hub thread idles on a demoted frame).
   if not uploadedScenesChangedHook.isNil:

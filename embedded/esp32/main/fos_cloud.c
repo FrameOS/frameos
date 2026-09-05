@@ -497,12 +497,18 @@ static void netguard_exempt_provider_url(const char *url, bool ws)
 static void apply_network_policy(void)
 {
     /* 0 = deny off, 1 = deny on (enrolled), 2 = deny on (demoted but still
-     * rendering cloud scenes), -1 = nothing logged yet. */
+     * rendering cloud scenes), 3 = deny on (a store-origin scene is resident
+     * on a frame that is not cloud-managed), -1 = nothing logged yet. */
     static int logged_state = -1;
     const fos_config_t *config = fos_config();
     const bool managed = (s_state == FOS_CLOUD_ENROLLED);
     const bool cloud_scenes = fos_scenes_from_cloud();
-    const bool active = (managed || cloud_scenes) && !config->allow_local_network;
+    /* Provenance, not transport: a scene from the public store is anyone's
+     * code whether the cloud pushed it, a self-hosted backend deployed it or
+     * someone uploaded it over USB — so it gets the same LAN deny on a
+     * backend-managed or standalone frame (docs/security-todo.md). */
+    const bool store_scenes = fos_scenes_store_origin_resident();
+    const bool active = (managed || cloud_scenes || store_scenes) && !config->allow_local_network;
 
     fos_netguard_clear_exempt();
     if (active && managed) {
@@ -512,13 +518,18 @@ static void apply_network_policy(void)
          * override (a dev frame hub on its own port) count as "the provider". */
         netguard_exempt_provider_url(config->cloud_url, false);
         netguard_exempt_provider_url(s_ws_url, true);
+    } else if (active && store_scenes && !cloud_scenes && config->backend_url[0]) {
+        /* Backend-managed frame running a store scene: the backend it belongs
+         * to is on the LAN by design and stays reachable (scene images, the
+         * frame's own API); everything else private is denied. */
+        netguard_exempt_provider_url(config->backend_url, false);
     }
     /* Not enrolled but still holding cloud scenes: the link (and its URLs)
      * are gone, so there is no provider host to exempt — exempts stay clear
      * and the deny covers everything private. */
     fos_netguard_set_policy(active);
 
-    const int state = active ? (managed ? 1 : 2) : 0;
+    const int state = active ? (managed ? 1 : (cloud_scenes ? 2 : 3)) : 0;
     if (state != logged_state) {
         logged_state = state;
         if (state == 1) {
@@ -532,6 +543,10 @@ static void apply_network_policy(void)
                           "frame is no longer cloud-managed but the resident scenes "
                           "were pushed by the provider; upload scenes locally, sync "
                           "from a backend, or `set allow_local_network 1` to lift");
+        } else if (state == 3) {
+            ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is blocked: the "
+                          "resident scene comes from the scene store (origin.storeSceneId); "
+                          "`set allow_local_network 1` to lift");
         } else if (managed) {
             ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is ALLOWED on this "
                           "cloud-managed frame (allow_local_network=1)");

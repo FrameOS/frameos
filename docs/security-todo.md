@@ -38,10 +38,15 @@ medium / low list below.
 
 ### Self-hosted backend
 
-- **`curl | sudo sh` bootstrap defaults to `http://` and downloads
-  `frameos-*.tar.gz` unverified**; the precompiled SD image and Remote
-  binary are likewise unverified server-side (the Buildroot base image is
-  sha256-checked). Publish and verify checksums; warn on plain HTTP.
+- The precompiled SD image and Remote binary are unverified server-side
+  (the Buildroot base image is sha256-checked). The `curl | sudo sh`
+  bootstrap is closed (2026-09-06): the script downloads the archive's
+  `.minisig` and verifies minisign's prehashed Ed25519 signature with
+  openssl against the release key before `tar -xzf`
+  (`backend/app/utils/release_signing.py`, pinned to `ota_pubkey.nim`), and
+  the API answers `plain_http` + a warning the drawer shows when the
+  script URL is `http://` (the key and Remote secret cross the LAN in
+  clear, once).
 - Smaller: cross-project leak via the first-loaded project's MQTT broker in
   `ha/sync.py`; `replayEnrollment`-style sync pulls `mode` / `agent` /
   `frame_admin_auth` / `https_proxy.server_key` from the device; `?token=`
@@ -64,15 +69,19 @@ medium / low list below.
   are gone. A self-hosted backend reached over plain http still carries the
   bearer in clear on every request, OTA included; that is the http-backend
   problem, not an OTA one.)
-- **OTA has no downgrade protection** on either control plane (only "same
-  version → skip"; `version` is outside the signed payload). Sign
-  `version || image` and refuse `≤ running` unless forced, or enable app
-  anti-rollback.
-- **Scene JS on a backend-managed frame has unrestricted LAN egress**
-  (`netguard` is armed only when cloud-managed) and holds whatever keys it
-  declared. Apply the private-network deny to store-origin scenes on
-  backend-managed frames too; bound total render wall time including native
-  HTTP calls (the 20 s interpreter budget pauses during them).
+- **Scene JS on a backend-managed frame holds whatever keys it declared**;
+  bound total render wall time including native HTTP calls (the 20 s
+  interpreter budget pauses during them). The LAN-egress half is closed
+  (2026-09-06): both runtimes arm the private-network deny when the
+  resident scene carries `origin.storeSceneId`, whoever installed it
+  (`storeOriginScenesResident` / `fos_scenes_store_origin_resident`), with
+  the frame's own backend host exempted; `allowLocalNetworkAccess` still
+  lifts it. Also closed: ESP32 OTA now refuses an offered version below the
+  running one on both planes (`fos_version.c`, `ota:… downgrade-refused`)
+  unless the console arms `ota downgrade` for one fetch — the manifest's
+  `version` stays outside the signed payload, so this is device-side
+  policy, not a signature; signing `version || image` remains the fuller
+  fix. The Pi door already refused downgrades.
 - Smaller ESP32: netguard exemptions are by hostname and a provider can
   point `ws_url` at a LAN address; `esp_http_client` still auto-follows
   redirects during the OTA download, so a first-party 302 carries the

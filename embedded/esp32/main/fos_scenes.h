@@ -49,6 +49,10 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
  * store whose index has no "source" key. */
 fos_scenes_source_t fos_scenes_source(void);
 bool fos_scenes_from_cloud(void);
+/* True while the resident scene (or payload) carries a store provenance stamp
+ * (`origin.storeSceneId`): scene code from the public store, whoever pushed it.
+ * fos_cloud.c arms the private-network deny on this as well as on the source. */
+bool fos_scenes_store_origin_resident(void);
 
 /* Last storage/sync error detail, suitable for HTTP/USB responses. */
 const char *fos_scenes_last_error(void);

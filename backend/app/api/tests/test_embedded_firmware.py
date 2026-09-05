@@ -65,7 +65,7 @@ async def test_new_embedded_frame(async_client):
     assert frame['https_proxy']['enable'] is True
     assert frame['https_proxy']['port'] == 8443
     assert 'BEGIN CERTIFICATE' in frame['https_proxy']['certs']['server']
-    assert 'BEGIN RSA PRIVATE KEY' in frame['https_proxy']['certs']['server_key']
+    assert 'BEGIN EC PRIVATE KEY' in frame['https_proxy']['certs']['server_key']
     assert 'BEGIN CERTIFICATE' in frame['https_proxy']['certs']['client_ca']
     assert frame['max_http_response_bytes'] == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame['device_config']['pins']['cs'] == 3
@@ -133,7 +133,7 @@ async def test_update_frame_to_embedded_applies_defaults(async_client, db):
     assert stored.https_proxy['enable'] is True
     assert stored.https_proxy['port'] == 8443
     assert 'BEGIN CERTIFICATE' in stored.https_proxy['certs']['server']
-    assert 'BEGIN RSA PRIVATE KEY' in stored.https_proxy['certs']['server_key']
+    assert 'BEGIN EC PRIVATE KEY' in stored.https_proxy['certs']['server_key']
     assert stored.log_to_file is None
     assert stored.network['wifiSSID'] == 'Test WiFi'
     assert stored.network['wifiPassword'] == 'secret1234'
