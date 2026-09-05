@@ -1045,12 +1045,14 @@ describe("frame re-enrollment (frame-bound claim tokens)", () => {
       max_uses: number;
     };
     // Echoed back so the flasher knows which row it is provisioning, and
-    // deliberately short-lived and single-use.
+    // single-use. The lifetime follows ttl_days like any other code (the
+    // default here: a day, not the one hour that left SD images dead by the
+    // time the card was in the Pi).
     expect(minted.frame_id).toBe(frame.frame_id);
     expect(minted.max_uses).toBe(1);
-    expect(Date.parse(minted.expires_at) - Date.now()).toBeLessThanOrEqual(
-      60 * 60 * 1000,
-    );
+    const boundLifetimeMs = Date.parse(minted.expires_at) - Date.now();
+    expect(boundLifetimeMs).toBeGreaterThan(60 * 60 * 1000);
+    expect(boundLifetimeMs).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
 
     // The board comes back with a NEW keypair, as it would after a reset.
     const replacement = deviceKeypair();
