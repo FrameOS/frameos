@@ -59,6 +59,20 @@ proc runSetupCommand*(command: string, raiseOnError = true): SetupCommandResult 
   if raiseOnError and result.exitCode != 0:
     raise newException(OSError, "Command failed with exit code " & $result.exitCode & ": " & command)
 
+proc runSetupCommandDetached*(command: string) =
+  ## For a command that backgrounds a long-lived child (`nohup … &`). The
+  ## captured runner cannot be used for that: the child inherits the write
+  ## end of the runner's stdout pipe, so runSetupCommand waits for an EOF
+  ## that only comes when the child exits — the cloud session thread on a
+  ## door frame sat inside scheduleFrameOSUpgrade for the whole upgrade,
+  ## acking nothing and answering no heartbeat until the restart killed it
+  ## (uus2w and Cloud-5, 2026-09-05; `systemd-run` on root frames never
+  ## had the problem because a transient unit inherits nothing). Parent
+  ## streams instead: nothing to inherit, and the shell returns the moment
+  ## it has backgrounded the child.
+  setupLog("> " & command)
+  discard runShellWithParentStreams("sh -c " & shellQuote(command), timeoutMs = setupCommandTimeoutMs)
+
 proc runSetupCommandRetrying*(command: string, attempts = 3, pauseMs = 2000): SetupCommandResult =
   ## For idempotent commands that talk to a daemon which may still be coming
   ## up — `systemctl` on a first boot runs while systemd is busy starting the

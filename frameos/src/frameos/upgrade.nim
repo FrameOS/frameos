@@ -1202,17 +1202,17 @@ proc scheduleFrameOSUpgrade*(): JsonNode =
     "log_path": logPath,
   })
   let childCommand = shellQuote(binary) & " upgrade --yes"
-  let redirected = childCommand & " >> " & shellQuote(logPath) & " 2>&1"
+  let redirected = childCommand & " >> " & shellQuote(logPath) & " 2>&1 </dev/null"
   if privilegedDoorAvailable():
     # Not root: no transient unit to hide in. The child runs as this user
     # inside frameos.service's cgroup; the download and signature check are
     # its work, the install is the root worker's, and the worker restarts
     # this service (and with it, the child) once the release is in place.
-    discard runSetupCommand("sh -c " & shellQuote("nohup " & redirected & " &"))
+    runSetupCommandDetached("nohup " & redirected & " &")
   elif commandExists("systemd-run"):
     discard runSetupCommand(privilegedCommand(
       "systemd-run --quiet --unit=frameos-upgrade --collect /bin/sh -lc " & shellQuote(redirected)
     ))
   else:
-    discard runSetupCommand(privilegedCommand("sh -c " & shellQuote("nohup " & redirected & " &")))
+    runSetupCommandDetached(privilegedCommand("nohup " & redirected & " &"))
   readUpgradeStatus()

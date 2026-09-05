@@ -2,6 +2,7 @@ import std/[base64, json, os, strutils, tables, times, unittest]
 
 import ../device_setup
 import ../ota_pubkey
+import ../privileged
 import ../upgrade
 
 suite "FrameOS upgrade helpers":
@@ -449,3 +450,38 @@ suite "interrupted upgrade status":
       else:
         delEnv("FRAMEOS_DIR")
       removeDir(tempDir)
+
+suite "scheduling an upgrade does not wait for it":
+  test "the door path returns while the detached child is still running":
+    # 2026-09-05: the `nohup … &` child inherited the captured runner's
+    # stdout pipe, so scheduleFrameOSUpgrade only returned when the child
+    # exited — on a door frame that is the restart at the end of the upgrade,
+    # and the cloud session thread spent the whole upgrade in here, acking
+    # nothing and answering no heartbeat.
+    let tempDir = getTempDir() / "frameos-upgrade-detach-test"
+    if dirExists(tempDir):
+      removeDir(tempDir)
+    createDir(tempDir / "current")
+    let fakeBinary = tempDir / "current" / "frameos"
+    writeFile(fakeBinary, "#!/bin/sh\nsleep 20\n")
+    setFilePermissions(fakeBinary, {fpUserExec, fpUserRead, fpUserWrite})
+
+    let hadFrameosDir = existsEnv("FRAMEOS_DIR")
+    let oldFrameosDir = if hadFrameosDir: getEnv("FRAMEOS_DIR") else: ""
+    setPrivilegedRequestHookForTest(proc(request: PrivilegedRequest): PrivilegedResult {.gcsafe.} =
+      privilegedOk())
+    try:
+      putEnv("FRAMEOS_DIR", tempDir)
+      check privilegedDoorAvailable()
+      let startedAt = epochTime()
+      let status = scheduleFrameOSUpgrade()
+      check status{"status"}.getStr() == "starting"
+      check epochTime() - startedAt < 5.0
+    finally:
+      resetPrivilegedRequestHookForTest()
+      if hadFrameosDir:
+        putEnv("FRAMEOS_DIR", oldFrameosDir)
+      else:
+        delEnv("FRAMEOS_DIR")
+      if dirExists(tempDir):
+        removeDir(tempDir)
