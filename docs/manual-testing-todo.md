@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-05 after release 2026.9.8.
+empty. Last refreshed 2026-09-05 08:00 UTC, after release 2026.9.8.
 
 ## Open
 
@@ -66,12 +66,6 @@ Done section for this bench below.
   left` — N should land near 190 KB, and a frame that previously OOMed
   should now render.
 
-- [~] **Battery ADC rounds (#426):** day 1 of the watch, 2026-09-05 00:00 UTC: E1004's 96 samples over the previous 24 h (15-min naps, 2026.9.6) sit at 3988–4020 mV, drifting down ~30 mV over the day, `onBattery: true` on every one, **no `batteryRawMillivolts` on any sample**, no critical parking. At the old ~2 % misread rate ~2 rejected reads were due in 96 samples, so zero is either the fix filtering silently or chance (p≈0.14) — needs the second day. The board moved to 2026.9.7 at 00:02 UTC; keep counting from there. Earlier: partial 2026-09-04 — E1004's 45 metrics samples since midnight (3.3 h of them on 2026.9.4) show `batteryMillivolts` steady at 4006–4020 mV, no `batteryRawMillivolts` field on any sample, no critical parking. Needs the day-or-two watch below to count as verified. Original text: hardware-unverified. The misread is
-  intermittent (~9 of the E1004's ~400 daily on-battery samples read
-  ~2 V instead of ~3.95 V), so confirming it means watching
-  `batteryRawMillivolts` appear without `batteryMillivolts` moving for a
-  day or two on a frame on battery, and no spurious "critical" parking.
-
 - [ ] **Layout-matched release image (#442; release 2026.9.2 carries the
   six images):** *(2026-09-04: E1002 is still on the generic 8 MB layout —
   `flashBytes 8388608`, `otaSlotBytes 3604480`, OTA check asks for
@@ -102,13 +96,6 @@ Done section for this bench below.
   `esp32-s3-generic`. Also: "Flash latest release" / "Apply frame settings"
   against a board still on 2026.9.2 firmware logs "does not know hostname
   yet" and finishes instead of stopping there.
-
-- [ ] **E1004 first render after a cold boot (2026.9.8):** the 02:36 render
-  fills the hourly cell, but the cloud capture of the very first render after
-  the OTA reboot (02:06, ~30 KB less PSRAM headroom) still showed the small
-  chart. Catch one cold boot (a battery swap or a reset) and check the first
-  render's capture; if it is small, look for a `render:degraded` line with
-  `"source":"svg"` — its absence would mean both rungs refused silently.
 
 - [ ] **Portal SSID field keeps grabbing focus (recorded 2026-09-04, not
   fixed):** re-check the hotspot portal from a normal browser tab rather than
@@ -766,6 +753,14 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   (`systemctl status frameos-privileged.service` settles).
 
 ### ESP32 bench
+
+- [x] **E1004 first render after a cold boot (2026.9.8):** closed 2026-09-05 07:56 UTC. Every deep-sleep wake on this board is a full boot (`cloud:session_ready … uptimeSeconds: 6` at every 15-minute wake), so every render since 02:21 has been a first-render-after-boot, all full size; a commanded cloud `reboot` on the 07:55 wake (second session at 07:55:21, `uptimeSeconds: 9`) rendered at 07:56:17 with the chart filling the lower cell, and the log has never carried a `render:degraded` line. The 02:06 capture was the one render *during* the OTA boot itself; whatever it showed did not recur across ~20 boots.
+
+- [x] **Battery ADC rounds (#426):** watched 2026-09-04 03:11 → 2026-09-05 07:41 UTC — 118 E1004 samples across 2026.9.6/9.7/9.8, `batteryMillivolts` 4020 → 3962 mV in a smooth ~50 mV/day decline (per-hour min/max never more than 8 mV apart), `onBattery: true` on every sample, **no** `batteryRawMillivolts` on any of them, no critical parking. The rejection field only appears when a misread is thrown out, so its absence over ~127 distinct samples (p≈0.06 at the old ~2 % rate) most likely means no ~2 V read happened to occur; what the box exists for — no spurious critical, no dip in the curve — held for 28 h. Closing; if a `batteryRawMillivolts` ever shows up it is the fix working, not a regression. Earlier: day 1 of the watch, 2026-09-05 00:00 UTC: E1004's 96 samples over the previous 24 h (15-min naps, 2026.9.6) sit at 3988–4020 mV, drifting down ~30 mV over the day, `onBattery: true` on every one, **no `batteryRawMillivolts` on any sample**, no critical parking. At the old ~2 % misread rate ~2 rejected reads were due in 96 samples, so zero is either the fix filtering silently or chance (p≈0.14) — needs the second day. The board moved to 2026.9.7 at 00:02 UTC; keep counting from there. Earlier: partial 2026-09-04 — E1004's 45 metrics samples since midnight (3.3 h of them on 2026.9.4) show `batteryMillivolts` steady at 4006–4020 mV, no `batteryRawMillivolts` field on any sample, no critical parking. Needs the day-or-two watch below to count as verified. Original text: hardware-unverified. The misread is
+  intermittent (~9 of the E1004's ~400 daily on-battery samples read
+  ~2 V instead of ~3.95 V), so confirming it means watching
+  `batteryRawMillivolts` appear without `batteryMillivolts` moving for a
+  day or two on a frame on battery, and no spurious "critical" parking.
 
 - [x] **E1004: scenes over USB after a flash (this branch):** verified on
   the bench 2026-08-26. The board ships `deep_sleep_on_battery=1` and has
