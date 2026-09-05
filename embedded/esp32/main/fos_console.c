@@ -1032,7 +1032,13 @@ static int cmd_ota(int argc, char **argv)
 {
     const char *plane = "backend";
     esp_err_t err = ota_request_for_control_plane(&plane);
-    printf("ota: %s (%s)\n", esp_err_to_name(err), plane);
+    /* CONFIG_ESP_ERR_TO_NAME_LOOKUP is off (flash budget), so every code —
+     * ESP_OK included — would print as "UNKNOWN ERROR" here. */
+    if (err == ESP_OK) {
+        printf("ota: check requested (%s)\n", plane);
+    } else {
+        printf("ota: request failed 0x%x (%s)\n", (unsigned)err, plane);
+    }
     return err == ESP_OK ? 0 : 1;
 }
 

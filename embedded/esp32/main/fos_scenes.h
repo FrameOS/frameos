@@ -82,3 +82,9 @@ int fos_scenes_loaded(void);
 
 /* ETag of the last synced payload ("" when none). */
 const char *fos_scenes_etag(void);
+
+/* True when /state holds a scene payload (the combined scenes.json or the
+ * per-scene index an earlier boot split it into). False on a fresh or
+ * wiped state partition — a SPIFFS autoformat after corruption, a flash
+ * relayout — even when NVS still remembers what used to be there. */
+bool fos_scenes_stored(void);

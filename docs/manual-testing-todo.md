@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-05 08:00 UTC, after release 2026.9.8.
+empty. Last refreshed 2026-09-05 10:15 UTC, after release 2026.9.8.
 
 ## Open
 
@@ -71,10 +71,27 @@ Done section for this bench below.
   `flashBytes 8388608`, `otaSlotBytes 3604480`, OTA check asks for
   `esp32-s3-generic`; "Update firmware" keeps whatever layout the board has,
   so only "Add frame" → Connect & flash exercises this. The 8 MB half of the
-  USB *update* path passed on 2026.9.5 — see the dual-console box.)* on the XTEINK X4 (16 MB C3), "Flash latest release" picks
-  `esp32-c3-16mb`, the "4MB layout / no OTA" warnings are gone, the board
-  boots and later takes an OTA; on a 13.3E6 (32 MB S3) the same with
-  `esp32-s3-32mb`.
+  USB *update* path passed on 2026.9.5 — see the dual-console box.)*
+  *(2026-09-05, the 13.3E6 half, firmware side only: SuurESP was moved from
+  the generic 8 MB layout to the signed `frameos-2026.9.8-esp32-s3-32mb.bin`
+  by hand with esptool, sparing NVS — erase old otadata 0xd000+0x2000 so it
+  reads as blank NVS pages, erase the old SPIFFS region at 0x800000, write
+  the image around 0x9000–0xf000 — so it reconnected as the SAME cloud
+  record; `storage` now reports flashBytes 33554432 / otaSlotBytes 4128768 /
+  stateBytes 25165824 / nvsBytes 24576, the SPIFFS format took ~3 min, a
+  console `ota` logged `ota:cloud up-to-date 2026.9.8` and the app carries
+  exactly one platform string, `esp32-s3-32mb` (the request itself was not
+  seen server-side). **Found:** the wiped `/state` left the board sceneless
+  for 10 min while the cloud showed it in sync — the hello reports the
+  NVS-cached `cloud_scn_sum` without checking `/state/scenes.json` exists
+  (`fos_cloud.c`), so the hub never re-pushed and `set_current_scene`
+  failed `scene not found`; recovered by reordering the assignment. Same
+  trap for a SPIFFS autoformat after corruption — in `docs/todo.md`. Still
+  open here: the browser "Add frame → Connect & flash" click-through on a
+  32 MB board, and a later OTA landing on the new layout.)* on the XTEINK
+  X4 (16 MB C3), "Flash latest release" picks `esp32-c3-16mb`, the "4MB
+  layout / no OTA" warnings are gone, the board boots and later takes an
+  OTA; on a 13.3E6 (32 MB S3) the same with `esp32-s3-32mb`.
 
 - [ ] **The backend flashes what the cloud flashes (needs firmware built
   after 2026-09-03):** on a blank board, "Flash latest release" from the
@@ -753,6 +770,26 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   (`systemctl status frameos-privileged.service` settles).
 
 ### ESP32 bench
+
+- [x] **SuurESP on the 32 MB layout + the two fixes it surfaced (2026-09-05,
+  dev build 2026.9.8+471e8e3f on branch `esp32-stale-checksum-and-444-jpeg`,
+  flashed to ota_0 by esptool):** *(1) wiped-state hello:* state partition
+  erased before the boot; `cloud:session_ready` at 09:59:40, the cloud listed
+  `scenes_checksum: ""` against the assignment (out of sync, where 2026.9.8
+  had claimed in sync and stayed sceneless), a `frame_scenes_set` with the
+  unchanged list pushed, and all five scenes were back within a minute
+  (`available: 5`). The hub does not push unasked on a hello mismatch, so the
+  recovery is a deploy — noted in `docs/todo.md`. *(2) 4:4:4 photos:* the SD
+  card scene rendered `koduraam/DSC02441.jpg` (6336-wide, 4:4:4, the local
+  copy checked with PIL) in 178 s with **no `render:degraded` line** where
+  every 4:4:4 photo on 2026.9.8 logged `needs 5160K … over the 4989K memory
+  budget` and came out 600x800; the panel capture is sharp at full
+  resolution. *(3)* console `ota` prints `check requested (cloud)` and the
+  prod nginx log shows the OTA check as
+  `firmware/manifest?platform=esp32-s3-32mb` (09:18:01 UTC; the 02:02 OTA
+  had asked for `esp32-s3-generic`). Idle PSRAM after a photo render 5.91 MB,
+  after Weather 5.36 MB — the 24 MB SPIFFS costs ~0.5 MB against the old
+  8 MB-layout baseline.
 
 - [x] **E1004 first render after a cold boot (2026.9.8):** closed 2026-09-05 07:56 UTC. Every deep-sleep wake on this board is a full boot (`cloud:session_ready … uptimeSeconds: 6` at every 15-minute wake), so every render since 02:21 has been a first-render-after-boot, all full size; a commanded cloud `reboot` on the 07:55 wake (second session at 07:55:21, `uptimeSeconds: 9`) rendered at 07:56:17 with the chart filling the lower cell, and the log has never carried a `render:degraded` line. The 02:06 capture was the one render *during* the OTA boot itself; whatever it showed did not recur across ~20 boots.
 

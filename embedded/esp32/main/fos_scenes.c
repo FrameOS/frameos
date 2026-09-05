@@ -892,6 +892,14 @@ bool fos_scenes_apply_succeeded(void) { return s_apply_ok; }
 
 int fos_scenes_loaded(void) { return s_loaded; }
 const char *fos_scenes_etag(void) { return s_etag; }
+
+bool fos_scenes_stored(void)
+{
+    if (!s_mounted) return false;
+    struct stat st;
+    if (stat(SCENES_PATH, &st) == 0 && st.st_size > 2) return true;
+    return stat(SCENES_INDEX_PATH, &st) == 0 && st.st_size > 2;
+}
 void fos_scenes_request_sync(void) { s_sync_requested = true; }
 
 /* The whole payload, for callers that download or re-upload it (the USB API,
