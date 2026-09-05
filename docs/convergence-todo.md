@@ -175,10 +175,16 @@ is *not* pinned elsewhere it already matters:
   list in one runner). Its first run found a drift: the SPA read an
   unknown `settings.execution` stamp as compiled while the backend read
   it as interpreted. New cases go in the JSON first.
-- [ ] The 8-both / 8-linux / 7-esp32 settings-key split is the measured
-  parity gap between the device planes. Each key that goes
-  both-planes deletes a row; no new key ships single-plane without a
-  contract entry saying so.
+- [x] The 8-both / 8-linux / 7-esp32 settings-key split is pinned
+  (2026-09-06): every single-plane key in `docs/cloud-frames-contract.json`
+  carries `parity: {only, why}` and the generator refuses the file
+  otherwise; pytest and the auth-web contract test assert the rule and cap
+  the count at today's 8 / 7. Each key that goes both-planes deletes its
+  parity entry (and the cap can only go down). Of the 15, none is a cheap
+  port: the linux-only eight are Pi-runtime features (flip stage, error
+  state machine, pairing overlay, metrics timer, assets cache, tzdata
+  timer, custom palette, driver knobs) and the esp32-only seven are power
+  management and ADC battery sense a Pi does not have.
 - [ ] `fos_cloud.c` (3,259) beside `hub_client.nim` (2,049) is the
   accepted cost of the C decision — hold the line: new verbs land as
   contract entry + fixtures + both walkers in one PR, and any helper

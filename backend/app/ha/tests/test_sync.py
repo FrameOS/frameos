@@ -6,7 +6,7 @@ from httpx import AsyncClient, MockTransport, Response
 
 from app.ha import HA_SYNC_REQUEST_KEY, discovery
 from app.ha.client import MqttConfig, RestConfig
-from app.ha.sync import HomeAssistantSync
+from app.ha.sync import HomeAssistantSync, partition_projects_by_broker
 from app.models import new_frame, update_frame
 from app.models.settings import Settings
 
@@ -285,3 +285,25 @@ async def test_render_publishes_latest_image(db, redis, service):
     service._mqtt.messages.clear()
     await service._handle_broadcast("new_scene_image", {"project_id": project_id, "frameId": frame.id})
     assert service._mqtt.messages == []
+
+
+def test_projects_are_only_shared_over_their_own_broker():
+    # Two projects, two brokers: the run connects to the first project's
+    # broker and the second project's frames stay off it. Before this, every
+    # enabled project's frames were published to whichever broker the
+    # first-loaded project configured.
+    home = MqttConfig(host="mqtt.home", port=1883, username="a", password="x")
+    office = MqttConfig(host="mqtt.office", port=1883, username="b", password="y")
+    broker, kept, skipped = partition_projects_by_broker({1: home, 2: office, 3: home})
+    assert broker == home
+    assert kept == [1, 3]
+    assert skipped == [2]
+
+    # The add-on case: the Supervisor's Mosquitto for everyone.
+    broker, kept, skipped = partition_projects_by_broker({1: home, 2: home})
+    assert (broker, kept, skipped) == (home, [1, 2], [])
+
+    # A project with no broker at all is skipped, not silently attached.
+    broker, kept, skipped = partition_projects_by_broker({1: None, 2: home})
+    assert (broker, kept, skipped) == (home, [2], [1])
+    assert partition_projects_by_broker({}) == (None, [], [])

@@ -105,3 +105,52 @@ def test_plain_http_to_a_public_provider_is_refused(url):
     # http an on-path attacker can forge any of them.
     with pytest.raises(ValueError):
         cloud_link.normalize_cloud_provider_url(url)
+
+
+@pytest.mark.parametrize(
+    "host, allowed",
+    [
+        ("192.168.1.20:8989", True),
+        ("[fe80::1]:8989", True),
+        ("frameos:8989", True),
+        ("localhost", True),
+        ("frameos.local:8989", True),
+        ("nas.lan", True),
+        ("homeassistant.home.arpa:8123", True),
+        ("evil.example.com", False),
+        ("192.168.1.20.evil.example.com", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_setup_host_rule(host, allowed):
+    from app.api.cloud import setup_host_allowed
+
+    assert setup_host_allowed(host) is allowed
+
+
+def test_setup_host_rule_honours_the_allowlist(monkeypatch):
+    from app.api.cloud import setup_host_allowed
+    from app import config
+
+    monkeypatch.setattr(config.config, "FRAMEOS_SETUP_ALLOWED_HOSTS", "frames.example.com, Other.Example.org")
+    assert setup_host_allowed("frames.example.com:8989") is True
+    assert setup_host_allowed("other.example.org") is True
+    assert setup_host_allowed("third.example.net") is False
+
+
+@pytest.mark.asyncio
+async def test_setup_routes_refuse_a_public_hostname_on_a_fresh_install(db, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config.config, "HASSIO_RUN_MODE", "")
+    # DNS rebinding: the attacker's page is on a domain that resolves to this
+    # backend's LAN address, so the browser sends that domain as Host.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://rebind.evil.example") as client:
+        response = await client.get("/api/cloud/setup/status")
+    assert response.status_code == 403
+    assert "local network" in response.json()["detail"]
+    # The same request from a LAN address is served.
+    async with _client() as client:
+        response = await client.get("/api/cloud/setup/status")
+    assert response.status_code == 200

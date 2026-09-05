@@ -122,10 +122,19 @@ async def store_frame_sync_hint_headers(redis: Redis, frame_id: int, frame_heade
     return _sync_hint_headers_from_payload(payload)
 
 
+# Backend-owned: the device holds a copy of these only because the backend
+# wrote it there, and importing the device's view back would let a
+# compromised (or merely stale) frame rewrite how the backend reaches and
+# runs it — which control mode it is in, whether FrameOS Remote may run
+# commands and with what shared secret, and the admin login the backend uses
+# against it. They never appear in the sync diff (docs/security-todo.md).
+FRAME_SYNC_BACKEND_OWNED_KEYS = frozenset({"mode", "agent", "frame_admin_auth"})
+
 FRAME_SYNC_FRAME_KEYS = tuple(
     key
     for key in FrameUpdateRequest.model_fields.keys()
-    if key
+    if key not in FRAME_SYNC_BACKEND_OWNED_KEYS
+    and key
     not in {
         "archived",
         "buildroot",
@@ -271,15 +280,13 @@ def _sync_https_proxy(value: Any) -> dict[str, Any] | None:
         return None
     if not _sync_bool(value.get("enable"), False):
         return None
-    certs = value.get("certs") if isinstance(value.get("certs"), dict) else {}
+    # No certs: the backend mints the frame's TLS pair and pushes it, so the
+    # device's copy is never the source of truth — and importing a certificate
+    # without its (write-only, blanked) key would leave a mismatched pair.
     proxy = {
         "enable": True,
         "port": _sync_number(value.get("port") or 8443),
         "expose_only_port": _sync_bool(value.get("expose_only_port"), True),
-        "certs": {
-            "server": certs.get("server"),
-            "server_key": certs.get("server_key"),
-        },
     }
     return _sync_prune_empty(proxy)
 

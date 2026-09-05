@@ -8,6 +8,8 @@ the backend's copy and the next deploy would push the blank to the device.
 """
 
 from app.api.frame_sync import (
+    FRAME_SYNC_BACKEND_OWNED_KEYS,
+    FRAME_SYNC_FRAME_KEYS,
     _build_frame_sync_section,
     _restore_write_only_secrets,
     _sync_frame_value,
@@ -94,16 +96,16 @@ def test_blanked_secrets_do_not_show_as_changes_once_restored():
     assert section["changes"] == []
 
 
-def test_without_restore_the_blanks_would_read_as_changes():
-    # The guard the test above depends on: the raw payload really differs.
+def test_blanked_secret_leaves_are_not_sync_choices_at_all():
+    # Every leaf the device blanks (admin password, TLS key, API key, Wi-Fi
+    # passphrase) is either backend-owned and never pulled
+    # (FRAME_SYNC_BACKEND_OWNED_KEYS), outside the pull list, or dropped by the
+    # per-key compaction — so even the raw, un-restored payload shows nothing to
+    # choose. The restore helper is what keeps the backend's copy intact when
+    # such a payload is written back; the two tests above cover that.
     backend = _backend_frame()
     section = _build_frame_sync_section(backend, _device_frame(), backend)
-    paths = {change["path"] for change in section["changes"]}
-    assert "frame_admin_auth" in paths
-    assert "https_proxy" in paths
-    assert _sync_frame_value("frame_admin_auth", _device_frame()["frame_admin_auth"]) != _sync_frame_value(
-        "frame_admin_auth", backend["frame_admin_auth"]
-    )
+    assert section["changes"] == []
 
 
 def test_restore_reads_the_backend_copy_off_a_frame_row():
@@ -124,3 +126,29 @@ def test_restore_reads_the_backend_copy_off_a_frame_row():
     assert restored["frame_admin_auth"]["pass"] == "row-admin-secret"
     assert restored["https_proxy"]["certs"]["server_key"] == "ROW-KEY"
     assert restored["network"]["wifiPassword"] == "row-wifi-secret"
+
+
+def test_backend_owned_keys_are_never_pulled_from_the_device():
+    # A device that claims another control mode, a Remote that may run
+    # commands under a secret of its choosing, or a different admin login
+    # must never even appear as a sync choice.
+    for key in ("mode", "agent", "frame_admin_auth"):
+        assert key in FRAME_SYNC_BACKEND_OWNED_KEYS
+        assert key not in FRAME_SYNC_FRAME_KEYS
+    backend = _backend_frame()
+    backend["mode"] = "rpios"
+    backend["agent"] = {"agentEnabled": True, "agentRunCommands": False, "agentSharedSecret": "ours"}
+    device = _device_frame()
+    device["mode"] = "buildroot"
+    device["agent"] = {"agentEnabled": True, "agentRunCommands": True, "agentSharedSecret": "theirs"}
+    device["frame_admin_auth"] = {"enabled": False, "user": "root", "pass": "pwned"}
+    section = _build_frame_sync_section(backend, device)
+    paths = {change["path"] for change in section.get("changes", [])}
+    assert not paths & {"mode", "agent", "frame_admin_auth"}
+
+
+def test_https_proxy_sync_carries_no_certificate_material():
+    # The backend mints and pushes the pair; the device's copy is not a
+    # source, and a cert imported without its blanked key would mismatch.
+    value = _sync_frame_value("https_proxy", _device_frame()["https_proxy"])
+    assert value == {"enable": True, "port": 8443, "expose_only_port": True}

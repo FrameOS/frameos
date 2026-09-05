@@ -7,8 +7,50 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.tasks import precompiled_frameos
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_frameos import download_precompiled_frameos_release, frame_compiled_scene_count
+
+
+import base64
+import hashlib
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+
+from app.utils import release_signing
+
+
+# Every archive the fakes hand out is signed with a key minted here, and the
+# module's trusted key is pointed at it: the cache verifies the signature both
+# on download and on every hit (the cache dir is world-writable /tmp by
+# default), so an unsigned fake would never be used.
+_TEST_SIGNING_KEY = ed25519.Ed25519PrivateKey.generate()
+_TEST_SIGNING_PUBLIC_KEY_BASE64 = base64.b64encode(
+    _TEST_SIGNING_KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+).decode()
+
+
+def _minisig_for(archive: Path) -> str:
+    digest = hashlib.blake2b(archive.read_bytes(), digest_size=64).digest()
+    blob = b"ED" + b"\x01" * 8 + _TEST_SIGNING_KEY.sign(digest)
+    return "untrusted comment: test\n" + base64.b64encode(blob).decode() + "\n"
+
+
+def _trust_test_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(release_signing, "RELEASE_SIGNING_PUBLIC_KEY_BASE64", _TEST_SIGNING_PUBLIC_KEY_BASE64)
+
+
+def _signing_download(archive: Path, calls: list[str] | None = None):
+    async def fake_download(url: str, destination: Path, _timeout: float) -> None:
+        if calls is not None:
+            calls.append(url)
+        if url.endswith(".minisig"):
+            destination.write_text(_minisig_for(archive), encoding="utf-8")
+        else:
+            shutil.copy2(archive, destination)
+
+    return fake_download
 
 
 def test_frame_compiled_scene_count_treats_missing_execution_as_interpreted():
@@ -45,14 +87,14 @@ async def test_download_precompiled_frameos_release_extracts_required_files(
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(source_root, arcname=source_root.name)
 
-    async def fake_download(_url: str, destination: Path, _timeout: float) -> None:
-        shutil.copy2(archive, destination)
+    fake_download = _signing_download(archive)
 
     logs: list[tuple[str, str]] = []
 
     async def logger(level: str, message: str) -> None:
         logs.append((level, message))
 
+    _trust_test_key(monkeypatch)
     monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr("app.tasks.precompiled_frameos._download", fake_download)
 
@@ -101,12 +143,9 @@ async def test_download_precompiled_frameos_release_reuses_cached_archive(
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(source_root, arcname=source_root.name)
 
-    download_count = 0
-
-    async def fake_download(_url: str, destination: Path, _timeout: float) -> None:
-        nonlocal download_count
-        download_count += 1
-        shutil.copy2(archive, destination)
+    download_calls: list[str] = []
+    fake_download = _signing_download(archive, download_calls)
+    _trust_test_key(monkeypatch)
 
     logs: list[tuple[str, str]] = []
 
@@ -133,7 +172,7 @@ async def test_download_precompiled_frameos_release_reuses_cached_archive(
         logger=logger,
     )
 
-    assert download_count == 1
+    assert len([url for url in download_calls if not url.endswith(".minisig")]) == 1
     assert first.cache_hit is False
     assert second.cache_hit is True
     assert Path(second.binary_path).read_bytes() == b"frameos"
@@ -268,3 +307,70 @@ async def test_download_gives_up_after_the_last_attempt(
         )
 
     assert not outcomes
+
+
+@pytest.mark.asyncio
+async def test_a_tampered_cached_archive_is_not_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The cache dir is predictable and (by default) under /tmp: bytes planted
+    there must fail the signature check and be fetched again, not deployed."""
+    source_root = tmp_path / "source" / "frameos-2026.5.14-debian-trixie-arm64"
+    (source_root / "drivers").mkdir(parents=True)
+    (source_root / "frameos").write_bytes(b"frameos")
+    (source_root / "metadata.json").write_text('{"slug":"debian-trixie-arm64","driver_libraries":[]}\n', encoding="utf-8")
+    archive = tmp_path / "release.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(source_root, arcname=source_root.name)
+
+    calls: list[str] = []
+    _trust_test_key(monkeypatch)
+    monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr("app.tasks.precompiled_frameos._download", _signing_download(archive, calls))
+
+    async def logger(level: str, message: str) -> None:
+        pass
+
+    url = precompiled_frameos.precompiled_frameos_release_url("debian-trixie-arm64", "2026.5.14")
+    assert url
+    cache_path, hit = await precompiled_frameos._cached_release_archive(url, "debian-trixie-arm64", 1.0, logger)
+    assert hit is False
+    assert precompiled_frameos.precompiled_frameos_signature_path(cache_path).is_file()
+
+    # Plant other bytes under the cached name: the signature no longer matches.
+    planted = tmp_path / "planted.tar.gz"
+    with tarfile.open(planted, "w:gz") as tar:
+        tar.add(source_root, arcname="evil")
+    shutil.copy2(planted, cache_path)
+    before = len(calls)
+    cache_path_again, hit = await precompiled_frameos._cached_release_archive(url, "debian-trixie-arm64", 1.0, logger)
+    assert hit is False, "a cached archive that fails its signature must not count as a hit"
+    assert len(calls) == before + 2
+    assert cache_path_again.read_bytes() == archive.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_a_release_with_a_bad_signature_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    archive = tmp_path / "release.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        pass
+    other_key = ed25519.Ed25519PrivateKey.generate()
+
+    async def fake_download(url: str, destination: Path, _timeout: float) -> None:
+        if url.endswith(".minisig"):
+            digest = hashlib.blake2b(archive.read_bytes(), digest_size=64).digest()
+            blob = b"ED" + b"\x01" * 8 + other_key.sign(digest)
+            destination.write_text("untrusted comment: x\n" + base64.b64encode(blob).decode() + "\n")
+        else:
+            shutil.copy2(archive, destination)
+
+    _trust_test_key(monkeypatch)
+    monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr("app.tasks.precompiled_frameos._download", fake_download)
+
+    async def logger(level: str, message: str) -> None:
+        pass
+
+    url = precompiled_frameos.precompiled_frameos_release_url("debian-trixie-arm64", "2026.5.14")
+    assert url
+    with pytest.raises(RuntimeError, match="signature"):
+        await precompiled_frameos._cached_release_archive(url, "debian-trixie-arm64", 1.0, logger)
+    assert not precompiled_frameos.precompiled_frameos_cache_path(url).exists()

@@ -1,5 +1,6 @@
 import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import Depends, HTTPException, status, Request, Response, WebSocket
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -177,22 +178,37 @@ async def get_current_user_from_request(
     return db.query(User).filter(User.email == email).first()
 
 
+def websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """Whether a WebSocket handshake comes from a page on this backend.
+
+    Browsers always send `Origin` on a WebSocket handshake and it cannot be
+    set by page script, so a mismatch against the `Host` the browser dialled
+    is a cross-site page opening a socket with the user's cookie (SameSite=Lax
+    does not cover WebSockets). Non-browser clients send no Origin and pass;
+    the cookie check that follows still applies to them. Compared as host:port
+    (case-insensitive), scheme ignored — a TLS-terminating proxy changes the
+    scheme the browser sees, never the host it dialled.
+    """
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    host = websocket.headers.get("host", "")
+    try:
+        origin_host = urlparse(origin).netloc
+    except ValueError:
+        return False
+    return bool(origin_host) and origin_host.lower() == host.lower()
+
+
 def get_current_user_from_websocket(
     websocket: WebSocket,
     db: Session,
 ) -> tuple[User | None, str | None]:
-    token = websocket.query_params.get("token")
-    if token:
-        try:
-            email, session_id = _decode_jwt_claims(token)
-        except JWTError:
-            return None, "Invalid token"
-        if not session_is_active(db, session_id):
-            return None, "Session revoked"
-        user = db.query(User).filter(User.email == email).first()
-        if user is None:
-            return None, "User not found"
-        return user, None
+    # Cookie only. The `?token=<jwt>` query form nothing in the SPA ever sent
+    # is gone: a bearer in a URL lands in proxy and browser logs, and the
+    # session cookie already rides every handshake from the same origin.
+    if not websocket_origin_allowed(websocket):
+        return None, "Origin not allowed"
 
     cookie_value = websocket.cookies.get(SESSION_COOKIE_NAME)
     claims = decode_session_cookie_claims(cookie_value)
@@ -381,7 +397,7 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     if cookie_claims is not None:
         revoke_user_session(db, cookie_claims[1])
     if user is not None:
-        from urllib.parse import quote
+        from urllib.parse import quote, urlparse
 
         from app.api.cloud import _browser_origin, _connected_link, _link_has_scope
         from app.models.cloud import CloudIdentity

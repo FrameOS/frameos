@@ -27,6 +27,42 @@ const fixtures = JSON.parse(
   readFileSync(new URL("../../../../../docs/cloud-frames-fixtures.json", import.meta.url), "utf8"),
 ) as { settings: SettingsFixture[]; verbs: { name: string; type: string; expect: string }[] };
 
+interface ContractSettingSpec {
+  profiles: Record<string, unknown>;
+  parity?: { only: string; why: string };
+}
+const contract = JSON.parse(
+  readFileSync(new URL("../../../../../docs/cloud-frames-contract.json", import.meta.url), "utf8"),
+) as { profiles: string[]; settings: Record<string, ContractSettingSpec> };
+
+describe("settings parity between the device planes", () => {
+  // docs/convergence-todo.md item 6: a key one plane accepts and the other
+  // does not is the measured parity gap, and every such key must say why.
+  it("every single-plane key carries a parity reason, and no both-planes key does", () => {
+    const every = new Set(contract.profiles);
+    for (const [name, spec] of Object.entries(contract.settings)) {
+      const present = Object.keys(spec.profiles);
+      const isSingle = present.length !== every.size;
+      if (isSingle) {
+        expect(spec.parity, `${name} is single-plane without a parity entry`).toBeDefined();
+        expect(present, name).toEqual([spec.parity!.only]);
+        expect(spec.parity!.why.trim().length, name).toBeGreaterThanOrEqual(20);
+      } else {
+        expect(spec.parity, `${name} is both-planes and must not carry parity`).toBeUndefined();
+      }
+    }
+  });
+
+  it("the gap does not grow past today's measurement", () => {
+    const counts: Record<string, number> = {};
+    for (const spec of Object.values(contract.settings)) {
+      if (spec.parity) counts[spec.parity.only] = (counts[spec.parity.only] ?? 0) + 1;
+    }
+    expect(counts.linux ?? 0).toBeLessThanOrEqual(8);
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(7);
+  });
+});
+
 describe("cloud verb contract fixtures", () => {
   it("has cases", () => {
     expect(fixtures.settings.length).toBeGreaterThan(50);
