@@ -683,7 +683,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   2026-09-01 on the 8 MB board — low-water free PSRAM was 34 KB with the
   transpiler's three token copies alive and 873 KB after the fix; the
   1.5 MiB reserve stands.
-- [~] **Battery ADC rounds (#426):** partial 2026-09-04 — E1004's 45 metrics samples since midnight (3.3 h of them on 2026.9.4) show `batteryMillivolts` steady at 4006–4020 mV, no `batteryRawMillivolts` field on any sample, no critical parking. Needs the day-or-two watch below to count as verified. Original text: hardware-unverified. The misread is
+- [~] **Battery ADC rounds (#426):** day 1 of the watch, 2026-09-05 00:00 UTC: E1004's 96 samples over the previous 24 h (15-min naps, 2026.9.6) sit at 3988–4020 mV, drifting down ~30 mV over the day, `onBattery: true` on every one, **no `batteryRawMillivolts` on any sample**, no critical parking. At the old ~2 % misread rate ~2 rejected reads were due in 96 samples, so zero is either the fix filtering silently or chance (p≈0.14) — needs the second day. The board moved to 2026.9.7 at 00:02 UTC; keep counting from there. Earlier: partial 2026-09-04 — E1004's 45 metrics samples since midnight (3.3 h of them on 2026.9.4) show `batteryMillivolts` steady at 4006–4020 mV, no `batteryRawMillivolts` field on any sample, no critical parking. Needs the day-or-two watch below to count as verified. Original text: hardware-unverified. The misread is
   intermittent (~9 of the E1004's ~400 daily on-battery samples read
   ~2 V instead of ~3.95 V), so confirming it means watching
   `batteryRawMillivolts` appear without `batteryMillivolts` moving for a
