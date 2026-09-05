@@ -956,7 +956,7 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   now reads Europe/Brussels (set by the 9.7 fallback branch); uus2w still
   `Etc/UTC` — `setupTimezone` returned at "already Europe/Brussels" before the
   sync ran. Fixed on main the same night (the early return syncs too;
-  `test_setup` pins it) — commit pending a Secretive signing approval.
+  `test_setup` pins it; `661abf5d`, in the next release).
 
 ## Not on the list, deliberately
 
