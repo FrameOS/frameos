@@ -290,7 +290,15 @@ profile they target rather than relying on the cap.
 ### Session start
 
 1. Frame → provider: `{"type": "hello", "frameos_version": "…",
-   "hardware": {…}, "states": {…scene state…}, "scenes_checksum": "…"}`
+   "hardware": {…}, "states": {…scene state…}, "scenes_checksum": "…"}` —
+   `scenes_checksum` is the checksum of the last `set_scenes` the device
+   applied **and still holds**; a device whose scene store is gone (a
+   reformatted or wiped `/state`) sends `""`, never a remembered value. An
+   empty checksum is the one mismatch the provider resolves by itself:
+   cloud.frameos.net re-queues the assigned `set_scenes` push ahead of the
+   drain, since the device holds nothing a push could clobber. Every other
+   mismatch (a preview replaced the set, a push was never acked) is shown to
+   the owner as out of sync and left to a deploy.
 2. Provider → frame: `{"type": "challenge", "nonce": "base64"}` — the nonce is
    at least **32 random bytes**, and the minimum is on the *decoded* length,
    not on the base64 text.

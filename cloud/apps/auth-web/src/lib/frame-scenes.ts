@@ -26,7 +26,6 @@ import {
   pinnedSceneVersion,
   readServiceSettingGroups,
   supersedePendingCommands,
-  storeDeclaredSettingsGroups,
 } from "./frames";
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { reportError } from "./log";
@@ -159,70 +158,11 @@ export function frameHoldsAssignedScenes(frame: {
   );
 }
 
-export type RedeployOutcome =
-  | { ok: true; checksum: string; commandId: string | undefined }
-  | { ok: false; error: string };
-
-// Push the frame's CURRENT assignments again, with `activeSceneId` (a runtime
-// id from the deployed scenes.json) as the payload's active scene: what
-// "Activate" means for a scene the device does not hold yet. Same payload,
-// checksum and ledger bookkeeping as assignScenesToFrame, minus the
-// assignment rewrite; the hub promotes assigned_scene_state on ack as usual.
-export async function redeployAssignedScenesToFrame(
-  db: Database,
-  {
-    accountId,
-    activeSceneId,
-    frame,
-    state,
-  }: {
-    accountId: string;
-    activeSceneId: string;
-    frame: FrameRow;
-    state?: Record<string, unknown> | undefined;
-  },
-): Promise<RedeployOutcome> {
-  const built = await buildScenesPayloadForFrame(db, frame.id);
-  if ("error" in built) {
-    return { ok: false, error: built.error };
-  }
-  // An unpinned assignment may have resolved to a newer version here. What
-  // it declares is refreshed; what it was granted is not widened — a version
-  // that starts asking for a new key does not get it until the owner says so.
-  const serviceSettingGroups = await storeDeclaredSettingsGroups(
-    db,
-    frame.id,
-    built.assignments,
-  );
-  const previous = readServiceSettingGroups(frame.serviceSettingGroups) ?? [];
-  const groupsChanged =
-    previous.length !== serviceSettingGroups.length ||
-    !serviceSettingGroups.every((group) => previous.includes(group));
-  await db
-    .update(frames)
-    .set({
-      assignedChecksum: built.checksum,
-      assignedSceneState: built.sceneStates,
-      updatedAt: new Date(),
-    })
-    .where(eq(frames.id, frame.id));
-  await supersedePendingCommands(db, frame.id, "set_scenes");
-  const command = await enqueueFrameCommand(db, {
-    createdByAccountId: accountId,
-    frameId: frame.id,
-    payload: {
-      checksum: built.checksum,
-      scenes: built.scenes,
-      scene_id: activeSceneId,
-      ...(state ? { state } : {}),
-    },
-    type: "set_scenes",
-  });
-  if (groupsChanged) {
-    await enqueueServiceSettingsRefreshIfScoped(db, frame.id);
-  }
-  return { ok: true, checksum: built.checksum, commandId: command?.id };
-}
+// redeployAssignedScenesToFrame lives in frames.ts (Next-free) so the frame
+// hub can call it too — a device whose scene store came up empty asks for its
+// assignments back in its hello. Re-exported here for the routes that grew up
+// around this module.
+export { redeployAssignedScenesToFrame, type RedeployOutcome } from "./frames";
 
 export async function currentSceneAssignments(
   db: Database,

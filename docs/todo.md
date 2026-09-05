@@ -62,21 +62,25 @@ Two rules that shape most entries:
   on the board: see the bench entry in `docs/manual-testing-todo.md`.
   Longer term the streamed JPEG decoder holds target-sized channel planes;
   a banded design would cut the plan to a few MCU rows per component.
-- **A cloud frame whose `/state` was wiped stayed sceneless but "in sync"
-  — device half fixed (`fos_cloud.c` + `fos_scenes_stored()`).** The hello
-  reported the NVS-cached `cloud_scn_sum` without checking that
-  `/state/scenes.json` (or the split index) still existed, so after a
-  SPIFFS autoformat or a flash relayout the hub saw the assigned checksum,
-  never re-pushed, and every `set_current_scene` failed `scene not found`.
-  Now the hello forgets the cached checksum when the store is empty and
-  reports the store's own etag, so the frame shows **out of sync** in the
-  workspace and any deploy (or `frame_scenes_set` with the same list)
-  restores it. The hub does not push unasked on a hello mismatch by design
-  (the push is assembled on the auth-web side; the hub has no channel to
-  ask for it), so an automatic re-push for the empty-store case is a
-  possible follow-up, not a bug: it would need an internal auth-web route
-  the hub can call, and it can never lose anything because the device
-  holds nothing.
+- **A cloud frame whose `/state` was wiped stayed sceneless but "in
+  sync" — fixed on both sides.** Device (`fos_cloud.c` + `fos_scenes_stored()`,
+  2026.9.9): the hello forgets the NVS-cached `cloud_scn_sum` when
+  `/state/scenes.json` (or the split index) is gone and reports the store's
+  own empty etag. Hub (`resyncEmptyStore`): an empty checksum is the one
+  hello mismatch it answers by itself — the assigned set is re-queued ahead
+  of the drain (`frame.scenes_resynced` audit), since the device holds
+  nothing a push could clobber; any other mismatch stays the owner's deploy.
+  Verified on SuurESP: state partition erased, boot, five scenes back
+  without a hand on the workspace.
+- **A scene that OOM-aborts on every render boot-loops the board** (seen
+  2026-09-05 provoking `memory:oomAbort` on SuurESP with a 300 K-rune text
+  scene): the second abort restarts as designed, the device restores its
+  last scene at boot and renders it *before* the cloud session is up, so a
+  cloud `set_current_scene` only lands after another abort has leaked ~1.5
+  MB (the birds scene that followed failed its SVG). Fix: persist the
+  aborting scene id next to the restart (NVS `oom_scene`); on boot, skip the
+  last-scene restore when it names that scene (fall through to the first
+  scene / status screen) and clear the mark on the next healthy render.
 - Console: `ota` printed `ota: UNKNOWN ERROR (cloud)` on every outcome
   because `CONFIG_ESP_ERR_TO_NAME_LOOKUP` is off; it now prints
   `check requested` / `request failed 0x…`.

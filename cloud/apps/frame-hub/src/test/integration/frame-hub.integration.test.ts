@@ -9,6 +9,7 @@ import {
   type KeyObject,
 } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
+import { zipSync } from "fflate";
 import { SignJWT } from "jose";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
@@ -20,8 +21,11 @@ import {
   frameLogs,
   frameMetrics,
   frames,
+  frameSceneAssignments,
   linkedClients,
   sessions,
+  storeScenes,
+  storeSceneVersions,
 } from "@frameos-cloud/db";
 import {
   enqueueFrameCommand,
@@ -187,6 +191,50 @@ async function createFrameForAccount(
     throw new Error("frame insert failed");
   }
   return { frame, linkedClient, privateKey, token };
+}
+
+// A store scene with one version whose zip is exactly what the payload
+// builder expects (scene/scenes.json + scene/template.json), so a resync test
+// can assign it and receive a real set_scenes push.
+async function createAssignedStoreScene(accountId: string, frameId: string) {
+  const [scene] = await db
+    .insert(storeScenes)
+    .values({
+      accountId,
+      latestVersion: 1,
+      name: "Resync scene",
+      riskFlags: [],
+      slug: `resync-scene-${randomUUID().slice(0, 8)}`,
+      status: "active",
+      visibility: "private",
+    })
+    .returning();
+  if (!scene) {
+    throw new Error("scene insert failed");
+  }
+  const scenes = [{ edges: [], id: "resync-runtime", name: "Resync scene", nodes: [] }];
+  await db.insert(storeSceneVersions).values({
+    content: Buffer.from(
+      zipSync({
+        "scene/scenes.json": new TextEncoder().encode(JSON.stringify(scenes)),
+        "scene/template.json": new TextEncoder().encode(JSON.stringify({ name: "Resync scene" })),
+      }),
+    ),
+    contentType: "application/zip",
+    riskFlags: [],
+    sceneId: scene.id,
+    sha256: "test",
+    sizeBytes: 1000,
+    version: 1,
+  });
+  await db
+    .insert(frameSceneAssignments)
+    .values({ frameId, position: 0, sceneId: scene.id });
+  await db
+    .update(frames)
+    .set({ assignedChecksum: "sum-assigned" })
+    .where(eq(frames.id, frameId));
+  return scene;
 }
 
 // Mirrors auth-web's createSession: a token minted for the absolute ceiling,
@@ -736,6 +784,48 @@ describe("command redelivery", () => {
     expect(staleRow?.status).toBe("expired");
     expect(staleRow?.error).toBe("superseded");
     second.ws.close();
+  });
+
+  it("re-pushes the assigned scenes when a hello reports an empty scene store", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id);
+
+    // An empty checksum is the device saying "I hold no scene store at all"
+    // (a wiped /state): the one mismatch the hub resolves by itself, before
+    // the drain, so the push rides this very connection.
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, { scenes_checksum: "" });
+    expect(ready.pending_commands).toBe(1);
+    const push = await device.next((msg) => msg.type === "set_scenes", "set_scenes push");
+    expect(Array.isArray(push.scenes)).toBe(true);
+    expect((push.scenes as unknown[]).length).toBe(1);
+    expect(push.scene_id).toBeUndefined();
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.assignedChecksum).toBe(push.checksum);
+    const audit = await waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(auditEvents)
+        .where(sql`${auditEvents.target}->>'frameId' = ${frame.id}`);
+      return rows.find((row) => row.eventType === "frame.scenes_resynced");
+    }, "audit row frame.scenes_resynced");
+    expect(audit.metadata).toMatchObject({ checksum: push.checksum, reason: "empty_store" });
+    device.ws.close();
+  });
+
+  it("leaves any other checksum mismatch to the owner", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id);
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, { scenes_checksum: "sum-preview" });
+    expect(ready.pending_commands).toBe(0);
+    const pushes = await db
+      .select()
+      .from(frameCommands)
+      .where(and(eq(frameCommands.frameId, frame.id), eq(frameCommands.type, "set_scenes")));
+    expect(pushes).toHaveLength(0);
+    device.ws.close();
   });
 
   it("promotes the per-scene ledger only on an ack of the assigned checksum", async () => {

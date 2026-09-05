@@ -43,6 +43,7 @@ import {
   markFramePreviewWatched,
   maxAssetFileBytes,
   parseAssetEntries,
+  redeployAssignedScenesToFrame,
   storeFrameAssetFile,
   storeFrameAssetListing,
   storeFrameLogs,
@@ -230,6 +231,8 @@ interface DeviceSession {
   frame: FrameRow;
   hello: Record<string, unknown> | undefined;
   hubSessionId: string;
+  // The empty-store resync ran for this connection (resyncEmptyStore).
+  storeResyncRequested: boolean;
   // Serializes message handling: two concurrent log_batches would otherwise
   // each re-select the other's freshly inserted rows and double-broadcast.
   handling: Promise<void>;
@@ -706,6 +709,7 @@ export async function startFrameHub(
       })
       .where(eq(frames.id, frameId));
 
+    await resyncEmptyStore(session, hello);
     await expireStaleCommands(frameId);
     // A fresh session cannot have written anything yet, so every command
     // still in "sent" belongs to a socket that died before acking: requeue it
@@ -768,6 +772,59 @@ export async function startFrameHub(
     // disconnect bookkeeping this close handler may have raced past.
     if (session.closed) {
       await markDeviceDisconnected(session);
+    }
+  }
+
+  // A device that lost its scene store — a SPIFFS autoformat after
+  // corruption, a flash relayout — says so with an EMPTY scenes_checksum
+  // (fos_cloud.c forgets its cached sum when /state holds no payload; the
+  // Linux runtime never had one to forget). Such a device holds nothing a
+  // push could clobber, so this is the one hello mismatch the hub answers by
+  // itself: the assigned set goes back into the queue ahead of the drain this
+  // connection is about to run. Every other mismatch (a preview replaced the
+  // set, a push was never acked) stays the owner's call and shows as out of
+  // sync in the workspace. Once per session: a device whose apply keeps
+  // failing reports "" on every reconnect, and its backoff paces that.
+  async function resyncEmptyStore(
+    session: DeviceSession,
+    hello: Record<string, unknown>,
+  ) {
+    if (hello.scenes_checksum !== "" || session.storeResyncRequested) {
+      return;
+    }
+    session.storeResyncRequested = true;
+    const frameId = session.frame.id;
+    const [row] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frameId))
+      .limit(1);
+    if (!row?.assignedChecksum) {
+      return;
+    }
+    try {
+      const outcome = await redeployAssignedScenesToFrame(db, {
+        accountId: row.accountId,
+        frame: row,
+      });
+      if (outcome.ok) {
+        logInfo("device.store_resynced", {
+          checksum: outcome.checksum,
+          commandId: outcome.commandId,
+          frameId,
+        });
+        await recordFrameAudit(row, "frame.scenes_resynced", {
+          checksum: outcome.checksum,
+          reason: "empty_store",
+        });
+      } else {
+        logWarn("device.store_resync_failed", { error: outcome.error, frameId });
+      }
+    } catch (error) {
+      logError("device.store_resync_failed", {
+        error: error instanceof Error ? error.message : String(error),
+        frameId,
+      });
     }
   }
 
@@ -1511,6 +1568,7 @@ export async function startFrameHub(
       frame,
       handling: Promise.resolve(),
       hello: undefined,
+      storeResyncRequested: false,
       hubSessionId: randomUUID(),
       nonce: randomBytes(32),
       ready: false,

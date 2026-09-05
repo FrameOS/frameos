@@ -1886,3 +1886,71 @@ export async function storeFrameMetrics(
   });
   return insertedId;
 }
+
+export type RedeployOutcome =
+  | { ok: true; checksum: string; commandId: string | undefined }
+  | { ok: false; error: string };
+
+// Push the frame's CURRENT assignments again, with `activeSceneId` (a runtime
+// id from the deployed scenes.json) as the payload's active scene: what
+// "Activate" means for a scene the device does not hold yet. Same payload,
+// checksum and ledger bookkeeping as assignScenesToFrame, minus the
+// assignment rewrite; the hub promotes assigned_scene_state on ack as usual.
+export async function redeployAssignedScenesToFrame(
+  db: Database,
+  {
+    accountId,
+    activeSceneId,
+    frame,
+    state,
+  }: {
+    accountId: string;
+    // A runtime id from the deployed scenes.json; omitted, the device
+    // activates the first scene of the push (the hub's empty-store resync
+    // has no better answer — the device remembers nothing).
+    activeSceneId?: string | undefined;
+    frame: typeof frames.$inferSelect;
+    state?: Record<string, unknown> | undefined;
+  },
+): Promise<RedeployOutcome> {
+  const built = await buildScenesPayloadForFrame(db, frame.id);
+  if ("error" in built) {
+    return { ok: false, error: built.error };
+  }
+  // An unpinned assignment may have resolved to a newer version here. What
+  // it declares is refreshed; what it was granted is not widened — a version
+  // that starts asking for a new key does not get it until the owner says so.
+  const serviceSettingGroups = await storeDeclaredSettingsGroups(
+    db,
+    frame.id,
+    built.assignments,
+  );
+  const previous = readServiceSettingGroups(frame.serviceSettingGroups) ?? [];
+  const groupsChanged =
+    previous.length !== serviceSettingGroups.length ||
+    !serviceSettingGroups.every((group) => previous.includes(group));
+  await db
+    .update(frames)
+    .set({
+      assignedChecksum: built.checksum,
+      assignedSceneState: built.sceneStates,
+      updatedAt: new Date(),
+    })
+    .where(eq(frames.id, frame.id));
+  await supersedePendingCommands(db, frame.id, "set_scenes");
+  const command = await enqueueFrameCommand(db, {
+    createdByAccountId: accountId,
+    frameId: frame.id,
+    payload: {
+      checksum: built.checksum,
+      scenes: built.scenes,
+      ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+      ...(state ? { state } : {}),
+    },
+    type: "set_scenes",
+  });
+  if (groupsChanged) {
+    await enqueueServiceSettingsRefreshIfScoped(db, frame.id);
+  }
+  return { ok: true, checksum: built.checksum, commandId: command?.id };
+}
