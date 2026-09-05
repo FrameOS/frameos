@@ -10,7 +10,6 @@ import {
 } from "../../../../src/lib/device-flow";
 import {
   isValidTimeZoneName,
-  boundClaimTokenTtlMs,
   claimTokenExpiry,
   claimTokenPrefix,
   countActiveClaimTokens,
@@ -35,8 +34,11 @@ export const runtime = "nodejs";
 // this account already owns, so redeeming it re-keys that frame (new device
 // key, rotated link token) rather than enrolling a second row for the same
 // physical board. That is the path for moving a board or rescuing one whose
-// NVS was erased. Bound tokens are always single-use, expire in an hour, and
-// do NOT consume frame quota — no frame is created.
+// NVS was erased. Bound tokens are always single-use and do NOT consume
+// frame quota — no frame is created. Their lifetime follows `ttl_days` like
+// any other code: an SD image carrying one is flashed when its owner gets to
+// it, and a one-hour window (the rule until 2026-09-05) only produced images
+// that were dead by the time the card was in the Pi.
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -202,13 +204,7 @@ export async function POST(request: NextRequest) {
   }
 
   const token = createSecretToken(claimTokenPrefix, 24);
-  // A bound token ignores any requested TTL: it is redeemed minutes after it
-  // is minted, and it is worth more than an ordinary code.
-  const expiresAt = boundFrame
-    ? new Date(Date.now() + boundClaimTokenTtlMs)
-    : ttlMs
-      ? new Date(Date.now() + ttlMs)
-      : claimTokenExpiry();
+  const expiresAt = ttlMs ? new Date(Date.now() + ttlMs) : claimTokenExpiry();
   const [row] = await db
     .insert(frameEnrollmentTokens)
     .values({

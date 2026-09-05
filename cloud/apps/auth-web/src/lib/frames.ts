@@ -108,12 +108,6 @@ export const maxClaimTokensPerAccount = limitFromEnv(
 );
 export const claimTokenTtlMs =
   limitFromEnv("FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS", 24) * 60 * 60 * 1000;
-// A frame-bound (re-enrollment) token is redeemed within one flashing
-// session, minutes after it is minted, and it is far more powerful than an
-// ordinary claim code: redeeming it hands a device the identity of an
-// existing frame, with its scenes, assets and logs. Hence one hour, not a
-// day, and single-use always.
-export const boundClaimTokenTtlMs = 60 * 60 * 1000;
 // Hard per-frame log retention cap. Retained bytes count toward the
 // account's storage usage; db-cleanup.sh prunes by age as well.
 export const maxLogsPerFrame = 5000;

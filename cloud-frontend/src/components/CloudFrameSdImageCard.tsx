@@ -58,12 +58,15 @@ export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactEle
   const seededWidth = frame.width ?? hardware?.width ?? undefined
   const seededHeight = frame.height ?? hardware?.height ?? undefined
 
-  // Bound (re-enrollment) codes only: single-use, one-hour, no frame quota.
-  // Minted per build rather than cached, because one code can only ever key
-  // one card.
-  async function mintClaimToken(): Promise<string> {
+  // Bound (re-enrollment) codes only: single-use, no frame quota. Minted per
+  // build rather than cached, because one code can only ever key one card.
+  // The lifetime is the builder's choice, as for a new frame's image.
+  async function mintClaimToken(opts: { ttlDays?: number | 'forever' }): Promise<string> {
     const response = await fetch('/api/frames/claim-tokens', {
-      body: JSON.stringify({ frame_id: String(frame.id) }),
+      body: JSON.stringify({
+        frame_id: String(frame.id),
+        ...(opts.ttlDays !== undefined ? { ttl_days: opts.ttlDays } : {}),
+      }),
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     })

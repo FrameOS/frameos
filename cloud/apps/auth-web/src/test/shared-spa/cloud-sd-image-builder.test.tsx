@@ -1049,11 +1049,13 @@ describe("SdImageBuilder", () => {
       expect(nameField.value).toBe("Kitchen Frame");
       expect(nameField.disabled).toBe(true);
 
-      // Bound codes are single-use and one-hour by contract, so the validity
-      // picker is replaced by a statement of that.
+      // Bound codes are single-use by contract, so the validity picker (which
+      // is about how many frames a card may add) is replaced by a statement
+      // of that. The lifetime itself is not limited: a card is flashed when
+      // its owner gets to it.
       expect(screen.queryByLabelText("Claim code validity")).toBeNull();
       expect(
-        screen.getByText(/single-use and valid for one hour/i),
+        screen.getByText(/single-use and bound to this frame/i),
       ).toBeTruthy();
 
       // The cover copy has to be honest about what does and does not travel.
@@ -1070,9 +1072,11 @@ describe("SdImageBuilder", () => {
       );
       await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
+      // Same lifetime as a new frame's image: forever unless limited.
       expect(mint).toHaveBeenCalledExactlyOnceWith({
         frameId: "f-1",
         multiUse: false,
+        ttlDays: "forever",
       });
       expect(saved.suggestedName).toBe(
         "frameos-raspberry-pi-64-kitchen-frame-1.2.3.img.gz",
@@ -1107,6 +1111,7 @@ describe("SdImageBuilder", () => {
       expect(mint).toHaveBeenCalledExactlyOnceWith({
         frameId: "f-1",
         multiUse: false,
+        ttlDays: "forever",
       });
     });
 

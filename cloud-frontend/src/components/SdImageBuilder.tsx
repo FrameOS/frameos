@@ -165,7 +165,7 @@ function FormGroup({
   children: ReactElement | ReactElement[] | null | false | (ReactElement | null | false)[]
 }): ReactElement {
   return (
-    <fieldset className="frameos-card grid gap-2 rounded-xl border border-white/80 p-3">
+    <fieldset className="frameos-card grid min-w-0 gap-2 rounded-xl border border-white/80 p-3">
       <legend className="frameos-strong px-1 text-xs font-semibold uppercase tracking-wide">{title}</legend>
       {hint ? <p className="frameos-muted -mt-1 text-xs">{hint}</p> : null}
       {children}
@@ -540,13 +540,12 @@ export function SdImageBuilder({
       let token = reenrollFrame ? undefined : claimToken
       if (!token) {
         setStatus(reenrollFrame ? 'Creating a claim code for this frame…' : 'Creating a multi-use claim code…')
+        // Same lifetime either way: a card is flashed and booted when its
+        // owner gets to it, which for a re-download is no sooner than for a
+        // new frame. Bound codes still key exactly one card.
+        const ttlDays = limitClaimValidity ? Number(claimValidity) : ('forever' as const)
         token = await mintClaimToken(
-          reenrollFrame
-            ? { frameId: reenrollFrame.id, multiUse: false }
-            : {
-                multiUse: true,
-                ttlDays: limitClaimValidity ? Number(claimValidity) : 'forever',
-              }
+          reenrollFrame ? { frameId: reenrollFrame.id, multiUse: false, ttlDays } : { multiUse: true, ttlDays }
         )
       }
       const configBytes = renderCloudConfig({
@@ -945,7 +944,7 @@ export function SdImageBuilder({
             Enable passwordless root login on this device (console only — needs physical access; SSH password login
             stays disabled)
           </label>
-          <div className="grid gap-1">
+          <div className="grid min-w-0 gap-1">
             <span className="frameos-muted text-xs font-semibold">SSH keys</span>
             <SshKeysSection
               compact
@@ -967,12 +966,13 @@ export function SdImageBuilder({
           </FormGroup>
           <FormGroup title="Claim code">
           {reenrollFrame ? (
-            // Bound codes are single-use and expire in an hour (the
-            // claim-tokens route enforces both), so there is nothing to pick:
-            // say what it means instead of offering a choice that is refused.
+            // Bound codes key exactly one card (the claim-tokens route
+            // enforces single use), and like a new frame's image they stay
+            // valid until that card boots — a card written today is often
+            // flashed next week.
             <p className="frameos-muted text-xs">
-              The claim code in this image is single-use and valid for one hour — flash the card and boot it while it
-              lasts, or build another image here.
+              The claim code in this image is single-use and bound to this frame. It stays valid until the card boots
+              and enrols, so flash it whenever you get to it; build another image here if you need a second card.
             </p>
           ) : (
             <div className="space-y-1.5">
