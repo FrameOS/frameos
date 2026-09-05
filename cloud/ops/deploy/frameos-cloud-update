@@ -76,10 +76,12 @@ unit_prefix="frameos-cloud-auth-web@"
 unit_dir="/etc/systemd/system"
 hub_unit="frameos-cloud-frame-hub.service"
 # Where this script is installed. Not "$0": ssh runs it by bare name off
-# PATH, and both usage() and the self-update need a path they can open.
+# PATH, and usage() and the drift check need a path they can open. Both
+# files are installed by cloud/ops/deploy/install.sh (--scripts-only) from a
+# human's checkout — a release never replaces them (see report_ops_drift).
 self_path="/usr/local/bin/frameos-cloud-update"
-# The forced command for the CI deploy key (see ops/deploy/README-ish notes in
-# cloud/docs/deployment.md). Kept up to date by self_update like this script.
+# The forced command for the CI deploy key (cloud/docs/deployment.md,
+# "Automatic deploys").
 command_wrapper_path="/usr/local/bin/frameos-cloud-deploy-command"
 lock_dir="/run/lock"
 lock_file="$lock_dir/frameos-cloud-update.lock"
@@ -364,36 +366,24 @@ migrate_layout() {
   fi
 }
 
-# Keep the box's copy of this script equal to the one in the release that is
-# now live. Before the deploy bundle carried ops/deploy, this file existed
-# only on the server and in the backups — the least reviewed, most dangerous
-# script in the deployment.
-self_update() {
+# The box's copy of this script and of the forced-command wrapper come from
+# install.sh, run by a person from a checkout — never from the release
+# archive. Until 2026-09-05 a deploy replaced both with the archive's copies
+# ("self-update"), which meant anyone holding the CI deploy key could ship an
+# archive whose scripts became root's next deploy. Now a release can only
+# *report* that the box is behind; a human decides to run install.sh.
+report_ops_drift() {
   local release="$1"
   local incoming="$release/cloud/ops/deploy/frameos-cloud-update"
-  [ -f "$incoming" ] || return 0
-  if ! cmp -s "$incoming" "$self_path"; then
-    local tmp="/usr/local/bin/.frameos-cloud-update.$$"
-    install -m 0755 "$incoming" "$tmp"
-    # Rename rather than overwrite in place: bash reads this script lazily
-    # from the open file, so truncating it mid-run would resume execution at
-    # a byte offset into different text. mv is atomic and leaves the running
-    # copy on its own inode.
-    mv -f "$tmp" "$self_path"
-    log "updated ${self_path} from the release"
+  if [ -f "$incoming" ] && ! cmp -s "$incoming" "$self_path"; then
+    log "NOTE: ${self_path} differs from the copy in this release."
+    log "      Not applied automatically: run cloud/ops/deploy/install.sh --scripts-only"
+    log "      from a checkout when you want the box on the new version."
   fi
-  # Same argument for the forced command the CI deploy key is pinned to: it
-  # is the thing standing between a leaked Actions secret and a root shell,
-  # so the box must run the reviewed copy rather than whatever was scp'd
-  # there once. Only updated if it is already installed — a host that has not
-  # opted into key-restricted deploys does not silently gain the file.
   local incoming_wrapper="$release/cloud/ops/deploy/frameos-cloud-deploy-command"
   if [ -f "$incoming_wrapper" ] && [ -f "$command_wrapper_path" ] &&
     ! cmp -s "$incoming_wrapper" "$command_wrapper_path"; then
-    local tmp_wrapper="/usr/local/bin/.frameos-cloud-deploy-command.$$"
-    install -m 0755 "$incoming_wrapper" "$tmp_wrapper"
-    mv -f "$tmp_wrapper" "$command_wrapper_path"
-    log "updated ${command_wrapper_path} from the release"
+    log "NOTE: ${command_wrapper_path} differs from the copy in this release (same remedy)."
   fi
 
   local unit="$release/cloud/ops/deploy/frameos-cloud-auth-web@.service"
@@ -402,6 +392,50 @@ self_update() {
     log "      Applying it restarts both instances, so it is not automatic:"
     log "      rerun cloud/ops/deploy/install.sh when you want it."
   fi
+}
+
+# Migrations run as the service user with DATABASE_URL and nothing else out
+# of the env file. The runner (scripts/db-migrate.sh) ships inside the
+# archive CI just uploaded, so it gets exactly what the job needs: the
+# database, as the account that owns the release tree — not root, and not
+# SESSION_SECRET / the encryption key / the API keys that live next to the
+# database URL. The URL travels in a 0600 file owned by the service user
+# rather than on a command line, where /proc would show it to every local
+# account.
+run_migrations_as_service_user() {
+  local staging="$1" database_url
+  database_url="$(
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+    printf '%s' "${DATABASE_URL:-}"
+  )"
+  [ -n "$database_url" ] || {
+    log "DATABASE_URL is not set in $env_file"
+    return 1
+  }
+  local url_file
+  url_file="$(mktemp "$staging/.database-url.XXXXXX")"
+  printf '%s' "$database_url" >"$url_file"
+  chmod 600 "$url_file"
+  local status=0
+  if id -u "$service_user" >/dev/null 2>&1 && [ "$(id -u "$service_user")" != "$(id -u)" ]; then
+    chown "$service_user" "$url_file"
+    runuser -u "$service_user" -- /bin/bash --noprofile --norc -c \
+      'DATABASE_URL="$(cat "$1")"; export DATABASE_URL; cd "$2" && exec scripts/db-migrate.sh' \
+      migrate "$url_file" "$staging/cloud" || status=$?
+  else
+    # No separate service account (a rehearsal container, a dev box): same
+    # shape, current user. Either way the runner inherits only the deploy
+    # shell's own environment — the env file is read in a subshell above and
+    # never exported here — plus DATABASE_URL.
+    /bin/bash --noprofile --norc -c \
+      'DATABASE_URL="$(cat "$1")"; export DATABASE_URL; cd "$2" && exec scripts/db-migrate.sh' \
+      migrate "$url_file" "$staging/cloud" || status=$?
+  fi
+  rm -f "$url_file"
+  return "$status"
 }
 
 release_ref_line() {
@@ -522,22 +556,15 @@ cmd_archive() {
   # Migrations run from the NEW release and before anything is flipped, so a
   # failing migration leaves the running app untouched — the staging
   # directory is simply thrown away by the trap.
-  log "applying database migrations"
-  (
-    set -a
-    # shellcheck disable=SC1090
-    . "$env_file"
-    set +a
-    cd "$staging/cloud"
-    scripts/db-migrate.sh
-  ) || die "migrations failed; production untouched"
+  log "applying database migrations as ${service_user}"
+  run_migrations_as_service_user "$staging" || die "migrations failed; production untouched"
 
   mv "$staging" "$release"
   trap - EXIT
   chmod 755 "$release"
 
   activate_release "$release" || die "deploy failed; the previous release is still serving"
-  self_update "$release"
+  report_ops_drift "$release"
 }
 
 cmd_rollback() {

@@ -50,14 +50,15 @@ run systemctl enable --now frameos-cloud-backup.timer
 run systemctl enable --now frameos-cloud-object-backup.timer
 run systemctl list-timers frameos-cloud-backup.timer frameos-cloud-object-backup.timer --no-pager
 
-# The remote half needs Storage Box credentials, which only a human has.
-# With the remote in place, run a first backup now so "installed" and
-# "verified working" are the same event.
-if run "rclone listremotes 2>/dev/null" | grep -q '^storagebox:$'; then
-  echo "rclone remote 'storagebox' found — running a first backup now"
-  run frameos-cloud-backup
-  echo "Remote contents:"
-  run '. /etc/frameos-cloud/backup.env 2>/dev/null; rclone lsl "${RCLONE_REMOTE:-storagebox:frameos-cloud-backups}"'
+# The remote half needs Storage Box credentials and the crypt passphrases,
+# which only a human has. With the crypt remote in place, run a first backup
+# now so "installed" and "verified working" are the same event.
+if run "rclone listremotes 2>/dev/null" | grep -q '^boxcrypt:$'; then
+  echo "rclone crypt remote 'boxcrypt' found — running a first backup now"
+  run systemctl start frameos-cloud-backup.service
+  run journalctl -u frameos-cloud-backup.service --no-pager -n 8 -o cat || true
+  echo "Remote contents (through the crypt remote):"
+  run '. /etc/frameos-cloud/backup.env 2>/dev/null; rclone lsl "${RCLONE_REMOTE:-boxcrypt:backups}"'
   if run "rclone listremotes 2>/dev/null" | grep -q '^r2:$'; then
     echo "rclone remote 'r2' found — copying the object store now"
     run systemctl start frameos-cloud-object-backup.service
@@ -68,11 +69,13 @@ if run "rclone listremotes 2>/dev/null" | grep -q '^storagebox:$'; then
 else
   cat <<'NEXT'
 
-rclone remote 'storagebox' is not configured yet, so the timer will fail
-until it is. On the server, create /root/.config/rclone/rclone.conf from
-cloud/ops/backup/rclone.conf.example (setup steps: cloud/docs/backups.md,
-"One-time setup"), then verify with:
+rclone crypt remote 'boxcrypt' is not configured yet, so the timer will
+fail until it is (the backup script refuses a plaintext remote). On the
+server, create /root/.config/rclone/rclone.conf from
+cloud/ops/backup/rclone.conf.example — the [storagebox] SFTP remote plus the
+[boxcrypt] crypt layer with freshly generated passphrases (setup steps:
+cloud/docs/backups.md, "One-time setup"), then verify with:
 
-  frameos-cloud-backup
+  systemctl start frameos-cloud-backup.service
 NEXT
 fi

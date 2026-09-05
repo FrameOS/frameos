@@ -136,19 +136,19 @@ medium / low list below.
 
 ### Frontends, wasm preview, CI
 
-- **The CI deploy key is root on the production box and runs
-  `scripts/db-migrate.sh` *from the shipped archive* with the whole env
-  file exported**, then self-updates the two root scripts from the archive.
-  Run migrations as the service user with only `DATABASE_URL`, keep the
-  runner script on the box (or verify a checksum), drop the automatic
-  self-update, fix the wrapper's comment. The key is written only after
-  every third-party action in the job, and the deploy job's actions are
-  pinned to commit SHAs. Move ESP32 firmware signing to a GitHub-hosted
-  job (the key currently lives in a VM on the same host as fork-PR VMs).
-- **Off-site backups are plaintext and contain `/root/.ssh`, `/etc/letsencrypt`
-  and every env file** (`pg-backup.sh`); the privacy policy calls them
-  encrypted. `rclone crypt` with a passphrase held outside the box; drop
-  `/root/.ssh` and live certs from the tarball; align `legal.ts`.
+- **The CI deploy key still reaches root on the production box** through
+  its forced command (`frameos-cloud-update --archive -`), which unpacks the
+  archive and manages systemd/nginx as root. Since 2026-09-05 migrations run
+  as the service user with only `DATABASE_URL` (the runner still comes from
+  the archive, as the service user), and the self-update is gone — the two
+  root scripts come only from `install.sh --scripts-only` on a human's
+  checkout, a deploy merely reports drift. Left: the root-side `tar -xf` +
+  `chown` of an archive the key uploaded (move the unpack under the service
+  user, or verify the archive against a checksum the workflow signs).
+  The key is written only after every third-party action in the job, and
+  the deploy job's actions are pinned to commit SHAs. Move ESP32 firmware
+  signing to a GitHub-hosted job (the key currently lives in a VM on the
+  same host as fork-PR VMs).
 - **Embedded editor postMessage protocol** accepts `init` /
   `previewProxyUrl` from any `event.source` / origin and replies to `'*'`
   (`EmbeddedEditor.tsx`, `mount.tsx`). Require an allowed-origin list at
@@ -161,10 +161,8 @@ medium / low list below.
 - Smaller: the runner pool's `/mnt/cache` is writable from every VM (fork
   PRs no longer land there since #440 — mount it read-only or a scratch
   subtree for any job that is not building a release, and keep "require
-  approval for all outside collaborators" on); `X-Forwarded-For` positional
-  trust is spoofable if the origin is
-  reachable around Cloudflare (verify nginx allowlists CF ranges or uses
-  `real_ip` + `CF-Connecting-IP`); runtime Docker stage runs as root and
+  approval for all outside collaborators" on — verified on 2026-09-05:
+  `approval_policy: all_external_contributors`); runtime Docker stage runs as root and
   compose sets no `SECRET_KEY` (the key now persists to a file, so compose
   works; still worth setting explicitly); `requirements.txt` has no
   `--hash` lines; the OpenAI service-account key and R2 keys sit in

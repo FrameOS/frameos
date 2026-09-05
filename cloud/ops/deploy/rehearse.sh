@@ -109,7 +109,9 @@ export PATH=/usr/local/sbin:$PATH
 install -m 0755 /deploy/frameos-cloud-update /usr/local/bin/frameos-cloud-update
 install -m 0644 "/deploy/frameos-cloud-auth-web@.service" /etc/systemd/system/ 2>/dev/null ||
   mkdir -p /etc/systemd/system && install -m 0644 "/deploy/frameos-cloud-auth-web@.service" /etc/systemd/system/
-echo "DATABASE_URL=postgres://fake/fake" >/etc/frameos-cloud/auth-web.env
+# A second secret next to the database URL: the migration step must never
+# see it (step 15).
+printf 'DATABASE_URL=postgres://fake/fake\nSESSION_SECRET=must-not-reach-migrations\n' >/etc/frameos-cloud/auth-web.env
 
 # The frame hub exists on the real host, so model it as installed and up.
 printf '[Service]\nExecStart=/bin/true\n' >/etc/systemd/system/frameos-cloud-frame-hub.service
@@ -150,6 +152,9 @@ make_bundle() {
   cat >"$dir/cloud/scripts/db-migrate.sh" <<'MIG'
 #!/usr/bin/env bash
 set -euo pipefail
+# Record what the runner was given, for step 15.
+env >/tmp/fake/migrate-env
+id -un >>/tmp/fake/migrate-env
 psql "${DATABASE_URL:?}" -c "select 1" >/dev/null
 MIG
   chmod +x "$dir/cloud/scripts/db-migrate.sh"
@@ -431,13 +436,40 @@ check "an unlisted subcommand is refused" "refused" \
   "$(wrapper_says 'frameos-cloud-update --activate /tmp/evil')"
 check "a prefix of an allowed command is refused" "refused" \
   "$(wrapper_says 'frameos-cloud-update --statusx')"
-# And the self-update keeps the box's copy equal to the release's.
-sed -i 's/^# Rotate it like any other prod secret\./# Rotate it like any other prod secret. (edited on the box)/' \
-  /usr/local/bin/frameos-cloud-deploy-command
+# A release never replaces the root-run scripts: a box whose copies drift is
+# told so, and only install.sh --scripts-only (a person, from a checkout)
+# brings them back in line. Before 2026-09-05 the deploy self-updated both
+# from the archive, i.e. the CI key chose root's next script.
+echo "# edited on the box" >>/usr/local/bin/frameos-cloud-deploy-command
+echo "# edited on the box" >>/usr/local/bin/frameos-cloud-update
 deploy 999999999999 "// hub v2" >/tmp/out14 2>&1 || { cat /tmp/out14; exit 1; }
-check "a drifted wrapper is restored from the release" "yes" \
+check "a drifted wrapper is NOT replaced by the release" "no" \
   "$(cmp -s /usr/local/bin/frameos-cloud-deploy-command /deploy/frameos-cloud-deploy-command &&
     echo yes || echo no)"
+check "a drifted update script is NOT replaced by the release" "no" \
+  "$(cmp -s /usr/local/bin/frameos-cloud-update /deploy/frameos-cloud-update && echo yes || echo no)"
+check "the deploy reported the drift" "yes" \
+  "$(grep -q 'differs from the copy in this release' /tmp/out14 && echo yes || echo no)"
+check "the deploy pointed at install.sh --scripts-only" "yes" \
+  "$(grep -q 'install.sh --scripts-only' /tmp/out14 && echo yes || echo no)"
+/deploy/install.sh --scripts-only >/tmp/out14b 2>&1 || { cat /tmp/out14b; exit 1; }
+check "install.sh --scripts-only restores both" "yes" \
+  "$(cmp -s /usr/local/bin/frameos-cloud-deploy-command /deploy/frameos-cloud-deploy-command &&
+    cmp -s /usr/local/bin/frameos-cloud-update /deploy/frameos-cloud-update && echo yes || echo no)"
+
+# --- 15. migrations get the database URL and nothing else -------------------
+
+# The runner ships in the archive, so it runs with the least a migration
+# needs: DATABASE_URL, as the service user. The session secret sitting next
+# to it in auth-web.env must not come along.
+echo "15. migrations see DATABASE_URL and no other secret"
+check "the runner received DATABASE_URL" "yes" \
+  "$(grep -q '^DATABASE_URL=postgres://fake/fake$' /tmp/fake/migrate-env && echo yes || echo no)"
+check "the runner did not receive SESSION_SECRET" "no" \
+  "$(grep -q 'SESSION_SECRET' /tmp/fake/migrate-env && echo yes || echo no)"
+check "the runner did not receive the URL file's path as a leftover" "no" \
+  "$(ls /opt/frameos-cloud.releases/*/.database-url.* 2>/dev/null | grep -q . && echo yes || echo no)"
+check "the runner ran as the service user" "root" "$(tail -1 /tmp/fake/migrate-env)"
 
 echo
 frameos-cloud-update --status

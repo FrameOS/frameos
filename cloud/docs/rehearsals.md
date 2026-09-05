@@ -52,8 +52,11 @@ Procedure, findings from the first run (2026-08-15, both paths passed), and
 the two gotchas it uncovered are in [backups.md](backups.md#rehearsal). The
 short version:
 
-1. On a machine that is not the prod box, run
-   `sudo -u postgres ops/backup/restore-drill.sh --sftp --sftp-key <key>`.
+1. On a machine that is not the prod box, build an `rclone.conf` from
+   `ops/backup/rclone.conf.example` (the Storage Box key plus the two
+   `boxcrypt` passphrases from the password manager — the off-site copy is
+   encrypted) and run
+   `sudo -u postgres RCLONE_CONFIG=/path/to/rclone.conf ops/backup/restore-drill.sh`.
 2. Read the row counts and blob sizes it prints; the script asserts the
    obvious failure modes itself and exits non-zero on them.
 3. Once a year, also walk the whole-box path (host tarball + pgBackRest)

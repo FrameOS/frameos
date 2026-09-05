@@ -12,6 +12,28 @@
 # restricted shell whose checksum tools have BSD names. Seed known_hosts with:
 #   ssh-keyscan -p 23 uXXXXXX.your-storagebox.de >> /root/.ssh/known_hosts
 
+# [boxcrypt] is what the backup jobs actually write to: an rclone "crypt"
+# remote layered over the SFTP one. Every file name and every byte is
+# encrypted on the box (NaCl secretbox, XSalsa20-Poly1305, key derived from
+# the two passphrases with scrypt) before it reaches Hetzner, and only the
+# two passphrases can read it back. Generate both with
+# `openssl rand -base64 33`, store the PLAINTEXT values in the password
+# manager ("FrameOS Cloud backup crypt"), and put the OBSCURED form here:
+#
+#   printf '%s' "$passphrase" | rclone obscure -
+#
+# `rclone reveal` turns an obscured value back into the plaintext, so this
+# file is a secret (chmod 600) and is deliberately NOT in the host tarball:
+# a backup must never contain the key that opens it. Losing both the
+# password manager entry and this file loses every off-site backup.
+#
+# Everything on the Storage Box lives under one folder,
+# frameos-cloud-encrypted/, so the crypt remote's sub-paths are short:
+# boxcrypt:backups (nightly dump + host tarball) and boxcrypt:objects (the
+# R2 copy). pgBackRest has its own client-side cipher
+# (repo1-cipher-type=aes-256-cbc in /etc/pgbackrest/pgbackrest.conf, with
+# a third passphrase kept the same way).
+
 # Cloudflare R2, the blob store (bucket frameos-cloud). Same account and
 # credentials the app uses — read them out of /etc/frameos-cloud/auth-web.env
 # rather than keeping a third copy, and keep this file chmod 600.
@@ -39,3 +61,11 @@ known_hosts_file = /root/.ssh/known_hosts
 shell_type = unix
 md5sum_command = md5 -r
 sha1sum_command = sha1 -r
+
+[boxcrypt]
+type = crypt
+remote = storagebox:frameos-cloud-encrypted
+filename_encryption = standard
+directory_name_encryption = true
+password = OBSCURED_PASSPHRASE_HERE
+password2 = OBSCURED_SALT_PASSPHRASE_HERE

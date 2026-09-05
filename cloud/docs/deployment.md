@@ -334,8 +334,17 @@ One-time setup, in order:
    box, which is what a deploy is. It removes the rest: the environment files
    (database URL, session secret, encryption key), the backups, and the SSH
    keys that open the storage box. Rotate it like any other production
-   secret. After the first deploy, `frameos-cloud-update` keeps the wrapper
-   equal to the copy in the release, the same way it does for itself.
+   secret.
+
+   Two rules keep the key's reach at "deploy" rather than "root": the
+   migrations run as the service user with `DATABASE_URL` alone (not the
+   env file), and the two root-run scripts — `frameos-cloud-update` and this
+   wrapper — are never taken from the archive. A deploy that carries a newer
+   copy only *says so* in its log; ship them yourself, from a checkout, with
+   `cloud/ops/deploy/install.sh --scripts-only` on the box (the wrapper is
+   installed only where one already exists). Until 2026-09-05 the deploy
+   self-updated both from the archive, which handed anyone with the key a
+   root-run script of their choosing on the next deploy.
 
 2. **Secrets**, on the `production` environment (Settings → Environments →
    production), so nothing else in the repository can read them:
@@ -501,7 +510,7 @@ location = /api/frames/ws {
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For $remote_addr;  # one entry, nginx's own verdict
     # The hub pings every 30s; anything over a minute of silence is dead.
     proxy_read_timeout 90s;
     proxy_send_timeout 90s;
@@ -515,7 +524,7 @@ location ~ ^/api/frames/([^/]+/)?updates$ {
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For $remote_addr;  # one entry, nginx's own verdict
     proxy_read_timeout 90s;
     proxy_send_timeout 90s;
 }
@@ -606,7 +615,7 @@ server blocks can share the same proxy location for all three names:
 location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For $remote_addr;  # one entry, nginx's own verdict
     # Not a literal port: the upstream block is the one place a deploy moves
     # traffic between the two auth-web instances. It is generated into
     # /etc/nginx/conf.d/frameos-cloud-upstream.conf and rewritten on every
@@ -623,13 +632,31 @@ line to change and the installer looks in `snippets/` as well as
 `sites-enabled/` and `conf.d/`.
 
 Per-client rate limits (firmware downloads, login attempts, hub upgrades)
-key on the client IP that `RATE_LIMIT_TRUSTED_PROXY_COUNT` picks out of the
-`X-Forwarded-For` chain, counted from the right. That must equal the number of
-proxy hops in front of auth-web: `1` for bare nginx, `2` when Cloudflare (or
-any other CDN) sits in front of it — with `1` every visitor keys on the
-Cloudflare edge address and the whole site shares one budget, which surfaces
-as "Too many firmware downloads from your network" for a user who has
-downloaded nothing.
+and the IP stamped on audit events key on the client IP that
+`RATE_LIMIT_TRUSTED_PROXY_COUNT` picks out of the `X-Forwarded-For` chain,
+counted from the right. That must equal the number of proxy hops in front
+of auth-web whose entry you trust. Production runs `1`: nginx is the only
+hop the app sees, because nginx itself decides who the client is —
+`cloud/ops/deploy/cloudflare-real-ip.sh` installs Cloudflare's published
+ranges as `set_real_ip_from` with `real_ip_header CF-Connecting-IP` (in
+`/etc/nginx/conf.d/cloudflare-real-ip.conf`), and the proxy snippets send
+`X-Forwarded-For $remote_addr` — one entry, overwriting whatever the request
+carried. A request through Cloudflare keys on the address Cloudflare vouches
+for; a request that reaches the origin directly keys on its own socket
+address and cannot name anyone else. Rerun the script when Cloudflare's
+ranges change (the generated file records its date).
+
+The other shape — `$proxy_add_x_forwarded_for` (append) with the count at
+`2` — is what production ran until 2026-09-05 and is what a plain nginx
+behind a CDN gives you by default. It works for honest traffic, but the
+origin answers 80/443 from anywhere, and a request that skips Cloudflare
+can then send a two-entry chain of its choosing and be counted, and logged,
+as someone else. Get the count wrong in either direction and the symptom
+is the same: with too high a count every visitor keys on the edge address
+and the whole site shares one budget, which surfaces as "Too many firmware
+downloads from your network" for a user who has downloaded nothing; with
+too low a count the chain is shorter than the count and everyone shares the
+`untrusted` key.
 
 Release lookups against api.github.com are cached in-process (fresh for five
 minutes, stale copy served while GitHub is down or rate limiting) and sent

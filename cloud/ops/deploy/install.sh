@@ -23,6 +23,13 @@ set -euo pipefail
 #   6. only then stop and disable the legacy unit
 #
 # --dry-run prints what would change and touches nothing.
+#
+# --scripts-only installs just frameos-cloud-update and (where one is already
+# installed) the CI key's forced-command wrapper, then exits. This is the
+# ONLY way those two files reach the box: a deploy reports when the release
+# carries a newer copy but never installs it, because a script that root
+# runs must come from a person's checkout, not from an archive the CI key
+# uploaded (cloud/docs/deployment.md, "Automatic deploys").
 
 here="$(cd "$(dirname "$0")" && pwd)"
 
@@ -30,6 +37,7 @@ legacy_unit="frameos-cloud-auth-web.service"
 unit_name="frameos-cloud-auth-web@.service"
 unit_dir="/etc/systemd/system"
 bin_path="/usr/local/bin/frameos-cloud-update"
+wrapper_path="/usr/local/bin/frameos-cloud-deploy-command"
 upstream_file="/etc/nginx/conf.d/frameos-cloud-upstream.conf"
 upstream_name="frameos_cloud_auth_web"
 app_link="/opt/frameos-cloud"
@@ -38,7 +46,14 @@ instances_dir="/opt/frameos-cloud.instances"
 legacy_port=3000
 
 dry_run=false
-[ "${1:-}" = "--dry-run" ] && dry_run=true
+scripts_only=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) dry_run=true ;;
+    --scripts-only) scripts_only=true ;;
+    *) echo "unknown argument: $arg (--dry-run, --scripts-only)" >&2; exit 2 ;;
+  esac
+done
 
 log() { echo "[install] $*"; }
 die() {
@@ -54,9 +69,32 @@ run() {
 }
 
 [ "$(id -u)" -eq 0 ] || die "must run as root on the production host"
+[ -f "$here/frameos-cloud-update" ] || die "run this from a copy of cloud/ops/deploy"
+
+install_scripts() {
+  log "installing $bin_path"
+  run install -m 0755 "$here/frameos-cloud-update" "$bin_path"
+  # Only where a host has opted into key-restricted deploys: a host without
+  # the wrapper does not silently gain a file that authorized_keys never
+  # points at.
+  if [ -f "$wrapper_path" ] && [ -f "$here/frameos-cloud-deploy-command" ]; then
+    if cmp -s "$here/frameos-cloud-deploy-command" "$wrapper_path"; then
+      log "$wrapper_path is already current"
+    else
+      log "installing $wrapper_path"
+      run install -m 0755 "$here/frameos-cloud-deploy-command" "$wrapper_path"
+    fi
+  fi
+}
+
+if [ "$scripts_only" = true ]; then
+  install_scripts
+  log "done (scripts only; the unit, nginx and the active release were not touched)"
+  exit 0
+fi
+
 command -v nginx >/dev/null || die "nginx not found; this installer assumes nginx fronts the app"
 command -v node >/dev/null || die "node not found"
-[ -f "$here/frameos-cloud-update" ] || die "run this from a copy of cloud/ops/deploy"
 
 # --- 0. show what the legacy unit does, so nothing is silently dropped ------
 
@@ -88,8 +126,7 @@ log "the port currently serving traffic is ${legacy_port}"
 
 # --- 1. the deploy script and the templated unit ----------------------------
 
-log "installing $bin_path"
-run install -m 0755 "$here/frameos-cloud-update" "$bin_path"
+install_scripts
 
 log "installing $unit_dir/$unit_name"
 run install -m 0644 "$here/$unit_name" "$unit_dir/$unit_name"

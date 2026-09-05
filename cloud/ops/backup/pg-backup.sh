@@ -22,17 +22,31 @@ set -euo pipefail
 #   host-<stamp>.tar.gz  the parts of the host that are in neither the repo
 #                        nor the database: /etc/frameos-cloud (secrets),
 #                        nginx/postgres/pgbackrest/ufw config, letsencrypt
-#                        state, the frameos-cloud systemd units, every
-#                        /usr/local/bin script, /root ops scripts and logs,
-#                        the rclone/SSH backup credentials, the release
+#                        renewal state (not the private keys), the
+#                        frameos-cloud systemd units, every /usr/local/bin
+#                        script, /root ops scripts and logs, the release
 #                        stamps, and a generated rebuild manifest (installed
 #                        packages, enabled units, tool versions).
+#
+# Both are encrypted before they leave the box. The destination must be an
+# rclone *crypt* remote (client-side AES, the passphrase lives in
+# /root/.config/rclone/rclone.conf and in the password manager — never in a
+# backup); the script refuses a plaintext remote so a mis-set RCLONE_REMOTE
+# cannot quietly ship the secrets in clear. For the same reason the tarball
+# carries no credential that opens the backups themselves: /root/.ssh, the
+# rclone config and postgres' copy of the Storage Box key stay out, and so
+# do the TLS private keys (certbot reissues them in a minute). All of those
+# are recoverable from the laptop / the password manager, which is where a
+# whole-box rebuild starts anyway (cloud/docs/backups.md).
 #
 # Configuration comes from the systemd unit's EnvironmentFiles: auth-web.env
 # supplies DATABASE_URL (no second copy of the password to rotate) and
 # backup.env supplies the rest:
 #
-#   RCLONE_REMOTE     rclone destination (default storagebox:frameos-cloud-backups)
+#   RCLONE_REMOTE     rclone crypt destination (default boxcrypt:backups)
+#   CAPACITY_REMOTE   the underlying remote whose free space is checked
+#                     (default: the crypt remote itself, which passes the
+#                     question through to the Storage Box)
 #   RETENTION_DAYS    prune remote files older than this (default 30)
 #   HEALTHCHECKS_URL  optional hc-ping.com check URL; start/success/fail pings
 #   LOCAL_DIR         staging dir (default /var/backups/frameos-cloud)
@@ -42,7 +56,8 @@ set -euo pipefail
 #                              the pgBackRest check entirely)
 
 database_url="${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
-rclone_remote="${RCLONE_REMOTE:-storagebox:frameos-cloud-backups}"
+rclone_remote="${RCLONE_REMOTE:-boxcrypt:backups}"
+capacity_remote="${CAPACITY_REMOTE:-${rclone_remote%%:*}:}"
 retention_days="${RETENTION_DAYS:-30}"
 healthchecks_url="${HEALTHCHECKS_URL:-}"
 local_dir="${LOCAL_DIR:-/var/backups/frameos-cloud}"
@@ -75,6 +90,19 @@ ping /start ""
 # A non-positive retention would prune everything, including last night.
 if ! [[ "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ]; then
   echo "RETENTION_DAYS must be a positive integer, got: ${retention_days}" >&2
+  exit 1
+fi
+
+# The backups leave the box only encrypted. A crypt remote encrypts file
+# names and contents with a key that never reaches the Storage Box, so the
+# check is on the remote's type, not on anything the upload could get wrong.
+# ALLOW_PLAINTEXT_REMOTE=1 is for a rehearsal VM with no key material — never
+# set it in /etc/frameos-cloud/backup.env on the production host.
+remote_name="${rclone_remote%%:*}"
+if [ "${ALLOW_PLAINTEXT_REMOTE:-0}" != "1" ] &&
+  ! rclone config show "$remote_name" 2>/dev/null | grep -qE '^type *= *crypt$'; then
+  echo "RCLONE_REMOTE=${rclone_remote} is not an rclone crypt remote — refusing to ship plaintext backups off the box" >&2
+  echo "(see cloud/ops/backup/rclone.conf.example for the [boxcrypt] section)" >&2
   exit 1
 fi
 
@@ -122,9 +150,13 @@ manifest="$local_dir/manifest.txt"
 # Host config: only paths that exist, so a box that predates one of these
 # (or never ran certbot) does not fail the whole backup. The list is the
 # 2026-08 audit of everything on the box that is in neither the repo nor
-# the database; /root/.ssh and the rclone config are the backup credentials
-# themselves — needed to rebuild the box's access, and no more sensitive
-# than the env secrets already in the tarball.
+# the database, minus (since 2026-09-05) anything that opens the backups or
+# is a live private key: /root/.ssh, /root/.config/rclone and postgres'
+# .ssh hold the Storage Box key and the crypt passphrase — a backup must
+# not contain the credential that decrypts it — and letsencrypt's
+# live/archive/keys are TLS private keys that certbot reissues on a fresh
+# box (the renewal configs and the ACME account stay in, so `certbot renew`
+# knows what to ask for).
 host_paths=()
 for p in \
   /etc/frameos-cloud \
@@ -136,9 +168,6 @@ for p in \
   /etc/systemd/system/frameos-cloud-*.service \
   /etc/systemd/system/frameos-cloud-*.timer \
   /usr/local/bin \
-  /root/.ssh \
-  /root/.config/rclone \
-  /var/lib/postgresql/.ssh \
   /root/CODEX_LOG.md \
   /root/*.sh \
   /root/nginx-backups \
@@ -148,8 +177,19 @@ for p in \
   [ -e "$p" ] && host_paths+=("$p")
 done
 echo "Archiving host config: ${host_paths[*]}"
-tar -czf "$host_file" "${host_paths[@]}"
+tar -czf "$host_file" \
+  --exclude=/etc/letsencrypt/live \
+  --exclude=/etc/letsencrypt/archive \
+  --exclude=/etc/letsencrypt/keys \
+  "${host_paths[@]}"
 chmod 600 "$host_file"
+
+# Belt and braces for the rule above: fail the run if a credential path
+# slipped into the archive anyway (a future edit to the list, a symlink).
+if tar -tzf "$host_file" | grep -qE '^(root/\.ssh|root/\.config/rclone|var/lib/postgresql/\.ssh|etc/letsencrypt/(live|archive|keys))(/|$)'; then
+  echo "the host tarball contains backup credentials or TLS private keys — refusing to upload it" >&2
+  exit 1
+fi
 
 echo "Uploading to $rclone_remote"
 rclone copy "$db_file" "$rclone_remote"
@@ -168,7 +208,7 @@ done
 # log doubles as a capacity history. Hard-fail below 50 GiB free — months of
 # warning at current growth, and a full repo would break WAL archiving too.
 box_summary=""
-about_json="$(rclone about "${rclone_remote%%:*}:" --json 2>/dev/null | tr -d ' \n\t' || true)"
+about_json="$(rclone about "$capacity_remote" --json 2>/dev/null | tr -d ' \n\t' || true)"
 if [ -n "$about_json" ]; then
   free_bytes="$(printf '%s' "$about_json" | sed -n 's/.*"free":\([0-9]*\).*/\1/p')"
   used_bytes="$(printf '%s' "$about_json" | sed -n 's/.*"used":\([0-9]*\).*/\1/p')"
