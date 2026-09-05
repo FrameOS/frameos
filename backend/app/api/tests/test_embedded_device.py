@@ -466,7 +466,7 @@ async def test_settings_carry_what_a_console_line_cannot(async_client, no_auth_c
         'port': 9443,
         'certs': {
             'server': '-----BEGIN CERTIFICATE-----\nserver\n-----END CERTIFICATE-----\n',
-            'server_key': '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n',
+            'server_key': '-----BEGIN EC PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n',
             'client_ca': '-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n',
         },
     }
@@ -483,7 +483,7 @@ async def test_settings_carry_what_a_console_line_cannot(async_client, no_auth_c
         'enable': True,
         'port': 9443,
         'cert': '-----BEGIN CERTIFICATE-----\nserver\n-----END CERTIFICATE-----\n',
-        'key': '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n',
+        'key': '-----BEGIN EC PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n',
         # The client CA is the backend's business, never the device's.
     }
 
