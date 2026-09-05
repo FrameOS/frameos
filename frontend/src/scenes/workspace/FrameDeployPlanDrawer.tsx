@@ -2551,7 +2551,7 @@ function CloudOtaDeployView({
 }): JSX.Element {
   const { updateFrameFirmware } = useActions(framesModel)
   const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
-  const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
+  const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   // Mirrors CloudPiUpdateCard: one press converges firmware + scenes +
   // settings — but "converge" means "make equal", so when there is nothing
   // unsaved and the device acked the last push, the tick sends nothing. The
@@ -2563,6 +2563,9 @@ function CloudOtaDeployView({
     unsavedChangeDetails.length === 0 &&
     Boolean(frame.assigned_checksum) &&
     frame.assigned_checksum === frame.scenes_checksum
+  // Nothing assigned → nothing to resend; the tick is not offered.
+  const hasScenes = (frameForm?.scenes ?? frame.scenes ?? []).length > 0
+  const offerResend = hasScenes && !scenesInSync
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const mode = workspaceMode()
   const canUpdateFirmware = frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
@@ -2599,13 +2602,13 @@ function CloudOtaDeployView({
                 type="button"
                 title={
                   firmwareDisabledReason ??
-                  (alsoPushScenes && !scenesInSync
+                  (alsoPushScenes && offerResend
                     ? 'Queue a firmware update and resend this frame’s scenes & settings'
                     : 'Queue a firmware update notification')
                 }
                 disabled={Boolean(firmwareDisabledReason)}
                 onClick={() => {
-                  if (alsoPushScenes && !scenesInSync) {
+                  if (alsoPushScenes && offerResend) {
                     // Scenes first: the OTA reboot redelivers a queued push
                     // when the frame reconnects.
                     saveAndDeployFrame()
@@ -2628,13 +2631,13 @@ function CloudOtaDeployView({
               {/* Nothing to resend when the device already acked everything:
                   a tick that sends nothing only invites the question of why
                   it is there, so the sentence stands alone. */}
-              {scenesInSync ? (
+              {offerResend ? (
+                <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+              ) : hasScenes ? (
                 <div className="frame-tool-muted text-xs leading-4">
                   Scenes &amp; settings are already in sync — nothing extra is sent.
                 </div>
-              ) : (
-                <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
-              )}
+              ) : null}
             </>
           ) : (
             <div className="frame-tool-muted text-sm leading-5">
@@ -2995,7 +2998,7 @@ function CloudPiUpdateCard({
 }): JSX.Element | null {
   const { updateFrameFirmware } = useActions(framesModel)
   const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
-  const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
+  const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   // "One big button": converge the whole frame — firmware, scenes and
   // settings — in one press. Converge means "make equal": with nothing
   // unsaved and the last push acked, the tick sends nothing at all. The
@@ -3007,6 +3010,10 @@ function CloudPiUpdateCard({
     unsavedChangeDetails.length === 0 &&
     Boolean(frame.assigned_checksum) &&
     frame.assigned_checksum === frame.scenes_checksum
+  // A frame with nothing assigned has nothing to resend either: the tick
+  // would only send an empty scene list, so it is not offered.
+  const hasScenes = (frameForm?.scenes ?? frame.scenes ?? []).length > 0
+  const offerResend = hasScenes && !scenesInSync
   const mode = workspaceMode()
   if (!frameMenuActionIsAllowed(mode, 'updateFirmware', frame)) {
     return null
@@ -3029,24 +3036,24 @@ function CloudPiUpdateCard({
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
-        {scenesInSync ? (
+        {offerResend ? (
+          <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+        ) : hasScenes ? (
           <div className="frame-tool-muted text-xs leading-4">
             Scenes &amp; settings are already in sync — nothing extra is sent.
           </div>
-        ) : (
-          <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
-        )}
+        ) : null}
         <button
           type="button"
           title={
             disabledReason ??
-            (alsoPushScenes && !scenesInSync
+            (alsoPushScenes && offerResend
               ? 'Queue a FrameOS update and push this frame’s scenes & settings'
               : 'Queue a FrameOS update notification')
           }
           disabled={Boolean(disabledReason)}
           onClick={() => {
-            if (alsoPushScenes && !scenesInSync) {
+            if (alsoPushScenes && offerResend) {
               // Scenes first: the firmware update reboots the frame, and a
               // queued push simply redelivers after it reconnects.
               saveAndDeployFrame()
@@ -3139,8 +3146,11 @@ function CloudDeploySection({
       <PendingActionsSection frame={frame} />
       {!isEsp32 ? (
         <>
-          <CloudScenesPushCard frame={frame} onPushed={onClose} />
+          {/* Same order as the esp32 views: the release upgrade first (the
+              status rows above just said whether one is due), the scene push
+              second. */}
           <CloudPiUpdateCard frame={frame} releaseInfo={releaseInfo} />
+          <CloudScenesPushCard frame={frame} onPushed={onClose} />
           {/* Cloud-only, and last: writing a card is what you do when the
               hardware, not the deploy, is the problem. */}
           {SdImagePanel ? <SdImagePanel frame={frame} /> : null}

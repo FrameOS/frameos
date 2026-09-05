@@ -436,15 +436,20 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
             : 'After the board reboots on the new firmware, send it the workspace’s current scenes over the same cable. Settings still arrive when the frame next connects.'
         }
       />
-      <button
-        type="button"
-        onClick={update}
-        disabled={busy}
-        className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-      >
-        {busy ? <Spinner /> : <ArrowUpCircleIcon className="h-4 w-4" />}
-        {phase === 'flashing' && progress !== null ? `Updating ${progress}%` : busy ? 'Updating' : 'Update over USB'}
-      </button>
+      {/* Its own block under the tick, at a width that fits every label:
+          the checkbox is inline, so an inline button shared its line and
+          hopped to the next one each time "Updating 7%" grew a digit. */}
+      <div>
+        <button
+          type="button"
+          onClick={update}
+          disabled={busy}
+          className="frameos-secondary-button inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+        >
+          {busy ? <Spinner /> : <ArrowUpCircleIcon className="h-4 w-4" />}
+          {phase === 'flashing' && progress !== null ? `Updating ${progress}%` : busy ? 'Updating' : 'Update over USB'}
+        </button>
+      </div>
       {phase === 'flashing' && progress !== null ? (
         <div className="frameos-inset h-2 w-full overflow-hidden rounded-full border">
           <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />

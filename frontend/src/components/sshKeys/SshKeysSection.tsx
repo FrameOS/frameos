@@ -57,14 +57,14 @@ export function SshKeysSection({
   }, [lastAddedKeyId])
 
   return (
-    <div className={clsx('space-y-2', className)}>
+    <div className={clsx('min-w-0 space-y-2', className)}>
       {description ? <div className="frameos-muted text-xs leading-relaxed">{description}</div> : null}
       {keys.length === 0 ? (
         <div className="frameos-muted text-sm">
           No SSH keys yet. Add one to be able to log in to the frame over SSH.
         </div>
       ) : (
-        <ul className={clsx('frame-tool-panel', compact ? 'space-y-1' : 'space-y-2')} aria-label="SSH keys">
+        <ul className={clsx('frame-tool-panel min-w-0', compact ? 'space-y-1' : 'space-y-2')} aria-label="SSH keys">
           {keys.map((key) => {
             const label = key.name || key.id
             return (

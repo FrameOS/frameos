@@ -50,6 +50,12 @@ function cloudFrame(
   } as unknown as FrameType;
 }
 
+const oneScene = {
+  scenes: [
+    { id: "scene-1", name: "Clock", nodes: [], edges: [], fields: [] },
+  ] as unknown as FrameType["scenes"],
+};
+
 type CloudTestWindow = Window & {
   FRAMEOS_APP_CONFIG?: { cloudMode: boolean };
   FRAMEOS_EMBEDDED_NO_BACKEND?: boolean;
@@ -104,7 +110,7 @@ describe("the deploy dialog in cloud mode", () => {
   });
 
   it("puts the push and the firmware nudge behind the over-the-air path", () => {
-    render(<FrameDeployPlanDrawer frame={cloudFrame("esp32")} />);
+    render(<FrameDeployPlanDrawer frame={cloudFrame("esp32", oneScene)} />);
     fireEvent.click(screen.getByRole("button", { name: /Over the air/ }));
 
     // The cloud's deploy: settings push + one checksummed set_scenes.
@@ -155,7 +161,7 @@ describe("the deploy dialog in cloud mode", () => {
     // assigned == acked and nothing unsaved: a resend would send nothing, so
     // the checkbox goes and only the "already in sync" sentence stays. Same
     // rule on both platforms' cards.
-    const inSync = { assigned_checksum: "abc123", scenes_checksum: "abc123" };
+    const inSync = { ...oneScene, assigned_checksum: "abc123", scenes_checksum: "abc123" };
     for (const platform of ["esp32", "pi-zero2w"] as const) {
       cleanup();
       render(<FrameDeployPlanDrawer frame={cloudFrame(platform, inSync)} />);
@@ -237,8 +243,27 @@ describe("the deploy dialog in cloud mode", () => {
     }
   });
 
+  it("offers no resend tick when the frame has no scenes to send", () => {
+    // Nothing assigned means the tick could only send an empty list; the
+    // "already in sync" sentence would be just as misplaced, so neither shows.
+    for (const platform of ["esp32", "pi-zero2w"] as const) {
+      cleanup();
+      render(<FrameDeployPlanDrawer frame={cloudFrame(platform)} />);
+      if (platform === "esp32") {
+        fireEvent.click(screen.getByRole("button", { name: /Over the air/ }));
+      }
+      expect(
+        screen.queryByRole("checkbox", { name: /Resend scenes & settings/ }),
+      ).toBeNull();
+      expect(screen.queryByText(/already in sync/)).toBeNull();
+      expect(
+        screen.getByRole("button", { name: platform === "esp32" ? /Upgrade firmware/ : /Upgrade FrameOS/ }),
+      ).toBeTruthy();
+    }
+  });
+
   it("leaves a cloud Pi frame the scene push and the FrameOS update, without the esp32 surfaces", () => {
-    render(<FrameDeployPlanDrawer frame={cloudFrame("pi-zero2w")} />);
+    render(<FrameDeployPlanDrawer frame={cloudFrame("pi-zero2w", oneScene)} />);
 
     expect(
       screen.getByRole("button", { name: /Push scenes & settings/ }),
@@ -254,6 +279,14 @@ describe("the deploy dialog in cloud mode", () => {
     );
     expect(
       screen.getByRole("button", { name: /Upgrade FrameOS/ }),
+    ).toBeTruthy();
+    // Same order as the esp32's over-the-air view: the update first, the
+    // scene push under it.
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(
+      screen
+        .getByRole("button", { name: /Upgrade FrameOS/ })
+        .compareDocumentPosition(screen.getByRole("button", { name: /Push scenes & settings/ })) & FOLLOWING,
     ).toBeTruthy();
     // USB provisioning and the hardware panel stay esp32-profile surfaces: a
     // cloud Pi has no serial console to provision over and no enrollment
