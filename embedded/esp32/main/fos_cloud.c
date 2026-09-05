@@ -1268,6 +1268,17 @@ static void add_state_fields(cJSON *msg, nim_snapshot_t *snap)
      * for every pushed payload). Anything else resident — backend-synced or
      * locally uploaded — reports the etag, which is the truth the provider
      * should see: out of sync. */
+    if (s_applied_scenes_checksum[0] && !fos_scenes_stored()) {
+        /* NVS remembers a payload /state no longer holds — a SPIFFS
+         * autoformat after corruption, a flash relayout. Vouching for it
+         * left a frame sceneless for good: the hub saw the assigned checksum,
+         * never re-pushed, and every set_current_scene failed "scene not
+         * found" (13.3" bench, 2026-09-05). Forget it so the hello reports
+         * the store's own (empty) etag and the hub resyncs. */
+        ESP_LOGW(TAG, "hello: cached scenes checksum but no stored scenes; reporting out of sync");
+        s_applied_scenes_checksum[0] = '\0';
+        nvs_erase_key_quiet("cloud_scn_sum");
+    }
     if (fos_scenes_from_cloud() && s_applied_scenes_checksum[0]) {
         cJSON_AddStringToObject(msg, "scenes_checksum", s_applied_scenes_checksum);
     } else {
