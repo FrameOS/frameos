@@ -138,7 +138,7 @@ medium / low list below.
 
 - **The CI deploy key still reaches root on the production box** through
   its forced command (`frameos-cloud-update --archive -`), which unpacks the
-  archive and manages systemd/nginx as root. Since 2026-09-05 migrations run
+  archive and manages systemd/nginx as root. Since #451 migrations run
   as the service user with only `DATABASE_URL` (the runner still comes from
   the archive, as the service user), and the self-update is gone — the two
   root scripts come only from `install.sh --scripts-only` on a human's
@@ -189,6 +189,13 @@ their own host, and the fix is to use interpreted scenes.
   `sources` unless an operator opts in, drop or sandbox `nim check`.
 
 ## Medium / low — worth a pass
+
+Cloud, left behind by the encrypted-backups rollout (#451, 2026-09-05):
+the pre-encryption pgBackRest repo `storagebox:pgbackrest` is frozen
+plaintext — **delete it on 2026-10-03** (`rclone purge storagebox:pgbackrest`
+on the box), once the encrypted repo has its own four-week window; the
+object store's own copy is rehearsed only by count and hash, not by a
+restore into R2.
 
 Cloud, left behind by the critical batch: `save_scene` still acts
 immediately (it only creates a private copy in the account; the prompt now
