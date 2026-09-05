@@ -741,6 +741,21 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   resets the chip (DTR/RTS auto-reset circuit), so open once with DTR/RTS
   low and keep the port open while waiting for the prompt.
 
+- [ ] **E1004 Weather hourly chart at full size (ac99f449, needs the next
+  release):** on 2026.9.7 the hourly panel — a JS-app SVG in the lower
+  `render/split` cell — rendered at 286×229 centred in a 1200×960 cell of
+  black (user report 2026-09-05; the browser preview never showed it). Cause:
+  since 8f8ea8ef / 2026.9.0 the SVG size went through
+  `boundedRequestedDimensions` before the into-target check; with 2 MB PSRAM
+  free but an 848 KB largest block the bound hit its 65,536-pixel floor, the
+  cell render was skipped, and `render/image` (placement "center") drew the
+  small raster as-is. Fixed: the offered cell is painted directly first, with
+  a degrade-and-stretch ladder only on refusal. Verify: after the OTA the
+  chart fills the lower cell again and the log shows no `render:degraded`
+  with `"source":"svg"` (if it does, the panel is soft, not tiny, and the
+  line names the headroom). Until then, setting the scene's `render/image`
+  placement to `contain` is a working stopgap on 9.7.
+
 ## 5. Older pending hardware item
 
 - [x] **13.3" E hardware SPI fix:** closed 2026-08-22 — frame 62 was built,
