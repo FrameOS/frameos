@@ -32,6 +32,7 @@
 #include "fos_config.h"
 #include "fos_http.h"
 #include "fos_ota_pubkey.h"
+#include "fos_version.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -201,6 +202,23 @@ typedef struct {
 #define FOS_OTA_MAX_FAILURES 3
 RTC_DATA_ATTR static char s_ota_failed_version[32];
 RTC_DATA_ATTR static uint8_t s_ota_failures;
+
+/* Downgrade protection. The manifest's `version` is outside the signed
+ * payload (the minisig covers image bytes), so anyone who can speak for the
+ * control plane — a plain-http backend on the LAN, a stolen provider token —
+ * could offer an OLDER signed release and roll the frame back to a known
+ * hole. An offer strictly below the running release is therefore refused
+ * unless the local admin asked for exactly that with `ota downgrade` on the
+ * console, which arms this for one manifest fetch. RTC memory: the console
+ * command may be followed by the request being served after a deep-sleep
+ * wake. A dev build ("dev", no dotted version) never refuses — see
+ * fos_version_is_downgrade. */
+RTC_DATA_ATTR static uint8_t s_ota_allow_downgrade;
+
+void fos_ota_allow_downgrade_once(void)
+{
+    s_ota_allow_downgrade = 1;
+}
 
 static void ota_note_failure(const char *version)
 {
@@ -412,6 +430,19 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
         cJSON_Delete(root);
         *up_to_date = true;
         return ESP_OK;
+    }
+    if (fos_version_is_downgrade(out->version, running)) {
+        if (!s_ota_allow_downgrade) {
+            ESP_LOGW(TAG, "ota (%s): refusing downgrade %s -> %s (console `ota downgrade` to allow once)",
+                     src->plane, running, out->version);
+            ota_log(src, "downgrade-refused", out->version);
+            cJSON_Delete(root);
+            *up_to_date = true; /* nothing to install; not a failure to count */
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "ota (%s): downgrade %s -> %s allowed once by the console", src->plane,
+                 running, out->version);
+        s_ota_allow_downgrade = 0;
     }
 
     if (!parse_minisig(minisig->valuestring, out->sig)) {

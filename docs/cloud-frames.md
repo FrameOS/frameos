@@ -94,7 +94,14 @@ the `ws_path` flow.
 
 Errors: `400 invalid_claim_token` (unknown/expired/budget spent), `400
 invalid_public_key`, `429` on abuse, `403 frame_quota_exceeded` when the
-account is at its frame limit. Each successful enrollment spends one use of
+account is at its frame limit, `403 cloud_rendered_frame_quota_exceeded`
+(with `max_cloud_rendered_frames`) when the device's `hardware.platform`
+names a board with no on-device renderer (`esp32-c3*`, `pico*`, or
+`localRenderSupported: false`) and the account's plan has no cloud-rendered
+frame left — the cloud would have to render every refresh for such a board,
+which is a paid-plan entitlement (`cloud/docs/accounting-todo.md` §0.2),
+enforced together with a refresh-interval floor on the settings push
+(`400 interval_below_plan_floor`, `min_interval` seconds). Each successful enrollment spends one use of
 the token's budget atomically (single-use by default; see "Multi-use claim
 tokens" under Provisioning), and a use is spent only when a frame is actually
 created — a rejected enrollment leaves the budget untouched, so a device that

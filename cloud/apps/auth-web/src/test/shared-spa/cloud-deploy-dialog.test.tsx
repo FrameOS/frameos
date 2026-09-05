@@ -177,28 +177,28 @@ describe("the deploy dialog in cloud mode", () => {
     }
   });
 
-  it("orders the USB path firmware, scene push, then Wi-Fi repair", () => {
+  it("orders the USB path: one connect action, then the scene push", () => {
     render(<FrameDeployPlanDrawer frame={cloudFrame("esp32")} />);
     fireEvent.click(screen.getByRole("button", { name: /Over USB/ }));
 
-    // 1. The NVS-sparing firmware update, with the same "and the scenes too"
-    // tick the over-the-air firmware card offers…
+    // 1. ONE USB action (EmbeddedUsbConnect): connect, read the board, and
+    // only then offer what applies — the NVS-sparing firmware update, Wi-Fi
+    // repair, restart. Nothing board-specific renders before a board answers,
+    // so the three old cards ("Update over USB", "Wi-Fi & device status",
+    // "USB setup") are gone from the unconnected view.
+    expect(screen.getAllByText("Connect over USB").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("button", { name: /Update over USB/ }),
-    ).toBeTruthy();
-    expect(
-      screen.getAllByRole("checkbox", { name: /Also push scenes & settings/ })
-        .length,
+      screen.getAllByRole("button", { name: /Connect over USB/ }).length,
     ).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /Update over USB/ })).toBeNull();
+    expect(screen.queryByText("Wi-Fi & device status")).toBeNull();
+    expect(screen.queryByText("USB setup")).toBeNull();
     // 2. …the same scene bodies the OTA push sends, over the cable (behind a
-    // connect button until a board is attached)…
+    // connect button until a board is attached).
     expect(screen.getByText("Push scenes & settings")).toBeTruthy();
     expect(
       screen.getByText(/Connect the board over USB to push scenes/),
     ).toBeTruthy();
-    // 3. …and WebSerial provisioning, the only repair channel for a board
-    // whose Wi-Fi credentials are wrong.
-    expect(screen.getByText("Wi-Fi & device status")).toBeTruthy();
     // Re-linking a WIPED board is the last card, not a pointer at some other
     // screen: it needs a claim token bound to this frame, so the cloud bundle
     // registers it (CloudFrameUsbRelink) — absent in this shared-SPA harness,
@@ -217,7 +217,7 @@ describe("the deploy dialog in cloud mode", () => {
 
     // Over the air cannot reach a frame with no device behind it (the command
     // queue 409s), so the choice would be a trick question.
-    expect(screen.getByText("Wi-Fi & device status")).toBeTruthy();
+    expect(screen.getAllByText("Connect over USB").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Over the air/ })).toBeNull();
     // No way back to a chooser that is not offered.
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();

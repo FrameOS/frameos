@@ -20,6 +20,7 @@ from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json,
 from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.deploy_remote import legacy_remote_cleanup_script
+from app.utils.release_signing import release_signing_public_key_spki_base64
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
 from app.utils.release_targets import release_distro_summary, release_versions
 from app.utils.token import secure_token
@@ -154,6 +155,55 @@ def _frame_bootstrap_all_scenes_json(frame: Frame) -> str:
     return json.dumps(list(frame.scenes or []), indent=2) + "\n"
 
 
+# The shell half of release verification, embedded verbatim into the bootstrap
+# script (and exercised on its own by test_frame_bootstrap_verify.py with a key
+# minted for the test). Reads FRAMEOS_RELEASE_SIGNING_KEY_SPKI and work_dir
+# from the script's environment.
+VERIFY_RELEASE_SIGNATURE_SH = r"""# The release archive is signed (minisign, prehashed Ed25519 over the
+# BLAKE2b-512 of the file) with the FrameOS release key baked into every
+# device runtime; this is the same check frameos performs on its own OTA
+# (frameos/src/frameos/upgrade.nim verifyReleaseArchiveSignature), done with
+# openssl because nothing FrameOS-built is trusted before it passes. A
+# transport-level compromise (a plain-http backend, a hostile mirror behind
+# FRAMEOS_RELEASE_BASE_URL) can then at most refuse the install, never run
+# other bytes as root.
+verify_release_signature() {
+  archive="$1"
+  minisig="$2"
+  sig_dir="$work_dir/sig"
+  mkdir -p "$sig_dir"
+  # First non-comment line: base64(ED || keyid8 || sig64).
+  # `|| true`: under `set -e` a pipeline that finds nothing would end the
+  # script before the message below names the problem.
+  sig_line="$(grep -v '^untrusted comment:' "$minisig" | grep -v '^trusted comment:' | grep -m1 . || true)"
+  if [ -z "$sig_line" ]; then
+    echo "Release signature file is empty or malformed: $minisig" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$sig_line" | base64 -d > "$sig_dir/blob" 2>/dev/null; then
+    echo "Release signature is not valid base64" >&2
+    exit 1
+  fi
+  if [ "$(wc -c < "$sig_dir/blob" | tr -d ' ')" -ne 74 ]; then
+    echo "Release signature blob has the wrong length (expected 74 bytes)" >&2
+    exit 1
+  fi
+  if [ "$(head -c 2 "$sig_dir/blob")" != "ED" ]; then
+    echo "Release signature is not the prehashed Ed25519 form FrameOS uses" >&2
+    exit 1
+  fi
+  tail -c 64 "$sig_dir/blob" > "$sig_dir/sig.bin"
+  openssl dgst -blake2b512 -binary "$archive" > "$sig_dir/digest.bin"
+  printf '%s\n%s\n%s\n' "-----BEGIN PUBLIC KEY-----" "$FRAMEOS_RELEASE_SIGNING_KEY_SPKI" "-----END PUBLIC KEY-----" > "$sig_dir/release.pub.pem"
+  if ! openssl pkeyutl -verify -pubin -inkey "$sig_dir/release.pub.pem" -rawin -in "$sig_dir/digest.bin" -sigfile "$sig_dir/sig.bin" >/dev/null 2>&1; then
+    echo "Release signature does not verify against the FrameOS signing key — refusing to install $archive" >&2
+    exit 1
+  fi
+  echo "Release signature verified"
+}
+"""
+
+
 def _frame_bootstrap_script(db: Session, frame: Frame) -> str:
     version = release_version()
     if not version:
@@ -187,6 +237,7 @@ set -eu
 
 FRAMEOS_RELEASE_VERSION={shlex.quote(version)}
 FRAMEOS_RELEASE_BASE_URL={shlex.quote(RELEASE_BASE_URL)}
+FRAMEOS_RELEASE_SIGNING_KEY_SPKI={release_signing_public_key_spki_base64()}
 FRAMEOS_DIR=/srv/frameos
 FRAMEOS_REMOTE_DIR=/srv/frameos/remote
 FRAMEOS_COMPILED_SCENE_COUNT={compiled_scene_count}
@@ -211,6 +262,7 @@ download_file() {{
   fi
 }}
 
+{VERIFY_RELEASE_SIGNATURE_SH}
 detect_arch() {{
   case "$(uname -m)" in
     aarch64|arm64|armv8) echo arm64 ;;
@@ -336,8 +388,16 @@ frameos_release_dir="$FRAMEOS_DIR/releases/$release_name"
 remote_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
 trap 'rm -rf "$work_dir"' EXIT
 
+# openssl verifies the release signature below; it is on every Debian and
+# Ubuntu image FrameOS supports, but a stripped-down one may have dropped it.
+install_optional_packages openssl
+need_cmd openssl
+need_cmd base64
+
 echo "Downloading precompiled FrameOS release for $target"
 download_file "$archive_url" "$work_dir/frameos.tar.gz"
+download_file "$archive_url.minisig" "$work_dir/frameos.tar.gz.minisig"
+verify_release_signature "$work_dir/frameos.tar.gz" "$work_dir/frameos.tar.gz.minisig"
 mkdir -p "$work_dir/extract" "$frameos_release_dir" "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state"
 tar -xzf "$work_dir/frameos.tar.gz" -C "$work_dir/extract"
 
@@ -511,9 +571,22 @@ async def api_frame_bootstrap_command(
     selected_remote = select_remote if select_remote is not None else (select_agent if select_agent is not None else True)
     await _ensure_frame_bootstrap_enabled(db, redis, frame, select_remote=selected_remote, regenerate=regenerate)
     script_url = _frame_bootstrap_script_url(request, frame)
+    # The script embeds this frame's API key and the remote's shared secret;
+    # over plain http they cross the LAN in clear, once, when the command is
+    # run. The release archive itself is signature-checked on the device
+    # regardless of transport, so the exposure is the secrets, not the code.
+    plain_http = script_url.startswith("http://")
     return {
         "script_url": script_url,
         "command": f"curl -fsSL {shlex.quote(script_url)} | sudo sh",
+        "plain_http": plain_http,
+        "warning": (
+            "This backend is reached over plain HTTP, so the install script — which carries this frame's API key "
+            "and its FrameOS Remote secret — travels unencrypted across your network when the command runs. Fine "
+            "on a trusted home LAN; put the backend behind HTTPS before using it elsewhere."
+            if plain_http
+            else None
+        ),
     }
 
 

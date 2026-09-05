@@ -6,7 +6,7 @@ from typing import Optional
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 
@@ -61,7 +61,19 @@ def generate_frame_tls_material(frame_host: str) -> dict[str, str]:
         .sign(private_key=ca_key, algorithm=hashes.SHA256())
     )
 
-    server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    # P-256, not RSA-2048: the pair rides the ESP32 settings pull into NVS as
+    # PEM, and on the 4 MB / 8 MB flash layouts NVS is 16 KB (~378 usable
+    # 32-byte entries). An RSA-2048 cert + key is ~2.9 KB of PEM (~100
+    # entries); a P-256 pair is ~1 KB (~35), which is what left the Wi-Fi
+    # driver room to store its own state on a bare C3 (2026-09-05). Caddy on
+    # the Pi and mbedTLS on the ESP32 (ECDSA + secp256r1 are on in every
+    # ESP-IDF build) both serve EC keys. The CA stays RSA: it never leaves the
+    # backend, and browsers/curl trust it as a plain self-signed root either
+    # way. Frames issued before this keep their RSA pair until the owner
+    # regenerates it; the cert and key always travel together (frame
+    # creation and POST /tls/generate hand out a complete set), so a mixed
+    # pair cannot arise.
+    server_key = ec.generate_private_key(ec.SECP256R1())
     server_cert = (
         x509.CertificateBuilder()
         .subject_name(_name(frame_host or "frame.local"))
@@ -82,7 +94,9 @@ def generate_frame_tls_material(frame_host: str) -> dict[str, str]:
         .add_extension(
             x509.KeyUsage(
                 digital_signature=True,
-                key_encipherment=True,
+                # ECDSA keys sign the handshake; keyEncipherment is an RSA
+                # key-transport bit and RFC 5480 says not to set it for EC.
+                key_encipherment=False,
                 key_cert_sign=False,
                 key_agreement=False,
                 content_commitment=False,
@@ -97,6 +111,8 @@ def generate_frame_tls_material(frame_host: str) -> dict[str, str]:
     )
 
     return {
+        # TraditionalOpenSSL gives "BEGIN EC PRIVATE KEY" (SEC 1), the form
+        # mbedtls_pk_parse_key and Caddy read without a PKCS#8 wrapper.
         "server_key": server_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.TraditionalOpenSSL,

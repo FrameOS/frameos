@@ -206,7 +206,17 @@ function assertDeviceLayoutMatches(partitions: Esp32Partition[] | null, plan: Fi
   }
 }
 
-export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.Element {
+export function EmbeddedUsbFirmwareUpdate({
+  frame,
+  onBusyChange,
+  label = 'Update over USB',
+}: {
+  frame: FrameType
+  // The Connect-over-USB card keeps its connected layout while this flow holds
+  // the port (the log stream it keys on is closed for the duration).
+  onBusyChange?: (busy: boolean) => void
+  label?: string
+}): JSX.Element {
   const [phase, setPhase] = useState<FlashPhase>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
@@ -223,6 +233,14 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
 
   const webSerialSupported = isWebSerialSupported()
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
+
+  useEffect(() => {
+    onBusyChange?.(busy)
+  }, [busy, onBusyChange])
+
+  useEffect(() => {
+    return () => onBusyChange?.(false)
+  }, [onBusyChange])
 
   useEffect(() => {
     setPhase('idle')
@@ -447,7 +465,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
           className="frameos-secondary-button inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
         >
           {busy ? <Spinner /> : <ArrowUpCircleIcon className="h-4 w-4" />}
-          {phase === 'flashing' && progress !== null ? `Updating ${progress}%` : busy ? 'Updating' : 'Update over USB'}
+          {phase === 'flashing' && progress !== null ? `Updating ${progress}%` : busy ? 'Updating' : label}
         </button>
       </div>
       {phase === 'flashing' && progress !== null ? (

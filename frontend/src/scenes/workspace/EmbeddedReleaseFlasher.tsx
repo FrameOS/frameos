@@ -191,10 +191,18 @@ export function EmbeddedReleaseFlasher({
   frame,
   disabled = false,
   onBusyChange,
+  label = 'Flash latest release',
+  primary = false,
 }: {
   frame: FrameType
   disabled?: boolean
   onBusyChange?: (busy: boolean) => void
+  // The Connect-over-USB card names the button by the situation it answers
+  // ("Flash FrameOS & set up this frame" on a silent board, "Erase & flash
+  // FrameOS again" under More) and makes it the primary action when it is
+  // the one thing to do.
+  label?: string
+  primary?: boolean
 }): JSX.Element | null {
   const [phase, setPhase] = useState<FlashPhase>('idle')
   const [message, setMessage] = useState<string | null>(null)
@@ -471,14 +479,12 @@ export function EmbeddedReleaseFlasher({
             ? plan.blockers.join(' ')
             : 'Write the latest published firmware and provision this frame over the same cable.'
         }
-        className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+        className={`${
+          primary ? 'frameos-primary-action' : 'frameos-secondary-button'
+        } inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40`}
       >
-        {busy ? <Spinner /> : <CloudArrowDownIcon className="h-4 w-4" />}
-        {phase === 'flashing' && progress !== null
-          ? `Flashing ${progress}%`
-          : busy
-          ? 'Flashing'
-          : 'Flash latest release'}
+        {busy ? <Spinner color={primary ? 'white' : undefined} /> : <CloudArrowDownIcon className="h-4 w-4" />}
+        {phase === 'flashing' && progress !== null ? `Flashing ${progress}%` : busy ? 'Flashing' : label}
       </button>
       {planError ? (
         <div className="frame-tool-muted text-xs leading-5">{planError}</div>
