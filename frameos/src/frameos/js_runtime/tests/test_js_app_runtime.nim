@@ -5,6 +5,7 @@ import frameos/js_runtime/app_runtime
 import frameos/js_runtime/burrito
 import frameos/types
 import frameos/utils/http_client
+import frameos/utils/memory
 import frameos/values
 
 proc testConfig(): FrameConfig =
@@ -248,6 +249,41 @@ suite "js app runtime":
     let pixel = value.asImage().data[value.asImage().dataIndex(0, 0)]
     check pixel.g > 0
     check pixel.a > 0
+
+  test "an SVG panel paints the offered cell at full size when the budget would cap a standalone raster":
+    # E1004, 2026-09-05: 2 MB of free PSRAM with an 848 KB largest block put
+    # the standalone raster bound at the 65,536-pixel floor; the size
+    # mismatch skipped the into-target render and the Weather scene's hourly
+    # chart came out at 286x229 in a 1200x960 cell, placed "center". The cell
+    # the planner offers already exists — paint it, and paint it full size.
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-svg-into-cell".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 17.NodeId, nodeName: "jsSvgCell", scene: scene, frameConfig: config)
+    let cell = newImage(600, 480)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0,
+      loopKey: ".", nextSleep: -1, decodeTargetImage: cell, decodeTargetNodeId: 17.NodeId)
+    availableRenderBytesOverride = 848 * 1024
+    defer: availableRenderBytesOverride = 0
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "image",
+      source = """export function get(app: FrameOSApp): FrameOSImageSpec {
+          return frameos.svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 480" width="600" height="480"><rect width="600" height="480" fill="#ff0000"/></svg>', { width: 600, height: 480 })
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{}, context)
+    check value.kind == fkImage
+    check value.asImage().width == 600
+    check value.asImage().height == 480
+    # The cell itself, not a copy: nothing cell-sized was allocated.
+    check value.asImage() == cell
+    let centre = cell.data[cell.dataIndex(300, 240)]
+    check centre.r == 255
+    check centre.a == 255
+    check context.decodeTargetImage.isNil
 
   test "runs logic app template logging path":
     let config = testConfig()

@@ -1286,6 +1286,53 @@ proc colorWithOpacity(spec: JsonNode): Color =
   color.a = opacity.float32
   return color
 
+proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string,
+    requestedWidth, requestedHeight, rasterWidth, rasterHeight: int): Image =
+  ## Rasterizes an SVG into the target the planner offered this node, when
+  ## there is one of the size the scene asked for; nil when the caller should
+  ## rasterize standalone.
+  ##
+  ## Paint the cell directly first. The target is the cell of the live
+  ## canvas or the chain's scratch — it exists already, so rendering into it
+  ## costs the SVG's own paths and the paint strips pixie sizes to the budget,
+  ## and nothing the size of the cell. The raster bound the caller computed
+  ## (`rasterWidth`/`Height`) assumes a fresh full-size buffer, which this
+  ## path never allocates, so it is not consulted here: it is what left the
+  ## E1004's hourly chart at 286x229 in a 1200x960 cell (2026-09-05) — 2 MB of
+  ## free PSRAM with an 848 KB largest block put the bound at the 65,536-pixel
+  ## floor, the size mismatch skipped the into-target render, and a
+  ## `render/image` placed with "center" drew the capped raster as-is.
+  ##
+  ## Only when pixie refuses the direct render (a budget refusal inside a
+  ## fill) does this step down the same ladder as a decode: the bounded
+  ## raster, then half and a quarter of it, each stretched onto the target.
+  ## Soft beats tiny, and the render:degraded line says which frames are soft.
+  let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
+  if offeredWidth <= 0 or offeredHeight <= 0:
+    return nil
+  if offeredWidth != requestedWidth or offeredHeight != requestedHeight:
+    # An offer of some other size (a planner that scaled the cell): only a
+    # raster of exactly that size can claim it.
+    if offeredWidth == rasterWidth and offeredHeight == rasterHeight:
+      let (target, _) = owner.takeDecodeTarget(context)
+      if not target.isNil and renderSvgIntoTarget(svg, target):
+        return target
+    return nil
+  let (target, _) = owner.takeDecodeTarget(context)
+  if target.isNil:
+    return nil
+  if renderSvgIntoTarget(svg, target):
+    return target
+  var rungs: seq[tuple[width, height: int]] = @[]
+  for divisor in [1, 2, 4]:
+    let rung: tuple[width, height: int] = (max(1, rasterWidth div divisor), max(1, rasterHeight div divisor))
+    if rung notin rungs and (rung.width < target.width or rung.height < target.height):
+      rungs.add(rung)
+  for rung in rungs:
+    if renderSvgDegradedInto(svg, target, rung.width, rung.height):
+      return target
+  nil
+
 proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, spec: JsonNode): Image =
   if spec.isNil or spec.kind == JNull:
     return nil
@@ -1295,8 +1342,12 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if data.startsWith("data:"):
       return decodeDataUrl(data)
     if data.startsWith("<svg") or data.startsWith("<?xml") or data.contains("<svg"):
-      let (svgWidth, svgHeight) = boundedRequestedDimensions(
-        defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
+      let requestedWidth = defaultImageWidth(owner, context, %*{})
+      let requestedHeight = defaultImageHeight(owner, context, %*{})
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
+      let degraded = svgIntoOfferedTarget(owner, context, data, requestedWidth, requestedHeight, svgWidth, svgHeight)
+      if not degraded.isNil:
+        return degraded
       let image = decodeSvgWithFallback(data, svgWidth, svgHeight)
       if image.isSome:
         return image.get()
@@ -1324,8 +1375,9 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if spec.hasKey("svg"):
       when defined(memProbe): memProbe("    svg decode src=" & $spec["svg"].getStr().len & "B BEFORE")
       # The spec's width/height are scene-requested: bounded like a decode.
-      let (svgWidth, svgHeight) = boundedRequestedDimensions(
-        defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
+      let requestedWidth = defaultImageWidth(owner, context, spec)
+      let requestedHeight = defaultImageHeight(owner, context, spec)
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
       # The same `intoTarget` handshake as the plain-canvas branch below: an
       # SVG panel is the common shape for a JS render app, and rasterizing it
       # into the target the planner offered is what keeps a full-size second
@@ -1345,12 +1397,11 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       # the mean colour over the changed area is identical. Weighed against
       # 1.48MB of PSRAM and 5.2s per render on a frame with ~6.6MB free, the
       # call was to take the memory (docs/value-pipeline.md).
-      let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
-      if offeredWidth == svgWidth and offeredHeight == svgHeight:
-        let (svgTarget, _) = owner.takeDecodeTarget(context)
-        if not svgTarget.isNil and renderSvgIntoTarget(spec["svg"].getStr(), svgTarget):
-          when defined(memProbe): memProbe("    svg decode AFTER (into target)")
-          return svgTarget
+      let intoTarget = svgIntoOfferedTarget(owner, context, spec["svg"].getStr(),
+        requestedWidth, requestedHeight, svgWidth, svgHeight)
+      if not intoTarget.isNil:
+        when defined(memProbe): memProbe("    svg decode AFTER (into target)")
+        return intoTarget
       let image = decodeSvgWithFallback(spec["svg"].getStr(), svgWidth, svgHeight)
       when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:

@@ -155,6 +155,45 @@ proc renderSvgIntoTarget*(svg: string, target: Image): bool =
   except CatchableError:
     false
 
+proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeight: int): bool =
+  ## The SVG rung of the degrade ladder (decodeIntoTargetWithDegrade is the
+  ## decoders'): rasterize at a size the budget allows, then stretch that onto
+  ## the full-size target the planner already owns. The target costs nothing
+  ## extra — it is the cell of the live canvas or the chain's scratch — so the
+  ## only allocation is the small raster.
+  ##
+  ## Without this, a raster the budget had capped went to the node as-is, and
+  ## a `render/image` placed with "center" drew it at that size: the E1004's
+  ## Weather scene (2026-09-05) showed its hourly chart at 286x229 in the
+  ## middle of a 1200x960 cell of black, because 2 MB of free PSRAM had an
+  ## 848 KB largest block and the raster fell to the 65,536-pixel floor. Soft
+  ## beats tiny, and the log line says which frames are soft.
+  ##
+  ## Composited, not overwritten, for the same reason renderSvgIntoTarget
+  ## composites: the target may be the live canvas with content under it.
+  if target.isNil or target.width <= 0 or target.height <= 0 or rasterWidth <= 0 or rasterHeight <= 0:
+    return false
+  if rasterWidth >= target.width and rasterHeight >= target.height:
+    return false
+  let raster = decodeSvgWithFallback(svg, rasterWidth, rasterHeight)
+  if raster.isNone:
+    return false
+  try:
+    target.scaleAndDrawImage(raster.get(), "stretch", blendMode = NormalBlend)
+  except PixieError:
+    return false
+  log(%*{
+    "event": "render:degraded",
+    "source": "svg",
+    "width": rasterWidth,
+    "height": rasterHeight,
+    "targetWidth": target.width,
+    "targetHeight": target.height,
+    "headroomBytes": availableRenderHeadroomBytes(),
+    "reason": "SVG raster capped by the render budget",
+  })
+  true
+
 proc decodeImageWithFallback*(data: string): Image =
   decodeImage(data)
 

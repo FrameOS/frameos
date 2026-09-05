@@ -159,6 +159,30 @@ suite "image helpers":
     check image.get().width == 4
     check image.get().height == 3
 
+  test "renderSvgDegradedInto stretches a budget-capped raster over the whole target":
+    # A red square SVG rasterized at 4x4 must fill a 40x40 target edge to
+    # edge — the small raster is the budget's doing, the size the scene asked
+    # for is the target's.
+    # viewBox on purpose: this fork's parseSvg rasterizes a viewBox-less SVG
+    # only at its declared size (parseInt on the missing attribute otherwise).
+    let svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40"><rect width="40" height="40" fill="#ff0000"/></svg>"""
+    let target = newImage(40, 40)
+    check renderSvgDegradedInto(svg, target, 4, 4)
+    # Interior pixels: the corners blend with the stretch's edge antialiasing.
+    check pixel(target, 5, 5).r == 255
+    check pixel(target, 34, 34).r == 255
+    check pixel(target, 20, 20).a == 255
+    # Composited, not overwritten: transparent SVG pixels keep what was under them.
+    let under = newImage(40, 40)
+    under.fill(rgba(0, 0, 255, 255))
+    let hole = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40"><rect x="0" y="0" width="20" height="40" fill="#00ff00"/></svg>"""
+    check renderSvgDegradedInto(hole, under, 8, 8)
+    check pixel(under, 5, 20).g == 255
+    check pixel(under, 35, 20).b == 255
+    # Not a downscale: a raster at or above the target size is not this rung's job.
+    check not renderSvgDegradedInto(svg, newImage(4, 4), 4, 4)
+    check not renderSvgDegradedInto("<svg", newImage(40, 40), 4, 4)
+
   test "rotateDegrees keeps dimensions and remaps pixels for right angles":
     let src = testImage(2, 3)
 
