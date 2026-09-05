@@ -3824,7 +3824,7 @@ export function FrameSettings({
                     <TextArea
                       name="https_proxy.certs.server_key"
                       rows={4}
-                      placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                      placeholder="-----BEGIN EC PRIVATE KEY-----"
                     />
                   </Field>
                 </>

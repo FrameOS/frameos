@@ -154,6 +154,34 @@ suite "scene persistence helpers":
     check not cloudUploadedScenesResident()
     check hookFired == 2
 
+  test "store-origin scenes are tracked regardless of who uploaded them":
+    # The LAN deny keys on provenance too: a scene stamped with a store id by
+    # the cloud is anyone's code, whether the payload came over the provider
+    # link ("cloud") or from a backend deploy / local upload (no source).
+    let storeScenes = %*[{
+      "id": "store-test", "name": "Store scene",
+      "origin": {"href": "https://scenes.frameos.net/s/x", "storeSceneId": "11111111-2222-3333-4444-555555555555"},
+      "nodes": [], "edges": [],
+    }]
+    let (storeMain, _) = updateUploadedScenesFromPayload(
+      %*{"scenes": storeScenes}, persistPayload = false)
+    check storeMain.isSome
+    check storeOriginScenesResident()
+    check not cloudUploadedScenesResident()
+
+    let ownScenes = %*[{
+      "id": "own-test", "name": "Own scene",
+      "origin": {"href": "https://scenes.frameos.net/s/x"},
+      "nodes": [], "edges": [],
+    }]
+    let (ownMain, _) = updateUploadedScenesFromPayload(
+      %*{"scenes": ownScenes}, persistPayload = false)
+    check ownMain.isSome
+    check not storeOriginScenesResident()
+    check scenePayloadHasStoreOrigin(storeScenes)
+    check not scenePayloadHasStoreOrigin(ownScenes)
+    check not scenePayloadHasStoreOrigin(%*{})
+
   test "cloud-origin payloads are re-checked for refused apps at load time":
     # The verb dispatcher refuses these at transport time; the load-time
     # re-check covers payloads edited on disk or persisted before a keyword

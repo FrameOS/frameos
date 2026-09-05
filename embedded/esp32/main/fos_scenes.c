@@ -62,6 +62,18 @@ static volatile bool s_pending = false;
  * (or before a combined scenes.json is first split) cannot launder a cloud
  * payload into "local" — fos_cloud.c keys the LAN deny on this. */
 static volatile int s_source = FOS_SCENES_SOURCE_LOCAL;
+/* Whether what the Nim runtime currently holds carries a store provenance
+ * stamp (`origin.storeSceneId`, written by the cloud when a store scene is
+ * read — never by the editor for a scene someone wrote themselves). A store
+ * scene is anyone's code, however it arrived — cloud push, backend deploy,
+ * local upload — so fos_cloud.c's private-network deny keys on this too, not
+ * only on who installed the payload. Recomputed on every load. */
+static volatile int s_store_origin = 0;
+
+static void note_store_origin(const char *json)
+{
+    s_store_origin = (json != NULL && strstr(json, "\"storeSceneId\"") != NULL) ? 1 : 0;
+}
 static volatile int s_pending_source = FOS_SCENES_SOURCE_LOCAL;
 /* Bumped once per pending-payload apply attempt by the render task; producers
  * poll it to learn whether their payload went live (see fos_scenes.h). */
@@ -447,6 +459,11 @@ bool fos_scenes_from_cloud(void)
     return s_source == FOS_SCENES_SOURCE_CLOUD;
 }
 
+bool fos_scenes_store_origin_resident(void)
+{
+    return s_store_origin != 0;
+}
+
 /* True once the boot-time restore succeeded or an explicit selection made
  * it moot. Until then every scene load retries: the first payload after
  * boot can be the baked single-scene default (fresh /state), and the
@@ -777,6 +794,7 @@ static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
     }
     size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     int ok = frameos_nim_load_scene(json);
+    if (ok) note_store_origin(json);
     free(json);
     if (!ok) {
         log_scene_event("scenes:load", "error", origin, scene_id ? scene_id : "",
@@ -883,6 +901,7 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
     size_t internal_cost = internal_before > internal_after
                                ? internal_before - internal_after : 0;
     s_loaded = count;
+    note_store_origin(json);
     /* Whole-payload path (no index to carry it): the loaded payload's source
      * becomes the resident source. The split path does this via the index. */
     s_source = s_pending_source;

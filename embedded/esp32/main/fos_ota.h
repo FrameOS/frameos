@@ -44,6 +44,10 @@ void fos_ota_start_periodic_task(uint32_t interval_hours);
  * lets HTTP and USB callers flush their acknowledgement first. */
 esp_err_t fos_ota_request_check(void);
 
+/* Let the NEXT manifest fetch install a release older than the running one.
+ * Console `ota downgrade`; see the downgrade note in fos_ota.c. */
+void fos_ota_allow_downgrade_once(void);
+
 /* Cloud-managed frames: the same signed path against the enrolled cloud's
  * manifest route, in its own one-shot task; a second request while one runs
  * is ignored. Triggered by the notify_update_available verb. */

@@ -37,6 +37,13 @@
     // the legacy workspace components through framesModel.
     // Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/embedded-release-flasher.test.tsx",
+    // Same story: the USB board classifier type-imports embeddedUsbLogsModel
+    // (noUncheckedIndexedAccess trips on its `connected[0]`), and the
+    // scene-execution corpus runner imports frameDeployUtils, whose graph
+    // reaches the legacy workspace. Vitest still runs both; only tsc leaves
+    // them out.
+    "src/test/shared-spa/usb-board-identity.test.ts",
+    "src/test/shared-spa/scene-execution-fixtures.test.ts",
     // Same story: builds every logic the embedded editor mounts, and
     // workspaceLogic's import graph reaches the legacy workspace components
     // (FrameConnectionDot's bare JSX namespace). Vitest still runs it; only

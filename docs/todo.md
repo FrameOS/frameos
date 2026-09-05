@@ -91,52 +91,24 @@ Two rules that shape most entries:
 
 ---
 
-## ESP32 deploy drawer: one USB action
-
-The Firmware card of the self-hosted deploy drawer offers three USB flows
-side by side — "Flash latest release" (write the whole chip, then provision),
-"Update over USB" (write around NVS, keep settings) and "USB setup" (console
-only: status, Wi-Fi, apply settings, restart, factory reset) — plus "Update
-over the air". Read cold they sound like the same thing (user, 2026-09-05,
-first time provisioning a C3 through it: "we need to make this much simpler").
-The board itself already tells us which one applies.
-
-- [ ] **Collapse the three USB cards into one "Connect over USB" action.**
-  After the port is picked, read the board once (`status` over the USB API,
-  esptool only when the console does not answer) and show ONE next step from
-  what it said: a blank or foreign board → flash the release for its flash
-  size and provision (today's "Flash latest release"); a FrameOS board that
-  is this frame → "Apply settings" / "Update firmware, keep settings" as
-  secondary buttons under a status line; a FrameOS board that is another
-  frame → say so and offer re-provisioning explicitly. Keep "Update over the
-  air" as the only non-USB button, first when the frame is online. The
-  by-hand esptool command stays in a "Details" fold. `EmbeddedReleaseFlasher`,
-  `EmbeddedUsbFirmwareUpdate`, `EmbeddedUsbSetup` keep their flows; the
-  card decides which to show. Found alongside the two flasher bugs fixed
-  2026-09-05 (image picked by the frame's flash size, C3 download-mode
-  after flash).
-
 ## ESP32 NVS on the 16 KB layouts
 
 The 4 MB and 8 MB partition tables give NVS 16 KB (4 pages, one always kept
 free for compaction, so 3 × 126 32-byte entries); the 16/32 MB tables give
 24 KB. On the self-hosted backend the first settings sync stores the frame's
-TLS pair as PEM blobs (RSA-2048: cert 1135 B + key ≈ 1.7 KB ≈ 100 entries),
-and a bare 4 MB C3 hit the ceiling on 2026-09-05 — the Wi-Fi driver's own
-writes failed (`wifi_nvs_set fail ... ret=4357`), PHY calibration would not
-store, and `wifi <ssid>` silently did not persist. Shipped: the driver now
-keeps its config in RAM (~45 mirrored items gone), `fos_config_save` reports
-the first failing key, `status` prints `nvs: used/total`. Still worth doing:
+TLS pair as PEM blobs, and a bare 4 MB C3 hit the ceiling on 2026-09-05 —
+the Wi-Fi driver's own writes failed (`wifi_nvs_set fail ... ret=4357`), PHY
+calibration would not store, and `wifi <ssid>` silently did not persist.
+Shipped: the driver keeps its config in RAM (~45 mirrored items gone),
+`fos_config_save` reports the first failing key, `status` prints `nvs:
+used/total`, and since 2026-09-06 the backend issues P-256 server keys
+(`backend/app/utils/tls.py`): cert + key ≈ 1 KB of PEM against ≈ 2.9 KB for
+the RSA-2048 pair it used to mint (the CA stays RSA; it never leaves the
+backend). Frames created before that keep their RSA pair until the owner
+regenerates it. Still worth doing only if a board still fills up:
 
-- [ ] **EC server keys from the backend** (`backend/app/utils/tls.py`
-  `server_key = rsa.generate_private_key(2048)` → `ec.generate_private_key(
-  ec.SECP256R1())`): a P-256 cert + key is ≈ 900 B of PEM against ≈ 2.9 KB,
-  one third of the NVS entries the pair costs today. mbedTLS on the ESP32
-  builds have ECDSA + secp256r1 on. The CA can stay RSA. Existing frames keep
-  their RSA pair until re-issued; check how the pair is (re)issued before
-  switching so a Pi frame does not get a mismatched cert/key across a sync.
 - [ ] **Store the pair as DER, not PEM**, on the device (`nvs_set_pem`):
-  another ~30 %. Only if the EC switch is not enough.
+  another ~30 %. Only if the EC switch turns out not to be enough.
 - [ ] Do NOT grow the NVS partition on the 4 MB / 8 MB tables casually: the
   NVS-sparing USB update (`embeddedFlashImage.ts`) writes around the NVS
   range read from the image and refuses a board whose table differs, so a

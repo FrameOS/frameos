@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-05 20:20 UTC, after release 2026.9.9.
+empty. Last refreshed 2026-09-05 (C3 dev board bench moved to Done), after release 2026.9.9.
 
 ## Open
 
@@ -28,69 +28,8 @@ empty. Last refreshed 2026-09-05 20:20 UTC, after release 2026.9.9.
 
 ### ESP32 bench
 
-### ESP32-C3 dev board bench (2026-09-05, 01Space-style ESP32-C3 + 0.42" OLED, 4 MB, no PSRAM, USB-Serial/JTAG)
-
-Stood in for the XTEINK X4 nobody has: a bare C3 is enough for the thin-client
-and flasher boxes, and on the self-hosted backend it is a real frame
-(`bench-c3`, id 66, `EPD_7in5_V2` configured, nothing wired). What it found,
-all fixed on main the same day unless noted:
-
-- **"Flash latest release" wrote the wrong image.** The self-hosted flasher
-  took the release asset from the frame record's flash size — 8 MB, the
-  default for custom hardware — and wrote `esp32-c3-8mb` onto a 4 MB chip:
-  boot loop on `spi_flash: Detected size(4096k) smaller than the size in the
-  binary image header(8192k)` + `assert failed`. The cloud flasher never did
-  this (it reads the flash id first). Now `EmbeddedReleaseFlasher` connects
-  first, reads the flash id, picks the layout-matched image
-  (`layoutMatchedPlatform` / `detectFlashSize` moved into
-  `embeddedFlashImage.ts`, shared with the cloud flasher), logs the mismatch
-  and saves the detected size on the frame after a successful flash.
-- **C3 parked in download mode after a flash.** `watchdogResetAfterFlash`
-  only knew the S3's registers; every other chip got the DTR/RTS pulse that
-  latches a USB-Serial/JTAG chip into ROM download mode. Per-chip register
-  table now (C3 added); unit test in the auth-web shared-spa suite.
-- **16 KB NVS is full once the backend's TLS pair lands.** After the first
-  settings sync (RSA-2048 cert 1135 B + key ≈ 2.9 KB of PEM) the partition
-  had 3 of 4 pages full: `wifi_nvs_set fail ... ret=4357`
-  (ESP_ERR_NVS_NOT_ENOUGH_SPACE), `phy_init: store_cal_data_to_nvs_handle
-  ... failed(0x1105)`, and `wifi bogus` on the console "took" but the board
-  came back on the old network — `fos_config_save` never checked a single
-  `nvs_set_*`. Fixes: the Wi-Fi driver keeps its config in RAM
-  (`esp_wifi_set_storage(WIFI_STORAGE_RAM)`, FrameOS re-applies the stored
-  credentials at boot anyway — drops ~45 mirrored `nvs.net80211` items),
-  every write in `fos_config_save` is checked and the first failing key is
-  logged with the NVS occupancy, and `status` prints an `nvs:` line. The
-  4 MB / 8 MB layouts keep their 16 KB NVS (the 16/32 MB ones have 24 KB);
-  an EC server key on the backend would shrink the pair 3× — `docs/todo.md`.
-- **`status` said `https: enabled cert=yes key=yes` while 8443 was dead.**
-  On this board the server is skipped for heap (`https server skipped:
-  internal=46044 largest=36864 min_internal=49152`); `status` now appends
-  `server=running|skipped: low memory|no certificate|failed: …`. Also added
-  a `hostname:` line — the box below asked for one and the printer had none
-  (the value only travelled as `name` in JSON).
-- Not a bug, worth knowing: the release image logs at WARN, so the INFO
-  `framebuffer reserved: …` line never shows on a release build.
-- Verified on the fixed build (local `esp32-c3` build of main, flashed by
-  esptool, re-provisioned through "Apply frame settings" + the console
-  `wifi`): after the settings sync brought the TLS pair back, `status` read
-  `https: enabled port=8443 cert=yes key=yes server=skipped: low memory`
-  and `nvs: 233/504 entries used, 271 free` (the API counts the spare
-  page; before the fix the three data pages were full at 118 items), and
-  `set ap_psk …` + `restart` came back with the new value — the write that
-  silently vanished on the release build. `hostname:` is overwritten by the
-  backend's `name` push on every boot, so it is not a persistence probe.
-- **The OLED itself (same day):** panel `OLED_SSD1306_72x40` (I2C driver,
-  `bus` flag in the panel table), device `oled.ssd1306_72x40`, preset
-  `esp32_c3_042_oled` — the board renders the backend's 72x40 1-bpp frames
-  (`render #4 done in 493 ms`, "HI 72x40" from a one-node text scene). Found
-  on the way: a stale `frame:{id}:active_scene` in redis (a scene the frame
-  no longer has) made the wasm harness fail instantly and the thin client
-  showed the diagnostic card on every poll — the endpoint now ignores a
-  cached id that is not in the frame's scenes.
-
-
 - [ ] **Layout-matched release image (#442; release 2026.9.2 carries the
-  six images):** *(2026-09-05, C3 half: no X4 to hand; a 4 MB C3 dev board through the self-hosted "Flash latest release" got `esp32-c3-generic` by flash-id detection — after the fix above; before it the frame's 8 MB default picked `esp32-c3-8mb` and boot-looped. The 16 MB C3 pick itself still needs a 16 MB C3.)* *(2026-09-04: E1002 is still on the generic 8 MB layout —
+  six images):** *(2026-09-05, C3 half: no X4 to hand; a 4 MB C3 dev board through the self-hosted "Flash latest release" got `esp32-c3-generic` by flash-id detection — after the flasher fix recorded in the C3 dev board bench under Done; before it the frame's 8 MB default picked `esp32-c3-8mb` and boot-looped. The 16 MB C3 pick itself still needs a 16 MB C3.)* *(2026-09-04: E1002 is still on the generic 8 MB layout —
   `flashBytes 8388608`, `otaSlotBytes 3604480`, OTA check asks for
   `esp32-s3-generic`; "Update firmware" keeps whatever layout the board has,
   so only "Add frame" → Connect & flash exercises this. The 8 MB half of the
@@ -843,6 +782,66 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
   (`systemctl status frameos-privileged.service` settles).
 
 ### ESP32 bench
+
+### ESP32-C3 dev board bench (2026-09-05, 01Space-style ESP32-C3 + 0.42" OLED, 4 MB, no PSRAM, USB-Serial/JTAG)
+
+Stood in for the XTEINK X4 nobody has: a bare C3 is enough for the thin-client
+and flasher boxes, and on the self-hosted backend it is a real frame
+(`bench-c3`, id 66, `EPD_7in5_V2` configured, nothing wired). What it found,
+all fixed on main the same day unless noted:
+
+- **"Flash latest release" wrote the wrong image.** The self-hosted flasher
+  took the release asset from the frame record's flash size — 8 MB, the
+  default for custom hardware — and wrote `esp32-c3-8mb` onto a 4 MB chip:
+  boot loop on `spi_flash: Detected size(4096k) smaller than the size in the
+  binary image header(8192k)` + `assert failed`. The cloud flasher never did
+  this (it reads the flash id first). Now `EmbeddedReleaseFlasher` connects
+  first, reads the flash id, picks the layout-matched image
+  (`layoutMatchedPlatform` / `detectFlashSize` moved into
+  `embeddedFlashImage.ts`, shared with the cloud flasher), logs the mismatch
+  and saves the detected size on the frame after a successful flash.
+- **C3 parked in download mode after a flash.** `watchdogResetAfterFlash`
+  only knew the S3's registers; every other chip got the DTR/RTS pulse that
+  latches a USB-Serial/JTAG chip into ROM download mode. Per-chip register
+  table now (C3 added); unit test in the auth-web shared-spa suite.
+- **16 KB NVS is full once the backend's TLS pair lands.** After the first
+  settings sync (RSA-2048 cert 1135 B + key ≈ 2.9 KB of PEM) the partition
+  had 3 of 4 pages full: `wifi_nvs_set fail ... ret=4357`
+  (ESP_ERR_NVS_NOT_ENOUGH_SPACE), `phy_init: store_cal_data_to_nvs_handle
+  ... failed(0x1105)`, and `wifi bogus` on the console "took" but the board
+  came back on the old network — `fos_config_save` never checked a single
+  `nvs_set_*`. Fixes: the Wi-Fi driver keeps its config in RAM
+  (`esp_wifi_set_storage(WIFI_STORAGE_RAM)`, FrameOS re-applies the stored
+  credentials at boot anyway — drops ~45 mirrored `nvs.net80211` items),
+  every write in `fos_config_save` is checked and the first failing key is
+  logged with the NVS occupancy, and `status` prints an `nvs:` line. The
+  4 MB / 8 MB layouts keep their 16 KB NVS (the 16/32 MB ones have 24 KB);
+  an EC server key on the backend would shrink the pair 3× — `docs/todo.md`.
+- **`status` said `https: enabled cert=yes key=yes` while 8443 was dead.**
+  On this board the server is skipped for heap (`https server skipped:
+  internal=46044 largest=36864 min_internal=49152`); `status` now appends
+  `server=running|skipped: low memory|no certificate|failed: …`. Also added
+  a `hostname:` line — the box below asked for one and the printer had none
+  (the value only travelled as `name` in JSON).
+- Not a bug, worth knowing: the release image logs at WARN, so the INFO
+  `framebuffer reserved: …` line never shows on a release build.
+- Verified on the fixed build (local `esp32-c3` build of main, flashed by
+  esptool, re-provisioned through "Apply frame settings" + the console
+  `wifi`): after the settings sync brought the TLS pair back, `status` read
+  `https: enabled port=8443 cert=yes key=yes server=skipped: low memory`
+  and `nvs: 233/504 entries used, 271 free` (the API counts the spare
+  page; before the fix the three data pages were full at 118 items), and
+  `set ap_psk …` + `restart` came back with the new value — the write that
+  silently vanished on the release build. `hostname:` is overwritten by the
+  backend's `name` push on every boot, so it is not a persistence probe.
+- **The OLED itself (same day):** panel `OLED_SSD1306_72x40` (I2C driver,
+  `bus` flag in the panel table), device `oled.ssd1306_72x40`, preset
+  `esp32_c3_042_oled` — the board renders the backend's 72x40 1-bpp frames
+  (`render #4 done in 493 ms`, "HI 72x40" from a one-node text scene). Found
+  on the way: a stale `frame:{id}:active_scene` in redis (a scene the frame
+  no longer has) made the wasm harness fail instantly and the thin client
+  showed the diagnostic card on every poll — the endpoint now ignores a
+  cached id that is not in the frame's scenes.
 
 - [x] **Portal SSID field keeps grabbing focus** — closed 2026-09-05 on the C3 hotspot (`FrameOS-7111`, blank board after a factory reset) from an iPhone: through the captive-portal helper the "Wi-Fi network" field is focused the moment the page opens, once, and nothing moves afterwards; the same page in Safari/Chrome on the phone focuses nothing. So it is the helper, as suspected, and it stays. What the helper's focus exposed and is fixed on main (next release): the page zoomed into the field because `input,select` had no `font-size` (iOS zooms into any focused control under 16 px) — now `1rem`. Original text: re-check the hotspot portal from a normal browser tab rather than
   a phone's captive-portal helper; nothing in the page sets focus, so the

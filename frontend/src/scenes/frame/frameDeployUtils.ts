@@ -202,7 +202,7 @@ function pluralize(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`
 }
 
-function frameCompilationMode(frame?: Partial<FrameType> | null): FrameCompilationMode {
+export function frameCompilationMode(frame?: Partial<FrameType> | null): FrameCompilationMode {
   return normalizeFrameCompilationMode(
     frame?.mode === 'buildroot' ? frame?.buildroot?.compilationMode : frame?.rpios?.compilationMode
   )

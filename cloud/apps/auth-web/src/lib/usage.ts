@@ -72,6 +72,44 @@ export const maxFramesPerAccount = (() => {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 50;
 })();
 
+// Boards below the capability line — no PSRAM, so no on-device renderer:
+// ESP32-C3 and the Pico family (embedded_firmware.py: localRenderSupported
+// false). Serving one means the control plane renders every frame for it,
+// which is the paid entitlement of cloud/docs/accounting-todo.md §0.2 —
+// `cloud_rendered_frames` on the plan, zero on the free tier — enforced as N
+// frames AND a minimum refresh interval, because renders per day is the cost.
+// The SQL in countCloudRenderedFramesForAccount mirrors this list; keep both
+// in step.
+export const cloudRenderedPlatformPrefixes = ["esp32-c3", "pico"] as const;
+
+export function hardwareIsCloudRendered(hardware: unknown): boolean {
+  if (!hardware || typeof hardware !== "object") {
+    return false;
+  }
+  const record = hardware as { localRenderSupported?: unknown; platform?: unknown };
+  if (record.localRenderSupported === false) {
+    return true;
+  }
+  const platform = typeof record.platform === "string" ? record.platform.toLowerCase() : "";
+  return cloudRenderedPlatformPrefixes.some((prefix) => platform.startsWith(prefix));
+}
+
+// The refresh-interval floor for a cloud-rendered frame (§0.2: proposal 5
+// minutes). Displayed nowhere as a headline number — the plan sells "N
+// frames" — but enforced on every settings push to such a frame.
+export const cloudRenderedMinIntervalSeconds = (() => {
+  const raw = process.env.FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS?.trim();
+  const parsed = raw ? Number(raw) : Number.NaN;
+  if (raw && (!Number.isInteger(parsed) || parsed < 1)) {
+    logWarn("usage.invalid_limit_env", {
+      fallback: 300,
+      name: "FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS",
+      value: raw,
+    });
+  }
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 300;
+})();
+
 export const maxPrivateSceneBytesPerAccount = megabyteLimitFromEnv(
   "FRAMEOS_CLOUD_MAX_PRIVATE_SCENE_MB",
   100,
@@ -299,6 +337,31 @@ export async function countFramesForAccount(
   return row?.count ?? 0;
 }
 
+/** Frames the cloud renders for (hardwareIsCloudRendered), counted with the
+ *  same revoked-grace rule as countFramesForAccount so the display and the
+ *  refusal agree. */
+export async function countCloudRenderedFramesForAccount(
+  db: FramesDatabase,
+  accountId: string,
+): Promise<number> {
+  const graceCutoff = new Date(Date.now() - revokedFrameQuotaGraceMs);
+  const platform = sql`lower(coalesce(${frames.hardware} ->> 'platform', ''))`;
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(frames)
+    .where(
+      and(
+        eq(frames.accountId, accountId),
+        or(sql`${frames.status} <> 'revoked'`, gt(frames.updatedAt, graceCutoff)),
+        or(
+          sql`${frames.hardware} ->> 'localRenderSupported' = 'false'`,
+          ...cloudRenderedPlatformPrefixes.map((prefix) => sql`${platform} like ${prefix + "%"}`),
+        ),
+      ),
+    );
+  return row?.count ?? 0;
+}
+
 export async function frameLogBytesForAccount(
   db: FramesDatabase,
   accountId: string,
@@ -324,11 +387,12 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
   // One plan lookup for both the quota limits and the AI summary; `undefined`
   // when the accounting tables are not migrated, which both handle.
   const plan = await readAccountPlan(db, accountId).catch(() => undefined);
-  const [scenes, backups, logs, frameCount, limits, ai] = await Promise.all([
+  const [scenes, backups, logs, frameCount, cloudRenderedCount, limits, ai] = await Promise.all([
     sceneBytesForAccount(db, accountId),
     backupBytesForAccount(db, accountId),
     frameLogBytesForAccount(db, accountId),
     countFramesForAccount(db, accountId),
+    countCloudRenderedFramesForAccount(db, accountId),
     accountLimits(db, accountId, plan),
     accountAiSummary(db, accountId, now, plan),
   ]);
@@ -345,6 +409,14 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
     frames: {
       count: frameCount,
       max_count: limits.frames,
+    },
+    // §0.2: boards the cloud renders for. A separate pool from `frames` — a
+    // self-hosted Pi costs a WebSocket and a row, a thin client costs a
+    // render per refresh.
+    cloud_rendered_frames: {
+      count: cloudRenderedCount,
+      max_count: limits.cloudRenderedFrames,
+      min_interval_seconds: cloudRenderedMinIntervalSeconds,
     },
     frame_logs: {
       bytes: Math.round(logs),

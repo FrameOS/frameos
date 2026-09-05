@@ -855,6 +855,34 @@ describe("cloud-managed frame enrollment", () => {
     expect(await claimTokenUseCount(claimToken)).toBe(1);
   });
 
+  it("a board the cloud would have to render for needs the plan's cloud-rendered entitlement", async () => {
+    // The free plan entitles zero cloud-rendered frames (§0.2): an ESP32-C3
+    // — no PSRAM, no on-device renderer — is refused at creation, the claim
+    // token keeps its budget, and the same token still enrolls an S3.
+    await signIn();
+    const claimToken = await mintToken("Hallway frame");
+    const refused = await enroll(claimToken, deviceKeypair().publicKeyBase64, {
+      hardware: { height: 480, platform: "esp32-c3", width: 800 },
+    });
+    expect(refused.status).toBe(403);
+    const body = (await refused.json()) as { error: string; max_cloud_rendered_frames: number };
+    expect(body.error).toBe("cloud_rendered_frame_quota_exceeded");
+    expect(body.max_cloud_rendered_frames).toBe(0);
+    expect(await claimTokenUseCount(claimToken)).toBe(0);
+
+    const pico = await enroll(claimToken, deviceKeypair().publicKeyBase64, {
+      hardware: { height: 300, platform: "pico-w", width: 400 },
+    });
+    expect(pico.status).toBe(403);
+    expect(await claimTokenUseCount(claimToken)).toBe(0);
+
+    const accepted = await enroll(claimToken, deviceKeypair().publicKeyBase64, {
+      hardware: { height: 480, platform: "esp32-s3", width: 800 },
+    });
+    expect(accepted.status).toBe(200);
+    expect(await claimTokenUseCount(claimToken)).toBe(1);
+  });
+
   it("concurrent enrollments on a multi-use token cannot exceed the quota", async () => {
     const accountId = await signIn();
     await seedFrames(accountId, maxFramesPerAccount - 1);
@@ -1467,6 +1495,49 @@ describe("frame management API", () => {
       routeParams(frame_id),
     );
     expect(refused.status).toBe(409);
+  });
+
+  it("holds a cloud-rendered frame to the plan's refresh-interval floor", async () => {
+    // Seeded straight into the table: enrollment refuses such a board on the
+    // free plan, but a frame that exists (a paid plan that lapsed, an
+    // operator override) still must not be pushed below the floor.
+    const accountId = await signIn();
+    const [client] = await db
+      .insert(linkedClients)
+      .values({
+        accountId,
+        clientKind: "frame",
+        providerClientMetadata: { requestedScopes: ["frame:managed"] },
+        publicDisplayName: "Thin client",
+        tokenReference: hashSecret(`fc_link_thin_${accountId}`),
+      })
+      .returning();
+    const [thin] = await db
+      .insert(frames)
+      .values({
+        accountId,
+        frameosVersion: "2026.9.9",
+        hardware: { height: 480, platform: "esp32-c3", width: 800 },
+        linkedClientId: client!.id,
+        name: "Thin client",
+        publicKey: deviceKeypair().publicKeyBase64,
+        status: "active",
+      })
+      .returning();
+    const tooFast = await pushFrameSettings(
+      postJson(`/api/frames/${thin!.id}/settings`, { settings: { interval: 60 } }, { origin: baseUrl }),
+      routeParams(thin!.id),
+    );
+    expect(tooFast.status).toBe(400);
+    const body = (await tooFast.json()) as { error: string; min_interval: number };
+    expect(body.error).toBe("interval_below_plan_floor");
+    expect(body.min_interval).toBe(300);
+
+    const atFloor = await pushFrameSettings(
+      postJson(`/api/frames/${thin!.id}/settings`, { settings: { interval: 300 } }, { origin: baseUrl }),
+      routeParams(thin!.id),
+    );
+    expect(atFloor.status).toBe(200);
   });
 
   it("enforces the settings allowlist and command types", async () => {

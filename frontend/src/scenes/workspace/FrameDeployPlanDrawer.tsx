@@ -79,7 +79,6 @@ import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
 import {
-  EmbeddedUsbFirmwareUpdate,
   fetchReleaseFirmwareListing,
   hasReleaseFirmwarePlatform,
   releaseFirmwarePlatform,
@@ -87,9 +86,8 @@ import {
 } from './EmbeddedUsbFirmwareUpdate'
 import { registeredFramePanel } from './addFramePanelRegistry'
 import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
-import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
+import { EmbeddedUsbConnect } from './EmbeddedUsbConnect'
 import { EmbeddedUsbConnectionButton } from './embeddedFlashShared'
-import { EmbeddedReleaseFlasher } from './EmbeddedReleaseFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { framePendingCommandsLogic, pendingCommandLabel, type FramePendingCommand } from './framePendingCommandsLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -1807,11 +1805,15 @@ function FrameSyncReviewSection({
 
 interface FrameBootstrapApiResponse {
   command: string
+  // Set when the backend URL the script embeds is plain http: the script
+  // carries the frame's API key and Remote secret, so the drawer says so.
+  warning?: string | null
 }
 
 function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () => void }): JSX.Element {
   const { loadFrame } = useActions(framesModel)
   const [command, setCommand] = useState('')
+  const [transportWarning, setTransportWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1820,6 +1822,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
     setLoading(true)
     setCopied(false)
     setError(null)
+    setTransportWarning(null)
     try {
       const response = await apiFetch(
         `/api/frames/${frame.id}/frame_bootstrap?select_remote=1&regenerate=${regenerate ? 1 : 0}`,
@@ -1833,6 +1836,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       }
       const payload = (await response.json()) as FrameBootstrapApiResponse
       setCommand(payload.command)
+      setTransportWarning(payload.warning ?? null)
       loadFrame(frame.id)
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to create install command')
@@ -1879,6 +1883,13 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
             <code>{command}</code>
           </pre>
         )}
+        {transportWarning ? (
+          <div className="frameos-warning-button rounded-xl border px-3 py-2 text-xs leading-5">{transportWarning}</div>
+        ) : null}
+        <div className="frame-tool-muted text-xs leading-4">
+          The installer downloads the signed FrameOS release and verifies its signature against the FrameOS release key
+          on the device before anything from it runs.
+        </div>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -1926,6 +1937,49 @@ function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX
   )
 }
 
+function OtaUpdateCard({
+  onOtaUpdate,
+  otaSupported,
+  disabled,
+  online = false,
+}: {
+  onOtaUpdate: () => void
+  otaSupported: boolean
+  disabled: boolean
+  online?: boolean
+}): JSX.Element {
+  return (
+    <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
+          <div className="frame-tool-muted mt-1 text-sm leading-5">
+            {otaSupported ? (
+              <>
+                Ask the frame to install the latest published FrameOS release. It downloads the signed image for its
+                flash layout through this backend, verifies the release signature, and reboots into it; progress shows
+                up in Logs as <code>ota:backend</code> lines.
+                {online ? '' : ' Needs the frame on the network.'}
+              </>
+            ) : (
+              'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'
+            )}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOtaUpdate}
+          disabled={disabled || !otaSupported}
+          className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+        >
+          <CloudArrowUpIcon className="h-4 w-4" />
+          Update over the air
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function EmbeddedFirmwareSection({
   frame,
   onBack,
@@ -1935,9 +1989,10 @@ function EmbeddedFirmwareSection({
   onBack?: () => void
   onOtaUpdate: () => void
 }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-  const [releaseFlashBusy, setReleaseFlashBusy] = useState(false)
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
+  // The USB card owns its own busy state now; the OTA button only needs to
+  // stay clickable.
+  const releaseFlashBusy = false
   // Pico-family boards flash a generic UF2 release asset over BOOTSEL and are
   // provisioned over the USB serial console: no esptool, no browser flashing,
   // no OTA. Hide all of those controls.
@@ -1978,11 +2033,6 @@ function EmbeddedFirmwareSection({
     /-/g,
     ''
   )} --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash 0x0 frameos-<version>-${releasePlatform}.bin`
-
-  const copyFlashCommand = (): void => {
-    copy(flashCommand)
-    setCopied(true)
-  }
 
   return (
     <section className="mb-5 space-y-2">
@@ -2031,101 +2081,29 @@ function EmbeddedFirmwareSection({
         </div>
       ) : isPicoPlatform ? null : (
         <>
-          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-            <div className="frame-tool-muted text-sm leading-5">
-              Plug the board into this computer over USB and flash the published FrameOS release straight from the
-              browser. Every ESP32 board runs the same signed image: this frame’s settings go over the cable right
-              after the flash, and the rest — its scenes, service keys and HTTPS certificate — arrives from this
-              backend once the board is on Wi-Fi.
-              {showUsbJtagPortGuidance ? (
-                <span className="mt-2 block">
-                  The 13.3&quot; ESP32 board can appear as two serial ports and either works.
-                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> is
-                  the fast one (logs, previews and scene uploads at USB speed);
-                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB Single Serial</span> is the
-                  board&apos;s USB-UART bridge at 115200 baud, so uploads take longer there.
-                </span>
-              ) : null}
-            </div>
-            {releaseAvailable ? (
-              <EmbeddedReleaseFlasher frame={frame} onBusyChange={setReleaseFlashBusy} />
-            ) : (
-              <div className="frame-tool-muted text-xs leading-5">
-                Flashing from the browser needs the FrameOS backend’s release listing, which this page cannot reach.
-                Flash the release image by hand (below) and provision the board under USB setup.
-              </div>
-            )}
+          <div className="frame-tool-muted text-sm leading-5">
+            Every ESP32 board runs the same signed FrameOS release image. Over USB the browser flashes it and tells the
+            board which frame it is; the rest — scenes, service keys, the HTTPS certificate — arrives from this backend
+            once the board is on Wi-Fi.
+            {showUsbJtagPortGuidance ? (
+              <span className="mt-2 block">
+                The 13.3&quot; ESP32 board can appear as two serial ports and either works.
+                <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> is
+                the fast one (logs, previews and scene uploads at USB speed);
+                <span className="font-semibold text-[color:var(--tool-strong)]"> USB Single Serial</span> is the
+                board&apos;s USB-UART bridge at 115200 baud, so uploads take longer there.
+              </span>
+            ) : null}
           </div>
-          {releaseAvailable ? (
-            <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-[color:var(--tool-strong)]">
-                  Update to release firmware over USB
-                </div>
-                <div className="frame-tool-muted mt-1 text-sm leading-5">
-                  Flashes the latest published FrameOS release ({releasePlatform}) around the board's settings
-                  partition, so it keeps its Wi-Fi credentials, its identity and every saved setting.
-                </div>
-              </div>
-              <EmbeddedUsbFirmwareUpdate frame={frame} />
-            </div>
+          {/* Over the air first when the frame is online — it is the button that
+              needs no cable — then the one USB action. */}
+          {frame.status === 'ready' || frame.status === 'deploying' ? (
+            <OtaUpdateCard onOtaUpdate={onOtaUpdate} otaSupported={otaSupported} disabled={releaseFlashBusy} online />
           ) : null}
-          <EmbeddedUsbSetup frame={frame} />
-          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
-                <div className="frame-tool-muted mt-1 text-sm leading-5">
-                  {otaSupported ? (
-                    <>
-                      Ask the frame to install the latest published FrameOS release. It downloads the signed image for
-                      its flash layout through this backend, verifies the release signature, and reboots into it;
-                      progress shows up in Logs as <code>ota:backend</code> lines.
-                    </>
-                  ) : (
-                    'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'
-                  )}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={onOtaUpdate}
-                disabled={releaseFlashBusy || !otaSupported}
-                className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-              >
-                <CloudArrowUpIcon className="h-4 w-4" />
-                Update over the air
-              </button>
-            </div>
-          </div>
-          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-            <div className="frame-tool-muted text-sm leading-5">
-              Or download{' '}
-              <a
-                href="https://github.com/FrameOS/frameos/releases/latest"
-                target="_blank"
-                rel="noreferrer"
-                className="underline"
-              >
-                the release image
-              </a>{' '}
-              and flash it by hand (<code>pip install esptool</code> if you don't have it), then provision the board
-              under USB setup:
-            </div>
-            <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
-              <code>{flashCommand}</code>
-            </pre>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={copyFlashCommand}
-                className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <ClipboardDocumentIcon className="h-4 w-4" />
-                {copied ? 'Copied' : 'Copy flash command'}
-              </button>
-            </div>
-          </div>
+          <EmbeddedUsbConnect frame={frame} manualFlashCommand={releaseAvailable ? flashCommand : undefined} />
+          {frame.status === 'ready' || frame.status === 'deploying' ? null : (
+            <OtaUpdateCard onOtaUpdate={onOtaUpdate} otaSupported={otaSupported} disabled={releaseFlashBusy} />
+          )}
           <FirmwareFootprintVisualization frame={frame} />
         </>
       )}
@@ -2768,28 +2746,15 @@ function CloudUsbDeployView({ frame, onBack }: { frame: FrameType; onBack?: () =
         </div>
       </section>
 
-      {/* Mirrors the over-the-air view's order: firmware and scenes first —
-          the two things a deploy is — then Wi-Fi repair as the maintenance
-          card. */}
+      {/* One USB action (EmbeddedUsbConnect): connect, read the board, and
+          show the step that applies — firmware kept in step for this frame,
+          Wi-Fi when it is off the network, and a pointer at the re-link panel
+          below for a blank or foreign board. Scenes follow as their own card. */}
       <section className="space-y-2">
-        <DrawerHeading>Update firmware</DrawerHeading>
-        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-          <div className="frame-tool-muted text-sm leading-5">
-            Flashes the latest released firmware around the board's settings partition: it keeps its Wi-Fi credentials,
-            its settings and its link to this account. No re-enrollment needed. A board whose settings were wiped has
-            nothing left to keep — use &ldquo;Re-link a wiped board&rdquo; at the bottom of this view instead.
-          </div>
-          <EmbeddedUsbFirmwareUpdate frame={frame} />
-        </div>
+        <EmbeddedUsbConnect frame={frame} />
       </section>
 
       <CloudUsbScenesPushCard frame={frame} />
-
-      <EmbeddedUsbSetup
-        frame={frame}
-        title="Wi-Fi & device status"
-        description="Check the board over its serial console, join a different Wi-Fi network, or restart it."
-      />
 
       {UsbRelinkPanel ? <UsbRelinkPanel frame={frame} /> : null}
     </>
@@ -3094,7 +3059,7 @@ function CloudPiUpdateCard({
  *   Over USB       WebSerial to a board plugged into this computer — the
  *                  NVS-sparing firmware update, the same scene bodies
  *                  pushed over the cable (usb_api upload-scenes), and
- *                  Wi-Fi/status repair (EmbeddedUsbSetup). The only path
+ *                  Wi-Fi/status repair (EmbeddedUsbConnect). The only path
  *                  that works when the board cannot reach the network,
  *                  which is why a frame no board has enrolled as yet skips
  *                  the choice and lands here directly. It is also how a
@@ -3222,8 +3187,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
-  const { applyEmbeddedFirmwareOta, cancelDeploy, downloadSdCardImage, loadFrame } =
-    useActions(framesModel)
+  const { applyEmbeddedFirmwareOta, cancelDeploy, downloadSdCardImage, loadFrame } = useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
   const { savedSettings } = useValues(settingsLogic)
   const defaultTimezone = savedSettings.defaults?.timezone
@@ -3627,7 +3591,11 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {!isEmbeddedFrame || embeddedFullDeploySupported ? (
                 <button
                   type="button"
-                  title={isEmbeddedFrame ? 'Install the latest FrameOS release over the air (OTA), then push the scenes' : undefined}
+                  title={
+                    isEmbeddedFrame
+                      ? 'Install the latest FrameOS release over the air (OTA), then push the scenes'
+                      : undefined
+                  }
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
                   className={clsx(
                     'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',

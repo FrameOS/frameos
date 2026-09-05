@@ -48,7 +48,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.https_proxy["enable"] is True
     assert frame.https_proxy["expose_only_port"] is True
     assert frame.https_proxy["certs"]["server"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["server"]
-    assert frame.https_proxy["certs"]["server_key"] and "BEGIN RSA PRIVATE KEY" in frame.https_proxy["certs"]["server_key"]
+    assert frame.https_proxy["certs"]["server_key"] and "BEGIN EC PRIVATE KEY" in frame.https_proxy["certs"]["server_key"]
     assert frame.https_proxy["certs"]["client_ca"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["client_ca"]
     assert frame.https_proxy["server_cert_not_valid_after"] is not None
     assert frame.https_proxy["client_ca_cert_not_valid_after"] is not None

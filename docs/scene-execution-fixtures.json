@@ -1,0 +1,245 @@
+{
+  "$comment": "Conformance corpus for the scene-execution rule (docs/convergence-todo.md item 6). Three implementations answer the same questions and MUST agree: backend/app/utils/scene_execution.py (scene_requires_compilation, scene_execution) + backend/app/codegen/drivers_nim.py (frame_compilation_mode); frontend/src/utils/sceneApps.ts (sceneRequiresCompilation) + frontend/src/utils/sceneExecution.ts (sceneExecutionForFrame, normalizeSceneExecution) + frontend/src/utils/frameBuildOptions.ts (normalizeFrameCompilationMode); cloud/packages/scene-convert (sceneRequiresCompilation) + cloud/apps/auth-web/src/lib/store.ts (compiledSceneNames). Runners: backend/app/utils/tests/test_scene_execution_fixtures.py and cloud/apps/auth-web/src/test/shared-spa/scene-execution-fixtures.test.ts. Add a case here first; a runner that disagrees is the bug.",
+  "scenes": [
+    {
+      "name": "plain interpreted scene with no settings key: absent means interpreted",
+      "scene": {
+        "id": "s-plain",
+        "name": "Plain",
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "render/text" } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "explicit interpreted stamp",
+      "scene": { "id": "s-interp", "name": "Interp", "nodes": [], "edges": [], "settings": { "execution": "interpreted" } },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "explicit compiled stamp on a scene that carries no Nim: the user's choice wins",
+      "scene": { "id": "s-compiled", "name": "Compiled", "nodes": [], "edges": [], "settings": { "execution": "compiled" } },
+      "requiresCompilation": false,
+      "execution": "compiled",
+      "cloudRefuses": true
+    },
+    {
+      "name": "unknown execution value reads as interpreted everywhere",
+      "scene": { "id": "s-banana", "name": "Banana", "nodes": [], "edges": [], "settings": { "execution": "banana" } },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "settings present but no execution key",
+      "scene": { "id": "s-nokey", "name": "No key", "nodes": [], "edges": [], "settings": { "refreshInterval": 60 } },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "Nim code node with no JavaScript twin",
+      "scene": {
+        "id": "s-nimcode",
+        "name": "Nim code",
+        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "result = 1" } }],
+        "edges": []
+      },
+      "requiresCompilation": true,
+      "execution": "interpreted",
+      "cloudRefuses": true
+    },
+    {
+      "name": "Nim code node with a JavaScript twin is interpretable",
+      "scene": {
+        "id": "s-twin",
+        "name": "Twin",
+        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "result = 1", "codeJS": "return 1" } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "whitespace-only Nim code is not code",
+      "scene": {
+        "id": "s-ws",
+        "name": "Whitespace",
+        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "   \n  " } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "JavaScript-only code node",
+      "scene": {
+        "id": "s-js",
+        "name": "JS",
+        "nodes": [{ "id": "n1", "type": "code", "data": { "codeJS": "return 1" } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "app node carrying Nim-only sources",
+      "scene": {
+        "id": "s-appnim",
+        "name": "App Nim",
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "proc run() = discard", "config.json": "{}" } } }],
+        "edges": []
+      },
+      "requiresCompilation": true,
+      "execution": "interpreted",
+      "cloudRefuses": true
+    },
+    {
+      "name": "app node carrying config.nim only",
+      "scene": {
+        "id": "s-confignim",
+        "name": "Config Nim",
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "config.nim": "const x = 1" } } }],
+        "edges": []
+      },
+      "requiresCompilation": true,
+      "execution": "interpreted",
+      "cloudRefuses": true
+    },
+    {
+      "name": "app node with Nim sources AND a JavaScript sibling is interpretable",
+      "scene": {
+        "id": "s-appboth",
+        "name": "App both",
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "proc run() = discard", "app.ts": "export function run() {}" } } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "app node with a .jsx source counts as JavaScript",
+      "scene": {
+        "id": "s-appjsx",
+        "name": "App jsx",
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "x", "app.jsx": "export function run() {}" } } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "empty app.nim string is not a Nim source",
+      "scene": {
+        "id": "s-appempty",
+        "name": "App empty",
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "", "config.json": "{}" } } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "scene-level app with Nim-only sources, referenced by keyword from a node",
+      "scene": {
+        "id": "s-sceneapp",
+        "name": "Scene app",
+        "apps": { "myapp": { "sources": { "app.nim": "proc run() = discard" } } },
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "myapp" } }],
+        "edges": []
+      },
+      "requiresCompilation": true,
+      "execution": "interpreted",
+      "cloudRefuses": true
+    },
+    {
+      "name": "scene-level app with Nim-only sources that no node references still needs the compiler",
+      "scene": {
+        "id": "s-sceneapp-unref",
+        "name": "Scene app unreferenced",
+        "apps": { "orphan": { "sources": { "app.nim": "proc run() = discard" } } },
+        "nodes": [],
+        "edges": []
+      },
+      "requiresCompilation": true,
+      "execution": "interpreted",
+      "cloudRefuses": true
+    },
+    {
+      "name": "scene-level app with a JavaScript source",
+      "scene": {
+        "id": "s-sceneapp-js",
+        "name": "Scene app JS",
+        "apps": { "myapp": { "sources": { "app.ts": "export function run() {}", "config.json": "{}" } } },
+        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "myapp" } }],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "source node",
+      "scene": {
+        "id": "s-source",
+        "name": "Source",
+        "nodes": [{ "id": "n1", "type": "source", "data": {} }],
+        "edges": []
+      },
+      "requiresCompilation": true,
+      "execution": "interpreted",
+      "cloudRefuses": true
+    },
+    {
+      "name": "event, state and dispatch nodes never need the compiler",
+      "scene": {
+        "id": "s-events",
+        "name": "Events",
+        "nodes": [
+          { "id": "n1", "type": "event", "data": { "keyword": "render" } },
+          { "id": "n2", "type": "state", "data": { "keyword": "count" } },
+          { "id": "n3", "type": "dispatch", "data": { "keyword": "setSceneState" } }
+        ],
+        "edges": []
+      },
+      "requiresCompilation": false,
+      "execution": "interpreted",
+      "cloudRefuses": false
+    },
+    {
+      "name": "compiled stamp AND Nim content: still compiled, still refused by the cloud",
+      "scene": {
+        "id": "s-both",
+        "name": "Both",
+        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "result = 1" } }],
+        "edges": [],
+        "settings": { "execution": "compiled" }
+      },
+      "requiresCompilation": true,
+      "execution": "compiled",
+      "cloudRefuses": true
+    }
+  ],
+  "frames": [
+    { "name": "rpios frame with no compilation mode defaults to precompiled", "frame": { "mode": "rpios" }, "compilationMode": "precompiled" },
+    { "name": "rpios frame with an empty compilation mode", "frame": { "mode": "rpios", "rpios": { "compilationMode": "" } }, "compilationMode": "precompiled" },
+    { "name": "rpios static", "frame": { "mode": "rpios", "rpios": { "compilationMode": "static" } }, "compilationMode": "static" },
+    { "name": "rpios precompiled", "frame": { "mode": "rpios", "rpios": { "compilationMode": "precompiled" } }, "compilationMode": "precompiled" },
+    { "name": "retired shared mode maps to static", "frame": { "mode": "rpios", "rpios": { "compilationMode": "shared" } }, "compilationMode": "static" },
+    { "name": "retired shared-scenes mode maps to static", "frame": { "mode": "rpios", "rpios": { "compilationMode": "shared-scenes" } }, "compilationMode": "static" },
+    { "name": "unknown mode falls back to precompiled", "frame": { "mode": "rpios", "rpios": { "compilationMode": "garbage" } }, "compilationMode": "precompiled" },
+    { "name": "buildroot reads its own block, not rpios", "frame": { "mode": "buildroot", "buildroot": { "compilationMode": "static" }, "rpios": { "compilationMode": "precompiled" } }, "compilationMode": "static" },
+    { "name": "buildroot with no block defaults to precompiled", "frame": { "mode": "buildroot", "rpios": { "compilationMode": "static" } }, "compilationMode": "precompiled" },
+    { "name": "frame with no mode reads the rpios block", "frame": { "rpios": { "compilationMode": "static" } }, "compilationMode": "static" }
+  ]
+}

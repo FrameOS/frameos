@@ -274,6 +274,8 @@ class FramePingResponse(BaseModel):
 class FrameBootstrapResponse(BaseModel):
     script_url: str
     command: str
+    plain_http: bool = False
+    warning: Optional[str] = None
 
 
 class FrameSetNextSceneRequest(BaseModel):

@@ -109,6 +109,18 @@ async def test_api_frame_bootstrap_command_enables_remote_and_returns_script(asy
     script = script_response.text
     assert 'frameos_remote' in script
     assert 'frameos.service' in script
+    # The archive is signature-checked on the device before anything in it
+    # runs as root: the .minisig beside the asset, the release key in SPKI
+    # form, openssl doing minisign's prehashed Ed25519 verify.
+    assert 'download_file "$archive_url.minisig"' in script
+    assert 'verify_release_signature "$work_dir/frameos.tar.gz" "$work_dir/frameos.tar.gz.minisig"' in script
+    assert 'openssl dgst -blake2b512 -binary' in script
+    assert 'openssl pkeyutl -verify -pubin' in script
+    assert 'FRAMEOS_RELEASE_SIGNING_KEY_SPKI=MCowBQYDK2VwAyEA0LvFbK8ePu0fSujVkabbyzo0gEppxSV3qhyBHQfaoMw=' in script
+    assert script.index('verify_release_signature "$work_dir') < script.index('tar -xzf "$work_dir/frameos.tar.gz"')
+    # The test backend is reached over http, and the response says so.
+    assert command_payload['plain_http'] is True
+    assert 'plain HTTP' in command_payload['warning']
     assert 'RestartSec=5' in script
     assert 'After=network.target getty@tty1.service' in script
     assert 'Conflicts=getty@tty1.service' in script
@@ -2095,7 +2107,7 @@ async def test_api_frame_new(async_client):
     assert data['frame']['https_proxy']['enable'] is True
     assert data['frame']['https_proxy']['expose_only_port'] is True
     assert 'BEGIN CERTIFICATE' in data['frame']['https_proxy']['certs']['server']
-    assert 'BEGIN RSA PRIVATE KEY' in data['frame']['https_proxy']['certs']['server_key']
+    assert 'BEGIN EC PRIVATE KEY' in data['frame']['https_proxy']['certs']['server_key']
     assert 'BEGIN CERTIFICATE' in data['frame']['https_proxy']['certs']['client_ca']
     assert data['frame']['https_proxy']['server_cert_not_valid_after'] is not None
     assert data['frame']['https_proxy']['client_ca_cert_not_valid_after'] is not None
@@ -3246,7 +3258,7 @@ async def test_api_frame_generate_tls_material_includes_validity_dates(async_cli
 
     data = response.json()
     assert 'BEGIN CERTIFICATE' in data['certs']['server']
-    assert 'BEGIN RSA PRIVATE KEY' in data['certs']['server_key']
+    assert 'BEGIN EC PRIVATE KEY' in data['certs']['server_key']
     assert 'BEGIN CERTIFICATE' in data['certs']['client_ca']
     assert data['server_cert_not_valid_after'] is not None
     assert data['client_ca_cert_not_valid_after'] is not None

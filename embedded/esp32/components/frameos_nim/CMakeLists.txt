@@ -8,7 +8,7 @@ file(GLOB NIM_GENERATED_SRCS "${CMAKE_CURRENT_LIST_DIR}/nimcache/*.c")
 
 if(NIM_GENERATED_SRCS)
     idf_component_register(
-        SRCS ${NIM_GENERATED_SRCS} "frameos_nim_glue.c" "fos_netguard.c"
+        SRCS ${NIM_GENERATED_SRCS} "frameos_nim_glue.c" "fos_netguard.c" "fos_version.c"
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "nimcache"
         # frameos_quickjs: the Nim js_runtime binds QuickJS (include path +
@@ -32,7 +32,7 @@ else()
     # private-network policy unconditionally, so a thin-client image that
     # dropped this file would fail to link.
     idf_component_register(
-        SRCS "frameos_nim_stub.c" "fos_netguard.c"
+        SRCS "frameos_nim_stub.c" "fos_netguard.c" "fos_version.c"
         INCLUDE_DIRS "include"
         PRIV_REQUIRES lwip
     )

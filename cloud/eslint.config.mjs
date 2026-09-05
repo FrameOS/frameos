@@ -28,6 +28,11 @@ export default tseslint.config(
       "**/src/test/shared-spa/embedded-flash-shared.test.ts",
       // Same exclusion, same reason: mounts EmbeddedReleaseFlasher.
       "**/src/test/shared-spa/embedded-release-flasher.test.tsx",
+      // The USB board classifier type-imports embeddedUsbLogsModel; the
+      // scene-execution corpus runner imports frameDeployUtils. Both are in
+      // the tsconfig exclude for the same strict-compiler reason.
+      "**/src/test/shared-spa/usb-board-identity.test.ts",
+      "**/src/test/shared-spa/scene-execution-fixtures.test.ts",
       // Same exclusion, same reason: builds every logic the embedded editor
       // mounts; workspaceLogic reaches the legacy workspace components.
       "**/src/test/shared-spa/embedded-editor-logics.test.ts",
