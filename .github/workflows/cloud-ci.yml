@@ -232,6 +232,16 @@ jobs:
       # would deploy older code over newer, so it stands down: the tip's own
       # run is already queued behind this one on the concurrency group.
       #
+      # ...but only when the tip *has* a run. This workflow is path-filtered,
+      # so a docs-only commit landing right behind a cloud change leaves no
+      # run queued at all: the cloud change's run stood down, nothing ran for
+      # the tip, and the fix never reached production (2026-09-05, a frame-hub
+      # fix sat unshipped while the bench kept testing against it). When the
+      # commits between us and the tip touch none of this workflow's inputs,
+      # the tip's cloud is byte-for-byte ours — ship it. deploy.sh resolves
+      # `main` from the remote and refuses a tree that is not that commit, so
+      # this checks the tip out the way the release path below does.
+      #
       # A release is the one case where main having moved on is the *point*:
       # the release run pushed `chore: version X` itself, and no push event
       # exists for that commit to leave a run queued behind us. Standing down
@@ -255,9 +265,19 @@ jobs:
             echo "sha=$tip" >>"$GITHUB_OUTPUT"
             echo "proceed=true" >>"$GITHUB_OUTPUT"
           elif [ "$tip" != "$GITHUB_SHA" ]; then
-            echo "origin/main is now $tip, not $GITHUB_SHA; leaving the deploy to that run." |
-              tee -a "$GITHUB_STEP_SUMMARY"
-            echo "proceed=false" >>"$GITHUB_OUTPUT"
+            # The same list as `on.push.paths` above; keep the two in step.
+            if git diff --name-only "$GITHUB_SHA" "$tip" | grep -qE \
+                '^(cloud/|frontend/|cloud-frontend/|repo/|frameos/wasm/|frameos/editor/|versions\.json$|release-assets/firmware-signing\.pub$|turbo\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.github/workflows/cloud-ci\.yml$)'; then
+              echo "origin/main is now $tip, not $GITHUB_SHA, and that commit has its own run; leaving the deploy to it." |
+                tee -a "$GITHUB_STEP_SUMMARY"
+              echo "proceed=false" >>"$GITHUB_OUTPUT"
+            else
+              git checkout --quiet --detach "$tip"
+              echo "origin/main moved on to $tip by commits outside this workflow's inputs; shipping the tip (same cloud as $GITHUB_SHA)." |
+                tee -a "$GITHUB_STEP_SUMMARY"
+              echo "sha=$tip" >>"$GITHUB_OUTPUT"
+              echo "proceed=true" >>"$GITHUB_OUTPUT"
+            fi
           else
             echo "sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
             echo "proceed=true" >>"$GITHUB_OUTPUT"
