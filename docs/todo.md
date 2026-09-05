@@ -36,22 +36,50 @@ Two rules that shape most entries:
 
 ## ESP32 memory
 
-- **Verify on hardware** (docs/esp32-memory.md, 2026-08-24): the Weather
-  scene renders on the 16 MB 13.3" (frame 529463b4) after a reboot with no
-  `memory:oomAbort`; post-render idle PSRAM stays near the ~6.9 MB
-  baseline; the sky gradient shows no strip seams. The 8 MB half is done:
-  the E1004 (565 canvas, strips are the only thing that fits) renders
-  Weather with an 873 KB PSRAM low-water mark since the transpiler fix
-  (#428, measured on the board 2026-09-01).
-- **Verify on hardware** (docs/esp32-memory.md, 2026-08-23): a 24 MP photo
-  cover-rendered on the 16 MB 13.3" is sharp (no `render:degraded` in the
-  log — the cover window keeps the plan at 2.9 MB inside the RGBX canvas's
-  ~5 MB headroom); the 7.3" weather sky renders without bands (RGBX canvas
-  now; boot line `canvas: 800x480 rgbx`); the E1004's gradients are
-  band-free on its `canvas: 1200x1600 rgb565 (dithered stores)`; after a
-  text render idle PSRAM should drop ~0.5 MB, not 1.6 MB; `render:degraded`
-  and `memory:oomAbort` appear in the cloud log when provoked (force the
-  budget low with an oversized photo); the leak-percent restart fires.
+- **Weather on the 16 MB-PSRAM 13.3" (SuurESP) — verified 2026-09-05** on
+  2026.9.8 after a cold boot (first scene render after the 32 MB relayout):
+  `render:done` in 85 s (14.4 s render + 18.9 s dither/pack + refresh), no
+  `memory:oomAbort`, no `render:degraded`; idle PSRAM 5.91 MB before the
+  text-heavy render and 5.36 MB after (the ~0.5 MB drop the plan expected,
+  not 1.6 MB); the packed capture shows the sky's 6-colour dither banding
+  and no full-width strip seam (the RGBX canvas draws no strips). Idle PSRAM
+  now sits ~0.5 MB below the old ~6.9 MB baseline — the 24 MB SPIFFS state
+  partition's cache, measured 6.15 MB free at boot with no scene loaded.
+  Still to provoke deliberately: `memory:oomAbort` and the leak-percent
+  restart. The 8 MB E1004 half was done 2026-09-01 (#428).
+- **4:4:4 JPEGs degraded to half resolution on the 13.3" — fixed in the
+  pixie fork (FrameOS/pixie#8, lock bumped to fe417a0).** Found 2026-09-05
+  on SuurESP: the `koduraam` photos are 4:4:4 exports and every one logged
+  `render:degraded … needs 5160K of decode buffers, over the 4989K memory
+  budget`, rendering 600x800 stretched at 12, 24 and 60 MP alike (4:2:0
+  and 4:2:2 files passed at 60 MP). The JPEG planner's budget clamp shaved
+  the sampling grid until the channel planes fit, then the plan check added
+  the per-component band + accumulator buffers (~180 KB) and refused, and
+  the degrade ladder jumped to the divisor-2 rung instead of the ~1130x1506
+  grid the clamp had computed. The clamp now counts the same three buffers
+  and shaves in 1/64 steps until the exact plan fits (`tests/test_jpeg.nim`
+  pins it; the frameos `test_decode_degrade` suite still passes). Verified
+  on the board: see the bench entry in `docs/manual-testing-todo.md`.
+  Longer term the streamed JPEG decoder holds target-sized channel planes;
+  a banded design would cut the plan to a few MCU rows per component.
+- **A cloud frame whose `/state` was wiped stayed sceneless but "in sync"
+  — device half fixed (`fos_cloud.c` + `fos_scenes_stored()`).** The hello
+  reported the NVS-cached `cloud_scn_sum` without checking that
+  `/state/scenes.json` (or the split index) still existed, so after a
+  SPIFFS autoformat or a flash relayout the hub saw the assigned checksum,
+  never re-pushed, and every `set_current_scene` failed `scene not found`.
+  Now the hello forgets the cached checksum when the store is empty and
+  reports the store's own etag, so the frame shows **out of sync** in the
+  workspace and any deploy (or `frame_scenes_set` with the same list)
+  restores it. The hub does not push unasked on a hello mismatch by design
+  (the push is assembled on the auth-web side; the hub has no channel to
+  ask for it), so an automatic re-push for the empty-store case is a
+  possible follow-up, not a bug: it would need an internal auth-web route
+  the hub can call, and it can never lose anything because the device
+  holds nothing.
+- Console: `ota` printed `ota: UNKNOWN ERROR (cloud)` on every outcome
+  because `CONFIG_ESP_ERR_TO_NAME_LOOKUP` is off; it now prints
+  `check requested` / `request failed 0x…`.
 
 ---
 
