@@ -163,8 +163,6 @@ suite "image helpers":
     # A red square SVG rasterized at 4x4 must fill a 40x40 target edge to
     # edge — the small raster is the budget's doing, the size the scene asked
     # for is the target's.
-    # viewBox on purpose: this fork's parseSvg rasterizes a viewBox-less SVG
-    # only at its declared size (parseInt on the missing attribute otherwise).
     let svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40"><rect width="40" height="40" fill="#ff0000"/></svg>"""
     let target = newImage(40, 40)
     check renderSvgDegradedInto(svg, target, 4, 4)
@@ -179,6 +177,13 @@ suite "image helpers":
     check renderSvgDegradedInto(hole, under, 8, 8)
     check pixel(under, 5, 20).g == 255
     check pixel(under, 35, 20).b == 255
+    # No viewBox — the shape every hand-built JS app SVG has: the fork's
+    # parseSvg takes the root's width/height as the box (FrameOS/pixie#7),
+    # so a budget-capped raster of it scales the same way.
+    let bare = """<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#ff0000"/></svg>"""
+    let bareTarget = newImage(40, 40)
+    check renderSvgDegradedInto(bare, bareTarget, 4, 4)
+    check pixel(bareTarget, 20, 20).r == 255
     # Not a downscale: a raster at or above the target size is not this rung's job.
     check not renderSvgDegradedInto(svg, newImage(4, 4), 4, 4)
     check not renderSvgDegradedInto("<svg", newImage(40, 40), 4, 4)
