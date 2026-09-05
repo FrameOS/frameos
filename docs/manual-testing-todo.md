@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-05 19:30 UTC, after release 2026.9.9.
+empty. Last refreshed 2026-09-05 20:20 UTC, after release 2026.9.9.
 
 ## Open
 
@@ -18,21 +18,6 @@ empty. Last refreshed 2026-09-05 19:30 UTC, after release 2026.9.9.
   (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
   and that everything works after. The deploy also flips the frame back to
   a root `frameos.service`, so check the unit's `User=` before and after.
-
-### Privilege separation bench (`docs/buildroot-privileges.md` §4)
-
-Bench context (frames, what each step is for, the door's design) is in the
-Done section for this bench below.
-
-- [ ] **7. Regressions:** deploy from localhost:8616 to one Waveshare frame
-  (still root, still renders); after the HA add-on has the 9.3 image, deploy
-  to one HA frame. Neither should have a `frameos` user or the door active.
-
-- [ ] **9. Afterwards:** tick the boxes here, move anything that broke into
-  `docs/todo.md`, and delete this section once everything passed. If a
-  migrated frame ends up unusable, reflash it with the 9.3 image — the
-  FRAMEOS partition layout is stamped by the composer, so a fresh card is
-  always the known-good state.
 
 ### Backend (self-hosted) bench
 
@@ -372,8 +357,8 @@ all fixed on main the same day unless noted:
 
 ### Privilege separation bench (`docs/buildroot-privileges.md` §4)
 
-Steps 0–6 and 8 ran on hardware 2026-09-04 (uus2w, Cloud-5, Cloud-W); steps
-7 and 9 are in Open above. A fresh generic `raspberry-pi-64` release image is
+Steps 0–6 and 8 ran on hardware 2026-09-04 (uus2w, Cloud-5, Cloud-W); step 7
+ran 2026-09-05 (Kontor 4in!, xkcd); step 9 closed the same evening. A fresh generic `raspberry-pi-64` release image is
 the known-good starting point for any of them.
 
 #### Context for picking this up cold (written 2026-09-03, PR #415 green, not yet merged)
@@ -646,6 +631,43 @@ root→`frameos` migration inside that upgrade (`docs/buildroot-privileges.md`
 - [x] **8. Link cases** — done 2026-09-04 on uus2w over SSH; see the
   "Root follows none of the runtime's links" box below for the full record
   (all four cases passed, plus the restore-and-retry upgrade).
+
+- [x] **7. Regressions** — passed 2026-09-05. *localhost half, 20:00 UTC:*
+  full deploy from localhost:8616 to `Kontor 4in!` (frame 16, Raspberry Pi
+  OS trixie aarch64, EPD_4in0e) completed; over SSH afterwards `id frameos`
+  → no such user, no door unit anywhere in `/etc/systemd/system` or
+  `list-units`, no `/run/frameos*` socket, `frameos.service` still the
+  Aug 30 unit with `User=pi` (the backend writes the SSH user into the unit
+  on RPi OS — this frame was never root, "still root" here means "unchanged
+  by #415"), the runtime and `frameos-remote` both running as `pi`,
+  `drivers/waveshare_EPD_4in0e.so` 0775 and `driver:shared … loaded: true`,
+  `render:done` 562 ms → `render:driver` 22.4 s → `render:sleep`.
+  *Home Assistant half, 20:07 UTC:* the add-on (9.9 image) deployed to
+  `xkcd` (10.8.0.67, Buildroot 2025.02.13 aarch64, Inky Impression 7.3,
+  root-only SSH — `pi@` does not exist there) → binary reports
+  `2026.9.9+b5bdb09a…`; `id frameos` → no such user, no uid 990 anywhere in
+  `/etc/passwd`, `frameos.service` and `frameos-remote.service` both
+  `User=root` and both processes root. The deploy's `frameos setup` did
+  write `frameos-privileged.path` / `.service` and the udev rule at 22:05
+  local, which is by design (`installBuildrootPrivilegedUnits` writes the
+  files on every Buildroot setup and *disables* the `.path` for a root
+  service user): `.path` is `disabled` / `inactive`, `.service` `static` /
+  `inactive`, no wants link, no `/srv/frameos/privileged` queue. Rendered:
+  `inky.so` + `gpioButton.so` loaded, `render:done` 1.3 s, panel refresh
+  37 s, then `render:sleep`. Seen, not from this deploy: `/srv/frameos/
+  releases` and `state` are owned by uid 1001 (no such account), as is
+  `release_2026.6.23` from June 2025 — the composer's uid, harmless as
+  root. Original text: deploy from localhost:8616 to one Waveshare frame
+  (still root, still renders); after the HA add-on has the 9.3 image, deploy
+  to one HA frame. Neither should have a `frameos` user or the door active.
+
+- [x] **9. Afterwards** — closed 2026-09-05: nothing broke in steps 0–8,
+  so nothing moved to `docs/todo.md`; the Open section for this bench is
+  gone. Original text: tick the boxes here, move anything that broke into
+  `docs/todo.md`, and delete this section once everything passed. If a
+  migrated frame ends up unusable, reflash it with the 9.3 image — the
+  FRAMEOS partition layout is stamped by the composer, so a fresh card is
+  always the known-good state.
 
 - [x] **It boots and renders as `frameos`** — uus2w live 2026-09-04 11:48 (SSH after the dropbear fix): `User=frameos`, `ps` shows `frameos 262 frameos`, `/` mounted `ro`, `/srv/frameos` `rw`, `/dev/fb0` `/dev/tty1` `/dev/gpiochip0` are `root:frameos 660`, framebuffer renders (172 ms scene + 481 ms driver at 1080p). SPI panel not yet checked (no SPI frame with SSH). Original text: `systemctl show -p User
   frameos.service` says `frameos`, `ps -o user= -C frameos` agrees, and a
