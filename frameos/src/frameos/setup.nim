@@ -781,6 +781,12 @@ proc setupTimezone*(timeZone: string): SetupResult =
   let current = detectSystemTimeZone()
   if current == normalized:
     setupLog("FrameOS setup: timezone: already " & normalized)
+    # The link may be right while the text copy is stale — every systemd
+    # frame that got its zone before the sync existed (uus2w after its 9.8
+    # OTA: localtime Europe/Brussels, /etc/timezone still Etc/UTC). A no-op
+    # when the file already agrees.
+    if runningAsRoot() or not privilegedDoorAvailable():
+      syncEtcTimezone(normalized)
     return setupOk()
 
   # As the unprivileged runtime (cloud enrolment personalisation, a settings

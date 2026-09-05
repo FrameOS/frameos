@@ -5,6 +5,7 @@ import ../privileged
 import ../samba_mounts
 import ../setup
 import ../types
+import lib/tz
 
 block test_app_apt_packages_from_scene_nodes:
   let scenes = parseJson("""[
@@ -92,6 +93,24 @@ block test_timezone_keeps_etc_timezone_in_step:
     resetSetupCommandRunnerForTest()
     delEnv("FRAMEOS_ETC_TIMEZONE")
     removeFile(tzPath)
+
+block test_timezone_syncs_etc_timezone_when_the_link_is_already_right:
+  # /etc/localtime already says the zone (the "already" early return), but
+  # /etc/timezone still carries the image's Etc/UTC — uus2w after its 9.8 OTA.
+  # Needs a host whose zone is readable; a bare CI container may have none.
+  let current = detectSystemTimeZone()
+  if current.len > 0:
+    let tzPath = getTempDir() / ("frameos-etc-timezone-already-" & $epochTime().int64)
+    writeFile(tzPath, "Etc/UTC\n")
+    putEnv("FRAMEOS_ETC_TIMEZONE", tzPath)
+    setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult = ("", 0))
+    try:
+      discard setupTimezone(current)
+      doAssert readFile(tzPath).strip() == current, readFile(tzPath)
+    finally:
+      resetSetupCommandRunnerForTest()
+      delEnv("FRAMEOS_ETC_TIMEZONE")
+      removeFile(tzPath)
 
 block test_timezone_leaves_a_missing_etc_timezone_alone:
   # A system that keeps no /etc/timezone does not get one invented for it.
