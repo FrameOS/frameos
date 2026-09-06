@@ -34,6 +34,18 @@ empty. Last refreshed 2026-09-06 (setup portal round two added), after release 2
   with an Android tries it). The captive-portal popup itself is NOT in
   yet — `docs/todo.md`, "Setup hotspot: captive portal".
 
+- [ ] **On-device "Add scene" lists the cloud scene store (2026-09-07, needs
+  the next release):** the frame's `/api/repositories` is now the store
+  index of the provider it is linked to (default cloud.frameos.net,
+  `/api/store/<version>/repository.json`, cached 5 min) and the drawer
+  lists it FIRST, samples and galleries after it. Check: the store shows
+  with covers, installing a store scene works (scenes come through the
+  frame's `/api/repositories/cloud-store/scenes/<id>/scenes.json`), and with
+  the frame offline the drawer still shows the bundled samples. Also
+  re-check the two same-day fixes on this bench: add a scene + Save no
+  longer logs you out (blank secrets keep their stored value), and the
+  admin panel stays up through a long polling session (auth cache race).
+
 ### Backend (self-hosted) bench
 
 - [ ] **Adopt a running standalone frame (#380):** point the backend at a
