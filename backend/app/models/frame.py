@@ -773,8 +773,12 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     # Declaration is a request, not a permission (docs/security-todo.md).
     setting_keys = set()
     store_scene_setting_keys = set()
+    # getattr: the generic release-image build hands this a Frame stand-in
+    # that carries only the columns a generic image needs.
     granted_to_store_scenes = {
-        str(group) for group in (frame.service_setting_groups or []) if isinstance(group, str) and group
+        str(group)
+        for group in (getattr(frame, "service_setting_groups", None) or [])
+        if isinstance(group, str) and group
     }
     app_configs = get_app_configs()
     for scene in list(frame.scenes):
