@@ -41,6 +41,42 @@ suite "web route behavior":
     check proxiedAuthRedirect.header("set-cookie").contains("frame_access_key=test-key")
     check proxiedAuthRedirect.header("set-cookie").contains("Secure")
 
+  test "setup status is public, uncached and readable cross-origin":
+    var config = defaultFrameConfig()
+    configureServerState(config, hotspotActive = true)
+    let response = httpRequest(server.port, "GET", "/setup/status")
+    check response.status == 200
+    check response.header("access-control-allow-origin") == "*"
+    check response.header("cache-control") == "no-store"
+    let status = parseJson(response.body)
+    check status["hotspot"].getBool()
+    check status.hasKey("internet")
+    check status.hasKey("network")
+    check status["frameUrl"].getStr().len > 0
+
+    configureServerState(config, hotspotActive = false)
+    check parseJson(httpRequest(server.port, "GET", "/setup/status").body)["hotspot"].getBool() == false
+
+  test "captive-portal probes and stray hosts redirect to the setup form while the hotspot is up":
+    var config = defaultFrameConfig()
+    configureServerState(config, hotspotActive = true)
+    let probe = httpRequest(server.port, "GET", "/generate_204", headers = [("Host", "connectivitycheck.gstatic.com")])
+    check probe.status == 302
+    check probe.header("location") == "http://10.42.0.1:" & $config.framePort & "/"
+    let apple = httpRequest(server.port, "GET", "/hotspot-detect.html", headers = [("Host", "captive.apple.com")])
+    check apple.status == 302
+    # Any unknown page from a device whose DNS now points at the frame.
+    let stray = httpRequest(server.port, "GET", "/some/app/page", headers = [("Host", "example.com")])
+    check stray.status == 302
+    check stray.header("location") == "http://10.42.0.1:" & $config.framePort & "/"
+    # A real 404 against the hotspot's own address stays a 404.
+    let own = httpRequest(server.port, "GET", "/some/app/page", headers = [("Host", "10.42.0.1:" & $config.framePort)])
+    check own.status == 404
+
+    configureServerState(config, hotspotActive = false)
+    check httpRequest(server.port, "GET", "/generate_204", headers = [("Host", "connectivitycheck.gstatic.com")]).status == 404
+    check httpRequest(server.port, "GET", "/some/app/page").status == 404
+
   test "admin and control routes enforce session/redirect expectations":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{

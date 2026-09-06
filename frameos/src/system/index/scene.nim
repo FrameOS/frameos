@@ -18,6 +18,7 @@ import frameos/utils/time
 import frameos/utils/local_time
 import frameos/utils/status_screen
 import frameos/render_stats
+import frameos/network_state
 import frameos/version
 import scenes/scenes as compiledScenes
 import system/options as sceneOptions
@@ -338,6 +339,9 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
     ("Time", clockLine(frameConfig, epoch, withSeconds = animating)),
     ("Time zone", frameConfig.timeZone),
     ("Network", networkLine),
+    # The address above says the LAN is up; this says whether the world is
+    # reachable through it (the boot / portal connectivity check).
+    ("Internet", internetLine(lastNetworkCheck())),
     ("Managed via", managedVia),
     ("Frame", frameUrl),
     ("Remote control", remoteLine),

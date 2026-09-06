@@ -20,6 +20,10 @@ proc buildRouter*(connectionsState: ConnectionsState, adminConnectionsState: Con
   addCloudApiRoutes(result)
 
   result.notFoundHandler = proc(request: Request) {.gcsafe.} =
+    # A device on the setup hotspot whose DNS resolves everything to the
+    # frame lands here for any page it had open: hand it the setup form.
+    if captivePortalRedirect(request):
+      return
     if shouldLogRouteNotFound(request.path):
       log(%*{"event": "404", "path": request.path})
     request.respond(Http404, body = "Not found!")

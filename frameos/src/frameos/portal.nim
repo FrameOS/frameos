@@ -12,6 +12,7 @@ import frameos/cloud/device_flow
 import frameos/cloud/enrollment
 import frameos/cloud/link_state
 import frameos/privileged
+import frameos/network_state
 import drivers/drivers as frameDrivers
 
 const
@@ -1136,9 +1137,7 @@ proc waitForReadyWifiDevice(): string =
     if attempt < hotspotDeviceWaitAttempts:
       portalSleepHook(hotspotDeviceWaitDelayMs)
 
-proc availableNetworks*(frameOS: FrameOS): seq[string] =
-  ## Return a list of nearby Wi-Fi SSIDs. Same shape from either backend: the
-  ## portal UI must not care which one is active.
+proc scannedNetworks(frameOS: FrameOS): seq[string] =
   if activeNetworkBackend() == nbSupplicant:
     return wpa.availableNetworks(networkContext(), supplicantWifiDevice(), networkToolProbe())
 
@@ -1160,6 +1159,18 @@ proc availableNetworks*(frameOS: FrameOS): seq[string] =
     let ssid = line.strip()
     if ssid.len > 0 and ssid notin result:
       result.add ssid
+
+proc availableNetworks*(frameOS: FrameOS): seq[string] =
+  ## Return a list of nearby Wi-Fi SSIDs. Same shape from either backend: the
+  ## portal UI must not care which one is active. The frame's own setup
+  ## hotspot is what the phone is connected to while it looks at this list —
+  ## a scan sees it too, and offering it back as a network to join is a trap
+  ## (2026-09-06, Zero 2 W: "FrameOS-Setup" listed between the home SSIDs).
+  let ownSsid = frameOS.frameConfig.network.wifiHotspotSsid.strip()
+  for ssid in scannedNetworks(frameOS):
+    if ownSsid.len > 0 and ssid == ownSsid:
+      continue
+    result.add ssid
 
 proc hotspotRunning(frameOS: FrameOS): bool =
   if activeNetworkBackend() == nbSupplicant:
@@ -1540,6 +1551,11 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
 
   stopAp(frameOS) # close hotspot before connecting
+  # The "Saved!" page polls /setup/status and only moves on once this is
+  # `connected`: between the hotspot going down and the join landing the
+  # phone may still reach the old 10.42.0.1 address for a moment.
+  frameOS.network.status = NetworkStatus.connecting
+  noteNetworkCheck(NetworkStatus.connecting)
 
   if attemptConnect(frameOS, options.ssid, options.password):
     var connected = false
@@ -1549,6 +1565,8 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
       try:
         let response = client.get(frameConfig.network.networkCheckUrl)
         if response.status.startsWith("200"):
+          frameOS.network.status = NetworkStatus.connected
+          noteNetworkCheck(NetworkStatus.connected)
           pLog("portal:connect:configPersisted",
                %*{"serverHost": frameConfig.serverHost, "serverPort": frameConfig.serverPort,
                    "frameHost": frameConfig.frameHost, "device": frameConfig.device})
@@ -1562,11 +1580,15 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
           return
         else:
           log(%*{"event": "networkCheck", "status": "failed", "response": response.status})
+          frameOS.network.status = NetworkStatus.error
+          noteNetworkCheck(NetworkStatus.error, "HTTP " & response.status)
           rememberError("Network check failed. Please try again." &
                         fmt" (HTTP {response.status})")
           sleep(3000 * (attempt + 1)) # wait before retrying
       except CatchableError as e:
         log(%*{"event": "networkCheck", "status": "error", "error": e.msg})
+        frameOS.network.status = NetworkStatus.error
+        noteNetworkCheck(NetworkStatus.error, e.msg)
         rememberError("Network check failed: " & e.msg)
         sleep(3000 * (attempt + 1)) # wait before retrying
       finally:
@@ -1578,6 +1600,8 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
       startAp(frameOS) # fall back to AP
   else:
     log(%*{"event": "portal:connectFailed"})
+    frameOS.network.status = NetworkStatus.error
+    noteNetworkCheck(NetworkStatus.error, "Wi-Fi join failed")
     rememberError("Wifi connection failed. Check your credentials.")
     startAp(frameOS)
 
@@ -1602,6 +1626,7 @@ proc checkNetwork*(self: FrameOS): bool =
   # that is seconds old would be the very failure it just fixed.
   var probeAfterRepair = false
   self.network.status = NetworkStatus.connecting
+  noteNetworkCheck(NetworkStatus.connecting)
   self.logger.log(%*{"event": "networkCheck", "url": url})
   while true:
     if not networkCheckProgressHook.isNil:
@@ -1614,6 +1639,7 @@ proc checkNetwork*(self: FrameOS): bool =
         discard
     if not probeAfterRepair and (getMonoTime() - timer) >= initDuration(milliseconds = int(timeout*1000)):
       self.network.status = NetworkStatus.timeout
+      noteNetworkCheck(NetworkStatus.timeout, &"check timed out after {int(timeout)} s")
       self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
       logNetworkDiagnostics("timeout")
       return false
@@ -1623,14 +1649,17 @@ proc checkNetwork*(self: FrameOS): bool =
       let response = client.get(url)
       if response.status.startsWith("200"):
         self.network.status = NetworkStatus.connected
+        noteNetworkCheck(NetworkStatus.connected)
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
         return true
       else:
         self.network.status = NetworkStatus.error
+        noteNetworkCheck(NetworkStatus.error, "HTTP " & response.status)
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
             "response": response.status})
     except CatchableError as e:
       self.network.status = NetworkStatus.error
+      noteNetworkCheck(NetworkStatus.error, e.msg)
 
       # Error with SSL certificates. Most likely means the clock is wrong after a long downtime
       # (or a cold boot with no RTC battery). Sync it once and wait for the sync to land; that
@@ -1657,6 +1686,7 @@ proc checkNetwork*(self: FrameOS): bool =
     if attempt == 1:
       if not anyWifiConfigured(self):
         self.network.status = NetworkStatus.error
+        noteNetworkCheck(NetworkStatus.error, "no Wi-Fi network configured")
         self.logger.log(%*{"event": "networkCheck", "status": "wifi_not_configured"})
         return false
       else:
@@ -1853,7 +1883,8 @@ proc setupHtml*(frameOS: FrameOS): string =
         <option disabled selected>Loading...</option>
       </select>
     </label>
-    <label>Password<input type="password" name="password"></label>
+    <label>Password<input id="wifi-password" type="password" name="password" autocomplete="off"></label>
+    <label class="inline"><input type="checkbox" data-reveal="wifi-password">Show password</label>
   </details>
 
   <details open>
@@ -1921,6 +1952,7 @@ proc setupHtml*(frameOS: FrameOS): string =
              data-existing="{adminPassExistingAttr}"
              placeholder="{htmlEscape(adminPassPlaceholder)}">
     </label>
+    <label class="inline"><input type="checkbox" data-reveal="admin-pass">Show password</label>
   </details>
 
   <details{serverDetailsOpen}>
@@ -2081,6 +2113,12 @@ deviceSel.addEventListener('change', () => updateDriverUi(true));
 adminEnabled.addEventListener('change', updateAdminUi);
 controlModeSel.addEventListener('change', updateControlUi);
 document.getElementById('random-hostname').addEventListener('click', randomHostname);
+document.querySelectorAll('input[data-reveal]').forEach(box => {
+  box.addEventListener('change', () => {
+    const field = document.getElementById(box.dataset.reveal);
+    if (field) field.type = box.checked ? 'text' : 'password';
+  });
+});
 updateDriverUi(false);
 updateAdminUi();
 updateControlUi();
@@ -2100,19 +2138,50 @@ proc postSetupFrameUrl*(frameOS: FrameOS): string =
     if (scheme == "http" and port == 80) or (scheme == "https" and port == 443): "" else: ":" & $port
   result = scheme & "://" & host & portSuffix & "/"
 
-proc confirmHtml*(frameOS: FrameOS): string =
+proc plainHttpFrameUrl(frameOS: FrameOS): string =
+  ## The http:// twin of postSetupFrameUrl for a frame whose public URL is
+  ## https: a browser will not fetch a self-signed https origin from the
+  ## "Saved!" page, while the plain port still answers /setup/status.
+  let frameConfig = frameOS.frameConfig
+  let host = if frameConfig.frameHost.strip().len > 0: frameConfig.frameHost.strip() else: "frame.local"
+  let port = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
+  result = "http://" & host & (if port == 80: "" else: ":" & $port) & "/"
+
+proc setupStatusJson*(frameOS: FrameOS): JsonNode =
+  ## What the "Saved!" page polls, from both the hotspot origin and the
+  ## frame's LAN address: nothing here that the status screen on the panel
+  ## does not already show whoever can see the frame.
+  let check = lastNetworkCheck()
+  %*{
+    "hotspot": isHotspotActive(frameOS),
+    "network": $frameOS.network.status,
+    "internet": check.status == NetworkStatus.connected,
+    "error": getLastError(),
+    "frameUrl": postSetupFrameUrl(frameOS),
+  }
+
+proc confirmHtml*(frameOS: FrameOS, ssid = ""): string =
   let frameUrl = postSetupFrameUrl(frameOS)
   let adminUrl = frameUrl & "admin"
+  let hotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
+  var probeUrls = @[frameUrl & "setup/status"]
+  if frameUrl.startsWith("https://"):
+    probeUrls.add plainHttpFrameUrl(frameOS) & "setup/status"
   let cloudNote =
     if pendingCloudEnrollment() != nil:
       "<p>A cloud claim code is queued: once online, the frame enrolls itself " &
       "and appears in your FrameOS Cloud account, usually within a minute.</p>\n"
     else:
       ""
+  let joining =
+    if ssid.strip().len > 0: "joining “" & htmlEscape(ssid.strip()) & "”"
+    else: "joining Wi-Fi"
   layout(
     "<h1>Saved!</h1>\n" &
-    "<p>The frame is now attempting to connect to Wi-Fi. After your computer reconnects to the same network, look for the frame at <a href=\"" &
+    "<p id=\"progress\">The frame is " & joining & ". Reconnect this device to the same network — " &
+      "this page follows the frame over as soon as it can reach it at <a href=\"" &
       htmlEscape(frameUrl) & "\">" & htmlEscape(frameUrl) & "</a>.</p>\n" &
+    "<p id=\"setup-error\" class=\"hidden\" style=\"color:#f87171\"></p>\n" &
     cloudNote &
     "<p>If you enabled the admin UI, open <a href=\"" & htmlEscape(adminUrl) & "\">" & htmlEscape(adminUrl) & "</a>.</p>\n" &
     "<p>If you left display setup enabled, the frame applies driver setup after joining Wi-Fi. If setup requires a reboot, the frame restarts automatically.</p>\n" &
@@ -2120,15 +2189,53 @@ proc confirmHtml*(frameOS: FrameOS): string =
 <h2>Troubleshooting</h2>
 <ul>
   <li>Wait about 60 seconds - your device can stay stuck on the setup network for a short time.</li>
-  <li>If the "FrameOS-Setup" access-point reappears, the Wi-Fi credentials were likely wrong.</li>
+  <li>If the "<span id="hotspot-ssid"></span>" access-point reappears, the Wi-Fi credentials were likely wrong.</li>
   <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
 </ul><script>
-// Reload the page when it comes back
-window.setInterval(() => {
-  window.fetch('/').then(() => {
-    window.location.href = '/';
-  }).catch(() => {
-    // ignore errors, we just want to reload the page
+// Two polls, every few seconds, until one of them settles it:
+//  - the frame's LAN address (frameUrl + setup/status). While this device is
+//    still on the hotspot it either fails or answers with the hotspot's own
+//    "connecting" state; once the device is back on the home network and the
+//    frame has passed its connectivity check, it answers `internet: true`
+//    and we move over. Cross-origin, so that route sends
+//    Access-Control-Allow-Origin: *.
+//  - this origin (the hotspot). If the frame gives up and brings the hotspot
+//    back, the device tends to rejoin it by itself; the error the frame
+//    remembered is shown here with a link back to the form.
+const frameUrl = __FRAME_URL__;
+const probeUrls = __PROBE_URLS__;
+document.getElementById('hotspot-ssid').textContent = __HOTSPOT_SSID__;
+let moved = false;
+function fetchJson(url) {
+  return window.fetch(url, { cache: 'no-store', mode: 'cors', credentials: 'omit' }).then(r => r.json());
+}
+function probeFrame() {
+  probeUrls.forEach(url => {
+    fetchJson(url).then(d => {
+      if (moved || d.hotspot || !d.internet) return;
+      moved = true;
+      document.getElementById('progress').textContent = 'The frame is online. Opening ' + frameUrl + ' …';
+      window.location.href = frameUrl;
+    }).catch(() => {});
   });
-}, 10000);
-</script>""")
+}
+function probeHotspot() {
+  fetchJson('/setup/status').then(d => {
+    const el = document.getElementById('setup-error');
+    if (d.hotspot && d.error) {
+      el.innerHTML = '';
+      el.appendChild(document.createTextNode(d.error + ' '));
+      const a = document.createElement('a');
+      a.href = '/';
+      a.textContent = 'Try again';
+      el.appendChild(a);
+      el.classList.remove('hidden');
+    }
+  }).catch(() => {});
+}
+window.setInterval(() => { probeFrame(); probeHotspot(); }, 5000);
+window.setTimeout(probeFrame, 1500);
+</script>"""
+      .replace("__FRAME_URL__", $(%frameUrl))
+      .replace("__PROBE_URLS__", $(%probeUrls))
+      .replace("__HOTSPOT_SSID__", $(%hotspotSsid)))

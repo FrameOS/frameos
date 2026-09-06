@@ -9,6 +9,7 @@ import frameos/channels
 import frameos/config
 import frameos/types
 import frameos/portal as netportal
+import frameos/utils/url
 import ../state
 import ../auth
 import ../api
@@ -73,6 +74,37 @@ proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
     request.respond(Http200, headers, asset)
   except KeyError:
     request.respond(Http404, body = "Not found!")
+
+const captiveProbePaths* = [
+  "/generate_204", "/gen_204",                       # Android, Chrome
+  "/hotspot-detect.html", "/library/test/success.html", # Apple
+  "/connecttest.txt", "/ncsi.txt", "/redirect",      # Windows
+  "/success.txt", "/canonical.html",                 # Firefox, Ubuntu
+  "/check_network_status.txt", "/nm-check.txt",      # NetworkManager
+]
+
+proc hotspotSetupUrl(): string {.gcsafe.} =
+  {.gcsafe.}:
+    let port = hotspotSetupPort(globalFrameOS.frameConfig)
+    "http://10.42.0.1" & (if port == 80: "" else: ":" & $port) & "/"
+
+proc captivePortalRedirect*(request: Request): bool {.gcsafe.} =
+  ## While the setup hotspot is up, any request that is not for the hotspot's
+  ## own address is a connectivity probe or a stray page load from a device
+  ## whose DNS now points everywhere at 10.42.0.1: send it to the setup form.
+  ## Returns false when there is nothing to redirect (no hotspot, or the
+  ## request already targets 10.42.0.1 by name).
+  {.gcsafe.}:
+    if not netportal.isHotspotActive(globalFrameOS):
+      return false
+    let host = if request.headers.contains("Host"): request.headers["Host"].split(':')[0].strip() else: ""
+    if host == "10.42.0.1" and request.path notin captiveProbePaths:
+      return false
+    var headers: mummy.HttpHeaders
+    headers["Location"] = hotspotSetupUrl()
+    headers["Cache-Control"] = "no-store"
+    request.respond(Http302, headers)
+    return true
 
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
   router.get("/", proc(request: Request) {.gcsafe.} =
@@ -170,8 +202,33 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http500, body = netportal.setupHtml(globalFrameOS))
         return
       spawn netportal.connectToWifi(globalFrameOS, options)
-      request.respond(Http200, body = netportal.confirmHtml(globalFrameOS))
+      request.respond(Http200, body = netportal.confirmHtml(globalFrameOS, ssid = options.ssid))
   )
+
+  # Polled by the "Saved!" page from the hotspot origin AND from the frame's
+  # LAN address (hence CORS *): it moves the browser over once the frame is
+  # online. Unauthenticated on purpose — it says no more than the status
+  # screen on the panel does.
+  router.get("/setup/status", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      var headers: mummy.HttpHeaders
+      headers["Content-Type"] = "application/json"
+      headers["Cache-Control"] = "no-store"
+      headers["Access-Control-Allow-Origin"] = "*"
+      request.respond(Http200, headers, $netportal.setupStatusJson(globalFrameOS))
+  )
+
+  # Captive-portal probes. While the setup hotspot is up, a phone that joined
+  # it asks these well-known URLs whether the internet is reachable; anything
+  # but the expected body means "sign-in required" and the OS opens the page
+  # we redirect to. (Only reaches us once the hotspot's DNS answers every
+  # name with 10.42.0.1 and port 80 lands on this server — docs/todo.md.)
+  for path in captiveProbePaths:
+    router.get(path, proc(request: Request) {.gcsafe.} =
+      {.gcsafe.}:
+        if not captivePortalRedirect(request):
+          request.respond(Http404, body = "Not found!")
+    )
 
   router.get("/ping", proc(request: Request) {.gcsafe.} =
     request.respond(Http200, body = "pong")

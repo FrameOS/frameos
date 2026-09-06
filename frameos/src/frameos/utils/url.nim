@@ -21,11 +21,11 @@ proc publicHost*(config: FrameConfig): string =
 
 proc hotspotSetupPort*(config: FrameConfig): int =
   when not defined(frameosEmbedded) and not defined(frameosWasm):
-    if config.httpsProxy.enable and config.httpsProxy.exposeOnlyPort:
+    if config.httpsProxy != nil and config.httpsProxy.enable and config.httpsProxy.exposeOnlyPort:
       let port = setupProxyPort()
       if port > 0:
         return port
-  config.framePort
+  if config.framePort > 0: config.framePort else: 8787
 
 proc publicBaseUrl*(config: FrameConfig): string =
   &"{publicScheme(config)}://{publicHost(config)}:{publicPort(config)}"

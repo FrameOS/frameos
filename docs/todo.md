@@ -157,6 +157,40 @@ its PTY verbs everywhere. Left:
 
 ---
 
+## Setup hotspot: captive portal
+
+A phone that joins `FrameOS-Setup` should get the OS's "sign in to network"
+sheet with the setup form in it, instead of the owner scanning a second QR
+code (2026-09-06, Zero 2 W first boot). Two halves; the server half shipped
+the same day, the image half is open:
+
+- **Done:** while the hotspot is up the frame answers the well-known probe
+  paths (`/generate_204`, `/hotspot-detect.html`, `/connecttest.txt`, …) and
+  every not-found request whose `Host` is not `10.42.0.1` with a 302 to the
+  setup form (`captivePortalRedirect`, `server/routes/web_routes.nim`).
+- **DNS:** the hotspot's dnsmasq must resolve every name to `10.42.0.1`.
+  NetworkManager's shared mode reads `/etc/NetworkManager/dnsmasq-shared.d/`,
+  so a `address=/#/10.42.0.1` drop-in staged next to the resolved/dropbear
+  ones in `backend/app/tasks/buildroot_image.py` covers `raspberry-pi-64` /
+  `raspberry-pi-5`; the supplicant backend (`network/supplicant.nim`,
+  armv6) builds its own dnsmasq command line and takes the same `--address`.
+  Root is read-only, so this is image-time only.
+- **Port 80:** the probes go to port 80 and the runtime listens on 8787 as
+  the unprivileged `frameos` user, so nothing answers today. Either add
+  `CAP_NET_BIND_SERVICE` to `frameos.service.unprivileged` (both unit
+  renderers read that file) and have the runtime open a second listener on
+  :80 for the hotspot's lifetime that only redirects, or have the door's
+  `nm-hotspot-start` verb add an nft/iptables `REDIRECT --to-ports 8787` on
+  the hotspot interface (needs the firewall binary NetworkManager's shared
+  mode already depends on — check which one the Buildroot NM package pulls).
+  The listener is the smaller change; the redirect needs no capability.
+- Without the DNS half the popup never triggers, and with DNS but no port 80
+  the OS sees "connection refused" and reports plain "no internet" — so ship
+  both halves together, and re-test the "Saved!" auto-move: a captive sheet
+  is a restricted browser that may not run the page's timers.
+
+---
+
 ## Canonical API gaps
 
 Matrix in `docs/api-triality.md`; nothing scheduled — the remaining deltas

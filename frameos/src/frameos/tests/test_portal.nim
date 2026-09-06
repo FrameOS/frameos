@@ -3,6 +3,7 @@ import std/[json, os, strutils, tables, unittest]
 import ../channels
 import ../cloud/device_flow
 import ../network/backend
+import ../network_state
 import ../portal
 import ../types
 
@@ -194,6 +195,45 @@ suite "portal network orchestration":
     check html.contains("http://frame.local:8787/")
     check html.contains("http://frame.local:8787/admin")
     check html.contains("restarts automatically")
+    # The page follows the frame to the LAN by polling its status route, and
+    # names the network it is joining and the hotspot that would come back.
+    check html.contains("""const probeUrls = ["http://frame.local:8787/setup/status"];""")
+    check html.contains("""textContent = "FrameOS-Setup";""")
+    check confirmHtml(frame, ssid = "home <wifi>").contains("joining “home &lt;wifi&gt;”")
+
+    # An https frame cannot be polled cross-origin with its self-signed
+    # certificate, so the plain port is probed too.
+    frame.frameConfig.httpsProxy = HttpsProxyConfig(enable: true, port: 8443, exposeOnlyPort: true)
+    check confirmHtml(frame).contains(
+      """["https://frame.local:8443/setup/status","http://frame.local:8787/setup/status"]""")
+
+  test "setupStatusJson reports hotspot, network state and the frame URL":
+    resetNetworkCheckForTest()
+    let frame = makeFrameOS()
+    rememberError("")
+    var status = setupStatusJson(frame)
+    check status["hotspot"].getBool() == false
+    check status["internet"].getBool() == false
+    check status["network"].getStr() == "idle"
+    check status["frameUrl"].getStr() == "http://frame.local:8787/"
+
+    frame.network.hotspotStatus = HotspotStatus.enabled
+    frame.network.status = NetworkStatus.connected
+    noteNetworkCheck(NetworkStatus.connected)
+    rememberError("Wifi connection failed.")
+    status = setupStatusJson(frame)
+    check status["hotspot"].getBool()
+    check status["internet"].getBool()
+    check status["network"].getStr() == "connected"
+    check status["error"].getStr() == "Wifi connection failed."
+    rememberError("")
+    resetNetworkCheckForTest()
+
+  test "setupHtml offers a show-password toggle for both password fields":
+    let html = setupHtml(makeFrameOS())
+    check html.contains("""<input type="checkbox" data-reveal="wifi-password">Show password""")
+    check html.contains("""<input type="checkbox" data-reveal="admin-pass">Show password""")
+    check html.contains("field.type = box.checked ? 'text' : 'password'")
 
   test "driver setup delegates reboot decision to setup command":
     let frame = makeFrameOS()
@@ -221,6 +261,12 @@ suite "portal network orchestration":
     let networks = availableNetworks(makeFrameOS())
     check networks == @["wifi-a", "wifi-b"]
     check runWifiListCalls == 1
+
+  test "availableNetworks hides the frame's own setup hotspot":
+    hookMode = hmWifiList
+    let frame = makeFrameOS()
+    frame.frameConfig.network.wifiHotspotSsid = "wifi-b"
+    check availableNetworks(frame) == @["wifi-a"]
 
   test "startAp issues hotspot commands and emits setup scene event":
     hookMode = hmStartApOk

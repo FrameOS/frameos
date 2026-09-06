@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-05 (C3 dev board bench moved to Done), after release 2026.9.9.
+empty. Last refreshed 2026-09-06 (setup portal round two added), after release 2026.9.9.
 
 ## Open
 
@@ -18,6 +18,20 @@ empty. Last refreshed 2026-09-05 (C3 dev board bench moved to Done), after relea
   (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
   and that everything works after. The deploy also flips the frame back to
   a root `frameos.service`, so check the unit's `User=` before and after.
+
+- [ ] **Setup portal round two (2026-09-06 Zero 2 W first boot, fixed on main
+  after 2026.9.9, needs the next image):** the Wi-Fi list no longer offers
+  the frame's own hotspot SSID; both password fields have a "Show password"
+  box; the "Saved!" page names the network it is joining and polls
+  `<frameUrl>setup/status` (CORS `*`, unauthenticated) until the frame
+  answers `internet: true` from the LAN, then opens the frame by itself —
+  and shows the frame's remembered error with a "Try again" link if the
+  hotspot comes back; the index screen has an `Internet:` row under
+  `Network:` (`connected` / `no internet — <why>` / `not checked`). Verify
+  all four on a phone through the QR flow; note whether the auto-move fires
+  on iOS Safari and on Android Chrome (Android may not resolve `.local`).
+  The captive-portal popup itself is NOT in yet — `docs/todo.md`, "Setup
+  hotspot: captive portal".
 
 ### Backend (self-hosted) bench
 

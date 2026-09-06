@@ -2,6 +2,7 @@ import std/[os, json, algorithm, strutils, times, sequtils, unittest]
 import pixie
 import lib/tz
 import ../../../frameos/types
+import ../../../frameos/network_state
 import ../scene as index_scene
 
 proc testConfig(): FrameConfig =
@@ -83,11 +84,24 @@ suite "system/index scene":
       check "Time zone: Europe/Brussels" in text
       check "Time: " in text
       check "Network: " in text
+      check "Internet: not checked" in text
       check "Managed via: self-hosted backend (frameos.local:8989)" in text
       check "Frame: http://192.168.1.50:8787" in text
       check "Remote control: disabled" in text
       check "Installed scenes" in text
       check "1. Default Scene" in text
+
+  test "the internet row follows the last connectivity check":
+    withScenesJson("[]") do (_: string):
+      noteNetworkCheck(NetworkStatus.connected)
+      check "Internet: connected" in makeIndexScene(testConfig()).buildSceneListText()
+      noteNetworkCheck(NetworkStatus.timeout, "check timed out after 30 s")
+      check "Internet: no internet — check timed out after 30 s" in makeIndexScene(testConfig()).buildSceneListText()
+      noteNetworkCheck(NetworkStatus.error, "x".repeat(200))
+      let text = makeIndexScene(testConfig()).buildSceneListText()
+      check "Internet: no internet — " & "x".repeat(71) & "…" in text
+      resetNetworkCheckForTest()
+      check "Internet: not checked" in makeIndexScene(testConfig()).buildSceneListText()
 
   test "the scene paints the status screen onto the render canvas":
     withScenesJson("[]") do (_: string):

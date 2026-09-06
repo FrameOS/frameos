@@ -142,11 +142,16 @@ proc httpRequest*(
   var socket = newSocket()
   socket.connect("127.0.0.1", Port(port))
 
-  var requestLines = @[
-    httpMethod & " " & path & " HTTP/1.1",
-    "Host: 127.0.0.1:" & $port,
-    "Connection: close",
-  ]
+  var requestLines = @[httpMethod & " " & path & " HTTP/1.1"]
+  # A caller's own Host header replaces the default (captive-portal tests
+  # speak for a phone asking connectivitycheck.gstatic.com).
+  var hostGiven = false
+  for (name, _) in headers:
+    if name.toLowerAscii() == "host":
+      hostGiven = true
+  if not hostGiven:
+    requestLines.add("Host: 127.0.0.1:" & $port)
+  requestLines.add("Connection: close")
   for (name, value) in headers:
     requestLines.add(name & ": " & value)
   if body.len > 0:
