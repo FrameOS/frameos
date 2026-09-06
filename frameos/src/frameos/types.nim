@@ -344,6 +344,10 @@ type
     edges*: seq[DiagramEdge]
     apps*: JsonNode
     stateFields*: seq[StateField] # all state fields, including private ones
+    ## The scene came from the public scene store (`origin.storeSceneId` is
+    ## set): anyone's code, whichever control plane installed it. Trust
+    ## decisions key on this, not on who uploaded the payload.
+    storeOrigin*: bool
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
@@ -375,12 +379,15 @@ type
     apps*: JsonNode
     fields*: seq[StateField]
     settings*: FrameSceneSettings
+    ## Template provenance the editor/cloud writes ({href, storeSceneId, version}); nil when absent.
+    origin*: JsonNode
 
   # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
     edges*: seq[DiagramEdge]
     apps*: JsonNode
+    storeOrigin*: bool ## see ExportedInterpretedScene.storeOrigin
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup

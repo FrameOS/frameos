@@ -75,9 +75,13 @@ medium / low list below.
   are gone. A self-hosted backend reached over plain http still carries the
   bearer in clear on every request, OTA included; that is the http-backend
   problem, not an OTA one.)
-- **Scene JS on a backend-managed frame holds whatever keys it declared**;
-  bound total render wall time including native HTTP calls (the 20 s
-  interpreter budget pauses during them). The LAN-egress half is closed
+- Service keys on a backend-managed frame — closed 2026-09-07: a scene from
+  the public store no longer receives every settings group its apps declare.
+  `get_frame_json` ships a group declared only by store-origin scenes when the
+  owner granted it on the frame (`frame.service_setting_groups`, Frame
+  settings → "Service keys for store scenes", migration `e1f2a3b4c5d6`);
+  scenes the owner authored keep declaration-as-grant. The same field name
+  and meaning as the cloud's per-frame grant. The LAN-egress half is closed
   (2026-09-06): both runtimes arm the private-network deny when the
   resident scene carries `origin.storeSceneId`, whoever installed it
   (`storeOriginScenesResident` / `fos_scenes_store_origin_resident`), with
@@ -111,18 +115,18 @@ medium / low list below.
   local admin password instead); strip current config from the
   unauthenticated setup page; cache the root `iw scan` / `nmcli` Wi-Fi
   scans behind a rate limit.
-- **The LAN deny and the refused-app list key on transport, not provenance.**
-  `allowLocalNetworkAccess` is enforced only in `utils/http_client.nim`;
-  `chromiumScreenshot` (root Chromium, any scheme incl. `file://`) and
-  `rstpSnapshot` (`ffmpeg -i <url>`) never consult it, and both are refused
-  only for cloud-origin payloads on Pi. A store scene installed through the
-  self-hosted backend or the local `/uploadScenes` route has full LAN reach,
-  `file://` reads via Chromium and `localImage.path` anywhere on disk. Key
-  the deny and the refused list on `origin.storeSceneId`; make the two
-  spawning apps opt-in via a local-admin toggle; enforce `http(s)://` + the
-  LAN policy on their URL before spawning. Scheduler and scene `dispatch`
-  can no longer fire `uploadScenes`, which closed the compromised-cloud
-  route into this; the provenance model is still the fix.
+- Provenance for the process-spawning apps — closed 2026-09-07:
+  `data/chromiumScreenshot` and `data/rstpSnapshot` are refused for any
+  scene that carries `origin.storeSceneId`, however it reached the frame
+  (`frameos/spawn_guard.nim`), unless the local admin allowed "shell apps
+  for store scenes" through the same on-panel ceremony as the LAN elevation
+  (`POST /api/network/local-access` with `scope: "shellApps"`, stored in
+  `state/local_access.json`); and whatever the scene's origin, the URL they
+  hand to the child process must be http(s) (rtsp(s) for the camera) with a
+  host that passes the private-network policy when it is on — `file://` and
+  router addresses never reach Chromium or ffmpeg. `localImage.path` reads
+  anywhere on disk remain: the asset sandbox (`js.assetSandbox: "scene"`) is
+  the answer there and is still opt-in.
 - **OTA signature binds archive bytes only**: version and target come from
   GitHub metadata, so anyone with release-upload rights (no signing key) can
   attach an older or other-arch signed archive under a new tag. Verify the
@@ -159,28 +163,33 @@ medium / low list below.
 
 ### Frontends, wasm preview, CI
 
-- **The CI deploy key still reaches root on the production box** through
-  its forced command (`frameos-cloud-update --archive -`), which unpacks the
-  archive and manages systemd/nginx as root. Since #451 migrations run
-  as the service user with only `DATABASE_URL` (the runner still comes from
-  the archive, as the service user), and the self-update is gone — the two
-  root scripts come only from `install.sh --scripts-only` on a human's
-  checkout, a deploy merely reports drift. Left: the root-side `tar -xf` +
-  `chown` of an archive the key uploaded (move the unpack under the service
-  user, or verify the archive against a checksum the workflow signs).
-  The key is written only after every third-party action in the job, and
-  the deploy job's actions are pinned to commit SHAs. Move ESP32 firmware
-  signing to a GitHub-hosted job (the key currently lives in a VM on the
-  same host as fork-PR VMs).
-- **Embedded editor postMessage protocol** accepts `init` /
-  `previewProxyUrl` from any `event.source` / origin and replies to `'*'`
-  (`EmbeddedEditor.tsx`, `mount.tsx`). Require an allowed-origin list at
-  mount, check `event.origin`, reply to it, only honour a same-origin
-  `previewProxyUrl`.
+- The CI deploy key on the production box — closed 2026-09-07: the forced
+  command (`frameos-cloud-update --archive -`) now unpacks the uploaded
+  archive as the service user (`runuser … tar --no-same-owner
+  --no-same-permissions` into a directory that user owns), so the key's
+  reach ends at the service account; root only moves the finished tree into
+  place and flips the units, with scripts that come from a human's checkout
+  (#451). ESP32 firmware built on the self-hosted runner is no longer signed
+  there: the GitHub-hosted `github-release` job signs every `frameos-*.bin`
+  without a `.minisig` alongside the Linux archives, and refuses to publish
+  an unsigned asset. The signing key is unsealed on GitHub-hosted runners
+  only.
+- Embedded editor postMessage — closed 2026-09-07: an iframe-hosted editor
+  accepts `init` / `get-scenes` / `select-scene` only from its parent window
+  and only from an origin the host declared (`?parentOrigin=` on the iframe
+  URL, else the framing document's referrer origin), replies to that origin
+  (never `'*'`), and honours `previewProxyUrl` only when it is same-origin
+  with the editor (`frontend/src/embed/embedOrigins.ts`; the direct mount
+  talks to its own window and is unchanged).
 - **Preview worker isolation.** Same-origin direct requests from scene code
   are refused in `frameos_library.js`, but the worker still shares the app
-  origin. Host `preview-worker.js` + wasm in a sandboxed
-  iframe or a dedicated origin and talk over postMessage.
+  origin. Host `preview-worker.js` + wasm in a sandboxed iframe or a
+  dedicated origin and talk over postMessage. Not done with the 2026-09-07
+  batch, deliberately: the worker reaches the preview proxy
+  (`/api/store/preview-proxy`, `/api/frames/…/preview_proxy`) with the
+  app's session cookie, and an opaque-origin worker cannot send it — the
+  proxy has to move to a short-lived per-preview token first, on both
+  control planes, before the worker can leave the origin.
 - Smaller: the runner pool's `/mnt/cache` is writable from every VM (fork
   PRs no longer land there since #440 — mount it read-only or a scratch
   subtree for any job that is not building a release, and keep "require

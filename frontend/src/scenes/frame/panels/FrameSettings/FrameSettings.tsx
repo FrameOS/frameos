@@ -95,7 +95,8 @@ import { Tag } from '../../../../components/Tag'
 import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import { Tooltip } from '../../../../components/Tooltip'
-import { getSettingsValue, settingsDetails } from '../secretSettings'
+import { collectSecretSettingsFromScenes, getSettingsValue, settingsDetails } from '../secretSettings'
+import { appsModel } from '../../../../models/appsModel'
 import { frameAdminUpgradeLogic, type FrameOSUpgradeStatus } from './frameAdminUpgradeLogic'
 
 export interface FrameSettingsProps {
@@ -365,6 +366,74 @@ function FrameAdminServiceSecretsSection(): JSX.Element {
  * The keys themselves are account-level (Settings → service secrets) and never
  * travel through this panel.
  */
+/**
+ * Self-hosted frames: the service keys a scene from the public scene store
+ * may read on this frame. A scene the owner authored gets what its apps
+ * declare, as it always has; a store scene is anyone's code, so its
+ * declaration is a request the owner grants here, per group — the backend's
+ * get_frame_json ships a group a store scene declares only when it is in
+ * frame.service_setting_groups (the same field and meaning as the cloud's
+ * per-frame grant). Saved with the frame form; a deploy follows because it is
+ * a frame.json change.
+ */
+function StoreSceneServiceSettingsSection(): JSX.Element | null {
+  const { frameForm } = useValues(frameLogic)
+  const { setFrameFormValues } = useActions(frameLogic)
+  const { apps } = useValues(appsModel)
+  const storeScenes = (frameForm.scenes ?? []).filter(
+    (scene) => typeof (scene as { origin?: { storeSceneId?: unknown } }).origin?.storeSceneId === 'string'
+  )
+  if (storeScenes.length === 0) {
+    return null
+  }
+  const granted = frameForm.service_setting_groups ?? []
+  const setGranted = (next: string[]): void => setFrameFormValues({ service_setting_groups: next })
+  return (
+    <>
+      <H6 id="frame-settings-store-scene-services" className="mt-2">
+        Service keys for store scenes
+      </H6>
+      <div className="pl-2 @md:pl-8 space-y-2">
+        <div className="frameos-muted text-xs">
+          Scenes you wrote get the service keys their apps declare. A scene installed from the scene store is someone
+          else&apos;s code: it only asks, and it gets a key only when you tick it here. Saved with the frame; the change
+          reaches the device on the next deploy.
+        </div>
+        {storeScenes.map((scene) => {
+          const declared = collectSecretSettingsFromScenes([scene], apps)
+          return (
+            <div key={scene.id} className="space-y-1">
+              <div className="text-sm">{scene.name || scene.id}</div>
+              {declared.length === 0 ? (
+                <div className="frameos-muted text-xs pl-3">Needs no service keys.</div>
+              ) : (
+                <div className="flex flex-wrap gap-3 pl-3">
+                  {declared.map((group) => (
+                    <label key={group} className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={granted.includes(group)}
+                        onChange={(e) =>
+                          setGranted(
+                            e.target.checked
+                              ? [...granted.filter((g) => g !== group), group]
+                              : granted.filter((g) => g !== group)
+                          )
+                        }
+                      />
+                      {settingsDetails[group]?.title ?? group}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
 function CloudServiceSettingsSection(): JSX.Element {
   const { frameId, frame } = useValues(frameLogic)
   const { loadFrame, hydrateCloudFrameScenes } = useActions(framesModel)
@@ -2519,7 +2588,7 @@ export function FrameSettings({
         {/* Cloud-only, and above the fold on both profiles: "why is my scene
             asking for an API key" is answered here, not in the account-wide
             secrets page. */}
-        {hideForCloud ? <CloudServiceSettingsSection /> : null}
+        {hideForCloud ? <CloudServiceSettingsSection /> : <StoreSceneServiceSettingsSection />}
         {hideForCloud ? <CloudTelemetrySection /> : null}
         {!cloudProfile && showFrameInfo ? (
           <>

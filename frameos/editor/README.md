@@ -38,6 +38,12 @@ editor.destroy()
 
 ## postMessage protocol
 
+**Origins.** The editor only accepts messages from the window that framed it, and only from an origin it
+knows: pass your page's origin on the iframe URL — `editor.html?parentOrigin=https://your.host` (repeat or
+comma-separate for several) — or leave it out and the document that framed the editor (its referrer origin)
+is the one host allowed. Replies are posted to that origin, never to `*`. `previewProxyUrl` is honoured only
+when it points back at the editor's own origin.
+
 Parent → editor:
 
 - `{type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?}` —

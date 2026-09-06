@@ -112,6 +112,7 @@ class FrameBase(BaseModel):
     mountpoints: Optional[Dict[str, Any]]
     error_behavior: Optional[FrameErrorBehavior] = None
     palette: Optional[Dict[str, Any]]
+    service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
@@ -191,6 +192,7 @@ class FrameUpdateRequest(BaseModel):
     mountpoints: Optional[Dict[str, Any]] = None
     error_behavior: Optional[FrameErrorBehavior] = None
     palette: Optional[Dict[str, Any]] = None
+    service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None

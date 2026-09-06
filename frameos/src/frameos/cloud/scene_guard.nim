@@ -57,3 +57,16 @@ proc refusedCloudAppKeyword*(scenes: JsonNode): string {.gcsafe.} =
         if cmpIgnoreCase(leaf, refused) == 0:
           return keyword
   ""
+
+proc sceneOriginIsStore*(origin: JsonNode): bool {.gcsafe.} =
+  ## The scene JSON's `origin` block names a store scene. Written by the cloud
+  ## when a store scene is read (never by the editor for a scene someone wrote
+  ## themselves), so it survives every path onto a frame: cloud push, backend
+  ## deploy, local upload.
+  if origin == nil or origin.kind != JObject:
+    return false
+  let storeSceneId = origin{"storeSceneId"}
+  storeSceneId != nil and storeSceneId.kind == JString and storeSceneId.getStr("").len > 0
+
+proc sceneJsonIsStoreOrigin*(scene: JsonNode): bool {.gcsafe.} =
+  scene != nil and scene.kind == JObject and sceneOriginIsStore(scene{"origin"})

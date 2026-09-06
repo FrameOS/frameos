@@ -296,14 +296,7 @@ proc scenePayloadHasStoreOrigin*(scenePayload: JsonNode): bool =
   if scenePayload == nil or scenePayload.kind != JArray:
     return false
   for scene in scenePayload:
-    if scene == nil or scene.kind != JObject:
-      continue
-    # `{}` yields nil for a missing key, and `.kind` on nil is a crash.
-    let origin = scene{"origin"}
-    if origin == nil or origin.kind != JObject:
-      continue
-    let storeSceneId = origin{"storeSceneId"}
-    if storeSceneId != nil and storeSceneId.kind == JString and storeSceneId.getStr("").len > 0:
+    if sceneJsonIsStoreOrigin(scene):
       return true
   false
 

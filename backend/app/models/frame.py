@@ -359,6 +359,13 @@ class Frame(Base):
     mountpoints = mapped_column(JSON, nullable=True)
     error_behavior = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
+    # Service-settings groups (openAI, homeAssistant, …) that scenes from the
+    # public scene store may read on this frame. A scene the owner authored is
+    # granted what its apps declare, as it always was; a store scene is
+    # anyone's code, so its declaration is a request the owner grants here
+    # (Frame settings → Service settings). NULL/empty = nothing granted. Same
+    # field name and meaning as the cloud's per-frame grant.
+    service_setting_groups = mapped_column(JSON, nullable=True)
     buildroot = mapped_column(JSON, nullable=True)
     embedded = mapped_column(JSON, nullable=True)
     rpios = mapped_column(JSON, nullable=True)
@@ -428,6 +435,7 @@ class Frame(Base):
             'mountpoints': normalize_mountpoints(self.mountpoints),
             'error_behavior': normalize_error_behavior(self.error_behavior),
             'palette': self.palette,
+            'service_setting_groups': self.service_setting_groups,
             'buildroot': self.buildroot,
             'embedded': self.embedded,
             'rpios': self.rpios,
@@ -758,9 +766,21 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             schedule['events'] = events
     frame_json["schedule"] = schedule
 
+    # Which groups the frame's scenes declare — split by provenance. A scene
+    # the owner authored is granted what it declares; a scene from the public
+    # store (origin.storeSceneId, stamped by the cloud when it was read) only
+    # gets a group the owner granted on this frame (service_setting_groups).
+    # Declaration is a request, not a permission (docs/security-todo.md).
     setting_keys = set()
+    store_scene_setting_keys = set()
+    granted_to_store_scenes = {
+        str(group) for group in (frame.service_setting_groups or []) if isinstance(group, str) and group
+    }
     app_configs = get_app_configs()
     for scene in list(frame.scenes):
+        origin = scene.get('origin') if isinstance(scene, dict) else None
+        scene_from_store = isinstance(origin, dict) and bool(origin.get('storeSceneId'))
+        declared_here = store_scene_setting_keys if scene_from_store else setting_keys
         for node in scene.get('nodes', []):
             if node.get('type', None) == 'app':
                 sources = node.get('data', {}).get('sources', None)
@@ -774,7 +794,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
                         config = json.loads(config)
                         settings = config.get('settings', [])
                         for key in settings:
-                            setting_keys.add(key)
+                            declared_here.add(key)
                     except:  # noqa: E722
                         pass
                 else:
@@ -783,7 +803,11 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
                         if app_config:
                             settings = app_config.get('settings', [])
                             for key in settings:
-                                setting_keys.add(key)
+                                declared_here.add(key)
+
+    for key in store_scene_setting_keys:
+        if key in granted_to_store_scenes:
+            setting_keys.add(key)
 
     final_settings = {}
     for key in setting_keys:

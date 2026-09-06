@@ -277,6 +277,46 @@ async def test_get_frame_json_keeps_sync_internals_out_of_home_assistant_setting
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_ships_store_scene_settings_only_when_granted(_mock_publish, db, redis):
+    # A scene the owner wrote gets what it declares; a store scene (the cloud
+    # stamps origin.storeSceneId when it is read) is anyone's code and only
+    # gets a group the owner granted on the frame. Declaration != permission.
+    frame = await new_frame(db, redis, "FrameJsonGrants", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="openAI", value={"apiKey": "sk-owner"}))
+    db.add(Settings(project_id=frame.project_id, key="unsplash", value={"accessKey": "u-owner"}))
+    db.commit()
+    declare = lambda group: {  # noqa: E731
+        "type": "app",
+        "data": {"sources": {"config.json": json.dumps({"settings": [group]})}},
+    }
+    frame.scenes = [
+        {"id": "own", "nodes": [declare("unsplash")]},
+        {
+            "id": "from-store",
+            "origin": {"href": "https://scenes.frameos.net/s/x", "storeSceneId": "11111111-2222-3333-4444-555555555555"},
+            "nodes": [declare("openAI")],
+        },
+    ]
+
+    frame.service_setting_groups = None
+    data = get_frame_json(db, frame)
+    assert data["settings"] == {"unsplash": {"accessKey": "u-owner"}}
+
+    frame.service_setting_groups = ["openAI"]
+    data = get_frame_json(db, frame)
+    assert data["settings"] == {"unsplash": {"accessKey": "u-owner"}, "openAI": {"apiKey": "sk-owner"}}
+
+    # A grant for a group no store scene declares changes nothing, and an
+    # owner scene declaring the same group as an ungranted store scene still
+    # gets it (the owner's declaration is the permission).
+    frame.service_setting_groups = ["homeAssistant"]
+    frame.scenes.append({"id": "own-2", "nodes": [declare("openAI")]})
+    data = get_frame_json(db, frame)
+    assert set(data["settings"]) == {"unsplash", "openAI"}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_includes_interval(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
     frame.interval = 3600

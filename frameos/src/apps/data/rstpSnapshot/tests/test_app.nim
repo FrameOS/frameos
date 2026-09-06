@@ -3,6 +3,7 @@ import pixie
 
 import ../app
 import frameos/types
+import frameos/local_access
 
 type
   LogStore = ref object
@@ -51,6 +52,39 @@ proc makeApp(scene: FrameScene, frameConfig: FrameConfig, url = "rtsp://cam/live
   )
 
 suite "data/rstpSnapshot app":
+  test "a store-origin scene is refused before ffmpeg is spawned":
+    let previousHook = rtspSnapshotFfmpegRunHook
+    defer:
+      rtspSnapshotFfmpegRunHook = previousHook
+      forgetStoredLocalNetworkAccess()
+
+    hookMode = hmSuccess
+    capturedCommand = ""
+    rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
+
+    let store = LogStore(items: @[])
+    let scene = InterpretedFrameScene(id: "store".SceneId, logger: newLogger(store), storeOrigin: true)
+    let app = makeApp(scene, FrameConfig(width: 9, height: 6))
+    let outputImage = app.get(ExecutionContext(hasImage: false))
+
+    check outputImage.width == 9
+    check outputImage.height == 6
+    check capturedCommand == ""
+
+  test "a file:// target never reaches ffmpeg":
+    let previousHook = rtspSnapshotFfmpegRunHook
+    defer:
+      rtspSnapshotFfmpegRunHook = previousHook
+
+    hookMode = hmSuccess
+    capturedCommand = ""
+    rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
+
+    let app = makeApp(FrameScene(logger: newLogger(LogStore(items: @[]))), FrameConfig(width: 9, height: 6),
+                      url = "file:///dev/video0")
+    discard app.get(ExecutionContext(hasImage: false))
+    check capturedCommand == ""
+
   test "spawn OSError branch returns frame-sized error image":
     let previousHook = rtspSnapshotFfmpegRunHook
     defer:

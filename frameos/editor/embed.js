@@ -25,13 +25,18 @@ export function createFrameOSEditor({
   onReady,
 }) {
   const iframe = document.createElement('iframe')
-  iframe.src = url
+  // Tell the editor who is allowed to drive it: it accepts postMessage only
+  // from the parent origin named on its URL (or, failing that, the framing
+  // document's referrer origin) and replies only to it — never to '*'.
+  const editorUrl = new URL(url, location.href)
+  editorUrl.searchParams.append('parentOrigin', location.origin)
+  iframe.src = editorUrl.toString()
   iframe.style.width = '100%'
   iframe.style.height = '100%'
   iframe.style.border = '0'
   container.appendChild(iframe)
 
-  const editorOrigin = new URL(url, location.href).origin
+  const editorOrigin = editorUrl.origin
   let latestScenes = scenes
   let latestSceneId = sceneId
   let ready = false

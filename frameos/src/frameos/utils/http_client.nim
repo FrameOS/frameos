@@ -747,6 +747,24 @@ else:
           "local network access is blocked on cloud-managed frames (" &
           hostname & " resolves to " & address & ")")
 
+  proc resolveHostBounded(host: string): string {.gcsafe.}
+
+  proc localNetworkPolicyRefusal*(host: string, port: int): string {.gcsafe.} =
+    ## "" when `host:port` may be reached under the current private-network
+    ## policy, otherwise why not. For callers that hand a URL to a child
+    ## process (a headless browser, ffmpeg) instead of this client — they
+    ## have no connect() of their own to put the check on, so they ask here
+    ## with the same resolver and the same classifier before spawning.
+    {.gcsafe.}:
+      if not localNetworkPolicySnapshot().active:
+        return ""
+      try:
+        let address = resolveHostBounded(host)
+        enforceLocalNetworkPolicy(host, Port(port), address)
+        ""
+      except CatchableError as error:
+        error.msg
+
   proc resolveHostBounded(host: string): string {.gcsafe.} =
     ## Resolve `host` to an IPv4 literal once per request instead of once per
     ## connect. `getAddrInfo` is bounded only by the system resolver, and

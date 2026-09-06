@@ -1,6 +1,7 @@
 import pixie
 import frameos/apps
 import frameos/types
+import frameos/spawn_guard
 import frameos/utils/image
 
 import os, strformat, strutils, random, json, net, sequtils
@@ -350,6 +351,18 @@ proc get*(self: App, context: ExecutionContext): Image =
 
   if not self.hasEnoughRam:
     return renderError(width, height, LOW_RAM_ERROR.replace("{memoryMb}", $(round(self.memoryKb / 1024).int)))
+
+  # Provenance and target checks before anything is spawned (spawn_guard.nim):
+  # a store scene needs the local admin's say-so to run a browser at all, and
+  # the URL it opens must be http(s) to a host the LAN policy allows.
+  let refusal = spawningAppRefusal(self.scene, "chromiumScreenshot")
+  if refusal.len > 0:
+    self.logError refusal
+    return renderError(width, height, refusal)
+  let targetRefusal = spawnTargetRefusal(self.appConfig.url, ["http", "https"])
+  if targetRefusal.len > 0:
+    self.logError "chromiumScreenshot refused to open the configured URL: " & targetRefusal
+    return renderError(width, height, targetRefusal)
 
   try:
     let screenshotFile = fmt"/tmp/frameos_screenshot_{rand(1000000)}_{rand(1000000)}.png"

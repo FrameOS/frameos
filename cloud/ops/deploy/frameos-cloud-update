@@ -534,7 +534,22 @@ cmd_archive() {
   staging="$(mktemp -d "$releases_dir/.incoming.XXXXXX")"
   trap 'rm -rf "$staging"' EXIT
   log "unpacking the release"
-  tar -C "$staging" -xf -
+  if id -u "$service_user" >/dev/null 2>&1; then
+    # Unpacked AS THE SERVICE USER, not root. The archive is whatever the CI
+    # deploy key uploaded; tar as root would honour its ownership and modes,
+    # follow nothing but still write wherever a crafted member pointed, and
+    # the files it left were root's until a later chown. As the service user,
+    # tar can only create files that user may own, in a directory that user
+    # owns — the deploy key's reach ends at the service account, which is the
+    # whole point of it not being root (docs/security-todo.md).
+    chown "$service_user":"$service_user" "$staging"
+    chmod 0750 "$staging"
+    runuser -u "$service_user" -- tar -C "$staging" --no-same-owner --no-same-permissions -xf - \
+      || die "unpacking the release as ${service_user} failed"
+  else
+    log "service user ${service_user} does not exist; unpacking as root"
+    tar -C "$staging" -xf -
+  fi
 
   [ -f "$staging/RELEASE" ] || die "the archive has no RELEASE file"
   local sha
@@ -544,14 +559,6 @@ cmd_archive() {
   local release
   release="$releases_dir/${sha}-$(date -u +%Y%m%dT%H%M%SZ)"
   [ -e "$release" ] && rm -rf "$release"
-
-  if id -u "$service_user" >/dev/null 2>&1; then
-    # -h so the many relative symlinks inside node_modules/.pnpm are retargeted
-    # as links rather than having their referents chowned twice.
-    chown -Rh "$service_user":"$service_user" "$staging"
-  else
-    log "service user ${service_user} does not exist; leaving ownership as root"
-  fi
 
   # Migrations run from the NEW release and before anything is flipped, so a
   # failing migration leaves the running app untouched — the staging

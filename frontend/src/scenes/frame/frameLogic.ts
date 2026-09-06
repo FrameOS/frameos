@@ -396,6 +396,10 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'control_code',
   'schedule',
   'gpio_buttons',
+  // Service-settings groups granted to store-origin scenes on a self-hosted
+  // frame (get_frame_json ships only those); a change here is a frame.json
+  // change, so it counts towards "deploy needed".
+  'service_setting_groups',
   // Cloud-managed ESP32 frames keep the power settings top-level (set_settings
   // keys); without them here the "is the form untouched?" diff ignored every
   // edit in the Power section and each sync poll reset it to the server copy.

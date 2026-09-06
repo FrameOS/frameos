@@ -55,11 +55,13 @@ DRIVERS = {
         can_render=True,
         can_turn_on_off=True,
     ),
+    # Framebuffer rendering plus the backlight GPIO through lgpio — no vendor
+    # tree since 2026-09-07 (the Python venv it needed could not be built on a
+    # Buildroot image, which left the panel blank).
     "inkyHyperPixel2rLegacyFb": Driver(
         name="inkyHyperPixel2rLegacyFb",
         import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
         setup_import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
-        vendor_folder="inkyHyperPixel2r",
         can_render=True,
         can_turn_on_off=True
     ),

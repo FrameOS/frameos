@@ -571,9 +571,18 @@ proc localNetworkAccessPayload*(): JsonNode =
     globalFrameConfig.network.allowLocalNetworkAccess
   %*{
     "allowLocalNetworkAccess": enabled,
+    # Store-origin scenes and the process-spawning apps (spawn_guard.nim);
+    # same ceremony, second fact.
+    "allowShellApps": storedAllowShellApps(),
     "challengePending": activeLocalAccessCode().len > 0,
     "challengeSecondsLeft": localAccessChallengeSecondsLeft(),
   }
+
+proc setShellAppsAccess*(enabled: bool): JsonNode =
+  ## Whether store-origin scenes may run chromiumScreenshot / rstpSnapshot on
+  ## this frame. Only ever called after the on-panel code has been matched.
+  persistAllowShellApps(enabled)
+  localNetworkAccessPayload()
 
 proc setLocalNetworkAccess*(enabled: bool): JsonNode =
   ## Applies the private-network elevation. Only ever called after the on-panel
