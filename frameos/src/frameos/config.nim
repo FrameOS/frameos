@@ -197,7 +197,8 @@ proc newHook*(v: var NetworkConfig) =
 proc newHook*(v: var JsRuntimeConfig) =
   ## Defaults live in js_runtime/burrito.nim (DefaultJs*); -1 means "keep what
   ## this build target chose", so an unset frame.json changes nothing.
-  v = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1, assetSandbox: "frame")
+  v = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1, assetSandbox: "frame",
+                      renderDeadlineMs: -1, dispatchBudget: -1)
 
 proc postHook*(v: var JsRuntimeConfig) =
   if v.assetSandbox notin ["frame", "scene"]:

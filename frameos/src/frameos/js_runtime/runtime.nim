@@ -638,11 +638,15 @@ proc jsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack: stri
   if result.message.len == 0:
     result.message = "JavaScript error"
   # An interrupted script reports a bare "InternalError: interrupted", which
-  # tells nobody why the scene died. Name the real cause.
-  let blownBudgetMs = clearContextDeadlineTrip(ctx)
-  if blownBudgetMs > 0:
-    result.message = "execution exceeded its " & $blownBudgetMs & "ms time budget"
+  # tells nobody why the scene died. Name the real cause — and which of the
+  # two clocks (interpreter time, or the run's wall-clock deadline) ran out.
+  let trip = takeContextDeadlineTrip(ctx)
+  if trip.budgetMs > 0:
+    result.message = deadlineTripMessage(trip.budgetMs, trip.wallClock)
     result.stack = result.message
+  else:
+    # `out of memory` is the scene's shared ceiling, not the device's; say so.
+    result.message = describeJsError(result.message)
 
 proc mappedJsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack: string] =
   result = jsExceptionDetails(ctx)
@@ -667,18 +671,67 @@ proc callGlobalFunction*(ctx: ptr JSContext, fnName: string, args: openArray[JSV
         argv[i] = arg
       result = JS_Call(ctx, fn, globalObj, args.len.cint, addr argv[0])
 
-proc sceneJsConfig*(frameConfig: FrameConfig): QuickJSConfig =
+# ---- per-scene heap budgets ------------------------------------------------
+# One JsHeapBudget per scene id, shared by the scene's own context and by the
+# runtime of every JS app node in it (app_runtime.ensureReady). QuickJS's
+# memory limit is per runtime, so before this a scene with N JS nodes could
+# hold N × 256 MB; now the N runtimes draw on one ceiling. Budgets are raw
+# memory the allocator callbacks read on the C stack and are kept for the
+# process lifetime — a few dozen 16-byte records at most — so a runtime that
+# outlives a scene reload (evicted and rebuilt, or torn down late) never
+# dereferences a freed budget.
+var
+  sceneHeapBudgets = initTable[string, ptr JsHeapBudget]()
+  sceneHeapBudgetsLock: Lock
+
+initLock(sceneHeapBudgetsLock)
+
+proc sceneHeapBudgetFor*(sceneId: string, limitBytes: int): ptr JsHeapBudget =
+  ## The scene's budget, created on first use; the limit follows the latest
+  ## frame.json on every call so a config reload applies to new runtimes.
+  {.gcsafe.}:
+    withLock sceneHeapBudgetsLock:
+      if sceneHeapBudgets.hasKey(sceneId):
+        result = sceneHeapBudgets[sceneId]
+      else:
+        result = cast[ptr JsHeapBudget](alloc0(sizeof(JsHeapBudget)))
+        sceneHeapBudgets[sceneId] = result
+      result.limitBytes = max(0, limitBytes).csize_t
+
+proc sceneHeapBudgetUsedBytes*(sceneId: string): int =
+  ## Bytes the scene's runtimes currently hold, as the allocator accounts them.
+  {.gcsafe.}:
+    withLock sceneHeapBudgetsLock:
+      if sceneHeapBudgets.hasKey(sceneId):
+        return sceneHeapBudgets[sceneId].usedBytes.int
+  0
+
+proc sceneJsHeapLimitBytes*(frameConfig: FrameConfig): int =
+  ## The scene-wide ceiling: frame.json's js.memoryLimitMb (0 = unlimited) or
+  ## the build target's default.
+  if frameConfig != nil and frameConfig.js != nil and frameConfig.js.memoryLimitMb >= 0:
+    return frameConfig.js.memoryLimitMb * 1024 * 1024
+  DefaultJsSceneHeapBytes
+
+proc sceneJsConfig*(frameConfig: FrameConfig, sceneId: string = ""): QuickJSConfig =
   ## Per-frame overrides for the interpreter ceilings. Anything left at -1 (or
-  ## absent from frame.json) keeps the build target's default.
+  ## absent from frame.json) keeps the build target's default. With a scene id
+  ## the runtime also joins that scene's shared heap budget.
   result = defaultConfig()
-  if frameConfig == nil or frameConfig.js == nil:
-    return
-  if frameConfig.js.executionTimeoutMs >= 0:
-    result.executionTimeoutMs = frameConfig.js.executionTimeoutMs
-  if frameConfig.js.memoryLimitMb >= 0:
-    result.memoryLimitBytes = frameConfig.js.memoryLimitMb * 1024 * 1024
-  if frameConfig.js.maxStackKb >= 0:
-    result.maxStackSizeBytes = frameConfig.js.maxStackKb * 1024
+  if frameConfig != nil and frameConfig.js != nil:
+    if frameConfig.js.executionTimeoutMs >= 0:
+      result.executionTimeoutMs = frameConfig.js.executionTimeoutMs
+    if frameConfig.js.memoryLimitMb >= 0:
+      # The per-runtime cap follows the scene ceiling on hosts that set one;
+      # embedded keeps the glue's own per-runtime cap (config default 0).
+      when not defined(frameosEmbedded):
+        result.memoryLimitBytes = frameConfig.js.memoryLimitMb * 1024 * 1024
+    if frameConfig.js.maxStackKb >= 0:
+      result.maxStackSizeBytes = frameConfig.js.maxStackKb * 1024
+  if sceneId.len > 0:
+    let sceneLimit = sceneJsHeapLimitBytes(frameConfig)
+    if sceneLimit > 0:
+      result.heapBudget = sceneHeapBudgetFor(sceneId, sceneLimit)
 
 # -------------------------
 # Scene JS context
@@ -730,7 +783,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
       evictIdleSceneJs(scene)
       if not liveSceneJsScenes.contains(scene):
         liveSceneJsScenes.add(scene)
-    scene.js = newQuickJS(sceneJsConfig(scene.frameConfig))
+    scene.js = newQuickJS(sceneJsConfig(scene.frameConfig, scene.id.string))
     # Register bridge functions ONCE per scene/context
     scene.js.registerFunction("getState", jsGetState)
     scene.js.registerFunction("getArg", jsGetArg)
@@ -912,7 +965,9 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
 
   let kind = parsed{"k"}.getStr()
   if kind == "error":
-    var message = mapJsErrorText(scene.js.context, parsed{"v"}{"message"}.getStr())
+    # The JS-side envelope caught the error, so QuickJS's text arrives raw;
+    # an `out of memory` here is the scene's shared heap ceiling.
+    var message = describeJsError(mapJsErrorText(scene.js.context, parsed{"v"}{"message"}.getStr()))
     let stack = mapJsErrorText(scene.js.context, parsed{"v"}{"stack"}.getStr())
     var errorPayload = %*{
       "event": "interpreter:jsError",

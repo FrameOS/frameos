@@ -186,6 +186,21 @@ viewBox units, numeric stop offsets 0–1, no percentages, no
 `gradientTransform`. For a whole-screen gradient the `render/gradient` app
 (`startColor`, `endColor`, `angle`) is the simpler choice.
 
+## What the runtime will not let a scene do
+
+Scene JS is untrusted on every frame — it is anyone's store scene at worst
+and your own typo at best — and it runs on the thread that draws the panel.
+Four ceilings turn "this frame never renders again" into one logged scene
+error. All of them are set in `frame.json` under `js`; `-1` or an absent key
+keeps the build's default, `0` disables the ceiling.
+
+| Key | Default | What it bounds |
+|---|---|---|
+| `executionTimeoutMs` | 30 000 (Pi), 20 000 (ESP32) | Interpreter time per entry into JS. The clock stops while a native binding (`httpRequest`, an asset read) runs, so a slow fetch is not mistaken for a runaway loop. |
+| `renderDeadlineMs` | 120 000 (Pi), 90 000 (ESP32), 60 000 (preview) | Wall-clock time per render or event, native calls **included**. Every HTTP request made during the run is capped to what is left of it; the script is stopped when it passes. This is what a tarpit URL costs a scene: one render, not the watchdog window. |
+| `memoryLimitMb` | 256 (Pi), 8 (ESP32) | JS heap **per scene**, shared by the scene's code-node context and every JS app node's runtime. One node hoarding the heap fails with `out of memory`; the frame's other scenes are unaffected. |
+| `dispatchBudget` | 64 | Events a single render or event may fire through dispatch nodes. A handler that dispatches its own event is an unbounded chain; past the budget the run's dispatches are dropped, once with an `interpreter:dispatch:ignored` log line (`reason: dispatchBudget`). The ESP32, which runs events synchronously, also refuses events nested more than four deep. |
+
 ## Checklist before shipping a scene
 
 - Every `data.config` key is a field of the app; select values are one of the options.

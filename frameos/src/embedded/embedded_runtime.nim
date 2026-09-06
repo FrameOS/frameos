@@ -38,6 +38,10 @@ var
   defaultSceneId: Option[SceneId] = none(SceneId)
   scenesLoadedCount = 0
   renderRequested = false
+  # Nesting of synchronously dispatched scene events (see the event hook).
+  embeddedEventDepth = 0
+
+const MaxEmbeddedEventDepth = 4
 
 type
   SceneCatalogEntry* = object
@@ -259,12 +263,23 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
       if event == "render":
         renderRequested = true
       elif not currentScene.isNil:
-        try:
-          let context = ExecutionContext(scene: currentScene, event: event,
-              payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
-          runEvent(currentScene, context)
-        except Exception as e:
-          log("event " & event & " failed: " & e.msg)
+        # Events run synchronously here (one task, no queue), so a handler that
+        # dispatches its own event recurses on the render task's stack. The
+        # per-run dispatch budget (interpreter, run_budget.nim) caps the fan-out;
+        # this caps the depth, and names the loop instead of overflowing.
+        if embeddedEventDepth >= MaxEmbeddedEventDepth:
+          log("event " & event & " dropped: " & $embeddedEventDepth &
+              " events deep — a scene is re-dispatching its own event")
+        else:
+          inc embeddedEventDepth
+          try:
+            let context = ExecutionContext(scene: currentScene, event: event,
+                payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
+            runEvent(currentScene, context)
+          except Exception as e:
+            log("event " & event & " failed: " & e.msg)
+          finally:
+            dec embeddedEventDepth
 
 proc cleanupScene(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping

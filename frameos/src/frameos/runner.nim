@@ -592,12 +592,19 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
   finally:
     markRuntimeDone()
 
+const MessageLoopYieldEvery = 32
+
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10
   var iterations = 0
   # Holds the first non-mouseMove event pulled out while coalescing a burst
   # of queued mouse moves, so ordering is preserved.
   var pendingEvent = none((Option[SceneId], string, JsonNode))
+  # Scene events handled since this loop last let the render loop run. Both
+  # loops share one thread, and a scene whose event handler re-dispatches
+  # keeps this queue non-empty forever — so after a burst the loop yields even
+  # though more is queued, and a frame under such a scene still refreshes.
+  var handledSinceYield = 0
 
   while true:
     # Heartbeat for systemd's WatchdogSec: stops when this thread hangs in a
@@ -724,9 +731,16 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
         self.dispatchSceneEvent(sceneId, event, payload)
       except Exception as e:
         self.logSignal(%*{"event": "event:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+      inc handledSinceYield
+      if handledSinceYield >= MessageLoopYieldEvery:
+        handledSinceYield = 0
+        if self.triggerRenderNext and not self.isRendering:
+          self.triggerRender()
+        await sleepAsync(1)
 
     # after we have processed all queued messages
     if not success:
+      handledSinceYield = 0
       let droppedEvents = eventsDroppedCounter.exchange(0)
       if droppedEvents > 0:
         self.logSignal(%*{"event": "events:dropped", "count": droppedEvents})
