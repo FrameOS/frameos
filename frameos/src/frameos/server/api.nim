@@ -328,6 +328,35 @@ proc mergeDeviceConfig(existing: JsonNode, patch: JsonNode): JsonNode =
   for key in patch.keys:
     putJsonIfPresent(result, patch, key, key)
 
+proc keepSecretIfBlank(target, existing: JsonNode, key: string) =
+  ## An empty string for a secret means "unchanged", never "wipe it".
+  if target == nil or target.kind != JObject or existing == nil or existing.kind != JObject:
+    return
+  if target{key} != nil and target[key].kind == JString and target[key].getStr("").len == 0 and
+      existing{key} != nil and existing[key].kind == JString and existing[key].getStr("").len > 0:
+    target[key] = copy(existing[key])
+
+proc keepExistingSecrets(result, existing: JsonNode) =
+  ## frameApiPayload masks every secret to "" for a session that may not see
+  ## them (a viewer with the frame access key, no admin login), and the SPA
+  ## posts the whole form back on Save — so a form that never saw the admin
+  ## password used to write frameAdminAuth.pass = "" (2026-09-06, Zero 2 W:
+  ## one scene added and saved → logged out, "Admin panel disabled": the
+  ## session fingerprint covers user+pass and the panel needs both). Blank
+  ## secrets keep their stored value; an explicit new value still replaces
+  ## it, and `enabled: false` still disables the panel.
+  if existing == nil or existing.kind != JObject:
+    return
+  for key in ["frameAccessKey", "serverApiKey"]:
+    keepSecretIfBlank(result, existing, key)
+  if result{"frameAdminAuth"} != nil and result["frameAdminAuth"].kind == JObject:
+    for key in ["user", "pass"]:
+      keepSecretIfBlank(result["frameAdminAuth"], existing{"frameAdminAuth"}, key)
+  if result{"network"} != nil and result["network"].kind == JObject:
+    keepSecretIfBlank(result["network"], existing{"network"}, "wifiHotspotPassword")
+  if result{"agent"} != nil and result["agent"].kind == JObject:
+    keepSecretIfBlank(result["agent"], existing{"agent"}, "agentSharedSecret")
+
 proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode): JsonNode =
   result = if existing != nil and existing.kind == JObject: copy(existing) else: %*{}
   if payload == nil or payload.kind != JObject:
@@ -360,6 +389,7 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
 
   if payload.hasKey("frame_admin_auth"):
     putJsonIfPresent(result, payload, "frame_admin_auth", "frameAdminAuth")
+  keepExistingSecrets(result, existing)
   if payload.hasKey("https_proxy"):
     result["httpsProxy"] = frontendHttpsProxyToRuntime(payload["https_proxy"], result{"httpsProxy"})
   if payload.hasKey("error_behavior"):

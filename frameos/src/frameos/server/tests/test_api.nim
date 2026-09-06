@@ -57,6 +57,48 @@ proc baseConfig(assetsPath = ""): FrameConfig =
   )
 
 suite "Server API helpers":
+  test "a save that never saw the secrets keeps them (blank = unchanged)":
+    # frameApiPayload masks secrets to "" without an admin session and the
+    # SPA posts the whole form back; the merge must not turn that into a wipe.
+    let existing = %*{
+      "frameAccessKey": "access-1", "serverApiKey": "server-1",
+      "frameAdminAuth": {"enabled": true, "user": "admin", "pass": "secret"},
+      "network": {"wifiHotspotSsid": "FrameOS-Setup", "wifiHotspotPassword": "frame1234"},
+      "agent": {"agentEnabled": false, "agentSharedSecret": "shh"},
+    }
+    let blanked = frontendFramePayloadToRuntimeConfig(%*{
+      "frame_access_key": "", "server_api_key": "",
+      "frame_admin_auth": {"enabled": true, "user": "", "pass": ""},
+      "network": {"wifiHotspotSsid": "Renamed", "wifiHotspotPassword": ""},
+      "agent": {"agentEnabled": true, "agentSharedSecret": ""},
+      "scenes": [],
+    }, existing)
+    check blanked["frameAccessKey"].getStr() == "access-1"
+    check blanked["serverApiKey"].getStr() == "server-1"
+    check blanked["frameAdminAuth"]["user"].getStr() == "admin"
+    check blanked["frameAdminAuth"]["pass"].getStr() == "secret"
+    check blanked["frameAdminAuth"]["enabled"].getBool()
+    check blanked["network"]["wifiHotspotSsid"].getStr() == "Renamed"
+    check blanked["network"]["wifiHotspotPassword"].getStr() == "frame1234"
+    check blanked["agent"]["agentEnabled"].getBool()
+    check blanked["agent"]["agentSharedSecret"].getStr() == "shh"
+
+    # A real new value still replaces, and disabling still disables.
+    let changed = frontendFramePayloadToRuntimeConfig(%*{
+      "frame_access_key": "access-2",
+      "frame_admin_auth": {"enabled": false, "user": "root", "pass": "other"},
+    }, existing)
+    check changed["frameAccessKey"].getStr() == "access-2"
+    check changed["frameAdminAuth"]["enabled"].getBool() == false
+    check changed["frameAdminAuth"]["user"].getStr() == "root"
+    check changed["frameAdminAuth"]["pass"].getStr() == "other"
+
+    # No stored secret to keep: a blank stays blank.
+    let fresh = frontendFramePayloadToRuntimeConfig(%*{
+      "frame_admin_auth": {"enabled": true, "user": "admin", "pass": ""},
+    }, %*{})
+    check fresh["frameAdminAuth"]["pass"].getStr() == ""
+
   test "url encoded parser decodes values":
     let parsed = parseUrlEncoded("name=Frame%20One&flag=true&empty=")
     check parsed["name"] == "Frame One"
