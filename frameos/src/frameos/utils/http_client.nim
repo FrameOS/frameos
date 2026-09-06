@@ -25,6 +25,7 @@ const
   DefaultFetchMaxRedirects* = 5
 
 import std/strutils
+import frameos/js_runtime/run_budget
 import frameos/spool
 
 type
@@ -380,6 +381,13 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     ## Callers must release it with freeHttpBufferResponse once they have
     ## decoded or copied the bytes they need.
     validateHttpRequestUrl(url)
+    # The run's wall-clock deadline (js_runtime/run_budget.nim) bounds every
+    # request made while a scene renders — built-in apps and scene JS alike —
+    # so a slow upstream costs the render its remaining time, not the whole
+    # watchdog window. Refused outright once the deadline has passed.
+    if renderDeadlineRemainingMs() == 0:
+      raise newException(IOError, &"HTTP request refused: the render's wall-clock deadline has passed ({url})")
+    let effectiveTimeoutMs = capToRenderDeadline(timeoutMs)
     var status: cint = 0
     let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
     let headerBlock = encodeSimpleHeaders(headers)
@@ -391,7 +399,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       let rawChunks = fos_nim_http_request_chunked_spill(httpMethod.cstring, url.cstring,
                                      bodyPtr, body.len.csize_t,
                                      headerPtr, headerBlock.len.csize_t,
-                                     timeoutMs.cint, maxBytes.csize_t,
+                                     effectiveTimeoutMs.cint, maxBytes.csize_t,
                                      addr status, addr chunkCount,
                                      addr spillPath, addr spillLen)
       if rawChunks == nil and status == 0:
@@ -425,7 +433,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       let buf = fos_nim_http_request(httpMethod.cstring, url.cstring,
                                      bodyPtr, body.len.csize_t,
                                      headerPtr, headerBlock.len.csize_t,
-                                     timeoutMs.cint, maxBytes.csize_t,
+                                     effectiveTimeoutMs.cint, maxBytes.csize_t,
                                      addr status, addr outLen)
       if buf == nil and status == 0:
         raise newException(IOError, &"HTTP request failed: {url}")

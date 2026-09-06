@@ -353,6 +353,56 @@ suite "interpreter error paths":
       check ignored["reason"].getStr() == "renderSelfDispatch"
     clearEventChannel()
 
+  test "a run's dispatch nodes are capped by the dispatch budget":
+    # Five chained dispatch nodes, a budget of three: three events reach the
+    # queue, the fourth is refused with one log line naming the budget, the
+    # fifth is dropped silently. A self-dispatching handler is the same chain
+    # spread over runs; this is what keeps it from starving the render loop.
+    clearEventChannel()
+    let sceneId = "tests/interpreter-errors/dispatch-budget".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "dispatch budget",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "tick"}),
+        node(21, "dispatch", %*{"keyword": "ping", "config": {}}),
+        node(22, "dispatch", %*{"keyword": "ping", "config": {}}),
+        node(23, "dispatch", %*{"keyword": "ping", "config": {}}),
+        node(24, "dispatch", %*{"keyword": "ping", "config": {}}),
+        node(25, "dispatch", %*{"keyword": "ping", "config": {}})
+      ],
+      edges: @[
+        edge(100, 10, "next", 21, "prev"),
+        edge(101, 21, "next", 22, "prev"),
+        edge(102, 22, "next", 23, "prev"),
+        edge(103, 23, "next", 24, "prev"),
+        edge(104, 24, "next", 25, "prev")
+      ]
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      scene.frameConfig.js = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1,
+                                             assetSandbox: "frame", renderDeadlineMs: -1, dispatchBudget: 3)
+      runEvent(scene, ctx(scene, "tick"))
+      var delivered = 0
+      while true:
+        let (ok, msg) = eventChannel.tryRecv()
+        if not ok:
+          break
+        check msg[1] == "ping"
+        inc delivered
+      check delivered == 3
+      var refusals = 0
+      for entry in store.entries:
+        if entry{"event"}.getStr() == "interpreter:dispatch:ignored" and entry{"reason"}.getStr() == "dispatchBudget":
+          inc refusals
+          check entry["budget"].getInt() == 3
+          check entry["nodeId"].getInt() == 24
+      check refusals == 1
+    clearEventChannel()
+
   test "a scene's dispatch node cannot fire runtime verbs":
     # Scene code is untrusted: dispatching uploadScenes would replace the
     # installed scenes past every guard, and reboot on every render is a loop.

@@ -7,6 +7,7 @@
 // js_def_malloc so JS_ComputeMemoryUsage and the malloc limit keep working.
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -40,6 +41,31 @@ static size_t fos_js_usable_size(const void *ptr)
     return heap_caps_get_allocated_size((void *)ptr);
 }
 
+/* The scene-wide ceiling shared by every runtime of one scene (its context
+ * plus one per JS app node), handed in as the malloc state's opaque by
+ * fos_js_new_runtime_budgeted. The per-runtime malloc_limit still applies;
+ * this stops N runtimes from claiming N × that limit of PSRAM. */
+static inline fos_js_heap_budget_t *fos_js_budget(JSMallocState *s)
+{
+    return (fos_js_heap_budget_t *)s->opaque;
+}
+
+static inline bool fos_js_budget_allows(fos_js_heap_budget_t *b, size_t extra)
+{
+    return b == NULL || b->limit_bytes == 0 || b->used_bytes + extra <= b->limit_bytes;
+}
+
+static inline void fos_js_budget_charge(fos_js_heap_budget_t *b, size_t bytes)
+{
+    if (b != NULL) b->used_bytes += bytes;
+}
+
+static inline void fos_js_budget_release(fos_js_heap_budget_t *b, size_t bytes)
+{
+    if (b == NULL) return;
+    b->used_bytes = b->used_bytes > bytes ? b->used_bytes - bytes : 0;
+}
+
 static void *fos_js_malloc(JSMallocState *s, size_t size)
 {
     void *ptr;
@@ -47,11 +73,15 @@ static void *fos_js_malloc(JSMallocState *s, size_t size)
     assert(size != 0);
     if (s->malloc_size + size > s->malloc_limit)
         return NULL;
+    if (!fos_js_budget_allows(fos_js_budget(s), size))
+        return NULL;
     ptr = fos_js_alloc(size);
     if (ptr == NULL)
         return NULL;
     s->malloc_count++;
-    s->malloc_size += fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD;
+    size_t charged = fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD;
+    s->malloc_size += charged;
+    fos_js_budget_charge(fos_js_budget(s), charged);
     return ptr;
 }
 
@@ -60,7 +90,9 @@ static void fos_js_free(JSMallocState *s, void *ptr)
     if (ptr == NULL)
         return;
     s->malloc_count--;
-    s->malloc_size -= fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD;
+    size_t charged = fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD;
+    s->malloc_size -= charged;
+    fos_js_budget_release(fos_js_budget(s), charged);
     heap_caps_free(ptr);
 }
 
@@ -81,6 +113,8 @@ static void *fos_js_realloc(JSMallocState *s, void *ptr, size_t size)
     }
     if (s->malloc_size + size - old_size > s->malloc_limit)
         return NULL;
+    if (size > old_size && !fos_js_budget_allows(fos_js_budget(s), size - old_size))
+        return NULL;
 
     // No heap_caps_realloc with caps fallback chain: realloc keeps the
     // original heap, which is what we want (stays in PSRAM).
@@ -89,7 +123,12 @@ static void *fos_js_realloc(JSMallocState *s, void *ptr, size_t size)
         new_ptr = heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
     if (new_ptr == NULL)
         return NULL;
-    s->malloc_size += fos_js_usable_size(new_ptr) - old_size;
+    size_t new_size = fos_js_usable_size(new_ptr);
+    s->malloc_size += new_size - old_size;
+    if (new_size >= old_size)
+        fos_js_budget_charge(fos_js_budget(s), new_size - old_size);
+    else
+        fos_js_budget_release(fos_js_budget(s), old_size - new_size);
     return new_ptr;
 }
 
@@ -100,12 +139,17 @@ static const JSMallocFunctions fos_js_malloc_funcs = {
     .js_malloc_usable_size = fos_js_usable_size,
 };
 
-struct JSRuntime *fos_js_new_runtime(void)
+struct JSRuntime *fos_js_new_runtime_budgeted(fos_js_heap_budget_t *budget)
 {
-    JSRuntime *rt = JS_NewRuntime2(&fos_js_malloc_funcs, NULL);
+    JSRuntime *rt = JS_NewRuntime2(&fos_js_malloc_funcs, budget);
     if (rt == NULL)
         return NULL;
     JS_SetMemoryLimit(rt, FOS_JS_MEMORY_LIMIT);
     JS_SetMaxStackSize(rt, FOS_JS_STACK_SIZE);
     return rt;
+}
+
+struct JSRuntime *fos_js_new_runtime(void)
+{
+    return fos_js_new_runtime_budgeted(NULL);
 }

@@ -4,6 +4,7 @@ import pixie
 
 import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
+import frameos/js_runtime/run_budget
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
@@ -218,8 +219,11 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     if not headersNode.isNil and headersNode.kind == JObject:
       for name, value in headersNode.pairs:
         headers.add((name, value.getStr($value)))
-    let timeoutMs = clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs)
-    let maxSeconds = max(DefaultFetchMaxSeconds, timeoutMs.float / 1000.0 + 30.0)
+    # The scene's own ceiling for this request, then the run's wall-clock
+    # deadline (run_budget.nim): a 600 s tarpit used to hold the render
+    # thread until the systemd watchdog fired.
+    let timeoutMs = capToRenderDeadline(clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs))
+    let maxSeconds = capToRenderDeadline(int(max(DefaultFetchMaxSeconds, timeoutMs.float / 1000.0 + 30.0) * 1000)).float / 1000.0
     let res = boundedRequestWithHeaders(
       urlStr,
       httpMethod = options{"method"}.getStr("GET").toUpperAscii(),
@@ -1113,7 +1117,10 @@ proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
     dynamicApp.runtime.releaseReplacedImageRef(dynamicApp.configJson[field], nextValue)
   dynamicApp.configJson[field] = nextValue
 
-proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig) =
+proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
+  ## `sceneId` joins this runtime to the owning scene's shared heap budget
+  ## (runtime.sceneHeapBudgetFor): every JS app node of a scene draws on one
+  ## ceiling instead of each getting the full per-runtime limit.
   if runtime.ready:
     return
 
@@ -1124,7 +1131,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig) =
       liveJsRuntimes.add(runtime)
 
   when defined(memProbe): memProbe("    newQuickJS BEFORE")
-  runtime.js = newQuickJS(sceneJsConfig(frameConfig))
+  runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
   when defined(memProbe): memProbe("    newQuickJS AFTER")
   jsAppRuntimeByCtx[runtime.js.context] = runtime
   runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
@@ -1526,7 +1533,7 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
   runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
 
 proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JSValue =
-  ensureReady(runtime, owner.frameConfig)
+  ensureReady(runtime, owner.frameConfig, if owner.scene.isNil: "" else: owner.scene.id.string)
   let ctx = runtime.js.context
   let fnNameValue = nimStringToJS(ctx, fnName)
   defer: JS_FreeValue(ctx, fnNameValue)

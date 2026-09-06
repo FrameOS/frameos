@@ -9,6 +9,7 @@ when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
+import frameos/js_runtime/run_budget
 import frameos/node_config
 import frameos/planner
 import frameos/runtime_diagnostics
@@ -845,7 +846,23 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "reason": "runtimeVerb"
         })
       else:
-        sendEvent(eventName, finalPayload)
+        # One run may fire only so many events (run_budget.nim): a handler that
+        # dispatches its own event is an unbounded chain that starves rendering
+        # on the Pi and recurses on the ESP32. Logged once per run, then dropped.
+        case takeDispatchBudget()
+        of dvAllowed:
+          sendEvent(eventName, finalPayload)
+        of dvRefusedFirst:
+          self.logger.log(%*{
+            "event": "interpreter:dispatch:ignored",
+            "sceneId": self.id.string,
+            "nodeId": currentNodeId.int,
+            "eventName": eventName,
+            "reason": "dispatchBudget",
+            "budget": dispatchBudgetTotalNow()
+          })
+        of dvRefused:
+          discard
       if asDataNode:
         result = VJson(copy(finalPayload))
     of "code":
@@ -1558,7 +1575,7 @@ proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
 
   true
 
-proc runEvent*(self: FrameScene, context: ExecutionContext) =
+proc runEventInner(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
     clearNode = true)
@@ -1633,6 +1650,32 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
         "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
           (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
       })
+
+proc resolvedRenderDeadlineMs(frameConfig: FrameConfig): int =
+  if frameConfig != nil and frameConfig.js != nil and frameConfig.js.renderDeadlineMs >= 0:
+    return frameConfig.js.renderDeadlineMs
+  DefaultRenderDeadlineMs
+
+proc resolvedDispatchBudget(frameConfig: FrameConfig): int =
+  if frameConfig != nil and frameConfig.js != nil and frameConfig.js.dispatchBudget >= 0:
+    return frameConfig.js.dispatchBudget
+  DefaultDispatchBudget
+
+proc runEvent*(self: FrameScene, context: ExecutionContext) =
+  ## Every run of a scene — a render, an event, a child scene's init — enters
+  ## here on every host (runner.nim, embedded_runtime.nim, wasm_main.nim), so
+  ## this is where the run's budgets are armed: the wall-clock deadline that
+  ## counts native calls too, and the dispatch budget. Re-entrant: a nested run
+  ## rides on the outer one's budgets (run_budget.nim).
+  let armedHere = armRenderDeadline(resolvedRenderDeadlineMs(self.frameConfig))
+  if armedHere:
+    setDispatchBudget(resolvedDispatchBudget(self.frameConfig))
+  try:
+    runEventInner(self, context)
+  finally:
+    if armedHere:
+      disarmRenderDeadline()
+      setDispatchBudget(0)
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   if TRACING:

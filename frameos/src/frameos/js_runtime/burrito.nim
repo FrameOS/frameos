@@ -81,6 +81,7 @@
 ##
 
 import std/[tables, macros, json, strutils, os, monotimes, times]
+import frameos/js_runtime/run_budget
 
 when defined(frameosEmbedded):
   # The ESP-IDF build compiles QuickJS as the frameos_quickjs component and
@@ -118,6 +119,19 @@ type
   JSRuntime* {.importc: "struct JSRuntime", header: "quickjs/quickjs.h".} = object
   JSContext* {.importc: "struct JSContext", header: "quickjs/quickjs.h".} = object
   JSModuleDef* {.importc: "struct JSModuleDef", header: "quickjs/quickjs.h".} = object
+  JSMallocState* {.importc: "JSMallocState", header: "quickjs/quickjs.h", bycopy.} = object
+    malloc_count*: csize_t
+    malloc_size*: csize_t
+    malloc_limit*: csize_t
+    opaque*: pointer
+  ## `const void *` as C spells it: the usable-size callback's parameter type
+  ## in JSMallocFunctions, which clang refuses to take a plain `void *` for.
+  ConstPointer* {.importc: "const void *", nodecl.} = distinct pointer
+  JSMallocFunctions* {.importc: "JSMallocFunctions", header: "quickjs/quickjs.h", bycopy.} = object
+    js_malloc*: proc(s: ptr JSMallocState, size: csize_t): pointer {.cdecl.}
+    js_free*: proc(s: ptr JSMallocState, p: pointer) {.cdecl.}
+    js_realloc*: proc(s: ptr JSMallocState, p: pointer, size: csize_t): pointer {.cdecl.}
+    js_malloc_usable_size*: proc(p: ConstPointer): csize_t {.cdecl.}
   JSAtom* = uint32
   JSClassID* = uint32
 
@@ -162,6 +176,7 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
 {.push importc, header: "quickjs/quickjs.h".}
 
 proc JS_NewRuntime*(): ptr JSRuntime
+proc JS_NewRuntime2*(mf: ptr JSMallocFunctions, opaque: pointer): ptr JSRuntime
 proc JS_FreeRuntime*(rt: ptr JSRuntime)
 proc JS_NewContext*(rt: ptr JSRuntime): ptr JSContext
 proc JS_FreeContext*(ctx: ptr JSContext)
@@ -212,6 +227,7 @@ proc JS_ThrowTypeError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 proc JS_ThrowReferenceError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 proc JS_ThrowRangeError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 proc JS_ThrowInternalError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
+proc JS_SetUncatchableException*(ctx: ptr JSContext, flag: cint)
 proc JS_ThrowSyntaxError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 
 # Global object
@@ -415,11 +431,22 @@ type
     ## loop.
     armed*: bool
     tripped*: bool
+    ## The trip was the run's wall-clock deadline (run_budget.nim), not this
+    ## guard's interpreter-time budget; the error message names which.
+    wallTripped*: bool
     deadline*: MonoTime
     budgetMs*: int
     defaultBudgetMs*: int
     nativeDepth*: int
     nativeEnteredAt*: MonoTime
+
+  JsHeapBudget* = object
+    ## One scene's JS heap ceiling, shared by every runtime the scene creates
+    ## (its scene context and one per JS app node). Raw memory the allocator
+    ## callbacks read on the C stack; layout matches fos_js_heap_budget_t in
+    ## embedded/esp32/components/frameos_quickjs/fos_qjs_glue.h.
+    limitBytes*: csize_t
+    usedBytes*: csize_t
 
   # Context data to pass to C callbacks
   BurritoContextData* = object
@@ -432,9 +459,10 @@ type
     includeStdLib*: bool     ## Include std module (default: false)
     includeOsLib*: bool      ## Include os module (default: false)
     enableStdHandlers*: bool ## Enable std event handlers (default: false)
-    memoryLimitBytes*: int   ## JS heap ceiling; 0 leaves it unlimited
+    memoryLimitBytes*: int   ## JS heap ceiling per runtime; 0 leaves it unlimited
     maxStackSizeBytes*: int  ## JS stack ceiling; 0 keeps QuickJS's default
     executionTimeoutMs*: int ## Interpreter-time ceiling per entry; 0 disables
+    heapBudget*: ptr JsHeapBudget ## Shared per-scene heap ceiling (nil: only the per-runtime limit)
 
   QuickJS* = object
     ## QuickJS wrapper object containing runtime and context
@@ -482,6 +510,99 @@ const
     else:
       30_000
 
+const
+  # Matches MALLOC_OVERHEAD in quickjs.c for the accounting the budget sees.
+  BudgetMallocOverhead = 8
+  # The scene-wide ceiling. Non-embedded: the same 256 MB one runtime used to
+  # get on its own, now shared — a scene with six JS nodes no longer holds
+  # 1.5 GB of headroom. Embedded: twice the glue's per-runtime cap, so a
+  # scene cannot claim the whole PSRAM by having many nodes while a single
+  # runtime keeps the room it has today.
+  DefaultJsSceneHeapBytes* = when defined(frameosEmbedded):
+      8 * 1024 * 1024
+    else:
+      256 * 1024 * 1024
+
+when not defined(frameosEmbedded):
+  # Budgeted allocators for JS_NewRuntime2: QuickJS's own def_malloc functions
+  # (per-runtime limit only) with one more check against the scene's shared
+  # JsHeapBudget. Sizes are kept in a 16-byte header so usable-size needs no
+  # platform call (macOS malloc_size vs glibc malloc_usable_size vs emscripten).
+  const BudgetHeaderBytes = 16
+  proc c_malloc(size: csize_t): pointer {.importc: "malloc", header: "<stdlib.h>".}
+  proc c_free(p: pointer) {.importc: "free", header: "<stdlib.h>".}
+  proc c_realloc(p: pointer, size: csize_t): pointer {.importc: "realloc", header: "<stdlib.h>".}
+
+  proc budgetRaw(p: pointer): pointer {.inline.} =
+    cast[pointer](cast[uint](p) - BudgetHeaderBytes.uint)
+
+  proc budgetedUsableSize(p: ConstPointer): csize_t {.cdecl.} =
+    let raw = cast[pointer](p)
+    if raw == nil: 0 else: cast[ptr csize_t](budgetRaw(raw))[]
+
+  proc budgetedMalloc(s: ptr JSMallocState, size: csize_t): pointer {.cdecl.} =
+    if size == 0:
+      return nil
+    if s.malloc_size + size > s.malloc_limit:
+      return nil
+    let budget = cast[ptr JsHeapBudget](s.opaque)
+    if budget != nil and budget.limitBytes > 0 and budget.usedBytes + size > budget.limitBytes:
+      return nil
+    let raw = c_malloc(size + BudgetHeaderBytes.csize_t)
+    if raw == nil:
+      return nil
+    cast[ptr csize_t](raw)[] = size
+    inc s.malloc_count
+    s.malloc_size += size + BudgetMallocOverhead.csize_t
+    if budget != nil:
+      budget.usedBytes += size + BudgetMallocOverhead.csize_t
+    cast[pointer](cast[uint](raw) + BudgetHeaderBytes.uint)
+
+  proc budgetedFree(s: ptr JSMallocState, p: pointer) {.cdecl.} =
+    if p == nil:
+      return
+    let size = budgetedUsableSize(cast[ConstPointer](p))
+    dec s.malloc_count
+    s.malloc_size -= size + BudgetMallocOverhead.csize_t
+    let budget = cast[ptr JsHeapBudget](s.opaque)
+    if budget != nil:
+      let charged = size + BudgetMallocOverhead.csize_t
+      budget.usedBytes = if budget.usedBytes > charged: budget.usedBytes - charged else: 0
+    c_free(budgetRaw(p))
+
+  proc budgetedRealloc(s: ptr JSMallocState, p: pointer, size: csize_t): pointer {.cdecl.} =
+    if p == nil:
+      return budgetedMalloc(s, size)
+    if size == 0:
+      budgetedFree(s, p)
+      return nil
+    let oldSize = budgetedUsableSize(cast[ConstPointer](p))
+    if s.malloc_size + size - oldSize > s.malloc_limit:
+      return nil
+    let budget = cast[ptr JsHeapBudget](s.opaque)
+    if budget != nil and budget.limitBytes > 0 and size > oldSize and
+        budget.usedBytes + (size - oldSize) > budget.limitBytes:
+      return nil
+    let raw = c_realloc(budgetRaw(p), size + BudgetHeaderBytes.csize_t)
+    if raw == nil:
+      return nil
+    cast[ptr csize_t](raw)[] = size
+    s.malloc_size = s.malloc_size + size - oldSize
+    if budget != nil:
+      if size >= oldSize:
+        budget.usedBytes += size - oldSize
+      else:
+        let shrink = oldSize - size
+        budget.usedBytes = if budget.usedBytes > shrink: budget.usedBytes - shrink else: 0
+    cast[pointer](cast[uint](raw) + BudgetHeaderBytes.uint)
+
+  var budgetedMallocFuncs = JSMallocFunctions(
+    js_malloc: budgetedMalloc,
+    js_free: budgetedFree,
+    js_realloc: budgetedRealloc,
+    js_malloc_usable_size: budgetedUsableSize,
+  )
+
 proc burritoInterruptHandler(rt: ptr JSRuntime, opaque: pointer): cint {.cdecl.} =
   ## Runs on the interpreter's own stack every few thousand bytecode steps.
   ## Must not allocate, raise, or re-enter QuickJS.
@@ -495,7 +616,15 @@ proc burritoInterruptHandler(rt: ptr JSRuntime, opaque: pointer): cint {.cdecl.}
   ## gets its own runtime, and therefore its own guard and its own budget — so
   ## the case this gives up on does not currently exist.
   let guard = cast[ptr JsExecutionGuard](opaque)
-  if guard == nil or not guard.armed or guard.nativeDepth > 0:
+  if guard == nil:
+    return 0
+  # The run's wall clock (run_budget.nim) counts everything and applies even
+  # when the interpreter-time budget is disabled or paused for a native call.
+  if renderDeadlinePassed():
+    guard.tripped = true
+    guard.wallTripped = true
+    return 1
+  if not guard.armed or guard.nativeDepth > 0:
     return 0
   if getMonoTime() < guard.deadline:
     return 0
@@ -516,6 +645,11 @@ proc leaveNativeCall*(guard: ptr JsExecutionGuard) =
   dec guard.nativeDepth
   if guard.nativeDepth == 0:
     guard.deadline = guard.deadline + (getMonoTime() - guard.nativeEnteredAt)
+  # A binding that came back after the render deadline: the interrupt handler
+  # will stop the script at its next check; say why when it does.
+  if renderDeadlinePassed():
+    guard.tripped = true
+    guard.wallTripped = true
 
 proc armGuard(guard: ptr JsExecutionGuard, timeoutMs: int): bool =
   ## Start (or leave running) the interpreter-time budget for one entry into
@@ -529,6 +663,7 @@ proc armGuard(guard: ptr JsExecutionGuard, timeoutMs: int): bool =
     return false
   guard.armed = true
   guard.tripped = false
+  guard.wallTripped = false
   guard.budgetMs = budget
   guard.nativeDepth = 0
   guard.deadline = getMonoTime() + initDuration(milliseconds = budget)
@@ -563,14 +698,39 @@ proc contextDeadlineTripped*(ctx: ptr JSContext): bool =
   let guard = guardForContext(ctx)
   guard != nil and guard.tripped
 
-proc clearContextDeadlineTrip*(ctx: ptr JSContext): int {.discardable.} =
-  ## Consume the tripped flag and report the budget that was blown, so the
-  ## caller can raise a message that names the real cause.
+proc takeContextDeadlineTrip*(ctx: ptr JSContext): tuple[budgetMs: int, wallClock: bool] =
+  ## Consume the tripped flag and report which ceiling was blown — the
+  ## interpreter-time budget, or the run's wall-clock deadline — and how big it
+  ## was, so the caller can raise a message that names the real cause.
   let guard = guardForContext(ctx)
   if guard == nil or not guard.tripped:
-    return 0
+    return (0, false)
+  let wall = guard.wallTripped
   guard.tripped = false
-  return guard.budgetMs
+  guard.wallTripped = false
+  if wall:
+    return (max(1, renderDeadlineBudgetMs()), true)
+  (guard.budgetMs, false)
+
+proc clearContextDeadlineTrip*(ctx: ptr JSContext): int {.discardable.} =
+  ## The blown budget in ms (either ceiling), 0 when nothing tripped.
+  takeContextDeadlineTrip(ctx).budgetMs
+
+const SceneHeapBudgetNote* = " (the scene's JS heap budget is shared by all of its code nodes and apps)"
+
+proc describeJsError*(errorMsg: string): string =
+  ## QuickJS's own text, plus what it means on a frame where that text is
+  ## easy to misread: `out of memory` is the SCENE's shared ceiling
+  ## (JsHeapBudget), not the device running dry. Idempotent.
+  if errorMsg.contains("out of memory") and not errorMsg.contains(SceneHeapBudgetNote):
+    return errorMsg & SceneHeapBudgetNote
+  errorMsg
+
+proc deadlineTripMessage*(budgetMs: int, wallClock: bool): string =
+  if wallClock:
+    "render exceeded its " & $budgetMs & "ms wall-clock deadline (native calls such as HTTP included) and was interrupted"
+  else:
+    "JavaScript execution exceeded its " & $budgetMs & "ms time budget and was interrupted"
 
 template withContextDeadline*(ctx: ptr JSContext, body: untyped): untyped =
   ## Bound one entry into the interpreter from a call site that only holds a
@@ -587,10 +747,11 @@ proc raiseIfDeadlineTripped(js: QuickJS) =
   ## QuickJS reports an interrupt as a bare InternalError; say what really
   ## happened so the scene log names the runaway script instead of "interrupted".
   if js.deadlineTripped():
-    let budget = js.deadlineBudgetMs()
+    let wall = js.guard.wallTripped
+    let budget = if wall: max(1, renderDeadlineBudgetMs()) else: js.deadlineBudgetMs()
     js.guard.tripped = false
-    raise newException(JSException,
-      "JavaScript execution exceeded its " & $budget & "ms time budget and was interrupted")
+    js.guard.wallTripped = false
+    raise newException(JSException, deadlineTripMessage(budget, wall))
 
 template withDeadline*(js: QuickJS, body: untyped): untyped =
   ## Bound one entry into the interpreter. Re-entrant: nested uses are no-ops.
@@ -1099,24 +1260,12 @@ proc jsArgsToSeq*(ctx: ptr JSContext, argc: cint, argv: ptr JSValueConst): seq[J
     result[i] = JS_DupValue(ctx, cast[ptr UncheckedArray[JSValueConst]](argv)[i])
 
 # Generic C function trampoline for Nim function calls
-proc nimFunctionTrampoline(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: ptr JSValueConst,
-    magic: cint): JSValue {.cdecl.} =
-  ## Generic trampoline that calls registered Nim functions from JavaScript
-  ## Uses magic parameter as function ID to lookup the actual Nim function
+proc nimFunctionTrampolineInner(ctx: ptr JSContext, contextData: ptr BurritoContextData, argc: cint,
+    argv: ptr JSValueConst, magic: cint): JSValue =
+  ## Calls the registered Nim function the magic id names and maps Nim
+  ## exceptions onto JavaScript ones. The budget bookkeeping around the call
+  ## lives in nimFunctionTrampoline.
   try:
-    let contextData = cast[ptr BurritoContextData](JS_GetContextOpaque(ctx))
-    if contextData == nil:
-      return jsUndefined(ctx)
-
-    if magic notin contextData.functions:
-      return jsUndefined(ctx)
-
-    # Time spent in a binding (an HTTP fetch, an asset read) is not the script
-    # spinning, so it must not eat the interpreter-time budget.
-    let guard = contextData.guard
-    enterNativeCall(guard)
-    defer: leaveNativeCall(guard)
-
     let funcEntry = contextData.functions[magic]
 
     case funcEntry.kind
@@ -1173,6 +1322,36 @@ proc nimFunctionTrampoline(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint
     let errorObj = nimStringToJS(ctx, "Nim Error: " & e.msg)
     return JS_Throw(ctx, errorObj)
 
+
+proc nimFunctionTrampoline(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: ptr JSValueConst,
+    magic: cint): JSValue {.cdecl.} =
+  ## Generic trampoline that calls registered Nim functions from JavaScript.
+  ## Uses magic parameter as function ID to lookup the actual Nim function.
+  let contextData = cast[ptr BurritoContextData](JS_GetContextOpaque(ctx))
+  if contextData == nil:
+    return jsUndefined(ctx)
+  if magic notin contextData.functions:
+    return jsUndefined(ctx)
+
+  # Time spent in a binding (an HTTP fetch, an asset read) is not the script
+  # spinning, so it must not eat the interpreter-time budget…
+  let guard = contextData.guard
+  enterNativeCall(guard)
+  result = nimFunctionTrampolineInner(ctx, contextData, argc, argv, magic)
+  leaveNativeCall(guard)
+  # …but it does count against the run's wall-clock deadline. A binding that
+  # came back after it has passed fails right here, so a script whose last
+  # statement was that slow fetch does not finish as if nothing happened; the
+  # interrupt handler backs this up on the next bytecode batch, try/catch or
+  # not, because the deadline stays passed.
+  if guard != nil and guard.wallTripped:
+    JS_FreeValue(ctx, result)
+    result = JS_ThrowInternalError(ctx, "%s",
+      deadlineTripMessage(max(1, renderDeadlineBudgetMs()), true).cstring)
+    # Same standing as the interrupt handler's own error: scene code cannot
+    # catch its way past the deadline.
+    JS_SetUncatchableException(ctx, 1)
+
 # Configuration helpers
 proc defaultConfig*(): QuickJSConfig =
   ## Create default configuration (no std/os modules)
@@ -1211,12 +1390,17 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   ## - config: Configuration specifying which modules to include
   when defined(frameosEmbedded):
     # Created by the frameos_quickjs IDF component: allocators backed by
-    # PSRAM (heap_caps_malloc) and a stack limit sized for the render task.
-    proc fos_js_new_runtime(): ptr JSRuntime {.importc: "fos_js_new_runtime",
+    # PSRAM (heap_caps_malloc), a stack limit sized for the render task, and
+    # the scene's shared heap budget when the caller has one.
+    proc fos_js_new_runtime_budgeted(budget: pointer): ptr JSRuntime {.importc: "fos_js_new_runtime_budgeted",
         header: "fos_qjs_glue.h".}
-    let rt = fos_js_new_runtime()
+    let rt = fos_js_new_runtime_budgeted(cast[pointer](config.heapBudget))
   else:
-    let rt = JS_NewRuntime()
+    let rt =
+      if config.heapBudget != nil:
+        JS_NewRuntime2(addr budgetedMallocFuncs, cast[pointer](config.heapBudget))
+      else:
+        JS_NewRuntime()
   if rt == nil:
     raise newException(JSException, "Failed to create QuickJS runtime")
 
@@ -1325,7 +1509,7 @@ proc eval*(js: QuickJS, code: string, filename: string = "<eval>", flags: cint =
       defer: JS_FreeValue(js.context, exception)
       let errorMsg = toNimString(js.context, exception)
       js.raiseIfDeadlineTripped()
-      raise newException(JSException, "Evaluation failed: " & errorMsg)
+      raise newException(JSException, "Evaluation failed: " & describeJsError(errorMsg))
 
     result = toNimString(js.context, val)
 
@@ -1365,7 +1549,7 @@ proc evalModule*(js: QuickJS, code: string, filename: string = "<module>"): stri
       let errorMsg = toNimString(js.context, exception)
       JS_FreeValue(js.context, val)
       js.raiseIfDeadlineTripped()
-      raise newException(JSException, "Module evaluation failed: " & errorMsg)
+      raise newException(JSException, "Module evaluation failed: " & describeJsError(errorMsg))
 
     # Modules return promises, but we just return a string representation
     # Using js_std_await here causes reference counting issues on cleanup
@@ -1434,7 +1618,7 @@ proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module
     defer: JS_FreeValue(ctx, exception)
     let errorMsg = toNimString(ctx, exception)
     JS_FreeValue(ctx, compiled)
-    raise newException(JSException, errorMsg)
+    raise newException(JSException, describeJsError(errorMsg))
 
   let moduleDef = moduleDefOf(compiled)
   if moduleDef == nil:
@@ -1453,7 +1637,7 @@ proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module
       let errorMsg = toNimString(ctx, exception)
       JS_FreeValue(ctx, evaluated)
       js.raiseIfDeadlineTripped()
-      raise newException(JSException, errorMsg)
+      raise newException(JSException, describeJsError(errorMsg))
     JS_FreeValue(ctx, evaluated)
 
   result = JS_GetModuleNamespace(ctx, moduleDef)
@@ -1462,7 +1646,7 @@ proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module
     defer: JS_FreeValue(ctx, exception)
     let errorMsg = toNimString(ctx, exception)
     JS_FreeValue(ctx, result)
-    raise newException(JSException, errorMsg)
+    raise newException(JSException, describeJsError(errorMsg))
 
 proc compileToBytecode*(js: QuickJS, code: string, filename: string = "<input>", isModule: bool = false): seq[byte] =
   ## Compile JavaScript code to bytecode format

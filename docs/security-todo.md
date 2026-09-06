@@ -127,13 +127,21 @@ medium / low list below.
   GitHub metadata, so anyone with release-upload rights (no signing key) can
   attach an older or other-arch signed archive under a new tag. Verify the
   global signature / trusted comment naming version + target.
-- **Interpreter robustness, what is left** (the node depth / self-reference
-  guard and the SVG / canvas dimension cap are in): the interpreter time
-  budget excludes native calls (`httpRequest` tarpit up to 600 s wedges the
-  render thread until the 900 s watchdog, forever); 256 MB JS heap per
-  runtime, one per JS app node; self-dispatching event loops starve
-  rendering (Pi) or recurse synchronously (ESP32). Wall-clock render
-  deadline, per-scene heap budget, per-render dispatch budget.
+- **Interpreter robustness — closed 2026-09-06** (the node depth /
+  self-reference guard and the SVG / canvas dimension cap were already in):
+  every run of a scene now arms a wall-clock deadline that counts native
+  calls (`js.renderDeadlineMs`, 120 s Pi / 90 s ESP32; the HTTP client caps
+  each request to what is left and the interrupt handler stops the script
+  when it passes — a 600 s `httpRequest` tarpit costs one render, not the
+  900 s watchdog), the JS heap ceiling is per scene and shared by all of the
+  scene's runtimes (`js.memoryLimitMb`, 256 MB Pi / 8 MB ESP32, through
+  budgeted QuickJS allocators on both planes), and a run may fire at most
+  `js.dispatchBudget` (64) events — the Pi's message loop also yields to the
+  render loop every 32 events, and the ESP32 refuses events nested more
+  than four deep. Reference: `docs/js-apps-and-code-nodes.md`, "What the
+  runtime will not let a scene do". Left: the budgets are per run, not per
+  scene per minute — a scene that spends its whole deadline on every render
+  is slow, not stopped.
 - Smaller: the frame's TLS material and admin login now ride the
   `/embedded/settings` pull (bearer-authenticated, but in clear on an http
   backend — same exposure as the API keys that pull already carried; an

@@ -61,9 +61,11 @@ type
     ## "sandbox posture"). Scene JS is user-authored at best and provider-pushed
     ## at worst, and it runs on the render thread.
     executionTimeoutMs*: int ## interpreter time per entry; 0 disables
-    memoryLimitMb*: int      ## JS heap ceiling; 0 leaves it unlimited
+    memoryLimitMb*: int      ## JS heap ceiling PER SCENE, shared by every runtime the scene creates; 0 leaves it unlimited
     maxStackKb*: int         ## JS stack ceiling; 0 keeps QuickJS's default
     assetSandbox*: string    ## "frame" (shared, default) or "scene" (per-scene subtree)
+    renderDeadlineMs*: int   ## wall-clock ceiling per render/event, native calls included; 0 disables
+    dispatchBudget*: int     ## dispatch nodes one render/event may fire; 0 leaves it unbounded
 
   # Part of FrameConfig
   TimeZoneUpdatesConfig* = ref object
