@@ -28,10 +28,11 @@ empty. Last refreshed 2026-09-06 (setup portal round two added), after release 2
   and shows the frame's remembered error with a "Try again" link if the
   hotspot comes back; the index screen has an `Internet:` row under
   `Network:` (`connected` / `no internet — <why>` / `not checked`). Verify
-  all four on a phone through the QR flow; note whether the auto-move fires
-  on iOS Safari and on Android Chrome (Android may not resolve `.local`).
-  The captive-portal popup itself is NOT in yet — `docs/todo.md`, "Setup
-  hotspot: captive portal".
+  all four on the iPhone through the QR flow (the 2026-09-06 run was an
+  iPhone; there is no Android to test with, and Android Chrome may not
+  resolve `.local`, so the auto-move is an iOS claim only until someone
+  with an Android tries it). The captive-portal popup itself is NOT in
+  yet — `docs/todo.md`, "Setup hotspot: captive portal".
 
 ### Backend (self-hosted) bench
 
