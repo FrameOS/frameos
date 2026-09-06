@@ -102,6 +102,14 @@ async function serveFrameAdmin(
   await page.route(`${FRAME_ORIGIN}/api/**`, (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   )
+  // Repository listings are arrays (the store the frame fetches, then the
+  // bundled samples); the `{}` catch-all above is not one.
+  await page.route(`${FRAME_ORIGIN}/api/repositories`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+  )
+  await page.route(`${FRAME_ORIGIN}/api/repositories/system`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+  )
   await page.route(`${FRAME_ORIGIN}/api/admin/session`, (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ authenticated }) })
   )
