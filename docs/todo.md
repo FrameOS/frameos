@@ -157,6 +157,31 @@ its PTY verbs everywhere. Left:
 
 ---
 
+## Runtime: refs shared across HTTP worker threads
+
+The frame's web server runs four mummy worker threads. ORC refcounts are not
+atomic, so a `ref` (JsonNode, FrameConfig, …) that a global hands to more than
+one thread gets freed under its readers sooner or later. Found 2026-09-06 on a
+Zero 2 W: `server/auth.nim` cached the `frameAdminAuth` JsonNode and every
+request touched it three times; four minutes of admin-panel polling later the
+node was garbage, every request answered "Admin panel disabled" (the session
+fingerprint reads user/pass from the same node, so sessions died too), and
+the heap followed. Fixed by caching plain values (`AdminAuthValues`) and
+building a fresh node per call; `test_auth.nim` has a four-thread regression
+test that reproduces it on the old code under libc malloc.
+
+Left: audit the rest of `server/` for the same shape — `globalFrameConfig`'s
+nested refs read from handlers (`frameAdminAuth`, `httpsProxy`, `network`,
+`agent` — field reads of scalars are fine, copying a nested ref or calling
+`{}` on a shared JsonNode is not), `globalRecentLogs` / `globalRecentMetrics`
+(JsonNodes appended by the logger and read by `/api/admin/logs`: keep every
+read under `globalRecentLogsLock` and serialize there, never return a node),
+and any other `var … : JsonNode` at module level. Rule for new code: a
+global that crosses threads holds values or is only ever read under the same
+lock that writes it; hand out copies, not refs.
+
+---
+
 ## Setup hotspot: captive portal
 
 A phone that joins `FrameOS-Setup` should get the OS's "sign in to network"

@@ -67,35 +67,56 @@ proc getCookieValue*(request: Request, name: string): string =
       return parts[1]
   return ""
 
+type
+  AdminAuthValues = object
+    ## The admin block as plain values. Never a ref: this cache is read from
+    ## every HTTP worker thread, and ORC refcounts are not atomic — a shared
+    ## JsonNode here was freed under its readers four minutes into an admin
+    ## session (2026-09-06, Zero 2 W: every request answered "Admin panel
+    ## disabled" — the freed node read as garbage, so `enabled` was false and
+    ## the session fingerprint changed — and the heap went shortly after).
+    ## Strings are copied under the lock, so each thread gets its own.
+    present: bool ## frame.json had a frameAdminAuth object
+    enabled: bool
+    user: string
+    pass: string
+
 var
   adminAuthCacheLock: Lock
   cachedAdminAuthPath: string
   cachedAdminAuthMtime: float
   cachedAdminAuthSize: BiggestInt
-  cachedAdminAuth: JsonNode
+  cachedAdminAuth: AdminAuthValues
   cachedAdminAuthValid: bool
 
 initLock(adminAuthCacheLock)
+
+proc adminAuthValues(node: JsonNode): AdminAuthValues =
+  if node == nil or node.kind != JObject:
+    return AdminAuthValues()
+  AdminAuthValues(present: true, enabled: node{"enabled"}.getBool(false),
+    user: node{"user"}.getStr(""), pass: node{"pass"}.getStr(""))
 
 proc invalidateFrameAdminAuthCache*() {.gcsafe.} =
   {.gcsafe.}:
     withLock adminAuthCacheLock:
       cachedAdminAuthValid = false
-      cachedAdminAuth = nil
+      cachedAdminAuth = AdminAuthValues()
 
-proc persistedFrameAdminAuth(): JsonNode {.gcsafe.} =
+proc persistedFrameAdminAuth(): AdminAuthValues {.gcsafe.} =
   ## Reads `frameAdminAuth` out of frame.json, memoized on the file's mtime and
   ## size. One admin auth check asks for this three times (panel enabled, user,
   ## pass), and it runs before the 401 on every request — so an unauthenticated
   ## flood used to cost three full JSON parses per request. The stat keeps the
   ## on-disk copy authoritative, so settings edits still apply without a restart.
+  ## `present` is false when the file is unreadable or has no admin block.
   let path = getConfigFilename()
   var info: FileInfo
   try:
     info = getFileInfo(path)
   except CatchableError:
     invalidateFrameAdminAuthCache()
-    return nil
+    return AdminAuthValues()
   let mtime = info.lastWriteTime.toUnixFloat()
 
   {.gcsafe.}:
@@ -104,14 +125,14 @@ proc persistedFrameAdminAuth(): JsonNode {.gcsafe.} =
           cachedAdminAuthMtime == mtime and cachedAdminAuthSize == info.size:
         return cachedAdminAuth
 
-  var parsed: JsonNode = nil
+  # The parse happens outside the lock, on this thread's own nodes.
+  var parsed = AdminAuthValues()
   try:
     let data = parseFile(path)
-    if data != nil and data.kind == JObject and data{"frameAdminAuth"} != nil and
-        data{"frameAdminAuth"}.kind == JObject:
-      parsed = data["frameAdminAuth"]
+    if data != nil and data.kind == JObject:
+      parsed = adminAuthValues(data{"frameAdminAuth"})
   except CatchableError:
-    parsed = nil
+    parsed = AdminAuthValues()
 
   {.gcsafe.}:
     withLock adminAuthCacheLock:
@@ -122,20 +143,32 @@ proc persistedFrameAdminAuth(): JsonNode {.gcsafe.} =
       cachedAdminAuthValid = true
   parsed
 
-proc frameAdminAuthSnapshot*(): JsonNode {.gcsafe.} =
-  let persistedAuth = persistedFrameAdminAuth()
-  if persistedAuth != nil:
-    return persistedAuth
+proc frameAdminAuthValues(): AdminAuthValues {.gcsafe.} =
+  let persisted = persistedFrameAdminAuth()
+  if persisted.present:
+    return persisted
   {.gcsafe.}:
-    if globalFrameConfig != nil and globalFrameConfig.frameAdminAuth != nil:
-      return globalFrameConfig.frameAdminAuth
-  %*{}
+    # The runtime's own copy is a ref shared with the main thread (the portal
+    # assigns it once at setup). Reading it under the cache lock keeps the
+    # workers from touching its refcounts concurrently; it is only reached
+    # while frame.json has no admin block at all.
+    withLock adminAuthCacheLock:
+      if globalFrameConfig != nil and globalFrameConfig.frameAdminAuth != nil:
+        return adminAuthValues(globalFrameConfig.frameAdminAuth)
+  AdminAuthValues()
+
+proc frameAdminAuthSnapshot*(): JsonNode {.gcsafe.} =
+  ## A fresh node per call, owned by the calling thread.
+  let values = frameAdminAuthValues()
+  if not values.present:
+    return %*{}
+  %*{"enabled": values.enabled, "user": values.user, "pass": values.pass}
 
 proc adminAuthUser(): string {.gcsafe.} =
-  frameAdminAuthSnapshot(){"user"}.getStr("")
+  frameAdminAuthValues().user
 
 proc adminAuthPass(): string {.gcsafe.} =
-  frameAdminAuthSnapshot(){"pass"}.getStr("")
+  frameAdminAuthValues().pass
 
 template frameAccessMode(): string =
   {.gcsafe.}:
@@ -150,10 +183,8 @@ template frameServerApiKeyValue(): string =
     (if globalFrameConfig.isNil: "" else: globalFrameConfig.serverApiKey)
 
 proc adminPanelEnabled*(): bool {.gcsafe.} =
-  let adminAuth = frameAdminAuthSnapshot()
-  adminAuth{"enabled"}.getBool(false) and
-    adminAuth{"user"}.getStr("").len > 0 and
-    adminAuth{"pass"}.getStr("").len > 0
+  let adminAuth = frameAdminAuthValues()
+  adminAuth.enabled and adminAuth.user.len > 0 and adminAuth.pass.len > 0
 
 proc adminAuthEnabled*(): bool {.gcsafe.} =
   adminPanelEnabled()

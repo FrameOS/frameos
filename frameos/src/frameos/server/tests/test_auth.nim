@@ -1,6 +1,6 @@
 import unittest
 import json
-import std/os
+import std/[atomics, os]
 import mummy
 
 import ../../types
@@ -104,6 +104,37 @@ suite "Server auth helpers":
     check adminPanelEnabled()
     check adminAuthEnabled()
     check validateAdminCredentials("admin", "secret")
+
+  test "the admin auth cache survives four HTTP worker threads":
+    # 2026-09-06, Zero 2 W: four minutes into an admin session every request
+    # started answering "Admin panel disabled" and the heap went shortly
+    # after. The cache handed one JsonNode ref to every mummy worker thread;
+    # ORC refcounts are not atomic, so the node was freed under the readers.
+    # Reproduces on the old code with glibc/libc malloc reuse (a freed node
+    # reads as garbage); the churn below is what makes the reuse happen.
+    let tempDir = getTempDir() / "frameos-auth-threaded-config"
+    createDir(tempDir)
+    let configPath = tempDir / "frame.json"
+    writeFile(configPath, $(%*{
+      "frameAdminAuth": {"enabled": true, "user": "admin", "pass": "secret"},
+    }))
+    putEnv("FRAMEOS_CONFIG", configPath)
+    invalidateFrameAdminAuthCache()
+    globalFrameConfig = FrameConfig(frameAdminAuth: %*{}, frameAccess: "public", frameAccessKey: "")
+
+    var disabledSeen: Atomic[int]
+    proc worker(seen: ptr Atomic[int]) {.thread.} =
+      {.cast(gcsafe).}:
+        for i in 0 ..< 200_000:
+          if not adminPanelEnabled() or not validateAdminCredentials("admin", "secret"):
+            discard seen[].fetchAdd(1)
+          let junk = parseJson("""{"a":[1,2,3],"b":{"c":"dddddddddddddddd"}}""")
+          if junk{"a"}.len != 3:
+            discard seen[].fetchAdd(1000)
+    var threads: array[4, Thread[ptr Atomic[int]]]
+    for t in threads.mitems: createThread(t, worker, addr disabledSeen)
+    joinThreads(threads)
+    check disabledSeen.load == 0
 
   test "legacy auth toggle no longer bypasses admin credentials":
     globalFrameConfig = FrameConfig(
