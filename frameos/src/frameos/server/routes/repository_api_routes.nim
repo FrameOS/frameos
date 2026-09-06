@@ -1,7 +1,10 @@
-import std/[algorithm, json, strutils, tables]
+import std/[algorithm, httpclient, json, locks, monotimes, strutils, tables, times]
 import mummy
 import mummy/routers
 import httpcore
+import frameos/version
+import frameos/channels
+import frameos/cloud/link_state
 import ../api
 import ../auth
 import ../embedded_assets
@@ -188,6 +191,148 @@ proc systemRepositoriesPayload(): JsonNode {.gcsafe.} =
   for slug in slugs:
     result.add(loadSystemRepository(slug))
 
+# ---------------------------------------------------------------------------
+# The cloud scene store as a repository, the way a self-hosted backend tracks
+# it (backend/app/api/repositories.py, cloud_store_repository_url): the
+# provider this frame is linked to — or the default provider when it is not
+# linked — serves its public catalog as frameos repository JSON at
+# /api/store/{frameosVersion}/repository.json, filtered to scenes this
+# version can run. The frame fetches that index itself and hands the SPA the
+# same shape /api/repositories has on a backend; template scenes come through
+# a same-origin route so the browser never needs CORS against the provider.
+# Images and zips stay absolute provider URLs — the browser loads those.
+
+const
+  CloudStoreRepositoryId* = "system-cloud-store"
+  CloudStoreScenesRoutePrefix = "/api/repositories/cloud-store/scenes/"
+  cloudStoreIndexTtlSeconds = 300
+  cloudStoreFetchTimeoutMs = 10_000
+
+type CloudStoreFetchHook* = proc(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.}
+
+proc defaultCloudStoreFetch(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.} =
+  let client = newHttpClient(timeout = cloudStoreFetchTimeoutMs, maxRedirects = 2)
+  try:
+    let response = client.get(url)
+    let status = try: parseInt(response.status.split(' ')[0]) except ValueError: 0
+    (body: response.body, status: status)
+  except CatchableError as e:
+    (body: e.msg, status: 0)
+  finally:
+    client.close()
+
+var cloudStoreFetchHook: CloudStoreFetchHook = defaultCloudStoreFetch
+
+proc setCloudStoreFetchHookForTest*(hook: CloudStoreFetchHook) =
+  cloudStoreFetchHook = if hook == nil: defaultCloudStoreFetch else: hook
+
+# The cached index is kept as its raw body (a string, copied out under the
+# lock) and parsed per request: a JsonNode shared across the worker threads
+# is what took the admin panel down on 2026-09-06 (server/auth.nim).
+var
+  cloudStoreCacheLock: Lock
+  cloudStoreCacheUrl: string
+  cloudStoreCacheBody: string
+  cloudStoreCacheAt: MonoTime
+  cloudStoreCacheValid: bool
+
+initLock(cloudStoreCacheLock)
+
+proc resetCloudStoreCacheForTest*() =
+  withLock cloudStoreCacheLock:
+    cloudStoreCacheValid = false
+    cloudStoreCacheBody = ""
+    cloudStoreCacheUrl = ""
+
+proc cloudStoreProviderUrl(): string {.gcsafe.} =
+  providerUrlFromState(loadCloudLinkState()).strip(chars = {'/'})
+
+proc cloudStoreRepositoryUrl*(): string {.gcsafe.} =
+  ## The versioned index when this build knows its version, the plain index
+  ## otherwise — the same fallback the backend makes.
+  let version = publishedFrameOSVersion(compiledFrameOSVersion())
+  let base = cloudStoreProviderUrl() & "/api/store/"
+  if version.len == 0 or version == "unknown": base & "repository.json"
+  else: base & version & "/repository.json"
+
+proc cloudStoreIndexBody(): string {.gcsafe.} =
+  ## The store index as served by the provider, or "" when it cannot be had.
+  let url = cloudStoreRepositoryUrl()
+  {.gcsafe.}:
+    withLock cloudStoreCacheLock:
+      if cloudStoreCacheValid and cloudStoreCacheUrl == url and
+          (getMonoTime() - cloudStoreCacheAt) < initDuration(seconds = cloudStoreIndexTtlSeconds):
+        return cloudStoreCacheBody
+    let fetched = cloudStoreFetchHook(url)
+    if fetched.status != 200:
+      log(%*{"event": "repositories:cloudStore:unavailable", "url": url, "status": fetched.status,
+             "error": (if fetched.status == 0: fetched.body else: "")})
+      return ""
+    withLock cloudStoreCacheLock:
+      cloudStoreCacheUrl = url
+      cloudStoreCacheBody = fetched.body
+      cloudStoreCacheAt = getMonoTime()
+      cloudStoreCacheValid = true
+    fetched.body
+
+proc resolveAgainst(repositoryUrl: string, value: string): string =
+  ## "./x" is relative to the index's directory, as the backend and the cloud
+  ## SPA both resolve it (backend/app/models/repository.py).
+  if not value.startsWith("./"):
+    return value
+  let slash = repositoryUrl.rfind('/')
+  (if slash >= 0: repositoryUrl[0 ..< slash] else: repositoryUrl) & value[1 .. ^1]
+
+proc validStoreSceneId(value: string): bool =
+  value.len == 36 and value.allCharsInSet({'0'..'9', 'a'..'f', 'A'..'F', '-'})
+
+proc cloudStoreRepositoryPayload*(): JsonNode {.gcsafe.} =
+  ## The store as one repository entry, or nil when the index is unavailable.
+  let url = cloudStoreRepositoryUrl()
+  let body = cloudStoreIndexBody()
+  if body.len == 0:
+    return nil
+  let data =
+    try:
+      parseJson(body)
+    except CatchableError:
+      log(%*{"event": "repositories:cloudStore:invalid", "url": url})
+      return nil
+  if data.kind != JObject:
+    return nil
+
+  var templates = newJArray()
+  if data{"templates"} != nil and data["templates"].kind == JArray:
+    for entry in data["templates"]:
+      if entry.kind != JObject:
+        continue
+      var templateData = copy(entry)
+      for key in ["image", "zip"]:
+        if templateData{key} != nil and templateData[key].kind == JString:
+          templateData[key] = %resolveAgainst(url, templateData[key].getStr())
+      # Scenes load through this frame, not straight from the provider: the
+      # SPA runs on the frame's origin and fetchTemplateScenes takes a
+      # same-origin scenesUrl without any CORS on the store.
+      if templateData.hasKey("scenes"):
+        templateData.delete("scenes")
+      let sceneId = templateData{"sceneId"}.getStr("")
+      if validStoreSceneId(sceneId):
+        templateData["scenesUrl"] = %(CloudStoreScenesRoutePrefix & sceneId & "/scenes.json")
+      templates.add(templateData)
+
+  result = newJObject()
+  result["id"] = %CloudStoreRepositoryId
+  result["name"] = %(data{"name"}.getStr("FrameOS Cloud store"))
+  result["description"] =
+    if data{"description"}.kind == JString: %(data["description"].getStr()) else: newJNull()
+  result["url"] = %url
+  result["last_updated_at"] = newJNull()
+  result["templates"] = templates
+
+proc cloudStoreSceneScenesJson(sceneId: string): tuple[body: string, status: int] {.gcsafe.} =
+  {.gcsafe.}:
+    cloudStoreFetchHook(cloudStoreProviderUrl() & "/api/store/scenes/" & sceneId & "/scenes.json")
+
 proc requireRepositoryReadAccess(request: Request): bool {.gcsafe.} =
   if not hasAdminAccess(request):
     request.respond(Http401, body = "Unauthorized")
@@ -205,7 +350,31 @@ proc addRepositoryApiRoutes*(router: var Router) =
   router.get("/api/repositories", proc(request: Request) {.gcsafe.} =
     if not requireRepositoryReadAccess(request):
       return
-    jsonResponse(request, Http200, newJArray())
+    {.gcsafe.}:
+      var repositories = newJArray()
+      let cloudStore = cloudStoreRepositoryPayload()
+      if cloudStore != nil:
+        repositories.add(cloudStore)
+      jsonResponse(request, Http200, repositories)
+  )
+
+  router.get("/api/repositories/cloud-store/scenes/@sceneId/scenes.json", proc(request: Request) {.gcsafe.} =
+    if not requireRepositoryReadAccess(request):
+      return
+    {.gcsafe.}:
+      let sceneId = decodePathSegment(request.pathParams["sceneId"])
+      if not validStoreSceneId(sceneId):
+        jsonResponse(request, Http404, %*{"detail": "Scene not found"})
+        return
+      let fetched = cloudStoreSceneScenesJson(sceneId)
+      if fetched.status != 200:
+        jsonResponse(request, Http502, %*{"detail": "The scene store did not answer",
+                                          "status": fetched.status})
+        return
+      var headers: mummy.HttpHeaders
+      headers["Content-Type"] = "application/json"
+      headers["Cache-Control"] = "no-store"
+      request.respond(Http200, headers, fetched.body)
   )
 
   router.get("/api/repositories/system/@repositorySlug/templates/@templateSlug/scenes.json", proc(request: Request) {.gcsafe.} =

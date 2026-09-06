@@ -3,6 +3,7 @@ import zippy
 
 import ../../channels
 import ../state
+import ../routes/repository_api_routes
 import ./helpers/http_harness
 
 var server = startRouterServer(19333)
@@ -63,7 +64,7 @@ suite "frame api route behavior":
     let states = httpRequest(server.port, "GET", "/api/frames/1/states?k=test-key", headers = [("Cookie", adminCookie)])
     check states.status == 200
 
-  test "repository endpoints expose bundled system templates only":
+  test "repository endpoints expose bundled templates and the cloud scene store":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
@@ -140,9 +141,67 @@ suite "frame api route behavior":
     check image.header("content-type") == "image/jpeg"
     check image.body.len > 0
 
+    # /api/repositories is the cloud scene store, fetched from the provider
+    # this frame is linked to (or the default one). Unreachable → nothing,
+    # the SPA falls back to the bundled repositories above.
+    resetCloudStoreCacheForTest()
+    setCloudStoreFetchHookForTest(proc(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.} =
+      (body: "connection refused", status: 0))
     let customRepositories = httpRequest(server.port, "GET", "/api/repositories", headers = [("Cookie", adminCookie)])
     check customRepositories.status == 200
     check parseJson(customRepositories.body).len == 0
+
+    # Reachable: one repository entry in the backend's /api/repositories
+    # shape, "./" assets resolved against the index, scenes routed through
+    # this frame so the browser never talks to the provider directly.
+    resetCloudStoreCacheForTest()
+    setCloudStoreFetchHookForTest(proc(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.} =
+      if url.endsWith("/repository.json"):
+        return (body: $(%*{
+          "name": "FrameOS Cloud store",
+          "description": "Public scenes",
+          "templates": [
+            {"name": "Weather", "sceneId": "8a5f1f2e-1111-4222-8333-444455556666",
+             "image": "./scenes/8a5f1f2e-1111-4222-8333-444455556666/image?v=3",
+             "zip": "https://cloud.example/api/store/scenes/8a5f1f2e-1111-4222-8333-444455556666/download",
+             "scenes": [{"id": "inline-should-not-ride-along"}]},
+            {"name": "No id", "zip": "./scenes/x/download"},
+          ],
+        }), status: 200)
+      if url.endsWith("/api/store/scenes/8a5f1f2e-1111-4222-8333-444455556666/scenes.json"):
+        return (body: $(%*[{"id": "weather", "name": "Weather", "nodes": [], "edges": []}]), status: 200)
+      (body: "not found", status: 404))
+    let storeRepositories = httpRequest(server.port, "GET", "/api/repositories", headers = [("Cookie", adminCookie)])
+    check storeRepositories.status == 200
+    let storePayload = parseJson(storeRepositories.body)
+    check storePayload.len == 1
+    let store = storePayload[0]
+    check store["id"].getStr() == "system-cloud-store"
+    check store["name"].getStr() == "FrameOS Cloud store"
+    check store["url"].getStr() == cloudStoreRepositoryUrl()
+    check store["url"].getStr().startsWith("https://cloud.frameos.net/api/store/")
+    check store["url"].getStr().endsWith("/repository.json")
+    check store["templates"].len == 2
+    let weather = store["templates"][0]
+    check weather["image"].getStr() ==
+      store["url"].getStr().replace("/repository.json", "") & "/scenes/8a5f1f2e-1111-4222-8333-444455556666/image?v=3"
+    check weather["zip"].getStr().startsWith("https://cloud.example/")
+    check not weather.hasKey("scenes")
+    check weather["scenesUrl"].getStr() ==
+      "/api/repositories/cloud-store/scenes/8a5f1f2e-1111-4222-8333-444455556666/scenes.json"
+    check not store["templates"][1].hasKey("scenesUrl")
+
+    let storeScenes = httpRequest(server.port, "GET", weather["scenesUrl"].getStr(), headers = [("Cookie", adminCookie)])
+    check storeScenes.status == 200
+    check parseJson(storeScenes.body)[0]["id"].getStr() == "weather"
+    check httpRequest(server.port, "GET", weather["scenesUrl"].getStr()).status == 401
+    check httpRequest(server.port, "GET", "/api/repositories/cloud-store/scenes/not-a-uuid/scenes.json",
+      headers = [("Cookie", adminCookie)]).status == 404
+    check httpRequest(server.port, "GET",
+      "/api/repositories/cloud-store/scenes/00000000-0000-4000-8000-000000000000/scenes.json",
+      headers = [("Cookie", adminCookie)]).status == 502
+    setCloudStoreFetchHookForTest(nil)
+    resetCloudStoreCacheForTest()
 
   test "frame update endpoint persists config and interpreted scenes":
     drainEventChannel()

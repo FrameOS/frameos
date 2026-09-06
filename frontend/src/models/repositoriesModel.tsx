@@ -117,14 +117,17 @@ export const repositoriesModel = kea<repositoriesModelType>([
               throw new Error('Failed to fetch system repositories')
             }
             const systemData = await systemResponse.json()
-            if (inFrameAdminMode) {
-              return systemData as RepositoryType[]
-            }
             const response = await apiFetch('/api/repositories')
             if (!response.ok) {
               throw new Error('Failed to fetch repositories')
             }
             const data = await response.json()
+            if (inFrameAdminMode) {
+              // On the frame /api/repositories is the cloud scene store the
+              // frame fetches from its provider (empty while offline); it
+              // goes first, the bundled samples and galleries stay behind it.
+              return [...data, ...systemData] as RepositoryType[]
+            }
             return [...systemData, ...data] as RepositoryType[]
           } catch (error) {
             logApiError(error)
