@@ -399,6 +399,13 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
   for key in payload.keys:
     if key != "next_action" and key != "skip_runtime_reload" and key != frameSyncMarkDeployedKey:
       frameApi[key] = copy(payload[key])
+  # The echo is what GET prefers for these fields, so it carries what was
+  # actually kept — never the blank a secret-less form sent back.
+  if frameApi.hasKey("frame_admin_auth") and result{"frameAdminAuth"} != nil:
+    frameApi["frame_admin_auth"] = copy(result["frameAdminAuth"])
+  for (apiKey, configKey) in [("frame_access_key", "frameAccessKey"), ("server_api_key", "serverApiKey")]:
+    if frameApi.hasKey(apiKey) and result{configKey} != nil:
+      frameApi[apiKey] = copy(result[configKey])
   if payload{frameSyncMarkDeployedKey}.getBool(false):
     var revision = payload{frameSyncCurrentRevisionKey}.getStr("")
     if revision.len == 0:

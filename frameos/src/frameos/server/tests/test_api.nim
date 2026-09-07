@@ -82,6 +82,12 @@ suite "Server API helpers":
     check blanked["network"]["wifiHotspotPassword"].getStr() == "frame1234"
     check blanked["agent"]["agentEnabled"].getBool()
     check blanked["agent"]["agentSharedSecret"].getStr() == "shh"
+    # The stored echo of the payload is what GET prefers for these fields:
+    # it must carry the kept secrets, not the blanks.
+    check blanked["frameApi"]["frame_admin_auth"]["pass"].getStr() == "secret"
+    check blanked["frameApi"]["frame_admin_auth"]["user"].getStr() == "admin"
+    check blanked["frameApi"]["frame_access_key"].getStr() == "access-1"
+    check blanked["frameApi"]["server_api_key"].getStr() == "server-1"
 
     # A real new value still replaces, and disabling still disables.
     let changed = frontendFramePayloadToRuntimeConfig(%*{
