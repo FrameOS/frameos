@@ -59,7 +59,7 @@ import ./contract
 import ./identity
 import ./link_state
 
-const ImagePlaceholderNames = ["FrameOS Setup", "FrameOS frame"]
+const ImagePlaceholderNames* = ["FrameOS Setup", "FrameOS frame"]
 
 proc frameDisplayName*(frameConfig: FrameConfig): string =
   ## The name a frame introduces itself with to a provider: frame.json's

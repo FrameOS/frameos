@@ -3427,8 +3427,10 @@ async def test_api_frame_adopt_carries_the_device_mode_and_buildroot_platform(as
     assert frame.ssh_user == 'root'
     assert frame.assets_path == '/srv/assets'
 
-    # A card from before the device reported its board: the common image.
-    payload = {**_standalone_device_payload(), 'name': 'Older card', 'mode': 'buildroot', 'buildroot': {}}
+    # A card from before the device reported its board: the common image. And
+    # the image's placeholder name gives way to the card's hostname.
+    payload = {**_standalone_device_payload(), 'name': 'FrameOS Setup', 'frame_host': 'frame-b6232a.local',
+               'mode': 'buildroot', 'buildroot': {}}
     with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=_adopt_mock_fetch(payload, []))):
         response = await async_client.post('/api/frames/adopt', json=_adopt_request_body(frame_host='10.0.0.43'))
     assert response.status_code == 200, response.text
@@ -3436,6 +3438,7 @@ async def test_api_frame_adopt_carries_the_device_mode_and_buildroot_platform(as
     frame = db.get(Frame, response.json()['frame']['id'])
     assert frame.mode == 'buildroot'
     assert frame.buildroot['platform'] == 'raspberry-pi-64'
+    assert frame.name == 'frame-b6232a'
 
 
 @pytest.mark.asyncio

@@ -1305,6 +1305,23 @@ async def push_backend_state_to_device(
     return payload
 
 
+# What the release image ships as `name` until something renames the card
+# (frameos/src/frameos/cloud/enrollment.nim ImagePlaceholderNames).
+ADOPT_PLACEHOLDER_NAMES = ("FrameOS Setup", "FrameOS frame")
+
+
+def _adopted_frame_name(remote_frame: dict[str, Any]) -> str:
+    """The device's name unless it is still the image placeholder, then the
+    hostname first boot gave the card (frame_host minus .local)."""
+    name = str(remote_frame.get("name") or "").strip()
+    if name and name not in ADOPT_PLACEHOLDER_NAMES:
+        return name
+    frame_host = str(remote_frame.get("frame_host") or "").strip()
+    if frame_host.endswith(".local"):
+        frame_host = frame_host[: -len(".local")]
+    return frame_host
+
+
 def _split_adopt_address(value: str, default_port: int) -> tuple[str, int]:
     """"10.0.0.5", "10.0.0.5:9000", "http://frame.local:8787/" or "[::1]:8787"
     → (host, port). People type what their browser shows them, and the
@@ -1400,7 +1417,7 @@ async def adopt_standalone_frame(
     frame = await new_frame(
         db,
         redis,
-        data.name or remote_frame.get("name") or host,
+        data.name or _adopted_frame_name(remote_frame) or host,
         host,
         f"{server_host}:{server_port}",
         device=remote_frame.get("device"),
@@ -1413,9 +1430,10 @@ async def adopt_standalone_frame(
         frame_import = _sync_frame_json_payload(remote_frame)
         for key in ADOPT_SKIPPED_SYNC_KEYS:
             frame_import.pop(key, None)
-        # The caller's choice of name wins over the device's.
-        if data.name:
-            frame_import.pop("name", None)
+        # The name was decided above (the caller's, else the device's unless
+        # that is still the image placeholder): the sync import must not put
+        # the device's back.
+        frame_import.pop("name", None)
         try:
             _apply_sync_frame_update(frame, frame_import)
         except ValueError as exc:

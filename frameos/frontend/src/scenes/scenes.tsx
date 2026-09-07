@@ -16,6 +16,9 @@ export const getRoutes = () =>
     '/admin': 'admin',
     '/frames': 'admin',
     '/frames/:id': 'admin',
+    // A hard reload of a frame tool page (/frames/1/assets): the tab lives
+    // in the URL the same way it does on a backend (urls.frame(id, tool)).
+    '/frames/:id/:tool': 'admin',
     '/scenes': 'adminScene',
     '/scenes/:frameId': 'adminScene',
     '/scenes/:frameId/:sceneId': 'adminScene',
@@ -26,4 +29,4 @@ export const getRoutes = () =>
     '/settings': 'admin',
     '/login': 'login',
     '/logout': 'login',
-  }) as const
+  } as const)

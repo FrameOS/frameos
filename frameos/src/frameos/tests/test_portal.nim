@@ -739,6 +739,20 @@ suite "portal setup control mode":
     check options.serverHost == ""
     check options.controlMode == "none"
 
+  test "the image's placeholder name gives way to the hostname":
+    writeFile(setupDir / "frame.json", $(%*{"name": "FrameOS Setup", "frameHost": "frame.local"}))
+    let frame = makeFrameOS()
+    frame.frameConfig.name = "FrameOS Setup"
+    let options = parseSetupOptions({"ssid": "x", "hostname": "frame-c486eb"}.toTable, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    check parseFile(setupDir / "frame.json"){"name"}.getStr() == "frame-c486eb"
+    check frame.frameConfig.name == "frame-c486eb"
+    # A name the owner chose stays.
+    frame.frameConfig.name = "Kitchen"
+    writeFile(setupDir / "frame.json", $(%*{"name": "Kitchen", "frameHost": "frame-c486eb.local"}))
+    check persistPortalSetup(frame, parseSetupOptions({"ssid": "x", "hostname": "hallway"}.toTable, frame.frameConfig))
+    check parseFile(setupDir / "frame.json"){"name"}.getStr() == "Kitchen"
+
   test "cloud mode clears serverHost and queues the typed claim code":
     writeFile(setupDir / "frame.json", $(%*{"serverHost": "localhost", "serverPort": 8989}))
     let frame = makeFrameOS()

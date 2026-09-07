@@ -980,7 +980,11 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     if options.timeZone.strip().len > 0 and isIanaZone(options.timeZone.strip()):
       data["timeZone"] = %options.timeZone.strip()
       frameConfig.timeZone = options.timeZone.strip()
-    if data{"name"}.getStr("").strip().len == 0 or data{"name"}.getStr("") == oldFrameHost:
+    # The image ships as "FrameOS Setup"; a card that has just been given a
+    # hostname is named after it (the same rule cloud enrollment applies —
+    # a backend that adopted such a card showed "FrameOS Setup", 2026-09-08).
+    let currentName = data{"name"}.getStr("").strip()
+    if currentName.len == 0 or currentName == oldFrameHost or currentName in ImagePlaceholderNames:
       data["name"] = %hostnameBase
       frameConfig.name = hostnameBase
 
