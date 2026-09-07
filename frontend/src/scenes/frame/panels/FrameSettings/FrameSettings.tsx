@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { frameAdminLoginIsOnlyAccess } from '../../frameDeployUtils'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -1689,6 +1690,7 @@ export function FrameSettings({
     )
   }
 
+  const adminLoginIsOnlyAccess = frameAdminLoginIsOnlyAccess(frame)
   const linkFrame: FrameType = {
     ...frame,
     frame_access: frameForm.frame_access ?? frame.frame_access,
@@ -3688,8 +3690,18 @@ export function FrameSettings({
                     )
                   }
                 >
-                  <Switch />
+                  <Switch disabled={adminLoginIsOnlyAccess} />
                 </Field>
+                {adminLoginIsOnlyAccess ? (
+                  <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                    <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
+                    <div>
+                      This login is the only way this backend reaches the frame: the card has no FrameOS Remote and no
+                      SSH key or password. It stays on, and the password cannot be left blank. Change it here and it is
+                      written to the frame on Save.
+                    </div>
+                  </div>
+                ) : null}
                 {frameForm.frame_admin_auth?.enabled ? (
                   <>
                     <Field name="frame_admin_auth.user" label="Username">

@@ -80,7 +80,7 @@ import {
   deployPlanPreviousFrameosVersion,
   isFrameosVersionBefore,
 } from './frameDeployUtils'
-import { getDeployPlanErrorMessage } from './frameDeployErrors'
+import { getDeployPlanErrorMessage, getResponseDetail } from './frameDeployErrors'
 import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
@@ -196,6 +196,24 @@ function currentFrameSyncToken(frame: FrameType | null, sync: FrameSyncStatus | 
   }
   return frameSyncStatusToken(sync) ?? frameSyncHintToken(frame)
 }
+
+/** frameos/upgrade.nim's upgrade-status.json, plus the backend's `shell_access`. */
+export interface DeviceUpgradeStatus {
+  status?: string
+  message?: string
+  current_version?: string
+  compiled_version?: string
+  latest_version?: string
+  update_available?: boolean
+  latest_error?: string
+  target?: string
+  target_error?: string
+  shell_access?: boolean
+  [key: string]: unknown
+}
+
+// frameos/upgrade.nim UpgradeTerminalStatuses: anything else is in flight.
+const DEVICE_UPGRADE_TERMINAL_STATUSES = ['success', 'reboot_required', 'failed', 'up_to_date', 'idle']
 
 function frameHasSyncCredentials(frame: FrameType | null): boolean {
   const frameAdminAuth = frame?.frame_admin_auth
@@ -1862,6 +1880,9 @@ export interface frameLogicValues {
   deployRecommendation: DeployRecommendation | null
   deployTransportToggleVisible: boolean
   deployWithAgent: boolean
+  deviceUpgradeError: string | null
+  deviceUpgradeLoading: boolean
+  deviceUpgradeStatus: DeviceUpgradeStatus | null
   fastDeployPlan: DeployPlanResponse | null
   fastDeployPlanSummary: SummaryItem[]
   frame: FrameType
@@ -1986,6 +2007,15 @@ export interface frameLogicActions {
   loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => {
     plan: DeployPlanResponse | null
   }
+  loadDeviceUpgradeStatus: (check?: boolean) => {
+    check: boolean
+  }
+  loadDeviceUpgradeStatusFailure: (error: string) => {
+    error: string
+  }
+  loadDeviceUpgradeStatusSuccess: (status: DeviceUpgradeStatus) => {
+    status: DeviceUpgradeStatus
+  }
   loadFrameSyncStatus: () => {
     value: true
   }
@@ -2085,6 +2115,15 @@ export interface frameLogicActions {
   }
   showDeployPlanModal: () => {
     value: true
+  }
+  startDeviceUpgrade: () => {
+    value: true
+  }
+  startDeviceUpgradeFailure: (error: string) => {
+    error: string
+  }
+  startDeviceUpgradeSuccess: (status: DeviceUpgradeStatus) => {
+    status: DeviceUpgradeStatus
   }
   stopFrame: () => {
     value: true
@@ -2275,6 +2314,15 @@ export const frameLogic = kea<frameLogicType>([
     loadDeployPlans: () => ({ startedAt: new Date().toISOString() }),
     loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
+    // The frame's own signed-release upgrade, for frames the backend has no
+    // shell on (GET/POST /api/frames/{id}/device/upgrade relay the device's
+    // /api/upgrade routes).
+    loadDeviceUpgradeStatus: (check: boolean = false) => ({ check }),
+    loadDeviceUpgradeStatusSuccess: (status: DeviceUpgradeStatus) => ({ status }),
+    loadDeviceUpgradeStatusFailure: (error: string) => ({ error }),
+    startDeviceUpgrade: true,
+    startDeviceUpgradeSuccess: (status: DeviceUpgradeStatus) => ({ status }),
+    startDeviceUpgradeFailure: (error: string) => ({ error }),
     loadFrameSyncStatus: true,
     loadFrameSyncStatusSuccess: (sync: FrameSyncStatus | null) => ({ sync }),
     loadFrameSyncStatusFailure: (error: string) => ({ error }),
@@ -2381,6 +2429,33 @@ export const frameLogic = kea<frameLogicType>([
             agent: { ...frame.agent, deployWithAgent },
           }
         },
+      },
+    ],
+    deviceUpgradeStatus: [
+      null as DeviceUpgradeStatus | null,
+      {
+        loadDeviceUpgradeStatusSuccess: (_, { status }) => status,
+        startDeviceUpgradeSuccess: (_, { status }) => status,
+      },
+    ],
+    deviceUpgradeLoading: [
+      false,
+      {
+        loadDeviceUpgradeStatus: () => true,
+        startDeviceUpgrade: () => true,
+        loadDeviceUpgradeStatusSuccess: () => false,
+        loadDeviceUpgradeStatusFailure: () => false,
+        startDeviceUpgradeSuccess: () => false,
+        startDeviceUpgradeFailure: () => false,
+      },
+    ],
+    deviceUpgradeError: [
+      null as string | null,
+      {
+        loadDeviceUpgradeStatus: () => null,
+        startDeviceUpgrade: () => null,
+        loadDeviceUpgradeStatusFailure: (_, { error }) => error,
+        startDeviceUpgradeFailure: (_, { error }) => error,
       },
     ],
     deployPlans: [
@@ -2646,6 +2721,35 @@ export const frameLogic = kea<frameLogicType>([
           },
         })
       }
+    },
+    loadDeviceUpgradeStatus: async ({ check }, breakpoint) => {
+      const response = await apiFetch(`/api/frames/${values.frameId}/device/upgrade${check ? '?check=1' : ''}`)
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        actions.loadDeviceUpgradeStatusFailure(getResponseDetail(payload) ?? 'Could not read the upgrade status')
+        return
+      }
+      actions.loadDeviceUpgradeStatusSuccess(payload as DeviceUpgradeStatus)
+      if (!DEVICE_UPGRADE_TERMINAL_STATUSES.includes(String(payload?.status ?? 'idle'))) {
+        // Still downloading / verifying / installing: keep watching.
+        await breakpoint(5000)
+        actions.loadDeviceUpgradeStatus(false)
+      }
+    },
+    startDeviceUpgrade: async (_, breakpoint) => {
+      const response = await apiFetch(`/api/frames/${values.frameId}/device/upgrade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        actions.startDeviceUpgradeFailure(getResponseDetail(payload) ?? 'Could not start the upgrade')
+        return
+      }
+      actions.startDeviceUpgradeSuccess(payload as DeviceUpgradeStatus)
+      await breakpoint(5000)
+      actions.loadDeviceUpgradeStatus(false)
     },
     loadDeployPlans: async () => {
       const currentFrameForm = {

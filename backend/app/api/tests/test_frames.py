@@ -3506,6 +3506,60 @@ async def test_api_frame_adopt_accepts_host_port_and_schemes_and_refuses_localho
 
 
 @pytest.mark.asyncio
+async def test_api_frame_device_upgrade_relays_the_frames_own_upgrade(async_client, db, redis):
+    payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
+    calls = []
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        calls.append((method, path, json.loads(body) if body and path != '/api/admin/login' else None))
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        if path.startswith('/api/upgrade/status'):
+            return 200, json.dumps({'status': 'idle', 'current_version': '2026.9.10', 'update_available': True,
+                                    'latest_version': '2026.9.11'}).encode(), {'content-type': 'application/json'}
+        if path == '/api/upgrade':
+            return 202, json.dumps({'status': 'starting', 'message': 'queued'}).encode(), {'content-type': 'application/json'}
+        if method == 'POST':
+            return 200, b'{"message":"ok"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': payload}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        adopted = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+        assert adopted.status_code == 200, adopted.text
+        frame_id = adopted.json()['frame']['id']
+
+        status = await async_client.get(f'/api/frames/{frame_id}/device/upgrade?check=1')
+        assert status.status_code == 200, status.text
+        assert status.json()['update_available'] is True
+        assert status.json()['latest_version'] == '2026.9.11'
+        # An adopted generic card: admin login is the only access.
+        assert status.json()['shell_access'] is False
+        assert ('GET', '/api/upgrade/status?check=1', None) in calls
+
+        started = await async_client.post(f'/api/frames/{frame_id}/device/upgrade', json={})
+        assert started.status_code == 200, started.text
+        assert started.json()['status'] == 'starting'
+        assert ('POST', '/api/upgrade', {'dry_run': False}) in calls
+
+        # The one login the backend has must stay: no disabling, no blank password.
+        locked = await async_client.post(f'/api/frames/{frame_id}',
+                                         json={'frame_admin_auth': {'enabled': False, 'user': 'admin', 'pass': 'secret'}})
+        assert locked.status_code == 400
+        assert 'only way this backend reaches the frame' in locked.json()['detail']
+        blank = await async_client.post(f'/api/frames/{frame_id}',
+                                        json={'frame_admin_auth': {'enabled': True, 'user': 'admin', 'pass': ''}})
+        assert blank.status_code == 400
+        # A frame with SSH is free to.
+        db.expire_all()
+        frame = db.get(Frame, frame_id)
+        frame.ssh_pass = 'raspberry'
+        db.commit()
+        allowed = await async_client.post(f'/api/frames/{frame_id}',
+                                          json={'frame_admin_auth': {'enabled': False, 'user': 'admin', 'pass': 'secret'}})
+        assert allowed.status_code == 200, allowed.text
+
+
+@pytest.mark.asyncio
 async def test_api_frame_adopt_validates_input(async_client, db, redis):
     response = await async_client.post(
         '/api/frames/adopt', json=_adopt_request_body(admin_username='  ')

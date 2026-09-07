@@ -443,6 +443,26 @@ function previousFrameosVersion(plan?: DeployPlanResponse | null): string {
   return deployPlanPreviousFrameosVersion(plan) ?? 'Not deployed'
 }
 
+/**
+ * True when the frame's admin login is the only way this backend reaches it:
+ * a Buildroot card with no FrameOS Remote, no SSH password and no SSH keys
+ * (an adopted generic image). Deploys over SSH/Remote cannot connect to such
+ * a frame; scenes and settings sync over its admin API and FrameOS updates
+ * itself to the latest signed release.
+ */
+export function frameAdminLoginIsOnlyAccess(frame: Partial<FrameType> | null | undefined): boolean {
+  if (!frame || (frame.mode ?? 'rpios') !== 'buildroot') {
+    return false
+  }
+  if (frame.agent?.agentEnabled && frame.agent?.agentRunCommands) {
+    return false
+  }
+  if ((frame.ssh_pass ?? '').trim()) {
+    return false
+  }
+  return !(frame.ssh_keys && frame.ssh_keys.length > 0)
+}
+
 export function buildDeployPlanRequestBody(
   frame: Partial<FrameType>,
   frameKeys: readonly (keyof FrameType)[]

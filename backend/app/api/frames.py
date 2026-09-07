@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
 from app.models.frame import (
+    normalize_frame_admin_auth,
     Frame,
     compact_timezone_updater,
     get_frame_json,
@@ -111,6 +112,7 @@ from app.utils.frame_http import (
 )
 from app.utils import embedded_assets, virtual_assets
 from app.api.frame_sync import (
+    _frame_admin_session_headers,
     adopt_standalone_frame,
     apply_frame_sync,
     get_frame_sync_status,
@@ -3402,6 +3404,86 @@ async def api_frame_embedded_firmware_ota(
     return {"message": "Firmware update requested", "device": device_payload}
 
 
+def frame_has_shell_access(frame: Frame) -> bool:
+    """Whether this backend has any way onto the frame besides its admin HTTP
+    API. A generic Buildroot card adopted over that API ships no FrameOS
+    Remote and accepts root SSH only with keys or a password installed from
+    the boot partition — so for it the admin login is THE way in, and the
+    SSH/Remote-based deploy plan cannot even connect (2026-09-07)."""
+    if (frame.mode or "rpios") != "buildroot":
+        return True
+    agent = frame.agent or {}
+    if agent.get("agentEnabled") and agent.get("agentRunCommands"):
+        return True
+    if (frame.ssh_pass or "").strip():
+        return True
+    return bool(frame.ssh_keys)
+
+
+async def _relay_device_admin(
+    frame: Frame, redis: Redis, path: str, *, method: str = "GET", body: dict | None = None
+) -> dict:
+    """One request against the frame's admin API with the stored admin login;
+    the device's JSON comes back as-is, its errors as a 502 with the detail."""
+    headers = await _frame_admin_session_headers(frame, redis, _fetch_frame_http_bytes)
+    if body is not None:
+        headers = {**headers, "Content-Type": "application/json"}
+    status, raw, _headers = await _fetch_frame_http_bytes(
+        frame, redis, path=path, method=method, body=json.dumps(body) if body is not None else None, headers=headers
+    )
+    try:
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+    except (ValueError, UnicodeDecodeError):
+        payload = {}
+    if status >= 400:
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Frame answered {status}: {detail or raw[:200]!s}")
+    return payload if isinstance(payload, dict) else {"result": payload}
+
+
+@api_project.get("/frames/{id:int}/device/upgrade")
+async def api_frame_device_upgrade_status(
+    id: int,
+    check: bool = Query(False),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """The frame's own signed-release upgrade state (`/api/upgrade/status` on
+    the device); `check=1` also asks it to look up the latest release for its
+    target. This is the update path for a frame with no shell — the runtime
+    fetches the release, verifies the minisign signature itself and installs
+    through its privileged door; the backend only nudges and watches."""
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    payload = await _relay_device_admin(frame, redis, "/api/upgrade/status" + ("?check=1" if check else ""))
+    payload["shell_access"] = frame_has_shell_access(frame)
+    return payload
+
+
+@api_project.post("/frames/{id:int}/device/upgrade")
+async def api_frame_device_upgrade(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Ask the frame to upgrade itself to the latest signed release
+    (`POST /api/upgrade` on the device); `{"dry_run": true}` only reports
+    what it would do."""
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - an empty body is "start"
+        body = {}
+    dry_run = bool(isinstance(body, dict) and body.get("dry_run"))
+    payload = await _relay_device_admin(frame, redis, "/api/upgrade", method="POST", body={"dry_run": dry_run})
+    payload["shell_access"] = frame_has_shell_access(frame)
+    return payload
+
+
 @api_project.get("/frames/{id:int}/commands")
 async def api_frame_pending_commands(id: int, db: Session = Depends(get_db)):
     """What is still waiting for this frame to act on it.
@@ -3654,6 +3736,18 @@ async def api_frame_update_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     update_data = data.model_dump(exclude_unset=True)
+    # On a frame this backend can only reach over its admin API, that login
+    # is the one way in: switching it off or blanking it locks the backend
+    # out for good. The form disables the switch and says why; this is the
+    # same rule for API callers.
+    if "frame_admin_auth" in update_data and not frame_has_shell_access(frame):
+        proposed = normalize_frame_admin_auth(update_data.get("frame_admin_auth"))
+        if not (proposed["enabled"] and proposed["user"] and proposed["pass"]):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="The admin login is the only way this backend reaches the frame (no SSH key, "
+                "password or FrameOS Remote on it) — it cannot be disabled or left blank",
+            )
     previous_buildroot_sd_image_fingerprint = (
         buildroot_sd_image_config_fingerprint(frame)
         if (frame.mode or "rpios") == "buildroot"

@@ -74,7 +74,14 @@ import {
   type SummaryItem,
   frameSyncChangeKey,
 } from '../frame/frameLogic'
-import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNotice } from '../frame/frameDeployUtils'
+import {
+  buildRemoteUpgradeNotice,
+  frameAdminLoginIsOnlyAccess,
+  frameosGitHubReleaseUrl,
+  type RemoteUpgradeNotice,
+} from '../frame/frameDeployUtils'
+import { isFrameConnectionError } from '../frame/frameDeployErrors'
+import type { DeviceUpgradeStatus } from '../frame/frameLogic'
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
@@ -908,6 +915,81 @@ function FrameSettingsLink({ frameId }: { frameId: FrameId }): JSX.Element {
     >
       See all settings
     </Link>
+  )
+}
+
+/**
+ * A frame the backend only reaches over its admin API (an adopted generic
+ * Buildroot card: no Remote, no SSH). The SSH/Remote deploy cannot connect;
+ * what works is the sync path for scenes and settings, and the frame's own
+ * signed-release upgrade, nudged and watched from here.
+ */
+function ShellLessFrameSection({
+  status,
+  loading,
+  error,
+  onCheck,
+  onUpgrade,
+}: {
+  status: DeviceUpgradeStatus | null
+  loading: boolean
+  error: string | null
+  onCheck: () => void
+  onUpgrade: () => void
+}): JSX.Element {
+  const inFlight =
+    Boolean(status?.status) &&
+    !['success', 'reboot_required', 'failed', 'up_to_date', 'idle'].includes(String(status?.status))
+  const updateAvailable = status?.update_available === true
+  const buttonClass =
+    'frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+  return (
+    <section className="space-y-2">
+      <DrawerHeading>No shell on this frame</DrawerHeading>
+      <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-sm leading-5">
+          This backend reaches the frame only through its admin login — the card has no FrameOS Remote and no SSH key or
+          password, so a deploy over SSH cannot connect. Scenes and settings still sync over the frame's admin API
+          (Save, then the sync panel above), and FrameOS updates itself: the frame downloads the latest release for its
+          board, verifies the signature and installs it through its privileged door.
+        </div>
+        {status ? (
+          <div className="text-sm">
+            <span className="font-semibold">FrameOS {status.current_version ?? '?'}</span>
+            {status.latest_version ? (
+              <span className="frame-tool-muted">
+                {' '}
+                · latest {status.latest_version}
+                {updateAvailable ? ' — update available' : status.status === 'idle' ? ' — up to date' : ''}
+              </span>
+            ) : null}
+            {status.status && status.status !== 'idle' ? (
+              <div className="frame-tool-muted mt-1">
+                {status.status}
+                {status.message ? `: ${status.message}` : ''}
+              </div>
+            ) : null}
+            {status.latest_error ? <div className="mt-1 text-amber-600">{status.latest_error}</div> : null}
+            {status.target_error ? <div className="mt-1 text-amber-600">{status.target_error}</div> : null}
+          </div>
+        ) : null}
+        {error ? <div className="text-sm font-semibold text-red-500">{error}</div> : null}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={onCheck} disabled={loading} className={buttonClass}>
+            {loading && !inFlight ? 'Checking…' : 'Check for updates'}
+          </button>
+          <button
+            type="button"
+            onClick={onUpgrade}
+            disabled={loading || inFlight || !updateAvailable}
+            className={buttonClass}
+            title={updateAvailable ? undefined : 'Check for updates first'}
+          >
+            {inFlight ? 'Updating…' : 'Update FrameOS'}
+          </button>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -3159,6 +3241,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployPlansError,
     deployPlansLoading,
     deployPlansLoadingStartedAt,
+    deviceUpgradeStatus,
+    deviceUpgradeLoading,
+    deviceUpgradeError,
     deployRecommendation,
     deployDrawerView,
     deployTransportToggleVisible,
@@ -3179,8 +3264,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployRemote,
     ignoreFrameSyncChanges,
     loadDeployPlans,
+    loadDeviceUpgradeStatus,
     loadFrameSyncStatus,
     restartRemote,
+    startDeviceUpgrade,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
     setFrameSyncItemChoice,
@@ -3400,6 +3487,15 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 <div className="space-y-3">
                   <DeployPlanProgress error={deployPlansError} logs={deployPlanLogs} planReady={false} />
                   <div className="text-sm font-semibold text-red-500">{deployPlansError}</div>
+                  {isFrameConnectionError(deployPlansError) && frameAdminLoginIsOnlyAccess(frame) ? (
+                    <ShellLessFrameSection
+                      status={deviceUpgradeStatus}
+                      loading={deviceUpgradeLoading}
+                      error={deviceUpgradeError}
+                      onCheck={() => loadDeviceUpgradeStatus(true)}
+                      onUpgrade={() => startDeviceUpgrade()}
+                    />
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => loadDeployPlans()}
