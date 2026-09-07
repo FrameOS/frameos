@@ -1519,7 +1519,10 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
   const [port, setPort] = useState('8787')
   const [adminUser, setAdminUser] = useState('')
   const [adminPass, setAdminPass] = useState('')
-  const [serverHost, setServerHost] = useState(defaultNewFrameServerHost() ?? '')
+  // The same default the SSH form offers: the backend address saved under
+  // Settings when there is one, the browser's origin otherwise.
+  const { savedSettings } = useValues(settingsLogic)
+  const [serverHost, setServerHost] = useState(defaultNewFrameServerHost(savedSettings) ?? '')
   const [name, setName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
