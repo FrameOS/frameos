@@ -949,9 +949,9 @@ function ShellLessFrameSection({
       <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
           This backend reaches the frame only through its admin login — the card has no FrameOS Remote and no SSH key or
-          password, so a deploy over SSH cannot connect. Scenes and settings still sync over the frame's admin API
-          (Save, then the sync panel above), and FrameOS updates itself: the frame downloads the latest release for its
-          board, verifies the signature and installs it through its privileged door.
+          password. Fast deploy pushes scenes and settings over that API and reloads the runtime; there is no full
+          deploy. FrameOS updates itself: the frame downloads the latest release for its board, verifies the signature
+          and installs it through its privileged door.
         </div>
         {status ? (
           <div className="text-sm">
@@ -3506,6 +3506,15 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 </div>
               ) : (
                 <div className="space-y-5">
+                  {frameAdminLoginIsOnlyAccess(frame) ? (
+                    <ShellLessFrameSection
+                      status={deviceUpgradeStatus}
+                      loading={deviceUpgradeLoading}
+                      error={deviceUpgradeError}
+                      onCheck={() => loadDeviceUpgradeStatus(true)}
+                      onUpgrade={() => startDeviceUpgrade()}
+                    />
+                  ) : null}
                   {frameSyncError ? (
                     <section className="space-y-2">
                       <DrawerHeading
@@ -3676,6 +3685,11 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               </button>
               <button
                 type="button"
+                title={
+                  frameAdminLoginIsOnlyAccess(frame)
+                    ? "Pushes scenes and settings over the frame's admin API and reloads the runtime"
+                    : undefined
+                }
                 onClick={() => closeAndRun(saveAndFastDeployFrame)}
                 className={clsx(
                   'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -3684,7 +3698,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Fast deploy
               </button>
-              {!isEmbeddedFrame || embeddedFullDeploySupported ? (
+              {(!isEmbeddedFrame || embeddedFullDeploySupported) && !frameAdminLoginIsOnlyAccess(frame) ? (
                 <button
                   type="button"
                   title={

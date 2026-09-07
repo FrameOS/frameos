@@ -1271,6 +1271,55 @@ ADOPT_DEFAULT_BUILDROOT_PLATFORM = "raspberry-pi-64"
 logger = logging.getLogger(__name__)
 
 
+def frame_has_shell_access(frame: Frame) -> bool:
+    """Whether this backend has any way onto the frame besides its admin HTTP
+    API. A generic Buildroot card adopted over that API ships no FrameOS
+    Remote and accepts root SSH only with keys or a password installed from
+    the boot partition — so for it the admin login is THE way in, and the
+    SSH/Remote-based deploy cannot even connect (2026-09-07)."""
+    if (frame.mode or "rpios") != "buildroot":
+        return True
+    agent = frame.agent or {}
+    if agent.get("agentEnabled") and agent.get("agentRunCommands"):
+        return True
+    if (frame.ssh_pass or "").strip():
+        return True
+    return bool(frame.ssh_keys)
+
+
+async def push_backend_state_to_device(
+    frame: Frame, db: Session, redis: Redis, fetch_frame_http_bytes: FrameFetch
+) -> dict[str, Any]:
+    """The fast deploy for a frame the backend only reaches over its admin
+    API: everything the device accepts from the backend's record (the sync
+    keys, the scenes, the admin login) in one POST /api/frames/1 with a
+    runtime reload, then the deploy baseline so the drawer reads clean.
+    The device applies it exactly as the local admin page's Save would.
+    Returns the payload that was pushed."""
+    backend_frame = frame.to_dict()
+    payload: dict[str, Any] = {}
+    for key in FRAME_SYNC_FRAME_KEYS:
+        value = _sync_frame_value(key, backend_frame.get(key))
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    scenes = copy.deepcopy(frame.scenes) if isinstance(frame.scenes, list) else []
+    normalize_scenes_execution(scenes)
+    payload["scenes"] = scenes
+    auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    if auth["enabled"] and auth["user"] and auth["pass"]:
+        payload["frame_admin_auth"] = auth
+    await _push_frame_sync_payload(frame, redis, payload, fetch_frame_http_bytes, reload_runtime=True)
+    _mark_frame_sync_baseline(frame)
+    frame.status = "ready"
+    await update_frame(db, redis, frame)
+    db.refresh(frame)
+    try:
+        await _push_frame_sync_metadata(frame, redis, fetch_frame_http_bytes)
+    except Exception:  # noqa: BLE001 - best effort, the deploy itself landed
+        logger.warning("fast deploy over HTTP: metadata echo to %s failed", frame.frame_host, exc_info=True)
+    return payload
+
+
 def _split_adopt_address(value: str, default_port: int) -> tuple[str, int]:
     """"10.0.0.5", "10.0.0.5:9000", "http://frame.local:8787/" or "[::1]:8787"
     → (host, port). People type what their browser shows them, and the

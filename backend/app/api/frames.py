@@ -113,6 +113,7 @@ from app.utils.frame_http import (
 from app.utils import embedded_assets, virtual_assets
 from app.api.frame_sync import (
     _frame_admin_session_headers,
+    frame_has_shell_access,
     adopt_standalone_frame,
     apply_frame_sync,
     get_frame_sync_status,
@@ -3402,22 +3403,6 @@ async def api_frame_embedded_firmware_ota(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
 
     return {"message": "Firmware update requested", "device": device_payload}
-
-
-def frame_has_shell_access(frame: Frame) -> bool:
-    """Whether this backend has any way onto the frame besides its admin HTTP
-    API. A generic Buildroot card adopted over that API ships no FrameOS
-    Remote and accepts root SSH only with keys or a password installed from
-    the boot partition — so for it the admin login is THE way in, and the
-    SSH/Remote-based deploy plan cannot even connect (2026-09-07)."""
-    if (frame.mode or "rpios") != "buildroot":
-        return True
-    agent = frame.agent or {}
-    if agent.get("agentEnabled") and agent.get("agentRunCommands"):
-        return True
-    if (frame.ssh_pass or "").strip():
-        return True
-    return bool(frame.ssh_keys)
 
 
 async def _relay_device_admin(

@@ -45,6 +45,34 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | No
             await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", "fast"))
         return
 
+    # A frame this backend only reaches over its admin API (an adopted generic
+    # Buildroot card: no Remote, no SSH): the fast deploy IS that API — one
+    # push of scenes and settings with a runtime reload. SSH would only fail.
+    from app.api.frame_sync import frame_has_shell_access, push_backend_state_to_device
+
+    if not frame_has_shell_access(frame):
+        from app.utils.frame_http import _fetch_frame_http_bytes
+
+        await register_active_deploy_job(redis, id, job_id)
+        try:
+            if task_id:
+                await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "started", "fast"))
+            await log(db, redis, id, "stdout",
+                      f"No shell on this frame: pushing scenes and settings over its admin API at {frame.frame_host}")
+            await push_backend_state_to_device(frame, db, redis, _fetch_frame_http_bytes)
+            await log(db, redis, id, "stdout", "Frame accepted the deploy and reloaded")
+            if task_id:
+                await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", "fast"))
+        except Exception as exc:
+            detail = getattr(exc, "detail", None) or str(exc)
+            if task_id:
+                await log(db, redis, id, "stderr", deploy_task_log_line(task_id, "failed", str(detail)))
+            await log(db, redis, id, "stderr", str(detail))
+            raise
+        finally:
+            await clear_active_deploy_job(redis, id, job_id)
+        return
+
     deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
     workflow = FrameDeployWorkflow(
         db=db,

@@ -3561,6 +3561,39 @@ async def test_api_frame_device_upgrade_relays_the_frames_own_upgrade(async_clie
 
 
 @pytest.mark.asyncio
+async def test_push_backend_state_to_device_is_the_http_fast_deploy(async_client, db, redis):
+    from app.api.frame_sync import push_backend_state_to_device
+
+    payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
+    posted = []
+    mock = _adopt_mock_fetch(payload, posted)
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock)):
+        adopted = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    assert adopted.status_code == 200, adopted.text
+    db.expire_all()
+    frame = db.get(Frame, adopted.json()['frame']['id'])
+    frame.name = 'Hallway'
+    frame.scenes = [{'id': 'scene-2', 'name': 'Edited on the backend', 'nodes': [], 'edges': []}]
+    frame.last_successful_deploy = None
+    db.commit()
+
+    posted.clear()
+    pushed = await push_backend_state_to_device(frame, db, redis, mock)
+    assert pushed['name'] == 'Hallway'
+    assert pushed['server_host'] == 'backend.local'
+    assert [scene['id'] for scene in pushed['scenes']] == ['scene-2']
+    assert pushed['frame_admin_auth'] == {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    assert 'frame_host' not in pushed and 'ssh_pass' not in pushed
+    # One POST with a reload, then the metadata echo.
+    assert posted[0]['name'] == 'Hallway' and 'skip_runtime_reload' not in posted[0]
+    assert posted[-1]['frame_sync_mark_deployed'] is True
+    db.expire_all()
+    frame = db.get(Frame, frame.id)
+    assert frame.last_successful_deploy['name'] == 'Hallway'
+    assert frame.status == 'ready'
+
+
+@pytest.mark.asyncio
 async def test_api_frame_adopt_validates_input(async_client, db, redis):
     response = await async_client.post(
         '/api/frames/adopt', json=_adopt_request_body(admin_username='  ')
