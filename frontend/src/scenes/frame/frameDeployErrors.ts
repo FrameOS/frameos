@@ -26,5 +26,5 @@ export function isFrameConnectionError(detail: string | null | undefined): boole
 
 export function getDeployPlanErrorMessage(payload: unknown): string {
   const detail = getResponseDetail(payload)
-  return isFrameConnectionError(detail) ? 'Failed to conennect to frame' : detail || 'Failed to load deploy plans'
+  return isFrameConnectionError(detail) ? 'Failed to connect to frame' : detail || 'Failed to load deploy plans'
 }
