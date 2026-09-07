@@ -60,6 +60,17 @@ empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.
   credential push, frame keeps rendering afterwards. Unit-tested (107 pass)
   but never run against real hardware.
 
+- [ ] **Shell-less frame from the deploy drawer (2026-09-07, main after
+  2026.9.10):** on the adopted generic card (frame 67 on the local backend,
+  no Remote, no SSH) open Deploy → after "Failed to connect to frame" the
+  drawer shows "No shell on this frame" with Check for updates / Update
+  FrameOS. Check: "Check for updates" reports the frame's version and the
+  latest for its board; Frame settings show the admin-login switch disabled
+  with the reason and refuse a blank password; once a newer release exists,
+  "Update FrameOS" runs the frame's own signed upgrade (status polled to
+  `success` / `reboot_required`) and the frame comes back on the new
+  version. Scenes and settings still push through the sync panel.
+
 ### ESP32 bench
 
 - [ ] **Layout-matched release image (#442; release 2026.9.2 carries the

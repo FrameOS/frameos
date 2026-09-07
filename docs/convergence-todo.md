@@ -10,9 +10,18 @@ the work that makes the architecture smaller or decided.*
 
 ## Standing decisions (context, not work)
 
-- Backend (Python, self-hosted, SSH/terminal/Remote) and cloud (TS,
-  hosted) are **two products**. Implementation convergence, SSH-in-cloud,
-  retiring `backend/`: all parked, revisited after item 1 lands.
+- **The backend converges onto the cloud's model** (decided 2026-09-07,
+  after the first real adoption of a generic Buildroot card into a
+  self-hosted backend). A frame gets one "server to connect to" — a
+  self-hosted backend or FrameOS Cloud — and both speak the same
+  provider protocol: outbound-only management WebSocket, the limited verb
+  set, the same enrollment. The backend's unique parts (SSH deploys of
+  unsigned builds, the terminal, FrameOS Remote's shell) are deprecated
+  as the provider path covers their real uses; the end state replaces
+  `backend/` with a self-hostable build of the cloud. Backports the other
+  way stay possible — SSH access as an opt-in in the cloud is the obvious
+  candidate. Item 7 below is the staged work; "two products" is no longer
+  the standing decision.
 - Compiled scenes are **deprecated** (2026-08-30): no editor action
   produces Nim, every surface warns, the converter is live
   (scenes.frameos.net/nim-converter, editor button, MCP `scene_convert`,
@@ -190,17 +199,64 @@ is *not* pinned elsewhere it already matters:
   contract entry + fixtures + both walkers in one PR, and any helper
   that can live in a generated table (not hand C and hand Nim) does.
 
+## 7. The backend becomes a provider (the cloud model)
+
+What exists: the runtime's in-binary cloud client (`hub_client.nim`,
+`fos_cloud.c`) is already the "remote lite" — outbound-only, enum verbs,
+no shell, signed self-upgrade on a nudge, scenes/settings/schedule/assets/
+logs/metrics/reboot/restart — with the contract in `docs/cloud-frames.md`
+and fixtures every device walker runs. The privileged door does the
+root-only work. What is missing is the provider side on the self-hosted
+backend: it manages Buildroot frames over SSH and the Remote's `shell`,
+which is why backend-personalized images still run as root and why an
+adopted generic card (no Remote, no SSH) could not be deployed to at all.
+
+- [x] Stage 0 (2026-09-07): a frame the backend only reaches over its
+  admin API gets what that API allows — scenes and settings through the
+  sync path, "Check for updates / Update FrameOS" through the device's own
+  signed self-upgrade (`/api/frames/{id}/device/upgrade`), the admin login
+  locked as the one way in. Adoption follows the device's mode, board,
+  TLS state and port instead of the backend's rpios/https defaults.
+- [ ] Stage 1: the backend hosts the management WebSocket. Either port
+  `cloud/apps/frame-hub` (~3.7k lines of TS: session auth, protocol,
+  queue, rate limits) into the FastAPI app or run the hub as a sidecar
+  the add-on ships; either way it passes the contract fixtures as the
+  fourth walker. Exit: a cloud-enrolled frame pointed at a backend URL
+  behaves identically.
+- [ ] Stage 2: adoption is enrollment. The device mints its keypair, the
+  backend mints the token, the write-back sets the provider URL — the
+  same write-back adoption does today with `serverHost`. The setup portal,
+  SD-image personalization and the flasher get one "server to connect to"
+  field; the `controlMode` cloud/backend/none choice goes.
+- [ ] Stage 3: the deploy drawer for Buildroot frames is provider verbs
+  only (`set_scenes`, `set_settings`, `set_schedule`, assets,
+  `notify_update_available`); backend-managed frames stay on the
+  unprivileged unit; backend-personalized images stop shipping the
+  Remote (`docs/buildroot-privileges.md` §4 "backend-personalized images
+  stay root" ends here).
+- [ ] Stage 4: deprecate the Remote and the backend-only surfaces with the
+  legacy source-build path (item 1): unsigned custom builds over SSH, the
+  terminal, `shell`. Before each goes, decide whether the cloud wants it
+  back as an opt-in (SSH access first; the HA add-on packaging and
+  virtual frames are the other candidates).
+- [ ] Stage 5: `backend/` is replaced by a self-hostable build of the
+  cloud; the HA add-on ships that. `docs/api-triality.md`'s three planes
+  become one protocol on two hosts.
+- Idea to evaluate on the way (2026-09-07): the backend's per-frame UI is
+  the frame's own admin SPA; for a shell-less frame, proxying the frame's
+  admin page through the backend may replace most per-frame backend
+  routes rather than re-implementing them.
+
 ## Parked — decided later, deliberately
 
 Roughly in the order they would come back, all after item 1:
 
-- **Implementation convergence** (cloud absorbs adoption, canonical
-  `/api/frames/:id/*` routes everywhere, settings parity); the contract
-  stays the seam. The four control planes (155 backend routes, 74 Pi
-  paths, 27 ESP32 paths, 120 cloud routes; `docs/api-triality.md`) shrink
-  through it, not through a rewrite.
-- **SSH / terminal / Remote in the cloud** — stays backend-only.
-- **Retiring `backend/`** / hosted backends / the HA add-on's future.
+- **Canonical `/api/frames/:id/*` routes everywhere / settings parity** —
+  the contract stays the seam; the four control planes (155 backend
+  routes, 74 Pi paths, 27 ESP32 paths, 120 cloud routes;
+  `docs/api-triality.md`) shrink through item 7, not through a rewrite.
+- **SSH / terminal in the cloud** — a backport candidate once item 7
+  stage 4 retires them from the backend (opt-in, never a default verb).
 - **Porting the Nim built-ins wholesale** — item 5 is the demand-driven
   version; wholesale stays parked.
 - **The cloud's scope** (is this a canvas or a company) — restated by the

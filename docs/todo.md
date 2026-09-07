@@ -23,14 +23,19 @@ not a priority. The "Both control planes" rule below stands.
 
 Two rules that shape most entries:
 
-- **Both control planes.** FrameOS frames are managed either by a self-hosted
-  backend or by FrameOS Cloud. A frame-facing feature lands on both unless it
-  is explicitly one-sided. Doctrine in `docs/cloud-frames.md`, parity matrix in
-  `docs/api-triality.md`.
+- **Both control planes — converging into one protocol.** FrameOS frames are
+  managed either by a self-hosted backend or by FrameOS Cloud. A frame-facing
+  feature lands on both unless it is explicitly one-sided. Doctrine in
+  `docs/cloud-frames.md`, parity matrix in `docs/api-triality.md`. Since
+  2026-09-07 the direction is that the backend becomes a provider speaking
+  the cloud's protocol and the frame sees one "server to connect to"
+  (`docs/convergence-todo.md` item 7); until that lands, "both" still means
+  both.
 - **The cloud has no shell verbs, on purpose.** Terminal, ping and debug panels
   are backend-only by design, not by omission. A stolen cloud account must not
   become a shell on someone's LAN. `docs/buildroot-privileges.md` audits how
-  close that is to true.
+  close that is to true. The backend's shell path (FrameOS Remote, SSH deploys)
+  is now on the way out for the same reason — convergence item 7, stage 4.
 
 ---
 
@@ -148,9 +153,13 @@ its PTY verbs everywhere. Left:
 - **Backend-personalized Buildroot images stay root**, and the remote keeps
   `shell`: the self-hosted deploy path (`backend/app/tasks/_frame_deployer.py`,
   `deploy_remote.py`, `restart_frame.py`, the asset manager) is built out of
-  it. Retiring `shell` means structured deploy verbs on the remote (`stage
-  release`, `activate`, `restart`) plus the backend `chown`ing what it writes,
-  after which those images can use the same unit and door.
+  it. The way out is no longer structured verbs on the Remote but the
+  backend speaking the provider protocol the in-binary client already
+  implements (`docs/convergence-todo.md` item 7): once deploys are
+  `set_scenes` / `set_settings` / `notify_update_available`, those images
+  use the same unprivileged unit and door as generic ones and the Remote
+  retires. Meanwhile a frame with no shell at all (an adopted generic card)
+  already deploys that way from the drawer (2026-09-07).
 - **Tighten the unit further once hardware says the groups work:**
   `DevicePolicy=closed` with an explicit `DeviceAllow` list, and
   `ProtectKernelTunables` with the two sysfs knobs re-exposed.
