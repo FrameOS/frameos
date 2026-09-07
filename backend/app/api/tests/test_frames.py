@@ -3354,6 +3354,11 @@ async def test_api_frame_adopt_imports_config_scenes_and_writes_back_credentials
     assert frame.frame_access == 'private'
     # The admin credentials the caller supplied are stored for future syncs.
     assert frame.frame_admin_auth == {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    # The device serves plain HTTP: the row must not point the write-back at
+    # the TLS proxy new_frame enables by default.
+    assert frame.https_proxy['enable'] is False
+    assert frame.frame_port == 8787
+    assert frame.ssh_port == 22
     assert login_calls[0] == {'username': 'admin', 'password': 'secret'}
     # Backend-side identity was minted, not copied from the (empty) device fields.
     assert frame.server_host == 'backend.local'
@@ -3456,6 +3461,23 @@ async def test_api_frame_adopt_turns_unexpected_failures_into_a_502_and_rolls_ba
     assert response.status_code == 502
     assert 'name resolution exploded' in response.json()['detail']
     assert db.query(Frame).count() == frames_before
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_keeps_the_web_port_and_follows_the_device_tls(async_client, db, redis):
+    posted = []
+    payload = {**_standalone_device_payload(), 'frame_port': 9000,
+               'https_proxy': {'enable': True, 'port': 8444, 'expose_only_port': True}}
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=_adopt_mock_fetch(payload, posted))):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body(frame_port=9000))
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+    assert frame.frame_host == '10.0.0.42'
+    assert frame.frame_port == 9000
+    assert frame.ssh_port == 22
+    assert frame.https_proxy['enable'] is True
+    assert frame.https_proxy['port'] == 8444
 
 
 @pytest.mark.asyncio

@@ -1328,17 +1328,18 @@ async def adopt_standalone_frame(
             detail=f"Could not read the frame at {host}:{data.frame_port}: {exc}",
         ) from exc
 
-    frame_host = host if data.frame_port in (0, 8787) else f"{host}:{data.frame_port}"
+    # new_frame reads "host:port" as an SSH port; the web port is its own column.
     frame = await new_frame(
         db,
         redis,
         data.name or remote_frame.get("name") or host,
-        frame_host,
+        host,
         f"{server_host}:{data.server_port}",
         device=remote_frame.get("device"),
         interval=remote_frame.get("interval"),
         project_id=project_id,
     )
+    frame.frame_port = int(data.frame_port or 8787)
 
     try:
         frame_import = _sync_frame_json_payload(remote_frame)
@@ -1366,6 +1367,20 @@ async def adopt_standalone_frame(
                 ensure_buildroot_frame_defaults(frame, ADOPT_DEFAULT_BUILDROOT_PLATFORM)
         elif remote_mode == "rpios":
             frame.mode = "rpios"
+
+        # The device says whether it serves TLS. new_frame mints a pair and
+        # enables the proxy on every new row, and a sync never imports
+        # "disabled" (the backend owns the pair) — so a standalone frame on
+        # plain HTTP got its credentials pushed to https://host:8443 and every
+        # adoption from a fresh backend died there (2026-09-07, HA add-on).
+        # The minted pair stays on the row for the day the proxy is enabled.
+        device_https = remote_frame.get("https_proxy")
+        device_https = device_https if isinstance(device_https, dict) else {}
+        https_proxy = normalize_https_proxy(frame.https_proxy)
+        https_proxy["enable"] = bool(device_https.get("enable"))
+        if https_proxy["enable"] and device_https.get("port"):
+            https_proxy["port"] = int(device_https["port"])
+        frame.https_proxy = https_proxy
 
         # Beyond the sync pull list, adoption takes over the device's web
         # access key (an admin session reads it unredacted, so the backend

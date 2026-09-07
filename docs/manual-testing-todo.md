@@ -42,7 +42,20 @@ empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.
 
 ### Backend (self-hosted) bench
 
-- [ ] **Adopt a running standalone frame (#380):** point the backend at a
+- [ ] **Adopt a running standalone frame (#380):** *(2026-09-07, first real
+  run from the Home Assistant add-on against a 2026.9.10 Zero 2 W: "Internal
+  server error" with the .local name AND with the IP. Reproduced in the
+  published 2026.9.10 image against a stub of the frame's real payload:
+  the read half works, then the credential write-back goes to
+  `https://<ip>:8443` — `new_frame` mints a TLS pair and enables the proxy on
+  every row and a sync never imports "disabled", while a standalone frame
+  runs plain HTTP. Fixed on main 2026-09-07 (adoption follows the device's
+  https_proxy and web port, carries `mode` + Buildroot platform, and any
+  failure answers a 502 with its cause and rolls the row back); the 500
+  itself (instead of the 502 the image gives here) is still unexplained —
+  the add-on log has the traceback. Re-run after the next release; the
+  .local name will not resolve inside the add-on container, use the IP.)*
+  point the backend at a
   real standalone Pi → full adopt: scene imports, API-key takeover,
   credential push, frame keeps rendering afterwards. Unit-tested (107 pass)
   but never run against real hardware.
