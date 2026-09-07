@@ -20,7 +20,12 @@ export function isFrameConnectionError(detail: string | null | undefined): boole
     normalizedDetail.includes('name or service not known') ||
     normalizedDetail.includes('temporary failure in name resolution') ||
     normalizedDetail.includes('timeout to http') ||
-    normalizedDetail.includes('timed out')
+    normalizedDetail.includes('timed out') ||
+    // The message this module itself normalizes to (a stored deployPlansError
+    // is that text, not the raw detail), and SSH refusing the backend's key:
+    // for a frame the backend has no shell on, both mean the same thing.
+    normalizedDetail.includes('failed to connect to frame') ||
+    normalizedDetail.includes('permission denied')
   )
 }
 
