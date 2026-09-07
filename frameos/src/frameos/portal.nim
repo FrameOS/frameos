@@ -13,6 +13,8 @@ import frameos/cloud/enrollment
 import frameos/cloud/link_state
 import frameos/privileged
 import frameos/network_state
+from frameos/cloud/contract import isIanaZone
+from frameos/setup import setupTimezone
 import drivers/drivers as frameDrivers
 
 const
@@ -54,6 +56,8 @@ type
     serverHost*: string
     serverPort*: string
     hostname*: string
+    # IANA zone; empty keeps the frame's current zone.
+    timeZone*: string
     device*: string
     width*: int
     height*: int
@@ -871,6 +875,11 @@ proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig)
     serverHost: params.getOrDefault("serverHost", frameConfig.serverHost),
     serverPort: params.getOrDefault("serverPort", $(if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989)),
     hostname: params.getOrDefault("hostname", setupHostnameValue(frameConfig)),
+    timeZone: (block:
+      # Only an IANA-shaped name is ever written or handed to the root side;
+      # anything else keeps the zone the frame already has.
+      let requested = params.getOrDefault("timeZone", "").strip()
+      if requested.len > 0 and isIanaZone(requested): requested else: frameConfig.timeZone),
     device: device,
     width: parseIntParam(params.getOrDefault("width", $frameConfig.width), frameConfig.width),
     height: parseIntParam(params.getOrDefault("height", $frameConfig.height), frameConfig.height),
@@ -968,6 +977,9 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
 
     data["frameHost"] = %frameHost
     frameConfig.frameHost = frameHost
+    if options.timeZone.strip().len > 0 and isIanaZone(options.timeZone.strip()):
+      data["timeZone"] = %options.timeZone.strip()
+      frameConfig.timeZone = options.timeZone.strip()
     if data{"name"}.getStr("").strip().len == 0 or data{"name"}.getStr("") == oldFrameHost:
       data["name"] = %hostnameBase
       frameConfig.name = hostnameBase
@@ -1551,6 +1563,13 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
 
   stopAp(frameOS) # close hotspot before connecting
+  # The system zone follows the form (clocks on the panel were all UTC after
+  # a hotspot setup, 2026-09-07): the frame's own copy is already in
+  # frameConfig, this links /etc/localtime through the door as root.
+  if options.timeZone.strip().len > 0:
+    {.cast(gcsafe).}:
+      discard setupTimezone(options.timeZone.strip()) # logs its own outcome
+    pLog("portal:setup:timezone", %*{"zone": options.timeZone.strip()})
   # The "Saved!" page polls /setup/status and only moves on once this is
   # `connected`: between the hotspot going down and the join landing the
   # phone may still reach the old 10.42.0.1 address for a moment.
@@ -1793,6 +1812,9 @@ summary{font-size:.875rem;font-weight:600;cursor:pointer;margin-bottom:1rem}
 .inline{display:flex;align-items:center;margin:.5rem 0 1rem}
 .muted{font-size:.8125rem;color:#9ca3af;margin-top:-.5rem}
 .secondary{width:auto;display:inline-block;background:#374151;padding:.5rem .75rem;margin-top:.5rem}
+.reveal{margin:-.5rem 0 1rem}
+.after-field{margin-top:-.5rem}
+.muted.after-button{margin-top:.75rem}
 .secondary:hover{background:#4b5563}
 .steps{margin:.5rem 0 1rem;padding-left:1.25rem}
 .hidden{display:none}
@@ -1871,6 +1893,17 @@ proc setupHtml*(frameOS: FrameOS): string =
     else:
       currentOption.partialMaxRefreshesBeforeFull
 
+  # The post-setup URL's pieces around the hostname, so the hint below the
+  # field is a real link that follows what is typed.
+  let linkScheme = if frameConfig.httpsProxy != nil and frameConfig.httpsProxy.enable: "https" else: "http"
+  let linkPort =
+    if linkScheme == "https":
+      (if frameConfig.httpsProxy != nil and frameConfig.httpsProxy.port > 0: frameConfig.httpsProxy.port else: 443)
+    else: framePort
+  let hostnameLinkPrefix = linkScheme & "://"
+  let hostnameLinkSuffix = ".local" &
+    (if (linkScheme == "http" and linkPort == 80) or (linkScheme == "https" and linkPort == 443): "" else: ":" & $linkPort) & "/"
+  let currentTimeZone = if frameConfig.timeZone.strip().len > 0: frameConfig.timeZone.strip() else: "UTC"
   let body = fmt"""
 <h1>Set up your Frame</h1>
 <p>If the connection fails, reconnect to this access point and try again.</p>
@@ -1884,7 +1917,7 @@ proc setupHtml*(frameOS: FrameOS): string =
       </select>
     </label>
     <label>Password<input id="wifi-password" type="password" name="password" autocomplete="off"></label>
-    <label class="inline"><input type="checkbox" data-reveal="wifi-password">Show password</label>
+    <label class="inline reveal"><input type="checkbox" data-reveal="wifi-password">Show password</label>
   </details>
 
   <details open>
@@ -1893,8 +1926,14 @@ proc setupHtml*(frameOS: FrameOS): string =
       <input id="hostname" type="text" name="hostname"
              value="{htmlEscape(setupHostnameValue(frameConfig))}" required>
     </label>
-    <button class="secondary" type="button" id="random-hostname">Randomize</button>
-    <p class="muted">After reconnecting, open http://&lt;hostname&gt;.local:{framePort}/.</p>
+    <button class="secondary after-field" type="button" id="random-hostname">Randomize</button>
+    <p class="muted after-button">After reconnecting, open <a id="hostname-link" href="{htmlEscape(hostnameLinkPrefix)}{htmlEscape(setupHostnameValue(frameConfig))}{htmlEscape(hostnameLinkSuffix)}">{htmlEscape(hostnameLinkPrefix)}{htmlEscape(setupHostnameValue(frameConfig))}{htmlEscape(hostnameLinkSuffix)}</a>.</p>
+    <label>Time zone
+      <select id="timezone" name="timeZone" data-current="{htmlEscape(currentTimeZone)}">
+        <option value="{htmlEscape(currentTimeZone)}" selected>{htmlEscape(currentTimeZone)}</option>
+      </select>
+    </label>
+    <p class="muted">Clocks and schedules on the frame follow this zone.</p>
   </details>
 
   <details open>
@@ -1952,7 +1991,7 @@ proc setupHtml*(frameOS: FrameOS): string =
              data-existing="{adminPassExistingAttr}"
              placeholder="{htmlEscape(adminPassPlaceholder)}">
     </label>
-    <label class="inline"><input type="checkbox" data-reveal="admin-pass">Show password</label>
+    <label class="inline reveal"><input type="checkbox" data-reveal="admin-pass">Show password</label>
   </details>
 
   <details{serverDetailsOpen}>
@@ -2113,6 +2152,43 @@ deviceSel.addEventListener('change', () => updateDriverUi(true));
 adminEnabled.addEventListener('change', updateAdminUi);
 controlModeSel.addEventListener('change', updateControlUi);
 document.getElementById('random-hostname').addEventListener('click', randomHostname);
+const hostnameLink = document.getElementById('hostname-link');
+const hostnameLinkPrefix = __HOSTNAME_LINK_PREFIX__;
+const hostnameLinkSuffix = __HOSTNAME_LINK_SUFFIX__;
+function updateHostnameLink() {
+  const base = (document.getElementById('hostname').value || '').trim().toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'frame';
+  const url = hostnameLinkPrefix + base + hostnameLinkSuffix;
+  hostnameLink.href = url;
+  hostnameLink.textContent = url;
+}
+document.getElementById('hostname').addEventListener('input', updateHostnameLink);
+document.getElementById('random-hostname').addEventListener('click', updateHostnameLink);
+updateHostnameLink();
+// Time zones: the browser knows the IANA list and its own zone; a frame that
+// still says UTC is almost certainly one nobody has set yet, so the phone's
+// zone is offered as the default there.
+(function () {
+  const select = document.getElementById('timezone');
+  const current = select.dataset.current || 'UTC';
+  let zones = [];
+  try { zones = Intl.supportedValuesOf('timeZone'); } catch (e) { zones = []; }
+  let guess = '';
+  try { guess = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { guess = ''; }
+  const chosen = (current === 'UTC' || current === 'Etc/UTC') && guess ? guess : current;
+  const all = new Set(zones);
+  all.add('UTC');
+  if (current) all.add(current);
+  if (guess) all.add(guess);
+  select.innerHTML = '';
+  Array.from(all).sort().forEach(zone => {
+    const o = document.createElement('option');
+    o.value = zone;
+    o.textContent = zone;
+    if (zone === chosen) o.selected = true;
+    select.appendChild(o);
+  });
+})();
 document.querySelectorAll('input[data-reveal]').forEach(box => {
   box.addEventListener('change', () => {
     const field = document.getElementById(box.dataset.reveal);
@@ -2122,7 +2198,10 @@ document.querySelectorAll('input[data-reveal]').forEach(box => {
 updateDriverUi(false);
 updateAdminUi();
 updateControlUi();
-</script>""".replace("__DISPLAY_META__", $displayOptionsJson(options))
+</script>"""
+    .replace("__DISPLAY_META__", $displayOptionsJson(options))
+    .replace("__HOSTNAME_LINK_PREFIX__", $(%hostnameLinkPrefix))
+    .replace("__HOSTNAME_LINK_SUFFIX__", $(%hostnameLinkSuffix))
   layout(body & script)
 
 proc postSetupFrameUrl*(frameOS: FrameOS): string =

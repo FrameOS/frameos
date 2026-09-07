@@ -229,6 +229,27 @@ suite "portal network orchestration":
     rememberError("")
     resetNetworkCheckForTest()
 
+  test "setupHtml links the post-setup URL and offers a time zone field":
+    let frame = makeFrameOS()
+    frame.frameConfig.frameHost = "kitchen.local"
+    frame.frameConfig.timeZone = "Europe/Tallinn"
+    let html = setupHtml(frame)
+    check html.contains("""<a id="hostname-link" href="http://kitchen.local:8787/">http://kitchen.local:8787/</a>""")
+    check html.contains("""const hostnameLinkPrefix = "http://";""")
+    check html.contains("""const hostnameLinkSuffix = ".local:8787/";""")
+    check html.contains("""<select id="timezone" name="timeZone" data-current="Europe/Tallinn">""")
+    check html.contains("Intl.supportedValuesOf('timeZone')")
+    frame.frameConfig.httpsProxy = HttpsProxyConfig(enable: true, port: 443, exposeOnlyPort: true)
+    check setupHtml(frame).contains("""const hostnameLinkSuffix = ".local/";""")
+
+  test "the time zone from the form is validated, saved and kept in memory":
+    let frame = makeFrameOS()
+    frame.frameConfig.timeZone = "UTC"
+    check parseSetupOptions({"ssid": "x", "timeZone": "Europe/Tallinn"}.toTable, frame.frameConfig).timeZone ==
+      "Europe/Tallinn"
+    check parseSetupOptions({"ssid": "x", "timeZone": "../../etc/shadow"}.toTable, frame.frameConfig).timeZone == "UTC"
+    check parseSetupOptions({"ssid": "x"}.toTable, frame.frameConfig).timeZone == "UTC"
+
   test "setupHtml offers a show-password toggle for both password fields":
     let html = setupHtml(makeFrameOS())
     check html.contains("""<input type="checkbox" data-reveal="wifi-password">Show password""")
@@ -728,10 +749,13 @@ suite "portal setup control mode":
       "controlMode": "cloud",
       "cloudUrl": "https://cloud.example.com",
       "claimToken": "FRCT-typed",
+      "timeZone": "Europe/Tallinn",
     }.toTable
     let options = parseSetupOptions(params, frame.frameConfig)
     check persistPortalSetup(frame, options)
     let saved = parseFile(setupDir / "frame.json")
+    check saved{"timeZone"}.getStr("missing") == "Europe/Tallinn"
+    check frame.frameConfig.timeZone == "Europe/Tallinn"
     check saved{"serverHost"}.getStr("missing") == ""
     check frame.frameConfig.serverHost == ""
     let pending = parseFile(setupDir / "pending.json")

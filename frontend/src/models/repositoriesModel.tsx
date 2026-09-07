@@ -129,9 +129,10 @@ export const repositoriesModel = kea<repositoriesModelType>([
             const data = asRepositoryList(await response.json())
             if (inFrameAdminMode) {
               // On the frame /api/repositories is the cloud scene store the
-              // frame fetches from its provider (empty while offline); it
-              // goes first, the bundled samples and galleries stay behind it.
-              return [...data, ...systemData]
+              // frame fetches from its provider. The bundled samples and
+              // galleries are a subset of it, so they only show while the
+              // store is unreachable (offline frame, no provider).
+              return data.length > 0 ? data : systemData
             }
             return [...systemData, ...data]
           } catch (error) {

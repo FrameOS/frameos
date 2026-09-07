@@ -20,7 +20,13 @@ empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.
   a root `frameos.service`, so check the unit's `User=` before and after.
 
 - [ ] **Setup portal round two (2026-09-06 Zero 2 W first boot, fixed on main
-  after 2026.9.9, needs the next image):** the Wi-Fi list no longer offers
+  after 2026.9.9; the 2026-09-07 hotspot run on 2026.9.10 added: password
+  field / "Show password" box and hostname field / Randomize sat too far
+  apart, the hint below Randomize overlapped the button, the hint's URL is
+  now a live link with the typed hostname, and a Time zone select (browser
+  IANA list, phone's zone offered when the frame still says UTC) is saved
+  to frame.json and applied through the door — clocks were all UTC after
+  setup; all on main after 2026.9.10):** the Wi-Fi list no longer offers
   the frame's own hotspot SSID; both password fields have a "Show password"
   box; the "Saved!" page names the network it is joining and polls
   `<frameUrl>setup/status` (CORS `*`, unauthenticated) until the frame
