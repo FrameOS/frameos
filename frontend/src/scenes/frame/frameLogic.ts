@@ -73,6 +73,7 @@ import {
   type SummaryItem,
   buildDeployPlanRequestBody,
   buildDeployRecommendation,
+  frameAdminLoginIsOnlyAccess,
   buildFastDeployPlanSummary,
   buildFullDeployPlanSummary,
   buildInferredFullDeployPlanSummary,
@@ -839,6 +840,20 @@ function deployChangeDetails(
   return remoteUpgrade ? [...details, remoteUpgrade] : details
 }
 
+// Backend-side fields with no meaning on a frame the backend has no shell on.
+const SHELL_LESS_BACKEND_ONLY_KEYS = new Set<keyof FrameType>([
+  'mode',
+  'agent',
+  'buildroot',
+  'rpios',
+  'ssh_user',
+  'ssh_pass',
+  'ssh_port',
+  'ssh_keys',
+  'frame_host',
+  'frame_port',
+])
+
 function computeChangeDetails(
   previous: Partial<FrameType> | null | undefined,
   next: Partial<FrameType> | null | undefined,
@@ -847,16 +862,28 @@ function computeChangeDetails(
 ): ChangeDetail[] {
   const recompileFields = new Set(getRecompileFields(mode).filter((key) => key !== 'scenes'))
   const details: ChangeDetail[] = []
+  // A frame the backend only reaches over its admin API: the backend-side
+  // fields (how the backend would SSH in, the Remote, the image recipe) never
+  // reach the device, nothing here reinstalls FrameOS, and the frame's own
+  // version is its own business.
+  const shellLess = frameAdminLoginIsOnlyAccess(next)
+  if (shellLess) {
+    includeFrameosVersion = false
+  }
   const previousFrameosVersion = includeFrameosVersion ? deployedFrameosVersion(previous) : null
 
   for (const key of frameDiffKeys().filter((k) => k !== 'scenes')) {
+    if (shellLess && SHELL_LESS_BACKEND_ONLY_KEYS.has(key)) {
+      continue
+    }
     if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: frameChangeDetailLabel(key, previous?.[key], next?.[key]),
         requiresFullDeploy:
-          key === 'mode' ||
-          recompileFields.has(key) ||
-          (includeFrameosVersion && frameKeyRequiresVersionUpgrade(key, previousFrameosVersion)),
+          !shellLess &&
+          (key === 'mode' ||
+            recompileFields.has(key) ||
+            (includeFrameosVersion && frameKeyRequiresVersionUpgrade(key, previousFrameosVersion))),
       })
     }
   }

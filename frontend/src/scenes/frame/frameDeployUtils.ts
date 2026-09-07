@@ -662,6 +662,17 @@ export function buildDeployRecommendation(
     .filter((change) => change.requiresFullDeploy && !change.frameosVersionChange)
     .map((change) => change.label)
 
+  if (frameAdminLoginIsOnlyAccess(frame)) {
+    // Nothing here reinstalls FrameOS: the admin API carries scenes and
+    // settings, the frame upgrades itself.
+    return {
+      mode: 'fast',
+      title: 'Suggested: fast deploy',
+      description:
+        "No shell on this frame: scenes and settings go over its admin API and the runtime reloads. FrameOS itself updates through the frame's own signed upgrade.",
+    }
+  }
+
   if (!hasPreviousDeploy) {
     return {
       mode: 'full',
