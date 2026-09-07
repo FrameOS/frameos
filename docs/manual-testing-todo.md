@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-06 (setup portal round two added), after release 2026.9.9.
+empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.9.10), after release 2026.9.10.
 
 ## Open
 
@@ -33,18 +33,6 @@ empty. Last refreshed 2026-09-06 (setup portal round two added), after release 2
   resolve `.local`, so the auto-move is an iOS claim only until someone
   with an Android tries it). The captive-portal popup itself is NOT in
   yet — `docs/todo.md`, "Setup hotspot: captive portal".
-
-- [ ] **On-device "Add scene" lists the cloud scene store (2026-09-07, needs
-  the next release):** the frame's `/api/repositories` is now the store
-  index of the provider it is linked to (default cloud.frameos.net,
-  `/api/store/<version>/repository.json`, cached 5 min) and the drawer
-  lists it FIRST, samples and galleries after it. Check: the store shows
-  with covers, installing a store scene works (scenes come through the
-  frame's `/api/repositories/cloud-store/scenes/<id>/scenes.json`), and with
-  the frame offline the drawer still shows the bundled samples. Also
-  re-check the two same-day fixes on this bench: add a scene + Save no
-  longer logs you out (blank secrets keep their stored value), and the
-  admin panel stays up through a long polling session (auth cache race).
 
 ### Backend (self-hosted) bench
 
@@ -137,6 +125,36 @@ empty. Last refreshed 2026-09-06 (setup portal round two added), after release 2
   2 h window is for device-link/scope approvals, not frame confirm.
 
 ### Pi / Buildroot bench — cloud-managed frames
+
+- [x] **On-device "Add scene" lists the cloud scene store + the two save/auth
+  fixes** — closed 2026-09-07 on a fresh standalone 2026.9.10 Zero 2 W
+  (frame-b6232a, framebuffer 1080p), over HTTP with the admin login:
+  `/api/repositories` answered one entry, `system-cloud-store`, url
+  `https://cloud.frameos.net/api/store/2026.9.10/repository.json`, 33
+  templates, scenes rewritten to `/api/repositories/cloud-store/scenes/<id>/
+  scenes.json` (a fetch through the frame: 200, 2.2 KB in 5.8 s); samples
+  (22) and galleries (5) still listed behind it, and the frame already
+  carried store scenes installed from the drawer (Abstract Architecture,
+  Analog clock face, …). Auth cache: four parallel pollers × 150 requests
+  each on session / state / frame / image — 600 requests, zero non-200,
+  session still authenticated and `/admin` 200 afterwards (on 9.9 this
+  died in four minutes). Blank-secret save: `POST /api/frames/1` with
+  `frame_admin_auth.pass = ""` → 200, session intact, `/admin` 200, a fresh
+  login with the real password 200. **Found:** the GET afterwards showed
+  `pass` empty — the raw payload echo under `frameApi` is what GET prefers;
+  fixed on main 73d7bf51 (echo carries the merged secrets), needs the next
+  release; the frame's echo was repaired by re-posting the real password.
+  Original text: the frame's `/api/repositories` is now the store
+  index of the provider it is linked to (default cloud.frameos.net,
+  `/api/store/<version>/repository.json`, cached 5 min) and the drawer
+  lists it FIRST, samples and galleries after it. Check: the store shows
+  with covers, installing a store scene works (scenes come through the
+  frame's `/api/repositories/cloud-store/scenes/<id>/scenes.json`), and with
+  the frame offline the drawer still shows the bundled samples. Also
+  re-check the two same-day fixes on this bench: add a scene + Save no
+  longer logs you out (blank secrets keep their stored value), and the
+  admin panel stays up through a long polling session (auth cache race).
+
 
 - [x] **Auto-confirm enrollment (#382):** passed 2026-08-22 — a Pi Zero 2 W
   SD card (v2026.8.33, HDMI/framebuffer, WiFi + passwordless sudo) from
