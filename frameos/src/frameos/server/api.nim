@@ -18,6 +18,7 @@ import frameos/utils/image
 import frameos/utils/font
 import frameos/utils/show_if
 import frameos/utils/system
+from frameos/cloud/enrollment import detectBoard
 import frameos/config
 import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
@@ -766,6 +767,16 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   if result{"network"} != nil and result["network"].kind == JObject:
     # Provisioning detail, not a setting the form edits.
     result["network"].delete("networkBackend")
+  # A Buildroot frame names the board its image was built for, the way cloud
+  # enrollment does: a backend adopting a standalone card needs the platform
+  # to pick release images, and nothing else on the card records it.
+  if result{"mode"}.getStr("") == "buildroot":
+    var buildroot = objectNodeOrEmpty(result{"buildroot"})
+    if buildroot{"platform"}.getStr("").len == 0:
+      let board = detectBoard()
+      if board.len > 0:
+        buildroot["platform"] = %board
+    result["buildroot"] = buildroot
 
   result["id"] = %frameApiId()
   result["project_id"] = %0

@@ -3409,6 +3409,56 @@ async def test_api_frame_adopt_rolls_back_when_the_write_back_fails(async_client
 
 
 @pytest.mark.asyncio
+async def test_api_frame_adopt_carries_the_device_mode_and_buildroot_platform(async_client, db, redis):
+    payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-5'}}
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=_adopt_mock_fetch(payload, []))):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+    assert frame.mode == 'buildroot'
+    assert frame.buildroot['platform'] == 'raspberry-pi-5'
+    assert frame.ssh_user == 'root'
+    assert frame.assets_path == '/srv/assets'
+
+    # A card from before the device reported its board: the common image.
+    payload = {**_standalone_device_payload(), 'name': 'Older card', 'mode': 'buildroot', 'buildroot': {}}
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=_adopt_mock_fetch(payload, []))):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body(frame_host='10.0.0.43'))
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+    assert frame.mode == 'buildroot'
+    assert frame.buildroot['platform'] == 'raspberry-pi-64'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_turns_unexpected_failures_into_a_502_and_rolls_back(async_client, db, redis):
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        if method == 'POST':
+            raise RuntimeError('redis went away')
+        return 200, json.dumps({'frame': _standalone_device_payload()}).encode(), {'content-type': 'application/json'}
+
+    frames_before = db.query(Frame).count()
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    assert response.status_code == 502
+    assert 'redis went away' in response.json()['detail']
+    assert db.query(Frame).count() == frames_before
+
+    async def failing_read(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        raise RuntimeError('name resolution exploded')
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=failing_read)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    assert response.status_code == 502
+    assert 'name resolution exploded' in response.json()['detail']
+    assert db.query(Frame).count() == frames_before
+
+
+@pytest.mark.asyncio
 async def test_api_frame_adopt_validates_input(async_client, db, redis):
     response = await async_client.post(
         '/api/frames/adopt', json=_adopt_request_body(admin_username='  ')

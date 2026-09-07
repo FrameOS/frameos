@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import copy
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -1263,6 +1264,11 @@ async def _push_frame_sync_metadata(
 # the device, and the device's own view of them (empty, or a previous
 # backend's) must not clobber that.
 ADOPT_SKIPPED_SYNC_KEYS = ("server_host", "server_port", "server_send_logs")
+# A Buildroot device that predates reporting its board (< 2026.9.11) is most
+# likely the common 64-bit image; the platform is editable in frame settings.
+ADOPT_DEFAULT_BUILDROOT_PLATFORM = "raspberry-pi-64"
+
+logger = logging.getLogger(__name__)
 
 
 async def adopt_standalone_frame(
@@ -1311,7 +1317,16 @@ async def adopt_standalone_frame(
         frame_admin_auth=admin_auth,
         mode="rpios",
     )
-    remote_frame = await _load_live_frame_api_payload(probe, redis, fetch_frame_http_bytes)
+    try:
+        remote_frame = await _load_live_frame_api_payload(probe, redis, fetch_frame_http_bytes)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the cause is the answer here, not a bare 500
+        logger.exception("adopt: reading %s:%s failed", host, data.frame_port)
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Could not read the frame at {host}:{data.frame_port}: {exc}",
+        ) from exc
 
     frame_host = host if data.frame_port in (0, 8787) else f"{host}:{data.frame_port}"
     frame = await new_frame(
@@ -1336,6 +1351,21 @@ async def adopt_standalone_frame(
             _apply_sync_frame_update(frame, frame_import)
         except ValueError as exc:
             _bad_request(str(exc))
+
+        # `mode` is backend-owned in a sync, so the row was created as rpios;
+        # an adopted device says what it really is. A Buildroot card names its
+        # board (2026.9.11+); without it the common 64-bit image is assumed.
+        remote_mode = remote_frame.get("mode")
+        if remote_mode == "buildroot":
+            platform = str((remote_frame.get("buildroot") or {}).get("platform") or "").strip()
+            try:
+                ensure_buildroot_frame_defaults(frame, platform or ADOPT_DEFAULT_BUILDROOT_PLATFORM)
+            except ValueError:
+                logger.warning("adopt: %s reports unknown Buildroot platform %r, assuming %s",
+                               host, platform, ADOPT_DEFAULT_BUILDROOT_PLATFORM)
+                ensure_buildroot_frame_defaults(frame, ADOPT_DEFAULT_BUILDROOT_PLATFORM)
+        elif remote_mode == "rpios":
+            frame.mode = "rpios"
 
         # Beyond the sync pull list, adoption takes over the device's web
         # access key (an admin session reads it unredacted, so the backend
@@ -1379,6 +1409,10 @@ async def adopt_standalone_frame(
         # a retry does not pile up half-adopted frames.
         await delete_frame(db, redis, frame.id, frame.project_id)
         raise
+    except Exception as exc:  # noqa: BLE001 - same rollback, and the cause reaches the caller
+        logger.exception("adopt: %s failed after the frame row was created", host)
+        await delete_frame(db, redis, frame.id, frame.project_id)
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Adoption failed: {exc}") from exc
 
     # The device now matches the backend by construction; record the baseline
     # so the sync panel opens clean. The metadata echo to the device is best
@@ -1388,8 +1422,8 @@ async def adopt_standalone_frame(
     db.refresh(frame)
     try:
         await _push_frame_sync_metadata(frame, redis, fetch_frame_http_bytes)
-    except HTTPException:
-        pass
+    except Exception:  # noqa: BLE001 - best effort, the adoption is complete
+        logger.warning("adopt: metadata echo to %s failed", host, exc_info=True)
     return frame
 
 
