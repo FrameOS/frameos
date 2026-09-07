@@ -60,7 +60,7 @@ frameos/agent/build/
 frameos/agent/tmp/
 frameos/agent/agent.deps
 frameos/agent/nimble.paths
-frameos/state/*.json
+frameos/state/
 e2e/state/scene.json
 e2e/state/*.json
 e2e/generated/interpreted.nim
