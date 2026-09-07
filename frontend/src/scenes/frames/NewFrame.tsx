@@ -1523,6 +1523,9 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
   const [name, setName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const serverHostIsLoopback = /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(:\d+)?\/?$/i.test(
+    serverHost.trim()
+  )
 
   async function adopt(): Promise<void> {
     setSubmitting(true)
@@ -1610,7 +1613,22 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
         </div>
         <div className="sm:col-span-1">
           <label className={labelClass}>This backend's address, as seen from the frame</label>
-          <input className={inputClass} value={serverHost} onChange={(e) => setServerHost(e.target.value)} />
+          <input
+            className={inputClass}
+            value={serverHost}
+            onChange={(e) => setServerHost(e.target.value)}
+            placeholder="10.0.0.5:8989"
+          />
+          {serverHostIsLoopback ? (
+            <p className="mt-1 text-xs font-medium text-amber-700">
+              The frame cannot reach this backend at {serverHost.trim()} — use this machine's address on the frame's
+              network.
+            </p>
+          ) : (
+            <p className="frameos-muted mt-1 text-xs text-slate-500">
+              Host or host:port. The frame sends its logs here and takes deploys from it.
+            </p>
+          )}
         </div>
         <div className="sm:col-span-1">
           <label className={labelClass}>Name (optional, defaults to the frame's own)</label>

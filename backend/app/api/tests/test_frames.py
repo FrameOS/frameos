@@ -3481,6 +3481,31 @@ async def test_api_frame_adopt_keeps_the_web_port_and_follows_the_device_tls(asy
 
 
 @pytest.mark.asyncio
+async def test_api_frame_adopt_accepts_host_port_and_schemes_and_refuses_localhost(async_client, db, redis):
+    posted = []
+    mock = _adopt_mock_fetch(_standalone_device_payload(), posted)
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body(
+            frame_host='http://10.0.0.42:8787/', server_host='homeassistant.local:8616'))
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+    assert frame.frame_host == '10.0.0.42'
+    assert frame.frame_port == 8787
+    assert frame.server_host == 'homeassistant.local'
+    assert frame.server_port == 8616
+    assert posted[0]['server_host'] == 'homeassistant.local'
+    assert posted[0]['server_port'] == 8616
+
+    frames_before = db.query(Frame).count()
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body(server_host='localhost:8989'))
+    assert response.status_code == 400
+    assert 'cannot reach this backend at localhost' in response.json()['detail']
+    assert db.query(Frame).count() == frames_before
+
+
+@pytest.mark.asyncio
 async def test_api_frame_adopt_validates_input(async_client, db, redis):
     response = await async_client.post(
         '/api/frames/adopt', json=_adopt_request_body(admin_username='  ')

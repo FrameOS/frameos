@@ -1271,6 +1271,35 @@ ADOPT_DEFAULT_BUILDROOT_PLATFORM = "raspberry-pi-64"
 logger = logging.getLogger(__name__)
 
 
+def _split_adopt_address(value: str, default_port: int) -> tuple[str, int]:
+    """"10.0.0.5", "10.0.0.5:9000", "http://frame.local:8787/" or "[::1]:8787"
+    → (host, port). People type what their browser shows them, and the
+    field that asks for "this backend's address" is prefilled with
+    host:port — 2026-09-07 that reached new_frame as "host:port:8989" and
+    died on "too many values to unpack (expected 2)" (a bare 500 on 9.10).
+    """
+    text = (value or "").strip()
+    for scheme in ("http://", "https://"):
+        if text.lower().startswith(scheme):
+            text = text[len(scheme):]
+    text = text.split("/", 1)[0].strip()
+    port = int(default_port or 0)
+    if text.startswith("["):
+        closing = text.find("]")
+        if closing > 0:
+            host = text[1:closing]
+            rest = text[closing + 1:]
+            if rest.startswith(":") and rest[1:].isdigit():
+                port = int(rest[1:])
+            return host, port
+    if text.count(":") == 1:
+        host, _, port_text = text.partition(":")
+        if port_text.isdigit():
+            return host.strip(), int(port_text)
+        return host.strip(), port
+    return text, port
+
+
 async def adopt_standalone_frame(
     db: Session,
     redis: Redis,
@@ -1299,19 +1328,24 @@ async def adopt_standalone_frame(
     if not admin_auth["user"] or not admin_auth["pass"]:
         _bad_request("The frame's admin username and password are required to adopt it")
 
-    host = data.frame_host.strip()
+    host, frame_port = _split_adopt_address(data.frame_host, data.frame_port)
     if not host:
         _bad_request("A frame host is required")
-    server_host = data.server_host.strip()
+    server_host, server_port = _split_adopt_address(data.server_host, data.server_port)
     if not server_host:
         _bad_request("A server host is required (the address the frame will reach this backend on)")
+    if server_host.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        _bad_request(
+            f"The frame cannot reach this backend at {server_host}: enter this machine's address "
+            "on the network the frame is on (for example 10.0.0.5:8989)"
+        )
 
     # Probe first, create later: _fetch_frame_http_bytes only needs host,
     # port, access mode and the admin credentials, so a transient (never
     # persisted) Frame is enough to log in and read the canonical payload.
     probe = Frame(
         frame_host=host,
-        frame_port=data.frame_port,
+        frame_port=frame_port,
         frame_access="private",
         frame_access_key="",
         frame_admin_auth=admin_auth,
@@ -1322,10 +1356,10 @@ async def adopt_standalone_frame(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 - the cause is the answer here, not a bare 500
-        logger.exception("adopt: reading %s:%s failed", host, data.frame_port)
+        logger.exception("adopt: reading %s:%s failed", host, frame_port)
         raise HTTPException(
             status_code=HTTPStatus.BAD_GATEWAY,
-            detail=f"Could not read the frame at {host}:{data.frame_port}: {exc}",
+            detail=f"Could not read the frame at {host}:{frame_port}: {exc}",
         ) from exc
 
     # new_frame reads "host:port" as an SSH port; the web port is its own column.
@@ -1334,12 +1368,12 @@ async def adopt_standalone_frame(
         redis,
         data.name or remote_frame.get("name") or host,
         host,
-        f"{server_host}:{data.server_port}",
+        f"{server_host}:{server_port}",
         device=remote_frame.get("device"),
         interval=remote_frame.get("interval"),
         project_id=project_id,
     )
-    frame.frame_port = int(data.frame_port or 8787)
+    frame.frame_port = frame_port
 
     try:
         frame_import = _sync_frame_json_payload(remote_frame)
