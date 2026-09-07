@@ -460,7 +460,12 @@ export function frameAdminLoginIsOnlyAccess(frame: Partial<FrameType> | null | u
   if ((frame.ssh_pass ?? '').trim()) {
     return false
   }
-  return !(frame.ssh_keys && frame.ssh_keys.length > 0)
+  if (frame.ssh_keys && frame.ssh_keys.length > 0) {
+    return false
+  }
+  // A card this backend wrote carries its default key even when the row
+  // lists none; an adopted card carries nothing of ours.
+  return Boolean(frame.buildroot?.adopted)
 }
 
 export function buildDeployPlanRequestBody(

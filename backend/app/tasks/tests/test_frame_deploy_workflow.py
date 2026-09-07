@@ -184,6 +184,43 @@ async def test_plan_fast_for_embedded_uses_http_scene_reload_plan():
 
 
 @pytest.mark.asyncio
+async def test_plan_for_a_frame_without_shell_never_touches_ssh():
+    class NoDistroDeployer(FakeDeployer):
+        async def get_distro(self) -> str:
+            raise AssertionError("a shell-less frame must not be probed over SSH")
+
+    frame = SimpleNamespace(
+        id=67,
+        name="Adopted card",
+        mode="buildroot",
+        buildroot={"platform": "raspberry-pi-64", "adopted": True},
+        agent={"agentEnabled": False, "agentRunCommands": False},
+        ssh_pass=None,
+        ssh_keys=None,
+        last_successful_deploy=None,
+        to_dict=lambda: {"id": 67, "name": "Adopted card", "mode": "buildroot"},
+    )
+    workflow = FrameDeployWorkflow(
+        db=None, redis=None, frame=frame, deployer=NoDistroDeployer(), temp_dir="", binary_builder=FakeBinaryBuilder()
+    )
+
+    for mode in ("fast", "combined"):
+        plan = await workflow.plan(mode)
+        assert plan.mode == mode
+        assert plan.fast_deploy is not None and plan.fast_deploy.action == "http_admin_api"
+        assert plan.full_deploy is None
+        assert plan.frame_dict["mode"] == "buildroot"
+        assert plan.frame_dict["frame_sync_current_revision"].startswith("deploy-sha256-")
+    with pytest.raises(ValueError, match="no shell access"):
+        await workflow.plan("full")
+
+    # A password, keys or the Remote turn the SSH path back on.
+    frame.ssh_pass = "raspberry"
+    with pytest.raises(AssertionError, match="probed over SSH"):
+        await workflow.plan("fast")
+
+
+@pytest.mark.asyncio
 async def test_full_deploy_skips_authorized_keys_when_remote_is_transport(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=28,

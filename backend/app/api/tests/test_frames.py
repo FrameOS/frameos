@@ -3423,6 +3423,7 @@ async def test_api_frame_adopt_carries_the_device_mode_and_buildroot_platform(as
     frame = db.get(Frame, response.json()['frame']['id'])
     assert frame.mode == 'buildroot'
     assert frame.buildroot['platform'] == 'raspberry-pi-5'
+    assert frame.buildroot['adopted'] is True
     assert frame.ssh_user == 'root'
     assert frame.assets_path == '/srv/assets'
 

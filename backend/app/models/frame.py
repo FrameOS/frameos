@@ -578,6 +578,27 @@ async def update_frame(db: Session, redis: Redis, frame: Frame):
     await publish_message(redis, "update_frame", websocket_frame_payload(frame.to_dict()))
 
 
+def frame_has_shell_access(frame: Any) -> bool:
+    """Whether this backend has any way onto the frame besides its admin HTTP
+    API. A generic Buildroot card adopted over that API ships no FrameOS
+    Remote and accepts root SSH only with keys or a password installed from
+    the boot partition — so for it the admin login is THE way in, and the
+    SSH/Remote-based deploy cannot even connect (2026-09-07). rpios frames
+    are SSH-managed by definition."""
+    if (getattr(frame, "mode", None) or "rpios") != "buildroot":
+        return True
+    agent = getattr(frame, "agent", None) or {}
+    if agent.get("agentEnabled") and agent.get("agentRunCommands"):
+        return True
+    if (getattr(frame, "ssh_pass", None) or "").strip():
+        return True
+    if getattr(frame, "ssh_keys", None):
+        return True
+    # A card this backend wrote carries its default key even when the row
+    # lists none; an adopted card carries nothing of ours.
+    return not bool((getattr(frame, "buildroot", None) or {}).get("adopted"))
+
+
 def record_successful_deploy(frame: Frame, frame_dict: dict, deployed_at: Optional[datetime] = None) -> None:
     """Store ``frame_dict`` as the frame's deploy baseline, minus its secrets."""
     frame.last_successful_deploy = deploy_snapshot(frame_dict)

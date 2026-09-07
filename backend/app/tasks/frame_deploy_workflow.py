@@ -18,7 +18,14 @@ from sqlalchemy.orm import Session
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, normalize_compilation_mode
 from app.models.assets import sync_assets
-from app.models.frame import Frame, normalize_https_proxy, normalize_reboot_crontab, record_successful_deploy, update_frame
+from app.models.frame import (
+    Frame,
+    frame_has_shell_access,
+    normalize_https_proxy,
+    normalize_reboot_crontab,
+    record_successful_deploy,
+    update_frame,
+)
 from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
@@ -500,7 +507,15 @@ class FrameDeployWorkflow:
         frame_dict.pop("last_successful_deploy_at", None)
         previous_frameos_version = (self.frame.last_successful_deploy or {}).get("frameos_version")
 
-        if mode == "combined":
+        if (getattr(self.frame, "mode", None) or "rpios") != "embedded" and not frame_has_shell_access(self.frame):
+            # No SSH, no Remote: probing the distro over SSH is the very step
+            # that fails. The admin API is the whole deploy story here.
+            if mode == "full":
+                raise ValueError("This frame has no shell access; only a fast deploy over its admin API is possible")
+            plan = self._plan_http_admin(
+                mode=mode, frame_dict=frame_dict, previous_frameos_version=previous_frameos_version
+            )
+        elif mode == "combined":
             plan = await self._plan_combined(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         elif mode == "fast":
             plan = await self._plan_fast(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
@@ -615,6 +630,33 @@ class FrameDeployWorkflow:
             fast_deploy=fast_plan.fast_deploy,
             full_deploy=full_plan.full_deploy,
             notes=notes,
+        )
+
+    def _plan_http_admin(
+        self, *, mode: str, frame_dict: dict[str, Any], previous_frameos_version: str | None
+    ) -> FrameDeployPlan:
+        """The plan for a frame the backend only reaches over its admin API:
+        one fast section (scenes + settings pushed, runtime reloaded), no
+        full section, nothing probed."""
+        frame_dict["mode"] = getattr(self.frame, "mode", frame_dict.get("mode"))
+        if isinstance(previous_frameos_version, str):
+            frame_dict["frameos_version"] = previous_frameos_version
+        else:
+            frame_dict["frameos_version"] = current_frameos_version()
+        return FrameDeployPlan(
+            mode=mode,
+            frame_id=int(self.frame.id),
+            frame_name=self.frame.name,
+            build_id=self.deployer.build_id,
+            frame_dict=frame_dict,
+            previous_frameos_version=previous_frameos_version if isinstance(previous_frameos_version, str) else None,
+            fast_deploy=FastDeployPlan(reload_supported=True, tls_settings_changed=False, action="http_admin_api"),
+            full_deploy=None,
+            notes=[
+                "No shell on this frame (no SSH key, password or FrameOS Remote): fast deploy pushes scenes and "
+                "settings over the frame's admin API and reloads the runtime. FrameOS itself updates through the "
+                "frame's own signed release upgrade.",
+            ],
         )
 
     async def _plan_fast(self, *, frame_dict: dict[str, Any], previous_frameos_version: str | None) -> FrameDeployPlan:

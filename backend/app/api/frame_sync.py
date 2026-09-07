@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.frame import (
+    frame_has_shell_access,
     Frame,
     compact_timezone_updater,
     delete_frame,
@@ -1271,22 +1272,6 @@ ADOPT_DEFAULT_BUILDROOT_PLATFORM = "raspberry-pi-64"
 logger = logging.getLogger(__name__)
 
 
-def frame_has_shell_access(frame: Frame) -> bool:
-    """Whether this backend has any way onto the frame besides its admin HTTP
-    API. A generic Buildroot card adopted over that API ships no FrameOS
-    Remote and accepts root SSH only with keys or a password installed from
-    the boot partition — so for it the admin login is THE way in, and the
-    SSH/Remote-based deploy cannot even connect (2026-09-07)."""
-    if (frame.mode or "rpios") != "buildroot":
-        return True
-    agent = frame.agent or {}
-    if agent.get("agentEnabled") and agent.get("agentRunCommands"):
-        return True
-    if (frame.ssh_pass or "").strip():
-        return True
-    return bool(frame.ssh_keys)
-
-
 async def push_backend_state_to_device(
     frame: Frame, db: Session, redis: Redis, fetch_frame_http_bytes: FrameFetch
 ) -> dict[str, Any]:
@@ -1448,6 +1433,10 @@ async def adopt_standalone_frame(
                 logger.warning("adopt: %s reports unknown Buildroot platform %r, assuming %s",
                                host, platform, ADOPT_DEFAULT_BUILDROOT_PLATFORM)
                 ensure_buildroot_frame_defaults(frame, ADOPT_DEFAULT_BUILDROOT_PLATFORM)
+            # This backend never wrote this card: nothing of ours (no key, no
+            # Remote) is on it until someone puts it there. frame_has_shell_access
+            # reads this; explicit SSH credentials or the Remote override it.
+            frame.buildroot = {**(frame.buildroot or {}), "adopted": True}
         elif remote_mode == "rpios":
             frame.mode = "rpios"
 

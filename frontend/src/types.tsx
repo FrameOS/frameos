@@ -1266,6 +1266,9 @@ export interface Palette {
 }
 
 export interface FrameBuildrootConfig {
+  // Set by adoption: this backend never wrote the card, so nothing of ours
+  // (SSH key, FrameOS Remote) is on it until someone puts it there.
+  adopted?: boolean
   platform?: string
   compilationMode?: FrameCompilationModeOptionValue
   sdImage?: {
