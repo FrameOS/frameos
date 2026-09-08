@@ -321,6 +321,17 @@ void DEV_GPIO_Init(void)
 	DEV_Digital_Write(EPD_CS_PIN, 1);
     if (EPD_CS_S_PIN >= 0) DEV_Digital_Write(EPD_CS_S_PIN, 1);
     DEV_Digital_Write(EPD_PWR_PIN, 1);
+
+    if (DEV_Debug_Enabled()) {
+        char extra[256];
+        snprintf(extra, sizeof(extra),
+                 "\"rst\":%d,\"dc\":%d,\"cs\":%d,\"cs2\":%d,\"busy\":%d,\"sclk\":%d,"
+                 "\"mosi\":%d,\"pwr\":%d,\"busyState\":%u",
+                 EPD_RST_PIN, EPD_DC_PIN, EPD_CS_PIN, EPD_CS_S_PIN, EPD_BUSY_PIN,
+                 EPD_SCLK_PIN, EPD_MOSI_PIN, EPD_PWR_PIN,
+                 (unsigned int)DEV_Digital_Read(EPD_BUSY_PIN));
+        DEV_Debug_Log("gpio:init", extra);
+    }
 }
 
 void DEV_SPI_SendnData(UBYTE *Reg)
