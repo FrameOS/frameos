@@ -62,6 +62,9 @@ export default tseslint.config(
       // Same exclusion, same reason, widest graph of the lot: mounts the
       // whole FrameSettings panel and the colour picker behind it.
       "**/src/test/shared-spa/cloud-frame-settings-panel.test.tsx",
+      // Same exclusion, same reason: imports frameLogic.
+      "**/src/test/shared-spa/frame-service-keys-change.test.ts",
+      "**/src/test/shared-spa/preview-key-consent.test.ts",
     ],
   },
   js.configs.recommended,

@@ -84,7 +84,22 @@ medium / low list below.
   scene from the workspace is the grant (the declared groups join
   `service_setting_groups` on install, as the cloud's assignment call does),
   so nothing changes for the owner until they untick a key. The same field
-  name and meaning as the cloud's per-frame grant. The LAN-egress half is closed
+  name and meaning as the cloud's per-frame grant. A key that would ship
+  differently from the deploy baseline is an undeployed change (2026-09-08):
+  `to_dict` fingerprints the settings groups frame.json would carry
+  (`settings_fingerprints`, HMAC per group, never a value) and every deploy
+  path snapshots that dict, so a key added or rotated in Settings, or a
+  store scene's newly granted group, lights the deploy button as "Service
+  keys: OpenAI added" — universal, no per-path plumbing.
+- Browser previews and store scenes — closed 2026-09-08: the in-browser
+  preview (live preview modal, tile "Preview in browser", store template
+  try-out) fetches the account's real service keys. It now asks before a
+  scene from the scene store gets them ("Preview with your API keys?", per
+  settings group, remembered per group on request; answers listed and
+  forgotten under Settings → Browser previews and store scenes; a "deny"
+  strips those groups from the preview's settings). Scenes the owner wrote
+  keep the click-to-preview gate they always had. An embed that never
+  mounts the dialog is not blocked (answers allow, the old behaviour). The LAN-egress half is closed
   (2026-09-06): both runtimes arm the private-network deny when the
   resident scene carries `origin.storeSceneId`, whoever installed it
   (`storeOriginScenesResident` / `fos_scenes_store_origin_resident`), with

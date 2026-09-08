@@ -53,7 +53,7 @@ import {
 import { persistAndPushCloudFrameScenes, type CloudScenePersistOptions } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache } from '../../models/framesModel'
 import { appsModel } from '../../models/appsModel'
-import { collectSecretSettingsFromScenes } from './panels/secretSettings'
+import { collectSecretSettingsFromScenes, settingsDetails } from './panels/secretSettings'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { longRunningTasksModel } from '../../models/longRunningTasksModel'
@@ -858,6 +858,59 @@ const SHELL_LESS_BACKEND_ONLY_KEYS = new Set<keyof FrameType>([
   'frame_port',
 ])
 
+/**
+ * "Service keys: openAI added, unsplash changed" — the fingerprints of the
+ * settings groups frame.json ships (backend `settings_fingerprints`) differ
+ * between the deploy baseline and the frame now. A key added in Settings
+ * after the deploy, a rotated key, or a store scene's newly granted group all
+ * land here; nothing else in the frame diff sees global settings. Null when
+ * either side has no map (a baseline recorded before the field existed).
+ */
+export function serviceKeysChangeSummary(
+  previous: Partial<FrameType> | null | undefined,
+  next: Partial<FrameType> | null | undefined
+): string | null {
+  const before = previous?.settings_fingerprints
+  const after = next?.settings_fingerprints
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object') {
+    return null
+  }
+  const parts: string[] = []
+  const labelOf = (group: string): string => settingsDetails[group]?.title ?? group
+  for (const group of Object.keys(after).sort()) {
+    if (!(group in before)) {
+      parts.push(`${labelOf(group)} added`)
+    } else if (before[group] !== after[group]) {
+      parts.push(`${labelOf(group)} changed`)
+    }
+  }
+  for (const group of Object.keys(before).sort()) {
+    if (!(group in after)) {
+      parts.push(`${labelOf(group)} removed`)
+    }
+  }
+  return parts.length ? parts.join(', ') : null
+}
+
+/** The form is what the user edits; the fingerprints are the server's. */
+function withServiceKeyFingerprints(
+  frameForm: Partial<FrameType> | null | undefined,
+  frame: Partial<FrameType> | null | undefined
+): Partial<FrameType> {
+  const fingerprints = frame?.settings_fingerprints
+  return fingerprints && !frameForm?.settings_fingerprints
+    ? { ...(frameForm ?? {}), settings_fingerprints: fingerprints }
+    : (frameForm ?? {})
+}
+
+export function serviceKeysChangeDetail(
+  previous: Partial<FrameType> | null | undefined,
+  next: Partial<FrameType> | null | undefined
+): ChangeDetail | null {
+  const summary = serviceKeysChangeSummary(previous, next)
+  return summary ? { label: `Service keys: ${summary}`, requiresFullDeploy: false } : null
+}
+
 function computeChangeDetails(
   previous: Partial<FrameType> | null | undefined,
   next: Partial<FrameType> | null | undefined,
@@ -906,7 +959,8 @@ function computeChangeDetails(
     })
   }
 
-  return [...details, ...sceneDetails]
+  const serviceKeys = serviceKeysChangeDetail(previous, next)
+  return serviceKeys ? [...details, ...sceneDetails, serviceKeys] : [...details, ...sceneDetails]
 }
 
 function firstDeploySceneLabel(scenes?: FrameScene[] | null): string | null {
@@ -1225,6 +1279,11 @@ function buildUndeployedSummaryItems(
       label: keyLabel(key),
       value: summarizeFrameFieldValue(key, nextValue),
     })
+  }
+
+  const serviceKeys = serviceKeysChangeSummary(previous, next)
+  if (serviceKeys) {
+    items.push({ label: 'Service keys', value: serviceKeys })
   }
 
   return items
@@ -2994,18 +3053,21 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
     deployChangeDetails: [
-      (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
+      (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode, s.frame],
       (
         lastDeploy: frameLogicValues['lastDeploy'],
         frameForm: frameLogicValues['frameForm'],
         mode: frameLogicValues['mode'],
-        isFrameAdminMode: frameLogicValues['isFrameAdminMode']
+        isFrameAdminMode: frameLogicValues['isFrameAdminMode'],
+        frame: frameLogicValues['frame']
       ): ChangeDetail[] =>
         isFrameAdminMode
           ? []
           : lastDeploy
-          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, frameForm, mode))
-          : firstDeployChangeDetails(frameForm, mode),
+            ? sortDeployChangeDetails(
+                deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode)
+              )
+            : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
@@ -3016,7 +3078,8 @@ export const frameLogic = kea<frameLogicType>([
         requiresRecompilation: boolean,
         isFrameAdminMode: boolean
       ): SummaryItem[] => {
-        const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
+        const pendingFrame =
+          Object.keys(frameForm ?? {}).length > 0 ? withServiceKeyFingerprints(frameForm, frame) : frame
         return isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, pendingFrame, requiresRecompilation)
       },
     ],
