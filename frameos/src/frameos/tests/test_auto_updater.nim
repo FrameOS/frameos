@@ -4,7 +4,7 @@ import ../auto_updater
 
 suite "auto updater":
   test "due once a day at or after the frame's own minute":
-    let minute = 17
+    let minute = 37
     let early = dateTime(2026, mSep, 8, AutoUpdateHour, minute - 1, 0)
     let due = dateTime(2026, mSep, 8, AutoUpdateHour, minute, 0)
     let late = dateTime(2026, mSep, 8, 23, 59, 0)
@@ -21,11 +21,12 @@ suite "auto updater":
     check shouldRunAutoUpdate(atDefault, "", 99, 99) == true
     check shouldRunAutoUpdate(dateTime(2026, mSep, 8, AutoUpdateHour - 1, 59, 0), "", 99, 99) == false
 
-  test "the minute is stable per frame name and always a minute":
+  test "the minute is stable per frame name and never collides with an on-the-hour reboot":
     check autoUpdateMinute("Kitchen") == autoUpdateMinute("Kitchen")
+    check AutoUpdateFirstMinute == 20
     for name in ["", "Kitchen", "Hallway", "frame-42", "a much longer frame name with spaces"]:
       let minute = autoUpdateMinute(name)
-      check minute >= 0 and minute <= 59
+      check minute >= AutoUpdateFirstMinute and minute <= 59
 
   test "only the release build's default scene is allowed to be compiled in":
     check compiledScenesBlockAutoUpdate([]) == false

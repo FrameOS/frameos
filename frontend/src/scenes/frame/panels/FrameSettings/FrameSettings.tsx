@@ -1687,7 +1687,7 @@ export function FrameSettings({
     !(frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico')
   const autoUpdateHelpText = isEmbeddedMode
     ? "Once a day the frame asks this backend for the latest signed firmware release for its board. Stable waits until a release has been the latest for a day, so a quick fix skips the release it fixes; Latest installs every release as it lands. The manual paths — the Update firmware action and the console's `ota` — work on every channel."
-    : 'Once a day, around 04:00 local time, FrameOS checks GitHub for a newer signed release, exactly as the Upgrade button does. Stable waits until a release has been the latest for a day, so a quick fix skips the release it fixes; Latest installs every release as it lands. Deploys from this backend keep working on every channel.'
+    : 'Once a day, between 04:20 and 05:00 local time (after any reboot scheduled on the hour), FrameOS checks GitHub for a newer signed release, exactly as the Upgrade button does. Stable waits until a release has been the latest for a day, so a quick fix skips the release it fixes; Latest installs every release as it lands. Deploys from this backend keep working on every channel.'
   const configuredGpioButtons = !isEmbeddedMode
     ? configuredGpioButtonsForDevice(cloudProfile ? cloudDevice : frameForm.device)
     : null

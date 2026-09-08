@@ -7,8 +7,13 @@
 ## clock, so the release the fix was for is never installed. `latest`: every
 ## release as soon as it is published. `off`: never check.
 ##
-## The check runs at 04:xx local — the minute is fixed per frame from its
-## name, so a fleet does not all ask GitHub in the same second — and when a
+## The check runs at 04:20–04:59 local — the minute is fixed per frame from
+## its name, so a fleet does not all ask GitHub in the same second, and never
+## in the first twenty minutes of the hour, because the backend's reboot
+## schedule (/etc/cron.d/frameos-reboot, 04:00 by default) fires ON the hour
+## and a reboot landing on a half-staged upgrade is the one race this must
+## not have. A frame that just rebooted runs its check fresh, and an upgrade
+## started at :20 is long done before the next hour — and when a
 ## release qualifies it starts the SAME detached upgrade the admin panel's
 ## Upgrade button and the cloud's `notify_update_available` nudge start
 ## (frameos/upgrade.nim: download, minisign verify, stage, restart). Nothing
@@ -40,6 +45,8 @@ import scenes/scenes as compiledScenes
 
 const
   AutoUpdateHour* = 4
+  ## Earliest minute of the hour a check may land: past any on-the-hour reboot.
+  AutoUpdateFirstMinute* = 20
   ## How long a release must have been the latest before `stable` installs it.
   AutoUpdateStableAgeSeconds* = 24 * 60 * 60
 
@@ -47,8 +54,8 @@ var autoUpdaterThread: Thread[FrameOS]
 var autoUpdaterStarted = false
 
 proc autoUpdateMinute*(frameName: string): int =
-  ## 0..59, the same every day for one frame name.
-  (int(hash(frameName)) and 0x7fffffff) mod 60
+  ## AutoUpdateFirstMinute..59, the same every day for one frame name.
+  AutoUpdateFirstMinute + (int(hash(frameName)) and 0x7fffffff) mod (60 - AutoUpdateFirstMinute)
 
 proc shouldRunAutoUpdate*(dt: DateTime, lastRunDate: string, minute: int, hour = AutoUpdateHour): bool =
   ## Due once per calendar day, at or after hour:minute local time.
