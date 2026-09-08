@@ -80,8 +80,11 @@ medium / low list below.
   `get_frame_json` ships a group declared only by store-origin scenes when the
   owner granted it on the frame (`frame.service_setting_groups`, Frame
   settings → "Service keys for store scenes", migration `e1f2a3b4c5d6`);
-  scenes the owner authored keep declaration-as-grant. The same field name
-  and meaning as the cloud's per-frame grant. The LAN-egress half is closed
+  scenes the owner authored keep declaration-as-grant. Installing a store
+  scene from the workspace is the grant (the declared groups join
+  `service_setting_groups` on install, as the cloud's assignment call does),
+  so nothing changes for the owner until they untick a key. The same field
+  name and meaning as the cloud's per-frame grant. The LAN-egress half is closed
   (2026-09-06): both runtimes arm the private-network deny when the
   resident scene carries `origin.storeSceneId`, whoever installed it
   (`storeOriginScenesResident` / `fos_scenes_store_origin_resident`), with

@@ -396,8 +396,8 @@ function StoreSceneServiceSettingsSection(): JSX.Element | null {
       <div className="pl-2 @md:pl-8 space-y-2">
         <div className="frameos-muted text-xs">
           Scenes you wrote get the service keys their apps declare. A scene installed from the scene store is someone
-          else&apos;s code: it only asks, and it gets a key only when you tick it here. Saved with the frame; the change
-          reaches the device on the next deploy.
+          else&apos;s code: installing it granted what it asked for, and this is where you take a key away again (or
+          give one back). Saved with the frame; the change reaches the device on the next deploy.
         </div>
         {storeScenes.map((scene) => {
           const declared = collectSecretSettingsFromScenes([scene], apps)

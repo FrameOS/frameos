@@ -3171,7 +3171,24 @@ export const frameLogic = kea<frameLogicType>([
         return
       }
 
-      actions.setFrameFormValues({ scenes: [...oldScenes, ...newScenes] })
+      // Installing is the owner's consent, on both planes: a store scene is
+      // granted the service keys its apps declare (the cloud does this in its
+      // assignment call; here the backend ships a store-declared group only
+      // when it is in frame.service_setting_groups). Adjustable afterwards
+      // under Settings → Service keys for store scenes.
+      const storeDeclaredGroups = isCloudMode()
+        ? []
+        : collectSecretSettingsFromScenes(
+            newScenes.filter((scene) => typeof scene.origin?.storeSceneId === 'string'),
+            appsModel.findMounted()?.values.apps ?? {}
+          )
+      const grantedGroups = storeDeclaredGroups.length
+        ? Array.from(new Set([...(frameForm.service_setting_groups ?? []), ...storeDeclaredGroups]))
+        : null
+      actions.setFrameFormValues({
+        scenes: [...oldScenes, ...newScenes],
+        ...(grantedGroups ? { service_setting_groups: grantedGroups } : {}),
+      })
       if (openDrawer) {
         openSceneControlDrawer(props.frameId, newScenes[0].id)
       }
