@@ -2,6 +2,7 @@
 
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
+import { redirectToReauthIfRequired } from "../lib/reauth-client";
 
 // Self-serve erasure. Two deliberate frictions and no more: you have to open
 // the form, and you have to re-authenticate. No "type DELETE to confirm"
@@ -57,6 +58,11 @@ export function DeleteAccountForm({
       const payload = (await response.json().catch(() => undefined)) as
         | { error?: string }
         | undefined;
+      // A password-less account proves itself on /login/reauth first; the
+      // form is still open when the browser comes back.
+      if (redirectToReauthIfRequired(response, payload)) {
+        return;
+      }
       if (payload?.error === "invalid_password") {
         setError("That password is not correct.");
       } else if (payload?.error === "invalid_confirmation") {

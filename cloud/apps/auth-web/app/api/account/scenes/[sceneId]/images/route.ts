@@ -28,7 +28,8 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // nothing: which images a scene shows, and in what order, is part of a
 // version, so the digest goes into the editor's draft and the next Save
 // publishes it (POST …/content with `images`). An upload that never gets
-// bound is what the object-store sweep removes.
+// bound is metered against the uploader (usage.ts) and, after a week, is
+// what the object-store sweep removes.
 export async function POST(request: NextRequest, context: RouteContext) {
   const { db, errorResponse, scene, session } = await loadOwnedScene(
     request,
@@ -66,9 +67,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("preview_image_fully_transparent", 400);
   }
 
-  // The bytes will count against the private-scene quota once a version
-  // links them; refusing here rather than at Save keeps the draft honest.
-  // Public scenes are free (usage.ts).
+  // The bytes count against the private-scene quota from this moment: as
+  // this account's unbound upload until a version links them, then as the
+  // scene's (public scenes are free, usage.ts). Refusing here rather than at
+  // Save keeps the draft honest.
   if (scene.visibility !== "public") {
     const [privateBytes, { privateSceneBytes: maxBytes }] = await Promise.all([
       privateSceneBytesForAccount(db, session.accountId!),
@@ -105,7 +107,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("moderation_unavailable", 503);
   }
 
-  const image = await registerStoreImage(db, content, contentType);
+  const image = await registerStoreImage(
+    db,
+    content,
+    contentType,
+    undefined,
+    session.accountId,
+  );
 
   await recordAuditEvent(db, {
     accountId: session.accountId,

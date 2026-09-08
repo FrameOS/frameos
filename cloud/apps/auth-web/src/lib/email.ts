@@ -168,6 +168,7 @@ export type SecurityNotification = {
   // Which credential changed, as the subject line's noun phrase.
   what:
     | "google_linked"
+    | "password_changed"
     | "passkey_added"
     | "passkey_removed"
     | "totp_enabled"
@@ -180,6 +181,7 @@ export type SecurityNotification = {
 
 const securityNotificationLines: Record<SecurityNotification["what"], string> = {
   google_linked: "Google sign-in was connected to your FrameOS Cloud account. Signing in with Google now opens this account.",
+  password_changed: "The password on your FrameOS Cloud account was changed, and every other session was signed out.",
   passkey_added: "A passkey was added to your FrameOS Cloud account.",
   passkey_removed: "A passkey was removed from your FrameOS Cloud account.",
   totp_disabled: "The authenticator app was removed from your FrameOS Cloud account.",

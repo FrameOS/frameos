@@ -4,6 +4,7 @@ export {
   describeReport,
   hasJavaScriptAppSource,
   hasNimOnlyAppSource,
+  ModelBudgetExceededError,
   reservedCodeArgNames,
   sceneRequiresCompilation,
   type ConvertOptions,

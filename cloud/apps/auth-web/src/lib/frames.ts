@@ -1237,15 +1237,25 @@ export async function buildScenesPayloadForFrame(
     }
   | { error: string }
 > {
+  const [frameRow] = await db
+    .select({ accountId: frames.accountId })
+    .from(frames)
+    .where(eq(frames.id, frameId))
+    .limit(1);
+  if (!frameRow) {
+    return { error: "invalid_frame" };
+  }
   const assignments = await db
     .select({
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       id: frameSceneAssignments.id,
+      sceneAccountId: storeScenes.accountId,
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
       sceneSlug: storeScenes.slug,
       sceneStatus: storeScenes.status,
       sceneVersion: frameSceneAssignments.sceneVersion,
+      sceneVisibility: storeScenes.visibility,
     })
     .from(frameSceneAssignments)
     .innerJoin(storeScenes, eq(storeScenes.id, frameSceneAssignments.sceneId))
@@ -1260,6 +1270,17 @@ export async function buildScenesPayloadForFrame(
   for (const assignment of assignments) {
     if (assignment.sceneStatus !== "active") {
       return { error: "scene_pulled" };
+    }
+    // Visibility is decided here, on the path that produces the bytes, not
+    // only at assignment: a scene flipped private after a stranger installed
+    // it must stop streaming its future versions to that frame — the
+    // assignment re-push and the hub's empty-store resync both come through
+    // here, while every HTTP surface already refused the same scene.
+    if (
+      assignment.sceneVisibility !== "public" &&
+      assignment.sceneAccountId !== frameRow.accountId
+    ) {
+      return { error: "scene_private" };
     }
     const versionRows = await db
       .select({

@@ -262,10 +262,13 @@ export async function publishStoreScene(
   // minus the cover itself when it was already among them.
   let images = previousImages;
   if (uploadedPreview) {
-    const cover = await registerStoreImage(db, uploadedPreview, undefined, {
-      height: validated.imageHeight,
-      width: validated.imageWidth,
-    });
+    const cover = await registerStoreImage(
+      db,
+      uploadedPreview,
+      undefined,
+      { height: validated.imageHeight, width: validated.imageWidth },
+      accountId,
+    );
     images = [cover, ...previousImages.filter((image) => image.sha256 !== cover.sha256)];
   }
   const aligned = await alignZipCover(content, validated, images);

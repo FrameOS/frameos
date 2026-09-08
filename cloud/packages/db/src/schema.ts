@@ -660,6 +660,12 @@ export const storeImages = pgTable("store_images", {
   sizeBytes: integer("size_bytes").notNull(),
   width: integer("width"),
   height: integer("height"),
+  // The uploader (migration 0049): an image no version binds yet is metered
+  // against this account and swept after a week; once bound it belongs to
+  // the versions that link it and this is just history.
+  accountId: uuid("account_id").references(() => accounts.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

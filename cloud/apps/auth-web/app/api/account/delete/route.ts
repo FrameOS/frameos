@@ -10,6 +10,7 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
+import { requireRecentAuth } from "../../../../src/lib/recent-auth";
 import {
   readSession,
   sessionCookieName,
@@ -21,11 +22,12 @@ import {
 //
 // Re-authentication is required: deletion is the most destructive thing an
 // account can do, and a session alone should not be enough to do it from a
-// borrowed laptop. Accounts with a password confirm with it; Google-only
-// accounts have no password to confirm, so they type their own email address
-// instead — weaker as proof, but it is a deliberate-action check rather than
-// an identity check, and the alternative (no self-serve deletion for Google
-// users at all) is worse.
+// borrowed laptop. Accounts with a password confirm with it. Accounts without
+// one (Google-only, passkey-only) go through the same sudo-mode gate the
+// other destructive routes use (requireRecentAuth → /login/reauth, which
+// offers Google with prompt=login, a passkey or a code — whatever the account
+// has); typing the email address is then the deliberate-action check on top,
+// not the proof of identity it was asked to be before.
 //
 // The delete itself is a single row: every table that holds this account's
 // data cascades from accounts.id (see packages/db/src/schema.ts). Two
@@ -114,11 +116,20 @@ export async function POST(request: NextRequest) {
     if (!valid) {
       return NextResponse.json({ error: "invalid_password" }, { status: 400 });
     }
-  } else if (
-    !account.primaryEmail ||
-    normalizeEmail(confirmEmail) !== normalizeEmail(account.primaryEmail)
-  ) {
-    return NextResponse.json({ error: "invalid_confirmation" }, { status: 400 });
+  } else {
+    // No password to prove with: the session itself has to have proved its
+    // credentials recently. The Security page prints the email, so on its
+    // own it proves nothing.
+    const reauth = await requireRecentAuth(db, accountId);
+    if (reauth) {
+      return reauth;
+    }
+    if (
+      !account.primaryEmail ||
+      normalizeEmail(confirmEmail) !== normalizeEmail(account.primaryEmail)
+    ) {
+      return NextResponse.json({ error: "invalid_confirmation" }, { status: 400 });
+    }
   }
 
   // Recorded BEFORE the delete: recordAuditEvent writes account_id, and after

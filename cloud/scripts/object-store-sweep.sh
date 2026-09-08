@@ -45,6 +45,29 @@ echo "Listing objects in $remote older than $min_age"
 rclone lsf "$remote" --recursive --files-only --min-age "$min_age" \
   | LC_ALL=C sort > "$work/stored"
 
+# Uploads nobody saved. The owner image route registers bytes before a
+# version binds them; a draft that was abandoned leaves a store_images row
+# with no store_scene_version_images link, and the app never deletes those.
+# Old enough unbound rows go first, so their objects show up as orphans
+# below. Same age floor as the objects: a Save in flight has its row and its
+# link written together, and a week-old unbound row is not mid-anything.
+unbound_sql="
+  delete from store_images i
+   where i.created_at < now() - interval '7 days'
+     and not exists (select 1 from store_scene_version_images vi where vi.image_sha256 = i.sha256)
+     and not exists (select 1 from store_scenes s where s.preview_object_key = i.object_key)"
+unbound_count="$(psql "$database_url" -Atq -v ON_ERROR_STOP=1 -c \
+  "select count(*) from store_images i
+    where i.created_at < now() - interval '7 days'
+      and not exists (select 1 from store_scene_version_images vi where vi.image_sha256 = i.sha256)
+      and not exists (select 1 from store_scenes s where s.preview_object_key = i.object_key)")"
+if [ "$apply" = true ] && [ "$unbound_count" != "0" ]; then
+  echo "Deleting $unbound_count unbound store_images rows older than 7 days"
+  psql "$database_url" -Atq -v ON_ERROR_STOP=1 -c "$unbound_sql" >/dev/null
+else
+  echo "unbound store_images rows older than 7 days: $unbound_count (deleted with --apply)"
+fi
+
 echo "Listing referenced keys in the database"
 psql "$database_url" -Atq -v ON_ERROR_STOP=1 > "$work/referenced" <<'SQL'
 SELECT object_key FROM store_scene_versions WHERE object_key IS NOT NULL

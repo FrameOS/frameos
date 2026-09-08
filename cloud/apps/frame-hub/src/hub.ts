@@ -179,6 +179,20 @@ const commandRedeliverAfterMs = 180_000;
 // (docs/cloud-frames.md), so 120 batches/minute is ~4x headroom.
 const logBatchRateLimit = { limit: 120, windowMs: 60_000 };
 
+// The other device → hub messages that cost a database write (and, for
+// `state`, a full-row re-select fanned out to every browser socket on the
+// account). A device sends `state` on hello and on scene changes, `metrics`
+// on its metrics interval (60 s default, 10 s minimum on the ESP32), `assets`
+// after a listing, `scene_ack` per applied push — so a few per second is a
+// bug or an attack, never a working frame. Over the limit the message is
+// dropped, the socket kept: the next one within a sane cadence gets through.
+const deviceWriteRateLimits: Record<string, { limit: number; windowMs: number }> = {
+  assets: { limit: 20, windowMs: 60_000 },
+  metrics: { limit: 30, windowMs: 60_000 },
+  scene_ack: { limit: 30, windowMs: 60_000 },
+  state: { limit: 60, windowMs: 60_000 },
+};
+
 // Snapshot fetches triggered by a device's "render" announcement, per frame.
 // The device already throttles itself to one snapshot write a minute
 // (SCENE_IMAGE_MAX_AGE_SECONDS); this is the ceiling that holds even if a
@@ -1518,6 +1532,25 @@ export async function startFrameHub(
       if (session.authed && session.hello && !session.ready) {
         await activateDeviceSession(session);
       }
+      return;
+    }
+
+    // Keyed on the frame, not the socket, so reconnecting does not reset the
+    // window (same shape as the log_batch and render limits).
+    const writeLimit =
+      typeof msg.type === "string" ? deviceWriteRateLimits[msg.type] : undefined;
+    if (
+      writeLimit &&
+      !checkMemoryRateLimit(
+        `frame_msg:${msg.type}:${session.frame.id}`,
+        writeLimit,
+      ).allowed
+    ) {
+      logWarn("device.message_rate_limited", {
+        frameId: session.frame.id,
+        type: msg.type,
+      });
+      sendAckError(session, msg, "rate_limited");
       return;
     }
 

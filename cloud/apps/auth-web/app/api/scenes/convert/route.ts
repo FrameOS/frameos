@@ -1,6 +1,7 @@
 import {
   convertScenes,
   DEFAULT_CONVERT_MODEL,
+  ModelBudgetExceededError,
   ModelRequestError,
   openAiModelPort,
   rewrapScenes,
@@ -135,19 +136,14 @@ export async function POST(request: NextRequest) {
     if (!apiKey) {
       const shared = sharedConverterKey();
       if (shared) {
-        const perAddress = await checkRateLimit(`scenes:convert-model:${clientKey(request)}`, {
-          limit: sharedKeyPerAddressPerHour(),
-          windowMs: 60 * 60 * 1000,
-        });
-        const global = perAddress.allowed
-          ? await checkRateLimit("scenes:convert-model:global", {
-              limit: sharedKeyPerDay(),
-              windowMs: 24 * 60 * 60 * 1000,
-            })
-          : perAddress;
-        if (!perAddress.allowed || !global.allowed) {
-          const resetAt = perAddress.allowed ? global.resetAt : perAddress.resetAt;
-          const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000));
+        // The budget is counted in MODEL CALLS, not requests: one request
+        // walks up to 20 scenes × every app and code node × 3 attempts, so a
+        // per-request unit bought an unbounded number of shared-key calls.
+        // The first call is paid for here (so an exhausted budget is a 429
+        // before any work starts); every further call pays as it is made.
+        const spent = await spendSharedModelBudget(request);
+        if (!spent.allowed) {
+          const retryAfter = Math.max(1, Math.ceil((spent.resetAt - Date.now()) / 1000));
           return NextResponse.json(
             {
               error: "model_budget_exhausted",
@@ -164,12 +160,18 @@ export async function POST(request: NextRequest) {
   }
 
   // --- convert --------------------------------------------------------------
-  const port: ModelPort | undefined = apiKey
+  let port: ModelPort | undefined = apiKey
     ? openAiModelPort({ apiKey, model, reasoningEffort })
     : undefined;
+  if (port && keySource === "shared") {
+    port = meteredSharedPort(port, request);
+  }
   let results: Awaited<ReturnType<typeof convertScenes>>;
   try {
     results = await convertScenes(scenes as Scene[], {
+      // A ceiling per scene whichever key pays: a pathological scene must
+      // not turn into hundreds of calls on anyone's account.
+      maxModelCalls: maxModelCallsPerScene,
       model: port,
       modelName: port ? model : undefined,
       signal: request.signal,
@@ -347,6 +349,48 @@ export function sharedConverterKey(env: Record<string, string | undefined> = pro
 function positiveInt(raw: string | undefined, fallback: number): number {
   const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// Per scene, on top of the shared-key budget: enough for a large scene's
+// apps and code nodes at three attempts each, far below "unbounded".
+const maxModelCallsPerScene = 60;
+
+// One unit of the shared-key budget: the per-address window first, the
+// global daily one only when that passed (so a spent address does not eat
+// into everyone's day). Both bucket keys are what the tests pin.
+async function spendSharedModelBudget(
+  request: NextRequest,
+): Promise<{ allowed: boolean; resetAt: number }> {
+  const perAddress = await checkRateLimit(`scenes:convert-model:${clientKey(request)}`, {
+    limit: sharedKeyPerAddressPerHour(),
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!perAddress.allowed) {
+    return { allowed: false, resetAt: perAddress.resetAt };
+  }
+  const global = await checkRateLimit("scenes:convert-model:global", {
+    limit: sharedKeyPerDay(),
+    windowMs: 24 * 60 * 60 * 1000,
+  });
+  return { allowed: global.allowed, resetAt: global.resetAt };
+}
+
+// The shared-key port pays one budget unit per call. The first call was paid
+// up front by the route; when the budget runs out mid-conversion the
+// converter reports the rest of the scene as needs_model instead of calling.
+function meteredSharedPort(port: ModelPort, request: NextRequest): ModelPort {
+  let prepaid = 1;
+  return async (modelRequest, signal) => {
+    if (prepaid > 0) {
+      prepaid -= 1;
+    } else {
+      const spent = await spendSharedModelBudget(request);
+      if (!spent.allowed) {
+        throw new ModelBudgetExceededError(sharedKeyPerAddressPerHour());
+      }
+    }
+    return port(modelRequest, signal);
+  };
 }
 
 function sharedKeyPerAddressPerHour() {

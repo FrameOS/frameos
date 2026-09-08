@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allCloudFrameSettingKeys,
+  cloudFrameFormDiffKeys,
   cloudFrameSettingKeys,
   cloudFrameSettingKeysForVersion,
   cloudFrameSettingsPayload,
@@ -426,6 +427,27 @@ describe("cloud settings push", () => {
     expect(payload).toEqual({ interval: 300, rotate: 90 });
     expect(allowedFrameSettings.get("interval")?.(payload.interval)).toBe(true);
     expect(allowedFrameSettings.get("rotate")?.(payload.rotate)).toBe(true);
+  });
+});
+
+describe("the cloud frame form diffs every key it can push", () => {
+  // The palette / partial-refresh / GPIO batch was rendered and sent but
+  // never diffed, so Save was never offered and the 15 s sync poll wiped the
+  // edit mid-typing. A far-future version returns every batch either
+  // profile knows; each must be in the diff list.
+  it("covers everything the Pi and ESP32 profiles send at a far-future firmware", () => {
+    const diffKeys = new Set<string>(cloudFrameFormDiffKeys());
+    for (const key of cloudFrameSettingKeysForVersion("9999.0.0")) {
+      expect(diffKeys.has(key), `Pi key ${key} is pushed but not diffed`).toBe(true);
+    }
+    for (const key of esp32CloudFrameSettingKeysForVersion("9999.0.0")) {
+      expect(diffKeys.has(key), `ESP32 key ${key} is pushed but not diffed`).toBe(true);
+    }
+    for (const key of hardwareCloudFrameSettingKeys) {
+      expect(diffKeys.has(key)).toBe(true);
+    }
+    expect(diffKeys.has("scenes")).toBe(true);
+    expect(diffKeys.has("schedule")).toBe(true);
   });
 });
 

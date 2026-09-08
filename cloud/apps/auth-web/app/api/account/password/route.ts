@@ -9,7 +9,9 @@ import {
 } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { csrfResponse } from "../../../../src/lib/csrf";
+import { sendSecurityNotificationEmail } from "../../../../src/lib/email";
 import { assertDatabaseUrlConfigured } from "../../../../src/lib/env";
+import { reportError } from "../../../../src/lib/log";
 import {
   hashPassword,
   validatePasswordCandidate,
@@ -35,6 +37,16 @@ export async function POST(request: NextRequest) {
   const session = await readSession();
   if (!session?.accountId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  // A bearer token is a script's credential, not the person's: with the
+  // current password it could rotate the password and revoke every session
+  // including the owner's — silently, since the bearer path has no cookie
+  // to keep. Same rule as the other credential routes (delete, 2FA).
+  if (session.apiToken) {
+    return NextResponse.json(
+      { error: "api_token_not_allowed" },
+      { status: 403 },
+    );
   }
 
   const limited =
@@ -73,7 +85,10 @@ export async function POST(request: NextRequest) {
   const db = createDb();
 
   const [account] = await db
-    .select({ passwordHash: accounts.passwordHash })
+    .select({
+      passwordHash: accounts.passwordHash,
+      primaryEmail: accounts.primaryEmail,
+    })
     .from(accounts)
     .where(eq(accounts.id, session.accountId))
     .limit(1);
@@ -118,6 +133,20 @@ export async function POST(request: NextRequest) {
     actor: { accountId: session.accountId },
     eventType: "account.password_changed",
   });
+
+  // The one credential change that had no mail: whoever holds the address
+  // learns their password was rotated (and every other session signed out)
+  // even when it was not them doing it. Best-effort, like the 2FA mails.
+  if (account.primaryEmail) {
+    try {
+      await sendSecurityNotificationEmail(account.primaryEmail, {
+        what: "password_changed",
+        when: new Date(),
+      });
+    } catch (error) {
+      reportError("account.password_changed_mail_failed", error);
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

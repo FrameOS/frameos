@@ -44,15 +44,20 @@ export async function registerStoreImage(
   /** Dimensions the caller knows (a zip manifest's), used when the bytes
    * do not say — WebP and GIF headers are not read. */
   known?: { height?: number | undefined; width?: number | undefined },
+  /** The uploading account: metered for these bytes until a version binds
+   * them (usage.ts unboundImageBytes), and what the sweep keys on. */
+  accountId?: string | null,
 ): Promise<StoreImage> {
   const type = contentType ?? detectImageContentType(content) ?? "image/jpeg";
   const stored = await storeBlob(blobNamespaces.sceneImage, content, type);
   const size = imageDimensions(content);
   const width = size?.width ?? known?.width ?? null;
   const height = size?.height ?? known?.height ?? null;
+  const uploader = accountId ?? null;
   const [row] = await db
     .insert(storeImages)
     .values({
+      accountId: uploader,
       contentType: type,
       height,
       objectKey: stored.objectKey,
@@ -63,9 +68,10 @@ export async function registerStoreImage(
     // The same bytes under an older key (a publish-time preview lives under
     // store/scene-previews) keep their row; the object is the same either
     // way once read through readBlob. Dimensions fill in when a later
-    // registration knows them.
+    // registration knows them; the first uploader stays on record.
     .onConflictDoUpdate({
       set: {
+        accountId: sql`coalesce(${storeImages.accountId}, ${uploader})`,
         height: sql`coalesce(${storeImages.height}, ${height})`,
         width: sql`coalesce(${storeImages.width}, ${width})`,
       },
