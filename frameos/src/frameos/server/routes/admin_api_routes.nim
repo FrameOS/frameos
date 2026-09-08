@@ -163,7 +163,18 @@ proc addAdminApiRoutes*(router: var Router) =
         jsonResponse(request, Http403, %*{"detail": verdict.detail})
         return
       try:
-        let updated = setLocalNetworkAccess(payload{"enabled"}.getBool(true))
+        # `scope` picks which locally-established fact the matched code
+        # unlocks: the LAN deny (default) or the process-spawning apps for
+        # store-origin scenes.
+        let scope = payload{"scope"}.getStr("localNetwork")
+        let updated =
+          case scope
+          of "localNetwork": setLocalNetworkAccess(payload{"enabled"}.getBool(true))
+          of "shellApps": setShellAppsAccess(payload{"enabled"}.getBool(true))
+          else:
+            sendEvent("render", %*{})
+            jsonResponse(request, Http400, %*{"detail": "Unknown scope: " & scope})
+            return
         sendEvent("render", %*{})
         jsonResponse(request, Http200, updated)
       except CatchableError as error:

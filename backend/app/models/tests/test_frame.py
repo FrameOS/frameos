@@ -277,6 +277,46 @@ async def test_get_frame_json_keeps_sync_internals_out_of_home_assistant_setting
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_ships_store_scene_settings_only_when_granted(_mock_publish, db, redis):
+    # A scene the owner wrote gets what it declares; a store scene (the cloud
+    # stamps origin.storeSceneId when it is read) is anyone's code and only
+    # gets a group the owner granted on the frame. Declaration != permission.
+    frame = await new_frame(db, redis, "FrameJsonGrants", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="openAI", value={"apiKey": "sk-owner"}))
+    db.add(Settings(project_id=frame.project_id, key="unsplash", value={"accessKey": "u-owner"}))
+    db.commit()
+    declare = lambda group: {  # noqa: E731
+        "type": "app",
+        "data": {"sources": {"config.json": json.dumps({"settings": [group]})}},
+    }
+    frame.scenes = [
+        {"id": "own", "nodes": [declare("unsplash")]},
+        {
+            "id": "from-store",
+            "origin": {"href": "https://scenes.frameos.net/s/x", "storeSceneId": "11111111-2222-3333-4444-555555555555"},
+            "nodes": [declare("openAI")],
+        },
+    ]
+
+    frame.service_setting_groups = None
+    data = get_frame_json(db, frame)
+    assert data["settings"] == {"unsplash": {"accessKey": "u-owner"}}
+
+    frame.service_setting_groups = ["openAI"]
+    data = get_frame_json(db, frame)
+    assert data["settings"] == {"unsplash": {"accessKey": "u-owner"}, "openAI": {"apiKey": "sk-owner"}}
+
+    # A grant for a group no store scene declares changes nothing, and an
+    # owner scene declaring the same group as an ungranted store scene still
+    # gets it (the owner's declaration is the permission).
+    frame.service_setting_groups = ["homeAssistant"]
+    frame.scenes.append({"id": "own-2", "nodes": [declare("openAI")]})
+    data = get_frame_json(db, frame)
+    assert set(data["settings"]) == {"unsplash", "openAI"}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_includes_interval(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
     frame.interval = 3600
@@ -571,3 +611,50 @@ async def test_legacy_deploy_snapshot_is_served_without_its_secrets(_mock_publis
 
     frame.ssh_pass = "rotated"
     assert frame.to_dict()["secret_fingerprints"]["ssh_pass"] != snapshot["secret_fingerprints"]["ssh_pass"]
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_to_dict_fingerprints_the_service_keys_frame_json_would_ship(_mock_publish, db, redis):
+    # The deploy baseline is to_dict(); with a fingerprint per shipped
+    # settings group on it, the workspace can tell "a key was added or
+    # rotated since the last deploy" without holding a value.
+    from app.models.frame import record_successful_deploy
+
+    frame = await new_frame(db, redis, "FrameJsonFingerprints", "host", "server_host.com")
+    unsplash = Settings(project_id=frame.project_id, key="unsplash", value={"accessKey": "u-1"})
+    db.add(unsplash)
+    db.commit()
+    declare = lambda group: {  # noqa: E731
+        "type": "app",
+        "data": {"sources": {"config.json": json.dumps({"settings": [group]})}},
+    }
+    frame.scenes = [
+        {"id": "own", "nodes": [declare("unsplash")]},
+        {"id": "store", "origin": {"storeSceneId": "11111111-2222-3333-4444-555555555555"}, "nodes": [declare("openAI")]},
+    ]
+    db.add(frame)
+    db.commit()
+
+    before = frame.to_dict()
+    # Only the group that would ship: unsplash (owner-declared, has a value);
+    # openAI is declared by a store scene and not granted, and has no value.
+    assert set(before["settings_fingerprints"]) == {"unsplash"}
+    assert "u-1" not in json.dumps(before["settings_fingerprints"])  # a hash, never the value
+    record_successful_deploy(frame, before)
+    assert frame.last_successful_deploy["settings_fingerprints"] == before["settings_fingerprints"]
+
+    # Rotating the key changes the fingerprint; the stored baseline keeps the old one.
+    unsplash.value = {"accessKey": "u-2"}
+    db.add(unsplash)
+    db.commit()
+    after = frame.to_dict()
+    assert after["settings_fingerprints"]["unsplash"] != before["settings_fingerprints"]["unsplash"]
+    assert frame.to_dict()["last_successful_deploy"]["settings_fingerprints"] == before["settings_fingerprints"]
+
+    # Granting the store scene's group (with a value) adds a fingerprint for it.
+    db.add(Settings(project_id=frame.project_id, key="openAI", value={"apiKey": "sk-1"}))
+    frame.service_setting_groups = ["openAI"]
+    db.add(frame)
+    db.commit()
+    assert set(frame.to_dict()["settings_fingerprints"]) == {"unsplash", "openAI"}

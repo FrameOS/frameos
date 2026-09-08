@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import hmac
 from typing import Any, Iterator
 
@@ -135,6 +136,28 @@ def frame_secret_fingerprints(frame_dict: dict) -> dict[str, str]:
             value = container.get(key)
             if value not in (None, ""):
                 fingerprints[dotted] = _fingerprint(value, keys[0])
+    return fingerprints
+
+
+SETTINGS_FINGERPRINTS_KEY = "settings_fingerprints"
+
+
+def shipped_settings_fingerprints(settings: dict) -> dict[str, str]:
+    """``{group: hmac}`` for every non-empty service settings group frame.json
+    would carry (``shipped_frame_settings``). Values are canonicalised (sorted
+    keys) so a re-save in a different key order fingerprints the same. Rides
+    on ``to_dict()`` and therefore on every deploy baseline: the frontend
+    diffs the two maps to say "service keys changed since the last deploy"
+    without ever holding a value."""
+    keys = _fingerprint_keys()
+    if not keys or not isinstance(settings, dict):
+        return {}
+    fingerprints: dict[str, str] = {}
+    for group, value in settings.items():
+        if value in (None, "", {}, []):
+            continue
+        canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        fingerprints[str(group)] = _fingerprint(canonical, keys[0])
     return fingerprints
 
 

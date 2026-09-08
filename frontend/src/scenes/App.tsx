@@ -21,6 +21,7 @@ import { inHassioIngress } from '../utils/inHassioIngress'
 import { isCloudMode } from '../utils/cloudMode'
 import { WorkspaceRouteLoading } from './workspace/WorkspaceRouteLoading'
 import { PersistentTerminalSessions } from './frame/panels/Terminal/PersistentTerminalSessions'
+import { PreviewKeyConsentModal } from './frame/panels/Scenes/PreviewKeyConsentModal'
 
 interface DisplayedScene {
   scene: SceneKey
@@ -129,6 +130,7 @@ export function LoggedInApp() {
       <PersistentTerminalSessions />
       <SceneRoute scene={scene} params={params} fallback={<WorkspaceRouteLoading scene={scene} />} />
       <LongRunningTaskToasts />
+      <PreviewKeyConsentModal />
     </>
   )
 }

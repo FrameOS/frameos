@@ -3,10 +3,11 @@ import json
 import os
 from datetime import datetime, timezone
 from arq import ArqRedis as Redis
+import time
 from typing import Any, Optional
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean, Text
-from sqlalchemy.orm import Session, mapped_column
+from sqlalchemy.orm import Session, mapped_column, object_session
 from app.utils.scene_execution import scene_is_interpreted
 from app.database import Base
 
@@ -20,7 +21,13 @@ from app.drivers.devices import (
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.timezone import frame_timezone, stored_timezone
-from app.utils.frame_secrets import deploy_snapshot, frame_secret_fingerprints, served_deploy_snapshot, websocket_frame_payload
+from app.utils.frame_secrets import (
+    deploy_snapshot,
+    frame_secret_fingerprints,
+    served_deploy_snapshot,
+    shipped_settings_fingerprints,
+    websocket_frame_payload,
+)
 from app.utils.ssh_host_keys import host_key_fingerprint
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
@@ -359,6 +366,13 @@ class Frame(Base):
     mountpoints = mapped_column(JSON, nullable=True)
     error_behavior = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
+    # Service-settings groups (openAI, homeAssistant, …) that scenes from the
+    # public scene store may read on this frame. A scene the owner authored is
+    # granted what its apps declare, as it always was; a store scene is
+    # anyone's code, so its declaration is a request the owner grants here
+    # (Frame settings → Service settings). NULL/empty = nothing granted. Same
+    # field name and meaning as the cloud's per-frame grant.
+    service_setting_groups = mapped_column(JSON, nullable=True)
     buildroot = mapped_column(JSON, nullable=True)
     embedded = mapped_column(JSON, nullable=True)
     rpios = mapped_column(JSON, nullable=True)
@@ -428,6 +442,7 @@ class Frame(Base):
             'mountpoints': normalize_mountpoints(self.mountpoints),
             'error_behavior': normalize_error_behavior(self.error_behavior),
             'palette': self.palette,
+            'service_setting_groups': self.service_setting_groups,
             'buildroot': self.buildroot,
             'embedded': self.embedded,
             'rpios': self.rpios,
@@ -440,6 +455,19 @@ class Frame(Base):
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
         result['secret_fingerprints'] = frame_secret_fingerprints(result)
+        # Fingerprints of the service keys frame.json would ship right now.
+        # Every deploy path snapshots this dict as its baseline, so the
+        # workspace can diff "keys shipped at the last deploy" against "keys
+        # that would ship now" without ever seeing a value. Best-effort: a
+        # detached row (no session) simply carries none.
+        try:
+            session = object_session(self)
+            if session is not None:
+                result['settings_fingerprints'] = shipped_settings_fingerprints(
+                    shipped_frame_settings(self, get_settings_dict(session, project_id=self.project_id), cached_app_configs())
+                )
+        except Exception:  # noqa: BLE001 — the baseline must never break serialisation
+            pass
         return result
 
 async def new_frame(
@@ -633,6 +661,87 @@ def get_templates_json() -> dict:
     else:
         return {}
 
+
+
+_APP_CONFIGS_CACHE: dict[str, Any] = {"at": 0.0, "configs": None}
+_APP_CONFIGS_CACHE_SECONDS = 5.0
+
+
+def cached_app_configs() -> dict[str, dict]:
+    """get_app_configs() reads every app's config.json from disk; to_dict runs
+    per frame on every list and broadcast, so it reuses one read for a few
+    seconds. get_frame_json (the deploy) still reads fresh."""
+    now = time.monotonic()
+    if _APP_CONFIGS_CACHE["configs"] is None or now - _APP_CONFIGS_CACHE["at"] > _APP_CONFIGS_CACHE_SECONDS:
+        _APP_CONFIGS_CACHE["configs"] = get_app_configs()
+        _APP_CONFIGS_CACHE["at"] = now
+    return _APP_CONFIGS_CACHE["configs"]
+
+
+def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None) -> dict:
+    """The service settings groups frame.json carries for this frame, by
+    provenance: what the owner's scenes declare, plus what store-origin
+    scenes declare AND the owner granted (service_setting_groups). The same
+    walk feeds the deploy baseline (``settings_fingerprints`` in to_dict), so
+    a key added or rotated after a deploy shows up as a pending change."""
+    # Which groups the frame's scenes declare — split by provenance. A scene
+    # the owner authored is granted what it declares; a scene from the public
+    # store (origin.storeSceneId, stamped by the cloud when it was read) only
+    # gets a group the owner granted on this frame (service_setting_groups).
+    # Declaration is a request, not a permission (docs/security-todo.md).
+    setting_keys = set()
+    store_scene_setting_keys = set()
+    # getattr: the generic release-image build hands this a Frame stand-in
+    # that carries only the columns a generic image needs.
+    granted_to_store_scenes = {
+        str(group)
+        for group in (getattr(frame, "service_setting_groups", None) or [])
+        if isinstance(group, str) and group
+    }
+    app_configs = app_configs if app_configs is not None else get_app_configs()
+    for scene in list(frame.scenes):
+        origin = scene.get('origin') if isinstance(scene, dict) else None
+        scene_from_store = isinstance(origin, dict) and bool(origin.get('storeSceneId'))
+        declared_here = store_scene_setting_keys if scene_from_store else setting_keys
+        for node in scene.get('nodes', []):
+            if node.get('type', None) == 'app':
+                sources = node.get('data', {}).get('sources', None)
+                keyword = node.get('data', {}).get('keyword', None)
+                scene_app = scene.get('apps', {}).get(keyword) if isinstance(scene.get('apps', {}), dict) else None
+                if not sources and isinstance(scene_app, dict):
+                    sources = scene_app.get('sources', None)
+                if sources and len(sources) > 0:
+                    try:
+                        config = sources.get('config.json', '{}')
+                        config = json.loads(config)
+                        settings = config.get('settings', [])
+                        for key in settings:
+                            declared_here.add(key)
+                    except:  # noqa: E722
+                        pass
+                else:
+                    if keyword:
+                        app_config = app_configs.get(keyword, None)
+                        if app_config:
+                            settings = app_config.get('settings', [])
+                            for key in settings:
+                                declared_here.add(key)
+
+    for key in store_scene_setting_keys:
+        if key in granted_to_store_scenes:
+            setting_keys.add(key)
+
+    final_settings = {}
+    for key in setting_keys:
+        value = all_settings.get(key, None)
+        if key == "homeAssistant" and isinstance(value, dict):
+            # Frame apps only need the URL + token; keep the backend sync
+            # internals (MQTT credentials, sync flags) off the devices.
+            value = {k: v for k, v in value.items() if k in ("url", "accessToken")}
+        final_settings[key] = value
+    return final_settings
+
+
 def get_frame_json(db: Session, frame: Frame) -> dict:
     https_proxy = normalize_https_proxy(frame.https_proxy)
     network = frame.network or {}
@@ -758,41 +867,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             schedule['events'] = events
     frame_json["schedule"] = schedule
 
-    setting_keys = set()
-    app_configs = get_app_configs()
-    for scene in list(frame.scenes):
-        for node in scene.get('nodes', []):
-            if node.get('type', None) == 'app':
-                sources = node.get('data', {}).get('sources', None)
-                keyword = node.get('data', {}).get('keyword', None)
-                scene_app = scene.get('apps', {}).get(keyword) if isinstance(scene.get('apps', {}), dict) else None
-                if not sources and isinstance(scene_app, dict):
-                    sources = scene_app.get('sources', None)
-                if sources and len(sources) > 0:
-                    try:
-                        config = sources.get('config.json', '{}')
-                        config = json.loads(config)
-                        settings = config.get('settings', [])
-                        for key in settings:
-                            setting_keys.add(key)
-                    except:  # noqa: E722
-                        pass
-                else:
-                    if keyword:
-                        app_config = app_configs.get(keyword, None)
-                        if app_config:
-                            settings = app_config.get('settings', [])
-                            for key in settings:
-                                setting_keys.add(key)
-
-    final_settings = {}
-    for key in setting_keys:
-        value = all_settings.get(key, None)
-        if key == "homeAssistant" and isinstance(value, dict):
-            # Frame apps only need the URL + token; keep the backend sync
-            # internals (MQTT credentials, sync flags) off the devices.
-            value = {k: v for k, v in value.items() if k in ("url", "accessToken")}
-        final_settings[key] = value
+    final_settings = shipped_frame_settings(frame, all_settings)
 
     frame_admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
 

@@ -345,7 +345,15 @@ capped at five attempts — someone who cannot see the screen cannot complete it
 On ESP32 the equivalent is `set allow_local_network 1` on the USB console,
 which is physical presence by construction.
 
-It is persisted in `state/local_access.json`, deliberately not in `frame.json`.
+The same ceremony carries a second, Pi-only fact: whether scenes from the
+public scene store may run the two built-in apps that spawn a child process
+(`data/chromiumScreenshot`, `data/rstpSnapshot`) — `POST
+/api/network/local-access` with `{"scope": "shellApps", "enabled": true,
+"code": …}` (`frameos/spawn_guard.nim`). Off by default: a store scene is
+anyone's code, and those two apps reach the network without the HTTP client's
+private-network check.
+
+Both are persisted in `state/local_access.json`, deliberately not in `frame.json`.
 A backend deploy uploads a freshly generated `frame.json` over SSH and never
 round-trips the device's copy, so a setting stored there is quietly reset by
 the next unrelated deploy — fail-safe, but baffling to debug a week later when

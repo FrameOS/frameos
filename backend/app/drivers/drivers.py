@@ -55,11 +55,14 @@ DRIVERS = {
         can_render=True,
         can_turn_on_off=True,
     ),
+    # Framebuffer rendering on the kernel's DPI overlay (setup adds
+    # vc4-kms-dpi-hyperpixel2r when config.txt has no HyperPixel overlay) plus
+    # the backlight through the kernel backlight class, then GPIO — no vendor
+    # tree or Python since 2026-09-07.
     "inkyHyperPixel2rLegacyFb": Driver(
         name="inkyHyperPixel2rLegacyFb",
         import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
         setup_import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
-        vendor_folder="inkyHyperPixel2r",
         can_render=True,
         can_turn_on_off=True
     ),

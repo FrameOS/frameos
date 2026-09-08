@@ -16,6 +16,14 @@ const LongRunningTaskToasts = lazy(() =>
     default: module.LongRunningTaskToasts,
   }))
 )
+// Same deferral: the "Preview with your API keys?" dialog for store scene
+// previews. Without a mounted host the gate answers "allow" — so the cloud,
+// where store scenes are the norm, must mount it.
+const PreviewKeyConsentModal = lazy(() =>
+  import('../../../frontend/src/scenes/frame/panels/Scenes/PreviewKeyConsentModal').then((module) => ({
+    default: module.PreviewKeyConsentModal,
+  }))
+)
 
 // Layout contract (see .frameos-cloud-app in src/index.css): the account
 // header is persistent chrome that never scrolls away and never re-mounts per
@@ -41,6 +49,7 @@ export function App(): JSX.Element {
           successes and failures alike finished with no visible trace. */}
       <Suspense fallback={null}>
         <LongRunningTaskToasts />
+        <PreviewKeyConsentModal />
       </Suspense>
     </div>
   )

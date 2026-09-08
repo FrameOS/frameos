@@ -8,6 +8,7 @@ import times
 import strformat
 import frameos/apps
 import frameos/types
+import frameos/spawn_guard
 import frameos/utils/image
 import frameos/utils/process
 
@@ -82,6 +83,13 @@ proc runFfmpeg(command: string, url: string, timeoutMs: int): tuple[data: string
   result.data = processResult.output
 
 proc get*(self: App, context: ExecutionContext): Image =
+  # Provenance and target checks before ffmpeg is spawned (spawn_guard.nim).
+  let refusal = spawningAppRefusal(self.scene, "rstpSnapshot")
+  if refusal.len > 0:
+    return renderError(self, context, refusal)
+  let targetRefusal = spawnTargetRefusal(self.appConfig.url, ["rtsp", "rtsps", "http", "https"])
+  if targetRefusal.len > 0:
+    return renderError(self, context, targetRefusal)
   try:
     let url = self.appConfig.url
     let command = ffmpegCommandForLog(url, "pipe:1")

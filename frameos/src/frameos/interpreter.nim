@@ -9,6 +9,7 @@ when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
+import frameos/cloud/scene_guard
 import frameos/js_runtime/run_budget
 import frameos/node_config
 import frameos/planner
@@ -1247,6 +1248,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     nodes: initTable[NodeId, DiagramNode](),
     edges: @[],
     apps: exportedScene.apps,
+    storeOrigin: exportedScene.storeOrigin,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -1811,6 +1813,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     edges: scene.edges,
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: scene.fields,
+    storeOrigin: sceneOriginIsStore(scene.origin),
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.
     publicStateFields: scene.fields.filterIt(it.access != "private"),

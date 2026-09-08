@@ -9,6 +9,8 @@ import { Spinner } from '../../components/Spinner'
 import { H6 } from '../../components/H6'
 import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
+import { settingsDetails } from '../frame/panels/secretSettings'
+import { forgetPreviewKeyDecisions, readRememberedPreviewKeyDecisions } from '../frame/panels/Scenes/previewKeyConsent'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
@@ -362,8 +364,8 @@ function DockerDaemonStatus(): JSX.Element {
         {systemInfo?.docker?.daemonAvailable
           ? 'Docker daemon is reachable.'
           : systemInfo?.docker?.cliAvailable
-          ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
-          : 'Docker CLI is not installed.'}
+            ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
+            : 'Docker CLI is not installed.'}
       </p>
       <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
         Recheck
@@ -1310,6 +1312,10 @@ export function Settings() {
               {showSection('settings-system') ? (
                 <>
                   <SettingsGroupDivider label="Information" />
+                  <H6 id="settings-preview-keys" className="pt-4">
+                    Browser previews and store scenes
+                  </H6>
+                  <PreviewKeyDecisions />
                   <H6 id="settings-system" className="pt-4">
                     System information
                   </H6>
@@ -1321,6 +1327,44 @@ export function Settings() {
         </div>
       </div>
     </FrameosShell>
+  )
+}
+
+/** The per-key answers remembered by the "Preview with your API keys?" dialog. */
+function PreviewKeyDecisions(): JSX.Element {
+  const [decisions, setDecisions] = useState(() => readRememberedPreviewKeyDecisions())
+  const entries = Object.entries(decisions).sort(([a], [b]) => a.localeCompare(b))
+  return (
+    <div className="space-y-2">
+      <p className="frameos-muted text-sm">
+        A browser preview of a scene from the scene store asks before it hands that code your service keys. Answers you
+        chose to remember are kept in this browser:
+      </p>
+      {entries.length === 0 ? (
+        <p className="frameos-muted text-sm">Nothing remembered — every store scene preview asks.</p>
+      ) : (
+        <ul className="text-sm">
+          {entries.map(([group, decision]) => (
+            <li key={group}>
+              {settingsDetails[group]?.title ?? group}:{' '}
+              {decision === 'allow' ? 'preview with keys' : 'preview without keys'}
+            </li>
+          ))}
+        </ul>
+      )}
+      {entries.length ? (
+        <Button
+          size="small"
+          color="secondary"
+          onClick={() => {
+            forgetPreviewKeyDecisions()
+            setDecisions({})
+          }}
+        >
+          Forget remembered answers
+        </Button>
+      ) : null}
+    </div>
   )
 }
 

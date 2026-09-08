@@ -41,7 +41,8 @@ def test_hyperpixel_round_keeps_legacy_fb_driver_for_existing_configs():
     assert "inkyHyperPixel2rLegacyFb" in drivers
     assert "inkyHyperPixel2r" not in drivers
     assert "evdev" in drivers
-    assert drivers["inkyHyperPixel2rLegacyFb"].vendor_folder == "inkyHyperPixel2r"
+    # The backlight is driven through lgpio; nothing to vendor or set up.
+    assert drivers["inkyHyperPixel2rLegacyFb"].vendor_folder is None
 
 
 def test_hyperpixel_round_native_uses_native_gpio_driver():

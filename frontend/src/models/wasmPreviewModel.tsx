@@ -15,6 +15,8 @@ import {
   withWasmPreviewEntry,
 } from '../utils/wasmScenePreview'
 import { framesModel } from './framesModel'
+import { appsModel } from './appsModel'
+import { gatePreviewSettings } from '../scenes/frame/panels/Scenes/previewKeyConsentLogic'
 
 // Cloud and backend modes: renders a frame's assigned scene in the browser
 // via the frameos-wasm worker when a tile has no device-sourced image at
@@ -112,7 +114,18 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
   }
   const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, null)
   const { width, height } = wasmPreviewDimensions(frame)
-  const settingsJson = await fetchSettingsJson(frame.id)
+  // Same gate as the live preview: a store scene gets the owner's keys only
+  // with their say-so. A cancel lands as a failed render (the tile shows
+  // nothing further); Settings can forget remembered answers.
+  const gated = await gatePreviewSettings(
+    payloadScenes,
+    appsModel.findMounted()?.values.apps ?? {},
+    JSON.parse(await fetchSettingsJson(frame.id)) as Record<string, unknown>
+  )
+  if (gated.settings === null) {
+    throw new Error('preview cancelled')
+  }
+  const settingsJson = JSON.stringify(gated.settings)
   const proxyUrl = await previewProxyUrl(frame.id)
 
   const worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })

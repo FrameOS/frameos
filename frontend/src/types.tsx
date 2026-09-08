@@ -285,6 +285,11 @@ export interface FrameType {
    * (each replaced by an HMAC fingerprint under `secret_fingerprints`). */
   last_successful_deploy?: Record<string, any>
   last_successful_deploy_at?: string
+  /** Backend only: {settingsGroup: hmac} of the service keys frame.json
+   * would ship right now. The deploy baseline carries the same map from
+   * deploy time, so the diff says "keys changed since the last deploy"
+   * without either side holding a value. */
+  settings_fingerprints?: Record<string, string>
   /** Backend only: fingerprints of the row's CURRENT secrets, keyed by dotted
    * path (`ssh_pass`, `agent.agentSharedSecret`, ...). Compared with the ones
    * in last_successful_deploy to tell an unchanged secret from a rotated one
@@ -612,16 +617,7 @@ export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (v
   fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
 export type ConfigFieldConditionOperator =
-  | 'eq'
-  | 'ne'
-  | 'gt'
-  | 'lt'
-  | 'gte'
-  | 'lte'
-  | 'empty'
-  | 'notEmpty'
-  | 'in'
-  | 'notIn'
+  'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte' | 'empty' | 'notEmpty' | 'in' | 'notIn'
 
 export interface ConfigFieldCondition {
   field: string | '.meta.showOutput' | '.meta.showNextPrev'

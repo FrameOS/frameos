@@ -22,6 +22,8 @@ import { getBasePath } from '../../../../utils/getBasePath'
 import { projectApiPath } from '../../../../utils/projectApi'
 import { frameLogic } from '../../frameLogic'
 import { collectScenePreviewPayloadScenes, scenesLogic } from './scenesLogic'
+import { appsModel } from '../../../../models/appsModel'
+import { gatePreviewSettings } from './previewKeyConsentLogic'
 import type { FrameType } from '../../../../types'
 
 export interface LivePreviewLogicProps {
@@ -574,9 +576,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         scenes: livePreviewLogicValues['scenes']
       ): FrameScene | null =>
         livePreviewSceneId
-          ? (livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
+          ? ((livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
             scenes.find((scene) => scene.id === livePreviewSceneId) ??
-            null
+            null)
           : null,
     ],
     gpioButtons: [
@@ -723,6 +725,26 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       for (const [group, groupValues] of Object.entries(values.previewSettings ?? {})) {
         settings[group] = { ...(settings[group] ?? {}), ...groupValues }
       }
+      // A store scene gets the owner's keys only with their say-so (per key,
+      // remembered on request); owner-authored scenes never ask. A template
+      // preview from a store-backed repository is store code before it is
+      // stamped, so it asks for every scene of the preview.
+      const gated = await gatePreviewSettings(
+        payloadScenes,
+        appsModel.findMounted()?.values.apps ?? {},
+        settings,
+        Boolean(values.livePreviewSourceTemplate?.template?.sceneId)
+      )
+      if (gated.settings === null) {
+        actions.closeLivePreview()
+        return
+      }
+      if (gated.withheld.length) {
+        actions.appendPreviewLog(
+          `Preview runs without your keys for: ${gated.withheld.join(', ')} (store scene; change under Settings)`
+        )
+      }
+      settings = gated.settings
       const settingsJson = JSON.stringify(settings)
 
       // Same-origin proxy so the runtime's HTTP requests (image apps,

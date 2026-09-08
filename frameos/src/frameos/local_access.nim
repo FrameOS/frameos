@@ -50,8 +50,33 @@ var
   # A hand-edited state file is picked up on restart, not live.
   persistedAccessCache: Option[bool]
   persistedAccessCacheLoaded = false
+  # Same file, same ceremony, second fact: may store-origin scenes on this
+  # frame run the two apps that spawn child processes (chromiumScreenshot,
+  # rstpSnapshot)? Off unless someone at the panel said yes.
+  persistedShellAppsCache: Option[bool]
+  persistedShellAppsCacheLoaded = false
 
 initLock(localAccessLock)
+
+proc readStateFile(): JsonNode =
+  ## The state file as an object, or an empty object when absent/corrupt.
+  try:
+    if storedFileExists(LocalAccessStatePath):
+      let data = parseJson(readTextFile(LocalAccessStatePath))
+      if data.kind == JObject:
+        return data
+  except CatchableError:
+    discard
+  %*{}
+
+proc writeStateFile(update: JsonNode) =
+  ## Merge `update` into the file so the two facts do not overwrite each other.
+  var data = readStateFile()
+  for key, value in update.pairs:
+    data[key] = value
+  data["updatedAt"] = %now().format("yyyy-MM-dd'T'HH:mm:sszzz")
+  ensureParentDir(LocalAccessStatePath)
+  writeTextFile(LocalAccessStatePath, $data & "\n")
 
 proc storedLocalNetworkAccess*(): Option[bool] =
   ## What the state file says, or none() when the ceremony has never been run
@@ -61,33 +86,47 @@ proc storedLocalNetworkAccess*(): Option[bool] =
       return persistedAccessCache
     persistedAccessCache = none(bool)
     persistedAccessCacheLoaded = true
-    try:
-      if storedFileExists(LocalAccessStatePath):
-        let data = parseJson(readTextFile(LocalAccessStatePath))
-        if data.kind == JObject and data.hasKey("allowLocalNetworkAccess"):
-          persistedAccessCache = some(data{"allowLocalNetworkAccess"}.getBool(false))
-    except CatchableError:
-      # An unreadable or corrupt state file must not be read as "elevated".
-      persistedAccessCache = none(bool)
+    # An unreadable or corrupt state file reads as an empty object, never as
+    # "elevated".
+    let data = readStateFile()
+    if data.hasKey("allowLocalNetworkAccess"):
+      persistedAccessCache = some(data{"allowLocalNetworkAccess"}.getBool(false))
     result = persistedAccessCache
 
 proc persistLocalNetworkAccess*(enabled: bool) =
   ## Raises on write failure: the caller is an admin request that must not
   ## report success for a change the next reboot would forget.
-  ensureParentDir(LocalAccessStatePath)
-  writeTextFile(LocalAccessStatePath, $(%*{
-    "allowLocalNetworkAccess": enabled,
-    "updatedAt": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
-  }) & "\n")
+  writeStateFile(%*{"allowLocalNetworkAccess": enabled})
   withLock localAccessLock:
     persistedAccessCache = some(enabled)
     persistedAccessCacheLoaded = true
+
+proc storedAllowShellApps*(): bool =
+  ## Whether store-origin scenes may run the process-spawning apps on this
+  ## frame. False until the on-panel ceremony has said otherwise; never read
+  ## from frame.json (a backend deploy must not be able to grant it).
+  withLock localAccessLock:
+    if not persistedShellAppsCacheLoaded:
+      persistedShellAppsCache = none(bool)
+      persistedShellAppsCacheLoaded = true
+      let data = readStateFile()
+      if data.hasKey("allowShellApps"):
+        persistedShellAppsCache = some(data{"allowShellApps"}.getBool(false))
+    result = persistedShellAppsCache.isSome and persistedShellAppsCache.get()
+
+proc persistAllowShellApps*(enabled: bool) =
+  writeStateFile(%*{"allowShellApps": enabled})
+  withLock localAccessLock:
+    persistedShellAppsCache = some(enabled)
+    persistedShellAppsCacheLoaded = true
 
 proc forgetStoredLocalNetworkAccess*() =
   ## Test seam; also the right call if the state file is ever edited in place.
   withLock localAccessLock:
     persistedAccessCache = none(bool)
     persistedAccessCacheLoaded = false
+    persistedShellAppsCache = none(bool)
+    persistedShellAppsCacheLoaded = false
 
 proc resolveLocalNetworkAccess*(frameJsonValue: bool): bool =
   ## The state file wins. `frameJsonValue` is the legacy fallback: frames

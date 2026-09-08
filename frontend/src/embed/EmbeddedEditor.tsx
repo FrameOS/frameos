@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { allowedParentOrigins, replyTargetOrigin, sameOriginPreviewProxyUrl } from './embedOrigins'
 import copy from 'copy-to-clipboard'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { useEffect, useRef, useState } from 'react'
@@ -259,6 +260,11 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
 //                                                  {type: 'frameos-editor:screenshot-saved', ok,
 //                                                   error?, fallbackDownload?} or the editor
 //                                                  downloads the PNG locally after a timeout
+// Origins: in an iframe, only the parent window may send these, and only from
+// an origin the host declared (`?parentOrigin=` on the iframe URL, else the
+// framing document's origin from document.referrer); replies go to that origin,
+// never '*'. `previewProxyUrl` is honoured only when it is same-origin with
+// the editor itself.
 // `previewProxyUrl` is an optional same-origin endpoint the wasm live preview
 // routes CORS-blocked HTTP requests through. `description` is the embedding
 // page's description of the scene (scenes.json doesn't carry one), shown in
@@ -271,12 +277,37 @@ export function EmbeddedEditor(): JSX.Element {
   const logic = useMountedLogic(embedFrameLogic(logicProps))
   const [init, setInit] = useState<Omit<EmbeddedSceneEditorProps, 'onScenesChanged'> | null>(null)
   const [selectedSceneId, setSelectedSceneId] = useState<string | undefined>(undefined)
+  // The parent origin every reply goes to, locked on the first accepted
+  // message from the parent. Stays null for the direct mount.
+  const [parentOrigin, setParentOrigin] = useState<string | null>(null)
 
   useEffect(() => {
+    const allowed = allowedParentOrigins(window.location.search, document.referrer)
+    let lockedParentOrigin: string | null = null
     const onMessage = (event: MessageEvent): void => {
       const message = event.data
       if (!message || typeof message !== 'object') {
         return
+      }
+      const fromSelf = event.source === window
+      const fromParent = window.parent !== window && event.source === window.parent
+      if (!fromSelf && !fromParent) {
+        return
+      }
+      if (fromParent) {
+        if (!allowed.includes(event.origin)) {
+          console.warn(
+            `frameos-editor: ignoring a "${String(message.type)}" message from ${event.origin}; ` +
+              (allowed.length > 0
+                ? `allowed parent origins: ${allowed.join(', ')}`
+                : 'no parent origin is known — load the editor with ?parentOrigin=<your origin>')
+          )
+          return
+        }
+        if (lockedParentOrigin === null) {
+          lockedParentOrigin = event.origin
+          setParentOrigin(event.origin)
+        }
       }
       if (message.type === 'frameos-editor:init' && Array.isArray(message.scenes)) {
         const frame: Partial<FrameType> = {
@@ -304,18 +335,31 @@ export function EmbeddedEditor(): JSX.Element {
               : document.documentElement.dataset.frameosTheme === 'dark'
               ? 'dark'
               : 'light',
-          previewProxyUrl: typeof message.previewProxyUrl === 'string' ? message.previewProxyUrl : undefined,
+          // Only a same-origin proxy: it sees every URL scene code fetches.
+          previewProxyUrl: sameOriginPreviewProxyUrl(message.previewProxyUrl, window.location.origin),
           description: typeof message.description === 'string' ? message.description : undefined,
         })
         setSelectedSceneId(typeof message.sceneId === 'string' ? message.sceneId : undefined)
       } else if (message.type === 'frameos-editor:get-scenes') {
-        window.parent?.postMessage({ type: 'frameos-editor:scenes', scenes: logic.values.frameForm?.scenes ?? [] }, '*')
+        window.parent?.postMessage(
+          { type: 'frameos-editor:scenes', scenes: logic.values.frameForm?.scenes ?? [] },
+          replyTargetOrigin(lockedParentOrigin)
+        )
       } else if (message.type === 'frameos-editor:select-scene' && typeof message.sceneId === 'string') {
         setSelectedSceneId(message.sceneId)
       }
     }
     window.addEventListener('message', onMessage)
-    window.parent?.postMessage({ type: 'frameos-editor:ready' }, '*')
+    // The ready handshake goes to every allowed parent origin (there is no
+    // locked one yet); an origin we would not accept messages from never
+    // hears from us at all.
+    if (window.parent !== window) {
+      for (const origin of allowed) {
+        window.parent.postMessage({ type: 'frameos-editor:ready' }, origin)
+      }
+    } else {
+      window.postMessage({ type: 'frameos-editor:ready' }, window.location.origin)
+    }
     return () => window.removeEventListener('message', onMessage)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -333,7 +377,10 @@ export function EmbeddedEditor(): JSX.Element {
       {...init}
       sceneId={selectedSceneId}
       onScenesChanged={(nextScenes) => {
-        window.parent?.postMessage({ type: 'frameos-editor:scenes', scenes: nextScenes }, '*')
+        window.parent?.postMessage(
+          { type: 'frameos-editor:scenes', scenes: nextScenes },
+          replyTargetOrigin(parentOrigin)
+        )
       }}
     />
   )

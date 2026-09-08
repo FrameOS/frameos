@@ -486,47 +486,12 @@ jobs:
             '
           ls -lh release-assets/
 
-      # Detached minisign-compatible signatures (<asset>.minisig) next to
-      # every firmware image. The device verifies the Ed25519/BLAKE2b-512
-      # signature against the public key baked into the firmware BEFORE
-      # switching boot slots, and the cloud's OTA manifest route answers
-      # 409 unsigned_release for a release without them — so a missing
-      # signing secret must fail the release here, loudly: an unsigned
-      # release is worse than a failed one.
-      - name: Sign ESP32 firmware
-        env:
-          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
-            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned firmware"
-            exit 1
-          fi
-          # Ubuntu 24.04 pip is PEP 668 "externally managed"; the fallback
-          # keeps this working if the runner image ever stops being.
-          # Pinned to the version backend/requirements.txt carries: this step
-          # holds the firmware signing key, and an unpinned `pip install` is
-          # whatever PyPI serves that minute.
-          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
-            || python3 -m pip install --quiet cryptography==50.0.0
-          keyfile=$(mktemp)
-          # The secret is the small text file sign_firmware.py keygen wrote:
-          # a comment line + base64(ED + keyid8 + seed32).
-          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
-          status=0
-          python3 tools/sign_firmware.py sign --secret "$keyfile" \
-            release-assets/frameos-*.bin || status=$?
-          shred -u "$keyfile"
-          [ "$status" -eq 0 ] || exit "$status"
-          # The CI secret must be the counterpart of the committed public key
-          # (the one baked into shipped firmware) — a rotated-but-not-updated
-          # secret would sign images no device accepts.
-          for bin in release-assets/frameos-*.bin; do
-            python3 tools/sign_firmware.py verify \
-              --public release-assets/firmware-signing.pub "$bin"
-          done
-          ls -lh release-assets/
-
+      # NOT signed here. This job runs on a self-hosted runner slot — the same
+      # host that runs fork-PR VMs — and the firmware signing key must never be
+      # present there. The github-release job (GitHub-hosted) signs every
+      # frameos-*.bin it downloads, exactly as it signs the Linux archives;
+      # the device-side verification and the cloud's 409 unsigned_release make
+      # a release with an unsigned image fail there, loudly.
       - name: Upload ESP32 firmware
         uses: actions/upload-artifact@v4
         with:
@@ -536,13 +501,9 @@ jobs:
           name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-generic
           path: |
             release-assets/*-esp32-s3-generic.bin
-            release-assets/*-esp32-s3-generic.bin.minisig
             release-assets/*-esp32-s3-generic-app.bin
-            release-assets/*-esp32-s3-generic-app.bin.minisig
             release-assets/*-esp32-c3-generic.bin
-            release-assets/*-esp32-c3-generic.bin.minisig
             release-assets/*-esp32-c3-generic-app.bin
-            release-assets/*-esp32-c3-generic-app.bin.minisig
             release-assets/*-esp32-s3-generic-size.json
             release-assets/*-esp32-c3-generic-size.json
           if-no-files-found: error
@@ -984,18 +945,19 @@ jobs:
         with:
           name: release-notes-${{ needs.update-versions.outputs.docker_version }}
 
-      # The Pi/buildroot half of signed OTA. A frame verifies the release
+      # Signed OTA, both halves, on a GitHub-hosted runner — the ONLY place
+      # the firmware signing key is ever unsealed. A Pi verifies the release
       # archive against the key compiled into its binary before unpacking it
-      # (frameos/src/frameos/upgrade.nim), which is only possible if the
-      # archive is signed here — so an unsigned archive must fail the release,
-      # exactly as unsigned ESP32 firmware does. The ESP32 images are already
-      # signed in their own job; this covers the .tar.gz assets the upgrade
-      # path consumes.
+      # (frameos/src/frameos/upgrade.nim); an ESP32 verifies its image before
+      # switching boot slots (fos_ota.c). The .tar.gz archives and the
+      # ESP32 images built on self-hosted runners (which must never see the
+      # key) are signed here; images a GitHub-hosted job already signed keep
+      # their .minisig. An unsigned asset must fail the release, loudly.
       #
       # Not signed: the buildroot .img.gz SD-card images. Those are flashed by
       # hand from a machine that already trusts what it downloaded; nothing
       # on-device verifies them, so a signature there would be decoration.
-      - name: Sign release archives
+      - name: Sign release archives and firmware
         env:
           FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
         run: |
@@ -1006,6 +968,9 @@ jobs:
           fi
           shopt -s nullglob
           archives=(release-assets/frameos-*.tar.gz)
+          for bin in release-assets/frameos-*.bin; do
+            [ -f "$bin.minisig" ] || archives+=("$bin")
+          done
           if [ ${#archives[@]} -eq 0 ]; then
             echo "::error::no release archives found to sign"
             exit 1
@@ -1022,9 +987,12 @@ jobs:
           # Same counterpart check the firmware job makes: a rotated-but-not-
           # committed secret would sign archives no frame accepts, and the
           # failure would only show up on devices.
-          for archive in "${archives[@]}"; do
+          # Every signable asset must now carry a signature — the ones signed
+          # here and the ones a GitHub-hosted firmware job signed before upload.
+          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin; do
+            [ -f "$asset.minisig" ] || { echo "::error::$asset is unsigned"; exit 1; }
             python3 tools/sign_firmware.py verify \
-              --public release-assets/firmware-signing.pub "$archive"
+              --public release-assets/firmware-signing.pub "$asset"
           done
           ls -lh release-assets
 
