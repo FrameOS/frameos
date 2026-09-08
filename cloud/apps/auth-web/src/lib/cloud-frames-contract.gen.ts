@@ -137,10 +137,10 @@ export const cloudFramesContract = {
       },
       "profiles": {
         "linux": {
-          "since": "2026.9.11"
+          "since": "2026.9.12"
         },
         "esp32": {
-          "since": "2026.9.11"
+          "since": "2026.9.12"
         }
       }
     },

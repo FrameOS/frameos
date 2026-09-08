@@ -160,25 +160,47 @@ def normalize_auto_update(value: Any) -> str:
     return "stable"
 
 
+def _frame_field(frame: Any, name: str) -> Any:
+    """A column off a Frame row or off its to_dict() — the sync drawer and
+    the shell-less push work on the dict."""
+    if isinstance(frame, dict):
+        return frame.get(name)
+    return getattr(frame, name, None)
+
+
 def frame_can_auto_update(frame: Any) -> bool:
     """Whether a frame can install a generic signed FrameOS release on its own.
 
     An ESP32 can (its firmware decides per flash layout whether an OTA slot
     exists). A Raspberry Pi OS or Buildroot frame can only when it runs the
     precompiled release build with no legacy compiled scenes — a source build
-    carries scenes the release binary would drop, so ``autoUpdate`` is
-    withheld from its frame.json even when the switch is on.
+    carries scenes the release binary would drop, so the channel is
+    withheld from its frame.json even when the switch is on. Takes a Frame
+    row or its to_dict().
     """
-    from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, frame_compilation_mode
+    from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, normalize_compilation_mode
 
-    mode = getattr(frame, "mode", None) or "rpios"
+    mode = _frame_field(frame, "mode") or "rpios"
     if mode == "embedded":
         return True
     if mode not in ("rpios", "buildroot"):
         return False
-    if compiled_scene_count(getattr(frame, "scenes", None)) > 0:
+    if compiled_scene_count(_frame_field(frame, "scenes")) > 0:
         return False
-    return frame_compilation_mode(frame) == COMPILATION_MODE_PRECOMPILED
+    build = _frame_field(frame, "buildroot" if mode == "buildroot" else "rpios") or {}
+    compilation_mode = build.get("compilationMode") if isinstance(build, dict) else None
+    return normalize_compilation_mode(compilation_mode) == COMPILATION_MODE_PRECOMPILED
+
+
+def effective_auto_update(frame: Any) -> str:
+    """The channel the DEVICE is told: the stored one when the frame can take
+    a generic release, ``off`` otherwise. Every path that writes a device's
+    copy (frame.json, the ESP32 settings poll, the shell-less sync push) and
+    every comparison against a device's copy (the sync drawer) goes through
+    this, so a withheld channel never reads as drift."""
+    if not frame_can_auto_update(frame):
+        return "off"
+    return normalize_auto_update(_frame_field(frame, "auto_update"))
 
 
 def compiled_scene_count(scenes) -> int:
@@ -839,7 +861,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         # The runtime re-checks eligibility itself (compiled scenes, an
         # unversioned binary), but a frame this backend knows cannot take a
         # generic release is never told to try.
-        "autoUpdate": normalize_auto_update(getattr(frame, "auto_update", None)) if frame_can_auto_update(frame) else "off",
+        "autoUpdate": effective_auto_update(frame),
         "scalingMode": frame.scaling_mode or "contain",
         "rotate": frame.rotate or 0,
         "flip": frame.flip,

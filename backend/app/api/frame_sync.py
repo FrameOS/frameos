@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.frame import (
+    effective_auto_update,
     frame_has_shell_access,
     Frame,
     compact_timezone_updater,
@@ -366,6 +367,16 @@ def _sync_error_behavior(value: Any) -> dict[str, Any] | None:
     normalized = normalize_error_behavior(value)
     default = normalize_error_behavior(None)
     return None if _sync_values_equal(normalized, default) else normalized
+
+
+def _sync_backend_value(key: str, backend_frame: dict[str, Any]) -> Any:
+    """The backend's value of `key` AS THE DEVICE WAS TOLD IT: the auto-update
+    channel is withheld ("off") from a frame that cannot take a generic
+    release (effective_auto_update), so comparing the stored preference
+    against the device's copy would pin a change into the drawer forever."""
+    if key == "auto_update":
+        return effective_auto_update(backend_frame)
+    return backend_frame.get(key)
 
 
 def _sync_frame_value(key: str, value: Any) -> Any:
@@ -895,9 +906,13 @@ def _build_frame_sync_section(
     baseline_frame = baseline_frame or backend_frame
     changes: list[dict[str, Any]] = []
     for key in FRAME_SYNC_FRAME_KEYS:
-        backend_value = _sync_frame_value(key, backend_frame.get(key))
+        if key == "auto_update" and "auto_update" not in remote_frame:
+            # Firmware before 2026.9.12 has no channel to report; "absent" is
+            # not a choice to offer, the next update brings the key along.
+            continue
+        backend_value = _sync_frame_value(key, _sync_backend_value(key, backend_frame))
         frame_value = _sync_frame_value(key, remote_frame.get(key))
-        baseline_value = _sync_frame_value(key, baseline_frame.get(key))
+        baseline_value = _sync_frame_value(key, _sync_backend_value(key, baseline_frame))
         if _sync_values_equal(frame_value, baseline_value):
             continue
         if _sync_values_equal(backend_value, frame_value):
@@ -1285,7 +1300,7 @@ async def push_backend_state_to_device(
     backend_frame = frame.to_dict()
     payload: dict[str, Any] = {}
     for key in FRAME_SYNC_FRAME_KEYS:
-        value = _sync_frame_value(key, backend_frame.get(key))
+        value = _sync_frame_value(key, _sync_backend_value(key, backend_frame))
         if value not in (None, "", [], {}):
             payload[key] = value
     scenes = copy.deepcopy(frame.scenes) if isinstance(frame.scenes, list) else []

@@ -100,14 +100,14 @@ export function cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion: string |
 }
 
 /**
- * 2026.9.11: the daily self-update switch, on BOTH profiles behind one
+ * 2026.9.12: the daily self-update switch, on BOTH profiles behind one
  * floor. A provider can only turn the device's own signed-release check on
  * or off — never name a release or a URL (the Pi asks GitHub, the ESP32 its
  * control plane's manifest relay, both verify minisign themselves). Older
  * firmware refuses the whole push on the key, so callers gate on
  * cloudFrameSupportsAutoUpdate; the form binds and diffs it on every frame.
  */
-export const autoUpdateCloudFrameSettingsMinVersion = '2026.9.11'
+export const autoUpdateCloudFrameSettingsMinVersion = '2026.9.12'
 export const autoUpdateCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.from(
   new Set<CloudFrameSettingKey>([
     ...linuxKeysSince(autoUpdateCloudFrameSettingsMinVersion),

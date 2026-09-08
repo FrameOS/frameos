@@ -2269,7 +2269,7 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
- * round out the profile, and `auto_update` (from 2026.9.11) switches the
+ * round out the profile, and `auto_update` (from 2026.9.12) switches the
  * daily signed-OTA channel (off / stable / latest), live (fos_ota.c).
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */

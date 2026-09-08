@@ -52,8 +52,8 @@ suite "FrameOS upgrade helpers":
     check backendReleaseUrl(%*{}) == ""
 
   test "the backend's answer is one release version, nothing looser":
-    check parseBackendReleaseVersion("""{"version": "2026.9.11"}""") == "2026.9.11"
-    check parseBackendReleaseVersion("""{"version": "v2026.9.11+abc"}""") == "2026.9.11"
+    check parseBackendReleaseVersion("""{"version": "2026.9.12"}""") == "2026.9.12"
+    check parseBackendReleaseVersion("""{"version": "v2026.9.12+abc"}""") == "2026.9.12"
     expect ValueError:
       discard parseBackendReleaseVersion("""{"version": ""}""")
     expect ValueError:
@@ -64,7 +64,7 @@ suite "FrameOS upgrade helpers":
       discard parseBackendReleaseVersion("[]")
 
   test "upgrade options take a pinned --version":
-    check parseFrameOSUpgradeOptions(@["--yes", "--version=2026.9.11"]).version == "2026.9.11"
+    check parseFrameOSUpgradeOptions(@["--yes", "--version=2026.9.12"]).version == "2026.9.12"
     check parseFrameOSUpgradeOptions(@["--yes"]).version == ""
     expect ValueError:
       discard parseFrameOSUpgradeOptions(@["--version=nope"])

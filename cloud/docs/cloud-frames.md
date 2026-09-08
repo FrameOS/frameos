@@ -144,7 +144,7 @@ Cloud-profile verb set (complete):
   asset saving, tz-updater on/off, scene schedule; from 2026.8.31 the panel
   palette, the partial-refresh policy and the GPIO button map — all three
   driver-init settings that restart the runtime; brightness once the runtime
-  has it); from 2026.9.11 `auto_update` on both profiles — the device's
+  has it); from 2026.9.12 `auto_update` on both profiles — the device's
   daily self-update channel, off / stable / latest, see "Signed OTA"
   below). Never SSH config, admin credentials, network config, panel wiring
   (VCOM, pins, upload URLs), update URLs, or agent/profile state. The full key list and its firmware gating live in
@@ -413,7 +413,7 @@ Both halves are in place.
   Cloud compromise therefore cannot become native code execution through
   the update channel — the worst it can do is ask a frame to check for an
   update it will verify and refuse.
-- `auto_update` (2026.9.11, a `set_settings` key on both profiles) changes
+- `auto_update` (2026.9.12, a `set_settings` key on both profiles) changes
   only WHO starts that check and how eager it is: `stable` (the default)
   and `latest` run it once a day on the device itself — against the
   release its control plane names: this cloud relays GitHub's latest, a

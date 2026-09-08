@@ -1,7 +1,7 @@
 """Which FrameOS release this backend runs — asked by the Pi/Buildroot runtime.
 
 ``GET /api/frameos/release`` (bearer = the frame's server API key, the same
-credential the log uploader sends) answers ``{"version": "2026.9.11"}``:
+credential the log uploader sends) answers ``{"version": "2026.9.12"}``:
 versions.json's release without the +sha, i.e. the version this backend's
 own deploys install. A backend-managed frame's auto-updater
 (frameos/src/frameos/auto_updater.nim → upgrade.nim resolveFrameOSRelease)

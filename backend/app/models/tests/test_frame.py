@@ -698,3 +698,19 @@ def test_normalize_auto_update_channels():
         assert normalize_auto_update(value) == "off", value
     for value in ("latest", " Latest ", "bleeding_edge"):
         assert normalize_auto_update(value) == "latest", value
+
+
+def test_effective_auto_update_works_on_a_row_and_on_its_dict():
+    from app.models.frame import effective_auto_update
+
+    row = Frame(mode="rpios", auto_update="latest", rpios={"compilationMode": "precompiled"}, scenes=[])
+    assert effective_auto_update(row) == "latest"
+    assert effective_auto_update({"mode": "rpios", "auto_update": "latest", "rpios": {"compilationMode": "precompiled"}, "scenes": []}) == "latest"
+    # An absent preference is the default channel …
+    assert effective_auto_update({"mode": "buildroot", "buildroot": {}, "scenes": []}) == "stable"
+    # … a source build or a compiled scene withholds it.
+    assert effective_auto_update({"mode": "rpios", "rpios": {"compilationMode": "static"}, "scenes": []}) == "off"
+    assert effective_auto_update({"mode": "rpios", "auto_update": "latest", "rpios": {},
+                                  "scenes": [{"id": "s", "settings": {"execution": "compiled"}}]}) == "off"
+    assert effective_auto_update({"mode": "embedded", "auto_update": "off"}) == "off"
+    assert effective_auto_update({"mode": "embedded"}) == "stable"

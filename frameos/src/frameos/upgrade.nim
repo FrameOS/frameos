@@ -477,7 +477,7 @@ proc backendReleaseUrl*(config: JsonNode): string =
   scheme & "://" & host & ":" & $port & BackendReleaseApiPath
 
 proc parseBackendReleaseVersion*(body: string): string =
-  ## `{"version": "2026.9.11"}` → "2026.9.11"; anything else raises.
+  ## `{"version": "2026.9.12"}` → "2026.9.12"; anything else raises.
   var payload: JsonNode
   try:
     payload = parseJson(body)
@@ -492,7 +492,7 @@ proc parseBackendReleaseVersion*(body: string): string =
 proc backendPinnedVersion*(): string =
   ## The FrameOS release the configured backend runs, "" when there is no
   ## backend. A backend that cannot be reached, or one too old to answer
-  ## (before 2026.9.11), raises: a backend-managed frame never falls back to
+  ## (before 2026.9.12), raises: a backend-managed frame never falls back to
   ## GitHub's latest on its own, because its backend deploys ITS version —
   ## a frame ahead of it would be downgraded by the next deploy and climb
   ## back the next night.
@@ -510,7 +510,7 @@ proc backendPinnedVersion*(): string =
     except CatchableError as error:
       raise newException(ValueError,
         "Could not ask the backend which FrameOS release it runs (" & url & "): " & error.msg &
-        ". A backend older than 2026.9.11 does not answer; update the backend first.")
+        ". A backend older than 2026.9.12 does not answer; update the backend first.")
   parseBackendReleaseVersion(body)
 
 proc resolveFrameOSRelease*(target = ""): tuple[release: FrameOSReleaseInfo, source: string] =

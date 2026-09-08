@@ -203,14 +203,14 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     expect(flip?.matches(":disabled")).toBe(false);
   });
 
-  it("offers the auto-update channel from firmware 2026.9.11, disabled (never hidden) below it", () => {
-    renderPanel(cloudFrame("raspberry-pi-64", "2026.9.11"));
+  it("offers the auto-update channel from firmware 2026.9.12, disabled (never hidden) below it", () => {
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.9.12"));
     const current = document.querySelector<HTMLSelectElement>('select[name="auto_update"]');
     expect(current, "the auto-update channel select is missing").toBeTruthy();
     expect(current?.matches(":disabled")).toBe(false);
     cleanup();
 
-    renderPanel(cloudFrame("raspberry-pi-64", "2026.9.10"));
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.9.11"));
     const old = document.querySelector<HTMLSelectElement>('select[name="auto_update"]');
     expect(old, "the field is hidden rather than disabled").toBeTruthy();
     expect(old?.matches(":disabled")).toBe(true);
@@ -333,18 +333,18 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("Panel")).toBeNull();
   });
 
-  it("offers the auto-update channel from firmware 2026.9.11, and not on a layout without an OTA slot", () => {
-    renderPanel(cloudFrame("esp32-s3", "2026.9.11"));
+  it("offers the auto-update channel from firmware 2026.9.12, and not on a layout without an OTA slot", () => {
+    renderPanel(cloudFrame("esp32-s3", "2026.9.12"));
     const current = document.querySelector<HTMLSelectElement>('select[name="auto_update"]');
     expect(current, "the auto-update channel select is missing").toBeTruthy();
     expect(current?.matches(":disabled")).toBe(false);
     cleanup();
 
-    renderPanel(cloudFrame("esp32-s3", "2026.9.10"));
+    renderPanel(cloudFrame("esp32-s3", "2026.9.11"));
     expect(document.querySelector('select[name="auto_update"]')?.matches(":disabled")).toBe(true);
     cleanup();
 
-    const noSlot = cloudFrame("esp32-c3", "2026.9.11");
+    const noSlot = cloudFrame("esp32-c3", "2026.9.12");
     noSlot.hardware = { ...noSlot.hardware, ota: { supported: false, slotBytes: 0 } };
     renderPanel(noSlot);
     expect(document.querySelector('select[name="auto_update"]')?.matches(":disabled")).toBe(true);

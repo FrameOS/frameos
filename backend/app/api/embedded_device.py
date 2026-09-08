@@ -454,7 +454,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),
         "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
         # The daily signed-OTA channel (fos_ota.c): "off" | "stable" | "latest".
-        # Backend-owned, so it is sent every poll; firmware before 2026.9.11
+        # Backend-owned, so it is sent every poll; firmware before 2026.9.12
         # ignores the key.
         "autoUpdate": normalize_auto_update(getattr(frame, "auto_update", None)),
         **_optional_power_settings(),

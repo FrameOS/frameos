@@ -430,7 +430,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   rpios: '2026.6.7',
   timezone_updater: '2026.6.7',
   embedded: '2026.6.26',
-  auto_update: '2026.9.11',
+  auto_update: '2026.9.12',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -727,7 +727,7 @@ function frameDiffKeys(): (keyof FrameType)[] {
     return [
       ...(cloudFrameSettingKeys as readonly (keyof FrameType)[]),
       ...(extendedCloudFrameSettingKeys as readonly (keyof FrameType)[]),
-      // The 2026.9.11 auto_update switch, both profiles, one floor.
+      // The 2026.9.12 auto_update switch, both profiles, one floor.
       ...(autoUpdateCloudFrameSettingKeys as readonly (keyof FrameType)[]),
       // ESP32 power keys (top-level on cloud frames). Left out, the "is the
       // form untouched?" check ignored every Power-section edit and each

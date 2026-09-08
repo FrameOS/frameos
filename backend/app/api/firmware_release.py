@@ -149,7 +149,7 @@ async def _fetch_latest_release() -> Optional[dict[str, Any]]:
 
 
 async def _fetch_release_by_tag(tag: str) -> Optional[dict[str, Any]]:
-    """One release's raw JSON from GitHub by tag ("v2026.9.11"), or None
+    """One release's raw JSON from GitHub by tag ("v2026.9.12"), or None
     (unknown tag, network). Tests patch this."""
     try:
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:

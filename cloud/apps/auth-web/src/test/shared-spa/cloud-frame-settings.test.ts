@@ -99,7 +99,7 @@ describe("cloud settings push", () => {
   });
 
   it("agrees with the control plane on the auto_update channel, one floor on both profiles", () => {
-    // 2026.9.11: the first key both planes learned together. It is neither
+    // 2026.9.12: the first key both planes learned together. It is neither
     // in the ungated base of either profile nor esp32-only, and rides a push
     // only once the reported firmware clears the floor.
     expect(new Set(autoUpdateCloudFrameSettingKeys)).toEqual(autoUpdateFrameSettingKeys);
@@ -113,12 +113,12 @@ describe("cloud settings push", () => {
       expect((esp32CloudFrameSettingKeys as readonly string[]).includes(key)).toBe(false);
       expect((esp32PowerSettingKeys as readonly string[]).includes(key)).toBe(false);
     }
-    expect(cloudFrameSupportsAutoUpdate("2026.9.10")).toBe(false);
-    expect(cloudFrameSupportsAutoUpdate("2026.9.11")).toBe(true);
-    expect(cloudFrameSettingKeysForVersion("2026.9.10")).not.toContain("auto_update");
-    expect(cloudFrameSettingKeysForVersion("2026.9.11")).toContain("auto_update");
-    expect(esp32CloudFrameSettingKeysForVersion("2026.9.10")).not.toContain("auto_update");
-    expect(esp32CloudFrameSettingKeysForVersion("2026.9.11")).toContain("auto_update");
+    expect(cloudFrameSupportsAutoUpdate("2026.9.11")).toBe(false);
+    expect(cloudFrameSupportsAutoUpdate("2026.9.12")).toBe(true);
+    expect(cloudFrameSettingKeysForVersion("2026.9.11")).not.toContain("auto_update");
+    expect(cloudFrameSettingKeysForVersion("2026.9.12")).toContain("auto_update");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.9.11")).not.toContain("auto_update");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.9.12")).toContain("auto_update");
     expect(cloudFrameSettingsPayload({ auto_update: "latest" } as never, ["auto_update"])).toEqual({ auto_update: "latest" });
     // The form may still hold a boolean from before the channel; it maps.
     expect(cloudFrameSettingsPayload({ auto_update: false } as never, ["auto_update"])).toEqual({ auto_update: "off" });

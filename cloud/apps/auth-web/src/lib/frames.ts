@@ -339,11 +339,11 @@ export const esp32BatteryEnablePinFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32BatteryEnablePinFrameSettingsMinVersion),
 );
 
-// 2026.9.11: the daily self-update switch (`auto_update`), the first key both
+// 2026.9.12: the daily self-update switch (`auto_update`), the first key both
 // profiles learned at the same floor. The route needs nothing beyond the
 // contract for it (frameSettingsRefusal reads `since`); the pair exists so
 // the SPA's gate is pinned to the control plane's, like the tails above.
-export const autoUpdateFrameSettingsMinVersion = "2026.9.11";
+export const autoUpdateFrameSettingsMinVersion = "2026.9.12";
 export const autoUpdateFrameSettingKeys = new Set([
   ...contractSettingKeysSince("linux", autoUpdateFrameSettingsMinVersion),
   ...contractSettingKeysSince("esp32", autoUpdateFrameSettingsMinVersion),

@@ -1491,7 +1491,7 @@ export function FrameSettings({
   // 2026.8.39: the battery divider's enable GPIO joined the power keys. Below
   // the floor the field renders disabled with the reason (the push would be
   // refused whole), same as the tails above.
-  // 2026.9.11: the daily self-update switch, both profiles behind one floor.
+  // 2026.9.12: the daily self-update switch, both profiles behind one floor.
   // An ESP32 whose flash layout has no OTA slot (the 4 MB profile) reports
   // so at enrollment; the switch is disabled with that reason instead.
   const cloudAutoUpdateSupported = cloudProfile && cloudFrameSupportsAutoUpdate(frame.frameos_version)
@@ -2481,7 +2481,7 @@ export function FrameSettings({
                   </Field>
                 </>
               ) : null}
-              {/* 2026.9.11 on both profiles: the daily self-update channel.
+              {/* 2026.9.12 on both profiles: the daily self-update channel.
                   Below the floor it renders disabled with the reason (the push
                   would be refused whole), never hidden. */}
               <fieldset disabled={!cloudAutoUpdateSupported || cloudEsp32OtaUnsupported} className="min-w-0">

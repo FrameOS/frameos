@@ -42,8 +42,12 @@ static const char *TAG = "fos_ota";
 #define FOS_OTA_REBOOT_DELAY_MS 1000
 #define FOS_OTA_REBOOT_TASK_STACK_SIZE 2048
 #define FOS_OTA_MANIFEST_MAX (8 * 1024)
-/* How often the periodic task (auto_update on) asks for the manifest. */
+/* How often the periodic task (auto_update on) asks for the manifest — and
+ * how soon after boot it asks the first time. Waiting a whole interval
+ * before the first check meant a frame that restarts daily (a settings
+ * change, a watchdog, a nightly reboot) never checked at all. */
 #define FOS_OTA_PERIODIC_INTERVAL_HOURS 24u
+#define FOS_OTA_FIRST_CHECK_DELAY_MS (10u * 60u * 1000u)
 /* The `stable` channel installs a release only once it has been the latest
  * for this long: a fix published within the window replaces it as latest
  * and resets the clock, so the release the fix was for never lands. */
@@ -63,9 +67,10 @@ static SemaphoreHandle_t s_ota_lock = NULL;
 static portMUX_TYPE s_ota_lock_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_ota_request_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_ota_task_handle = NULL;
-/* Set around the periodic task's own check: only that path honours the
- * `stable` channel's waiting period; every manual/provider-asked run
- * installs what the manifest offers. */
+/* Set by the periodic task around its own check and read once by
+ * ota_check_and_apply_locked: only that path honours the `stable` channel's
+ * waiting period; every manual/provider-asked run installs what the
+ * manifest offers. */
 static volatile bool s_periodic_run = false;
 static volatile bool s_ota_busy = false;
 static volatile bool s_ota_reboot_scheduled = false;
@@ -618,8 +623,10 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
 
 /* One complete run: manifest → version check → download + verify → reboot.
  * Returns ESP_OK both when an image was staged (the device restarts before
- * the caller sees it) and when it was already up to date. */
-static esp_err_t ota_run_signed(const ota_source_t *src)
+ * the caller sees it) and when it was already up to date. `unattended` is
+ * the periodic task's run: the only one the `stable` channel's waiting
+ * period applies to. */
+static esp_err_t ota_run_signed(const ota_source_t *src, bool unattended)
 {
     if (!ota_supported()) {
         ESP_LOGI(TAG, "no OTA app partition in this flash layout; skipping OTA");
@@ -644,7 +651,7 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
         ota_log(src, "gave-up", detail);
         return ESP_FAIL;
     }
-    if (s_periodic_run && fos_config()->auto_update == FOS_AUTO_UPDATE_STABLE) {
+    if (unattended && fos_config()->auto_update == FOS_AUTO_UPDATE_STABLE) {
         /* The stable channel: the offered release must have been the latest
          * for a day. "Unknown" never passes as "old enough" — a manifest
          * without a publish time, or a clock that never synced, waits. */
@@ -807,7 +814,7 @@ static esp_err_t ota_check_and_apply_locked(void)
         stopped_http = true;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    esp_err_t err = ota_run_signed(&src);
+    esp_err_t err = ota_run_signed(&src, s_periodic_run);
     if (stopped_http) {
         fos_http_start(false);
     }
@@ -861,8 +868,10 @@ static void ota_task(void *arg)
     uint32_t interval_hours = (uint32_t)(uintptr_t)arg;
     if (interval_hours == 0) interval_hours = 24;
     TickType_t interval_ticks = pdMS_TO_TICKS(interval_hours * 3600u * 1000u);
+    TickType_t wait_ticks = pdMS_TO_TICKS(FOS_OTA_FIRST_CHECK_DELAY_MS);
     while (true) {
-        uint32_t notifications = ulTaskNotifyTake(pdTRUE, interval_ticks);
+        uint32_t notifications = ulTaskNotifyTake(pdTRUE, wait_ticks);
+        wait_ticks = interval_ticks;
         bool manual = notifications > 0;
         if (manual) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -969,7 +978,7 @@ static esp_err_t cloud_ota_run(void)
         ota_log(&src, "skipped", "not-enrolled");
         return ESP_ERR_INVALID_STATE;
     }
-    return ota_run_signed(&src);
+    return ota_run_signed(&src, false);
 }
 
 static void cloud_ota_task(void *arg)

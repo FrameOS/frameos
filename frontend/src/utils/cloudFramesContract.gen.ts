@@ -27,7 +27,7 @@ export const cloudFramesContractSettings = {
       "since": null
     },
     "auto_update": {
-      "since": "2026.9.11"
+      "since": "2026.9.12"
     },
     "flip": {
       "since": "2026.8.30"
@@ -88,7 +88,7 @@ export const cloudFramesContractSettings = {
       "since": "2026.8.31"
     },
     "auto_update": {
-      "since": "2026.9.11"
+      "since": "2026.9.12"
     },
     "max_http_response_bytes": {
       "since": "2026.8.31",

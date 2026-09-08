@@ -16,7 +16,7 @@
     {"name": "timezone and debug (esp32 from 2026.8.34 / 2026.8.31)",
      "settings": {"timezone": "Europe/Brussels", "debug": true},
      "expect": {"linux": "ok", "esp32": "ok"}},
-    {"name": "auto_update is a channel on both profiles (from 2026.9.11)",
+    {"name": "auto_update is a channel on both profiles (from 2026.9.12)",
      "settings": {"auto_update": "stable"},
      "expect": {"linux": "ok", "esp32": "ok"}},
     {"name": "auto_update knows off and latest too",
