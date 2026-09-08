@@ -1996,6 +1996,7 @@ describe("frame management API", () => {
         "battery_pin",
         "battery_divider",
         "battery_enable_pin",
+        "auto_update",
       ].sort(),
     );
     // The ESP32 profile: exactly what ws_handle_set_settings applies.
@@ -2015,6 +2016,7 @@ describe("frame management API", () => {
         "max_http_response_bytes",
         "gpio_buttons",
         "timezone",
+        "auto_update",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {
