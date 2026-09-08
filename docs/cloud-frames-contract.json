@@ -73,6 +73,11 @@
       "rule": {"type": "bool"},
       "profiles": {"linux": {"since": null}, "esp32": {"since": "2026.8.31"}}
     },
+    "auto_update": {
+      "$comment": "The daily self-update channel. `stable` (default): once a day the device checks ITS OWN signed release channel — a frame with a self-hosted backend follows the release that backend runs (the backend deploys its own version, so a frame never climbs past it); a cloud-managed or standalone Pi asks GitHub, an ESP32 its provider's manifest relay — and installs the latest release once it has been the latest for 24 h — a fix published within a day resets the clock, so the release it fixes is never installed. `latest`: install every release as soon as it is published. `off`: never check. A provider can only pick the channel, never name what gets installed; the manual paths (the admin panel's Upgrade button, the console's `ota`, notify_update_available) stay open either way.",
+      "rule": {"type": "string", "enum": ["off", "stable", "latest"]},
+      "profiles": {"linux": {"since": "2026.9.12"}, "esp32": {"since": "2026.9.12"}}
+    },
     "flip": {
       "rule": {"type": "string", "enum": ["", "horizontal", "vertical", "both"]},
       "profiles": {"linux": {"since": "2026.8.30"}},

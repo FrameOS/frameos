@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <strings.h>
 
 #include "freertos/FreeRTOS.h"
@@ -41,6 +42,16 @@ static const char *TAG = "fos_ota";
 #define FOS_OTA_REBOOT_DELAY_MS 1000
 #define FOS_OTA_REBOOT_TASK_STACK_SIZE 2048
 #define FOS_OTA_MANIFEST_MAX (8 * 1024)
+/* How often the periodic task (auto_update on) asks for the manifest — and
+ * how soon after boot it asks the first time. Waiting a whole interval
+ * before the first check meant a frame that restarts daily (a settings
+ * change, a watchdog, a nightly reboot) never checked at all. */
+#define FOS_OTA_PERIODIC_INTERVAL_HOURS 24u
+#define FOS_OTA_FIRST_CHECK_DELAY_MS (10u * 60u * 1000u)
+/* The `stable` channel installs a release only once it has been the latest
+ * for this long: a fix published within the window replaces it as latest
+ * and resets the clock, so the release the fix was for never lands. */
+#define FOS_OTA_STABLE_AGE_SECONDS (24 * 60 * 60)
 #define FOS_OTA_CHUNK (8 * 1024)
 /* Transient download failures (a dropped socket, a short read) are retried
  * this many times within one run, after the Wi-Fi is back; a signature or
@@ -56,6 +67,11 @@ static SemaphoreHandle_t s_ota_lock = NULL;
 static portMUX_TYPE s_ota_lock_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_ota_request_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_ota_task_handle = NULL;
+/* Set by the periodic task around its own check and read once by
+ * ota_check_and_apply_locked: only that path honours the `stable` channel's
+ * waiting period; every manual/provider-asked run installs what the
+ * manifest offers. */
+static volatile bool s_periodic_run = false;
 static volatile bool s_ota_busy = false;
 static volatile bool s_ota_reboot_scheduled = false;
 static volatile bool s_cloud_ota_running = false;
@@ -342,6 +358,7 @@ typedef struct {
     char download_url[FOS_URL_LEN + 192];
     uint8_t sig[64];
     size_t size;
+    int64_t published_at;              /* unix seconds; 0 = the manifest carries none */
 } ota_manifest_t;
 
 /* GET the manifest and pull out what the download needs. Returns ESP_OK with
@@ -457,6 +474,8 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
         strlcpy(out->download_url, download->valuestring, sizeof(out->download_url));
     }
     out->size = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
+    const cJSON *published = cJSON_GetObjectItem(root, "publishedAt");
+    out->published_at = cJSON_IsNumber(published) ? (int64_t)published->valuedouble : 0;
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -604,8 +623,10 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
 
 /* One complete run: manifest → version check → download + verify → reboot.
  * Returns ESP_OK both when an image was staged (the device restarts before
- * the caller sees it) and when it was already up to date. */
-static esp_err_t ota_run_signed(const ota_source_t *src)
+ * the caller sees it) and when it was already up to date. `unattended` is
+ * the periodic task's run: the only one the `stable` channel's waiting
+ * period applies to. */
+static esp_err_t ota_run_signed(const ota_source_t *src, bool unattended)
 {
     if (!ota_supported()) {
         ESP_LOGI(TAG, "no OTA app partition in this flash layout; skipping OTA");
@@ -629,6 +650,32 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
                  (unsigned)s_ota_failures);
         ota_log(src, "gave-up", detail);
         return ESP_FAIL;
+    }
+    if (unattended && fos_config()->auto_update == FOS_AUTO_UPDATE_STABLE) {
+        /* The stable channel: the offered release must have been the latest
+         * for a day. "Unknown" never passes as "old enough" — a manifest
+         * without a publish time, or a clock that never synced, waits. */
+        char detail[80];
+        if (manifest.published_at <= 0) {
+            snprintf(detail, sizeof(detail), "%s:publish-time-unknown", manifest.version);
+            ota_log(src, "waiting", detail);
+            return ESP_OK;
+        }
+        if (!fos_wifi_time_synced()) {
+            snprintf(detail, sizeof(detail), "%s:clock-not-synced", manifest.version);
+            ota_log(src, "waiting", detail);
+            return ESP_OK;
+        }
+        int64_t age = (int64_t)time(NULL) - manifest.published_at;
+        if (age < FOS_OTA_STABLE_AGE_SECONDS) {
+            int64_t left = FOS_OTA_STABLE_AGE_SECONDS - age;
+            snprintf(detail, sizeof(detail), "%s:%lldm-until-stable", manifest.version,
+                     (long long)((left + 59) / 60));
+            ESP_LOGI(TAG, "ota (%s): %s published %lld s ago; stable channel waits %lld s more",
+                     src->plane, manifest.version, (long long)age, (long long)left);
+            ota_log(src, "waiting", detail);
+            return ESP_OK;
+        }
     }
 
     /* Same transport rule as cloud_url itself: https anywhere, plain http
@@ -695,11 +742,12 @@ static bool backend_source(ota_source_t *src)
 {
     const fos_config_t *config = fos_config();
     if (!config->backend_url[0] || config->frame_id == 0) {
-        ESP_LOGW(TAG, "no backend configured, skipping OTA check");
+        /* Not an error: a cloud-managed frame has no backend, and the
+         * caller falls through to cloud_source. */
         return false;
     }
     if (!config->api_key[0]) {
-        ESP_LOGW(TAG, "no frame API key configured, skipping OTA check");
+        ESP_LOGW(TAG, "no frame API key configured, skipping backend OTA check");
         return false;
     }
     memset(src, 0, sizeof(*src));
@@ -713,6 +761,27 @@ static bool backend_source(ota_source_t *src)
     return true;
 }
 
+/* ----------------------------------------------------------- cloud plane
+ * An enrolled frame asks the cloud for the same manifest shape over its
+ * device token (`/api/frames/{uuid}/firmware/manifest?platform=…`); the
+ * cloud relays the release's minisig exactly as the backend does. */
+
+static bool cloud_source(ota_source_t *src)
+{
+    memset(src, 0, sizeof(*src));
+    src->plane = "cloud";
+    char frame_id[64];
+    if (!fos_cloud_api_access(src->base_url, sizeof(src->base_url), frame_id, sizeof(frame_id),
+                              src->auth, sizeof(src->auth))) {
+        return false;
+    }
+    snprintf(src->manifest_url, sizeof(src->manifest_url),
+             "%s/api/frames/%s/firmware/manifest?platform=%s",
+             src->base_url, frame_id, fos_ota_platform());
+    src->trust_base_transport = false;
+    return true;
+}
+
 static esp_err_t ota_check_and_apply_locked(void)
 {
     ESP_LOGI(TAG, "OTA check started");
@@ -720,8 +789,13 @@ static esp_err_t ota_check_and_apply_locked(void)
         ESP_LOGI(TAG, "no OTA app partition in this flash layout; skipping OTA check");
         return ESP_ERR_NOT_SUPPORTED;
     }
+    /* Whichever control plane owns this frame: a self-hosted backend when
+     * one is configured, else the cloud it is enrolled with. */
     ota_source_t src;
-    if (!backend_source(&src)) return ESP_ERR_INVALID_STATE;
+    if (!backend_source(&src) && !cloud_source(&src)) {
+        ESP_LOGW(TAG, "no control plane configured; skipping OTA check");
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!wait_for_wifi_connected(5000)) {
         ESP_LOGW(TAG, "Wi-Fi state=%s; OTA requires connected station mode",
                  wifi_state_name(fos_wifi_state()));
@@ -740,7 +814,7 @@ static esp_err_t ota_check_and_apply_locked(void)
         stopped_http = true;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    esp_err_t err = ota_run_signed(&src);
+    esp_err_t err = ota_run_signed(&src, s_periodic_run);
     if (stopped_http) {
         fos_http_start(false);
     }
@@ -794,14 +868,26 @@ static void ota_task(void *arg)
     uint32_t interval_hours = (uint32_t)(uintptr_t)arg;
     if (interval_hours == 0) interval_hours = 24;
     TickType_t interval_ticks = pdMS_TO_TICKS(interval_hours * 3600u * 1000u);
+    TickType_t wait_ticks = pdMS_TO_TICKS(FOS_OTA_FIRST_CHECK_DELAY_MS);
     while (true) {
-        uint32_t notifications = ulTaskNotifyTake(pdTRUE, interval_ticks);
+        uint32_t notifications = ulTaskNotifyTake(pdTRUE, wait_ticks);
+        wait_ticks = interval_ticks;
         bool manual = notifications > 0;
         if (manual) {
             vTaskDelay(pdMS_TO_TICKS(250));
         }
-        ESP_LOGW(TAG, "%s OTA check waking", manual ? "manual" : "periodic");
+        /* The switch is read at every tick, not at task start: a frame whose
+         * owner turned auto_update off keeps this task (there is no safe way
+         * to kill it mid-download) and simply idles through the next ticks. */
+        if (!manual && fos_config()->auto_update == FOS_AUTO_UPDATE_OFF) {
+            ESP_LOGI(TAG, "periodic OTA check skipped: auto_update is off");
+            continue;
+        }
+        ESP_LOGW(TAG, "%s OTA check waking (channel %s)", manual ? "manual" : "periodic",
+                 fos_config_auto_update_name(fos_config()->auto_update));
+        s_periodic_run = !manual;
         esp_err_t err = fos_ota_check_and_apply();
+        s_periodic_run = false;
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s OTA check failed: %s",
                      manual ? "manual" : "periodic", esp_err_to_name(err));
@@ -825,6 +911,22 @@ void fos_ota_start_periodic_task(uint32_t interval_hours)
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     }
+}
+
+void fos_ota_sync_periodic_task(void)
+{
+    if (fos_config()->auto_update == FOS_AUTO_UPDATE_OFF) {
+        if (s_ota_task_handle != NULL) {
+            ESP_LOGI(TAG, "auto_update off; the periodic OTA task idles from its next tick");
+        }
+        return;
+    }
+    if (s_ota_task_handle == NULL) {
+        ESP_LOGI(TAG, "auto_update %s; checking the control plane's release manifest every %u h",
+                 fos_config_auto_update_name(fos_config()->auto_update),
+                 (unsigned)FOS_OTA_PERIODIC_INTERVAL_HOURS);
+    }
+    fos_ota_start_periodic_task(FOS_OTA_PERIODIC_INTERVAL_HOURS);
 }
 
 static void ota_reboot_task(void *arg)
@@ -872,19 +974,11 @@ esp_err_t fos_ota_request_check(void)
 static esp_err_t cloud_ota_run(void)
 {
     ota_source_t src;
-    memset(&src, 0, sizeof(src));
-    src.plane = "cloud";
-    char frame_id[64];
-    if (!fos_cloud_api_access(src.base_url, sizeof(src.base_url), frame_id, sizeof(frame_id),
-                              src.auth, sizeof(src.auth))) {
+    if (!cloud_source(&src)) {
         ota_log(&src, "skipped", "not-enrolled");
         return ESP_ERR_INVALID_STATE;
     }
-    snprintf(src.manifest_url, sizeof(src.manifest_url),
-             "%s/api/frames/%s/firmware/manifest?platform=%s",
-             src.base_url, frame_id, fos_ota_platform());
-    src.trust_base_transport = false;
-    return ota_run_signed(&src);
+    return ota_run_signed(&src, false);
 }
 
 static void cloud_ota_task(void *arg)

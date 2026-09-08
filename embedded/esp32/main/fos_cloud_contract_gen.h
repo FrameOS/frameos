@@ -41,6 +41,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_NULL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 4, 3, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 1024.0f, 67108864.0f},
     {FOS_RULE_ARRAY, 0, 0, 0, 0, 0, -1, -1, 8, -1, -1, 0, 0, 0, 0, 2, 1, 0.0f, 0.0f},
     {FOS_RULE_OBJECT, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 2, 0, 0, 0.0f, 0.0f},
@@ -54,12 +55,12 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
 };
 static const fos_rule_key_t k_fos_rule_keys[] = {
-    {"pin", 12, 1},
-    {"label", 13, 1},
+    {"pin", 13, 1},
+    {"label", 14, 1},
 };
-static const int16_t k_fos_rule_children[] = {6, 7, 11, };
+static const int16_t k_fos_rule_children[] = {6, 7, 12, };
 static const int32_t k_fos_rule_int_enums[] = {0, 90, 180, 270, };
-static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", };
+static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "off", "stable", "latest", };
 
 static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"name", 0, 0, NULL},
@@ -69,16 +70,17 @@ static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"timezone", 4, 0, NULL},
     {"timezone_data", 5, 0, "timezone"},
     {"debug", 8, 0, NULL},
-    {"max_http_response_bytes", 9, 1, NULL},
-    {"gpio_buttons", 10, 1, NULL},
-    {"deep_sleep", 14, 0, NULL},
-    {"deep_sleep_on_battery", 15, 0, NULL},
-    {"wake_check_seconds", 16, 0, NULL},
-    {"battery_pin", 17, 1, NULL},
-    {"battery_divider", 18, 1, NULL},
-    {"battery_enable_pin", 19, 1, NULL},
+    {"auto_update", 9, 0, NULL},
+    {"max_http_response_bytes", 10, 1, NULL},
+    {"gpio_buttons", 11, 1, NULL},
+    {"deep_sleep", 15, 0, NULL},
+    {"deep_sleep_on_battery", 16, 0, NULL},
+    {"wake_check_seconds", 17, 0, NULL},
+    {"battery_pin", 18, 1, NULL},
+    {"battery_divider", 19, 1, NULL},
+    {"battery_enable_pin", 20, 1, NULL},
 };
-#define FOS_CONTRACT_SETTINGS_COUNT 15
+#define FOS_CONTRACT_SETTINGS_COUNT 16
 
 /* Every verb in the contract, with the scope it requires (NULL = none) and
  * whether it is a content verb (refused `backend_managed` when a backend owns the frame). */

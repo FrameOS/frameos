@@ -281,10 +281,20 @@ proc parseHook*(s: string, i: var int, v: var PaletteConfig) =
       v.colors = @[]
       return
 
+proc normalizeAutoUpdateChannel*(value: string): string =
+  ## The three channels the auto-updater knows. Absent, blank and the
+  ## boolean spellings a form may still post map onto them: true → stable,
+  ## false → off; anything unknown is the default, stable.
+  case value.strip().toLowerAscii()
+  of "off", "false", "0", "no", "none", "disabled": "off"
+  of "latest", "bleeding", "bleeding_edge", "edge": "latest"
+  else: "stable"
+
 proc newHook*(v: var FrameConfig) =
   v = FrameConfig(
     mode: "rpios",
     serverSendLogs: true,
+    autoUpdate: "stable",
     metricsInterval: 60,
     maxHttpResponseBytes: DefaultMaxHttpResponseBytes,
     frameAdminAuth: %*{},
@@ -318,6 +328,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.metricsInterval < 0: config.metricsInterval = 60
   if config.maxHttpResponseBytes <= 0: config.maxHttpResponseBytes = DefaultMaxHttpResponseBytes
   if config.scalingMode == "": config.scalingMode = "cover"
+  config.autoUpdate = normalizeAutoUpdateChannel(config.autoUpdate)
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
   if config.httpsProxy == nil: newHook(config.httpsProxy)

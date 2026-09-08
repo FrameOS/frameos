@@ -152,3 +152,33 @@ def test_https_proxy_sync_carries_no_certificate_material():
     # source, and a cert imported without its blanked key would mismatch.
     value = _sync_frame_value("https_proxy", _device_frame()["https_proxy"])
     assert value == {"enable": True, "port": 8443, "expose_only_port": True}
+
+
+def test_a_withheld_auto_update_channel_never_reads_as_drift():
+    # A Pi with a legacy compiled scene is told "off" (frame.json withholds
+    # the channel — get_frame_json / effective_auto_update) even though the
+    # row keeps its preference. Comparing the preference against the
+    # device's copy pinned "Automatic updates: stable → off" into the drawer.
+    backend = _backend_frame()
+    backend["mode"] = "rpios"
+    backend["auto_update"] = "stable"
+    backend["scenes"] = [{"id": "s1", "settings": {"execution": "compiled"}, "nodes": [], "edges": []}]
+    device = _device_frame()
+    device["auto_update"] = "off"
+    section = _build_frame_sync_section(backend, device, backend)
+    assert [change["path"] for change in section["changes"] if change["path"] == "auto_update"] == []
+
+    # The same frame on interpreted scenes: the preference reaches the
+    # device, and a device on another channel is a real difference.
+    backend["scenes"] = []
+    section = _build_frame_sync_section(backend, device, backend)
+    assert [change["path"] for change in section["changes"] if change["path"] == "auto_update"] == ["auto_update"]
+
+
+def test_a_device_that_reports_no_channel_is_not_a_choice():
+    # Firmware before 2026.9.12 answers without auto_update; the backend's
+    # "stable" is not drift against an absence.
+    backend = _backend_frame()
+    backend["auto_update"] = "stable"
+    section = _build_frame_sync_section(backend, _device_frame(), backend)
+    assert section["changes"] == []

@@ -31,15 +31,23 @@ const char *fos_ota_platform(void);
 /* Mark the running image valid (cancels pending rollback). Call once per
  * boot after the system proves healthy. */
 void fos_ota_mark_boot_valid(void);
-/* Backend-managed frames: GET the backend's OTA manifest, compare it to the
- * running version, download + verify the release image into the inactive
- * slot when it differs, and reboot on success. */
+/* GET the control plane's OTA manifest (the configured backend's, else the
+ * enrolled cloud's), compare it to the running version, download + verify
+ * the release image into the inactive slot when it differs, and reboot on
+ * success. */
 esp_err_t fos_ota_check_and_apply(void);
 bool fos_ota_busy(void);
 bool fos_ota_boot_request_pending(void);
 esp_err_t fos_ota_run_boot_request(void);
-/* Background task that checks every interval_hours (backend-managed). */
+/* Background task that checks every interval_hours. Each tick consults
+ * fos_config()->auto_update and idles when it is off; prefer
+ * fos_ota_sync_periodic_task, which starts it only when the switch is on. */
 void fos_ota_start_periodic_task(uint32_t interval_hours);
+/* Bring the periodic task in line with the `auto_update` setting: start it
+ * (idempotent) when the switch is on, leave it idling when off. Called at
+ * every online boot and after every settings apply that may have flipped
+ * the switch (backend poll, cloud set_settings, console, local HTTP). */
+void fos_ota_sync_periodic_task(void);
 /* Request an early-boot OTA check and schedule a reboot into it. The delay
  * lets HTTP and USB callers flush their acknowledgement first. */
 esp_err_t fos_ota_request_check(void);

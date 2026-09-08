@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
 from app.models.frame import (
+    normalize_auto_update,
     DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     Frame,
     normalize_frame_admin_auth,
@@ -1414,6 +1415,7 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     settings.append(_provisioning_setting("rotate", int(frame.rotate or 0) % 360))
     settings.append(_provisioning_setting("scaling_mode", embedded_scaling_mode_for_frame(frame)))
     settings.append(_provisioning_setting("server_send_logs", 1 if frame.server_send_logs is not False else 0))
+    settings.append(_provisioning_setting("auto_update", normalize_auto_update(getattr(frame, "auto_update", None))))
     max_http = embedded_max_http_response_bytes_for_frame(frame)
     if max_http != EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES:
         settings.append(_provisioning_setting("max_http_response_bytes", max_http))

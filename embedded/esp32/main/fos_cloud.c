@@ -2269,7 +2269,8 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
- * round out the profile.
+ * round out the profile, and `auto_update` (from 2026.9.12) switches the
+ * daily signed-OTA channel (off / stable / latest), live (fos_ota.c).
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */
 /* The contract's pin ranges (-1..48) are chip-agnostic; whether a pin is an
@@ -2455,6 +2456,15 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (debug != NULL) {
         config->debug_logging = cJSON_IsTrue(debug);
     }
+    /* The daily self-update channel (fos_ota.c). A provider can only pick
+     * off / stable / latest — what gets installed is the signed release the
+     * device fetches and verifies itself. The contract check above already
+     * refused anything but the three names. Applied live after the save. */
+    const cJSON *auto_update = cJSON_GetObjectItem(settings, "auto_update");
+    uint8_t channel;
+    if (cJSON_IsString(auto_update) && fos_config_parse_auto_update(auto_update->valuestring, &channel)) {
+        config->auto_update = channel;
+    }
     /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
      * (main.c), so a change takes the same deferred reboot as rotate. Same
      * floor as the local admin API; the ceiling is the Pi runtime's default
@@ -2514,6 +2524,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
                  changes);
         frameos_nim_log_hook(line);
     }
+    fos_ota_sync_periodic_task();
     ws_ack(id, true, NULL);
     if (restart_for_init && !battery_changed && !rotate_changed) {
         ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons); restarting",

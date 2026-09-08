@@ -339,6 +339,16 @@ export const esp32BatteryEnablePinFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32BatteryEnablePinFrameSettingsMinVersion),
 );
 
+// 2026.9.12: the daily self-update switch (`auto_update`), the first key both
+// profiles learned at the same floor. The route needs nothing beyond the
+// contract for it (frameSettingsRefusal reads `since`); the pair exists so
+// the SPA's gate is pinned to the control plane's, like the tails above.
+export const autoUpdateFrameSettingsMinVersion = "2026.9.12";
+export const autoUpdateFrameSettingKeys = new Set([
+  ...contractSettingKeysSince("linux", autoUpdateFrameSettingsMinVersion),
+  ...contractSettingKeysSince("esp32", autoUpdateFrameSettingsMinVersion),
+]);
+
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
 // slice lookup is what rejects unknown-but-well-formed names later.

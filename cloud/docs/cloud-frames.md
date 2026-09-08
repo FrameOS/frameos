@@ -144,7 +144,9 @@ Cloud-profile verb set (complete):
   asset saving, tz-updater on/off, scene schedule; from 2026.8.31 the panel
   palette, the partial-refresh policy and the GPIO button map — all three
   driver-init settings that restart the runtime; brightness once the runtime
-  has it). Never SSH config, admin credentials, network config, panel wiring
+  has it); from 2026.9.12 `auto_update` on both profiles — the device's
+  daily self-update channel, off / stable / latest, see "Signed OTA"
+  below). Never SSH config, admin credentials, network config, panel wiring
   (VCOM, pins, upload URLs), update URLs, or agent/profile state. The full key list and its firmware gating live in
   `docs/cloud-frames.md` (`set_settings`).
 - `get_state`, `get_logs`, `get_metrics` — gated by the `telemetry:*` scopes
@@ -411,6 +413,24 @@ Both halves are in place.
   Cloud compromise therefore cannot become native code execution through
   the update channel — the worst it can do is ask a frame to check for an
   update it will verify and refuse.
+- `auto_update` (2026.9.12, a `set_settings` key on both profiles) changes
+  only WHO starts that check and how eager it is: `stable` (the default)
+  and `latest` run it once a day on the device itself — against the
+  release its control plane names: this cloud relays GitHub's latest, a
+  self-hosted backend pins its own version (its deploys install that
+  version, so its frames follow it rather than climb past it) —
+  the Pi against GitHub's latest release for its target
+  (`frameos/auto_updater.nim`, the same single-flight upgrade as the
+  button, skipped with a logged reason on a source build with compiled
+  scenes), the ESP32 against this manifest route (`fos_ota.c`'s periodic
+  task). `stable` installs a release only once it has been the latest for a
+  day — the manifest now carries `publishedAt` (unix seconds, GitHub's
+  `published_at`; null when unknown, and unknown waits) — so a fix published
+  within that day skips the release it fixes; `latest` installs every
+  release as it lands; `off` never checks. Before the channel the ESP32
+  firmware polled a self-hosted backend unconditionally while nothing else
+  in FrameOS updated itself. The channel carries no release and no URL, so
+  the rule above holds either way.
 
 Not covered: the buildroot `.img.gz` SD-card images, which are flashed by
 hand from a machine that already trusts what it downloaded. Nothing

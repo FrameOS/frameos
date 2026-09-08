@@ -109,7 +109,7 @@ static void on_portal_exit(void)
     fos_ota_mark_boot_valid();
     frameos_nim_set_log_upload_enabled(true);
     log_bootup_event(true);
-    fos_ota_start_periodic_task(24);
+    fos_ota_sync_periodic_task();
     fos_client_render_now();
 }
 
@@ -391,7 +391,7 @@ void app_main(void)
         if (config->assets_sd.enabled) fos_assets_sd_log_status();
         log_bootup_event(true);
         fos_http_start(false);
-        fos_ota_start_periodic_task(24);
+        fos_ota_sync_periodic_task();
         BOOTMEM("after-http+ota");
         FOS_MEM_LOG_MILESTONE(TAG, "after-http+ota");
     } else {

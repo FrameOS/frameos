@@ -215,6 +215,7 @@ static int cmd_status(int argc, char **argv)
                                   : fos_tz_slice_missing() ? "(no slice yet; fetched from tz.frameos.net when online)"
                                   : (getenv("TZ") ? getenv("TZ") : "?"));
     printf("send_logs:   %d\n", (int)config->server_send_logs);
+    printf("auto_update: %s\n", fos_config_auto_update_name(config->auto_update));
     printf("debug:       %d\n", (int)config->debug_logging);
     printf("fusion:      %d\n", (int)config->image_fusion);
     printf("assets:      path=%s sd=%d mounted=%d pins=%s freq=%lu kHz autoformat=%d\n",
@@ -430,7 +431,7 @@ static int cmd_set(int argc, char **argv)
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|time_zone|"
-               "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
+               "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|auto_update|"
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
@@ -744,6 +745,20 @@ static int cmd_set(int argc, char **argv)
                     fos_tz_slice_missing() ? "fetched from tz.frameos.net on the next online render" : "installed");
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
+    /* off | stable (default: the control plane's latest signed release once it
+     * has been the latest for a day) | latest (every release as it lands);
+     * fos_ota.c. The manual paths — `ota`, the backend's POST /api/action/ota,
+     * the cloud's notify_update_available — work on every channel. Live: the
+     * periodic task starts or idles on the next line. */
+    else if (strcmp(key, "auto_update") == 0) {
+        uint8_t channel;
+        if (!fos_config_parse_auto_update(value, &channel)) {
+            printf("auto_update must be off, stable or latest\n");
+            return 1;
+        }
+        config->auto_update = channel;
+        fos_ota_sync_periodic_task();
+    }
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;
     else if (strcmp(key, "fusion") == 0) config->image_fusion = atoi(value) != 0;
     /* 0 (default): while this frame is enrolled with a cloud provider, scene

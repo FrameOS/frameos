@@ -43,6 +43,10 @@ type
     saveAssets*: JsonNode
     logToFile*: string
     debug*: bool
+    # The daily self-update channel (frameos/auto_updater.nim): "stable"
+    # (default — the latest release once it has been the latest for a day),
+    # "latest" (every release as it lands) or "off".
+    autoUpdate*: string
     timeZone*: string
     timeZoneUpdates*: TimeZoneUpdatesConfig
     schedule*: FrameSchedule

@@ -180,6 +180,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-gpio',
     'frame-settings-logs',
     'frame-settings-reboot',
+    'frame-settings-updates',
   ],
   // The on-device panel hides the whole SSH block, and the FrameOS Remote
   // agent section lives inside it.
@@ -200,6 +201,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-gpio',
     'frame-settings-logs',
     'frame-settings-reboot',
+    'frame-settings-updates',
   ],
   // A cloud-managed frame renders only what the cloud can actually save: the
   // declarative `set_settings` keys, plus Power on an ESP32. Everything else
@@ -351,10 +353,7 @@ export function isEsp32CloudFrame(frame?: FrameCapabilityInput | null, mode: Wor
  * the control plane want this — how much a microcontroller can be asked to
  * do at once does not depend on who is asking.
  */
-export function isEsp32Frame(
-  frame?: FrameCapabilityInput | null,
-  mode: WorkspaceMode = workspaceMode()
-): boolean {
+export function isEsp32Frame(frame?: FrameCapabilityInput | null, mode: WorkspaceMode = workspaceMode()): boolean {
   return isEsp32CloudFrame(frame, mode) || isEsp32Platform(frame?.embedded?.platform)
 }
 

@@ -37,6 +37,38 @@ suite "FrameOS upgrade helpers":
     expect ValueError:
       discard archForUname("riscv64")
 
+  test "a backend-managed frame asks its backend which release to run":
+    # frame.json names a backend → its release endpoint, over the same
+    # host/port/TLS rule the log uploader uses.
+    check backendReleaseUrl(%*{"serverHost": "backend.local", "serverPort": 8989, "serverApiKey": "k"}) ==
+      "http://backend.local:8989/api/frameos/release"
+    check backendReleaseUrl(%*{"serverHost": "frames.example.com", "serverPort": 443, "serverApiKey": "k"}) ==
+      "https://frames.example.com:443/api/frameos/release"
+    check backendReleaseUrl(%*{"serverHost": "backend.local", "serverPort": 8443, "serverApiKey": "k"}) ==
+      "https://backend.local:8443/api/frameos/release"
+    # A cloud-managed or adopted card names none: it follows GitHub's latest.
+    check backendReleaseUrl(%*{"serverHost": "", "serverApiKey": ""}) == ""
+    check backendReleaseUrl(%*{"serverHost": "backend.local", "serverApiKey": ""}) == ""
+    check backendReleaseUrl(%*{}) == ""
+
+  test "the backend's answer is one release version, nothing looser":
+    check parseBackendReleaseVersion("""{"version": "2026.9.12"}""") == "2026.9.12"
+    check parseBackendReleaseVersion("""{"version": "v2026.9.12+abc"}""") == "2026.9.12"
+    expect ValueError:
+      discard parseBackendReleaseVersion("""{"version": ""}""")
+    expect ValueError:
+      discard parseBackendReleaseVersion("""{"version": "unknown"}""")
+    expect ValueError:
+      discard parseBackendReleaseVersion("not json")
+    expect ValueError:
+      discard parseBackendReleaseVersion("[]")
+
+  test "upgrade options take a pinned --version":
+    check parseFrameOSUpgradeOptions(@["--yes", "--version=2026.9.12"]).version == "2026.9.12"
+    check parseFrameOSUpgradeOptions(@["--yes"]).version == ""
+    expect ValueError:
+      discard parseFrameOSUpgradeOptions(@["--version=nope"])
+
   test "release payload selects stable target asset":
     let release = releaseInfoFromPayload(
       %*{

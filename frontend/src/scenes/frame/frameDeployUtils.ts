@@ -282,6 +282,33 @@ function precompiledSkipReason(frame?: Partial<FrameType> | null): string | null
     : null
 }
 
+/**
+ * Why the `auto_update` switch cannot apply to this frame, or null when it
+ * can. The device installs the GENERIC signed FrameOS release, so a Pi or
+ * Buildroot frame must run the precompiled build with no legacy compiled
+ * scenes (the mirror of frame_can_auto_update in backend/app/models/frame.py,
+ * which withholds the key from frame.json for the same frames). An ESP32 can
+ * always be asked: its firmware knows whether the flash layout has an OTA
+ * slot and says so in its log when it does not.
+ */
+export function frameAutoUpdateBlockedReason(frame?: Partial<FrameType> | null): string | null {
+  const mode = frame?.mode ?? 'rpios'
+  if (mode === 'embedded') {
+    return null
+  }
+  if (mode !== 'rpios' && mode !== 'buildroot') {
+    return `Automatic updates are not available for frames in ${mode} mode.`
+  }
+  const compiledScenes = precompiledSkipReason(frame)
+  if (compiledScenes) {
+    return `Automatic updates install the generic FrameOS release, which carries no compiled scenes. This frame has ${compiledScenes} — convert them to interpreted scenes first.`
+  }
+  if (frameCompilationMode(frame) !== 'precompiled') {
+    return 'Automatic updates install the generic FrameOS release. This frame is set to build FrameOS from source; switch its build to the precompiled release first.'
+  }
+  return null
+}
+
 function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: DeployPlanResponse | null): boolean {
   if (frameCompiledSceneCount(frame) > 0) {
     return false

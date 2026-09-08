@@ -31,6 +31,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_ota.h"
 #include "fos_framebuffer.h"
 #include "fos_mem.h"
 #include "fos_scenes.h"
@@ -860,7 +861,7 @@ char *fos_http_status_json(void)
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\","
         "\"hardwarePreset\":\"%s\",\"renderMode\":\"%s\","
         "\"intervalSec\":%lu,\"maxHttpResponseBytes\":%lu,"
-        "\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
+        "\"serverSendLogs\":%s,\"autoUpdate\":\"%s\",\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
         "\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
         app_name, app_version, elf_sha, idf_version, partition,
@@ -900,6 +901,7 @@ char *fos_http_status_json(void)
         (unsigned long)config->interval_sec,
         (unsigned long)config->max_http_response_bytes,
         config->server_send_logs ? "true" : "false",
+        fos_config_auto_update_name(config->auto_update),
         config->tls_enable ? "true" : "false", s_https_server ? "true" : "false", (unsigned)config->tls_port,
         config->deep_sleep ? "true" : "false",
         config->wake_schedule ? "true" : "false",
@@ -1565,6 +1567,7 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddNumberToObject(frame, "server_port", 0);
     cJSON_AddStringToObject(frame, "server_api_key", "");
     cJSON_AddBoolToObject(frame, "server_send_logs", config->server_send_logs);
+    cJSON_AddStringToObject(frame, "auto_update", fos_config_auto_update_name(config->auto_update));
     cJSON_AddStringToObject(frame, "status", "online");
     cJSON_AddBoolToObject(frame, "archived", false);
     cJSON_AddNullToObject(frame, "version");
@@ -1743,6 +1746,18 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
 
     const cJSON *send_logs = cJSON_GetObjectItem(root, "server_send_logs");
     if (send_logs != NULL) config->server_send_logs = json_bool_item(send_logs, config->server_send_logs);
+    const cJSON *auto_update = cJSON_GetObjectItem(root, "auto_update");
+    if (auto_update != NULL) {
+        /* "off" | "stable" | "latest"; a bool from an older form still maps. */
+        uint8_t channel = config->auto_update;
+        if (cJSON_IsString(auto_update)) {
+            fos_config_parse_auto_update(auto_update->valuestring, &channel);
+        } else if (cJSON_IsBool(auto_update)) {
+            channel = cJSON_IsTrue(auto_update) ? FOS_AUTO_UPDATE_STABLE : FOS_AUTO_UPDATE_OFF;
+        }
+        config->auto_update = channel;
+        fos_ota_sync_periodic_task();
+    }
 
     const cJSON *network = cJSON_GetObjectItem(root, "network");
     if (cJSON_IsObject(network)) {

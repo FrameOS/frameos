@@ -26,6 +26,9 @@ export const cloudFramesContractSettings = {
     "debug": {
       "since": null
     },
+    "auto_update": {
+      "since": "2026.9.12"
+    },
     "flip": {
       "since": "2026.8.30"
     },
@@ -83,6 +86,9 @@ export const cloudFramesContractSettings = {
     },
     "debug": {
       "since": "2026.8.31"
+    },
+    "auto_update": {
+      "since": "2026.9.12"
     },
     "max_http_response_bytes": {
       "since": "2026.8.31",

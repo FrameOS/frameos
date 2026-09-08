@@ -2395,6 +2395,7 @@ def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
             "flip": None,
             "background_color": None,
             "debug": False,
+            "auto_update": "stable",
             "scenes": [{"id": "scene-1"}],
             "last_log_at": None,
             "log_to_file": None,

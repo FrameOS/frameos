@@ -126,6 +126,24 @@ export const cloudFramesContract = {
         }
       }
     },
+    "auto_update": {
+      "rule": {
+        "type": "string",
+        "enum": [
+          "off",
+          "stable",
+          "latest"
+        ]
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.9.12"
+        },
+        "esp32": {
+          "since": "2026.9.12"
+        }
+      }
+    },
     "flip": {
       "rule": {
         "type": "string",

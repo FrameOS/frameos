@@ -100,6 +100,56 @@ export function cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion: string |
 }
 
 /**
+ * 2026.9.12: the daily self-update switch, on BOTH profiles behind one
+ * floor. A provider can only turn the device's own signed-release check on
+ * or off — never name a release or a URL (the Pi asks GitHub, the ESP32 its
+ * control plane's manifest relay, both verify minisign themselves). Older
+ * firmware refuses the whole push on the key, so callers gate on
+ * cloudFrameSupportsAutoUpdate; the form binds and diffs it on every frame.
+ */
+export const autoUpdateCloudFrameSettingsMinVersion = '2026.9.12'
+export const autoUpdateCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.from(
+  new Set<CloudFrameSettingKey>([
+    ...linuxKeysSince(autoUpdateCloudFrameSettingsMinVersion),
+    ...esp32KeysSince(autoUpdateCloudFrameSettingsMinVersion),
+  ])
+)
+
+export function cloudFrameSupportsAutoUpdate(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(autoUpdateCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/** The three channels, as the wire spells them (the contract's enum). */
+export type AutoUpdateChannel = 'off' | 'stable' | 'latest'
+export const autoUpdateChannelOptions: { value: AutoUpdateChannel; label: string }[] = [
+  { value: 'stable', label: 'Stable (recommended) — releases that have been out for a day with no newer release' },
+  { value: 'latest', label: 'Latest — every release as soon as it is published' },
+  { value: 'off', label: 'Off — never check; update from the Upgrade button or the backend' },
+]
+
+/** Absent/unknown reads as the default channel, stable; older booleans still map. */
+export function normalizeAutoUpdateChannel(value: unknown): AutoUpdateChannel {
+  if (value === false || value === 'off' || value === 'false' || value === '0') {
+    return 'off'
+  }
+  if (value === 'latest') {
+    return 'latest'
+  }
+  return 'stable'
+}
+
+export function autoUpdateChannelLabel(value: unknown): string {
+  switch (normalizeAutoUpdateChannel(value)) {
+    case 'off':
+      return 'Off'
+    case 'latest':
+      return 'Latest'
+    default:
+      return 'Stable'
+  }
+}
+
+/**
  * What every ESP32 firmware with the cloud link applies: four of the base
  * six (no timezone before 2026.8.34, no debug before 2026.8.31) plus the
  * ungated power keys.
@@ -152,6 +202,7 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...cloudFrameSettingKeys,
     ...extendedCloudFrameSettingKeys,
     ...hardwareCloudFrameSettingKeys,
+    ...autoUpdateCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )
@@ -477,6 +528,9 @@ export function cloudFrameSettingsPayload(
     }
     let converted: unknown
     switch (key) {
+      case 'auto_update':
+        converted = normalizeAutoUpdateChannel(value)
+        break
       case 'control_code':
         converted = cloudControlCodePayload(value)
         break

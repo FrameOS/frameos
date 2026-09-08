@@ -198,7 +198,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { idempotentHint: true },
       description:
-        "Push device settings to a frame. Requires confirm=true (it changes the device). Allowed keys: debug, interval (seconds 1–86400), name, rotate (0/90/180/270), scaling_mode (contain/cover/stretch/center), timezone (IANA), flip, error_behavior, control_code, metrics_interval, max_http_response_bytes, save_assets, timezone_updater, palette, device_config, gpio_buttons, and on ESP32 the power keys deep_sleep, deep_sleep_on_battery, wake_check_seconds, battery_pin, battery_divider, battery_enable_pin. Unknown keys or values are refused as a whole (setting_not_allowed); old firmware is refused with settings_need_newer_firmware. Returns a command_id.",
+        "Push device settings to a frame. Requires confirm=true (it changes the device). Allowed keys: debug, interval (seconds 1–86400), name, rotate (0/90/180/270), scaling_mode (contain/cover/stretch/center), timezone (IANA), auto_update (firmware 2026.9.12+: off/stable/latest — the device's daily self-update channel; stable installs a release once it has been the latest for a day), flip, error_behavior, control_code, metrics_interval, max_http_response_bytes, save_assets, timezone_updater, palette, device_config, gpio_buttons, and on ESP32 the power keys deep_sleep, deep_sleep_on_battery, wake_check_seconds, battery_pin, battery_divider, battery_enable_pin. Unknown keys or values are refused as a whole (setting_not_allowed); old firmware is refused with settings_need_newer_firmware. Returns a command_id.",
       inputSchema: {
         confirm: z
           .literal(true)

@@ -303,7 +303,7 @@ suite "cloud hub verb dispatcher":
     # advertised. Pin one accepted value per key.
     let samples = %*{
       "name": "Kitchen", "rotate": 180, "interval": 300, "scaling_mode": "contain",
-      "timezone": "Europe/Tallinn", "debug": true, "flip": "",
+      "timezone": "Europe/Tallinn", "debug": true, "auto_update": "stable", "flip": "",
       "error_behavior": {"mode": "show_error_retry", "show_error_retry_seconds": 60},
       "control_code": {"enabled": false},
       "metrics_interval": 60, "max_http_response_bytes": 64 * 1024 * 1024,

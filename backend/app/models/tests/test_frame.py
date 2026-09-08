@@ -4,6 +4,7 @@ from unittest.mock import patch, AsyncMock
 import pytest
 
 from app.models.frame import (
+    normalize_auto_update,
     Frame,
     delete_frame,
     get_frame_json,
@@ -166,6 +167,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["interval"] == 55
     assert data["max_http_response_bytes"] == 64 * 1024 * 1024
     assert data["server_send_logs"] is True
+    assert data["auto_update"] == "stable"
     assert data["reboot"]["crontab"] == "0 4 * * *"
     assert data["https_proxy"]["certs"]["server"]
     assert data["https_proxy"]["certs"]["server_key"]
@@ -658,3 +660,57 @@ async def test_to_dict_fingerprints_the_service_keys_frame_json_would_ship(_mock
     db.add(frame)
     db.commit()
     assert set(frame.to_dict()["settings_fingerprints"]) == {"unsplash", "openAI"}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_auto_update_only_for_release_builds(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameAuto", "host", "server_host.com")
+    # NULL is the default channel, stable; a fresh rpios frame is on the
+    # precompiled build with no compiled scenes, so it gets it.
+    assert get_frame_json(db, frame)["autoUpdate"] == "stable"
+
+    frame.auto_update = "latest"
+    frame.rpios = {"compilationMode": "precompiled"}
+    frame.scenes = [{"id": "s1", "settings": {"execution": "interpreted"}, "nodes": [], "edges": []}]
+    assert get_frame_json(db, frame)["autoUpdate"] == "latest"
+
+    # A legacy compiled scene forces a source build; the release binary would
+    # drop it, so the channel is withheld from the device.
+    frame.scenes = [{"id": "s1", "settings": {"execution": "compiled"}, "nodes": [], "edges": []}]
+    assert get_frame_json(db, frame)["autoUpdate"] == "off"
+
+    frame.scenes = []
+    frame.rpios = {"compilationMode": "static"}
+    assert get_frame_json(db, frame)["autoUpdate"] == "off"
+
+    frame.mode = "embedded"
+    assert get_frame_json(db, frame)["autoUpdate"] == "latest"
+
+    frame.auto_update = "off"
+    assert get_frame_json(db, frame)["autoUpdate"] == "off"
+
+
+def test_normalize_auto_update_channels():
+    for value in (None, True, "", "stable", "true", "1", "whatever"):
+        assert normalize_auto_update(value) == "stable", value
+    for value in (False, "off", "false", "0", "OFF"):
+        assert normalize_auto_update(value) == "off", value
+    for value in ("latest", " Latest ", "bleeding_edge"):
+        assert normalize_auto_update(value) == "latest", value
+
+
+def test_effective_auto_update_works_on_a_row_and_on_its_dict():
+    from app.models.frame import effective_auto_update
+
+    row = Frame(mode="rpios", auto_update="latest", rpios={"compilationMode": "precompiled"}, scenes=[])
+    assert effective_auto_update(row) == "latest"
+    assert effective_auto_update({"mode": "rpios", "auto_update": "latest", "rpios": {"compilationMode": "precompiled"}, "scenes": []}) == "latest"
+    # An absent preference is the default channel …
+    assert effective_auto_update({"mode": "buildroot", "buildroot": {}, "scenes": []}) == "stable"
+    # … a source build or a compiled scene withholds it.
+    assert effective_auto_update({"mode": "rpios", "rpios": {"compilationMode": "static"}, "scenes": []}) == "off"
+    assert effective_auto_update({"mode": "rpios", "auto_update": "latest", "rpios": {},
+                                  "scenes": [{"id": "s", "settings": {"execution": "compiled"}}]}) == "off"
+    assert effective_auto_update({"mode": "embedded", "auto_update": "off"}) == "off"
+    assert effective_auto_update({"mode": "embedded"}) == "stable"

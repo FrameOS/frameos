@@ -36,6 +36,7 @@ Documented divergences from the cloud route:
 
 import os
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, Optional
 from urllib.parse import urlsplit
@@ -49,6 +50,7 @@ from app.tasks.embedded_firmware import embedded_release_asset_names
 from . import api_project
 
 RELEASE_API_URL = "https://api.github.com/repos/FrameOS/frameos/releases/latest"
+RELEASE_TAG_API_URL = "https://api.github.com/repos/FrameOS/frameos/releases/tags/"
 
 # Explicit allow-list of platform -> exact asset suffix. The ESP32 entries
 # come from the flash profiles (EMBEDDED_FLASH_PROFILES.releaseAssets, one
@@ -99,12 +101,20 @@ RELEASE_CACHE_SECONDS = 600
 RELEASE_FAILURE_CACHE_SECONDS = 60
 
 _release_cache: dict[str, Any] = {"at": 0.0, "release": None}
+# The release this backend RUNS (versions.json), by tag — what its frames'
+# OTA follows. Separate from the latest-release cache above: the browser
+# flasher and SD-image listing keep offering GitHub's latest, the device
+# update channel follows the backend.
+_pinned_release_cache: dict[str, Any] = {"at": 0.0, "tag": None, "release": None}
 
 
 def clear_release_cache() -> None:
-    """Reset the in-process release cache (tests)."""
+    """Reset the in-process release caches (tests)."""
     _release_cache["at"] = 0.0
     _release_cache["release"] = None
+    _pinned_release_cache["at"] = 0.0
+    _pinned_release_cache["tag"] = None
+    _pinned_release_cache["release"] = None
 
 
 def _local_generic_firmware() -> Optional[dict[str, Any]]:
@@ -138,6 +148,59 @@ async def _fetch_latest_release() -> Optional[dict[str, Any]]:
     return payload if isinstance(payload, dict) else None
 
 
+async def _fetch_release_by_tag(tag: str) -> Optional[dict[str, Any]]:
+    """One release's raw JSON from GitHub by tag ("v2026.9.12"), or None
+    (unknown tag, network). Tests patch this."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.get(
+                f"{RELEASE_TAG_API_URL}{tag}",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+    except httpx.HTTPError:
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def backend_release_version() -> Optional[str]:
+    """The FrameOS release this backend runs — versions.json's release tag
+    without the +sha. What every frame it manages is kept on: the backend
+    deploys this version, so a frame ahead of it would be downgraded by the
+    next deploy and climb back the next night."""
+    from app.tasks.precompiled_frameos import release_version
+
+    return release_version()
+
+
+async def _pinned_release_cached() -> Optional[dict[str, Any]]:
+    """The GitHub release for backend_release_version(), or None when that
+    version has no published release (a dev backend ahead of the tags, or
+    GitHub unreachable) — the OTA routes then answer "nothing to install"."""
+    version = backend_release_version()
+    if not version:
+        return None
+    tag = f"v{version}"
+    now = time.monotonic()
+    ttl = RELEASE_CACHE_SECONDS if _pinned_release_cache["release"] is not None else RELEASE_FAILURE_CACHE_SECONDS
+    if (
+        _pinned_release_cache["tag"] == tag
+        and _pinned_release_cache["at"]
+        and now - _pinned_release_cache["at"] < ttl
+    ):
+        return _pinned_release_cache["release"]
+    release = await _fetch_release_by_tag(tag)
+    _pinned_release_cache["at"] = now
+    _pinned_release_cache["tag"] = tag
+    _pinned_release_cache["release"] = release
+    return release
+
+
 async def _latest_release_cached() -> Optional[dict[str, Any]]:
     now = time.monotonic()
     ttl = RELEASE_CACHE_SECONDS if _release_cache["release"] is not None else RELEASE_FAILURE_CACHE_SECONDS
@@ -161,6 +224,23 @@ def published_provisioning_assets(release: Optional[dict[str, Any]]) -> Optional
 async def latest_published_provisioning_assets() -> Optional[set[str]]:
     """Same, for the cached latest release — what the provisioning route asks."""
     return published_provisioning_assets(await _latest_release_cached())
+
+
+def release_published_at(release: dict[str, Any]) -> Optional[int]:
+    """GitHub's ``published_at`` as unix seconds, or None when the listing has
+    none. The device's `stable` auto-update channel installs a release only
+    once it has been the latest for a day (embedded/esp32/main/fos_ota.c,
+    frameos/auto_updater.nim), and refuses to guess when the time is unknown."""
+    raw = release.get("published_at")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        stamp = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return int(stamp.timestamp())
 
 
 def release_version(release: dict[str, Any]) -> str:
@@ -211,13 +291,17 @@ async def fetch_release_asset_text(asset: dict[str, Any]) -> Optional[str]:
 async def latest_release_ota_manifest(platform: str, download_url: str) -> dict[str, Any]:
     """The OTA manifest the device understands (embedded/esp32/main/fos_ota.c,
     same shape as the cloud's /api/frames/{id}/firmware/manifest):
-    ``{platform, version, size, minisig, downloadUrl}``. Raises HTTPException
+    ``{platform, version, size, minisig, downloadUrl, publishedAt}``. Named
+    "latest" for the device, which only ever asks for the newest image it
+    may run — and on a self-hosted backend that is the release the BACKEND
+    runs (backend_release_version), never GitHub's latest: the backend
+    deploys its own version, so its frames follow it. Raises HTTPException
     with the cloud's error tokens: 400 invalid_platform, 404
     ota_image_not_published, 409 unsigned_release, 502 release_lookup_failed.
     """
     if platform not in OTA_ASSETS:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid_platform")
-    release = await _latest_release_cached()
+    release = await _pinned_release_cached()
     if release is None:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="release_lookup_failed")
     asset = find_ota_asset(release, platform)
@@ -235,14 +319,17 @@ async def latest_release_ota_manifest(platform: str, download_url: str) -> dict[
         "size": asset.get("size"),
         "minisig": minisig,
         "downloadUrl": download_url,
+        # Unix seconds; the device's `stable` channel waits a day after this.
+        "publishedAt": release_published_at(release),
     }
 
 
 async def stream_latest_release_ota_image(platform: str, range_header: Optional[str] = None) -> StreamingResponse:
-    """Pipe the release's bare app image for ``platform`` to the device."""
+    """Pipe the release's bare app image for ``platform`` to the device —
+    the same pinned release the manifest named."""
     if platform not in OTA_ASSETS:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid_platform")
-    release = await _latest_release_cached()
+    release = await _pinned_release_cached()
     if release is None:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="release_lookup_failed")
     asset = find_ota_asset(release, platform)

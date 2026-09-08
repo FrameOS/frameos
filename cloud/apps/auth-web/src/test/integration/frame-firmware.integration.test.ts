@@ -93,6 +93,7 @@ function releasePayload(options: { signed?: boolean } = {}) {
         : []),
     ],
     tag_name: "v2026.8.1",
+    published_at: "2026-08-01T10:00:00Z",
   };
 }
 
@@ -235,6 +236,7 @@ describe("device-authed firmware manifest + download", () => {
       size: firmwareBytes.length,
       minisig: minisigText,
       downloadUrl: downloadPath(frame_id),
+      publishedAt: Date.UTC(2026, 7, 1, 10, 0, 0) / 1000,
     });
   });
 

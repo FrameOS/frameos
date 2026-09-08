@@ -299,6 +299,7 @@ const frameApiKeyMap* = [
   ("upload_fonts", "uploadFonts"),
   ("log_to_file", "logToFile"),
   ("debug", "debug"),
+  ("auto_update", "autoUpdate"),
   ("timezone", "timeZone"),
   ("timezone_updater", "timeZoneUpdates"),
   ("schedule", "schedule"),

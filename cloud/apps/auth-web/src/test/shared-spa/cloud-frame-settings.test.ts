@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   allCloudFrameSettingKeys,
+  autoUpdateCloudFrameSettingKeys,
+  autoUpdateCloudFrameSettingsMinVersion,
+  cloudFrameSupportsAutoUpdate,
   cloudFrameSettingKeys,
   cloudFrameSettingKeysForVersion,
   cloudFrameSettingsPayload,
@@ -29,6 +32,8 @@ import {
 import {
   allowedFrameCommandTypes,
   allowedFrameSettings,
+  autoUpdateFrameSettingKeys,
+  autoUpdateFrameSettingsMinVersion,
   esp32BatteryEnablePinFrameSettingKeys,
   esp32BatteryEnablePinFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
@@ -93,13 +98,46 @@ describe("cloud settings push", () => {
     }
   });
 
+  it("agrees with the control plane on the auto_update channel, one floor on both profiles", () => {
+    // 2026.9.12: the first key both planes learned together. It is neither
+    // in the ungated base of either profile nor esp32-only, and rides a push
+    // only once the reported firmware clears the floor.
+    expect(new Set(autoUpdateCloudFrameSettingKeys)).toEqual(autoUpdateFrameSettingKeys);
+    expect(autoUpdateCloudFrameSettingsMinVersion).toBe(autoUpdateFrameSettingsMinVersion);
+    expect(autoUpdateFrameSettingKeys.has("auto_update")).toBe(true);
+    for (const key of autoUpdateCloudFrameSettingKeys) {
+      expect(allowedFrameSettings.has(key)).toBe(true);
+      expect(esp32SettableKeys.has(key)).toBe(true);
+      expect(esp32OnlySettableKeys.has(key)).toBe(false);
+      expect((cloudFrameSettingKeys as readonly string[]).includes(key)).toBe(false);
+      expect((esp32CloudFrameSettingKeys as readonly string[]).includes(key)).toBe(false);
+      expect((esp32PowerSettingKeys as readonly string[]).includes(key)).toBe(false);
+    }
+    expect(cloudFrameSupportsAutoUpdate("2026.9.11")).toBe(false);
+    expect(cloudFrameSupportsAutoUpdate("2026.9.12")).toBe(true);
+    expect(cloudFrameSettingKeysForVersion("2026.9.11")).not.toContain("auto_update");
+    expect(cloudFrameSettingKeysForVersion("2026.9.12")).toContain("auto_update");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.9.11")).not.toContain("auto_update");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.9.12")).toContain("auto_update");
+    expect(cloudFrameSettingsPayload({ auto_update: "latest" } as never, ["auto_update"])).toEqual({ auto_update: "latest" });
+    // The form may still hold a boolean from before the channel; it maps.
+    expect(cloudFrameSettingsPayload({ auto_update: false } as never, ["auto_update"])).toEqual({ auto_update: "off" });
+    expect(cloudFrameSettingsPayload({ auto_update: true } as never, ["auto_update"])).toEqual({ auto_update: "stable" });
+    for (const channel of ["off", "stable", "latest"]) {
+      expect(allowedFrameSettings.get("auto_update")?.(channel), channel).toBe(true);
+    }
+    expect(allowedFrameSettings.get("auto_update")?.(true)).toBe(false);
+    expect(allowedFrameSettings.get("auto_update")?.("yes")).toBe(false);
+  });
+
   it("agrees with the control plane on what the esp32 firmware applies, and its gated tail", () => {
     // Ungated: exactly the control plane's esp32 subset minus the tails.
     const ungated = [...esp32SettableKeys].filter(
       (key) =>
         !esp32ExtendedFrameSettingKeys.has(key) &&
         !esp32TimeZoneFrameSettingKeys.has(key) &&
-        !esp32BatteryEnablePinFrameSettingKeys.has(key),
+        !esp32BatteryEnablePinFrameSettingKeys.has(key) &&
+        !autoUpdateFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);

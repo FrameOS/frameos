@@ -193,6 +193,7 @@ frameos> set deep_sleep 1                # battery mode: deep sleep between refr
 frameos> set wake_schedule 1             # align wake to wall-clock interval boundaries
 frameos> set battery_pin 2               # ADC1 GPIO tapping VBAT (-1 = none)
 frameos> set battery_divider 2.0         # Vbat = Vpin * divider
+frameos> set auto_update latest          # off | stable (default: a release once it's been latest a day) | latest
 frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset
@@ -712,11 +713,19 @@ SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.32mb-ota" \
 OTA profiles boot new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
 the app marks itself valid once the network is up, otherwise the next reset rolls
 back to the previous slot. One signed path serves both control planes
-(`main/fos_ota.c`): a backend-managed device polls
-`/api/frames/{id}/embedded/ota/manifest?platform=<its layout>` daily (or on
-`ota`, or when the backend asks over `POST /api/action/ota`), a cloud-managed
-one fetches `/api/frames/{id}/firmware/manifest` on `notify_update_available`.
-Both answer `{platform, version, size, minisig, downloadUrl}` — the release
+(`main/fos_ota.c`): a device polls its control plane's manifest —
+`/api/frames/{id}/embedded/ota/manifest?platform=<its layout>` on a self-hosted
+backend, `/api/frames/{id}/firmware/manifest` on the cloud — once a day on the
+`auto_update` channel (`set auto_update off|stable|latest`, the backend's
+settings poll, or the cloud's `set_settings`; `stable` by default, the same
+channel the Pi runtime has: it installs a release only once the manifest's
+`publishedAt` is a day old, so a quick fix skips the release it fixes;
+`latest` installs every release as it lands), and on demand on `ota`, the
+backend's `POST /api/action/ota`, or the cloud's `notify_update_available`.
+The cloud's manifest names GitHub's latest release; a self-hosted backend's
+names the release the backend itself runs (its deploys install that version,
+so its frames follow the backend rather than climb past it).
+Both answer `{platform, version, size, minisig, downloadUrl, publishedAt}` — the release
 relayed, never a binary the control plane built — and the device streams the
 image into the inactive slot, BLAKE2b-hashes it as it goes and verifies the
 minisign signature against the release key baked into every image

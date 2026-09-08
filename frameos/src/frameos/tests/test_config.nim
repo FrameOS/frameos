@@ -1,5 +1,6 @@
 import std/[json, os, times]
 import ../config
+import ../types
 import ../utils/image
 
 proc withConfig(content: string, body: proc()) =
@@ -39,6 +40,7 @@ block test_load_config:
         "maxHttpResponseBytes": 33554432,
         "rotate": 0,
         "debug": true,
+        "autoUpdate": "latest",
         "scalingMode": "cover",
         "imageEngine": "imagemagick",  # legacy key from before ImageMagick was removed; must still parse
         "timeZone": "UTC",
@@ -90,6 +92,7 @@ block test_load_config:
         doAssert config.rotate == 0
         doAssert config.flip == ""
         doAssert config.debug == true
+        doAssert config.autoUpdate == "latest"
         doAssert config.scalingMode == "cover"
         doAssert config.settings == %*{}
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"} == nil
@@ -134,3 +137,24 @@ block test_error_behavior_legacy_silent_retry_minutes:
 
     doAssert config.mode == "silent_retry"
     doAssert config.silentWindowMinutes == 7
+
+
+block:
+  # The auto-update channel: absent/blank and the boolean spellings a form may
+  # still post map onto the three channels; unknown values fall back to stable.
+  doAssert normalizeAutoUpdateChannel("") == "stable"
+  doAssert normalizeAutoUpdateChannel("stable") == "stable"
+  doAssert normalizeAutoUpdateChannel("true") == "stable"
+  doAssert normalizeAutoUpdateChannel("1") == "stable"
+  doAssert normalizeAutoUpdateChannel("whatever") == "stable"
+  doAssert normalizeAutoUpdateChannel("false") == "off"
+  doAssert normalizeAutoUpdateChannel("OFF") == "off"
+  doAssert normalizeAutoUpdateChannel("0") == "off"
+  doAssert normalizeAutoUpdateChannel("latest") == "latest"
+  doAssert normalizeAutoUpdateChannel(" Latest ") == "latest"
+  var config = FrameConfig()
+  setConfigDefaults(config)
+  doAssert config.autoUpdate == "stable"
+  config.autoUpdate = "false"
+  setConfigDefaults(config)
+  doAssert config.autoUpdate == "off"

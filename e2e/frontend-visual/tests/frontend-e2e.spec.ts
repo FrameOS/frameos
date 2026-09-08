@@ -41,6 +41,7 @@ const frameSettingsSections = [
   ['GPIO', 'frame-settings-gpio'],
   ['Logs', 'frame-settings-logs'],
   ['Reboot', 'frame-settings-reboot'],
+  ['Updates', 'frame-settings-updates'],
 ] as const
 
 const globalSettingsSections = [
