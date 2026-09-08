@@ -414,12 +414,15 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
-    /* The daily self-update switch (fos_ota.c). Applied live: the periodic
-     * task starts when this turns on and idles when it turns off. */
+    /* The daily self-update channel (fos_ota.c): "off" | "stable" | "latest".
+     * Applied live: the periodic task starts when this leaves off and idles
+     * when it returns there. */
     const cJSON *auto_update = cJSON_GetObjectItem(frame, "autoUpdate");
-    if (cJSON_IsBool(auto_update) &&
-        config->auto_update != (bool)cJSON_IsTrue(auto_update)) {
-        config->auto_update = cJSON_IsTrue(auto_update);
+    uint8_t channel;
+    if (cJSON_IsString(auto_update) &&
+        fos_config_parse_auto_update(auto_update->valuestring, &channel) &&
+        config->auto_update != channel) {
+        config->auto_update = channel;
         changed = true;
     }
 
@@ -663,7 +666,7 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
         change_append(out, out_len, "deep_sleep", after->deep_sleep ? "true" : "false");
     }
     if (before->auto_update != after->auto_update) {
-        change_append(out, out_len, "auto_update", after->auto_update ? "true" : "false");
+        change_append(out, out_len, "auto_update", fos_config_auto_update_name(after->auto_update));
     }
     if (before->deep_sleep_on_battery != after->deep_sleep_on_battery) {
         change_append(out, out_len, "deep_sleep_on_battery",

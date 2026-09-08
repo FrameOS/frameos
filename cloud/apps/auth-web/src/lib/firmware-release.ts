@@ -100,6 +100,21 @@ export interface ReleaseAsset {
 export interface Release {
   assets?: ReleaseAsset[];
   tag_name?: string;
+  published_at?: string;
+}
+
+/**
+ * GitHub's `published_at` as unix seconds, or null when the listing has
+ * none. The device's `stable` auto-update channel installs a release only
+ * once it has been the latest for a day (embedded/esp32/main/fos_ota.c), and
+ * refuses to guess when the time is unknown.
+ */
+export function releasePublishedAt(release: Release): number | null {
+  if (typeof release.published_at !== "string" || !release.published_at.trim()) {
+    return null;
+  }
+  const ms = Date.parse(release.published_at);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
 export function findAsset(release: Release, suffix: string) {

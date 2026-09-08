@@ -25,6 +25,12 @@
 #define FOS_ASSETS_PATH_LEN 128
 
 typedef enum {
+    FOS_AUTO_UPDATE_OFF = 0,
+    FOS_AUTO_UPDATE_STABLE = 1,
+    FOS_AUTO_UPDATE_LATEST = 2,
+} fos_auto_update_t;
+
+typedef enum {
     FOS_RENDER_LOCAL = 0,  /* render scenes on-device with the Nim runtime */
     FOS_RENDER_REMOTE = 1, /* thin client: fetch prerendered bitmap from backend */
 } fos_render_mode_t;
@@ -95,11 +101,13 @@ typedef struct {
                                     * interpreter (value bytes, heap delta,
                                     * fusion tier) — see docs/value-pipeline.md */
     bool server_send_logs;         /* upload runtime/render logs to backend */
-    /* Once a day, check the control plane's signed release manifest and
-     * install a newer image (fos_ota.c periodic task). Off by default:
-     * the manual paths — console `ota`, the backend's POST /api/action/ota,
-     * the cloud's notify_update_available — work either way. */
-    bool auto_update;
+    /* The daily self-update channel (fos_ota.c periodic task), a
+     * fos_auto_update_t: STABLE (default) installs the control plane's
+     * latest signed release once it has been the latest for a day, LATEST
+     * installs every release as it lands, OFF never checks. The manual paths
+     * — console `ota`, the backend's POST /api/action/ota, the cloud's
+     * notify_update_available — work on every channel. */
+    uint8_t auto_update;
     /* Escape hatch for the cloud-managed private-network deny
      * (components/frameos_nim/include/fos_netguard.h), matching
      * `network.allowLocalNetworkAccess` in the native build's frame.json: 1
@@ -160,6 +168,11 @@ bool fos_config_normalize_rotate(double value, uint16_t *out);
  * normalize_rotate: every writer — USB console, backend settings poll,
  * cloud set_settings — goes through this so they cannot drift apart. */
 bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_len);
+/* The auto-update channel's wire spellings ("off" | "stable" | "latest",
+ * plus the digits 0/1/2 and the booleans an older form may still send):
+ * value → fos_auto_update_t. False for anything else. */
+bool fos_config_parse_auto_update(const char *value, uint8_t *out);
+const char *fos_config_auto_update_name(uint8_t channel);
 /* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);

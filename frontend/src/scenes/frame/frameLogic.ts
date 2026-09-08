@@ -46,6 +46,7 @@ import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sc
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import {
   autoUpdateCloudFrameSettingKeys,
+  autoUpdateChannelLabel,
   cloudFrameSettingKeys,
   extendedCloudFrameSettingKeys,
   esp32PowerSettingKeys,
@@ -1241,8 +1242,9 @@ function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string 
     }
     case 'server_send_logs':
     case 'debug':
-    case 'auto_update':
       return value ? 'Enabled' : 'Disabled'
+    case 'auto_update':
+      return autoUpdateChannelLabel(value)
     case 'save_assets':
       if (typeof value === 'boolean') {
         return value ? 'Enabled' : 'Disabled'

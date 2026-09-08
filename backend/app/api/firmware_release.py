@@ -36,6 +36,7 @@ Documented divergences from the cloud route:
 
 import os
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, Optional
 from urllib.parse import urlsplit
@@ -163,6 +164,23 @@ async def latest_published_provisioning_assets() -> Optional[set[str]]:
     return published_provisioning_assets(await _latest_release_cached())
 
 
+def release_published_at(release: dict[str, Any]) -> Optional[int]:
+    """GitHub's ``published_at`` as unix seconds, or None when the listing has
+    none. The device's `stable` auto-update channel installs a release only
+    once it has been the latest for a day (embedded/esp32/main/fos_ota.c,
+    frameos/auto_updater.nim), and refuses to guess when the time is unknown."""
+    raw = release.get("published_at")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        stamp = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return int(stamp.timestamp())
+
+
 def release_version(release: dict[str, Any]) -> str:
     """Release tags are v-prefixed ("v2026.9.2"); the device compares against
     esp_app_get_description()->version, which is not."""
@@ -235,6 +253,8 @@ async def latest_release_ota_manifest(platform: str, download_url: str) -> dict[
         "size": asset.get("size"),
         "minisig": minisig,
         "downloadUrl": download_url,
+        # Unix seconds; the device's `stable` channel waits a day after this.
+        "publishedAt": release_published_at(release),
     }
 
 

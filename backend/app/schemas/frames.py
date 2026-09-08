@@ -97,7 +97,7 @@ class FrameBase(BaseModel):
     flip: Optional[str]
     background_color: Optional[str]
     debug: Optional[bool]
-    auto_update: Optional[bool] = None
+    auto_update: Optional[str] = None
     last_log_at: Optional[datetime]
     log_to_file: Optional[str]
     assets_path: Optional[str]
@@ -184,7 +184,7 @@ class FrameUpdateRequest(BaseModel):
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
-    auto_update: Optional[bool] = None
+    auto_update: Optional[str] = None
     reboot: Any = None
     control_code: Any = None
     schedule: Optional[Dict[str, Any]] = None
@@ -200,6 +200,17 @@ class FrameUpdateRequest(BaseModel):
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
+
+    @field_validator('auto_update', mode='before')
+    @classmethod
+    def validate_auto_update(cls, value: Any) -> Optional[str]:
+        # "off" | "stable" | "latest"; None keeps the column (NULL = stable).
+        # Booleans still arrive from older forms: true → stable, false → off.
+        if value is None:
+            return None
+        from app.models.frame import normalize_auto_update
+
+        return normalize_auto_update(value)
 
     @field_validator('max_http_response_bytes')
     @classmethod

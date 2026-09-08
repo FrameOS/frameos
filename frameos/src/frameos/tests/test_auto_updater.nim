@@ -34,8 +34,32 @@ suite "auto updater":
     check compiledScenesBlockAutoUpdate(["scene_1234"]) == true
 
   test "a switched-off frame is skipped before anything is looked up":
-    let config = FrameConfig(name: "Kitchen", autoUpdate: false)
+    let config = FrameConfig(name: "Kitchen", autoUpdate: "off")
     let line = runAutoUpdateOnce(config)
     check line["status"].getStr() == "skipped"
     check line["reason"].getStr() == "disabled"
     check runAutoUpdateOnce(nil)["reason"].getStr() == "disabled"
+    check runAutoUpdateOnce(FrameConfig(name: "x", autoUpdate: ""))["reason"].getStr() == "disabled"
+
+  test "release age reads GitHub's published_at and refuses to guess":
+    let now = dateTime(2026, mSep, 9, 12, 0, 0, zone = utc())
+    check releaseAgeSeconds("2026-09-08T12:00:00Z", now) == 24 * 60 * 60
+    check releaseAgeSeconds("2026-09-09T11:59:00Z", now) == 60
+    check releaseAgeSeconds("", now) == -1
+    check releaseAgeSeconds("yesterday", now) == -1
+
+  test "stable installs only a release that has been the latest for a day":
+    let now = dateTime(2026, mSep, 9, 12, 0, 0, zone = utc())
+    check releaseQualifies("stable", "2026-09-08T11:59:59Z", now) == (true, "")
+    check releaseQualifies("stable", "2026-09-08T12:00:00Z", now) == (true, "")
+    check releaseQualifies("stable", "2026-09-08T12:00:01Z", now) == (false, "waiting_for_stable")
+    check releaseQualifies("stable", "2026-09-09T11:00:00Z", now) == (false, "waiting_for_stable")
+    check releaseQualifies("stable", "", now) == (false, "publish_time_unknown")
+    check releaseQualifies("stable", "not a date", now) == (false, "publish_time_unknown")
+
+  test "latest installs every release as soon as it is published, off never":
+    let now = dateTime(2026, mSep, 9, 12, 0, 0, zone = utc())
+    check releaseQualifies("latest", "2026-09-09T11:59:59Z", now) == (true, "")
+    check releaseQualifies("latest", "", now) == (true, "")
+    check releaseQualifies("off", "2026-09-01T00:00:00Z", now) == (false, "disabled")
+    check releaseQualifies("", "2026-09-01T00:00:00Z", now) == (false, "disabled")

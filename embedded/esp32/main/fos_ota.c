@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <strings.h>
 
 #include "freertos/FreeRTOS.h"
@@ -43,6 +44,10 @@ static const char *TAG = "fos_ota";
 #define FOS_OTA_MANIFEST_MAX (8 * 1024)
 /* How often the periodic task (auto_update on) asks for the manifest. */
 #define FOS_OTA_PERIODIC_INTERVAL_HOURS 24u
+/* The `stable` channel installs a release only once it has been the latest
+ * for this long: a fix published within the window replaces it as latest
+ * and resets the clock, so the release the fix was for never lands. */
+#define FOS_OTA_STABLE_AGE_SECONDS (24 * 60 * 60)
 #define FOS_OTA_CHUNK (8 * 1024)
 /* Transient download failures (a dropped socket, a short read) are retried
  * this many times within one run, after the Wi-Fi is back; a signature or
@@ -58,6 +63,10 @@ static SemaphoreHandle_t s_ota_lock = NULL;
 static portMUX_TYPE s_ota_lock_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_ota_request_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_ota_task_handle = NULL;
+/* Set around the periodic task's own check: only that path honours the
+ * `stable` channel's waiting period; every manual/provider-asked run
+ * installs what the manifest offers. */
+static volatile bool s_periodic_run = false;
 static volatile bool s_ota_busy = false;
 static volatile bool s_ota_reboot_scheduled = false;
 static volatile bool s_cloud_ota_running = false;
@@ -344,6 +353,7 @@ typedef struct {
     char download_url[FOS_URL_LEN + 192];
     uint8_t sig[64];
     size_t size;
+    int64_t published_at;              /* unix seconds; 0 = the manifest carries none */
 } ota_manifest_t;
 
 /* GET the manifest and pull out what the download needs. Returns ESP_OK with
@@ -459,6 +469,8 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
         strlcpy(out->download_url, download->valuestring, sizeof(out->download_url));
     }
     out->size = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
+    const cJSON *published = cJSON_GetObjectItem(root, "publishedAt");
+    out->published_at = cJSON_IsNumber(published) ? (int64_t)published->valuedouble : 0;
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -631,6 +643,32 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
                  (unsigned)s_ota_failures);
         ota_log(src, "gave-up", detail);
         return ESP_FAIL;
+    }
+    if (s_periodic_run && fos_config()->auto_update == FOS_AUTO_UPDATE_STABLE) {
+        /* The stable channel: the offered release must have been the latest
+         * for a day. "Unknown" never passes as "old enough" — a manifest
+         * without a publish time, or a clock that never synced, waits. */
+        char detail[80];
+        if (manifest.published_at <= 0) {
+            snprintf(detail, sizeof(detail), "%s:publish-time-unknown", manifest.version);
+            ota_log(src, "waiting", detail);
+            return ESP_OK;
+        }
+        if (!fos_wifi_time_synced()) {
+            snprintf(detail, sizeof(detail), "%s:clock-not-synced", manifest.version);
+            ota_log(src, "waiting", detail);
+            return ESP_OK;
+        }
+        int64_t age = (int64_t)time(NULL) - manifest.published_at;
+        if (age < FOS_OTA_STABLE_AGE_SECONDS) {
+            int64_t left = FOS_OTA_STABLE_AGE_SECONDS - age;
+            snprintf(detail, sizeof(detail), "%s:%lldm-until-stable", manifest.version,
+                     (long long)((left + 59) / 60));
+            ESP_LOGI(TAG, "ota (%s): %s published %lld s ago; stable channel waits %lld s more",
+                     src->plane, manifest.version, (long long)age, (long long)left);
+            ota_log(src, "waiting", detail);
+            return ESP_OK;
+        }
     }
 
     /* Same transport rule as cloud_url itself: https anywhere, plain http
@@ -832,12 +870,15 @@ static void ota_task(void *arg)
         /* The switch is read at every tick, not at task start: a frame whose
          * owner turned auto_update off keeps this task (there is no safe way
          * to kill it mid-download) and simply idles through the next ticks. */
-        if (!manual && !fos_config()->auto_update) {
+        if (!manual && fos_config()->auto_update == FOS_AUTO_UPDATE_OFF) {
             ESP_LOGI(TAG, "periodic OTA check skipped: auto_update is off");
             continue;
         }
-        ESP_LOGW(TAG, "%s OTA check waking", manual ? "manual" : "periodic");
+        ESP_LOGW(TAG, "%s OTA check waking (channel %s)", manual ? "manual" : "periodic",
+                 fos_config_auto_update_name(fos_config()->auto_update));
+        s_periodic_run = !manual;
         esp_err_t err = fos_ota_check_and_apply();
+        s_periodic_run = false;
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s OTA check failed: %s",
                      manual ? "manual" : "periodic", esp_err_to_name(err));
@@ -865,14 +906,15 @@ void fos_ota_start_periodic_task(uint32_t interval_hours)
 
 void fos_ota_sync_periodic_task(void)
 {
-    if (!fos_config()->auto_update) {
+    if (fos_config()->auto_update == FOS_AUTO_UPDATE_OFF) {
         if (s_ota_task_handle != NULL) {
             ESP_LOGI(TAG, "auto_update off; the periodic OTA task idles from its next tick");
         }
         return;
     }
     if (s_ota_task_handle == NULL) {
-        ESP_LOGI(TAG, "auto_update on; checking the control plane's release manifest every %u h",
+        ESP_LOGI(TAG, "auto_update %s; checking the control plane's release manifest every %u h",
+                 fos_config_auto_update_name(fos_config()->auto_update),
                  (unsigned)FOS_OTA_PERIODIC_INTERVAL_HOURS);
     }
     fos_ota_start_periodic_task(FOS_OTA_PERIODIC_INTERVAL_HOURS);

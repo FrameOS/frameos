@@ -37,6 +37,7 @@ type
     assetName*: string
     assetUrl*: string
     htmlUrl*: string
+    publishedAt*: string ## GitHub's published_at, ISO 8601 UTC; "" when the payload has none
 
   FrameOSUpgradeOptions* = object
     dryRun*: bool
@@ -397,6 +398,7 @@ proc releaseInfoFromPayload*(payload: JsonNode, target: string): FrameOSReleaseI
   result.target = target
   result.assetName = "frameos-" & result.version & "-" & target & ".tar.gz"
   result.htmlUrl = payload{"html_url"}.getStr("")
+  result.publishedAt = payload{"published_at"}.getStr("")
   let assets = payload{"assets"}
   if assets == nil or assets.kind != JArray:
     raise newException(ValueError, "Latest FrameOS release has no assets")
@@ -466,6 +468,7 @@ proc releaseJson(release: FrameOSReleaseInfo): JsonNode =
     "asset_name": release.assetName,
     "asset_url": release.assetUrl,
     "html_url": release.htmlUrl,
+    "published_at": release.publishedAt,
   }
 
 proc applyLatestReleaseToStatus*(payload: JsonNode, release: FrameOSReleaseInfo, currentVersion: string) =

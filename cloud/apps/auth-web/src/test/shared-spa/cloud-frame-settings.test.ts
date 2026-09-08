@@ -98,7 +98,7 @@ describe("cloud settings push", () => {
     }
   });
 
-  it("agrees with the control plane on the auto_update switch, one floor on both profiles", () => {
+  it("agrees with the control plane on the auto_update channel, one floor on both profiles", () => {
     // 2026.9.11: the first key both planes learned together. It is neither
     // in the ungated base of either profile nor esp32-only, and rides a push
     // only once the reported firmware clears the floor.
@@ -119,8 +119,14 @@ describe("cloud settings push", () => {
     expect(cloudFrameSettingKeysForVersion("2026.9.11")).toContain("auto_update");
     expect(esp32CloudFrameSettingKeysForVersion("2026.9.10")).not.toContain("auto_update");
     expect(esp32CloudFrameSettingKeysForVersion("2026.9.11")).toContain("auto_update");
-    expect(cloudFrameSettingsPayload({ auto_update: true } as never, ["auto_update"])).toEqual({ auto_update: true });
-    expect(allowedFrameSettings.get("auto_update")?.(true)).toBe(true);
+    expect(cloudFrameSettingsPayload({ auto_update: "latest" } as never, ["auto_update"])).toEqual({ auto_update: "latest" });
+    // The form may still hold a boolean from before the channel; it maps.
+    expect(cloudFrameSettingsPayload({ auto_update: false } as never, ["auto_update"])).toEqual({ auto_update: "off" });
+    expect(cloudFrameSettingsPayload({ auto_update: true } as never, ["auto_update"])).toEqual({ auto_update: "stable" });
+    for (const channel of ["off", "stable", "latest"]) {
+      expect(allowedFrameSettings.get("auto_update")?.(channel), channel).toBe(true);
+    }
+    expect(allowedFrameSettings.get("auto_update")?.(true)).toBe(false);
     expect(allowedFrameSettings.get("auto_update")?.("yes")).toBe(false);
   });
 

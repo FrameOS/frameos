@@ -193,7 +193,7 @@ frameos> set deep_sleep 1                # battery mode: deep sleep between refr
 frameos> set wake_schedule 1             # align wake to wall-clock interval boundaries
 frameos> set battery_pin 2               # ADC1 GPIO tapping VBAT (-1 = none)
 frameos> set battery_divider 2.0         # Vbat = Vpin * divider
-frameos> set auto_update 1               # check the control plane for a signed release daily (default 0)
+frameos> set auto_update latest          # off | stable (default: a release once it's been latest a day) | latest
 frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset
@@ -715,12 +715,14 @@ the app marks itself valid once the network is up, otherwise the next reset roll
 back to the previous slot. One signed path serves both control planes
 (`main/fos_ota.c`): a device polls its control plane's manifest —
 `/api/frames/{id}/embedded/ota/manifest?platform=<its layout>` on a self-hosted
-backend, `/api/frames/{id}/firmware/manifest` on the cloud — once a day while
-`auto_update` is on (`set auto_update 1`, the backend's settings poll, or the
-cloud's `set_settings`; off by default, the same switch the Pi runtime has),
-and on demand on `ota`, the backend's `POST /api/action/ota`, or the cloud's
-`notify_update_available`.
-Both answer `{platform, version, size, minisig, downloadUrl}` — the release
+backend, `/api/frames/{id}/firmware/manifest` on the cloud — once a day on the
+`auto_update` channel (`set auto_update off|stable|latest`, the backend's
+settings poll, or the cloud's `set_settings`; `stable` by default, the same
+channel the Pi runtime has: it installs a release only once the manifest's
+`publishedAt` is a day old, so a quick fix skips the release it fixes;
+`latest` installs every release as it lands), and on demand on `ota`, the
+backend's `POST /api/action/ota`, or the cloud's `notify_update_available`.
+Both answer `{platform, version, size, minisig, downloadUrl, publishedAt}` — the release
 relayed, never a binary the control plane built — and the device streams the
 image into the inactive slot, BLAKE2b-hashes it as it goes and verifies the
 minisign signature against the release key baked into every image

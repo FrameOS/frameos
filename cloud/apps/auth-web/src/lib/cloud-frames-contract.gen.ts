@@ -128,7 +128,12 @@ export const cloudFramesContract = {
     },
     "auto_update": {
       "rule": {
-        "type": "bool"
+        "type": "string",
+        "enum": [
+          "off",
+          "stable",
+          "latest"
+        ]
       },
       "profiles": {
         "linux": {

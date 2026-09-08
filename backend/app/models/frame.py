@@ -141,6 +141,25 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
     }
 
 
+AUTO_UPDATE_CHANNELS = ("off", "stable", "latest")
+
+
+def normalize_auto_update(value: Any) -> str:
+    """One of AUTO_UPDATE_CHANNELS. Absent (NULL) is the default, ``stable``;
+    the boolean spellings an older form may post map true → stable and
+    false → off; anything unknown is stable."""
+    if value is None or value is True:
+        return "stable"
+    if value is False:
+        return "off"
+    text = str(value).strip().lower()
+    if text in ("off", "false", "0", "no", "none", "disabled"):
+        return "off"
+    if text in ("latest", "bleeding", "bleeding_edge", "edge"):
+        return "latest"
+    return "stable"
+
+
 def frame_can_auto_update(frame: Any) -> bool:
     """Whether a frame can install a generic signed FrameOS release on its own.
 
@@ -372,10 +391,12 @@ class Frame(Base):
     assets_path = mapped_column(String(256), nullable=True)
     save_assets = mapped_column(JSON, nullable=True)
     debug = mapped_column(Boolean, nullable=True)
-    # Daily unattended install of the device's own signed release (the Pi
-    # runtime's auto_updater.nim, the ESP32 firmware's periodic OTA task).
-    # NULL/False = off; frame_can_auto_update says whether it applies.
-    auto_update = mapped_column(Boolean, nullable=True)
+    # The daily self-update channel of the device's own signed release (the
+    # Pi runtime's auto_updater.nim, the ESP32 firmware's periodic OTA task):
+    # "stable" (NULL — the default: the latest release once it has been the
+    # latest for a day), "latest" or "off". frame_can_auto_update says
+    # whether it applies at all.
+    auto_update = mapped_column(String(16), nullable=True)
     upload_fonts = mapped_column(String(10), nullable=True)
     last_log_at = mapped_column(DateTime, nullable=True)
     reboot = mapped_column(JSON, nullable=True)
@@ -448,7 +469,7 @@ class Frame(Base):
             'flip': self.flip,
             'background_color': self.background_color,
             'debug': self.debug,
-            'auto_update': bool(self.auto_update),
+            'auto_update': normalize_auto_update(self.auto_update),
             'scenes': self.scenes,
             # Legacy compiled scenes force a source build on every deploy; the
             # workspace shows the count so the owner knows which frames still
@@ -818,7 +839,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         # The runtime re-checks eligibility itself (compiled scenes, an
         # unversioned binary), but a frame this backend knows cannot take a
         # generic release is never told to try.
-        "autoUpdate": bool(frame.auto_update) and frame_can_auto_update(frame),
+        "autoUpdate": normalize_auto_update(frame.auto_update) if frame_can_auto_update(frame) else "off",
         "scalingMode": frame.scaling_mode or "contain",
         "rotate": frame.rotate or 0,
         "flip": frame.flip,

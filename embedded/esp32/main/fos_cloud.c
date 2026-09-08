@@ -2270,7 +2270,7 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
  * round out the profile, and `auto_update` (from 2026.9.11) switches the
- * daily signed-OTA check on or off, live (fos_ota.c).
+ * daily signed-OTA channel (off / stable / latest), live (fos_ota.c).
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */
 /* The contract's pin ranges (-1..48) are chip-agnostic; whether a pin is an
@@ -2456,12 +2456,14 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (debug != NULL) {
         config->debug_logging = cJSON_IsTrue(debug);
     }
-    /* The daily self-update switch (fos_ota.c). A provider can only turn the
-     * check on or off — what gets installed is the signed release the device
-     * fetches and verifies itself. Applied live after the save below. */
+    /* The daily self-update channel (fos_ota.c). A provider can only pick
+     * off / stable / latest — what gets installed is the signed release the
+     * device fetches and verifies itself. The contract check above already
+     * refused anything but the three names. Applied live after the save. */
     const cJSON *auto_update = cJSON_GetObjectItem(settings, "auto_update");
-    if (auto_update != NULL) {
-        config->auto_update = cJSON_IsTrue(auto_update);
+    uint8_t channel;
+    if (cJSON_IsString(auto_update) && fos_config_parse_auto_update(auto_update->valuestring, &channel)) {
+        config->auto_update = channel;
     }
     /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
      * (main.c), so a change takes the same deferred reboot as rotate. Same

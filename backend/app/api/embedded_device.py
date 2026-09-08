@@ -45,7 +45,13 @@ from sqlalchemy.orm import Session
 from app.utils.tz_slice import tz_slice
 from app.database import get_db
 from app.drivers.devices import device_dimensions
-from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
+from app.models.frame import (
+    Frame,
+    get_frame_json,
+    normalize_auto_update,
+    normalize_frame_admin_auth,
+    normalize_https_proxy,
+)
 from app.redis import get_redis
 from app.utils.embedded_render import render_scene_rgba
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
@@ -447,9 +453,10 @@ def embedded_frame_settings(frame: Frame) -> dict:
         "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),
         "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
-        # The daily signed-OTA check (fos_ota.c). Backend-owned, so it is sent
-        # every poll; firmware before 2026.9.11 ignores the key.
-        "autoUpdate": bool(frame.auto_update),
+        # The daily signed-OTA channel (fos_ota.c): "off" | "stable" | "latest".
+        # Backend-owned, so it is sent every poll; firmware before 2026.9.11
+        # ignores the key.
+        "autoUpdate": normalize_auto_update(frame.auto_update),
         **_optional_power_settings(),
         # 0/90/180/270 — the firmware restarts itself to re-init the renderer
         # when this changes (scene canvases are sized at init).

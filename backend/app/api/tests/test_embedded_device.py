@@ -410,7 +410,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'renderMode': 'remote',  # thin client — string form fos_settings.c parses
         'deepSleep': True,
         'wakeSchedule': False,
-        'autoUpdate': False,
+        'autoUpdate': 'stable',
         # The optional power keys (deepSleepOnBattery, wakeCheckSeconds,
         # batteryPin, batteryDivider) are present-only: absent from
         # device_config means absent from the poll, so the device's own
@@ -443,7 +443,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'renderMode': 'local',
         'deepSleep': False,
         'wakeSchedule': False,
-        'autoUpdate': False,
+        'autoUpdate': 'stable',
         'utcOffsetMinutes': 0,
         'timeZone': '',
         'timeZoneData': None,
@@ -589,6 +589,9 @@ async def test_ota_manifest_relays_the_published_release(async_client, no_auth_c
     assert manifest['downloadUrl'] == (
         f'/api/frames/{frame.id}/embedded/ota/download?platform=esp32-s3-generic'
     )
+    # The fixture listing carries no published_at: the device's `stable`
+    # channel then waits rather than guesses.
+    assert manifest['publishedAt'] is None
     # Legacy identifier for firmware from before the signed release OTA: it
     # compares the sha against the image it last applied, so a stable
     # per-release token is what moves those boards onto the release image.

@@ -52,6 +52,7 @@ import {
   cloudFrameSupportsExtendedSettings,
   cloudFrameSupportsHardwareSettings,
   autoUpdateCloudFrameSettingsMinVersion,
+  autoUpdateChannelOptions,
   cloudFrameSupportsAutoUpdate,
   esp32ExtendedCloudFrameSettingsMinVersion,
   esp32TimeZoneCloudFrameSettingsMinVersion,
@@ -1498,7 +1499,7 @@ export function FrameSettings({
   const cloudAutoUpdateTooltip = cloudEsp32OtaUnsupported
     ? "This frame's flash layout has no OTA slot, so its firmware is updated over USB."
     : cloudAutoUpdateSupported
-    ? 'Once a day the frame checks for a newer signed FrameOS release and installs it on its own. The cloud never picks the release: the frame fetches and verifies it itself.'
+    ? 'Stable installs the latest signed FrameOS release once it has been the latest for a day, so a fix published within that day skips the release it fixes. Latest installs every release as it lands. The cloud never picks the release: the frame fetches and verifies it itself.'
     : frame.frameos_version
     ? `Automatic updates need FrameOS ${autoUpdateCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to enable them here.`
     : `Automatic updates need FrameOS ${autoUpdateCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`
@@ -1685,8 +1686,8 @@ export function FrameSettings({
     !isVirtualPlatform &&
     !(frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico')
   const autoUpdateHelpText = isEmbeddedMode
-    ? "Once a day the frame asks this backend for the latest signed firmware release for its board and installs it. The manual paths — the Update firmware action and the console's `ota` — work either way."
-    : 'Once a day, around 04:00 local time, FrameOS checks GitHub for a newer signed release and installs it, exactly as the Upgrade button does. Deploys from this backend keep working either way.'
+    ? "Once a day the frame asks this backend for the latest signed firmware release for its board. Stable waits until a release has been the latest for a day, so a quick fix skips the release it fixes; Latest installs every release as it lands. The manual paths — the Update firmware action and the console's `ota` — work on every channel."
+    : 'Once a day, around 04:00 local time, FrameOS checks GitHub for a newer signed release, exactly as the Upgrade button does. Stable waits until a release has been the latest for a day, so a quick fix skips the release it fixes; Latest installs every release as it lands. Deploys from this backend keep working on every channel.'
   const configuredGpioButtons = !isEmbeddedMode
     ? configuredGpioButtonsForDevice(cloudProfile ? cloudDevice : frameForm.device)
     : null
@@ -2480,12 +2481,19 @@ export function FrameSettings({
                   </Field>
                 </>
               ) : null}
-              {/* 2026.9.11 on both profiles: the daily self-update switch.
+              {/* 2026.9.11 on both profiles: the daily self-update channel.
                   Below the floor it renders disabled with the reason (the push
                   would be refused whole), never hidden. */}
               <fieldset disabled={!cloudAutoUpdateSupported || cloudEsp32OtaUnsupported} className="min-w-0">
                 <Field name="auto_update" label="Automatic updates" tooltip={cloudAutoUpdateTooltip}>
-                  <Switch name="auto_update" fullWidth />
+                  {({ value, onChange }) => (
+                    <Select
+                      value={value || 'stable'}
+                      onChange={onChange}
+                      name="auto_update"
+                      options={autoUpdateChannelOptions}
+                    />
+                  )}
                 </Field>
               </fieldset>
               <p className="frameos-muted text-sm">
@@ -4331,9 +4339,16 @@ export function FrameSettings({
                     <Field
                       name="auto_update"
                       label="Automatic updates"
-                      tooltip="Off by default. The frame only ever installs a release signed with the FrameOS release key; nothing here chooses which one."
+                      tooltip="Stable by default. The frame only ever installs a release signed with the FrameOS release key; nothing here chooses which one."
                     >
-                      <Switch name="auto_update" fullWidth />
+                      {({ value, onChange }) => (
+                        <Select
+                          value={value || 'stable'}
+                          onChange={onChange}
+                          name="auto_update"
+                          options={autoUpdateChannelOptions}
+                        />
+                      )}
                     </Field>
                   </fieldset>
                   <p className="frameos-muted text-sm">{autoUpdateBlockedReason ?? autoUpdateHelpText}</p>

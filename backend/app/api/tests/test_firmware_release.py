@@ -373,7 +373,15 @@ async def test_ota_manifest_shape():
         "size": 48,
         "minisig": MINISIG,
         "downloadUrl": "/download/here",
+        "publishedAt": None,
     }
+
+
+def test_release_published_at_is_unix_seconds_or_none():
+    assert firmware_release_module.release_published_at({"published_at": "2026-09-08T10:00:00Z"}) == 1788861600
+    assert firmware_release_module.release_published_at({"published_at": "2026-09-08T12:00:00+02:00"}) == 1788861600
+    assert firmware_release_module.release_published_at({}) is None
+    assert firmware_release_module.release_published_at({"published_at": "yesterday"}) is None
 
 
 @pytest.mark.asyncio

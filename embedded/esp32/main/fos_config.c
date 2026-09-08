@@ -181,7 +181,7 @@ esp_err_t fos_config_init(void)
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
-    if (nvs_get_u8(nvs, "auto_update", &u8) == ESP_OK) s_config.auto_update = u8 != 0;
+    if (nvs_get_u8(nvs, "auto_update", &u8) == ESP_OK && u8 <= FOS_AUTO_UPDATE_LATEST) s_config.auto_update = u8;
     if (nvs_get_u8(nvs, "debug", &u8) == ESP_OK) s_config.debug_logging = u8 != 0;
     if (nvs_get_u8(nvs, "fusion", &u8) == ESP_OK) s_config.image_fusion = u8 != 0;
     if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
@@ -214,7 +214,7 @@ esp_err_t fos_config_init(void)
              (unsigned long)s_config.frame_id, s_config.hostname[0] ? s_config.hostname : "(unset)", s_config.panel,
              s_config.render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
              (unsigned long)s_config.interval_sec, s_config.server_send_logs ? "on" : "off",
-             s_config.auto_update ? "on" : "off",
+             fos_config_auto_update_name(s_config.auto_update),
              s_config.tls_enable ? "on" : "off", (unsigned)s_config.tls_port,
              (s_config.admin_auth_enabled && s_config.admin_user[0] && s_config.admin_pass[0]) ? "on" : "off",
              s_config.assets_sd.enabled ? "on" : "off",
@@ -281,7 +281,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes), "spill_force");
     FOS_NVS_SET(nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode), "render_mode");
     FOS_NVS_SET(nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0), "send_logs");
-    FOS_NVS_SET(nvs_set_u8(nvs, "auto_update", s_config.auto_update ? 1 : 0), "auto_update");
+    FOS_NVS_SET(nvs_set_u8(nvs, "auto_update", s_config.auto_update), "auto_update");
     FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
     FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
@@ -362,6 +362,30 @@ bool fos_config_normalize_rotate(double value, uint16_t *out)
     if (rot != 0 && rot != 90 && rot != 180 && rot != 270) return false;
     if (out != NULL) *out = (uint16_t)rot;
     return true;
+}
+
+bool fos_config_parse_auto_update(const char *value, uint8_t *out)
+{
+    if (value == NULL || out == NULL) return false;
+    if (strcasecmp(value, "off") == 0 || strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0) {
+        *out = FOS_AUTO_UPDATE_OFF;
+    } else if (strcasecmp(value, "stable") == 0 || strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0) {
+        *out = FOS_AUTO_UPDATE_STABLE;
+    } else if (strcasecmp(value, "latest") == 0 || strcmp(value, "2") == 0) {
+        *out = FOS_AUTO_UPDATE_LATEST;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+const char *fos_config_auto_update_name(uint8_t channel)
+{
+    switch (channel) {
+        case FOS_AUTO_UPDATE_OFF: return "off";
+        case FOS_AUTO_UPDATE_LATEST: return "latest";
+        default: return "stable";
+    }
 }
 
 bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_len)

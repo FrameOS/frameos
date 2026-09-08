@@ -119,6 +119,36 @@ export function cloudFrameSupportsAutoUpdate(frameosVersion: string | null | und
   return cloudFrameSupportsSettingsFrom(autoUpdateCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** The three channels, as the wire spells them (the contract's enum). */
+export type AutoUpdateChannel = 'off' | 'stable' | 'latest'
+export const autoUpdateChannelOptions: { value: AutoUpdateChannel; label: string }[] = [
+  { value: 'stable', label: 'Stable (recommended) — releases that have been out for a day with no newer release' },
+  { value: 'latest', label: 'Latest — every release as soon as it is published' },
+  { value: 'off', label: 'Off — never check; update from the Upgrade button or the backend' },
+]
+
+/** Absent/unknown reads as the default channel, stable; older booleans still map. */
+export function normalizeAutoUpdateChannel(value: unknown): AutoUpdateChannel {
+  if (value === false || value === 'off' || value === 'false' || value === '0') {
+    return 'off'
+  }
+  if (value === 'latest') {
+    return 'latest'
+  }
+  return 'stable'
+}
+
+export function autoUpdateChannelLabel(value: unknown): string {
+  switch (normalizeAutoUpdateChannel(value)) {
+    case 'off':
+      return 'Off'
+    case 'latest':
+      return 'Latest'
+    default:
+      return 'Stable'
+  }
+}
+
 /**
  * What every ESP32 firmware with the cloud link applies: four of the base
  * six (no timezone before 2026.8.34, no debug before 2026.8.31) plus the
@@ -498,6 +528,9 @@ export function cloudFrameSettingsPayload(
     }
     let converted: unknown
     switch (key) {
+      case 'auto_update':
+        converted = normalizeAutoUpdateChannel(value)
+        break
       case 'control_code':
         converted = cloudControlCodePayload(value)
         break

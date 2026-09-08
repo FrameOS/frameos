@@ -41,7 +41,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_NULL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
-    {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 4, 3, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 1024.0f, 67108864.0f},
     {FOS_RULE_ARRAY, 0, 0, 0, 0, 0, -1, -1, 8, -1, -1, 0, 0, 0, 0, 2, 1, 0.0f, 0.0f},
     {FOS_RULE_OBJECT, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 2, 0, 0, 0.0f, 0.0f},
@@ -60,7 +60,7 @@ static const fos_rule_key_t k_fos_rule_keys[] = {
 };
 static const int16_t k_fos_rule_children[] = {6, 7, 12, };
 static const int32_t k_fos_rule_int_enums[] = {0, 90, 180, 270, };
-static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", };
+static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "off", "stable", "latest", };
 
 static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"name", 0, 0, NULL},

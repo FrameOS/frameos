@@ -6,6 +6,7 @@ import {
   fetchLatestRelease,
   fetchReleaseAssetText,
   findOtaAsset,
+  releasePublishedAt,
   streamablePlatforms,
 } from "../../../../../../src/lib/firmware-release";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
@@ -18,7 +19,10 @@ export const runtime = "nodejs";
 // own schedule:
 //
 //   GET /api/frames/{id}/firmware/manifest?platform=esp32-s3-generic
-//   -> { platform, version, size, minisig, downloadUrl }
+//   -> { platform, version, size, minisig, downloadUrl, publishedAt }
+//
+// `publishedAt` (unix seconds, null when unknown) is what the device's
+// `stable` auto-update channel waits a day after; `latest` ignores it.
 //
 // The image behind it is the release's bare APP binary (`…-app.bin`), not the
 // merged flash image the browser flasher writes — an OTA slot accepts nothing
@@ -79,6 +83,8 @@ export async function GET(
         size: dev.size,
         minisig: dev.minisig,
         downloadUrl: `/api/frames/${auth.frame.id}/firmware/download?platform=${platform}`,
+        // A dev image has no publish time; a `stable` device waits, `latest` installs.
+        publishedAt: null,
       },
       { headers: { "cache-control": "no-store" } },
     );
@@ -121,6 +127,7 @@ export async function GET(
       size: asset.size,
       minisig,
       downloadUrl: `/api/frames/${auth.frame.id}/firmware/download?platform=${platform}`,
+      publishedAt: releasePublishedAt(release),
     },
     { headers: { "cache-control": "private, max-age=300" } },
   );

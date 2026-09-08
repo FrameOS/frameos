@@ -70,8 +70,9 @@
 #ifndef FRAMEOS_DEFAULT_SERVER_SEND_LOGS
 #define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 1
 #endif
+/* 0 off, 1 stable (a release once it has been the latest for a day), 2 latest. */
 #ifndef FRAMEOS_DEFAULT_AUTO_UPDATE
-#define FRAMEOS_DEFAULT_AUTO_UPDATE 0
+#define FRAMEOS_DEFAULT_AUTO_UPDATE 1
 #endif
 #ifndef FRAMEOS_DEFAULT_TLS_ENABLE
 #define FRAMEOS_DEFAULT_TLS_ENABLE 0
