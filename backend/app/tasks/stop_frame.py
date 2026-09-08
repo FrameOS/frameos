@@ -3,7 +3,7 @@ from arq import ArqRedis
 from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
-from app.models.frame import update_frame
+from app.models.frame import frame_has_shell_access, update_frame
 from app.tasks.utils import get_fresh_frame
 from app.utils.remote_exec import run_commands
 
@@ -18,6 +18,14 @@ async def stop_frame_task(ctx: dict[str, Any], id: int):
     try:
         frame = get_fresh_frame(db, id)
         if not frame:
+            return
+
+        if not frame_has_shell_access(frame):
+            # The runtime cannot stop itself for good: its admin API has
+            # restart and reboot, and systemd brings a stopped process back.
+            await log(db, redis, id, "stderr",
+                      "No shell on this frame: stopping frameos.service needs SSH or FrameOS Remote. "
+                      "Use Restart FrameOS or Reboot instead.")
             return
 
         frame.status = 'stopping'

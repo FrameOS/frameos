@@ -2,7 +2,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
-from app.models.frame import Frame
+from app.models.frame import Frame, frame_has_shell_access
 from app.models.log import new_log as log
 from app.models.frame import update_frame
 from app.tasks.utils import get_fresh_frame
@@ -29,12 +29,64 @@ async def _embedded_device_action(
     so both reboot the chip). Status transitions mirror the SSH paths.
     """
     from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
-    from app.utils.frame_http import _fetch_frame_http_bytes
 
     if embedded_platform_spec_for_frame(frame)["family"] == "virtual":
         await log(db, redis, int(frame.id),
                   "stderr", f"Virtual frames have no device to {action_label}")
         return
+
+    await _device_http_action(
+        db, redis, frame,
+        path=path,
+        pending_status=pending_status,
+        final_status=final_status,
+        action_label=action_label,
+        success_line=f"Requested embedded {action_label}; the device reboots in about a second",
+    )
+
+
+async def _shell_less_control_event(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    *,
+    event: str,
+    pending_status: str,
+    final_status: str | None,
+    action_label: str,
+) -> None:
+    """Restart / reboot a Linux frame the backend only reaches over its admin
+    HTTP API (an adopted generic Buildroot card: no Remote, no SSH — the SSH
+    path died with "No SSH private keys available for this frame",
+    2026-09-08). The runtime's own control verbs, POST /event/restart and
+    /event/reboot, take the serverApiKey bearer the adoption wrote to the
+    device; `restart` exits the process and systemd starts it again,
+    `reboot` goes through the privileged door on a uid-990 card."""
+    await _device_http_action(
+        db, redis, frame,
+        path=f"/event/{event}",
+        pending_status=pending_status,
+        final_status=final_status,
+        action_label=action_label,
+        success_line=(
+            f"Requested {action_label} over the frame's admin API (no shell on this frame); "
+            "the runtime comes back in a few seconds"
+        ),
+    )
+
+
+async def _device_http_action(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    *,
+    path: str,
+    pending_status: str,
+    final_status: str | None,
+    action_label: str,
+    success_line: str,
+) -> None:
+    from app.utils.frame_http import _fetch_frame_http_bytes
 
     try:
         frame.status = pending_status
@@ -49,11 +101,10 @@ async def _embedded_device_action(
         if status >= 300:
             detail = body.decode("utf-8", errors="replace").strip()
             raise Exception(
-                f"Embedded {action_label} request failed with HTTP {status}"
+                f"The {action_label} request failed with HTTP {status}"
                 + (f": {detail}" if detail else "")
             )
-        await log(db, redis, int(frame.id), "stdout",
-                  f"Requested embedded {action_label}; the device reboots in about a second")
+        await log(db, redis, int(frame.id), "stdout", success_line)
 
         if final_status is not None:
             frame.status = final_status
@@ -79,6 +130,16 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
             redis,
             frame,
             path="/api/action/restart",
+            pending_status="restarting",
+            final_status="starting",
+            action_label="restart",
+        )
+        return
+
+    if not frame_has_shell_access(frame):
+        await _shell_less_control_event(
+            db, redis, frame,
+            event="restart",
             pending_status="restarting",
             final_status="starting",
             action_label="restart",
@@ -130,6 +191,16 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
             pending_status="rebooting",
             # The SSH path leaves the frame in "rebooting" until it reports
             # back; the embedded device's bootup log flips it to "ready".
+            final_status=None,
+            action_label="reboot",
+        )
+        return
+
+    if not frame_has_shell_access(frame):
+        await _shell_less_control_event(
+            db, redis, frame,
+            event="reboot",
+            pending_status="rebooting",
             final_status=None,
             action_label="reboot",
         )

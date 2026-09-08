@@ -108,3 +108,108 @@ async def test_restart_frame_task_virtual_frame_is_a_noop(monkeypatch: pytest.Mo
     assert http_calls == []
     assert statuses == []
     assert any("no device to restart" in message for _t, message in logs)
+
+
+def _adopted_card(**overrides) -> SimpleNamespace:
+    """A generic Buildroot card adopted over its admin API: no Remote, no SSH
+    credentials, nothing of this backend's on it (frame_has_shell_access)."""
+    defaults = dict(
+        id=14,
+        name="frame-2c2ea9",
+        mode="buildroot",
+        status="ready",
+        buildroot={"platform": "raspberry-pi-64", "adopted": True},
+        agent={},
+        ssh_pass="",
+        ssh_keys=[],
+        device_config={},
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_restart_frame_task_shell_less_card_posts_the_control_event(monkeypatch: pytest.MonkeyPatch):
+    frame = _adopted_card()
+    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+
+    await restart_frame_task({"db": None, "redis": None}, 14)
+
+    assert http_calls == [("POST", "/event/restart")]
+    assert statuses == ["restarting", "starting"]
+    assert any("no shell on this frame" in message for _t, message in logs)
+
+
+@pytest.mark.asyncio
+async def test_reboot_frame_task_shell_less_card_posts_the_control_event(monkeypatch: pytest.MonkeyPatch):
+    frame = _adopted_card()
+    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+
+    await reboot_frame_task({"db": None, "redis": None}, 14)
+
+    assert http_calls == [("POST", "/event/reboot")]
+    assert statuses == ["rebooting"]
+
+
+@pytest.mark.asyncio
+async def test_restart_frame_task_shell_less_card_reports_a_refused_event(monkeypatch: pytest.MonkeyPatch):
+    frame = _adopted_card()
+    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+
+    async def refused(_frame, _redis, *, path, method, body=None, headers=None):
+        http_calls.append((method, path))
+        return 401, b"Unauthorized", {}
+
+    monkeypatch.setattr("app.utils.frame_http._fetch_frame_http_bytes", refused)
+
+    await restart_frame_task({"db": None, "redis": None}, 14)
+
+    assert http_calls == [("POST", "/event/restart")]
+    assert statuses == ["restarting", "uninitialized"]
+    assert any(t == "stderr" and "HTTP 401" in message for t, message in logs)
+
+
+@pytest.mark.asyncio
+async def test_restart_frame_task_buildroot_card_with_ssh_keys_still_uses_the_shell(monkeypatch: pytest.MonkeyPatch):
+    frame = _adopted_card(ssh_keys=["key-1"])
+    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    ran: list[list[str]] = []
+
+    async def fake_run_commands(_db, _redis, _frame, commands):
+        ran.append(commands)
+
+    monkeypatch.setattr(restart_frame_module, "run_commands", fake_run_commands)
+
+    await restart_frame_task({"db": None, "redis": None}, 14)
+
+    assert http_calls == []
+    assert ran and "sudo -n systemctl start frameos.service" in ran[0]
+    assert statuses == ["restarting", "starting"]
+
+
+@pytest.mark.asyncio
+async def test_stop_frame_task_shell_less_card_refuses_with_a_reason(monkeypatch: pytest.MonkeyPatch):
+    stop_frame_module = importlib.import_module("app.tasks.stop_frame")
+    frame = _adopted_card()
+    logs: list[tuple[str, str]] = []
+    statuses: list[str] = []
+
+    async def fake_log(_db, _redis, _frame_id, log_type, message):
+        logs.append((log_type, message))
+
+    async def fake_update_frame(_db, _redis, _frame):
+        statuses.append(_frame.status)
+
+    async def fail_run_commands(*_args, **_kwargs):
+        raise AssertionError("a shell-less card must not be reached over SSH")
+
+    monkeypatch.setattr(stop_frame_module, "get_fresh_frame", lambda _db, _id: frame)
+    monkeypatch.setattr(stop_frame_module, "log", fake_log)
+    monkeypatch.setattr(stop_frame_module, "update_frame", fake_update_frame)
+    monkeypatch.setattr(stop_frame_module, "run_commands", fail_run_commands)
+
+    await stop_frame_module.stop_frame_task({"db": None, "redis": None}, 14)
+
+    assert statuses == []
+    assert logs == [("stderr", "No shell on this frame: stopping frameos.service needs SSH or FrameOS Remote. "
+                     "Use Restart FrameOS or Reboot instead.")]

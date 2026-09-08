@@ -119,6 +119,13 @@ class FrameBase(BaseModel):
     terminal_history: Optional[List[str]] = None
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
+    # HMAC fingerprints of the row's current secrets / shipped service
+    # settings (app/utils/frame_secrets): the browser pairs them with the
+    # secret-free deploy baseline to tell an unchanged secret from a rotated
+    # one. Without them here the response model dropped both, so every secret
+    # read as "changed since deploy" after a page load.
+    secret_fingerprints: Optional[Dict[str, str]] = None
+    settings_fingerprints: Optional[Dict[str, str]] = None
     active_connections: Optional[int] = None
     active_scene_id: Optional[str] = None
     frame_sync_hint: Optional[FrameSyncHint] = None

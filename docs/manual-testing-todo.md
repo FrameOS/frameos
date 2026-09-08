@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.9.10), after release 2026.9.10.
+empty. Last refreshed 2026-09-08 (setup portal round two + adopt #380 closed on 2026.9.11), after release 2026.9.11.
 
 ## Open
 
@@ -19,57 +19,32 @@ empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.
   and that everything works after. The deploy also flips the frame back to
   a root `frameos.service`, so check the unit's `User=` before and after.
 
-- [ ] **Setup portal round two (2026-09-06 Zero 2 W first boot, fixed on main
-  after 2026.9.9; the 2026-09-07 hotspot run on 2026.9.10 added: password
-  field / "Show password" box and hostname field / Randomize sat too far
-  apart, the hint below Randomize overlapped the button, the hint's URL is
-  now a live link with the typed hostname, and a Time zone select (browser
-  IANA list, phone's zone offered when the frame still says UTC) is saved
-  to frame.json and applied through the door — clocks were all UTC after
-  setup; all on main after 2026.9.10):** the Wi-Fi list no longer offers
-  the frame's own hotspot SSID; both password fields have a "Show password"
-  box; the "Saved!" page names the network it is joining and polls
-  `<frameUrl>setup/status` (CORS `*`, unauthenticated) until the frame
-  answers `internet: true` from the LAN, then opens the frame by itself —
-  and shows the frame's remembered error with a "Try again" link if the
-  hotspot comes back; the index screen has an `Internet:` row under
-  `Network:` (`connected` / `no internet — <why>` / `not checked`). Verify
-  all four on the iPhone through the QR flow (the 2026-09-06 run was an
-  iPhone; there is no Android to test with, and Android Chrome may not
-  resolve `.local`, so the auto-move is an iOS claim only until someone
-  with an Android tries it). The captive-portal popup itself is NOT in
-  yet — `docs/todo.md`, "Setup hotspot: captive portal".
-
 ### Backend (self-hosted) bench
 
-- [ ] **Adopt a running standalone frame (#380):** *(2026-09-07, first real
-  run from the Home Assistant add-on against a 2026.9.10 Zero 2 W: "Internal
-  server error" with the .local name AND with the IP. Reproduced in the
-  published 2026.9.10 image against a stub of the frame's real payload:
-  the read half works, then the credential write-back goes to
-  `https://<ip>:8443` — `new_frame` mints a TLS pair and enables the proxy on
-  every row and a sync never imports "disabled", while a standalone frame
-  runs plain HTTP. Fixed on main 2026-09-07 (adoption follows the device's
-  https_proxy and web port, carries `mode` + Buildroot platform, and any
-  failure answers a 502 with its cause and rolls the row back); the 500
-  itself (instead of the 502 the image gives here) is still unexplained —
-  the add-on log has the traceback. Re-run after the next release; the
-  .local name will not resolve inside the add-on container, use the IP.)*
-  point the backend at a
-  real standalone Pi → full adopt: scene imports, API-key takeover,
-  credential push, frame keeps rendering afterwards. Unit-tested (107 pass)
-  but never run against real hardware.
+- [ ] **"Update FrameOS" on a shell-less card (needs a release newer than
+  2026.9.11):** on frame-2c2ea9 (or any adopted generic card) press Update
+  FrameOS in the deploy drawer: the frame downloads the release for its
+  target, verifies the minisign signature and installs through the
+  privileged door; the drawer polls the status to `success` /
+  `reboot_required` and the frame comes back on the new version. The rest of
+  that box passed 2026-09-08 (see Done). Watch the door's file modes on the
+  way — the 9.5 OTA left `drivers/*.so` 0640 and loaded no drivers.
 
-- [ ] **Shell-less frame from the deploy drawer (2026-09-07, main after
-  2026.9.10):** on the adopted generic card (frame 67 on the local backend,
-  no Remote, no SSH) open Deploy → after "Failed to connect to frame" the
-  drawer shows "No shell on this frame" with Check for updates / Update
-  FrameOS. Check: "Check for updates" reports the frame's version and the
-  latest for its board; Frame settings show the admin-login switch disabled
-  with the reason and refuse a blank password; once a newer release exists,
-  "Update FrameOS" runs the frame's own signed upgrade (status polled to
-  `success` / `reboot_required`) and the frame comes back on the new
-  version. Scenes and settings still push through the sync panel.
+- [ ] **Adopted card, round two (2026-09-08 findings on frame-2c2ea9, all
+  fixed on main the same day, needs the next backend release):** re-adopt
+  a fresh generic card (or the same one, un-adopted) and check: logs arrive
+  without touching the device (the adopt log line says it restarted
+  FrameOS); "Current image" shows the panel and the scene gets its
+  snapshot (the write-back handed the keyless card the backend's access
+  key — the device's QR / `?k=` link now carries that key); "Pending
+  changes" opens clean after a page reload (`FrameBase` serves
+  `secret_fingerprints`); Restart FrameOS and Reboot work from the backend
+  with no shell (admin-API control verbs; the reboot goes through the
+  door), and Stop logs its "needs SSH or Remote" line instead of failing.
+  Not done: adoption still does not copy the device's stored scene
+  images (they reappear on the first render). The boot-partition SSH key
+  file stays first-boot-only, by decision (2026-09-08): re-reading it on
+  every boot would be an easy way into a running frame.
 
 - [ ] **Vannituba (HyperPixel 2r, `pimoroni.hyperpixel2r`) on the next HA
   image:** the legacy driver's `setup` now writes
@@ -169,6 +144,38 @@ empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.
   2 h window is for device-link/scope approvals, not frame confirm.
 
 ### Pi / Buildroot bench — cloud-managed frames
+
+- [x] **Setup portal round two** — PASSED 2026-09-08 on a fresh generic
+  2026.9.11 card (Pi Zero 2 W, HDMI), iPhone through the QR flow: the Wi-Fi
+  list left out the frame's own hotspot SSID; both password fields had a
+  "Show password" box next to them; hostname and Randomize sat together with
+  the hint below no longer overlapping the button, and the hint's URL was a
+  live link carrying the typed hostname; the Time zone select offered the
+  phone's zone while the frame still read UTC; "Saved!" named the network it
+  was joining, and once the phone was back on Wi-Fi the page moved to the
+  frame's login page by itself; the index screen showed the `Internet:` row
+  under `Network:` and the clock in the chosen zone, not UTC. Still an iOS
+  claim only (no Android to try the `.local` auto-move on); the captive-portal
+  popup remains in `docs/todo.md`. Original text: (2026-09-06 Zero 2 W first boot, fixed on main
+  after 2026.9.9; the 2026-09-07 hotspot run on 2026.9.10 added: password
+  field / "Show password" box and hostname field / Randomize sat too far
+  apart, the hint below Randomize overlapped the button, the hint's URL is
+  now a live link with the typed hostname, and a Time zone select (browser
+  IANA list, phone's zone offered when the frame still says UTC) is saved
+  to frame.json and applied through the door — clocks were all UTC after
+  setup; all on main after 2026.9.10): the Wi-Fi list no longer offers
+  the frame's own hotspot SSID; both password fields have a "Show password"
+  box; the "Saved!" page names the network it is joining and polls
+  `<frameUrl>setup/status` (CORS `*`, unauthenticated) until the frame
+  answers `internet: true` from the LAN, then opens the frame by itself —
+  and shows the frame's remembered error with a "Try again" link if the
+  hotspot comes back; the index screen has an `Internet:` row under
+  `Network:` (`connected` / `no internet — <why>` / `not checked`). Verify
+  all four on the iPhone through the QR flow (the 2026-09-06 run was an
+  iPhone; there is no Android to test with, and Android Chrome may not
+  resolve `.local`, so the auto-move is an iOS claim only until someone
+  with an Android tries it). The captive-portal popup itself is NOT in
+  yet — `docs/todo.md`, "Setup hotspot: captive portal".
 
 - [x] **On-device "Add scene" lists the cloud scene store + the two save/auth
   fixes** — closed 2026-09-07 on a fresh standalone 2026.9.10 Zero 2 W
@@ -382,6 +389,81 @@ empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.
   or any other frame, only the post-restart reconnects. (uus2w's own log
   stream answered nothing to the logs API during this window — its upgrade is
   evidenced by the release dir, the service restart and the activity feed.)
+
+### Backend (self-hosted) bench
+
+- [x] **Shell-less frame from the deploy drawer** — everything but the update
+  itself PASSED 2026-09-08 on frame-2c2ea9 (adopted generic 2026.9.11 card,
+  2026.9.11 add-on): the drawer opened straight on "No shell on this frame"
+  with Check for updates / Update FrameOS and "Suggested: fast deploy"
+  (2026.9.11, framebuffer, evdev + frameBuffer, 04:00 restart), never
+  offering a full deploy. "Check for updates" answered running 2026.9.11,
+  release target `debian-bookworm-arm64`, latest 2026.9.11, **up to date** —
+  the target is right and deliberate: a Buildroot card installs the *binary*
+  artifact (`normalizeDistroRelease` maps `ID=buildroot` to bookworm because
+  os-release carries the Buildroot version, not a binary target), and
+  `frameos-2026.9.11-debian-bookworm-arm64.tar.gz` + `.minisig` are both on
+  the GitHub release; only `/srv/frameos/current` is replaced through the
+  door, the rootfs is untouched. Frame settings showed the admin-login
+  switch disabled with its reason and refused a blank password. A scene
+  change pushed through the sync panel and reached the frame. Found: that
+  notice (and the ESP32 "set an admin password" one next to it) sat on a
+  light amber box in dark mode; fixed on main the same day with the amber
+  dark variant the rest of the SPA uses. **Still open, needs a release newer
+  than 2026.9.11:** "Update FrameOS" runs the frame's own signed upgrade
+  (status polled to `success` / `reboot_required`) and the frame comes back
+  on the new version — see the open box.
+
+- [x] **Adopt a running standalone frame (#380)** — PASSED 2026-09-08 from the
+  Home Assistant add-on on 2026.9.11 against the fresh generic 2026.9.11
+  Zero 2 W (frame-2c2ea9, adopted by IP): the row came up under the device's
+  own name, the scene installed on the device came with it, and the frame
+  kept rendering. **Seen on the adopted card, all explained on main the
+  same day:** (1) "Pending changes" listed Frame access key / Frame admin
+  auth / HTTPS proxy / Server API key (all Fast) with nothing to deploy —
+  the GET and list response model (`FrameBase`) never carried
+  `secret_fingerprints` / `settings_fingerprints` (since #440), so after a
+  page load the browser could not pair the row's secrets with the
+  secret-free baseline and read every one as rotated; fixed on main
+  2026-09-08 (schema + regression test), needs the next backend release.
+  (2) Zero logs: the credential write-back reloads the runtime, and a reload
+  updates the config in place while the logger thread keeps the
+  `serverHost` it started with (empty on a standalone card) — logs start
+  after a restart, as the adopt docstring says; "Restart FrameOS" from the
+  backend (POST /event/restart with the serverApiKey it just pushed) is
+  enough — and, from main 2026-09-08, adoption itself asks the runtime to
+  restart (POST /event/restart with the key it just wrote) and says so on
+  the frame's log, or says what to do when the restart was refused. Also
+  found on the way: "Restart FrameOS" / "Reboot" / "Stop" from the backend
+  all died with `No SSH private keys available for this frame.` — the tasks
+  only knew SSH and the ESP32 action routes; on main restart and reboot go
+  over the frame's admin API (`/event/restart`, `/event/reboot`, serverApiKey
+  bearer) when the backend has no shell on the frame, and stop says why it
+  cannot. (3) "Current image" read "Unable to fetch image": the log line
+  after the restart said `Error fetching image from frame 14: 401
+  Unauthorized` — a fresh generic card is `private` with **no** web access
+  key (nothing on the device mints one), so adoption kept the key new_frame
+  minted and the device never saw it; on main the write-back hands a
+  keyless card the backend's key. (4) No scene snapshots: adoption does not
+  copy the device's stored scene images, and the backend only stores one
+  when an /image fetch succeeds with a scene id, so (3) hid them too. All
+  four need the next backend release (the add-on). Original text: *(2026-09-07, first real
+  run from the Home Assistant add-on against a 2026.9.10 Zero 2 W: "Internal
+  server error" with the .local name AND with the IP. Reproduced in the
+  published 2026.9.10 image against a stub of the frame's real payload:
+  the read half works, then the credential write-back goes to
+  `https://<ip>:8443` — `new_frame` mints a TLS pair and enables the proxy on
+  every row and a sync never imports "disabled", while a standalone frame
+  runs plain HTTP. Fixed on main 2026-09-07 (adoption follows the device's
+  https_proxy and web port, carries `mode` + Buildroot platform, and any
+  failure answers a 502 with its cause and rolls the row back); the 500
+  itself (instead of the 502 the image gives here) is still unexplained —
+  the add-on log has the traceback. Re-run after the next release; the
+  .local name will not resolve inside the add-on container, use the IP.)*
+  point the backend at a
+  real standalone Pi → full adopt: scene imports, API-key takeover,
+  credential push, frame keeps rendering afterwards. Unit-tested (107 pass)
+  but never run against real hardware.
 
 ### Privilege separation bench (`docs/buildroot-privileges.md` §4)
 

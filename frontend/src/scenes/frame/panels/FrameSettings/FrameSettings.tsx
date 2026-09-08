@@ -3733,7 +3733,7 @@ export function FrameSettings({
               </p>
               <div className="pl-2 @md:pl-8 space-y-2">
                 {embeddedAdminAuthMissing ? (
-                  <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
                     <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
                     <div>
                       Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup
@@ -3762,7 +3762,7 @@ export function FrameSettings({
                   <Switch disabled={adminLoginIsOnlyAccess} />
                 </Field>
                 {adminLoginIsOnlyAccess ? (
-                  <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
                     <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
                     <div>
                       This login is the only way this backend reaches the frame: the card has no FrameOS Remote and no

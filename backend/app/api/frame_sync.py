@@ -27,6 +27,7 @@ from app.models.frame import (
     record_successful_deploy,
     update_frame,
 )
+from app.models.log import new_log
 from app.schemas.frames import FrameAdoptRequest, FrameSyncApplyRequest, FrameUpdateRequest
 from app.tasks.buildroot_image import (
     buildroot_sd_image_config_fingerprint,
@@ -1477,8 +1478,10 @@ async def adopt_standalone_frame(
         # keeps working against links already in the wild) and its scenes.
         if isinstance(remote_frame.get("frame_access"), str) and remote_frame["frame_access"]:
             frame.frame_access = remote_frame["frame_access"]
+        device_access_key_missing = True
         if isinstance(remote_frame.get("frame_access_key"), str) and remote_frame["frame_access_key"]:
             frame.frame_access_key = remote_frame["frame_access_key"]
+            device_access_key_missing = False
         remote_scenes = remote_frame.get("scenes")
         if isinstance(remote_scenes, list) and remote_scenes:
             # Scenes pulled from a device may predate the removal of the
@@ -1494,21 +1497,24 @@ async def adopt_standalone_frame(
 
         # The write-back is what makes this an adoption: a non-empty
         # serverHost marks the device backend-managed (and blocks cloud
-        # enrollment). The device reloads its config; logs start flowing on
-        # its next restart or deploy (the log shipper binds its target at
-        # process start).
-        await _push_frame_sync_payload(
-            frame,
-            redis,
-            {
-                "server_host": frame.server_host,
-                "server_port": frame.server_port,
-                "server_api_key": frame.server_api_key,
-                "server_send_logs": True,
-            },
-            fetch_frame_http_bytes,
-            reload_runtime=True,
-        )
+        # enrollment). The device reloads its config; the runtime is asked
+        # to restart below so the log shipper (which binds its target at
+        # process start) picks the backend up.
+        write_back: dict[str, Any] = {
+            "server_host": frame.server_host,
+            "server_port": frame.server_port,
+            "server_api_key": frame.server_api_key,
+            "server_send_logs": True,
+        }
+        if device_access_key_missing and frame.frame_access_key:
+            # A fresh card is `private` with no web access key at all (nothing
+            # on the device mints one), so its /image answers 401 to everyone
+            # but the admin session — including the backend's GET /image?k=
+            # with the key new_frame minted, which the device never saw
+            # (2026-09-08 bench: "Unable to fetch image", no snapshots). Hand
+            # the device the backend's key so both sides hold the same one.
+            write_back["frame_access_key"] = frame.frame_access_key
+        await _push_frame_sync_payload(frame, redis, write_back, fetch_frame_http_bytes, reload_runtime=True)
     except HTTPException:
         # Adoption failed after the row was created: leave nothing behind, so
         # a retry does not pile up half-adopted frames.
@@ -1529,7 +1535,48 @@ async def adopt_standalone_frame(
         await _push_frame_sync_metadata(frame, redis, fetch_frame_http_bytes)
     except Exception:  # noqa: BLE001 - best effort, the adoption is complete
         logger.warning("adopt: metadata echo to %s failed", host, exc_info=True)
+    await _restart_adopted_runtime(frame, db, redis, fetch_frame_http_bytes)
     return frame
+
+
+async def _restart_adopted_runtime(
+    frame: Frame, db: Session, redis: Redis, fetch_frame_http_bytes: FrameFetch
+) -> None:
+    """Ask the freshly adopted runtime to restart so its logs reach us.
+
+    The device reloaded its config with the write-back, but the logger
+    thread keeps the serverHost it started with — empty on a standalone
+    card — so nothing arrived here until someone restarted FrameOS by hand
+    (2026-09-08 bench). `restart` is a control verb the runtime takes with
+    the serverApiKey bearer it just received; systemd starts it again a few
+    seconds later. Best effort: the adoption is complete either way, and the
+    frame's log says what to do if this did not work.
+    """
+    try:
+        status, body, _headers = await fetch_frame_http_bytes(
+            frame,
+            redis,
+            path="/event/restart",
+            method="POST",
+            body="{}",
+            headers={"Content-Type": "application/json"},
+        )
+        if status >= 300:
+            raise RuntimeError(f"HTTP {status} {_decode_bytes(body)}".strip())
+        await new_log(
+            db, redis, frame.id, "stdout",
+            "Adopted: restarting FrameOS on the device so its logs reach this backend",
+        )
+    except Exception as exc:  # noqa: BLE001 - reported on the frame, never fatal
+        logger.warning("adopt: restart of %s failed", frame.frame_host, exc_info=True)
+        try:
+            await new_log(
+                db, redis, frame.id, "stderr",
+                f"Adopted, but FrameOS could not be restarted ({exc}). Its logs reach this backend "
+                "after the next restart: use \"Restart FrameOS\" here, or the device's own admin panel.",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("adopt: could not log the restart failure for %s", frame.id, exc_info=True)
 
 
 async def get_frame_sync_status(
