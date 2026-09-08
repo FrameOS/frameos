@@ -71,6 +71,20 @@ empty. Last refreshed 2026-09-07 (store drawer + save/auth fixes closed on 2026.
   `success` / `reboot_required`) and the frame comes back on the new
   version. Scenes and settings still push through the sync panel.
 
+- [ ] **Vannituba (HyperPixel 2r, `pimoroni.hyperpixel2r`) on the next HA
+  image:** the legacy driver's `setup` now writes
+  `dtoverlay=vc4-kms-dpi-hyperpixel2r` into config.txt when no HyperPixel
+  overlay is there (a composed Buildroot image had none, so the panel had no
+  DPI output at all — the missing vendor tree was a symptom) and reboots
+  once. Expect `FrameOS setup: boot config: updating /boot/config.txt` →
+  reboot → `/dev/fb0` at 480×480 and the scene on the panel. Then turn the
+  frame off and on from the workspace: the backlight goes through
+  `/sys/class/backlight/*/bl_power` first (both overlays give GPIO 19 to the
+  kernel's gpio-backlight, so a gpiochip claim is "GPIO busy"), else the
+  register poke RPi.GPIO used to do through `/dev/gpiomem`. Note which path
+  the panel actually answered to — the old vendor README says the sysfs knob
+  did nothing back then, and only RPi.GPIO worked.
+
 ### ESP32 bench
 
 - [ ] **Layout-matched release image (#442; release 2026.9.2 carries the

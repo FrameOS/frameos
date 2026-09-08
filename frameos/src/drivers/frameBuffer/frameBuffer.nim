@@ -28,7 +28,7 @@ var consoleRestoreRegistered = false
 proc runDisplayCommand(command: string): int =
   runShellWithParentStreams(command, timeoutMs = DISPLAY_COMMAND_TIMEOUT_MS).exitCode
 
-proc runPrivilegedDisplayShell(command: string): int =
+proc runPrivilegedDisplayShell*(command: string): int =
   ## The sysfs knobs (cursor_blink, fb0/blank) are handed to the service
   ## group by frameos.service's ExecStartPre on Buildroot, so a plain write
   ## works there for the unprivileged runtime; root frames and sudo-capable

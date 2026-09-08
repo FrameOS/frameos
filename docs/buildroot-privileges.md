@@ -252,8 +252,9 @@ user (uid/gid 990, fixed, `/bin/false`). The unit is rendered from
 set of exactly `CAP_SYS_TTY_CONFIG` (the framebuffer driver's `KDSETMODE`).
 `SupplementaryGroups=video input` covers the nodes udev already groups;
 an `ExecStartPre=+` step (root) hands `/dev/spidev*`, `/dev/gpiochip*`,
-`/dev/i2c-*`, `/dev/vchiq`, `/dev/fb*`, `/dev/tty0-1` and the two sysfs
-knobs the driver pokes (`fbcon/cursor_blink`, `fb0/blank`) to the service
+`/dev/i2c-*`, `/dev/vchiq`, `/dev/fb*`, `/dev/gpiomem`, `/dev/tty0-1` and the
+sysfs knobs the drivers poke (`fbcon/cursor_blink`, `fb0/blank`, the
+`backlight/*/bl_power` and `brightness` of a panel's backlight) to the service
 group, and makes sure the door's directories exist with the right owners.
 `60-frameos-devices.rules` does the same through udev for the future.
 
