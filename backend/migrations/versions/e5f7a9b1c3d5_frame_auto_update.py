@@ -1,7 +1,7 @@
 """frame.auto_update: the daily self-update channel
 
 Revision ID: e5f7a9b1c3d5
-Revises: d4e6f8a0b2c4
+Revises: e1f2a3b4c5d6
 Create Date: 2026-09-08 00:00:00.000000
 
 "off", "stable" or "latest"; NULL reads as "stable", the default. On
@@ -19,7 +19,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "e5f7a9b1c3d5"
-down_revision = "d4e6f8a0b2c4"
+down_revision = "e1f2a3b4c5d6"
 branch_labels = None
 depends_on = None
 
