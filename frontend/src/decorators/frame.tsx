@@ -3,7 +3,6 @@ import { isCloudMode } from '../utils/cloudMode'
 import { Spinner } from '../components/Spinner'
 import { FrameType, LogType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
-import { withFrameAdminLoginParams } from '../utils/frameAdminLoginParams'
 
 export function logUpdatesFrameActivity(log: Pick<LogType, 'type' | 'line'>): boolean {
   return log.type === 'webhook'
@@ -394,12 +393,11 @@ export function frameAdminUrl(frame: FrameType): string | null {
   if (!frame.frame_admin_auth?.enabled || !frame.frame_host) {
     return null
   }
-  const url = frameRootUrl(frame) + frameAdminPath()
-  try {
-    return withFrameAdminLoginParams(url, frame.frame_admin_auth.user || '', frame.frame_admin_auth.pass || '')
-  } catch {
-    return null
-  }
+  // Just the address. The link used to carry the admin username and password
+  // in its hash — in the DOM, the status bar, "copy link address" and the
+  // target tab's history — and nothing on the device ever read them. The
+  // password is one field up in the same form for whoever needs it.
+  return frameRootUrl(frame) + frameAdminPath()
 }
 
 export function frameImageUrl(frame: FrameType): string | null {
