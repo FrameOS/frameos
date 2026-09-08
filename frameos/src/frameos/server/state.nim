@@ -124,16 +124,21 @@ proc storeUiLog*(logEntry: JsonNode) =
         while globalRecentMetrics.len > MAX_RECENT_METRICS:
           discard globalRecentMetrics.popFirst()
 
+# Both readers hand back COPIES. The array used to be built from the very
+# refs still sitting in the deque, then serialised — outside the lock, on a
+# mummy worker or the hub-client thread — while storeUiLog popped and freed
+# the oldest of them under ORC: the same use-after-free class that took the
+# auth cache down (docs/todo.md "never return a node").
 proc getUiLogs*(): JsonNode =
   {.gcsafe.}:
     withLock globalRecentLogsLock:
       result = newJArray()
       for entry in globalRecentLogs:
-        result.add(entry)
+        result.add(copy(entry))
 
 proc getUiMetrics*(): JsonNode =
   {.gcsafe.}:
     withLock globalRecentLogsLock:
       result = newJArray()
       for entry in globalRecentMetrics:
-        result.add(entry)
+        result.add(copy(entry))

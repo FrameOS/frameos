@@ -171,7 +171,7 @@ suite "web route behavior":
     let loginWithSession = httpRequest(
       server.port,
       "GET",
-      "/login?__login_user=admin&__login_pass=secret",
+      "/login",
       headers = [("Cookie", adminCookie)],
     )
     check loginWithSession.status == 302

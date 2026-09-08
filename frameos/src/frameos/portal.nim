@@ -6,6 +6,7 @@ import frameos/scenes
 import frameos/channels
 import frameos/setup_proxy
 import frameos/utils/process
+import frameos/utils/system
 import frameos/network/backend as netbackend
 import frameos/network/supplicant as wpa
 import frameos/cloud/device_flow
@@ -1039,7 +1040,11 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       data["frameAdminAuth"] = %*{"enabled": false, "user": adminUser, "pass": ""}
     frameConfig.frameAdminAuth = data["frameAdminAuth"]
 
-    writeFile(filename, pretty(data, indent = 4) & "\n")
+    # Atomic and private: this runs from the unauthenticated first-boot
+    # POST /setup with frameAdminAuth.pass in clear, so a power cut mid-write
+    # must leave the old frame.json, not a truncated one the frame cannot
+    # boot from — and the file must never sit at 0644.
+    writePrivateFile(filename, pretty(data, indent = 4) & "\n")
     writeHostnameBestEffort(hostnameBase)
 
     if options.controlMode == "cloud":

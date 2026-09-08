@@ -821,9 +821,10 @@ else:
 
   # Headers that authenticate the caller to one specific origin. A redirect to
   # a different origin must not carry them: an open redirect (or a compromised
-  # first hop) would otherwise hand a bearer token or session cookie to
-  # whatever host the Location header names.
-  const CrossOriginHeaders = ["authorization", "proxy-authorization", "cookie"]
+  # first hop) would otherwise hand a bearer token, session cookie or the
+  # Immich-style API key to whatever host the Location header names. The
+  # ESP32 client keeps the same list (frameos_nim_glue.c s_cross_origin_headers).
+  const CrossOriginHeaders = ["authorization", "proxy-authorization", "cookie", "x-api-key"]
 
   proc effectiveHttpPort(uri: Uri): string =
     if uri.port.len > 0: uri.port

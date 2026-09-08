@@ -28,6 +28,7 @@ proc serverLoop() {.thread.} =
     server.accept(client)
     var requestLine = ""
     var authHeader = ""
+    var apiKeyHeader = ""
     var hostHeader = ""
     var extraHeader = ""
     try:
@@ -43,6 +44,8 @@ proc serverLoop() {.thread.} =
           hostHeader = line.split(':', 1)[1].strip()
         if line.toLowerAscii().startsWith("x-frameos-test:"):
           extraHeader = line.split(':', 1)[1].strip()
+        if line.toLowerAscii().startsWith("x-api-key:"):
+          apiKeyHeader = line.split(':', 1)[1].strip()
     except CatchableError:
       client.close()
       continue
@@ -63,6 +66,12 @@ proc serverLoop() {.thread.} =
       respond(client, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nstreamed until close")
     of "/redirect":
       respond(client, "HTTP/1.1 302 Found\r\nLocation: /content-length\r\nContent-Length: 0\r\n\r\n")
+    of "/echo-api-key":
+      respond(client, "HTTP/1.1 200 OK\r\nContent-Length: " & $apiKeyHeader.len &
+        "\r\n\r\n" & apiKeyHeader)
+    of "/redirect-other-origin-api-key":
+      respond(client, "HTTP/1.1 302 Found\r\nLocation: http://localhost:" &
+        $int(serverPort) & "/echo-api-key\r\nContent-Length: 0\r\n\r\n")
     of "/echo-auth":
       respond(client, "HTTP/1.1 200 OK\r\nContent-Length: " & $authHeader.len &
         "\r\n\r\n" & authHeader)
@@ -252,6 +261,9 @@ suite "bounded http client":
     check boundedRequestContent(baseUrl() & "/redirect-other-origin", headers = headers) == ""
     # The header the caller passed in is untouched for its own next use.
     check headers["Authorization"] == "Bearer secret-token"
+    # The Immich-style API key header is a credential too.
+    var apiKey = newHttpHeaders({"X-Api-Key": "immich-key"})
+    check boundedRequestContent(baseUrl() & "/redirect-other-origin-api-key", headers = apiKey) == ""
 
   test "a large body streams into a file-backed spool":
     # The whole point of boundedGetSpool: past the threshold the body lands in

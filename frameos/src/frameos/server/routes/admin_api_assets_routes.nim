@@ -134,6 +134,30 @@ proc contentTypeForFilePath*(path: string): string =
     return "image/svg+xml"
   contentTypeForAsset(lowerPath)
 
+# Content types a browser would EXECUTE if it opened the URL directly: a
+# scripted SVG, a script, a stylesheet, a page. Assets are scene-writable (a
+# store scene may save whatever it likes under /srv/assets — js.assetSandbox
+# defaults to frame-wide), so one of these opened from the admin origin would
+# run same-origin with the admin cookie. They go out as downloads.
+proc isActiveContentType*(contentType: string): bool =
+  let lower = contentType.toLowerAscii()
+  lower.startsWith("text/html") or lower.startsWith("application/xhtml") or
+    lower.startsWith("image/svg") or lower.startsWith("application/javascript") or
+    lower.startsWith("text/javascript") or lower.startsWith("text/css") or
+    lower.startsWith("text/xml") or lower.startsWith("application/xml")
+
+# Headers for any asset body handed to a browser from this origin: no
+# sniffing (an "octet-stream" that looks like HTML stays octet-stream), no
+# script/style/frame ancestry even if something does render it, and the
+# active types above as attachments.
+proc setInertAssetHeaders*(headers: var mummy.HttpHeaders, contentType: string, path: string) =
+  headers["Content-Type"] = contentType
+  headers["X-Content-Type-Options"] = "nosniff"
+  headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+  if isActiveContentType(contentType):
+    headers["Content-Disposition"] = "attachment; filename=\"" &
+      lastPathPart(path).multiReplace(("\"", "_"), ("\\", "_"), ("\r", "_"), ("\n", "_")) & "\""
+
 proc assetPayloadForPath*(path: string): JsonNode =
   let fullPath = normalizedPath(path)
   let isDir = dirExists(fullPath)
@@ -400,7 +424,7 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
       return (Http413, headers, $(%*{
         "detail": &"Asset is {fileSize} bytes; downloads over this endpoint are capped at {MaxAssetDownloadBytes} bytes"
       }))
-    headers["Content-Type"] = contentTypeForFilePath(fullPath)
+    setInertAssetHeaders(headers, contentTypeForFilePath(fullPath), fullPath)
     return (Http200, headers, readFile(fullPath))
 
   let fullMd5 = getMD5(fullPath)
@@ -416,7 +440,7 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
       createDir(parentDir(thumbPath))
       writeThumbnail(fullPath, thumbPath)
     var headers: mummy.HttpHeaders
-    headers["Content-Type"] = ThumbnailContentType
+    setInertAssetHeaders(headers, ThumbnailContentType, thumbPath)
     return (Http200, headers, readFile(thumbPath))
   except PixieError as e:
     var headers: mummy.HttpHeaders
