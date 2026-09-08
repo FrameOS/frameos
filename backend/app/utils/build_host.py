@@ -340,8 +340,12 @@ class BuildHostSession:
                     else:
                         child.unlink()
             local.mkdir(parents=True, exist_ok=True)
+            # The archive was produced by the REMOTE machine: a hostile or
+            # compromised build host must not get to write outside `local`
+            # (../ members, absolute names, symlinks pointing out) or plant
+            # device files. "data" is the strictest of tarfile's filters.
             with tarfile.open(archive_path, "r:gz") as tar:
-                tar.extractall(local)
+                tar.extractall(local, filter="data")
         finally:
             archive_path.unlink(missing_ok=True)
             await self.remove_path(remote_archive)

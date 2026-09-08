@@ -2,6 +2,8 @@ import gzip
 import json
 
 import pytest
+
+from app import config as app_config
 from app.models import new_frame, update_frame, Log
 
 @pytest.mark.asyncio
@@ -102,7 +104,7 @@ async def test_api_log_no_key(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_api_log_embedded_bootup_follows_ip_only_when_it_is_the_request_peer(async_client, db, redis):
+async def test_api_log_embedded_bootup_follows_ip_only_when_it_is_the_request_peer(async_client, db, redis, monkeypatch):
     frame = await new_frame(db, redis, 'EmbeddedIpFrame', '10.8.0.5', 'localhost')
     frame.mode = 'embedded'
     frame.server_api_key = 'testkey'
@@ -116,8 +118,18 @@ async def test_api_log_embedded_bootup_follows_ip_only_when_it_is_the_request_pe
     db.refresh(frame)
     assert frame.frame_host == '10.8.0.5'
 
-    # The same claim from that very address (forwarded by the loopback test
-    # client, a trusted proxy): followed.
+    # A forwarded header from the loopback test client is NOT enough: the
+    # implicit private-range proxy trust would make every LAN device a
+    # "proxy" that can vouch for any address (the spoof this closes).
+    response = await async_client.post(
+        '/api/log', json={'log': bootup}, headers={**headers, 'X-Forwarded-For': '10.8.0.99'}
+    )
+    assert response.status_code == 200
+    db.refresh(frame)
+    assert frame.frame_host == '10.8.0.5'
+
+    # Name the peer as a trusted proxy and its X-Forwarded-For counts.
+    monkeypatch.setattr(app_config.config, "FRAMEOS_TRUSTED_PROXIES", "127.0.0.1, testclient")
     response = await async_client.post(
         '/api/log', json={'log': bootup}, headers={**headers, 'X-Forwarded-For': '10.8.0.99'}
     )

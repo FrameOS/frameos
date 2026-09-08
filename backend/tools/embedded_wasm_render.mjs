@@ -27,8 +27,15 @@
 // never natively in Node. Its host hooks are logging and the synchronous
 // XHR bridge (tools/wasm/frameos_library.js); the shim below implements
 // that bridge so scene apps' HTTP works exactly like on a physical frame —
-// the device fetches xkcd/weather/etc directly, and so does this. The one
-// hard block is the cloud metadata address. The wasm module has no
+// the device fetches xkcd/weather/etc directly, and so does this. Like on
+// the device, scene HTTP is kept off the local network unless the frame's
+// `network.allowLocalNetworkAccess` says otherwise (`allowLocalNetwork` in
+// the request): every hop of a redirect chain is resolved and classified
+// before it is connected, credentials are dropped when a redirect leaves the
+// origin, and the cloud metadata address is always refused. This is the
+// third runtime scene code runs in (after the Pi and the ESP32) and it sits
+// on the backend's own network — the HA add-on network or the host LAN — so
+// it needs the same guard the other two have. The wasm module has no
 // filesystem or socket access of its own (plain MEMFS, no NODERAWFS).
 
 import { spawnSync } from 'node:child_process'
@@ -41,28 +48,130 @@ import { dirname, join, relative, sep } from 'node:path'
 // send() runs fetch() in a short-lived child Node so the blocking wait is
 // outside this process' event loop.
 const FETCH_CHILD_SCRIPT = `
+const dns = require('node:dns').promises;
+const net = require('node:net');
 const chunks = [];
 process.stdin.on('data', (c) => chunks.push(c));
+
+// The address classes scene HTTP may not reach unless the frame allows local
+// network access: everything that is not a public unicast address. Same
+// families the device runtimes refuse (frameos/src/frameos/utils/http_client.nim
+// isLocalNetworkAddress, embedded fos_netguard.c).
+function isLocalAddress(address) {
+  if (net.isIPv4(address)) {
+    const [a, b, c] = address.split('.').map(Number);
+    return (
+      a === 0 || a === 10 || a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||          // 100.64/10 carrier NAT
+      (a === 169 && b === 254) ||                    // link-local, cloud metadata
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0 && c === 0) ||           // 192.0.0/24
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||       // benchmarking
+      a >= 224                                       // multicast, reserved, broadcast
+    );
+  }
+  if (!net.isIPv6(address)) return true;
+  const lower = address.toLowerCase();
+  const mapped = lower.match(/^(?:0*:)*ffff:(\\d+\\.\\d+\\.\\d+\\.\\d+)$/) || lower.match(/^::ffff:([0-9a-f]+):([0-9a-f]+)$/);
+  if (mapped) {
+    if (mapped[2] !== undefined) {
+      const hi = parseInt(mapped[1], 16);
+      const lo = parseInt(mapped[2], 16);
+      return isLocalAddress([hi >> 8, hi & 255, lo >> 8, lo & 255].join('.'));
+    }
+    return isLocalAddress(mapped[1]);
+  }
+  if (lower === '::' || lower === '::1') return true;
+  const firstWord = parseInt(lower.split(':')[0] || '0', 16);
+  if ((firstWord & 0xfe00) === 0xfc00) return true;     // fc00::/7 unique local
+  if ((firstWord & 0xffc0) === 0xfe80) return true;     // fe80::/10 link-local
+  if ((firstWord & 0xff00) === 0xff00) return true;     // multicast
+  if (firstWord === 0x2002) return true;                // 6to4 (embeds an IPv4)
+  if (lower.startsWith('64:ff9b:')) return true;        // NAT64
+  if (lower.startsWith('fd00:ec2::')) return true;      // AWS metadata
+  return false;
+}
+
+const METADATA_HOSTS = new Set(['169.254.169.254', 'fd00:ec2::254', 'metadata.google.internal', 'metadata']);
+const CROSS_ORIGIN_HEADERS = ['authorization', 'proxy-authorization', 'cookie', 'x-api-key'];
+
+// Resolve and classify every address the host name maps to; a name that
+// resolves to any local address is refused as a whole (DNS rebinding would
+// otherwise pass a public A record and connect to the private one).
+async function checkTarget(url, allowLocal) {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('blocked: only http(s) URLs');
+  }
+  const host = url.hostname.replace(/^\\[|\\]$/g, '').toLowerCase();
+  if (METADATA_HOSTS.has(host)) {
+    throw new Error('blocked: cloud metadata address');
+  }
+  let addresses;
+  if (net.isIP(host)) {
+    addresses = [host];
+  } else {
+    const records = await dns.lookup(host, { all: true, verbatim: true });
+    addresses = records.map((r) => r.address);
+  }
+  if (addresses.length === 0) {
+    throw new Error('host did not resolve');
+  }
+  for (const address of addresses) {
+    if (METADATA_HOSTS.has(address)) {
+      throw new Error('blocked: cloud metadata address');
+    }
+    if (!allowLocal && isLocalAddress(address)) {
+      throw new Error('blocked: local network access is off for this frame (network.allowLocalNetworkAccess)');
+    }
+  }
+}
+
+function sameOrigin(a, b) {
+  return a.protocol === b.protocol && a.hostname.toLowerCase() === b.hostname.toLowerCase() &&
+    (a.port || (a.protocol === 'https:' ? '443' : '80')) === (b.port || (b.protocol === 'https:' ? '443' : '80'));
+}
+
 process.stdin.on('end', async () => {
   const req = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), req.timeoutMs || 30000);
-    const response = await fetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.bodyBase64 ? Buffer.from(req.bodyBase64, 'base64') : undefined,
-      redirect: 'follow',
-      signal: controller.signal,
-    });
+    let url = new URL(req.url);
+    let method = req.method;
+    let headers = { ...(req.headers || {}) };
+    let body = req.bodyBase64 ? Buffer.from(req.bodyBase64, 'base64') : undefined;
+    let response;
+    for (let hop = 0; ; hop++) {
+      await checkTarget(url, req.allowLocalNetwork === true);
+      response = await fetch(url, { method, headers, body, redirect: 'manual', signal: controller.signal });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      const location = response.headers.get('location');
+      if (!location) break;
+      if (hop >= 5) throw new Error('too many redirects');
+      const next = new URL(location, url);
+      if (!sameOrigin(url, next)) {
+        for (const name of Object.keys(headers)) {
+          if (CROSS_ORIGIN_HEADERS.includes(name.toLowerCase())) delete headers[name];
+        }
+      }
+      if ([301, 302, 303].includes(response.status) && method !== 'GET' && method !== 'HEAD') {
+        method = 'GET';
+        body = undefined;
+      }
+      url = next;
+    }
     clearTimeout(timer);
-    const body = Buffer.from(await response.arrayBuffer());
-    process.stdout.write(JSON.stringify({ status: response.status, bodyBase64: body.toString('base64') }));
+    const bytes = Buffer.from(await response.arrayBuffer());
+    process.stdout.write(JSON.stringify({ status: response.status, bodyBase64: bytes.toString('base64') }));
   } catch (error) {
     process.stdout.write(JSON.stringify({ status: 0, error: String(error) }));
   }
 });
 `
+
+// Set once the request has been read; the XHR shim is installed before that.
+let ALLOW_LOCAL_NETWORK = false
 
 class SyncXMLHttpRequest {
   open(method, url) {
@@ -86,6 +195,7 @@ class SyncXMLHttpRequest {
       headers: this._headers,
       timeoutMs: this.timeout || 30000,
       bodyBase64: body ? Buffer.from(body).toString('base64') : '',
+      allowLocalNetwork: ALLOW_LOCAL_NETWORK,
     }
     const child = spawnSync(process.execPath, ['-e', FETCH_CHILD_SCRIPT], {
       input: JSON.stringify(request),
@@ -135,6 +245,9 @@ async function readStdin() {
 
 const request = JSON.parse(await readStdin())
 const { assetsDir, width, height } = request
+// The frame's network.allowLocalNetworkAccess, decided by the Python caller.
+// Off by default, exactly like on the device.
+ALLOW_LOCAL_NETWORK = request.allowLocalNetwork === true
 if (!assetsDir || !Number.isInteger(width) || !Number.isInteger(height)) {
   fail('assetsDir, width and height are required')
 }

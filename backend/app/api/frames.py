@@ -29,7 +29,9 @@ from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from fastapi import (
     Depends,
     File,
@@ -3991,6 +3993,15 @@ async def api_frame_adopt(
     return {"frame": frame.to_dict()}
 
 
+# The keys `POST /frames/import` takes: exactly what the settings form may
+# set. Deploy state, TOFU host keys, `status`, `apps`, id/project are decided
+# by this backend, never read from a file.
+FRAME_IMPORT_KEYS = frozenset(FrameUpdateRequest.model_fields.keys())
+# Handed to new_frame; not set again afterwards.
+FRAME_IMPORT_CREATE_KEYS = frozenset({"name", "frame_host", "server_host", "device", "interval"})
+MAX_FRAME_IMPORT_BYTES = 16 * 1024 * 1024
+
+
 @api_project.post("/frames/import", response_model=FrameResponse)
 async def api_frame_import(
     request: Request,
@@ -3998,15 +4009,35 @@ async def api_frame_import(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    """Import a frame from a JSON body or uploaded file."""
+    """Import a frame from a JSON body or uploaded file.
+
+    Only the keys a frame's settings form can set (FrameUpdateRequest) are
+    taken, type-checked. The old `setattr` over every key with a matching
+    attribute let an export forge the deploy baseline (`last_successful_deploy`,
+    so every pending-change indicator went quiet), pre-pin an SSH host key
+    (defeating first-connect trust), or set `status` and `apps` — none of
+    which a person restoring a backup means to carry over.
+    """
     try:
         if file is not None:
             content = await file.read()
-            data = json.loads(content)
         else:
-            data = await request.json()
+            content = await request.body()
+        if len(content) > MAX_FRAME_IMPORT_BYTES:
+            raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Frame export too large")
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid JSON")
+
+    importable = {key: value for key, value in data.items() if key in FRAME_IMPORT_KEYS}
+    try:
+        FrameUpdateRequest.model_validate(importable)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors())
 
     try:
         frame = await new_frame(
@@ -4020,25 +4051,13 @@ async def api_frame_import(
             project_id=current_project_id(),
         )
 
-        for key, value in data.items():
-            if key in [
-                "id",
-                "project_id",
-                "name",
-                "frame_host",
-                "server_host",
-                "device",
-                "interval",
-                "last_success",
-            ]:
+        for key, value in importable.items():
+            if key in FRAME_IMPORT_CREATE_KEYS:
                 continue
-            if hasattr(frame, key):
-                if key == "server_api_key":
-                    if not value or db.query(Frame).filter(Frame.server_api_key == value, Frame.id != frame.id).first():
-                        continue
-                if key in ["last_successful_deploy_at", "last_log_at"]:
-                    value = datetime.fromisoformat(value) if isinstance(value, str) else value
-                setattr(frame, key, value)
+            if key == "server_api_key":
+                if not value or db.query(Frame).filter(Frame.server_api_key == value, Frame.id != frame.id).first():
+                    continue
+            setattr(frame, key, value)
 
         await update_frame(db, redis, frame)
         db.refresh(frame)

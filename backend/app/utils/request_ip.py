@@ -12,12 +12,31 @@ def configured_trusted_proxies() -> list[str]:
     return [p.strip() for p in app_config.config.FRAMEOS_TRUSTED_PROXIES.split(",") if p.strip()]
 
 
+def peer_is_explicitly_trusted_proxy(peer: Optional[str]) -> bool:
+    """A peer someone actually named: `FRAMEOS_TRUSTED_PROXIES`, or the
+    Supervisor's ingress proxy when running as a Home Assistant add-on."""
+    peer = peer or ""
+    if not peer:
+        return False
+    configured = configured_trusted_proxies()
+    if configured:
+        return peer in configured
+    return bool(app_config.config.HASSIO_TOKEN) and peer == HASSIO_INGRESS_PROXY
+
+
 def peer_is_trusted_proxy(peer: Optional[str]) -> bool:
     """Whether a direct peer may set X-Forwarded-* / Forwarded / X-Real-IP.
 
     Configured proxies win. Otherwise trust loopback and private-range peers:
     that covers docker and the usual reverse-proxy layouts, while a client out
     on the network cannot claim another address (or origin) by sending a header.
+
+    This default is fine for attribution (rate limits, log lines) and NOT for
+    anything that acts on the address — every device on the LAN is a
+    private-range peer, so a header from one is worth exactly as much as its
+    own claim. Callers deciding something from the address use
+    `strict=True` (extract_client_ip), which honours forwarded headers only
+    from peers named in FRAMEOS_TRUSTED_PROXIES.
     """
     peer = peer or ""
     if not peer:
@@ -65,6 +84,8 @@ def _forwarded_for_chain(headers: Mapping[str, str]) -> list[str]:
 def extract_client_ip(
     headers: Mapping[str, str],
     client_host: Optional[str] = None,
+    *,
+    strict: bool = False,
 ) -> Optional[str]:
     """The address a request really came from.
 
@@ -73,8 +94,14 @@ def extract_client_ip(
     append the peer they saw, so the trustworthy entry is the rightmost one that
     is not itself a configured proxy — the leftmost is whatever the client
     typed.
+
+    `strict` drops the implicit loopback/private-range trust: only a peer
+    named in FRAMEOS_TRUSTED_PROXIES (or the HA ingress proxy) may forward.
+    Use it when the address decides something — which host the backend will
+    push credentials to, say — rather than merely labels a request.
     """
-    if not peer_is_trusted_proxy(client_host):
+    trusted = peer_is_explicitly_trusted_proxy(client_host) if strict else peer_is_trusted_proxy(client_host)
+    if not trusted:
         return client_host
     chain = _forwarded_for_chain(headers)
     if not chain:
@@ -86,7 +113,7 @@ def extract_client_ip(
     return chain[0]
 
 
-def client_ip_for_request(request: Any) -> Optional[str]:
+def client_ip_for_request(request: Any, *, strict: bool = False) -> Optional[str]:
     """`extract_client_ip` for a Starlette Request or WebSocket."""
     client_host = request.client.host if request.client else None
-    return extract_client_ip(request.headers, client_host)
+    return extract_client_ip(request.headers, client_host, strict=strict)
