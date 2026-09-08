@@ -2303,7 +2303,8 @@ export interface frameLogicMeta {
       lastDeploy: Partial<FrameType> | null,
       frameForm: Partial<FrameType>,
       mode: 'buildroot' | 'embedded' | 'rpios',
-      isFrameAdminMode: boolean
+      isFrameAdminMode: boolean,
+      frame: FrameType
     ) => ChangeDetail[]
     undeployedSummaryItems: (
       lastDeploy: Partial<FrameType> | null,
