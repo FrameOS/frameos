@@ -46,7 +46,12 @@ medium / low list below.
   (`backend/app/utils/release_signing.py`, pinned to `ota_pubkey.nim`), and
   the API answers `plain_http` + a warning the drawer shows when the
   script URL is `http://` (the key and Remote secret cross the LAN in
-  clear, once).
+  clear, once). Until 2026-09-09 that was true only of the
+  backend-generated bootstrap: the standalone `scripts/frameos-setup.sh`
+  (`frameos.net/setup.sh`, the cloud's `/install.sh`) went straight from
+  download to `tar -xzf`. It now carries the same function with the key
+  pinned as a constant; `test_frame_bootstrap_verify.py` runs both copies
+  and pins the key to `release_signing.py`.
 - Smaller, what is left: a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).

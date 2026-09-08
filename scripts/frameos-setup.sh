@@ -12,6 +12,13 @@ set -eu
 FRAMEOS_RELEASE_VERSION_DEFAULT="2026.8.0" # __FRAMEOS_RELEASE_VERSION_DEFAULT__
 FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-$FRAMEOS_RELEASE_VERSION_DEFAULT}"
 FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS/frameos/releases/download/}"
+# The FrameOS release signing key (minisign Ed25519, as an RFC 8410 SPKI so
+# openssl can read it) — byte-for-byte the key in frameos/src/frameos/ota_pubkey.nim
+# and backend/app/utils/release_signing.py, which a backend test pins. Not an
+# environment override on purpose: whoever can set the installer's environment
+# already runs as root, and a hostile mirror behind FRAMEOS_RELEASE_BASE_URL
+# must never be able to bring its own key along.
+FRAMEOS_RELEASE_SIGNING_KEY_SPKI="MCowBQYDK2VwAyEA0LvFbK8ePu0fSujVkabbyzo0gEppxSV3qhyBHQfaoMw="
 FRAMEOS_DIR="${FRAMEOS_DIR:-/srv/frameos}"
 FRAMEOS_REMOTE_DIR="${FRAMEOS_REMOTE_DIR:-${FRAMEOS_AGENT_DIR:-/srv/frameos/remote}}"
 FRAMEOS_ASSETS_DIR="${FRAMEOS_ASSETS_DIR:-/srv/assets}"
@@ -294,6 +301,45 @@ download_file() {
   else
     die "Missing required command: curl or wget"
   fi
+}
+
+# The release archive is signed (minisign, prehashed Ed25519 over the
+# BLAKE2b-512 of the file) with the FrameOS release key baked into every
+# device runtime; this is the same check frameos performs on its own OTA
+# (frameos/src/frameos/upgrade.nim verifyReleaseArchiveSignature) and the one
+# the backend-generated bootstrap runs (backend/app/api/frame_bootstrap.py
+# VERIFY_RELEASE_SIGNATURE_SH — keep the two in step, a backend test runs
+# both). Done with openssl because nothing FrameOS-built is trusted before it
+# passes: a hostile mirror or a tampered download can at most refuse the
+# install, never run other bytes as root.
+verify_release_signature() {
+  archive="$1"
+  minisig="$2"
+  sig_dir="$work_dir/sig"
+  mkdir -p "$sig_dir"
+  # First non-comment line: base64(ED || keyid8 || sig64).
+  # `|| true`: under `set -e` a pipeline that finds nothing would end the
+  # script before the message below names the problem.
+  sig_line="$(grep -v '^untrusted comment:' "$minisig" | grep -v '^trusted comment:' | grep -m1 . || true)"
+  if [ -z "$sig_line" ]; then
+    die "Release signature file is empty or malformed: $minisig"
+  fi
+  if ! printf '%s' "$sig_line" | base64 -d > "$sig_dir/blob" 2>/dev/null; then
+    die "Release signature is not valid base64"
+  fi
+  if [ "$(wc -c < "$sig_dir/blob" | tr -d ' ')" -ne 74 ]; then
+    die "Release signature blob has the wrong length (expected 74 bytes)"
+  fi
+  if [ "$(head -c 2 "$sig_dir/blob")" != "ED" ]; then
+    die "Release signature is not the prehashed Ed25519 form FrameOS uses"
+  fi
+  tail -c 64 "$sig_dir/blob" > "$sig_dir/sig.bin"
+  openssl dgst -blake2b512 -binary "$archive" > "$sig_dir/digest.bin"
+  printf '%s\n%s\n%s\n' "-----BEGIN PUBLIC KEY-----" "$FRAMEOS_RELEASE_SIGNING_KEY_SPKI" "-----END PUBLIC KEY-----" > "$sig_dir/release.pub.pem"
+  if ! openssl pkeyutl -verify -pubin -inkey "$sig_dir/release.pub.pem" -rawin -in "$sig_dir/digest.bin" -sigfile "$sig_dir/sig.bin" >/dev/null 2>&1; then
+    die "Release signature does not verify against the FrameOS signing key — refusing to install $archive"
+  fi
+  say "Release signature verified"
 }
 
 detect_arch() {
@@ -928,7 +974,11 @@ if ! command -v python3 >/dev/null 2>&1; then
   install_packages python3
 fi
 need_cmd python3
-install_packages ca-certificates hostapd
+# openssl verifies the release signature below; it is on every supported
+# image already, the install is belt and braces.
+install_packages ca-certificates hostapd openssl
+need_cmd openssl
+need_cmd base64
 install_optional_packages caddy
 systemctl disable --now caddy.service >/dev/null 2>&1 || true
 
@@ -1154,6 +1204,8 @@ remote_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
 trap 'rm -rf "$work_dir"' EXIT
 
 download_file "$archive_url" "$work_dir/frameos.tar.gz"
+download_file "$archive_url.minisig" "$work_dir/frameos.tar.gz.minisig"
+verify_release_signature "$work_dir/frameos.tar.gz" "$work_dir/frameos.tar.gz.minisig"
 mkdir -p "$work_dir/extract" "$frameos_release_dir" "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state" "$FRAMEOS_ASSETS_PATH"
 tar -xzf "$work_dir/frameos.tar.gz" -C "$work_dir/extract"
 

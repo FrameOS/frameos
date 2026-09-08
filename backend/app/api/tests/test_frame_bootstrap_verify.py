@@ -111,3 +111,75 @@ def test_non_prehashed_or_malformed_signature_is_refused(tmp_path: Path):
     result = _run(tmp_path, archive, "untrusted comment: x\nAAAA\n", spki)
     assert result.returncode != 0
     assert "wrong length" in result.stderr
+
+
+# The standalone installer (scripts/frameos-setup.sh, served as frameos.net/setup.sh
+# and by the cloud as /install.sh) carries its own copy of the function with
+# the release key pinned as a constant. It is the install path most
+# cloud-managed frames take, so it gets the same tests as the bootstrap's.
+STANDALONE_INSTALLER = Path(__file__).resolve().parents[4] / "scripts" / "frameos-setup.sh"
+
+
+def _standalone_verify_function() -> str:
+    script = STANDALONE_INSTALLER.read_text()
+    start = script.index("verify_release_signature() {")
+    end = script.index("\n}\n", start) + 3
+    return script[start:end]
+
+
+def _standalone_key_spki() -> str:
+    script = STANDALONE_INSTALLER.read_text()
+    prefix = 'FRAMEOS_RELEASE_SIGNING_KEY_SPKI="'
+    start = script.index(prefix) + len(prefix)
+    return script[start : script.index('"', start)]
+
+
+def test_standalone_installer_pins_the_release_key():
+    from app.utils.release_signing import release_signing_public_key_spki_base64
+
+    assert _standalone_key_spki() == release_signing_public_key_spki_base64()
+    script = STANDALONE_INSTALLER.read_text()
+    # Download, then the signature, then verify, then extract — in that order.
+    download = script.index('download_file "$archive_url" "$work_dir/frameos.tar.gz"')
+    minisig = script.index('download_file "$archive_url.minisig"')
+    verify = script.index('verify_release_signature "$work_dir/frameos.tar.gz"')
+    extract = script.index('tar -xzf "$work_dir/frameos.tar.gz"')
+    assert download < minisig < verify < extract
+
+
+def _run_standalone(tmp_path: Path, archive: bytes, minisig: str, spki: str) -> subprocess.CompletedProcess[str]:
+    (tmp_path / "frameos.tar.gz").write_bytes(archive)
+    (tmp_path / "frameos.tar.gz.minisig").write_text(minisig)
+    script = (
+        "set -e\n"
+        'say() { echo "$*"; }\n'
+        'die() { echo "$*" >&2; exit 1; }\n'
+        f"work_dir={tmp_path}\n"
+        f"FRAMEOS_RELEASE_SIGNING_KEY_SPKI={spki}\n"
+        + _standalone_verify_function()
+        + f'\nverify_release_signature "{tmp_path}/frameos.tar.gz" "{tmp_path}/frameos.tar.gz.minisig"\n'
+    )
+    env = dict(os.environ)
+    env["PATH"] = str(Path(OPENSSL).parent) + os.pathsep + env.get("PATH", "")
+    return subprocess.run(["sh", "-c", script], capture_output=True, text=True, env=env, timeout=60)
+
+
+@pytest.mark.skipif(OPENSSL is None, reason="no OpenSSL 3 binary available")
+def test_standalone_installer_verifies_and_refuses(tmp_path: Path):
+    key = ed25519.Ed25519PrivateKey.generate()
+    archive = os.urandom(70_000)
+    spki = _spki(key.public_key())
+    result = _run_standalone(tmp_path, archive, _minisig(key, archive), spki)
+    assert result.returncode == 0, result.stderr
+    assert "Release signature verified" in result.stdout
+
+    tampered = bytearray(archive)
+    tampered[1234] ^= 0x01
+    result = _run_standalone(tmp_path, bytes(tampered), _minisig(key, archive), spki)
+    assert result.returncode != 0
+    assert "does not verify" in result.stderr
+
+    other = ed25519.Ed25519PrivateKey.generate()
+    result = _run_standalone(tmp_path, archive, _minisig(key, archive), _spki(other.public_key()))
+    assert result.returncode != 0
+    assert "does not verify" in result.stderr
