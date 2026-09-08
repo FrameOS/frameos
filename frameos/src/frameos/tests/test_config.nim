@@ -39,6 +39,7 @@ block test_load_config:
         "maxHttpResponseBytes": 33554432,
         "rotate": 0,
         "debug": true,
+        "autoUpdate": "true",  # the SPA posts booleans as strings; the lenient hook takes them
         "scalingMode": "cover",
         "imageEngine": "imagemagick",  # legacy key from before ImageMagick was removed; must still parse
         "timeZone": "UTC",
@@ -90,6 +91,7 @@ block test_load_config:
         doAssert config.rotate == 0
         doAssert config.flip == ""
         doAssert config.debug == true
+        doAssert config.autoUpdate == true
         doAssert config.scalingMode == "cover"
         doAssert config.settings == %*{}
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"} == nil

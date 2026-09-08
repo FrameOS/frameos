@@ -141,6 +141,27 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
     }
 
 
+def frame_can_auto_update(frame: Any) -> bool:
+    """Whether a frame can install a generic signed FrameOS release on its own.
+
+    An ESP32 can (its firmware decides per flash layout whether an OTA slot
+    exists). A Raspberry Pi OS or Buildroot frame can only when it runs the
+    precompiled release build with no legacy compiled scenes — a source build
+    carries scenes the release binary would drop, so ``autoUpdate`` is
+    withheld from its frame.json even when the switch is on.
+    """
+    from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, frame_compilation_mode
+
+    mode = getattr(frame, "mode", None) or "rpios"
+    if mode == "embedded":
+        return True
+    if mode not in ("rpios", "buildroot"):
+        return False
+    if compiled_scene_count(getattr(frame, "scenes", None)) > 0:
+        return False
+    return frame_compilation_mode(frame) == COMPILATION_MODE_PRECOMPILED
+
+
 def compiled_scene_count(scenes) -> int:
     """How many of a frame's scenes are on the legacy compiled path."""
     return sum(1 for scene in (scenes or []) if isinstance(scene, dict) and not scene_is_interpreted(scene))
@@ -351,6 +372,10 @@ class Frame(Base):
     assets_path = mapped_column(String(256), nullable=True)
     save_assets = mapped_column(JSON, nullable=True)
     debug = mapped_column(Boolean, nullable=True)
+    # Daily unattended install of the device's own signed release (the Pi
+    # runtime's auto_updater.nim, the ESP32 firmware's periodic OTA task).
+    # NULL/False = off; frame_can_auto_update says whether it applies.
+    auto_update = mapped_column(Boolean, nullable=True)
     upload_fonts = mapped_column(String(10), nullable=True)
     last_log_at = mapped_column(DateTime, nullable=True)
     reboot = mapped_column(JSON, nullable=True)
@@ -423,6 +448,7 @@ class Frame(Base):
             'flip': self.flip,
             'background_color': self.background_color,
             'debug': self.debug,
+            'auto_update': bool(self.auto_update),
             'scenes': self.scenes,
             # Legacy compiled scenes force a source build on every deploy; the
             # workspace shows the count so the owner knows which frames still
@@ -789,6 +815,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "metricsInterval": 60.0 if frame.metrics_interval is None else frame.metrics_interval,
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
+        # The runtime re-checks eligibility itself (compiled scenes, an
+        # unversioned binary), but a frame this backend knows cannot take a
+        # generic release is never told to try.
+        "autoUpdate": bool(frame.auto_update) and frame_can_auto_update(frame),
         "scalingMode": frame.scaling_mode or "contain",
         "rotate": frame.rotate or 0,
         "flip": frame.flip,

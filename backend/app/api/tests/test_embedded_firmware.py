@@ -1023,6 +1023,7 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
         "rotate",
         "scaling_mode",
         "server_send_logs",
+        "auto_update",       # the daily signed-OTA check, off unless the frame says so
         # max_http_response_bytes only when it differs from the default
         "admin_user",
         "admin_pass",

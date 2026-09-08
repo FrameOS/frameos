@@ -73,6 +73,11 @@
       "rule": {"type": "bool"},
       "profiles": {"linux": {"since": null}, "esp32": {"since": "2026.8.31"}}
     },
+    "auto_update": {
+      "$comment": "Once a day the device checks ITS OWN signed release channel (the GitHub release for the Pi runtime, the provider's firmware manifest relay for the ESP32) and installs a newer release; a provider can only turn the daily check on or off, never name what gets installed. Off by default. The manual paths (the admin panel's Upgrade button, the console's `ota`, notify_update_available) stay open either way.",
+      "rule": {"type": "bool"},
+      "profiles": {"linux": {"since": "2026.9.11"}, "esp32": {"since": "2026.9.11"}}
+    },
     "flip": {
       "rule": {"type": "string", "enum": ["", "horizontal", "vertical", "both"]},
       "profiles": {"linux": {"since": "2026.8.30"}},

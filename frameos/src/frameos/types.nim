@@ -43,6 +43,9 @@ type
     saveAssets*: JsonNode
     logToFile*: string
     debug*: bool
+    # Daily unattended check-and-install of the device's own signed release
+    # (frameos/auto_updater.nim). Off unless frame.json says otherwise.
+    autoUpdate*: bool
     timeZone*: string
     timeZoneUpdates*: TimeZoneUpdatesConfig
     schedule*: FrameSchedule

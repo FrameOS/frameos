@@ -45,6 +45,7 @@ import { isCloudMode } from '../../utils/cloudMode'
 import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import {
+  autoUpdateCloudFrameSettingKeys,
   cloudFrameSettingKeys,
   extendedCloudFrameSettingKeys,
   esp32PowerSettingKeys,
@@ -388,6 +389,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'background_color',
   'scenes',
   'debug',
+  'auto_update',
   'log_to_file',
   'assets_path',
   'save_assets',
@@ -427,6 +429,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   rpios: '2026.6.7',
   timezone_updater: '2026.6.7',
   embedded: '2026.6.26',
+  auto_update: '2026.9.11',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -513,6 +516,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   background_color: 'Background color',
   scenes: 'Scenes',
   debug: 'Debug mode',
+  auto_update: 'Automatic updates',
   log_to_file: 'Log to file',
   assets_path: 'Assets path',
   save_assets: 'Save assets',
@@ -569,6 +573,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'flip',
   'background_color',
   'debug',
+  'auto_update',
   'log_to_file',
   'assets_path',
   'save_assets',
@@ -721,6 +726,8 @@ function frameDiffKeys(): (keyof FrameType)[] {
     return [
       ...(cloudFrameSettingKeys as readonly (keyof FrameType)[]),
       ...(extendedCloudFrameSettingKeys as readonly (keyof FrameType)[]),
+      // The 2026.9.11 auto_update switch, both profiles, one floor.
+      ...(autoUpdateCloudFrameSettingKeys as readonly (keyof FrameType)[]),
       // ESP32 power keys (top-level on cloud frames). Left out, the "is the
       // form untouched?" check ignored every Power-section edit and each
       // sync-status poll reset the form to the server copy mid-typing. On a
@@ -1234,6 +1241,7 @@ function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string 
     }
     case 'server_send_logs':
     case 'debug':
+    case 'auto_update':
       return value ? 'Enabled' : 'Disabled'
     case 'save_assets':
       if (typeof value === 'boolean') {

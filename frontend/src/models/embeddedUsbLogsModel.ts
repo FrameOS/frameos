@@ -1190,6 +1190,7 @@ export type EmbeddedUsbConfigKey =
   | 'interval'
   | 'max_http_response_bytes'
   | 'server_send_logs'
+  | 'auto_update'
   | 'admin_user'
   | 'admin_pass'
   | 'admin_auth'

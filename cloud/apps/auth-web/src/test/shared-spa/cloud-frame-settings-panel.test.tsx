@@ -19,6 +19,7 @@ import { frameLogic } from "../../../../../../frontend/src/scenes/frame/frameLog
 import { framesModel } from "../../../../../../frontend/src/models/framesModel";
 import { FrameSettings } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/FrameSettings";
 import {
+  autoUpdateCloudFrameSettingKeys,
   cloudFrameSettingKeys,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
@@ -159,6 +160,7 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     const rendered = new Set(renderedFieldNames());
     const saveable = new Set<string>([
       ...cloudFrameSettingKeys,
+      ...autoUpdateCloudFrameSettingKeys,
       ...Object.keys(extendedFieldNames),
     ]);
     const unsaveable = [...rendered].filter((name) => !saveable.has(name));
@@ -199,6 +201,19 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     // The 2026.8.30 batch right next to it stays editable.
     const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
     expect(flip?.matches(":disabled")).toBe(false);
+  });
+
+  it("offers the auto-update switch from firmware 2026.9.11, disabled (never hidden) below it", () => {
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.9.11"));
+    const current = document.querySelector<HTMLButtonElement>('button[name="auto_update"]');
+    expect(current, "the auto-update switch is missing").toBeTruthy();
+    expect(current?.matches(":disabled")).toBe(false);
+    cleanup();
+
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.9.10"));
+    const old = document.querySelector<HTMLButtonElement>('button[name="auto_update"]');
+    expect(old, "the field is hidden rather than disabled").toBeTruthy();
+    expect(old?.matches(":disabled")).toBe(true);
   });
 
   it("still offers all six settings the device does accept", () => {
@@ -316,6 +331,23 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("QR Control Code")).toBeNull();
     expect(screen.queryByText("Global errors")).toBeNull();
     expect(screen.queryByText("Panel")).toBeNull();
+  });
+
+  it("offers the auto-update switch from firmware 2026.9.11, and not on a layout without an OTA slot", () => {
+    renderPanel(cloudFrame("esp32-s3", "2026.9.11"));
+    const current = document.querySelector<HTMLButtonElement>('button[name="auto_update"]');
+    expect(current, "the auto-update switch is missing").toBeTruthy();
+    expect(current?.matches(":disabled")).toBe(false);
+    cleanup();
+
+    renderPanel(cloudFrame("esp32-s3", "2026.9.10"));
+    expect(document.querySelector('button[name="auto_update"]')?.matches(":disabled")).toBe(true);
+    cleanup();
+
+    const noSlot = cloudFrame("esp32-c3", "2026.9.11");
+    noSlot.hardware = { ...noSlot.hardware, ota: { supported: false, slotBytes: 0 } };
+    renderPanel(noSlot);
+    expect(document.querySelector('button[name="auto_update"]')?.matches(":disabled")).toBe(true);
   });
 
   it("enables the time zone field from firmware 2026.8.34", () => {

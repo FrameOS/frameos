@@ -447,6 +447,9 @@ def embedded_frame_settings(frame: Frame) -> dict:
         "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),
         "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
+        # The daily signed-OTA check (fos_ota.c). Backend-owned, so it is sent
+        # every poll; firmware before 2026.9.11 ignores the key.
+        "autoUpdate": bool(frame.auto_update),
         **_optional_power_settings(),
         # 0/90/180/270 — the firmware restarts itself to re-init the renderer
         # when this changes (scene canvases are sized at init).

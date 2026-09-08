@@ -80,6 +80,7 @@ FRAME_RESTORE_FIELDS = (
     "flip",
     "background_color",
     "debug",
+    "auto_update",
     "scenes",
     "log_to_file",
     "assets_path",

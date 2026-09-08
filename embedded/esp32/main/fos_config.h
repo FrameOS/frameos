@@ -95,6 +95,11 @@ typedef struct {
                                     * interpreter (value bytes, heap delta,
                                     * fusion tier) — see docs/value-pipeline.md */
     bool server_send_logs;         /* upload runtime/render logs to backend */
+    /* Once a day, check the control plane's signed release manifest and
+     * install a newer image (fos_ota.c periodic task). Off by default:
+     * the manual paths — console `ota`, the backend's POST /api/action/ota,
+     * the cloud's notify_update_available — work either way. */
+    bool auto_update;
     /* Escape hatch for the cloud-managed private-network deny
      * (components/frameos_nim/include/fos_netguard.h), matching
      * `network.allowLocalNetworkAccess` in the native build's frame.json: 1

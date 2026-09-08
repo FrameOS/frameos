@@ -215,6 +215,7 @@ static int cmd_status(int argc, char **argv)
                                   : fos_tz_slice_missing() ? "(no slice yet; fetched from tz.frameos.net when online)"
                                   : (getenv("TZ") ? getenv("TZ") : "?"));
     printf("send_logs:   %d\n", (int)config->server_send_logs);
+    printf("auto_update: %d\n", (int)config->auto_update);
     printf("debug:       %d\n", (int)config->debug_logging);
     printf("fusion:      %d\n", (int)config->image_fusion);
     printf("assets:      path=%s sd=%d mounted=%d pins=%s freq=%lu kHz autoformat=%d\n",
@@ -430,7 +431,7 @@ static int cmd_set(int argc, char **argv)
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|time_zone|"
-               "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
+               "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|auto_update|"
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
@@ -744,6 +745,14 @@ static int cmd_set(int argc, char **argv)
                     fos_tz_slice_missing() ? "fetched from tz.frameos.net on the next online render" : "installed");
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
+    /* 1: check the control plane's signed release manifest once a day and
+     * install a newer image (fos_ota.c); 0 (default): only on `ota`, the
+     * backend's POST /api/action/ota, or the cloud's notify_update_available.
+     * Live — the periodic task starts or idles on the next line. */
+    else if (strcmp(key, "auto_update") == 0) {
+        config->auto_update = atoi(value) != 0;
+        fos_ota_sync_periodic_task();
+    }
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;
     else if (strcmp(key, "fusion") == 0) config->image_fusion = atoi(value) != 0;
     /* 0 (default): while this frame is enrolled with a cloud provider, scene

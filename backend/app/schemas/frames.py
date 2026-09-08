@@ -97,6 +97,7 @@ class FrameBase(BaseModel):
     flip: Optional[str]
     background_color: Optional[str]
     debug: Optional[bool]
+    auto_update: Optional[bool] = None
     last_log_at: Optional[datetime]
     log_to_file: Optional[str]
     assets_path: Optional[str]
@@ -183,6 +184,7 @@ class FrameUpdateRequest(BaseModel):
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
+    auto_update: Optional[bool] = None
     reboot: Any = None
     control_code: Any = None
     schedule: Optional[Dict[str, Any]] = None

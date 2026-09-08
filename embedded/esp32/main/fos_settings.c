@@ -19,6 +19,7 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_mem.h"
+#include "fos_ota.h"
 #include "fos_schedule.h"
 #include "fos_tz.h"
 #include "fos_wifi.h"
@@ -413,6 +414,15 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    /* The daily self-update switch (fos_ota.c). Applied live: the periodic
+     * task starts when this turns on and idles when it turns off. */
+    const cJSON *auto_update = cJSON_GetObjectItem(frame, "autoUpdate");
+    if (cJSON_IsBool(auto_update) &&
+        config->auto_update != (bool)cJSON_IsTrue(auto_update)) {
+        config->auto_update = cJSON_IsTrue(auto_update);
+        changed = true;
+    }
+
     const cJSON *wake_schedule = cJSON_GetObjectItem(frame, "wakeSchedule");
     if (cJSON_IsBool(wake_schedule) &&
         config->wake_schedule != (bool)cJSON_IsTrue(wake_schedule)) {
@@ -651,6 +661,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->deep_sleep != after->deep_sleep) {
         change_append(out, out_len, "deep_sleep", after->deep_sleep ? "true" : "false");
+    }
+    if (before->auto_update != after->auto_update) {
+        change_append(out, out_len, "auto_update", after->auto_update ? "true" : "false");
     }
     if (before->deep_sleep_on_battery != after->deep_sleep_on_battery) {
         change_append(out, out_len, "deep_sleep_on_battery",
@@ -912,6 +925,7 @@ esp_err_t fos_settings_sync(bool force)
         char changes[320] = "";
         fos_settings_describe_changes(before, config, changes, sizeof(changes));
         log_settings_applied(s_restart_after_apply ? "restarting" : "", changes);
+        fos_ota_sync_periodic_task();
         ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u scaling=%s)",
                  (unsigned long)config->interval_sec, (int)config->render_mode,
                  (unsigned)config->rotate, config->scaling_mode);

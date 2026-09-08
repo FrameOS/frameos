@@ -265,6 +265,7 @@ const allFrameSettingsSections = [
   { id: 'frame-settings-gpio', label: 'GPIO' },
   { id: 'frame-settings-logs', label: 'Logs' },
   { id: 'frame-settings-reboot', label: 'Reboot' },
+  { id: 'frame-settings-updates', label: 'Updates' },
 ]
 
 function frameSettingsSectionsForFrame(

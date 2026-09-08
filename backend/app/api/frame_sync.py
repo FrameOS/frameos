@@ -195,6 +195,7 @@ FRAME_SYNC_LABELS = {
     "frame_admin_auth": "Frame admin auth",
     "https_proxy": "HTTPS proxy",
     "server_send_logs": "Send logs to backend",
+    "auto_update": "Automatic updates",
     "device_config": "Device config",
     "timezone_updater": "Timezone updater",
     "metrics_interval": "Metrics interval",

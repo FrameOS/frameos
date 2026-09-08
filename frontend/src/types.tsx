@@ -272,6 +272,9 @@ export interface FrameType {
   /** How many scenes are on the legacy compiled path (a source build on every deploy). */
   compiled_scene_count?: number
   debug?: boolean
+  /** Once a day the device checks its own signed release channel and installs a newer
+   * release (Pi: frameos/auto_updater.nim, ESP32: fos_ota.c). Off unless set. */
+  auto_update?: boolean
   last_log_at?: string
   log_to_file?: string
   assets_path?: string

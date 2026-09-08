@@ -40,6 +40,7 @@ static void load_defaults(void)
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.server_send_logs = FRAMEOS_DEFAULT_SERVER_SEND_LOGS;
+    s_config.auto_update = FRAMEOS_DEFAULT_AUTO_UPDATE;
     /* Fusion is the normal path; the flag exists so a render can be repeated
      * with every image edge materialized and the two panels compared. */
     s_config.image_fusion = true;
@@ -180,6 +181,7 @@ esp_err_t fos_config_init(void)
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
+    if (nvs_get_u8(nvs, "auto_update", &u8) == ESP_OK) s_config.auto_update = u8 != 0;
     if (nvs_get_u8(nvs, "debug", &u8) == ESP_OK) s_config.debug_logging = u8 != 0;
     if (nvs_get_u8(nvs, "fusion", &u8) == ESP_OK) s_config.image_fusion = u8 != 0;
     if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
@@ -208,10 +210,11 @@ esp_err_t fos_config_init(void)
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s tls=%s:%u admin=%s assets_sd=%s buttons=%u wifi=%s backend=%s",
+    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s auto_update=%s tls=%s:%u admin=%s assets_sd=%s buttons=%u wifi=%s backend=%s",
              (unsigned long)s_config.frame_id, s_config.hostname[0] ? s_config.hostname : "(unset)", s_config.panel,
              s_config.render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
              (unsigned long)s_config.interval_sec, s_config.server_send_logs ? "on" : "off",
+             s_config.auto_update ? "on" : "off",
              s_config.tls_enable ? "on" : "off", (unsigned)s_config.tls_port,
              (s_config.admin_auth_enabled && s_config.admin_user[0] && s_config.admin_pass[0]) ? "on" : "off",
              s_config.assets_sd.enabled ? "on" : "off",
@@ -278,6 +281,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes), "spill_force");
     FOS_NVS_SET(nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode), "render_mode");
     FOS_NVS_SET(nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0), "send_logs");
+    FOS_NVS_SET(nvs_set_u8(nvs, "auto_update", s_config.auto_update ? 1 : 0), "auto_update");
     FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
     FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");

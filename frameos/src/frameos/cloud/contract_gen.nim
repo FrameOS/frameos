@@ -39,6 +39,11 @@ const CloudContractSettings* = @[
   profiles: @[
     ProfileSpec(profile: "linux"),
     ProfileSpec(profile: "esp32", since: "2026.8.31")]),
+  SettingSpec(key: "auto_update", rule:
+    Rule(kind: rkBool),
+  profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.9.11"),
+    ProfileSpec(profile: "esp32", since: "2026.9.11")]),
   SettingSpec(key: "flip", rule:
     Rule(kind: rkString, strEnum: @["", "horizontal", "vertical", "both"]),
   profiles: @[
