@@ -3317,6 +3317,12 @@ def _adopt_mock_fetch(device_payload, posted_payloads, login_calls=None):
             if login_calls is not None:
                 login_calls.append(json.loads(body))
             return _sync_admin_login_response()
+        if path == '/event/restart':
+            # The control verb: no admin cookie, the real fetch adds the
+            # serverApiKey bearer itself (app/utils/frame_http._auth_headers).
+            assert method == 'POST'
+            posted_payloads.append({'__event__': 'restart'})
+            return 200, b'{"status":"ok"}', {'content-type': 'application/json'}
         assert headers and 'Cookie' in headers
         assert path.startswith('/api/frames/1')
         if method == 'POST':
@@ -3373,11 +3379,86 @@ async def test_api_frame_adopt_imports_config_scenes_and_writes_back_credentials
     assert credentials_push['server_api_key'] == frame.server_api_key
     assert credentials_push['server_send_logs'] is True
     assert 'skip_runtime_reload' not in credentials_push
+    # The device already had a web access key: nothing to hand it.
+    assert 'frame_access_key' not in credentials_push
 
     # The sync baseline is recorded so the sync panel opens clean.
     assert frame.last_successful_deploy_at is not None
     assert frame.last_successful_deploy['name'] == 'Kitchen frame'
-    assert posted_payloads[-1]['frame_sync_mark_deployed'] is True
+    assert posted_payloads[-2]['frame_sync_mark_deployed'] is True
+    # Last of all the runtime is restarted, so the log shipper (bound at
+    # process start) picks up the backend it was just given.
+    assert posted_payloads[-1] == {'__event__': 'restart'}
+    logs = (await async_client.get(f'/api/frames/{frame_id}/logs')).json()['logs']
+    assert any('restarting FrameOS' in entry['line'] for entry in logs)
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_hands_a_keyless_card_the_backend_access_key(async_client, db, redis):
+    """A fresh generic card is `private` with no web access key (nothing on
+    the device mints one): its /image answers 401 to the key new_frame
+    minted, so the backend showed "Unable to fetch image" and stored no
+    snapshots (2026-09-08 bench). The write-back hands it the backend's key."""
+    posted = []
+    payload = {**_standalone_device_payload(), 'frame_access_key': ''}
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=_adopt_mock_fetch(payload, posted))):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+    assert frame.frame_access == 'private'
+    assert frame.frame_access_key  # the minted one stayed
+    assert posted[0]['frame_access_key'] == frame.frame_access_key
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_reports_a_failed_restart_on_the_frame_log(async_client, db, redis):
+    posted = []
+    inner = _adopt_mock_fetch(_standalone_device_payload(), posted)
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/event/restart':
+            return 401, b'Unauthorized', {}
+        return await inner(frame_obj, redis_obj, path=path, method=method, body=body, headers=headers)
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    # The adoption itself is complete; the frame's log says what to do.
+    assert response.status_code == 200, response.text
+    frame_id = response.json()['frame']['id']
+    logs = (await async_client.get(f'/api/frames/{frame_id}/logs')).json()['logs']
+    failure = [entry for entry in logs if 'could not be restarted' in entry['line']]
+    assert failure and failure[0]['type'] == 'stderr'
+    assert 'HTTP 401' in failure[0]['line']
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_and_list_serve_the_secret_fingerprints(async_client, db, redis):
+    """The deploy baseline holds fingerprints, not secrets, and the browser
+    pairs them with the row's *current* fingerprints from its GET. The
+    response model used to drop `secret_fingerprints` (and the service-key
+    `settings_fingerprints`), so after a page load every secret read as
+    changed since the deploy: Frame access key / Frame admin auth / HTTPS
+    proxy / Server API key sat in "Pending changes" on a freshly adopted
+    card that had nothing to deploy (2026-09-08 bench)."""
+    posted = []
+    payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=_adopt_mock_fetch(payload, posted))):
+        adopted = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    assert adopted.status_code == 200, adopted.text
+    frame_id = adopted.json()['frame']['id']
+    db.expire_all()
+    expected = db.get(Frame, frame_id).to_dict()
+    assert expected['secret_fingerprints']  # the row has secrets to fingerprint
+
+    got = (await async_client.get(f'/api/frames/{frame_id}')).json()['frame']
+    assert got['secret_fingerprints'] == expected['secret_fingerprints']
+    assert got['settings_fingerprints'] == expected.get('settings_fingerprints')
+    # An untouched adopted card: the baseline's fingerprints pair with the live ones.
+    assert got['last_successful_deploy']['secret_fingerprints'] == got['secret_fingerprints']
+
+    listed = next(f for f in (await async_client.get('/api/frames')).json()['frames'] if f['id'] == frame_id)
+    assert listed['secret_fingerprints'] == expected['secret_fingerprints']
 
 
 @pytest.mark.asyncio
