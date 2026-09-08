@@ -415,7 +415,10 @@ Both halves are in place.
   update it will verify and refuse.
 - `auto_update` (2026.9.11, a `set_settings` key on both profiles) changes
   only WHO starts that check and how eager it is: `stable` (the default)
-  and `latest` run it once a day on the device itself —
+  and `latest` run it once a day on the device itself — against the
+  release its control plane names: this cloud relays GitHub's latest, a
+  self-hosted backend pins its own version (its deploys install that
+  version, so its frames follow it rather than climb past it) —
   the Pi against GitHub's latest release for its target
   (`frameos/auto_updater.nim`, the same single-flight upgrade as the
   button, skipped with a logged reason on a source build with compiled

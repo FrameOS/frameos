@@ -77,11 +77,29 @@ def patch_release(release):
     """Both halves of a release lookup: the listing and the small text asset
     fetch that carries the .minisig body."""
     return (
-        patch('app.api.firmware_release._fetch_latest_release', new_callable=AsyncMock,
-              return_value=release),
+        _PatchBothLookups(release),
         patch('app.api.firmware_release.fetch_release_asset_text', new_callable=AsyncMock,
               return_value=MINISIG_TEXT),
     )
+
+
+class _PatchBothLookups:
+    """GitHub's latest (flasher, SD images) and the release by tag (the
+    device OTA, pinned to the backend's own version) answer the same listing."""
+
+    def __init__(self, release):
+        self._latest = patch('app.api.firmware_release._fetch_latest_release', new_callable=AsyncMock,
+                             return_value=release)
+        self._by_tag = patch('app.api.firmware_release._fetch_release_by_tag', new_callable=AsyncMock,
+                             return_value=release)
+
+    def __enter__(self):
+        self.by_tag = self._by_tag.__enter__()
+        return self._latest.__enter__()
+
+    def __exit__(self, *exc):
+        self._by_tag.__exit__(*exc)
+        return self._latest.__exit__(*exc)
 
 
 async def create_embedded_frame(async_client) -> dict:
@@ -842,3 +860,40 @@ def test_spectra6_packer_skips_the_missing_palette_index():
         pack_image_for_panel(image, FOS_PIXEL_4BPP_SPECTRA6), width, height, 4)
     assert 4 not in levels
     assert set(levels) == {0, 1, 2, 3, 5, 6}
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_is_pinned_to_the_backends_own_release(async_client, no_auth_client, db):
+    """A self-hosted backend deploys ITS version; the device OTA follows the
+    same pin, never GitHub's latest, or the next deploy would downgrade the
+    frame and it would climb back the next night."""
+    from app.api.firmware_release import backend_release_version, clear_release_cache
+
+    frame = await device_frame(async_client, db)
+    listing, text = patch_release(release_with('esp32-s3-generic'))
+    clear_release_cache()
+    with listing as latest, text:
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
+            headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert listing.by_tag.await_count == 1
+    assert listing.by_tag.await_args.args == (f'v{backend_release_version()}',)
+    assert latest.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_frameos_release_answers_the_backends_version_to_a_frame(async_client, no_auth_client, db):
+    """The Pi runtime's question (upgrade.nim backendPinnedVersion): bearer =
+    the frame's server API key, the answer is versions.json's release."""
+    from app.api.firmware_release import backend_release_version
+
+    frame = await device_frame(async_client, db)
+    response = await no_auth_client.get('/api/frameos/release', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert response.json() == {'version': backend_release_version()}
+    assert backend_release_version().count('.') == 2 and '+' not in backend_release_version()
+
+    assert (await no_auth_client.get('/api/frameos/release')).status_code == 401
+    assert (await no_auth_client.get(
+        '/api/frameos/release', headers={'Authorization': 'Bearer nope'})).status_code == 401

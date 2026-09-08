@@ -1,8 +1,11 @@
 ## Unattended FrameOS upgrades — the `autoUpdate` channel in frame.json.
 ##
-## Three channels. `stable` (the default): once a day this thread asks
-## GitHub for the latest release for this install's target and installs it
-## once it has been the latest for AutoUpdateStableAgeSeconds (a day) — a
+## Three channels. `stable` (the default): once a day this thread asks for
+## the release this frame should be on — its backend's version when
+## frame.json names a backend (upgrade.nim resolveFrameOSRelease: a backend
+## deploys ITS release, so a frame must never climb past it), else GitHub's
+## latest — and installs it once it has been the latest for
+## AutoUpdateStableAgeSeconds (a day) — a
 ## fix published within that day replaces it as "latest" and resets the
 ## clock, so the release the fix was for is never installed. `latest`: every
 ## release as soon as it is published. `off`: never check.
@@ -142,24 +145,26 @@ proc runAutoUpdateOnce*(frameConfig: FrameConfig, now = now()): JsonNode {.gcsaf
       return
     try:
       let target = detectUpgradeTarget()
-      let release = latestFrameOSRelease(target)
+      let (release, source) = resolveFrameOSRelease(target)
       if compareFrameOSVersions(currentVersion, release.version) >= 0:
-        result = %*{"status": "up_to_date", "channel": channel, "current_version": currentVersion,
-                    "latest_version": release.version, "target": target}
+        result = %*{"status": "up_to_date", "channel": channel, "source": source,
+                    "current_version": currentVersion, "latest_version": release.version,
+                    "target": target}
         autoUpdateLog(result)
         return
       let verdict = releaseQualifies(channel, release.publishedAt, now)
       if not verdict.ok:
         result = %*{"status": "skipped", "reason": verdict.reason, "channel": channel,
-                    "current_version": currentVersion, "latest_version": release.version,
-                    "published_at": release.publishedAt,
+                    "source": source, "current_version": currentVersion,
+                    "latest_version": release.version, "published_at": release.publishedAt,
                     "age_seconds": releaseAgeSeconds(release.publishedAt, now),
                     "min_age_seconds": AutoUpdateStableAgeSeconds}
         autoUpdateLog(result)
         return
-      discard scheduleFrameOSUpgrade()
-      result = %*{"status": "scheduled", "channel": channel, "current_version": currentVersion,
-                  "latest_version": release.version, "target": target}
+      discard scheduleFrameOSUpgrade(release.version)
+      result = %*{"status": "scheduled", "channel": channel, "source": source,
+                  "current_version": currentVersion, "latest_version": release.version,
+                  "target": target}
       autoUpdateLog(result)
     except CatchableError as error:
       result = %*{"status": "error", "channel": channel, "current_version": currentVersion,

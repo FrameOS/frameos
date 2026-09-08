@@ -48,12 +48,34 @@ def clear_release_cache(monkeypatch):
     firmware_release_module.clear_release_cache()
 
 
+class _PatchRelease:
+    """Both lookups answer with the same listing: GitHub's latest (the browser
+    flasher, SD images) and the release by tag (the device OTA, pinned to
+    the backend's own version)."""
+
+    def __init__(self, release):
+        self._latest = patch(
+            "app.api.firmware_release._fetch_latest_release",
+            new_callable=AsyncMock,
+            return_value=release,
+        )
+        self._by_tag = patch(
+            "app.api.firmware_release._fetch_release_by_tag",
+            new_callable=AsyncMock,
+            return_value=release,
+        )
+
+    def __enter__(self):
+        self.by_tag = self._by_tag.__enter__()
+        return self._latest.__enter__()
+
+    def __exit__(self, *exc):
+        self._by_tag.__exit__(*exc)
+        return self._latest.__exit__(*exc)
+
+
 def patch_release(release=RELEASE):
-    return patch(
-        "app.api.firmware_release._fetch_latest_release",
-        new_callable=AsyncMock,
-        return_value=release,
-    )
+    return _PatchRelease(release)
 
 
 @pytest.mark.asyncio

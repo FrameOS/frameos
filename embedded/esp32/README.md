@@ -722,6 +722,9 @@ channel the Pi runtime has: it installs a release only once the manifest's
 `publishedAt` is a day old, so a quick fix skips the release it fixes;
 `latest` installs every release as it lands), and on demand on `ota`, the
 backend's `POST /api/action/ota`, or the cloud's `notify_update_available`.
+The cloud's manifest names GitHub's latest release; a self-hosted backend's
+names the release the backend itself runs (its deploys install that version,
+so its frames follow the backend rather than climb past it).
 Both answer `{platform, version, size, minisig, downloadUrl, publishedAt}` — the release
 relayed, never a binary the control plane built — and the device streams the
 image into the inactive slot, BLAKE2b-hashes it as it goes and verifies the

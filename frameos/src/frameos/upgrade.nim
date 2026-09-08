@@ -16,6 +16,10 @@ import frameos/version
 
 const
   GitHubLatestReleaseApi* = "https://api.github.com/repos/FrameOS/frameos/releases/latest"
+  GitHubReleaseTagApiPrefix* = "https://api.github.com/repos/FrameOS/frameos/releases/tags/v"
+  ## Where a backend-managed frame asks which FrameOS release its backend
+  ## runs (backend/app/api/frameos_release.py, bearer = serverApiKey).
+  BackendReleaseApiPath* = "/api/frameos/release"
   GitHubReleaseDownloadPrefix* = "https://github.com/FrameOS/frameos/releases/download/"
   SupportedReleaseTargets = [
     "debian-buster",
@@ -43,6 +47,7 @@ type
     dryRun*: bool
     yes*: bool
     noReboot*: bool
+    version*: string ## a release to install by version ("" = resolve: the backend's, else GitHub's latest)
 
   UpgradeFinishAction* = enum
     restartServices  ## the new release can take over in place
@@ -410,18 +415,32 @@ proc releaseInfoFromPayload*(payload: JsonNode, target: string): FrameOSReleaseI
     raise newException(ValueError, "Latest FrameOS release has no asset for " & target & " (" & result.assetName & ")")
   validateGithubReleaseAssetUrl(result.assetUrl, result.version)
 
-proc latestFrameOSRelease*(target = ""): FrameOSReleaseInfo =
-  let resolvedTarget = if target.len > 0: target else: detectUpgradeTarget()
+proc fetchGitHubRelease(url, target: string): FrameOSReleaseInfo =
   var headers = newHttpHeaders()
   headers["Accept"] = "application/vnd.github+json"
   headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
   let body = boundedGetContent(
-    GitHubLatestReleaseApi,
+    url,
     headers = headers,
     maxBytes = 2 * 1024 * 1024,
     maxSeconds = 30,
   )
-  releaseInfoFromPayload(parseJson(body), resolvedTarget)
+  releaseInfoFromPayload(parseJson(body), target)
+
+proc latestFrameOSRelease*(target = ""): FrameOSReleaseInfo =
+  ## GitHub's latest stable release — what a frame with no backend follows.
+  let resolvedTarget = if target.len > 0: target else: detectUpgradeTarget()
+  fetchGitHubRelease(GitHubLatestReleaseApi, resolvedTarget)
+
+proc frameOSReleaseByVersion*(target, version: string): FrameOSReleaseInfo =
+  ## One specific release by version — what a backend-managed frame installs
+  ## (its backend's version) and what `frameos upgrade --version=` asks for.
+  let normalized = normalizeReleaseVersion(version)
+  if not validReleaseVersion(normalized):
+    raise newException(ValueError, "release version must have exactly three numeric fields (YYYY.M.N): " & version)
+  let resolvedTarget = if target.len > 0: target else: detectUpgradeTarget()
+  fetchGitHubRelease(GitHubReleaseTagApiPrefix & normalized, resolvedTarget)
+
 
 proc currentFrameConfigPath(): string =
   frameosInstallDir() / "current" / "frame.json"
@@ -444,6 +463,65 @@ proc currentFrameConfig(): JsonNode =
   except CatchableError:
     discard
   %*{}
+
+proc backendReleaseUrl*(config: JsonNode): string =
+  ## The configured backend's release endpoint, or "" when frame.json names
+  ## no backend (a cloud-managed or adopted card: serverHost/serverApiKey
+  ## blank). Same host/port/TLS rule as the log uploader (logger.nim).
+  let host = config{"serverHost"}.getStr("").strip()
+  let key = config{"serverApiKey"}.getStr("").strip()
+  if host.len == 0 or key.len == 0:
+    return ""
+  let port = config{"serverPort"}.getInt(8989)
+  let scheme = if port mod 1000 == 443: "https" else: "http"
+  scheme & "://" & host & ":" & $port & BackendReleaseApiPath
+
+proc parseBackendReleaseVersion*(body: string): string =
+  ## `{"version": "2026.9.11"}` → "2026.9.11"; anything else raises.
+  var payload: JsonNode
+  try:
+    payload = parseJson(body)
+  except CatchableError:
+    raise newException(ValueError, "Backend release payload is not JSON")
+  if payload == nil or payload.kind != JObject:
+    raise newException(ValueError, "Backend release payload is not an object")
+  result = normalizeReleaseVersion(payload{"version"}.getStr(""))
+  if not validReleaseVersion(result):
+    raise newException(ValueError, "Backend reports no release version (" & payload{"version"}.getStr("") & ")")
+
+proc backendPinnedVersion*(): string =
+  ## The FrameOS release the configured backend runs, "" when there is no
+  ## backend. A backend that cannot be reached, or one too old to answer
+  ## (before 2026.9.11), raises: a backend-managed frame never falls back to
+  ## GitHub's latest on its own, because its backend deploys ITS version —
+  ## a frame ahead of it would be downgraded by the next deploy and climb
+  ## back the next night.
+  let config = currentFrameConfig()
+  let url = backendReleaseUrl(config)
+  if url.len == 0:
+    return ""
+  var headers = newHttpHeaders()
+  headers["Accept"] = "application/json"
+  headers["Authorization"] = "Bearer " & config{"serverApiKey"}.getStr("").strip()
+  headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
+  let body =
+    try:
+      boundedGetContent(url, headers = headers, maxBytes = 64 * 1024, maxSeconds = 15)
+    except CatchableError as error:
+      raise newException(ValueError,
+        "Could not ask the backend which FrameOS release it runs (" & url & "): " & error.msg &
+        ". A backend older than 2026.9.11 does not answer; update the backend first.")
+  parseBackendReleaseVersion(body)
+
+proc resolveFrameOSRelease*(target = ""): tuple[release: FrameOSReleaseInfo, source: string] =
+  ## The release this frame should be on: the backend's version when a
+  ## backend is configured ("backend"), else GitHub's latest ("github").
+  let resolvedTarget = if target.len > 0: target else: detectUpgradeTarget()
+  let pinned = backendPinnedVersion()
+  if pinned.len > 0:
+    (frameOSReleaseByVersion(resolvedTarget, pinned), "backend")
+  else:
+    (latestFrameOSRelease(resolvedTarget), "github")
 
 proc installedFrameOSVersion*(): string =
   let compiled = normalizeReleaseVersion(compiledFrameOSVersion())
@@ -493,8 +571,9 @@ proc frameOSUpgradeStatusPayload*(checkLatest = false): JsonNode =
     result["target_error"] = %targetError
   if checkLatest and target.len > 0:
     try:
-      let release = latestFrameOSRelease(target)
-      applyLatestReleaseToStatus(result, release, installedFrameOSVersion())
+      let resolved = resolveFrameOSRelease(target)
+      applyLatestReleaseToStatus(result, resolved.release, installedFrameOSVersion())
+      result["release_source"] = %resolved.source
     except CatchableError as error:
       result["latest_error"] = %error.msg
       result["update_available"] = %false
@@ -1111,12 +1190,21 @@ proc performFrameOSUpgrade*(options: FrameOSUpgradeOptions): JsonNode =
   var release = FrameOSReleaseInfo()
   try:
     let target = detectUpgradeTarget()
-    release = latestFrameOSRelease(target)
+    var source = "requested"
+    if options.version.len > 0:
+      release = frameOSReleaseByVersion(target, options.version)
+    else:
+      let resolved = resolveFrameOSRelease(target)
+      release = resolved.release
+      source = resolved.source
     let currentVersion = installedFrameOSVersion()
     ensureCompatibleInstalledLayout(release)
+    setupLog("FrameOS release " & release.version & " (" & source & ") for " & target)
 
     if currentVersion != "unknown" and compareFrameOSVersions(currentVersion, release.version) >= 0:
-      result = statusPayload("up_to_date", "FrameOS is already on the latest stable GitHub release.", release)
+      result = statusPayload("up_to_date",
+        (if source == "backend": "FrameOS is already on the release the backend runs (" & release.version & ")."
+         else: "FrameOS is already on the latest stable GitHub release."), release)
       writeUpgradeStatus(result)
       setupLog(result["message"].getStr())
       return
@@ -1188,10 +1276,20 @@ proc parseFrameOSUpgradeOptions*(args: seq[string]): FrameOSUpgradeOptions =
       result.yes = true
     of "--no-reboot":
       result.noReboot = true
+    elif arg.startsWith("--version="):
+      let version = normalizeReleaseVersion(arg["--version=".len .. ^1])
+      if not validReleaseVersion(version):
+        raise newException(ValueError, "Invalid --version for FrameOS upgrade: " & arg)
+      result.version = version
     else:
       raise newException(ValueError, "Unknown FrameOS upgrade option: " & arg)
 
-proc scheduleFrameOSUpgrade*(): JsonNode =
+proc scheduleFrameOSUpgrade*(version = ""): JsonNode =
+  ## `version` pins the child to one release (the auto-updater passes the one
+  ## it just qualified, so the release cannot change between check and
+  ## install); "" lets the child resolve it — the backend's, else latest.
+  if version.len > 0 and not validReleaseVersion(normalizeReleaseVersion(version)):
+    raise newException(ValueError, "Invalid release version to install: " & version)
   let binary = frameosInstallDir() / "current" / "frameos"
   if not fileExists(binary):
     raise newException(ValueError, "FrameOS binary not found: " & binary)
@@ -1204,7 +1302,8 @@ proc scheduleFrameOSUpgrade*(): JsonNode =
     "compiled_version": compiledFrameOSVersion(),
     "log_path": logPath,
   })
-  let childCommand = shellQuote(binary) & " upgrade --yes"
+  let childCommand = shellQuote(binary) & " upgrade --yes" &
+    (if version.len > 0: " --version=" & shellQuote(normalizeReleaseVersion(version)) else: "")
   let redirected = childCommand & " >> " & shellQuote(logPath) & " 2>&1 </dev/null"
   if privilegedDoorAvailable():
     # Not root: no transient unit to hide in. The child runs as this user
