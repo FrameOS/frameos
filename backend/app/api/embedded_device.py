@@ -456,7 +456,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # The daily signed-OTA channel (fos_ota.c): "off" | "stable" | "latest".
         # Backend-owned, so it is sent every poll; firmware before 2026.9.11
         # ignores the key.
-        "autoUpdate": normalize_auto_update(frame.auto_update),
+        "autoUpdate": normalize_auto_update(getattr(frame, "auto_update", None)),
         **_optional_power_settings(),
         # 0/90/180/270 — the firmware restarts itself to re-init the renderer
         # when this changes (scene canvases are sized at init).

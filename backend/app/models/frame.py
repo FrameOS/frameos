@@ -839,7 +839,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         # The runtime re-checks eligibility itself (compiled scenes, an
         # unversioned binary), but a frame this backend knows cannot take a
         # generic release is never told to try.
-        "autoUpdate": normalize_auto_update(frame.auto_update) if frame_can_auto_update(frame) else "off",
+        "autoUpdate": normalize_auto_update(getattr(frame, "auto_update", None)) if frame_can_auto_update(frame) else "off",
         "scalingMode": frame.scaling_mode or "contain",
         "rotate": frame.rotate or 0,
         "flip": frame.flip,

@@ -90,6 +90,7 @@ const releasePayload = {
     },
   ],
   tag_name: "v1.2.3",
+  published_at: "2026-01-02T03:04:05Z",
 };
 
 function mockGitHub(release: unknown = releasePayload) {
@@ -159,6 +160,9 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
       size: firmwareBytes.length,
       minisig: minisigText,
       downloadUrl: `/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic`,
+      // GitHub's published_at as unix seconds: what the device's `stable`
+      // auto-update channel waits a day after.
+      publishedAt: Date.UTC(2026, 0, 2, 3, 4, 5) / 1000,
     });
     expect(rateLimitMock.mock.calls[0]?.[1]).toBe("frames:device-firmware-meta");
   });
@@ -294,6 +298,8 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
       size: 4096,
       minisig: minisigText,
       downloadUrl: `/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic`,
+      // A dev image has no publish time; a `stable` device waits, `latest` installs.
+      publishedAt: null,
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

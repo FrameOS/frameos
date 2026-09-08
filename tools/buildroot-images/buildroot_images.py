@@ -343,6 +343,9 @@ class ReleaseImageFrame:
     flip: str | None = None
     background_color: str | None = None
     debug: bool = False
+    # The SD image's frame.json says `stable`: a card written today checks
+    # GitHub daily and installs a release once it has been the latest for a day.
+    auto_update: str | None = "stable"
     last_log_at: str | None = None
     log_to_file: str | None = "/srv/frameos/logs/frameos-{date}.log"
     assets_path: str = "/srv/assets"
