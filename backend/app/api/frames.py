@@ -54,6 +54,7 @@ from app.models.frame import (
     Frame,
     compact_timezone_updater,
     get_frame_json,
+    split_server_address,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -95,7 +96,14 @@ from app.schemas.frames import (
 )
 from app.api.auth import get_current_user_from_request
 from app.config import config
-from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, is_safe_host
+from app.utils.network import (
+    TargetBlocked,
+    assert_target_allowed,
+    check_target_host,
+    device_server_host_error,
+    is_safe_host,
+)
+from app.utils.embedded_render import RenderQueueFull
 from app.utils.asset_headers import inert_asset_headers
 from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
 from app.utils.upload_limits import (
@@ -485,6 +493,31 @@ def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
     if not value:
         return None
     return value.replace(tzinfo=timezone.utc).isoformat()
+
+
+def _require_valid_device_server_host(server_host: Any, *, split_address: bool) -> None:
+    """400 unless `server_host` names a host a device may be told to dial —
+    app.utils.network.device_server_host_error. On create and import the
+    value is the typed address ("host", "host:port", "scheme://host:port")
+    that new_frame splits; on update it is the bare host column, stored
+    verbatim as frame.json serverHost, so a port or scheme in it is refused
+    rather than shipped. An empty value ("no backend controls this frame")
+    passes; `localhost` stays allowed here (single-machine development)."""
+    text = str(server_host or "").strip()
+    if not text:
+        return
+    host = text
+    if split_address:
+        try:
+            host, _port, _scheme = split_server_address(text)
+        except ValueError:
+            host = text
+    error = device_server_host_error(host)
+    if error:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Server host {host!r} cannot be handed to the frame: {error}",
+        )
 
 
 def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
@@ -2324,7 +2357,14 @@ async def api_frame_get_image(
         if cached is None:
             from .virtual_frame import render_virtual_frame_png
 
-            cached = await render_virtual_frame_png(db, redis, frame)
+            try:
+                cached = await render_virtual_frame_png(db, redis, frame)
+            except RenderQueueFull as exc:
+                raise HTTPException(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                    detail="Render queue is full, retry later",
+                    headers={"Retry-After": str(exc.retry_after)},
+                )
             active_scene = await _active_scene_id_from_cache(redis, frame.id)
             await _store_frame_image(
                 db, redis, frame, cached,
@@ -3592,31 +3632,41 @@ async def api_frame_deploy_plan(
     if not frame:
         _not_found()
 
+    # A GET is read-only: the plan runs against a detached copy of the frame
+    # (the same stand-in the POST preview uses) and the workflow is told not
+    # to persist the mode it detects, so opening the deploy drawer never
+    # rewrites the row. The deploy job applies the detected mode for real.
+    plan_frame = _apply_frame_preview_update(frame, FrameUpdateRequest())
     try:
         if mode in {"combined", "full"}:
             with tempfile.TemporaryDirectory() as temp_dir:
-                deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir=temp_dir)
+                deployer = FrameDeployer(db=db, redis=redis, frame=plan_frame, nim_path="", temp_dir=temp_dir)
                 workflow = FrameDeployWorkflow(
                     db=db,
                     redis=redis,
-                    frame=frame,
+                    frame=plan_frame,
                     deployer=deployer,
                     temp_dir=temp_dir,
+                    persist_detected_mode=False,
                 )
                 plan = await workflow.plan(mode)
         elif mode == "fast":
-            deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
+            deployer = FrameDeployer(db=db, redis=redis, frame=plan_frame, nim_path="", temp_dir="")
             workflow = FrameDeployWorkflow(
                 db=db,
                 redis=redis,
-                frame=frame,
+                frame=plan_frame,
                 deployer=deployer,
                 temp_dir="",
+                persist_detected_mode=False,
             )
             plan = await workflow.plan("fast")
         else:
             _bad_request("mode must be 'combined', 'full' or 'fast'")
 
+        pending_mode_change = getattr(workflow, "pending_mode_change", None)
+        if pending_mode_change and pending_mode_change not in plan.notes:
+            plan.notes.append(pending_mode_change)
         return {"plan": plan.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -3831,6 +3881,14 @@ async def api_frame_update_endpoint(
     # mode; stamp it here so nothing downstream has to guess.
     normalize_scenes_execution(update_data.get("scenes"))
 
+    if "server_host" in update_data:
+        # Handed to the device as frame.json serverHost on the next deploy or
+        # sync; an empty value is the documented "no backend" state.
+        server_host_text = str(update_data["server_host"] or "").strip()
+        update_data["server_host"] = server_host_text
+        if server_host_text:
+            _require_valid_device_server_host(server_host_text, split_address=False)
+
     old_mode = frame.mode
     old_device = frame.device
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
@@ -3950,6 +4008,7 @@ async def api_frame_new(
                 data.network.get("wifiPassword"), (settings.get("defaults") or {}).get("wifiPassword")
             ),
         }
+    _require_valid_device_server_host(data.server_host, split_address=True)
     try:
         if data.mode == "buildroot":
             normalize_buildroot_platform(data.platform)
@@ -4130,6 +4189,7 @@ async def api_frame_import(
     except ValidationError as exc:
         raise RequestValidationError(exc.errors())
 
+    _require_valid_device_server_host(data.get("server_host"), split_address=True)
     try:
         frame = await new_frame(
             db,

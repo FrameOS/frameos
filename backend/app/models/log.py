@@ -256,6 +256,35 @@ async def new_log(
     return log
 
 
+# A device's bootup line reports its panel: width/height as pixel counts,
+# `color` as a short descriptor ("monochrome", "spectra6", ...). Values
+# outside these forms (a string width, a JSON object, a control character)
+# are dropped rather than written onto the frame row.
+BOOTUP_MAX_DIMENSION = 16384
+BOOTUP_COLOR_MAX_LENGTH = 64
+_BOOTUP_COLOR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.:/#,-]*$")
+
+
+def _bootup_display_value(key: str, value: Any) -> Any:
+    """`value` normalized for the frame column `key`, or None to ignore it."""
+    if value is None or isinstance(value, bool):
+        return None
+    if key in ("width", "height"):
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if not isinstance(value, int) or not 1 <= value <= BOOTUP_MAX_DIMENSION:
+            return None
+        return value
+    if key == "color":
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text or len(text) > BOOTUP_COLOR_MAX_LENGTH or not _BOOTUP_COLOR_RE.fullmatch(text):
+            return None
+        return text
+    return None
+
+
 async def process_log(
     db: Session,
     redis: Redis,
@@ -324,10 +353,16 @@ async def process_log(
             # report, but never overwrite an explicitly configured resolution with a detected one.
             if key in ('width', 'height') and getattr(frame, key) is not None:
                 continue
-            if key in log and log[key] is not None and log[key] != getattr(frame, key):
-                changes[key] = log[key]
-            if 'config' in log and key in log['config'] and log['config'][key] is not None and log['config'][key] != getattr(frame, key):
-                changes[key] = log['config'][key]
+            # The line is device-written: only a well-typed value reaches the
+            # row (an int in range for the dimensions, a short identifier for
+            # the colour descriptor); anything else is ignored, not stored.
+            reported = _bootup_display_value(key, log.get(key))
+            if reported is not None and reported != getattr(frame, key):
+                changes[key] = reported
+            config = log.get('config')
+            reported = _bootup_display_value(key, config.get(key)) if isinstance(config, dict) else None
+            if reported is not None and reported != getattr(frame, key):
+                changes[key] = reported
         if not frame.timezone:
             config = log.get("config") if isinstance(log.get("config"), dict) else {}
             boot_timezone = stored_timezone(config.get("timeZone") or log.get("timeZone"))

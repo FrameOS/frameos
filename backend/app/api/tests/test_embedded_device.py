@@ -370,6 +370,76 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
 
 
 @pytest.mark.asyncio
+async def test_settings_pull_follows_the_granted_set(async_client, no_auth_client, db):
+    """The pull used to hard-code four groups. It is the granted set now (the
+    same walk frame.json ships): a group outside the old four that the
+    owner's scene declares flows through; a group a store-origin scene
+    declares reaches the device only once the owner granted it."""
+    frame = await device_frame(async_client, db)
+    frame.scenes = [
+        {
+            'id': 'own-gallery',
+            'name': 'Own scene',
+            'nodes': [{'type': 'app', 'data': {'keyword': 'data/frameOSGallery'}}],
+            'edges': [],
+        },
+        {
+            'id': 'store-unsplash',
+            'name': 'Store scene',
+            'origin': {'storeSceneId': 'abc', 'href': 'https://store/x', 'version': 1},
+            'nodes': [{'type': 'app', 'data': {'keyword': 'data/unsplash'}}],
+            'edges': [],
+        },
+    ]
+    frame.service_setting_groups = []
+    db.add_all([
+        frame,
+        Settings(project_id=frame.project_id, key='frameOS', value={'apiKey': 'gallery-key'}),
+        Settings(project_id=frame.project_id, key='unsplash', value={'accessKey': 'unsplash-key'}),
+        Settings(project_id=frame.project_id, key='openAI', value={'apiKey': 'never-declared'}),
+    ])
+    db.commit()
+
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    payload.pop('frame')
+    payload.pop('schedule')
+    assert payload == {'frameOS': {'apiKey': 'gallery-key'}}
+
+    frame.service_setting_groups = ['unsplash']
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    payload.pop('frame')
+    payload.pop('schedule')
+    assert payload == {'frameOS': {'apiKey': 'gallery-key'}, 'unsplash': {'accessKey': 'unsplash-key'}}
+
+
+@pytest.mark.asyncio
+async def test_render_answers_503_with_retry_after_when_the_queue_is_full(
+    async_client, no_auth_client, db, monkeypatch
+):
+    from app.utils.embedded_render import RenderQueueFull
+
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'Busy', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    async def queue_full(frame_arg, width, height, **kwargs):
+        raise RenderQueueFull()
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', queue_full)
+
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 503, response.text
+    assert response.headers['Retry-After'] == '5'
+
+
+@pytest.mark.asyncio
 async def test_settings_includes_live_frame_settings(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
     frame.name = 'Kitchen'

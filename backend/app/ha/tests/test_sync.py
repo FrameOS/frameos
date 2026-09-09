@@ -307,3 +307,39 @@ def test_projects_are_only_shared_over_their_own_broker():
     broker, kept, skipped = partition_projects_by_broker({1: None, 2: home})
     assert (broker, kept, skipped) == (home, [2], [1])
     assert partition_projects_by_broker({}) == (None, [], [])
+
+
+@pytest.mark.asyncio
+async def test_partial_update_frame_payload_publishes_from_the_persisted_row(db, redis, service):
+    """The Remote websocket publishes "update_frame" with just {id, project_id,
+    active_connections}. Discovery used to be rebuilt from that payload, which
+    renamed the HA device to "Frame N" and retained a null status."""
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    frame.status = "ready"
+    db.commit()
+    project_id = frame.project_id
+    service._enabled = {project_id: {"syncEnabled": True}}
+
+    await service._handle_broadcast(
+        "update_frame", {"id": frame.id, "project_id": project_id, "active_connections": 1}
+    )
+
+    node = discovery.frame_node_id(project_id, frame.id)
+    config = json.loads(service._mqtt.payload_for(f"homeassistant/sensor/{node}/status/config"))
+    assert config["device"]["name"] == "Kitchen"
+    state = json.loads(service._mqtt.payload_for(discovery.frame_state_topic(project_id, frame.id)))
+    assert state["name"] == "Kitchen"
+    assert state["status"] == "ready"
+    assert service._frames[frame.id]["name"] == "Kitchen"
+
+
+@pytest.mark.asyncio
+async def test_update_frame_for_a_deleted_row_falls_back_to_the_payload(db, redis, service):
+    project_id = 1
+    service._enabled = {project_id: {"syncEnabled": True}}
+    await service._handle_broadcast(
+        "update_frame", {"id": 987654, "project_id": project_id, "name": "Ghost", "archived": True}
+    )
+    node = discovery.frame_node_id(project_id, 987654)
+    assert service._mqtt.payload_for(f"homeassistant/sensor/{node}/status/config") is None
+    assert f"homeassistant/sensor/{node}/status/config" in service._mqtt.topics()

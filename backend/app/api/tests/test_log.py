@@ -312,3 +312,50 @@ async def test_api_log_rejects_malformed_entries_before_writing_anything(async_c
     response = await async_client.post('/api/log', json={'logs': [[1700000000, {'event': 'log', 'message': 'ok'}]]}, headers=headers)
     assert response.status_code == 200, response.text
     assert db.query(Log).filter_by(frame_id=frame.id).count() == before + 1
+
+
+@pytest.mark.asyncio
+async def test_api_log_bootup_only_stores_well_typed_panel_values(async_client, db, redis):
+    """The bootup line is device-written: width/height must be pixel counts
+    and `color` a short descriptor, or the row keeps what it has."""
+    from app.models.frame import Frame
+
+    frame = await new_frame(db, redis, 'TypedBoot', 'localhost', 'localhost')
+    frame.server_api_key = 'testkey'
+    frame.width = None
+    frame.height = None
+    frame.color = 'monochrome'
+    await update_frame(db, redis, frame)
+    headers = {'Authorization': 'Bearer testkey'}
+
+    response = await async_client.post('/api/log', json={'log': {
+        'event': 'bootup',
+        'width': '800',
+        'height': {'px': 480},
+        'color': {'mode': 'spectra6'},
+        'config': {'width': True, 'height': -1, 'color': 'evil\r\nSet-Cookie: x'},
+    }}, headers=headers)
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    row = db.get(Frame, frame.id)
+    assert row.width is None
+    assert row.height is None
+    assert row.color == 'monochrome'
+
+    response = await async_client.post('/api/log', json={'log': {
+        'event': 'bootup',
+        'width': 800,
+        'height': 480.0,
+        'color': ' spectra6 ',
+    }}, headers=headers)
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    row = db.get(Frame, frame.id)
+    assert (row.width, row.height, row.color) == (800, 480, 'spectra6')
+
+    # An oversized descriptor never lands either.
+    response = await async_client.post('/api/log', json={'log': {'event': 'bootup', 'color': 'x' * 65}},
+                                       headers=headers)
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    assert db.get(Frame, frame.id).color == 'spectra6'

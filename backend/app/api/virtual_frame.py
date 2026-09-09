@@ -38,7 +38,7 @@ from app.models.frame import Frame
 from app.redis import get_redis
 from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
 from app.utils import virtual_assets
-from app.utils.embedded_render import render_scene_rgba_and_state
+from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
 
 from . import api_public
 from .embedded_device import (
@@ -398,7 +398,16 @@ async def api_virtual_frame_image(
     redis=Depends(get_redis),
 ):
     frame = _virtual_frame(db, id, k)
-    png = await _virtual_frame_png(db, redis, frame)
+    try:
+        png = await _virtual_frame_png(db, redis, frame)
+    except RenderQueueFull as exc:
+        # The kiosk page keeps the image it has and retries on its interval;
+        # a full queue must not park one coroutine per kiosk poll.
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Render queue is full, retry later",
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     return Response(
         content=png,
         media_type="image/png",

@@ -47,7 +47,7 @@ from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
 from app.redis import get_redis
-from app.utils.embedded_render import render_scene_rgba
+from app.utils.embedded_render import RenderQueueFull, render_scene_rgba
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
     FOS_PIXEL_1BPP,
@@ -325,13 +325,24 @@ async def api_embedded_device_render(
     # error, timeout — falls back to the diagnostic bitmap below, so the
     # device always gets a valid frame.
     packed: bytes | None = None
-    rgba = await render_scene_rgba(
-        frame,
-        width,
-        height,
-        scene_id=await _active_scene_id(redis, frame),
-        settings=embedded_settings_payload(db, frame),
-    )
+    try:
+        rgba = await render_scene_rgba(
+            frame,
+            width,
+            height,
+            scene_id=await _active_scene_id(redis, frame),
+            settings=embedded_settings_payload(db, frame),
+        )
+    except RenderQueueFull as exc:
+        # Not a render failure but a full queue: the device keeps what it
+        # shows and polls again after Retry-After, instead of this request
+        # parking until a slot frees (or a diagnostic card replacing a
+        # perfectly good scene).
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Render queue is full, retry later",
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     if rgba is not None:
         from PIL import Image
 
@@ -360,13 +371,18 @@ def embedded_scenes_payload(frame: Frame) -> bytes:
 
 
 def embedded_settings_payload(db: Session, frame: Frame) -> dict:
+    """The service-settings groups this frame is granted, as frame.json
+    carries them: what the owner's scenes declare plus what store-origin
+    scenes declare AND the owner granted (shipped_frame_settings, via
+    get_frame_json). A hard-coded list of four groups used to sit here, so a
+    newly granted group never reached an ESP32; the granted set is the one
+    source now. Groups without a configured value are left out."""
     frame_settings = get_frame_json(db, frame).get("settings") or {}
     payload: dict = {}
     if not isinstance(frame_settings, dict):
         return payload
-    for key in ("homeAssistant", "immich", "openAI", "unsplash"):
-        value = frame_settings.get(key)
-        if isinstance(value, dict):
+    for key, value in frame_settings.items():
+        if isinstance(key, str) and key and isinstance(value, dict):
             payload[key] = value
     return payload
 
