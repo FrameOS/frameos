@@ -485,6 +485,11 @@ MemorySwapMax=64M
 # Its own /tmp (same as setup.nim's frameosServiceContents): the
 # browser-snapshot app stages an executable script and a Chromium profile
 # there; privileged work goes through sudo, which shares the namespace.
+# No ProtectSystem here for the same reason as in setup.nim: the sudo
+# children write /etc (systemd drop-ins, cron, fstab, localtime), /boot
+# (cmdline.txt) and, through apt-get, /usr from inside this namespace. The
+# Buildroot unit gets ProtectSystem=strict because its privileged work runs
+# in root's own namespace behind the door.
 PrivateTmp=yes
 ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf "serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n" "$SERVICE_RESULT" "$EXIT_CODE" "$EXIT_STATUS" > /srv/frameos/runtime/frameos-last-exit'
 {frameos_service_tty}

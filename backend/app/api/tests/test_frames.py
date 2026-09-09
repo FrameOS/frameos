@@ -3881,3 +3881,155 @@ async def test_api_frame_get_carries_the_pinned_host_key_fingerprint(async_clien
 
     listed = (await async_client.get('/api/frames')).json()['frames'][0]
     assert listed['ssh_host_key_fingerprint'] == host_key_fingerprint(public)
+
+
+@pytest.mark.asyncio
+async def test_api_frame_logs_full_download_is_capped_to_the_retained_window_and_streamed(async_client, db, monkeypatch):
+    from app.api import frames as frames_module
+
+    frame = Frame(
+        project_id=async_client.project_id,
+        name="CappedLogFrame",
+        mode="rpios",
+        frame_host="localhost",
+        frame_port=8787,
+        ssh_user="pi",
+        ssh_port=22,
+        server_host="localhost",
+        server_port=8989,
+        status="uninitialized",
+        interval=300,
+        metrics_interval=60,
+        scenes=[],
+        apps=[],
+        scaling_mode="contain",
+        rotate=0,
+        assets_path="/srv/assets",
+        save_assets=True,
+        upload_fonts="",
+    )
+    db.add(frame)
+    db.commit()
+    db.refresh(frame)
+    base_timestamp = datetime(2026, 5, 8, 8, 0, 0)
+    db.add_all(
+        Log(frame_id=frame.id, type='stdout', line=f'line {index}', timestamp=base_timestamp + timedelta(seconds=index))
+        for index in range(12)
+    )
+    db.commit()
+
+    # The cap keeps the NEWEST rows (the prune deletes the oldest), and a page
+    # smaller than the cap proves the download is assembled page by page.
+    monkeypatch.setattr(frames_module, "FULL_LOG_DOWNLOAD_MAX_ROWS", 7)
+    monkeypatch.setattr(frames_module, "FULL_LOG_DOWNLOAD_PAGE_ROWS", 3)
+    selects: list[str] = []
+
+    from sqlalchemy import event
+    from app.database import engine
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "FROM log" in statement:
+            selects.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        response = await async_client.get(f'/api/frames/{frame.id}/logs/full')
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert response.status_code == 200
+    lines = response.text.splitlines()
+    assert [line.rsplit(' ', 1)[-1] for line in lines] == [str(index) for index in range(5, 12)]
+    assert all("LIMIT" in statement.upper() for statement in selects), selects
+    # One SELECT for the window floor, then ceil(7 / 3) = 3 pages.
+    assert len(selects) == 4, selects
+
+
+@pytest.mark.asyncio
+async def test_api_frame_metrics_reboot_markers_are_bounded_to_the_returned_window(async_client, db, redis):
+    from app.api import frames as frames_module
+
+    frame = await new_frame(db, redis, 'WindowedRebootsFrame', 'localhost', 'localhost')
+    old_boot = datetime(2026, 6, 1, 0, 0, 0)          # days before any sample: outside the window
+    lead_boot = datetime(2026, 6, 2, 2, 30, 0)        # 35 min before the first sample: inside the lead
+    mid_boot = datetime(2026, 6, 2, 3, 6, 30)         # between two samples
+    later_boot = datetime(2026, 6, 3, 12, 0, 0)       # after the last sample
+    db.add_all(
+        [
+            Metrics(frame_id=frame.id, timestamp=datetime(2026, 6, 2, 3, 5, 0), metrics={"load": [0.1]}),
+            Metrics(frame_id=frame.id, timestamp=datetime(2026, 6, 2, 3, 6, 0), metrics={"load": [0.2]}),
+            Metrics(frame_id=frame.id, timestamp=datetime(2026, 6, 2, 3, 7, 0), metrics={"load": [0.3]}),
+        ]
+        + [
+            Log(frame_id=frame.id, type='webhook', line=json.dumps({"event": "bootup"}), timestamp=stamp)
+            for stamp in (old_boot, lead_boot, mid_boot, later_boot)
+        ]
+        # Not a boot: must never be parsed into a marker, and the marker query
+        # must not select it (it is not a webhook line).
+        + [Log(frame_id=frame.id, type='stdout', line='{"event": "bootup"}', timestamp=mid_boot)]
+    )
+    db.commit()
+
+    selects: list[str] = []
+    from sqlalchemy import event
+    from app.database import engine
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if "FROM log" in statement:
+            selects.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        response = await async_client.get(f'/api/frames/{frame.id}/metrics')
+        recent = await async_client.get(f'/api/frames/{frame.id}/metrics/recent?since=2026-06-02T03:06:10Z')
+        without = await async_client.get(f'/api/frames/{frame.id}/metrics?reboots=0')
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert response.status_code == 200
+    stamps = [marker['timestamp'] for marker in response.json()['reboots']]
+    assert stamps == [
+        lead_boot.replace(tzinfo=timezone.utc).isoformat(),
+        mid_boot.replace(tzinfo=timezone.utc).isoformat(),
+    ]
+    assert recent.status_code == 200
+    assert [marker['timestamp'] for marker in recent.json()['reboots']] == [
+        mid_boot.replace(tzinfo=timezone.utc).isoformat(),
+    ]
+    assert without.status_code == 200
+    assert without.json()['reboots'] == []
+    assert len(without.json()['metrics']) == 3
+
+    # Every log query the markers ran was bounded: filtered to webhook lines
+    # or to one boot's context window, and LIMITed.
+    assert selects, "the markers should have queried the log table"
+    assert all("LIMIT" in statement.upper() for statement in selects), selects
+    assert frames_module.REBOOT_MARKERS_MAX >= 1
+
+
+@pytest.mark.asyncio
+async def test_api_frame_metrics_reboot_markers_never_exceed_the_marker_cap(async_client, db, redis, monkeypatch):
+    from app.api import frames as frames_module
+
+    monkeypatch.setattr(frames_module, "REBOOT_MARKERS_MAX", 3)
+    frame = await new_frame(db, redis, 'ManyRebootsFrame', 'localhost', 'localhost')
+    db.add_all(
+        Log(
+            frame_id=frame.id,
+            type='webhook',
+            line=json.dumps({"event": "bootup"}),
+            timestamp=datetime(2026, 6, 2, 3, 0, 0) + timedelta(minutes=index),
+        )
+        for index in range(10)
+    )
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/metrics')
+
+    assert response.status_code == 200
+    stamps = [marker['timestamp'] for marker in response.json()['reboots']]
+    # The newest three, oldest first.
+    assert stamps == [
+        (datetime(2026, 6, 2, 3, 0, 0) + timedelta(minutes=index)).replace(tzinfo=timezone.utc).isoformat()
+        for index in (7, 8, 9)
+    ]

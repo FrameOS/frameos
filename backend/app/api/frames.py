@@ -63,8 +63,8 @@ from app.models.frame import (
     remember_device_reported_frameos_version,
     update_frame,
 )
-from app.models.log import FRAME_ACTIVITY_LOG_TYPES, Log, new_log as log
-from app.models.metrics import Metrics
+from app.models.log import FRAME_ACTIVITY_LOG_TYPES, LOG_LIMIT_PER_FRAME, Log, new_log as log
+from app.models.metrics import METRICS_RETAINED_PER_FRAME, Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import (
     get_ssh_connection,
@@ -2218,25 +2218,70 @@ def _format_frame_log_line(log_entry: Log) -> str:
     return f"[{timestamp}] ({log_entry.type}) {log_entry.line}"
 
 
+# The full-log download is bounded to the retained window: maybe_prune_logs
+# trims a frame back to LOG_LIMIT_PER_FRAME rows (checked every 100 inserts,
+# so up to 100 more sit there briefly). Anything older is gone from the
+# database anyway, so this cap only ever bites between two prune checks.
+FULL_LOG_DOWNLOAD_MAX_ROWS = LOG_LIMIT_PER_FRAME
+# Rows per SELECT while streaming the download. Small enough that a page is
+# formatted and flushed before the next is fetched, so the request never holds
+# the whole window as ORM objects (10k rows of 64 KiB lines is 640 MiB).
+FULL_LOG_DOWNLOAD_PAGE_ROWS = 1000
+
+
+def _iter_frame_log_pages(db: Session, frame: Frame, max_rows: int, page_rows: int):
+    """Yield the newest ``max_rows`` log rows of ``frame``, oldest first, one
+    page at a time. Each page is its own bounded SELECT keyed on the row id,
+    which is unique and monotonic within a frame's log stream."""
+    scoped = db.query(Log).filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+    # The id of the oldest row inside the retained window: everything from
+    # here up is what the download contains.
+    oldest_kept = (
+        scoped.with_entities(Log.id)
+        .order_by(Log.timestamp.desc(), Log.id.desc())
+        .offset(max_rows - 1)
+        .limit(1)
+        .scalar()
+    )
+    if oldest_kept is None:
+        # Fewer rows than the cap: the whole log fits.
+        floor_id = 0
+    else:
+        floor_id = int(oldest_kept)
+    after_id = floor_id - 1
+    remaining = max_rows
+    while remaining > 0:
+        page = (
+            scoped.filter(Log.id > after_id)
+            .order_by(Log.id.asc())
+            .limit(min(page_rows, remaining))
+            .all()
+        )
+        if not page:
+            return
+        yield page
+        after_id = int(page[-1].id)
+        remaining -= len(page)
+        if len(page) < page_rows:
+            return
+
+
 @api_project.get("/frames/{id:int}/logs/full")
 async def api_frame_download_full_logs(id: int, db: Session = Depends(get_db)):
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    logs = (
-        db.query(Log)
-        .filter_by(project_id=frame.project_id, frame_id=id)
-        .order_by(Log.timestamp.asc(), Log.id.asc())
-        .all()
-    )
-    content = "\n".join(_format_frame_log_line(log_entry) for log_entry in logs)
-    if content:
-        content += "\n"
+    def render_pages():
+        for page in _iter_frame_log_pages(db, frame, FULL_LOG_DOWNLOAD_MAX_ROWS, FULL_LOG_DOWNLOAD_PAGE_ROWS):
+            yield "".join(_format_frame_log_line(log_entry) + "\n" for log_entry in page)
+            # Drop the page's ORM objects before fetching the next one.
+            db.expunge_all()
+
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     filename = f"frame-{id}-full-logs-{timestamp}.log"
-    return Response(
-        content,
+    return StreamingResponse(
+        render_pages(),
         media_type="text/plain; charset=utf-8",
         headers={
             "Content-Disposition": (
@@ -4239,55 +4284,113 @@ def _merge_reboot_details(primary: dict[str, Any], secondary: dict[str, Any]) ->
     return merged
 
 
-def _frame_reboot_markers(db: Session, frame: Frame, since: Optional[datetime] = None) -> list[dict[str, Any]]:
-    query = db.query(Log).filter_by(project_id=frame.project_id, frame_id=frame.id)
+# Reboot markers come from the frame's ``bootup`` webhook lines. Both metrics
+# routes used to walk EVERY log row of the frame (up to LOG_LIMIT_PER_FRAME,
+# each parsed as JSON) on every GET; now only the bootup lines inside the
+# requested window are selected, at most REBOOT_MARKERS_MAX of them, and the
+# context that classifies each boot (the lines just before it) is a second
+# bounded SELECT per marker.
+REBOOT_MARKERS_MAX = 100
+REBOOT_CONTEXT_MAX_LINES = 200
+# A boot that precedes the first metric sample by up to this much still
+# belongs to that sample's window: the runtime posts its first metrics one
+# ``metrics_interval`` after it comes up.
+REBOOT_MARKERS_WINDOW_LEAD = timedelta(hours=1)
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _frame_reboot_markers(
+    db: Session,
+    frame: Frame,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    scoped = db.query(Log).filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+    boots = scoped.filter(Log.type == "webhook", Log.line.contains("bootup"))
     if since is not None:
-        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
-        query = query.filter(Log.timestamp >= (since_utc - REBOOT_CONTEXT_LOOKBACK).replace(tzinfo=None))
+        boots = boots.filter(Log.timestamp >= _naive_utc(since))
+    if until is not None:
+        boots = boots.filter(Log.timestamp <= _naive_utc(until))
+    boot_logs = boots.order_by(Log.timestamp.desc(), Log.id.desc()).limit(REBOOT_MARKERS_MAX).all()
 
     markers: list[dict[str, Any]] = []
-    context_logs: list[Log] = []
-    for log_entry in query.order_by(Log.timestamp).all():
-        payload = _json_log_payload(log_entry.line) if log_entry.type == "webhook" else None
-        if payload and payload.get("event") == "bootup":
-            details = _reboot_details_from_payload(payload)
-            lookback_start = log_entry.timestamp - REBOOT_CONTEXT_LOOKBACK
-            nearby_context = [log for log in context_logs if log.timestamp >= lookback_start]
-            details = _merge_reboot_details(details, _reboot_hint_for_boot(nearby_context))
-            timestamp = log_entry.timestamp
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
-            else:
-                timestamp = timestamp.astimezone(timezone.utc)
-            markers.append(
-                {
-                    "timestamp": timestamp.isoformat(),
-                    "log_id": log_entry.id,
-                    **details,
-                }
-            )
-        context_logs.append(log_entry)
-        if len(context_logs) > 200:
-            context_logs = context_logs[-200:]
-
-    if since is not None:
-        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
-        return [
-            marker
-            for marker in markers
-            if datetime.fromisoformat(marker["timestamp"]).astimezone(timezone.utc) >= since_utc
-        ]
+    for log_entry in reversed(boot_logs):
+        payload = _json_log_payload(log_entry.line)
+        if not payload or payload.get("event") != "bootup":
+            continue
+        details = _reboot_details_from_payload(payload)
+        lookback_start = log_entry.timestamp - REBOOT_CONTEXT_LOOKBACK
+        nearby_context = (
+            scoped.filter(Log.timestamp >= lookback_start, Log.timestamp <= log_entry.timestamp, Log.id < log_entry.id)
+            .order_by(Log.timestamp.desc(), Log.id.desc())
+            .limit(REBOOT_CONTEXT_MAX_LINES)
+            .all()
+        )
+        details = _merge_reboot_details(details, _reboot_hint_for_boot(list(reversed(nearby_context))))
+        timestamp = log_entry.timestamp
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
+        markers.append(
+            {
+                "timestamp": timestamp.isoformat(),
+                "log_id": log_entry.id,
+                **details,
+            }
+        )
     return markers
 
 
+def _reboot_markers_for_metrics(
+    db: Session,
+    frame: Frame,
+    metrics: list[Metrics],
+    since: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    """Markers for the window the returned ``metrics`` span. With no explicit
+    ``since`` the window starts a little before the oldest returned sample;
+    with no samples at all there is no window and the newest boots are
+    returned (still bounded by REBOOT_MARKERS_MAX)."""
+    until: Optional[datetime] = None
+    if metrics:
+        oldest = min(metric.timestamp for metric in metrics)
+        newest = max(metric.timestamp for metric in metrics)
+        if since is None:
+            since = oldest - REBOOT_MARKERS_WINDOW_LEAD
+        until = newest
+    return _frame_reboot_markers(db, frame, since, until)
+
+
 @api_project.get("/frames/{id:int}/metrics", response_model=FrameMetricsResponse)
-async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
+async def api_frame_metrics(
+    id: int,
+    reboots: bool = Query(True, description="Attach the reboot markers inside the returned samples' window"),
+    db: Session = Depends(get_db),
+):
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
-        metrics = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id).order_by(Metrics.timestamp).all()
-        return {"metrics": [metric.to_dict() for metric in metrics], "reboots": _frame_reboot_markers(db, frame)}
+        # The retained window, newest first, so the bound holds even between
+        # two trims; served oldest first like before.
+        metrics = (
+            db.query(Metrics)
+            .filter_by(project_id=frame.project_id, frame_id=id)
+            .order_by(Metrics.timestamp.desc(), Metrics.id.desc())
+            .limit(METRICS_RETAINED_PER_FRAME)
+            .all()
+        )
+        metrics.reverse()
+        return {
+            "metrics": [metric.to_dict() for metric in metrics],
+            "reboots": _reboot_markers_for_metrics(db, frame, metrics) if reboots else [],
+        }
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -4297,6 +4400,7 @@ async def api_frame_recent_metrics(
     id: int,
     limit: int = Query(1000, ge=1, le=1000),
     since: Optional[datetime] = Query(None),
+    reboots: bool = Query(True, description="Attach the reboot markers inside the returned samples' window"),
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id)
@@ -4305,9 +4409,12 @@ async def api_frame_recent_metrics(
     try:
         query = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id)
         if since is not None:
-            since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
-            query = query.filter(Metrics.timestamp >= since_utc.replace(tzinfo=None))
+            query = query.filter(Metrics.timestamp >= _naive_utc(since))
         metrics = query.order_by(Metrics.timestamp.desc()).limit(limit).all()
-        return {"metrics": [metric.to_dict() for metric in reversed(metrics)], "reboots": _frame_reboot_markers(db, frame, since)}
+        metrics.reverse()
+        return {
+            "metrics": [metric.to_dict() for metric in metrics],
+            "reboots": _reboot_markers_for_metrics(db, frame, metrics, since) if reboots else [],
+        }
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

@@ -656,11 +656,20 @@ class CrossCompiler:
 
     @staticmethod
     def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
+        # Same contract as app.tasks.precompiled_frameos._safe_extract: the
+        # name check is a fast first refusal (a separator-aware one — the old
+        # prefix test let ``dest-evil`` pass for ``dest``), and the ``data``
+        # filter is what actually decides at extraction time, so a symlink or
+        # hardlink member pointing outside is refused too, not just a name.
+        root = path.resolve()
         for member in tar.getmembers():
-            member_path = path / member.name
-            if not str(member_path.resolve()).startswith(str(path.resolve())):
+            member_path = (path / member.name).resolve()
+            if os.path.commonpath([str(root), str(member_path)]) != str(root):
                 raise RuntimeError("Tar file attempted to escape target directory")
-        tar.extractall(path=path)
+        try:
+            tar.extractall(path=path, filter="data")
+        except tarfile.FilterError as exc:
+            raise RuntimeError(f"Tar file attempted to escape target directory: {exc}") from exc
 
     @staticmethod
     def _normalize_component_dir(dest_dir: Path) -> None:
