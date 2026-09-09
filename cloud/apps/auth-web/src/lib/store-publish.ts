@@ -29,7 +29,11 @@ import {
   type StoreImage,
 } from "./store-images";
 import type { SceneListing } from "./store-listing";
-import { alignZipCover, writeSceneVersion } from "./store-version-write";
+import {
+  alignZipCover,
+  nextSceneVersion,
+  writeSceneVersion,
+} from "./store-version-write";
 import {
   accountLimits,
   privateSceneBytesForAccount,
@@ -372,7 +376,7 @@ export async function publishStoreScene(
     );
   }
 
-  const nextVersion = scene.latestVersion + 1;
+  const nextVersion = await nextSceneVersion(db, scene.id);
   const written = await writeSceneVersion(db, {
     content: aligned.content,
     images,

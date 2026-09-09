@@ -1,6 +1,7 @@
 import type { FrameSchedule, FrameScene, FrameType } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
+import { storeSceneErrorMessage, type StoreErrorDetail } from './storeSceneErrors'
 import {
   allCloudFrameSettingKeys,
   cloudFrameSettingKeys,
@@ -77,8 +78,12 @@ async function assertOk(response: Response, fallback: string): Promise<void> {
   if (response.ok) {
     return
   }
-  const detail = (await response.json().catch(() => ({}))) as { error?: string }
-  throw new Error(detail.error ? `${fallback} (${detail.error})` : fallback)
+  const detail = (await response.json().catch(() => ({}))) as StoreErrorDetail
+  // The store's own wording for the refusals it has a name for (the
+  // private-scene quota, a pulled scene, a rate limit…); the action plus
+  // the raw code for anything else, so a new server code still says what
+  // did not happen.
+  throw new Error(storeSceneErrorMessage(detail, response.status, fallback))
 }
 
 export async function sendCloudFrameCommand(

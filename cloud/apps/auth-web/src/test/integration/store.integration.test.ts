@@ -1224,6 +1224,79 @@ describe("store publish and distribution", () => {
     expect(explicit.status).toBe(200);
     expect(explicit.headers.get("x-scene-version")).toBe("2");
 
+    // `latest_version` followed the yank: the store index, the cover SQL and
+    // the immutable `?v=N` cover URL all key on it, so it must name what the
+    // download route serves by default — not the version just yanked.
+    const latestVersionOf = async () =>
+      (
+        await db
+          .select({ latestVersion: storeScenes.latestVersion })
+          .from(storeScenes)
+          .where(eq(storeScenes.id, sceneId))
+      )[0]?.latestVersion;
+    expect((await readJson(yank)).latest_version).toBe(1);
+    expect(await latestVersionOf()).toBe(1);
+    const repo = await readJson(
+      await getRepositoryJson(request("/api/store/repository.json", "GET")),
+    );
+    const listed = (repo.templates as Array<Record<string, unknown>>).find(
+      (template) => template.sceneId === sceneId,
+    );
+    expect(listed?.version).toBe("1");
+
+    // Version numbers never repeat: the next publish after the yank is v3,
+    // one past the highest ever issued, not `latest_version + 1` (= 2).
+    const republished = await publish(accessToken);
+    expect(republished.status).toBe(200);
+    expect((await readJson(republished)).scene).toMatchObject({
+      latest_version: 3,
+    });
+    expect(await latestVersionOf()).toBe(3);
+
+    // Unyanking an older version does not move the pointer off a newer live
+    // one; yanking the newest hands it to the newest still live.
+    const unyank = await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/2`, "PATCH", {
+        body: { yanked: false },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "2" }) },
+    );
+    expect(unyank.status).toBe(200);
+    expect((await readJson(unyank)).latest_version).toBe(3);
+    const yankNewest = await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/3`, "PATCH", {
+        body: { yanked: true },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "3" }) },
+    );
+    expect(yankNewest.status).toBe(200);
+    expect(await latestVersionOf()).toBe(2);
+    // Back to the v2-yanked state the last-version check below expects.
+    await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/3`, "PATCH", {
+        body: { yanked: false },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "3" }) },
+    );
+    await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/2`, "PATCH", {
+        body: { yanked: true },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "2" }) },
+    );
+    await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/3`, "PATCH", {
+        body: { yanked: true },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "3" }) },
+    );
+    expect(await latestVersionOf()).toBe(1);
+
     const lastYank = await patchVersion(
       request(`/api/account/scenes/${sceneId}/versions/1`, "PATCH", {
         body: { yanked: true },
@@ -1845,7 +1918,11 @@ describe("store publish and distribution", () => {
     );
     try {
       const response = await proxied({
-        headers: { "x-api-key": "k", cookie: "never-forwarded" },
+        headers: {
+          "x-api-key": "k",
+          authorization: "Bearer app-key",
+          cookie: "never-forwarded",
+        },
         url: "https://example.com/data",
       });
       expect(response.status).toBe(201);
@@ -1863,6 +1940,10 @@ describe("store publish and distribution", () => {
       const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit];
       const sentHeaders = new Headers(init.headers);
       expect(sentHeaders.get("x-api-key")).toBe("k");
+      // The app's own key for the host it named goes through, as it does on
+      // a frame and through the backend's proxy; the browser's cookie for
+      // US never does.
+      expect(sentHeaders.get("authorization")).toBe("Bearer app-key");
       expect(sentHeaders.get("cookie")).toBeNull();
     } finally {
       vi.unstubAllGlobals();

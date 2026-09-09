@@ -33,6 +33,7 @@ import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../lib/ai-sce
 import type { AiListingChanges } from "../lib/ai-chat-client";
 import { requiredSettingsForScenes } from "../lib/preview-settings";
 import { clearSceneDraft, readSceneDraft, writeSceneDraft } from "../lib/scene-draft";
+import { ownerActionErrorMessage } from "./ownerActionError";
 import {
   defaultSceneEditorPanels,
   onlyPanel,
@@ -1867,7 +1868,7 @@ export function SceneEditorModal({
         setError(
           payload.error === "login_required"
             ? "Sign in to fork this scene."
-            : `Forking failed: ${payload.error ?? response.status}`,
+            : ownerActionErrorMessage(payload, response.status, "Forking failed"),
         );
         return;
       }
@@ -1928,19 +1929,15 @@ export function SceneEditorModal({
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         setError(
-          // Renaming the scene renames the store listing with it, and two of
-          // your scenes may not share a name.
-          payload.error === "scene_name_taken"
-            ? `You already have another scene called “${payload.name ?? "that"}” — rename this one to something else.`
-            : // The name and the note show on the public page, so both are
-              // moderated; the note is the usual suspect.
-              payload.error === "content_rejected"
-              ? "The scene's name, description, tags or your note was flagged by moderation — please reword it."
-              : payload.error === "invalid_tags"
-                ? "Up to 5 tags; lowercase letters, digits, dashes, max 24 characters each."
-                : payload.error === "invalid_frameos_version"
-                  ? "The minimum FrameOS version should look like 2026.7.5."
-                  : `Saving failed: ${payload.error ?? response.status}`,
+          // The name and the note show on the public page, so both are
+          // moderated; the note is the usual suspect, and a Save is where
+          // the reader needs to know WHICH field to reword.
+          payload.error === "content_rejected"
+            ? "The scene's name, description, tags or your note was flagged by moderation — please reword it."
+            : // Everything else is the shared store wording: a name clash
+              // names the other scene, the private-scene quota and a pulled
+              // scene say so — instead of the raw code this used to show.
+              ownerActionErrorMessage(payload, response.status, "Saving failed"),
         );
         return;
       }

@@ -11,7 +11,9 @@ import {
   ensureChat,
   historyForModel,
 } from "../../../../../src/lib/ai/chat-store";
+import { emptyUsage } from "../../../../../src/lib/ai/openai";
 import { formatAiException } from "../../../../../src/lib/ai/scene-utils";
+import { captureAiTurn } from "../../../../../src/lib/ai/telemetry";
 import {
   inFlightSpendMicros,
   releaseTurnSpend,
@@ -167,6 +169,7 @@ export async function POST(request: NextRequest) {
   // request, so the request is the turn. Reserved against the daily cap
   // until metered (spend-reservations.ts).
   const turnId = crypto.randomUUID();
+  const startedAt = Date.now();
   reserveTurnSpend(accountId, turnId);
   try {
     const result = await runAppChat({
@@ -181,6 +184,7 @@ export async function POST(request: NextRequest) {
       sceneId,
       signal: request.signal,
       sources,
+      telemetry: { accountId, chatId: chat.id, turnId },
     });
     await meterAiUsage({
       accountId,
@@ -193,6 +197,25 @@ export async function POST(request: NextRequest) {
       usage: result.usage,
     });
     releaseTurnSpend(turnId);
+    // The turn summary the scene chat emits from its turn loop; here the
+    // request is the turn. Same surface name as the meter row above, so the
+    // reconcile can pair them.
+    captureAiTurn({
+      accountId,
+      chatId: chat.id,
+      deliveredTool: result.tool,
+      disconnects: 0,
+      durationMs: Date.now() - startedAt,
+      model: credentials.model,
+      outcome: "ok",
+      resumes: 0,
+      rounds: 1,
+      surface: "app_chat",
+      toolArgErrors: [],
+      toolCalls: result.tool === "edit_app" ? ["write_app_files"] : [],
+      turnId,
+      usage: result.usage,
+    });
     await appendChatMessage(db, chat.id, {
       content: result.reply,
       // File contents are NOT persisted: they are already in the user's
@@ -210,6 +233,23 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     releaseTurnSpend(turnId);
     const detail = `App chat failed: ${formatAiException(error)}`;
+    captureAiTurn({
+      accountId,
+      chatId: chat.id,
+      deliveredTool: "error",
+      disconnects: 0,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+      model: credentials.model,
+      outcome: request.signal.aborted ? "stopped" : "error",
+      resumes: 0,
+      rounds: 1,
+      surface: "app_chat",
+      toolArgErrors: [],
+      toolCalls: [],
+      turnId,
+      usage: emptyUsage(),
+    });
     try {
       await appendChatMessage(db, chat.id, {
         content: detail,

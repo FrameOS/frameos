@@ -42,6 +42,7 @@ import {
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
 import {
   alignZipCover,
+  nextSceneVersion,
   writeSceneVersion,
 } from "../../../../../../src/lib/store-version-write";
 import {
@@ -312,7 +313,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  const nextVersion = scene.latestVersion + 1;
+  const nextVersion = await nextSceneVersion(db, scene.id);
   const written = await writeSceneVersion(db, {
     content,
     images,
