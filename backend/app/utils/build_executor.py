@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shlex
 import shutil
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.utils.build_environment import BuildEnvironmentProvider
-from app.utils.build_host import persist_build_host_key, BuildHostConfig, BuildHostSession
+from app.utils.build_host import BUILD_COMMAND_TIMEOUT_SECONDS, persist_build_host_key, BuildHostConfig, BuildHostSession
 from app.utils.modal_sandbox import (
     ModalSandboxConfig,
     ModalSandboxSession,
@@ -261,12 +262,23 @@ class LocalBuildExecutor(BuildExecutor):
 
         out_buf: list[str] = []
         err_buf: list[str] = []
-        await asyncio.gather(
-            pump(proc.stdout, "stdout", out_buf),
-            pump(proc.stderr, stderr_log_tag, err_buf),
-        )
-
-        exit_code = await proc.wait()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    pump(proc.stdout, "stdout", out_buf),
+                    pump(proc.stderr, stderr_log_tag, err_buf),
+                ),
+                timeout=BUILD_COMMAND_TIMEOUT_SECONDS,
+            )
+            exit_code = await asyncio.wait_for(proc.wait(), timeout=60)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # A hung compiler or a cancelled deploy must not keep the child
+            # (and this arq slot) alive for the job's six hours.
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.wait(), timeout=10)
+            raise
         if exit_code and log_output:
             if self.db and self.redis:
                 await log(

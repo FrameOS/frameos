@@ -891,7 +891,7 @@ async def cloud_login_start(
     if await hit_rate_limit(
         redis,
         "cloud_login_start",
-        client_ip_for_request(request) or "unknown",
+        client_ip_for_request(request, strict=True) or "unknown",
         limit=CLOUD_LOGIN_START_LIMIT,
         window_seconds=CLOUD_LOGIN_START_WINDOW_SECONDS,
     ):

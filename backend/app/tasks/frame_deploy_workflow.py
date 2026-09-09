@@ -1275,8 +1275,13 @@ class FrameDeployWorkflow:
 
     async def _execute_full(self, plan: FrameDeployPlan) -> None:
         if self.frame.status == "deploying":
+            # A previous deploy died without resetting the row (a killed
+            # worker, a lost cancellation). The per-frame Redis lock above is
+            # what guards against a CONCURRENT deploy, so this is stale state,
+            # not a running one: note it and carry on rather than returning —
+            # returning here logged "completed" for a deploy that never ran
+            # and made the user click a third time.
             await self._mark_stuck_deploy_as_undeployed()
-            return
         if not plan.full_deploy:
             raise RuntimeError("Full deploy plan missing")
 
@@ -1364,7 +1369,7 @@ class FrameDeployWorkflow:
     async def _mark_stuck_deploy_as_undeployed(self) -> None:
         self.frame.status = "uninitialized"
         await update_frame(self.db, self.redis, self.frame)
-        await self.deployer.log("stderr", "Already deploying. Marked frame as undeployed; request deploy again to start fresh.")
+        await self.deployer.log("stderr", 'A previous deploy left the frame marked "deploying"; cleared it and continuing with this one.')
 
     async def _install_authorized_keys_for_full_deploy(self, full_plan: FullDeployPlan) -> None:
         if full_plan.selected_public_keys and full_plan.ssh_keys_need_install:

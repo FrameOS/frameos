@@ -141,13 +141,20 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
             await workflow.execute(plan)
             if task_id:
                 await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "completed"))
-    except Exception as exc:
+    except (Exception, asyncio.CancelledError) as exc:
+        # CancelledError is a BaseException: an aborted or timed-out job used
+        # to skip this block, leave status="deploying" and log nothing, and
+        # the next deploy then hit the stuck-status branch. Reset the row
+        # here (the workflow's own reset only runs for Exception) before
+        # re-raising so arq records the outcome.
+        message = str(exc) or ("cancelled" if isinstance(exc, asyncio.CancelledError) else exc.__class__.__name__)
         if task_id:
-            await log(db, redis, int(frame.id), type="stderr", line=deploy_task_log_line(task_id, "failed", str(exc)))
-        await log(db, redis, int(frame.id), type="stderr", line=str(exc))
-        # Re-raise so arq records the job as failed. The workflow already reset
-        # frame.status to "uninitialized" before raising, so this leaves no
-        # stuck state but lets job-status consumers see the failure.
+            await log(db, redis, int(frame.id), type="stderr", line=deploy_task_log_line(task_id, "failed", message))
+        await log(db, redis, int(frame.id), type="stderr", line=message)
+        current = get_fresh_frame(db, id)
+        if current is not None and current.status == "deploying":
+            current.status = "uninitialized"
+            await update_frame(db, redis, current)
         raise
     finally:
         await clear_active_deploy_job(redis, id, job_id)

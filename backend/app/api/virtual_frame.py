@@ -6,17 +6,19 @@ output is served as an image URL instead of a panel payload, for browser
 kiosks, old tablets, digital-signage players, or anything else that can
 show a picture. Self-hosted backends only.
 
-- ``GET /api/frames/{id}/virtual/image?k=<server_api_key>`` — one PNG frame
+- ``GET /api/frames/{id}/virtual/image?k=<view_token>`` — one PNG frame
   at the frame's configured size, optionally quantized to an e-ink-style
   palette (``device_config.colorMode``).
-- ``GET /api/frames/{id}/virtual/page?k=<server_api_key>`` — a black
+- ``GET /api/frames/{id}/virtual/page?k=<view_token>`` — a black
   full-screen HTML page that shows the image and refreshes it on the
   frame's interval. Paste into any kiosk browser and walk away.
 
-The token is the frame's ``server_api_key`` — the same device credential
-the hardware thin clients present as a Bearer header, carried in the query
-string because kiosk browsers cannot set headers. Treat the URL like a
-password; rotating the frame's server API key invalidates it.
+The token is ``device_config.viewToken``, a view-only credential minted for
+this purpose — deliberately NOT the frame's ``server_api_key``, which would
+open the whole device API to whoever reads the kiosk's URL bar. It rides the
+query string because kiosk browsers cannot set headers. Treat the URL like a
+password; regenerating ``device_config.viewToken`` invalidates it (rotating
+the server API key does not).
 """
 
 from __future__ import annotations

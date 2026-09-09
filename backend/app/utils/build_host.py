@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+
 import os
 import shlex
 import shutil
@@ -27,6 +29,13 @@ from app.utils.ssh_host_keys import (
 
 LogFunc = Callable[[str, str], Awaitable[None]]
 
+
+
+# The longest a single build-step command may run, local or on a build host.
+# The whole deploy job has a six-hour arq timeout; one command that has
+# produced no exit in this long is hung, not slow (a full Nim + C build of the
+# runtime is minutes, not hours). build_executor imports this.
+BUILD_COMMAND_TIMEOUT_SECONDS = 2 * 60 * 60
 
 @dataclass(slots=True)
 class BuildHostConfig:
@@ -211,12 +220,21 @@ class BuildHostSession:
 
         out_buf: list[str] = []
         err_buf: list[str] = []
-        await asyncio.gather(
-            pump(proc.stdout, "stdout", out_buf), # type: ignore
-            pump(proc.stderr, "stderr", err_buf), # type: ignore
-        )
-
-        status = await proc.wait()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    pump(proc.stdout, "stdout", out_buf), # type: ignore
+                    pump(proc.stderr, "stderr", err_buf), # type: ignore
+                ),
+                timeout=BUILD_COMMAND_TIMEOUT_SECONDS,
+            )
+            status = await asyncio.wait_for(proc.wait(), timeout=60)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # Same rule as the local executor: a hung remote command is
+            # killed, not waited on for the job's six hours.
+            with contextlib.suppress(Exception):
+                proc.kill()
+            raise
         if status and log_output and status.returncode != 0:
             await self._log("exit_status", f"The command exited with status {status.returncode}")
         return status.returncode or 0, "".join(out_buf) or None, "".join(err_buf) or None

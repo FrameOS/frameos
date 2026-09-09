@@ -53,7 +53,8 @@ def test_redact_frame_secrets_strips_every_secret_leaf_and_keeps_the_rest():
         {"source", "target", "username", "password"},  # empty: not a secret, shape kept
     ]
     assert redacted["name"] == "Kitchen"
-    assert redacted["network"] == {"wifiHotspot": "disabled"}
+    assert redacted["network"]["wifiHotspot"] == "disabled"
+    assert "wifiPassword" not in redacted["network"]
     assert redacted["scenes"] == [{"id": "a"}]
 
 
@@ -62,7 +63,7 @@ def test_websocket_payload_omits_secrets_and_their_containers_instead_of_blankin
 
     # The browser merges shallowly, so a container sent without its secret
     # leaf would wipe the client's copy of that leaf. Omitted keys are kept.
-    for key in ("ssh_pass", "server_api_key", "frame_access_key", "https_proxy", "agent", "frame_admin_auth", "mountpoints"):
+    for key in ("ssh_pass", "server_api_key", "frame_access_key", "https_proxy", "agent", "frame_admin_auth", "mountpoints", "network"):
         assert key not in payload
     assert payload["id"] == 7
     assert payload["name"] == "Kitchen"

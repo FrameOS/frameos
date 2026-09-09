@@ -579,7 +579,9 @@ async def new_frame(
     apply_device_gpio_button_defaults(frame)
     db.add(frame)
     db.commit()
-    await publish_message(redis, "new_frame", frame.to_dict())
+    # Every browser tab of the project hears this; secrets stay behind the
+    # per-frame GET (app/utils/frame_secrets — the same rule update_frame keeps).
+    await publish_message(redis, "new_frame", websocket_frame_payload(frame.to_dict()))
 
     from app.models import new_log
     await new_log(db, redis, int(frame.id), "welcome", f"The frame \"{frame.name}\" has been created!")
