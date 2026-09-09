@@ -164,7 +164,8 @@ void fos_ota_mark_boot_valid(void)
     esp_ota_img_states_t state;
     if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
         state == ESP_OTA_IMG_PENDING_VERIFY) {
-        ESP_LOGI(TAG, "first boot of new image on %s: marking valid", running->label);
+        ESP_LOGI(TAG, "first boot of new image on %s reached rendering: marking valid",
+                 running->label);
         esp_ota_mark_app_valid_cancel_rollback();
     }
 }
@@ -176,7 +177,8 @@ void fos_ota_mark_boot_valid(void)
  * with incremental hashing; the boot partition switches ONLY after the
  * signature verifies against the baked release key (fos_ota_pubkey.h).
  * Rollback protection stays on top: the new image boots pending-verify and
- * rolls back unless it reaches Wi-Fi. */
+ * rolls back unless it reaches its first successful render (or an orderly
+ * deep sleep) — fos_ota_mark_boot_valid, called from fos_client.c. */
 
 /* Where one run pulls from. Both control planes fill one of these; nothing
  * below knows which plane it serves beyond the log event name. */

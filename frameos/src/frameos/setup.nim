@@ -219,6 +219,13 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     "MemoryHigh=" & memoryLimits.high & "\n" &
     "MemoryMax=" & memoryLimits.max & "\n" &
     "MemorySwapMax=64M\n" &
+    # Its own /tmp: the browser-snapshot app stages an executable script and
+    # a Chromium profile there, and the runtime's chunked uploads spool
+    # there too. Nothing outside the unit reads them (privileged work goes
+    # through sudo, which shares the namespace), so no other account on the
+    # box gets to pre-plant or read them either. ProtectSystem is deliberately
+    # absent: a root install still writes /etc through those sudo children.
+    "PrivateTmp=yes\n" &
     "ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf \"serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n\" \"$SERVICE_RESULT\" \"$EXIT_CODE\" \"$EXIT_STATUS\" > /srv/frameos/runtime/frameos-last-exit'\n"
   if framebufferConsole:
     result &= "TTYPath=/dev/tty1\n" &

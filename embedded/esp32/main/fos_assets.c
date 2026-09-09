@@ -1,4 +1,5 @@
 #include "fos_assets.h"
+#include "fos_upload_limits.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -330,6 +331,21 @@ bool fos_assets_valid_upload_id(const char *upload_id)
     return true;
 }
 
+/* How many part files sit under <assets>/.uploads right now. */
+static int pending_upload_parts(const char *dir_path)
+{
+    DIR *dir = opendir(dir_path);
+    if (!dir) return 0;
+    int count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        count++;
+    }
+    closedir(dir);
+    return count;
+}
+
 static void chunk_part_path(char *out, size_t out_len, const char *upload_id)
 {
     snprintf(out, out_len, "%s/.uploads/%s.part", fos_assets_root(), upload_id);
@@ -359,6 +375,15 @@ esp_err_t fos_assets_chunk_begin(const char *upload_id, long long offset,
     }
     chunk_part_path(writer->tmp_path, sizeof(writer->tmp_path), upload_id);
     if (offset <= 0) {
+        /* A NEW part (a retry from offset 0 of an existing id reuses its
+         * slot): cap how many can be pending at once, so abandoned uploads
+         * cannot fill the card — the boot sweep is the only other cleanup. */
+        struct stat existing;
+        if (stat(writer->tmp_path, &existing) != 0 &&
+            pending_upload_parts(dir) >= FOS_UPLOAD_MAX_PENDING_PARTS) {
+            set_err(err, "too_many_uploads");
+            return ESP_ERR_INVALID_STATE;
+        }
         writer->file = fopen(writer->tmp_path, "wb");
     } else {
         struct stat st;

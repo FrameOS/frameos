@@ -1,4 +1,5 @@
-import std/[times, unittest]
+import std/[strutils, times, unittest]
+import zippy
 import ../../lib/tz
 import ../types
 import ../timezone_updater
@@ -40,6 +41,26 @@ suite "timezone updater":
     check displayTimezoneEtag("\"82c58f73201ad8edbcf337ca3b4f8bb9\"") == "82c58f73201ad8edbcf337ca3b4f8bb9"
     check displayTimezoneEtag("  \"abc123\"  ") == "abc123"
     check displayTimezoneEtag("abc123") == "abc123"
+
+  test "the gzip body is inflated under a cap, not measured afterwards":
+    let honest = compress("{\"zones\": []}", dataFormat = dfGzip)
+    check boundedGunzip(honest, 1024) == "{\"zones\": []}"
+    # An honest archive that is simply too large is refused from its own
+    # trailer before a byte is inflated.
+    let big = compress("x".repeat(3 * 1024 * 1024), dataFormat = dfGzip)
+    check big.len < 64 * 1024
+    expect IOError:
+      discard boundedGunzip(big, 1024 * 1024)
+    # A lying trailer (ISIZE says 16 bytes) is cut off during inflation.
+    var lying = big
+    lying[^4] = '\x10'
+    lying[^3] = '\x00'
+    lying[^2] = '\x00'
+    lying[^1] = '\x00'
+    expect IOError:
+      discard boundedGunzip(lying, 1024 * 1024)
+    expect IOError:
+      discard boundedGunzip("not gzip at all", 1024)
 
   test "sha256 helper matches known digest":
     check sha256Hex("hello") == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"

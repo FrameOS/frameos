@@ -749,21 +749,34 @@ else:
 
   proc resolveHostBounded(host: string): string {.gcsafe.}
 
-  proc localNetworkPolicyRefusal*(host: string, port: int): string {.gcsafe.} =
-    ## "" when `host:port` may be reached under the current private-network
-    ## policy, otherwise why not. For callers that hand a URL to a child
+  proc localNetworkPolicyPin*(host: string, port: int): tuple[refusal: string, address: string] {.gcsafe.} =
+    ## The private-network check for callers that hand a URL to a child
     ## process (a headless browser, ffmpeg) instead of this client — they
     ## have no connect() of their own to put the check on, so they ask here
     ## with the same resolver and the same classifier before spawning.
+    ## `refusal` is "" when `host:port` may be reached under the current
+    ## policy. `address` is the literal the check was made against, and it
+    ## is only ever non-empty while the deny is active: the child must be
+    ## made to connect to exactly that address (a resolver rule, the host
+    ## rewritten in the URL) — resolving the name a second time in the
+    ## child is a DNS-rebinding hole, since the second answer can be a
+    ## router address the first one was not. With the deny off there is
+    ## nothing to pin and the child resolves for itself.
     {.gcsafe.}:
       if not localNetworkPolicySnapshot().active:
-        return ""
+        return ("", "")
       try:
         let address = resolveHostBounded(host)
         enforceLocalNetworkPolicy(host, Port(port), address)
-        ""
+        ("", address)
       except CatchableError as error:
-        error.msg
+        (error.msg, "")
+
+  proc localNetworkPolicyRefusal*(host: string, port: int): string {.gcsafe.} =
+    ## "" when `host:port` may be reached under the current private-network
+    ## policy, otherwise why not. See localNetworkPolicyPin for the callers
+    ## that also need the address.
+    localNetworkPolicyPin(host, port).refusal
 
   proc resolveHostBounded(host: string): string {.gcsafe.} =
     ## Resolve `host` to an IPv4 literal once per request instead of once per

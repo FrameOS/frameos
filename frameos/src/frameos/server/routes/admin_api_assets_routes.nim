@@ -84,6 +84,32 @@ proc sanitizeUploadId(uploadId: string): string =
 proc uploadChunkTempPath(uploadId: string): string =
   normalizedPath(uploadChunkTempRoot() / (sanitizeUploadId(uploadId) & ".part"))
 
+proc realPathWithin(fullPath, root: string): bool =
+  ## The lexical check above says nothing about symlinks: a link planted
+  ## inside the assets folder (a scene's JS can write there, a Samba share
+  ## can too) pointed the admin routes anywhere on the disk. Resolve the
+  ## deepest ancestor that exists — the target itself may be about to be
+  ## created — and insist the real path is still under the real root. Same
+  ## rule the JS runtime's asset guard applies (js_runtime/app_runtime.nim).
+  when defined(frameosEmbedded) or defined(frameosWasm):
+    true
+  else:
+    if not dirExists(root):
+      return true
+    try:
+      let realRoot = expandFilename(root)
+      var probe = fullPath
+      while not (fileExists(probe) or dirExists(probe) or symlinkExists(probe)):
+        let parent = probe.parentDir()
+        if parent == probe or parent.len < root.len:
+          return true
+        probe = parent
+      let realProbe = expandFilename(probe)
+      realProbe == realRoot or realProbe.startsWith(realRoot & DirSep)
+    except CatchableError:
+      # A dangling link, or a component we cannot stat: not ours to touch.
+      false
+
 proc resolveAssetPath*(path: string, allowRoot = false): string =
   let assetsPath = configuredAssetsPath()
   let stripped = path.strip()
@@ -103,6 +129,8 @@ proc resolveAssetPath*(path: string, allowRoot = false): string =
     raise newException(ValueError, "Invalid asset path")
   if not allowRoot and fullPath == assetsPath:
     raise newException(ValueError, "Path is required")
+  if not realPathWithin(fullPath, assetsPath):
+    raise newException(ValueError, "Invalid asset path")
   fullPath
 
 proc relativeAssetPath*(path: string): string =

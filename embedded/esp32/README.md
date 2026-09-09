@@ -731,8 +731,11 @@ SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.32mb-ota" \
 ```
 
 OTA profiles boot new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
-the app marks itself valid once the network is up, otherwise the next reset rolls
-back to the previous slot. One signed path serves both control planes
+the app marks itself valid after its first successful render (or before an
+orderly deep sleep — `fos_ota_mark_boot_valid`), otherwise the next reset rolls
+back to the previous slot. "Reached Wi-Fi" used to be the mark, which let a
+release that joined the network and then died in Nim or scene init boot-loop as
+a valid image. One signed path serves both control planes
 (`main/fos_ota.c`): a backend-managed device polls
 `/api/frames/{id}/embedded/ota/manifest?platform=<its layout>` daily (or on
 `ota`, or when the backend asks over `POST /api/action/ota`), a cloud-managed

@@ -14,6 +14,11 @@ import frameos/utils/process
 
 const
   DefaultFfmpegTimeoutSeconds = 15
+  # A scene picks the timeout, but the render thread is what waits: the
+  # service watchdog restarts the whole frame after 900 s without a
+  # heartbeat, so a dead camera with an unbounded timeout took the frame
+  # down with it. Two minutes covers a slow RTSP handshake many times over.
+  MaxFfmpegTimeoutSeconds* = 120
   MaxFfmpegOutputBytes = 50 * 1024 * 1024
 
 type
@@ -35,22 +40,45 @@ proc renderError(self: App, context: ExecutionContext, message: string): Image =
     message
   )
 
-proc ffmpegTimeoutMs(self: App): int =
-  max(1, (if self.appConfig.timeoutSeconds > 0: self.appConfig.timeoutSeconds else: DefaultFfmpegTimeoutSeconds)) * 1000
+proc ffmpegTimeoutMs*(timeoutSeconds: int): int =
+  let requested = if timeoutSeconds > 0: timeoutSeconds else: DefaultFfmpegTimeoutSeconds
+  clamp(requested, 1, MaxFfmpegTimeoutSeconds) * 1000
 
-proc ffmpegArgs(url: string, outputPath: string): seq[string] =
+proc ffmpegTimeoutMs(self: App): int =
+  ffmpegTimeoutMs(self.appConfig.timeoutSeconds)
+
+proc ffmpegProtocolWhitelist*(scheme: string): string =
+  ## What ffmpeg may open for a URL of this scheme — and nothing else: the
+  ## guard checked one URL, but ffmpeg's demuxers follow HTTP redirects and
+  ## playlists (HLS, concat…) into any protocol they name, `file:` included.
+  ## rtsp needs its transports (rtp/udp/tcp); the secure variants need tls.
+  case scheme.toLowerAscii()
+  of "rtsp": "rtsp,rtp,udp,tcp"
+  of "rtsps": "rtsps,rtsp,rtp,udp,tcp,tls"
+  of "https": "https,http,tcp,tls"
+  else: "http,tcp"
+
+proc ffmpegArgs*(url: string, outputPath: string, scheme = "", hostHeader = ""): seq[string] =
   result = @[
     "-loglevel", "quiet",
     "-nostdin",
     "-y",
     "-threads", "1",
+  ]
+  if scheme.len > 0:
+    result.add(@["-protocol_whitelist", ffmpegProtocolWhitelist(scheme)])
+  if hostHeader.len > 0:
+    # The URL carries the pinned address (spawn_guard.nim); the name the
+    # scene wrote still goes to the server as the HTTP Host.
+    result.add(@["-headers", "Host: " & hostHeader & "\r\n"])
+  result.add(@[
     "-i", url,
     "-an",
     "-vframes", "1",
     "-f", "image2",
     "-c:v", "bmp",
     outputPath
-  ]
+  ])
 
 proc shellDisplayArg(arg: string): string =
   for ch in arg:
@@ -58,17 +86,16 @@ proc shellDisplayArg(arg: string): string =
       return quoteShell(arg)
   arg
 
-proc ffmpegCommandForLog(url: string, outputPath = ""): string =
-  let args = ffmpegArgs(url, outputPath).filterIt(it.len > 0)
-  "ffmpeg " & args.mapIt(shellDisplayArg(it)).join(" ")
+proc ffmpegCommandForLog(args: seq[string]): string =
+  "ffmpeg " & args.filterIt(it.len > 0).mapIt(shellDisplayArg(it)).join(" ")
 
-proc runFfmpeg(command: string, url: string, timeoutMs: int): tuple[data: string, exitCode: int] =
+proc runFfmpeg(command: string, args: seq[string], timeoutMs: int): tuple[data: string, exitCode: int] =
   if rtspSnapshotFfmpegRunHook != nil:
     return rtspSnapshotFfmpegRunHook(command, timeoutMs)
 
   let processResult = runProcessPiped(
     "ffmpeg",
-    ffmpegArgs(url, "pipe:1"),
+    args,
     timeoutMs = timeoutMs,
     maxOutputBytes = MaxFfmpegOutputBytes
   )
@@ -87,12 +114,20 @@ proc get*(self: App, context: ExecutionContext): Image =
   let refusal = spawningAppRefusal(self.scene, "rstpSnapshot")
   if refusal.len > 0:
     return renderError(self, context, refusal)
-  let targetRefusal = spawnTargetRefusal(self.appConfig.url, ["rtsp", "rtsps", "http", "https"])
-  if targetRefusal.len > 0:
-    return renderError(self, context, targetRefusal)
+  let target = spawnTarget(self.appConfig.url, ["rtsp", "rtsps", "http", "https"])
+  if target.refusal.len > 0:
+    return renderError(self, context, target.refusal)
   try:
-    let url = self.appConfig.url
-    let command = ffmpegCommandForLog(url, "pipe:1")
+    # While the private-network deny is on, ffmpeg connects to the address
+    # the guard checked, never to a second lookup of the name; an http(s)
+    # server still sees the name in the Host header. (An RTSP server gets
+    # the address in its request URL — RTSP has no Host header — which the
+    # cameras this app is for do not mind.)
+    let hostHeader =
+      if target.address.len > 0 and target.scheme in ["http", "https"]: target.hostname
+      else: ""
+    let args = ffmpegArgs(target.pinnedUrl, "pipe:1", scheme = target.scheme, hostHeader = hostHeader)
+    let command = ffmpegCommandForLog(args)
     let timeoutMs = self.ffmpegTimeoutMs()
 
     if self.frameConfig.debug:
@@ -103,7 +138,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       })
 
     let startedAt = epochTime()
-    var (data, exitCode) = runFfmpeg(command, url, timeoutMs)
+    var (data, exitCode) = runFfmpeg(command, args, timeoutMs)
     let elapsedMs = round((epochTime() - startedAt) * 1000, 3)
 
     if exitCode != 0:

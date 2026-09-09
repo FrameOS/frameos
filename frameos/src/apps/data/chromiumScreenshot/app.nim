@@ -1,10 +1,11 @@
 import pixie
 import frameos/apps
 import frameos/types
+import frameos/local_access
 import frameos/spawn_guard
 import frameos/utils/image
 
-import os, strformat, strutils, random, json, net, sequtils
+import os, strformat, strutils, json, net, sequtils
 import posix except Time
 import frameos/utils/process
 
@@ -13,14 +14,63 @@ const VENV_TIMEOUT_MS = 30 * 60 * 1000
 const BROWSER_START_TIMEOUT_MS = 60 * 1000
 const PLAYWRIGHT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000
 
+# The request gate (frameos/spawn_guard.nim): the guard checked ONE URL
+# before the browser was handed it, but a page is a chain of requests —
+# redirects, sub-resources, iframes — and each of those is a fresh host the
+# guard never saw. While the frame's private-network deny is on
+# (PIN_HOST set: cloud-managed frames), every request the page makes goes
+# through here: the pinned host itself is fine (Chromium resolves it to the
+# checked address through --host-resolver-rules, so it cannot rebind), and
+# any other host is resolved and classified the way the runtime's HTTP
+# client classifies (`not is_global` = loopback, RFC1918, link-local, CGNAT,
+# reserved, multicast) and dropped when private. The lookup is this
+# script's, not Chromium's, so a sub-resource host that rebinds between the
+# two lookups is the residual window — narrower than the "first URL only"
+# it replaces, and the primary host has none.
 const DEFAULT_PLAYWRIGHT_SCRIPT_START = """
+import ipaddress
+import socket
 import time
+from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright
+
+PIN_HOST = PINNED_HOST
+
+def _private_host(host):
+    try:
+        addr = ipaddress.ip_address(host)
+        return not addr.is_global
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return True
+    for info in infos:
+        try:
+            if not ipaddress.ip_address(info[4][0]).is_global:
+                return True
+        except ValueError:
+            return True
+    return not infos
+
+def _gate(route, request):
+    parts = urlsplit(request.url)
+    if parts.scheme not in ("http", "https"):
+        route.abort("blockedbyclient")
+        return
+    host = (parts.hostname or "").lower()
+    if host == PIN_HOST or not _private_host(host):
+        route.continue_()
+    else:
+        route.abort("blockedbyclient")
 
 playwright = sync_playwright().start()
 browser = playwright.chromium.connect_over_cdp("http://127.0.0.1:BROWSER_DEBUG_PORT")
 context = browser.contexts[0] if browser.contexts else browser.new_context()
 page = context.new_page()
+if PIN_HOST is not None:
+    page.route("**/*", _gate)
 page.set_viewport_size({"width": WIDTH, "height": HEIGHT})
 page.goto(URL_TO_CAPTURE, timeout=NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
 """
@@ -43,9 +93,19 @@ const CHROMIUM_PID_FILE = "/tmp/frameos_browser_snapshot_chromium.pid"
 const CHROMIUM_LOG_FILE = "/tmp/frameos_browser_snapshot_chromium.log"
 const CHROMIUM_USER_DATA_DIR = "/tmp/frameos_browser_snapshot_profile"
 const LOW_RAM_ERROR = "Error: Can't take a browser snapshot.\n\nModern browsers need at least 1GB of RAM to run.\n\nThis device has just {memoryMb} MB.\n\nSorry. :("
+# Chromium refuses to start as root without --no-sandbox, and with it a page
+# renders unsandboxed AS ROOT. The runtime is `frameos` (uid 990) on every
+# image since the privileged door shipped (docs/buildroot-privileges.md), and
+# there the real sandbox runs; a root install (a self-hosted backend's SSH
+# deploy, an image from before 9.4) gets the flag only after the local admin
+# has said at the panel that this frame may run shell apps at all.
+const ROOT_SANDBOX_REFUSAL = "chromiumScreenshot: FrameOS runs as root on this frame, so Chromium " &
+  "would render the page unsandboxed as root. Allow shell apps at the panel " &
+  "(Settings → Network → shell apps for store scenes, confirmed with the code " &
+  "shown on the panel) to accept that, or run FrameOS as the unprivileged " &
+  "frameos user (every release image since 9.4 does)."
 const LIGHTWEIGHT_CHROMIUM_ARGS = @[
   "--headless",
-  "--no-sandbox",
   "--disable-gpu",
   "--disable-software-rasterizer",
   "--disable-extensions",
@@ -93,6 +153,13 @@ var
   chromiumEnsureSystemDependenciesHook*: ChromiumEnsureSystemDependenciesHook = nil
   chromiumEnsureVenvExistsHook*: ChromiumEnsureVenvExistsHook = nil
   chromiumEnsureBackgroundBrowserHook*: ChromiumEnsureBackgroundBrowserHook = nil
+  # The --host-resolver-rules the running background Chromium was started
+  # with. A resolver rule is a process-start flag, so a target pinned to
+  # another address (spawn_guard.nim) means a restart. Unknown after a
+  # runtime restart (the browser outlives us): a pinned target then restarts
+  # it once.
+  chromiumRunningResolverRules = ""
+  chromiumRunningResolverRulesKnown = false
 
 when defined(testing):
   # Under -d:testing the bootstrap seams default to no-ops instead of nil.
@@ -109,7 +176,8 @@ when defined(testing):
   chromiumEnsureBackgroundBrowserHook = proc(self: App, width, height: int): bool = false
 
 proc ensureVenvExists(self: App): string
-proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bool
+proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600,
+                             resolverRules = ""): bool
 proc stopBackgroundBrowser(self: App)
 proc shellQuote(value: string): string
 proc pickChromiumBinary(): string
@@ -259,9 +327,19 @@ proc ensureVenvExists(self: App): string =
       self.logError &"Error installing playwright: {e.msg}"
       return
 
-proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bool =
+proc runningAsRoot(): bool =
+  posix.geteuid() == 0
+
+proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600,
+                             resolverRules = ""): bool =
   if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
-    return true
+    let rulesMatch =
+      if chromiumRunningResolverRulesKnown: chromiumRunningResolverRules == resolverRules
+      else: resolverRules.len == 0
+    if rulesMatch:
+      return true
+    self.log "Restarting Chromium: the target's host-resolver rules changed"
+    self.stopBackgroundBrowser()
 
   let existingPid = readPidFromFile(CHROMIUM_PID_FILE)
   if existingPid > 0 and isPidAlive(existingPid):
@@ -284,7 +362,14 @@ proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bo
     # other requested raster, or a 20000x20000 window is Chromium's problem
     # and then the frame's.
     let (windowWidth, windowHeight) = boundedRequestedDimensions(width, height)
-    let chromiumArgs = LIGHTWEIGHT_CHROMIUM_ARGS & @["--window-size=" & $windowWidth & "," & $windowHeight]
+    var chromiumArgs = LIGHTWEIGHT_CHROMIUM_ARGS & @["--window-size=" & $windowWidth & "," & $windowHeight]
+    if runningAsRoot():
+      # Only reachable after the panel ceremony (see get); logged every
+      # start so the choice stays visible.
+      self.log "Chromium runs with --no-sandbox because FrameOS runs as root on this frame"
+      chromiumArgs.add("--no-sandbox")
+    if resolverRules.len > 0:
+      chromiumArgs.add("--host-resolver-rules=" & resolverRules)
     let argString = chromiumArgs.mapIt(shellQuote(it)).join(" ")
     let startCommand = &"nohup {shellQuote(chromiumBinary)} {argString} >> {shellQuote(CHROMIUM_LOG_FILE)} 2>&1 & echo $! > {shellQuote(CHROMIUM_PID_FILE)}"
     # the shell backgrounds chromium with nohup and exits right away
@@ -293,6 +378,8 @@ proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bo
     if response != 0:
       self.logError &"Error starting background Chromium process (response {response})"
       return false
+    chromiumRunningResolverRules = resolverRules
+    chromiumRunningResolverRulesKnown = true
   except CatchableError as e:
     self.logError &"Error starting background Chromium process: {e.msg}"
     return false
@@ -330,6 +417,18 @@ proc stopBackgroundBrowser(self: App) =
       removeFile(CHROMIUM_PID_FILE)
   except CatchableError:
     discard
+  chromiumRunningResolverRules = ""
+  chromiumRunningResolverRulesKnown = false
+
+proc privateWorkDir(): string =
+  ## A fresh 0700 directory for this capture's script and screenshot. The
+  ## script is executed, so a predictable name in a shared /tmp was a
+  ## pre-plant-and-race invitation; mkdtemp's name is the kernel's and the
+  ## mode keeps other users out.
+  var pattern = getTempDir() / "frameos-screenshot-XXXXXX"
+  if posix.mkdtemp(pattern.cstring) == nil:
+    raise newException(OSError, "mkdtemp failed: " & $strerror(errno))
+  pattern
 
 proc pickChromiumBinary(): string =
   let browserCandidates = ["chromium-headless-shell", "chromium-browser", "chromium"]
@@ -363,21 +462,28 @@ proc get*(self: App, context: ExecutionContext): Image =
   if refusal.len > 0:
     self.logError refusal
     return renderError(width, height, refusal)
-  let targetRefusal = spawnTargetRefusal(self.appConfig.url, ["http", "https"])
-  if targetRefusal.len > 0:
-    self.logError "chromiumScreenshot refused to open the configured URL: " & targetRefusal
-    return renderError(width, height, targetRefusal)
+  let target = spawnTarget(self.appConfig.url, ["http", "https"])
+  if target.refusal.len > 0:
+    self.logError "chromiumScreenshot refused to open the configured URL: " & target.refusal
+    return renderError(width, height, target.refusal)
+  if runningAsRoot() and not storedAllowShellApps():
+    self.logError ROOT_SANDBOX_REFUSAL
+    return renderError(width, height, ROOT_SANDBOX_REFUSAL)
+  # While the private-network deny is on, Chromium must connect the checked
+  # host to the checked address and nothing else (spawn_guard.nim).
+  let resolverRules =
+    if target.address.len > 0: "MAP " & target.hostname & " " & target.address
+    else: ""
 
   try:
-    let screenshotFile = fmt"/tmp/frameos_screenshot_{rand(1000000)}_{rand(1000000)}.png"
-    let scriptFile = fmt"/tmp/frameos_playwright_script_{rand(1000000)}.py"
+    let workDir = privateWorkDir()
+    let screenshotFile = workDir / "screenshot.png"
+    let scriptFile = workDir / "capture.py"
 
     # Remove the temp files on every exit path, not just success: a scene
     # stuck on a failing URL re-renders for months, and /tmp is RAM-backed.
     defer:
-      try: removeFile(scriptFile)
-      except OSError: discard
-      try: removeFile(screenshotFile)
+      try: removeDir(workDir)
       except OSError: discard
 
     self.log &"Capturing URL `{self.appConfig.url}` at {width}x{height} in {screenshotFile}"
@@ -393,7 +499,7 @@ proc get*(self: App, context: ExecutionContext): Image =
         chromiumEnsureVenvExistsHook(self)
     let venvPython = venvRoot & "/bin/python"
     let browserReady = if chromiumEnsureBackgroundBrowserHook == nil:
-        self.ensureBackgroundBrowser(width, height)
+        self.ensureBackgroundBrowser(width, height, resolverRules)
       else:
         chromiumEnsureBackgroundBrowserHook(self, width, height)
     if not browserReady:
@@ -411,7 +517,9 @@ proc get*(self: App, context: ExecutionContext): Image =
     else:
       "context = browser.new_context()"
 
-    let scripHead = DEFAULT_PLAYWRIGHT_SCRIPT_START.replace("URL_TO_CAPTURE", $(%*(self.appConfig.url)))
+    let pinnedHost = if target.address.len > 0: $(%*(target.hostname.toLowerAscii())) else: "None"
+    let scripHead = DEFAULT_PLAYWRIGHT_SCRIPT_START.replace("URL_TO_CAPTURE", $(%*(target.url)))
+      .replace("PINNED_HOST", pinnedHost)
       .replace("BROWSER_DEBUG_PORT", $CHROMIUM_DEBUG_PORT)
       .replace("context = browser.contexts[0] if browser.contexts else browser.new_context()", scriptContext)
       .replace("WIDTH", $width).replace("HEIGHT", $height)
@@ -438,7 +546,7 @@ page.wait_for_timeout(1500)
         self.log "Retrying Browser Snapshot with a fresh Chromium process"
         self.stopBackgroundBrowser()
         let browserReady = if chromiumEnsureBackgroundBrowserHook == nil:
-            self.ensureBackgroundBrowser(width, height)
+            self.ensureBackgroundBrowser(width, height, resolverRules)
           else:
             chromiumEnsureBackgroundBrowserHook(self, width, height)
         if not browserReady:

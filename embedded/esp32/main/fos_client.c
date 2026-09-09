@@ -1002,6 +1002,11 @@ static esp_err_t render_once(void)
         if (s_render_count == 1) {
             ESP_LOGI(TAG, "render task stack free at low-water mark: %u bytes",
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            /* "Reached rendering" is the rollback window: a new image that
+             * got this far has booted, brought the panel up, run the Nim
+             * runtime and drawn a scene. Before this point any reset rolls
+             * back to the previous slot (main.c no longer marks on Wi-Fi). */
+            fos_ota_mark_boot_valid();
         }
     }
     int64_t total_ms = (esp_timer_get_time() - start) / 1000;
@@ -1539,6 +1544,11 @@ static void client_task(void *arg)
                  * the stack a moment to actually put them on the air. */
                 vTaskDelay(pdMS_TO_TICKS(250));
             }
+            /* An orderly sleep is not a crash: a battery frame whose first
+             * render after an update failed for a network reason must not
+             * have its own wake-up (a bootloader pass) roll the image back.
+             * A Nim panic never gets here — it resets first, and rolls back. */
+            fos_ota_mark_boot_valid();
             /* USB console drops in deep sleep; that's the point (battery). */
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }

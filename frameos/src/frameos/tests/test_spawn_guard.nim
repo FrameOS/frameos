@@ -78,6 +78,34 @@ suite "spawn targets":
     check spawnTargetRefusal("rtsp://cam/live", ["http", "https"]).contains("scheme")
     check spawnTargetRefusal("https:///nohost", ["http", "https"]).contains("no host")
     check spawnTargetRefusal("   ", ["http", "https"]).contains("no URL")
+
+  test "the parsed target carries scheme, host and the scheme's default port":
+    let plain = spawnTarget("  https://example.com/page ", ["http", "https"])
+    check plain.refusal == ""
+    check plain.url == "https://example.com/page"
+    check plain.scheme == "https"
+    check plain.hostname == "example.com"
+    check plain.port == 443
+    check spawnTarget("rtsp://cam.example/live", ["rtsp"]).port == 554
+    check spawnTarget("http://cam.example:8080/x", ["http"]).port == 8080
+    # With the deny off nothing is pinned: the child resolves for itself.
+    check plain.address == ""
+    check plain.pinnedUrl == plain.url
+
+  test "with the deny on, the target is pinned to the address that was checked":
+    # A literal address needs no lookup, so the pin is the literal itself
+    # and the URL is left alone; a private literal is refused outright.
+    setLocalNetworkPolicy(true)
+    let literal = spawnTarget("http://93.184.216.34/x", ["http"])
+    check literal.refusal == ""
+    check literal.address == ""
+    check literal.pinnedUrl == "http://93.184.216.34/x"
+    check spawnTarget("rtsp://192.168.1.20/live", ["rtsp"]).refusal.contains("blocked")
+    check spawnTarget("http://127.0.0.1:8787/", ["http"]).refusal.contains("blocked")
+    # A name resolves once; the child then gets that answer, never a second
+    # lookup of the name (the rebinding hole). localhost is the one name a
+    # test can resolve without the network, and it classifies as private.
+    check spawnTarget("http://localhost/", ["http"]).refusal.contains("blocked")
     check spawnTargetRefusal("http://example.com:notaport/", ["http", "https"]).contains("port")
 
   test "the private-network policy applies to the child's target too":

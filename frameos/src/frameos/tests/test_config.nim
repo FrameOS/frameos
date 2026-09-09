@@ -110,6 +110,20 @@ block test_load_config:
         doAssert config.mountpoints.items[0].target == "/mnt/photos"
         doAssert config.mountpoints.items[0].username == "frame"
 
+block test_server_scheme_defaults:
+    # A frame.json from before `serverScheme` existed: the old port guess.
+    doAssert parseFrameConfig($(%*{"serverHost": "b", "serverPort": 8443})).serverScheme == "https"
+    doAssert parseFrameConfig($(%*{"serverHost": "b", "serverPort": 443})).serverScheme == "https"
+    doAssert parseFrameConfig($(%*{"serverHost": "b", "serverPort": 8989})).serverScheme == "http"
+    doAssert parseFrameConfig($(%*{"serverHost": "b"})).serverScheme == "http"
+    # Stated beats guessed, in either direction.
+    doAssert parseFrameConfig($(%*{"serverPort": 8443, "serverScheme": "http"})).serverScheme == "http"
+    doAssert parseFrameConfig($(%*{"serverPort": 9000, "serverScheme": "https"})).serverScheme == "https"
+    doAssert parseFrameConfig($(%*{"serverPort": 9000, "serverScheme": "HTTPS://"})).serverScheme == "https"
+    # Junk falls back to the port, never to a third value.
+    doAssert parseFrameConfig($(%*{"serverPort": 8443, "serverScheme": "ftp"})).serverScheme == "https"
+    doAssert parseFrameConfig($(%*{"serverPort": 8080, "serverScheme": 12})).serverScheme == "http"
+
 block test_error_behavior_defaults:
     let config = parseFrameConfig($(%*{"errorBehavior": {
         "mode": "not-a-mode",

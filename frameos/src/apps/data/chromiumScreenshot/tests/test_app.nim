@@ -1,4 +1,5 @@
 import std/[json, strutils, unittest]
+import std/posix
 import pixie
 
 import ../app
@@ -112,6 +113,47 @@ suite "data/chromiumScreenshot app":
     app.init()
     discard app.get(ExecutionContext(hasImage: false))
     check logs.logContains("refused to open the configured URL")
+
+  test "as root, Chromium is refused until the panel ceremony allowed shell apps":
+    let previousRamProbeHook = chromiumRamProbeHook
+    let previousEnsureSystemDependenciesHook = chromiumEnsureSystemDependenciesHook
+    let previousEnsureVenvExistsHook = chromiumEnsureVenvExistsHook
+    let previousEnsureBackgroundBrowserHook = chromiumEnsureBackgroundBrowserHook
+    defer:
+      chromiumRamProbeHook = previousRamProbeHook
+      chromiumEnsureSystemDependenciesHook = previousEnsureSystemDependenciesHook
+      chromiumEnsureVenvExistsHook = previousEnsureVenvExistsHook
+      chromiumEnsureBackgroundBrowserHook = previousEnsureBackgroundBrowserHook
+      forgetStoredLocalNetworkAccess()
+
+    ramProbeValue = 4_000_000
+    ensureBackgroundBrowserCalls = 0
+    ensureBackgroundBrowserResult = true
+    chromiumRamProbeHook = fakeRamProbe
+    chromiumEnsureSystemDependenciesHook = fakeEnsureSystemDependencies
+    chromiumEnsureVenvExistsHook = fakeEnsureVenvExists
+    chromiumEnsureBackgroundBrowserHook = fakeEnsureBackgroundBrowser
+
+    let logs = LogStore(items: @[])
+    let app = makeApp(FrameScene(logger: newLogger(logs)), FrameConfig(width: 10, height: 6))
+    app.init()
+    let browserCallsAfterInit = ensureBackgroundBrowserCalls
+    let outputImage = app.get(ExecutionContext(hasImage: false))
+    check outputImage.width == 10
+    check outputImage.height == 6
+    if geteuid() == 0:
+      # Root (CI containers): the render is refused and the browser never
+      # asked for, until the local admin accepted it at the panel.
+      check ensureBackgroundBrowserCalls == browserCallsAfterInit
+      check logs.logContains("unsandboxed as root")
+      persistAllowShellApps(true)
+      discard app.get(ExecutionContext(hasImage: false))
+      check ensureBackgroundBrowserCalls > browserCallsAfterInit
+    else:
+      # Unprivileged (the frameos user, every dev laptop): no gate, and the
+      # sandbox flag is never passed.
+      check ensureBackgroundBrowserCalls > browserCallsAfterInit
+      check not logs.logContains("unsandboxed as root")
 
   test "low RAM guard returns frame-sized error image and skips bootstrap":
     let previousRamProbeHook = chromiumRamProbeHook

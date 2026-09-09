@@ -5,6 +5,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
   import json, pixie, locks, tables, options
 else:
   import json, pixie, locks, tables, options, asyncdispatch, mummy
+import std/strutils
 import frameos/ids
 export ids
 import frameos/spool
@@ -13,6 +14,18 @@ import frameos/js_runtime/burrito
 
 const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
 
+proc serverSchemeFromPort*(port: int): string =
+  ## The pre-2026.9.13 guess, kept only for a frame.json written before
+  ## `serverScheme` existed: a port ending in 443 meant TLS. Every current
+  ## writer (the backend, frameos-setup.sh, the local admin page) states it.
+  if port mod 1000 == 443: "https" else: "http"
+
+proc normalizeServerScheme*(scheme: string, port: int): string =
+  ## "http" | "https", from the configured value when it is one of those and
+  ## from the port otherwise (absent key, legacy config, a typo).
+  let cleaned = scheme.strip().toLowerAscii().strip(leading = false, chars = {':', '/'})
+  if cleaned in ["http", "https"]: cleaned else: serverSchemeFromPort(port)
+
 type
   # Parsed from config.json
   FrameConfig* = ref object
@@ -20,6 +33,7 @@ type
     mode*: string
     serverHost*: string
     serverPort*: int
+    serverScheme*: string ## "http" | "https"; setConfigDefaults fills a missing one
     serverApiKey*: string
     serverSendLogs*: bool
     frameHost*: string

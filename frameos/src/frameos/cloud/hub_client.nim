@@ -1602,6 +1602,12 @@ proc runHandshake(socket: WebSocket, ctx: CloudVerbContext): Future[JsonNode] {.
   ## link's granted `scopes`.
   var hello = helloStatePayload(ctx.frameConfig, ctx.scenesChecksum)
   hello["type"] = %"hello"
+  # Where a LAN browser reaches this admin panel: the provider fills a link
+  # that has no local_origin (claim-token enrollments before this field was
+  # sent), which is what "Sign in with FrameOS Cloud" redirects to.
+  let localOrigin = deviceLocalOrigin(ctx.frameConfig)
+  if localOrigin.len > 0:
+    hello["local_origin"] = %localOrigin
   await socket.send($hello)
   var challenge: JsonNode
   while true:

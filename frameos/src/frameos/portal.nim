@@ -52,6 +52,12 @@ type
     password*: string
     # "cloud" | "backend" | "none": what controls this frame after setup.
     controlMode*: string
+    # Whether the request named a control mode at all. A minimal POST /setup
+    # (Wi-Fi and hostname only — a script, an older portal page) must not
+    # move the frame off its backend or drop a queued cloud claim: without
+    # this flag the derived default ran the "none" branch, which clears
+    # serverHost, and a backend-managed frame came out of setup orphaned.
+    controlModeExplicit*: bool
     cloudUrl*: string
     claimToken*: string
     serverHost*: string
@@ -106,12 +112,23 @@ proc permissionsFromMode(mode: int): set[FilePermission] =
   if (mode and 0o001) != 0: result.incl(fpOthersExec)
 
 proc defaultPortalWriteFileHook(path, content: string, mode: int): bool {.gcsafe, nimcall.} =
+  ## wpa_supplicant.conf and hostapd.conf carry the Wi-Fi passphrase in
+  ## clear: a plain writeFile followed by a chmod left them world-readable
+  ## for the window in between (and the plain write follows a symlink). A
+  ## non-executable mode goes through writeFileAtomically, whose temporary
+  ## inode is born with the final mode; the one executable file written
+  ## here (the udhcpc script, no secrets) keeps the simple path.
   try:
     let dir = parentDir(path)
     if dir.len > 0 and not dirExists(dir):
       createDir(dir)
-    writeFile(path, content)
-    setFilePermissions(path, permissionsFromMode(mode))
+    if (mode and 0o111) == 0:
+      writeFileAtomically(path, content,
+        private = (mode and 0o077) == 0,
+        groupReadableOnly = (mode and 0o007) == 0)
+    else:
+      writeFile(path, content)
+      setFilePermissions(path, permissionsFromMode(mode))
     true
   except CatchableError:
     false
@@ -208,8 +225,12 @@ proc pLog(ev: string, extra: JsonNode = %*{}) =
 proc shQuote(s: string): string =
   "'" & s.replace("'", "'\"'\"'") & "'"
 
-proc masked*(s: string; keep: int = 2): string =
-  if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
+proc masked*(s: string): string =
+  ## Log-safe stand-in for a secret (Wi-Fi PSK, admin password, claim token).
+  ## Fixed width and no prefix: these logs leave the device (cloud telemetry,
+  ## backend log shipping), and two characters plus the exact length was a
+  ## real head start on a short passphrase.
+  if s.len == 0: "" else: "********"
 
 proc maskedPasswordArgs*(args: seq[string]): seq[string] =
   ## Copy of args with the value following any "password" argument masked,
@@ -861,7 +882,8 @@ proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig)
   let deviceConfig = ensureDeviceConfig(frameConfig)
   let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
   var controlMode = params.getOrDefault("controlMode", "").strip().toLowerAscii()
-  if controlMode notin ["cloud", "backend", "none"]:
+  let controlModeExplicit = controlMode in ["cloud", "backend", "none"]
+  if not controlModeExplicit:
     controlMode = defaultControlMode(frameConfig)
   let pending = pendingCloudEnrollment()
   let defaultCloudUrl =
@@ -871,6 +893,7 @@ proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig)
     ssid: params.getOrDefault("ssid", ""),
     password: params.getOrDefault("password", ""),
     controlMode: controlMode,
+    controlModeExplicit: controlModeExplicit,
     cloudUrl: params.getOrDefault("cloudUrl", defaultCloudUrl).strip(),
     claimToken: params.getOrDefault("claimToken", "").strip(),
     serverHost: params.getOrDefault("serverHost", frameConfig.serverHost),
@@ -963,7 +986,11 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     if data == nil or data.kind != JObject:
       data = newJObject()
 
-    if options.controlMode == "backend":
+    if not options.controlModeExplicit:
+      # Nothing about the control plane changes: serverHost, the queued
+      # claim and the panel link code all stay as they are.
+      discard
+    elif options.controlMode == "backend":
       if options.serverHost.strip().len > 0:
         data["serverHost"] = %options.serverHost.strip()
         frameConfig.serverHost = options.serverHost.strip()
@@ -1047,7 +1074,9 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     writePrivateFile(filename, pretty(data, indent = 4) & "\n")
     writeHostnameBestEffort(hostnameBase)
 
-    if options.controlMode == "cloud":
+    if not options.controlModeExplicit:
+      discard
+    elif options.controlMode == "cloud":
       if options.claimToken.len > 0:
         # A fresh claim code replaces whatever enrollment was queued; blank
         # keeps the boot-provisioned one. The hub thread redeems it once the

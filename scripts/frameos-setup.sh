@@ -888,6 +888,7 @@ data.update({
     "httpsProxy": https_proxy,
     "serverHost": env("FRAMEOS_SERVER_HOST"),
     "serverPort": env_int("FRAMEOS_SERVER_PORT", 8989),
+    "serverScheme": env("FRAMEOS_SERVER_SCHEME", "http"),
     "serverApiKey": env("FRAMEOS_SERVER_API_KEY"),
     "serverSendLogs": env_bool("FRAMEOS_SERVER_SEND_LOGS") if remote_enabled else False,
     "width": env_int("FRAMEOS_WIDTH", 800),
@@ -1019,6 +1020,7 @@ existing_admin_password="$(json_get "$existing_config" frameAdminAuth.pass "")"
 default_frame_access_key="$(json_get "$existing_config" frameAccessKey "$(random_secret)")"
 default_server_host="$(json_get "$existing_config" serverHost "")"
 default_server_port="$(json_get "$existing_config" serverPort "8989")"
+default_server_scheme="$(json_get "$existing_config" serverScheme "")"
 default_server_api_key="$(json_get "$existing_config" serverApiKey "")"
 default_remote_secret="$(json_get "$existing_config" agent.agentSharedSecret "")"
 default_remote_enabled="$(json_get "$existing_config" agent.agentEnabled "false")"
@@ -1147,6 +1149,15 @@ FRAMEOS_BACKEND_ENABLED="${FRAMEOS_BACKEND_ENABLED:-$(ask_yes_no "Connect this f
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   FRAMEOS_SERVER_HOST="${FRAMEOS_SERVER_HOST:-$(ask_required "Backend host" "$default_server_host")}"
   FRAMEOS_SERVER_PORT="${FRAMEOS_SERVER_PORT:-$(ask_int "Backend port" "$default_server_port")}"
+  # Stated, never guessed from the port: the log shipper, FrameOS Remote and
+  # the local admin page all read serverScheme. A config from before the key
+  # existed defaults the prompt the way the old heuristic read it.
+  if [ -z "$default_server_scheme" ]; then
+    if [ "$FRAMEOS_SERVER_PORT" = "443" ] || [ "$FRAMEOS_SERVER_PORT" = "8443" ]; then default_server_scheme="y"; else default_server_scheme="n"; fi
+  elif [ "$default_server_scheme" = "https" ]; then default_server_scheme="y"; else default_server_scheme="n"; fi
+  if [ -z "$FRAMEOS_SERVER_SCHEME" ]; then
+    if [ "$(ask_yes_no "Backend uses HTTPS (TLS)" "$default_server_scheme")" = "true" ]; then FRAMEOS_SERVER_SCHEME="https"; else FRAMEOS_SERVER_SCHEME="http"; fi
+  fi
   FRAMEOS_SERVER_API_KEY="${FRAMEOS_SERVER_API_KEY:-$(ask_required "Backend server API key" "$default_server_api_key")}"
   FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$(ask_required "FrameOS Remote shared secret" "$default_remote_secret")}"
   FRAMEOS_AGENT_RUN_COMMANDS="${FRAMEOS_AGENT_RUN_COMMANDS:-$(ask_yes_no "Allow backend terminal/deploy commands through FrameOS Remote" "$default_remote_run_commands")}"
@@ -1154,6 +1165,7 @@ if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
 else
   FRAMEOS_SERVER_HOST="${FRAMEOS_SERVER_HOST:-}"
   FRAMEOS_SERVER_PORT="${FRAMEOS_SERVER_PORT:-8989}"
+  FRAMEOS_SERVER_SCHEME="${FRAMEOS_SERVER_SCHEME:-http}"
   FRAMEOS_SERVER_API_KEY="${FRAMEOS_SERVER_API_KEY:-}"
   FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$default_remote_secret}"
   FRAMEOS_AGENT_RUN_COMMANDS="${FRAMEOS_AGENT_RUN_COMMANDS:-false}"
@@ -1190,7 +1202,7 @@ FRAMEOS_FLIP="${FRAMEOS_FLIP:-$(json_get "$existing_config" flip "")}"
 export FRAMEOS_RELEASE_VERSION
 export FRAMEOS_NAME FRAMEOS_DEVICE FRAMEOS_WIDTH FRAMEOS_HEIGHT FRAMEOS_ROTATE
 export FRAMEOS_FRAME_HOST FRAMEOS_FRAME_PORT FRAMEOS_FRAME_ACCESS FRAMEOS_FRAME_ACCESS_KEY
-export FRAMEOS_SERVER_HOST FRAMEOS_SERVER_PORT FRAMEOS_SERVER_API_KEY FRAMEOS_SERVER_SEND_LOGS
+export FRAMEOS_SERVER_HOST FRAMEOS_SERVER_PORT FRAMEOS_SERVER_SCHEME FRAMEOS_SERVER_API_KEY FRAMEOS_SERVER_SEND_LOGS
 export FRAMEOS_BACKEND_ENABLED FRAMEOS_AGENT_SHARED_SECRET FRAMEOS_AGENT_RUN_COMMANDS
 export FRAMEOS_ADMIN_AUTH_ENABLED FRAMEOS_ADMIN_USER FRAMEOS_ADMIN_PASSWORD
 export FRAMEOS_HTTP_UPLOAD_URL FRAMEOS_DEVICE_VCOM
@@ -1442,7 +1454,7 @@ if [ -n "$GENERATED_ADMIN_PASSWORD" ]; then
   say "  Generated admin password: $GENERATED_ADMIN_PASSWORD"
 fi
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-  say "  Backend: $FRAMEOS_SERVER_HOST:$FRAMEOS_SERVER_PORT"
+  say "  Backend: $FRAMEOS_SERVER_SCHEME://$FRAMEOS_SERVER_HOST:$FRAMEOS_SERVER_PORT"
 elif [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
   # %/ strips a trailing slash: the URL is user-supplied and "https://x/" would
   # otherwise print "https://x//frames". The pending-enrollment file normalizes
