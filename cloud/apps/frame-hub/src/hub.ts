@@ -68,6 +68,7 @@ import {
   isAllowedBrowserOrigin,
 } from "./env";
 import { errorField, logError, logInfo, logWarn } from "./log";
+import { createGuardedInterval } from "./periodic";
 import {
   browserEvent,
   commandMessage,
@@ -302,13 +303,20 @@ export interface FrameHubOptions {
   sweepIntervalMs?: number;
   lifecycleAuditDebounceMs?: number;
   assetStreamIdleMs?: number;
+  // Test seam: called with the text of every statement this hub's pool
+  // sends, so a test can count what one sweep costs. Gives the hub its own
+  // (uncached) pool; production leaves it unset.
+  onQuery?: (query: string) => void;
 }
 
 export interface FrameHub {
   port: number;
   connectedFrames(): number;
-  // Runs one periodic sweep immediately; the interval keeps running too.
+  // Runs one periodic sweep immediately (after any sweep already in flight);
+  // the interval keeps running too.
   sweep(): Promise<void>;
+  // Timer ticks skipped because the previous sweep was still running.
+  skippedSweeps(): number;
   close(): Promise<void>;
 }
 
@@ -319,7 +327,9 @@ export async function startFrameHub(
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required to start the frame hub");
   }
-  const db = createDb(databaseUrl);
+  const db = options.onQuery
+    ? createDb(databaseUrl, { onQuery: options.onQuery })
+    : createDb(databaseUrl);
   const authTimeoutMs = options.authTimeoutMs ?? defaultAuthTimeoutMs;
   const heartbeatIntervalMs =
     options.heartbeatIntervalMs ?? defaultHeartbeatIntervalMs;
@@ -506,13 +516,20 @@ export async function startFrameHub(
   // this session wrote can be outstanding yet), or the write was lost on a
   // still-live connection (caught by the sweep, cutoff = now minus the grace
   // period).
-  async function redeliverSentCommands(frameId: string, cutoff: Date) {
+  //
+  // Takes a list of frames so the sweep can do this for every connected
+  // device in three statements instead of three per device; the per-frame
+  // semantics (and the per-frame log line) are unchanged.
+  async function redeliverSentCommands(frameIds: string[], cutoff: Date) {
+    if (frameIds.length === 0) {
+      return 0;
+    }
     await db
       .update(frameCommands)
       .set({ error: "delivered_once", status: "expired" })
       .where(
         and(
-          eq(frameCommands.frameId, frameId),
+          inArray(frameCommands.frameId, frameIds),
           eq(frameCommands.status, "sent"),
           lt(frameCommands.sentAt, cutoff),
           inArray(frameCommands.type, [
@@ -532,7 +549,7 @@ export async function startFrameHub(
       .set({ error: "superseded", status: "expired" })
       .where(
         and(
-          eq(frameCommands.frameId, frameId),
+          inArray(frameCommands.frameId, frameIds),
           eq(frameCommands.status, "sent"),
           lt(frameCommands.sentAt, cutoff),
           sql`exists (
@@ -549,21 +566,51 @@ export async function startFrameHub(
       .set({ sentAt: null, status: "pending" })
       .where(
         and(
-          eq(frameCommands.frameId, frameId),
+          inArray(frameCommands.frameId, frameIds),
           eq(frameCommands.status, "sent"),
           lt(frameCommands.sentAt, cutoff),
         ),
       )
-      .returning({ id: frameCommands.id });
-    if (requeued.length > 0) {
-      logWarn("command.redelivering", { count: requeued.length, frameId });
+      .returning({ frameId: frameCommands.frameId, id: frameCommands.id });
+    const perFrame = new Map<string, number>();
+    for (const row of requeued) {
+      perFrame.set(row.frameId, (perFrame.get(row.frameId) ?? 0) + 1);
+    }
+    for (const [frameId, count] of perFrame) {
+      logWarn("command.redelivering", { count, frameId });
     }
     return requeued.length;
   }
 
+  // Which of these frames have a command waiting. One statement for the
+  // whole connected set: the sweep drains only the frames that come back,
+  // and in the steady state (NOTIFY already drained everything) that is none.
+  async function framesWithPendingCommands(frameIds: string[]) {
+    if (frameIds.length === 0) {
+      return new Set<string>();
+    }
+    const rows = await db
+      .selectDistinct({ frameId: frameCommands.frameId })
+      .from(frameCommands)
+      .where(
+        and(
+          inArray(frameCommands.frameId, frameIds),
+          eq(frameCommands.status, "pending"),
+        ),
+      );
+    return new Set(rows.map((row) => row.frameId));
+  }
+
   // Drain the durable command queue to a live device socket, oldest first.
   // Serialized per session: a NOTIFY landing mid-drain queues one more pass.
-  async function drainCommands(session: DeviceSession) {
+  //
+  // `expire: false` is for the sweep, which has just expired every frame's
+  // stale commands in one statement and does not need it again on the first
+  // pass; a queued second pass (a NOTIFY landed mid-drain) expires as usual.
+  async function drainCommands(
+    session: DeviceSession,
+    { expire = true }: { expire?: boolean } = {},
+  ) {
     if (!session.ready || session.closed) {
       return;
     }
@@ -572,10 +619,14 @@ export async function startFrameHub(
       return;
     }
     session.draining = true;
+    let expireThisPass = expire;
     try {
       do {
         session.drainQueued = false;
-        await expireStaleCommands(session.frame.id);
+        if (expireThisPass) {
+          await expireStaleCommands(session.frame.id);
+        }
+        expireThisPass = true;
         const pending = await db
           .select()
           .from(frameCommands)
@@ -668,20 +719,42 @@ export async function startFrameHub(
   // device redials and hears the new grant in a fresh `ready` (neither
   // device plane takes an unsolicited scope message; both reconnect on any
   // close but 4401).
-  async function frameSessionStaleness(
+  //
+  // The read is batched (one statement for every connected frame) because the
+  // sweep asks this of the whole connected set every 30 s; the NOTIFY path
+  // asks for one frame.
+  type Staleness = "stale" | "rescoped" | undefined;
+
+  async function frameStalenessRows(frameIds: string[]) {
+    const rows =
+      frameIds.length === 0
+        ? []
+        : await db
+            .select({
+              frameId: frames.id,
+              providerClientMetadata: linkedClients.providerClientMetadata,
+              publicKey: frames.publicKey,
+              revokedAt: linkedClients.revokedAt,
+              status: frames.status,
+            })
+            .from(frames)
+            .innerJoin(
+              linkedClients,
+              eq(linkedClients.id, frames.linkedClientId),
+            )
+            .where(inArray(frames.id, frameIds));
+    return new Map(rows.map((row) => [row.frameId, row]));
+  }
+
+  type StalenessRow =
+    Awaited<ReturnType<typeof frameStalenessRows>> extends Map<string, infer Row>
+      ? Row
+      : never;
+
+  function judgeStaleness(
     session: DeviceSession,
-  ): Promise<"stale" | "rescoped" | undefined> {
-    const [row] = await db
-      .select({
-        providerClientMetadata: linkedClients.providerClientMetadata,
-        publicKey: frames.publicKey,
-        revokedAt: linkedClients.revokedAt,
-        status: frames.status,
-      })
-      .from(frames)
-      .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
-      .where(eq(frames.id, session.frame.id))
-      .limit(1);
+    row: StalenessRow | undefined,
+  ): Staleness {
     if (
       !row ||
       row.status === "revoked" ||
@@ -694,6 +767,27 @@ export async function startFrameHub(
       return "rescoped";
     }
     return undefined;
+  }
+
+  async function frameSessionStaleness(
+    session: DeviceSession,
+  ): Promise<Staleness> {
+    const rows = await frameStalenessRows([session.frame.id]);
+    return judgeStaleness(session, rows.get(session.frame.id));
+  }
+
+  // The stale / rescoped exits, shared by the NOTIFY wake and the sweep.
+  // Returns true when the session was closed and must not be drained.
+  async function closeIfStale(session: DeviceSession, staleness: Staleness) {
+    if (staleness === "stale") {
+      await kickRevokedSession(session);
+      return true;
+    }
+    if (staleness === "rescoped") {
+      await closeRescopedSession(session);
+      return true;
+    }
+    return false;
   }
 
   async function isFrameSessionStale(session: DeviceSession) {
@@ -737,18 +831,12 @@ export async function startFrameHub(
     if (!session.ready || !session.readySent || session.closed) {
       return;
     }
-    const staleness = await frameSessionStaleness(session);
-    if (staleness === "stale") {
-      await kickRevokedSession(session);
-      return;
-    }
-    if (staleness === "rescoped") {
-      await closeRescopedSession(session);
+    if (await closeIfStale(session, await frameSessionStaleness(session))) {
       return;
     }
     // Anything still unacked well past its write is treated as lost.
     await redeliverSentCommands(
-      session.frame.id,
+      [session.frame.id],
       new Date(Date.now() - redeliverAfterMs),
     );
     await drainCommands(session);
@@ -865,7 +953,7 @@ export async function startFrameHub(
     // A fresh session cannot have written anything yet, so every command
     // still in "sent" belongs to a socket that died before acking: requeue it
     // all (cutoff = now) before counting what the device is about to receive.
-    await redeliverSentCommands(frameId, now);
+    await redeliverSentCommands([frameId], now);
     const [pendingRow] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(frameCommands)
@@ -2151,7 +2239,7 @@ export async function startFrameHub(
   });
 
   // Liveness: ping every 30s, terminate sockets that missed a pong.
-  const heartbeatTimer = setInterval(() => {
+  function runHeartbeat() {
     const now = Date.now();
     for (const session of deviceSessions.values()) {
       if (!session.alive) {
@@ -2186,7 +2274,14 @@ export async function startFrameHub(
         }
       }
     }
-  }, heartbeatIntervalMs);
+  }
+  const heartbeat = createGuardedInterval({
+    intervalMs: heartbeatIntervalMs,
+    onError: (error) =>
+      logError("heartbeat.failed", { error: errorField(error) }),
+    onSkip: () => logWarn("heartbeat.tick_skipped"),
+    run: runHeartbeat,
+  });
 
   // Browser sockets authenticate once, at upgrade; a session revoked later
   // (logout, admin revoke, expiry) has to be noticed here or the socket keeps
@@ -2218,18 +2313,61 @@ export async function startFrameHub(
   // pending/sent commands whose TTL passed while no one was draining them,
   // plus the browser-session revocation recheck.
   //
+  // The per-device work of a wake (the staleness re-read, the three
+  // redelivery statements, the pending check) is done here for the whole
+  // connected set in one statement each, so a tick costs a handful of
+  // queries however many devices are connected; only a frame that actually
+  // has a command waiting (or has to be kicked) gets its own statements.
+  // The steady state — NOTIFY drained everything, nobody revoked — is six
+  // statements per tick (expiry, staleness, the three redelivery updates,
+  // the pending check), pinned by the "sweep" integration tests.
+  //
   // One session's failure (a database error mid-drain, a socket that went
   // away between the readyState check and the write) must not skip the wake
   // of every session after it in iteration order — the sweep is the fallback
   // for a missed NOTIFY, so a frame skipped here waits a whole interval.
   async function runSweep() {
     await expireStaleCommands();
-    for (const session of deviceSessions.values()) {
-      if (!session.ready) {
+    const sessions = [...deviceSessions.values()].filter(
+      (session) => session.ready && session.readySent && !session.closed,
+    );
+    const staleness = await frameStalenessRows(
+      sessions.map((session) => session.frame.id),
+    );
+    const live: DeviceSession[] = [];
+    for (const session of sessions) {
+      try {
+        const verdict = judgeStaleness(
+          session,
+          staleness.get(session.frame.id),
+        );
+        if (!(await closeIfStale(session, verdict))) {
+          live.push(session);
+        }
+      } catch (error) {
+        logError("sweep.wake_failed", {
+          error: errorField(error),
+          frameId: session.frame.id,
+        });
+      }
+    }
+    const liveIds = live.map((session) => session.frame.id);
+    try {
+      // Anything still unacked well past its write is treated as lost.
+      await redeliverSentCommands(
+        liveIds,
+        new Date(Date.now() - redeliverAfterMs),
+      );
+    } catch (error) {
+      logError("sweep.redeliver_failed", { error: errorField(error) });
+    }
+    const withPending = await framesWithPendingCommands(liveIds);
+    for (const session of live) {
+      if (!withPending.has(session.frame.id)) {
         continue;
       }
       try {
-        await wakeSession(session);
+        await drainCommands(session, { expire: false });
       } catch (error) {
         logError("sweep.wake_failed", {
           error: errorField(error),
@@ -2240,11 +2378,16 @@ export async function startFrameHub(
     await closeRevokedBrowserSockets();
   }
 
-  const sweepTimer = setInterval(() => {
-    runSweep().catch((error: unknown) =>
-      logError("sweep.failed", { error: errorField(error) }),
-    );
-  }, sweepIntervalMs);
+  // Guarded: a tick that outlives the interval (a slow database, many frames
+  // with work) is not started again on top of itself — the next tick is
+  // skipped and logged instead.
+  const sweep = createGuardedInterval({
+    intervalMs: sweepIntervalMs,
+    onError: (error) => logError("sweep.failed", { error: errorField(error) }),
+    onSkip: () =>
+      logWarn("sweep.tick_skipped", { connected: deviceSessions.size }),
+    run: runSweep,
+  });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -2263,8 +2406,8 @@ export async function startFrameHub(
       return;
     }
     closed = true;
-    clearInterval(heartbeatTimer);
-    clearInterval(sweepTimer);
+    heartbeat.stop();
+    sweep.stop();
     try {
       await listenClient.end({ timeout: 5 });
     } catch (error) {
@@ -2310,12 +2453,18 @@ export async function startFrameHub(
       // so shutdown cannot hang on a half-open peer.
       setTimeout(() => server.closeAllConnections(), 250).unref();
     });
+    // An observed pool is this hub's own (see FrameHubOptions.onQuery); the
+    // shared cached one belongs to whoever created it.
+    if (options.onQuery) {
+      await db.$client.end({ timeout: 5 });
+    }
   }
 
   return {
     close,
     connectedFrames: () => deviceSessions.size,
     port,
-    sweep: runSweep,
+    skippedSweeps: () => sweep.skipped(),
+    sweep: () => sweep.runNow(),
   };
 }
