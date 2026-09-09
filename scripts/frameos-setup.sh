@@ -1155,7 +1155,7 @@ if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   if [ -z "$default_server_scheme" ]; then
     if [ "$FRAMEOS_SERVER_PORT" = "443" ] || [ "$FRAMEOS_SERVER_PORT" = "8443" ]; then default_server_scheme="y"; else default_server_scheme="n"; fi
   elif [ "$default_server_scheme" = "https" ]; then default_server_scheme="y"; else default_server_scheme="n"; fi
-  if [ -z "$FRAMEOS_SERVER_SCHEME" ]; then
+  if [ -z "${FRAMEOS_SERVER_SCHEME:-}" ]; then
     if [ "$(ask_yes_no "Backend uses HTTPS (TLS)" "$default_server_scheme")" = "true" ]; then FRAMEOS_SERVER_SCHEME="https"; else FRAMEOS_SERVER_SCHEME="http"; fi
   fi
   FRAMEOS_SERVER_API_KEY="${FRAMEOS_SERVER_API_KEY:-$(ask_required "Backend server API key" "$default_server_api_key")}"

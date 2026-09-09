@@ -277,7 +277,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
 
         result = self._run_setup({})
 
-        self.assertIn("Backend: backend.example:9443", result.stdout)
+        self.assertIn("Backend: http://backend.example:9443", result.stdout)
         frame_json = self._installed_frame_json()
         self.assertEqual(frame_json["name"], "Existing Frame")
         self.assertEqual(frame_json["device"], "web_only")
@@ -286,6 +286,9 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertEqual(frame_json["frameAdminAuth"]["pass"], "existing-admin-pass")
         self.assertEqual(frame_json["serverHost"], "backend.example")
         self.assertEqual(frame_json["serverPort"], 9443)
+        # No serverScheme in the old config and 9443 is not a TLS port, so the
+        # prompt defaults to plain http and the answer is written out explicitly.
+        self.assertEqual(frame_json["serverScheme"], "http")
         self.assertEqual(frame_json["serverApiKey"], "server-api-key")
         self.assertEqual(frame_json["serverSendLogs"], True)
         self.assertEqual(frame_json["agent"], {
