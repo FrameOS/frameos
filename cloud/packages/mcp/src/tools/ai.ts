@@ -23,7 +23,7 @@ type StreamEvent = Record<string, unknown> & { type: string };
 type TurnOutcome = {
   chat_id: string | undefined;
   delivered: { scenes: Record<string, unknown>[]; title?: string; tool: string }[];
-  // Frame installs the AI proposed. The scene AI never deploys on its own:
+  // Frame installs the AI proposed. The scene AI never installs on its own:
   // in the browser these become Install cards the user approves; here the
   // caller decides, by calling frame_scene_install with confirm=true.
   proposals: Record<string, unknown>[];
@@ -224,7 +224,7 @@ async function finalize(
       ? {
           proposed_installs: outcome.proposals,
           proposed_installs_hint:
-            "The AI proposed putting these scenes on frames but installed NOTHING (it never deploys on its own). If the user wants them, call frame_scene_install with confirm=true for each — its declared_settings_groups are the account keys the scene would receive; grant them there only if the user agrees.",
+            "The AI proposed putting these scenes on frames but installed NOTHING (it never installs on its own). If the user wants them, call frame_scene_install with confirm=true for each — its declared_settings_groups are the account keys the scene would receive; grant them there only if the user agrees.",
         }
       : {}),
     ...(last && !saved && apply === "none"

@@ -1,18 +1,25 @@
 # Cloud-Managed Frames — Design
 
-Status: **agreed direction, first cut shipped** (design 2026-07-31; phases
-1–3 largely live as of 2026-08 — enrollment, hub, scene management, the
-cloud workspace, provisioning). This doc remains the design reference;
-remaining work (signed OTA, capability audit, account hardening, fleet
-extras) is tracked in `docs/todo.md` at the repo root.
+Status: **agreed direction, all four phases shipped** (design 2026-07-31;
+enrollment, hub, scene management, the cloud workspace, provisioning and
+signed OTA on both device planes live as of 2026-09). This doc remains the
+design reference; what is still open (the parity gap between the two device
+planes, fleet extras) is tracked in `docs/convergence-todo.md` and
+`docs/todo.md` at the repo root.
 
 ## Summary
 
 Add an **"Add frame"** button to the account surface. A frame enrolls directly
 with FrameOS Cloud — via a downloadable SD card image, a link code shown on the
 device, or a browser-based flasher — and can then be managed from the cloud
-account: assign interpreted scenes, set schedules and declarative settings, see
-status and screenshots-via-wasm, receive telemetry.
+account: install interpreted scenes, set schedules and declarative settings,
+see status and screenshots-via-wasm, receive telemetry.
+
+One word for one action: putting a scene on a frame is **install**, in the
+store, the workspace, the MCP tools and here. The data model underneath is
+`frame_scene_assignments` (an install is a row there), and the transport step
+that carries the resulting `set_scenes` to the device is a **push** — those
+two words name the mechanism, never the button.
 
 The design rests on one architectural bet and one security posture:
 
@@ -44,8 +51,8 @@ as a third wrapper bundle for the cloud (see "Frontend: the fourth adapter",
 - One-click onboarding: download image / enter code / flash from browser,
   frame appears in the account.
 - Manage frames from `cloud.frameos.net` with no self-hosted backend.
-- Assign store scenes and private scenes to frames; edit them in the hosted
-  editor; changes go live without a deploy.
+- Install store scenes and private scenes on frames; edit them in the hosted
+  editor; changes go live without a backend deploy.
 - Fleet basics: online/offline, health, logs and metrics (opt-in scopes),
   scene previews.
 - The self-hosted stack remains fully functional with zero cloud, forever.
@@ -162,10 +169,33 @@ Cloud-profile verb set (complete):
 Anything else the socket receives is rejected and audit-logged on-device.
 
 Not every device need implement all of it — a device answers
-`unsupported_verb` for a verb outside its profile — though today both
-profiles (full Linux/Pi and ESP32) implement the complete set. The
-management UI disables-with-reason any control whose frame profile lags a
-verb; the profile table lives in `docs/cloud-frames.md`.
+`unsupported_verb` for a verb outside its profile. Which planes implement a
+verb is not prose: every verb in `docs/cloud-frames-contract.json` carries
+`profiles`, the list of device planes (`linux`, `esp32`) that implement it,
+the same way every `set_settings` key does. Today all 20 verbs list both.
+The rule, enforced by `frameos/tools/generate_cloud_contract.py` and again
+by the cloud's contract test:
+
+- A verb listed for one plane only must also carry `parity: {only, why}` —
+  the plane that has it and a sentence on why the other cannot. The generator
+  refuses the file otherwise, so a single-plane verb never ships silently;
+  the count of `parity` entries across keys and verbs *is* the measured
+  parity gap (`docs/convergence-todo.md` item 6).
+- A verb both planes list must not carry `parity`, and must be issued by
+  some cloud code path: the contract test scans the provider's sources for
+  each verb name, so a verb every device implements and nobody sends fails
+  the build instead of sitting in the table unused (`get_state` and
+  `get_logs` did, for weeks).
+
+The generator writes the verb table into all four walkers — the Linux
+runtime (`contract_gen.nim`), the ESP32 firmware
+(`fos_cloud_contract_gen.h`), the cloud (`cloud-frames-contract.gen.ts`) and
+the SPA (`cloudFramesContract.gen.ts`) — and `docs/cloud-frames-fixtures.json`
+holds the conformance cases all three verb-layer implementations run. The
+device tables carry only the verbs and their scopes (a device knows what it
+implements); `profiles` is read on the provider side, where the cloud uses it
+to gate what it sends a frame of a given plane and the management UI
+disables-with-reason any control whose frame profile lacks the verb.
 
 ### Device identity and enrollment secrets
 
@@ -247,7 +277,7 @@ scene's declared groups when the owner installs it (that click is the
 consent) and shows per-scene toggles under the frame's service settings;
 the store page's install dialog shows the same checkboxes. `NULL` granted is
 a row from before the column existed: it reads as "granted = declared" so no
-frame went dark on deploy, and it becomes explicit the next time the owner
+frame went dark on the next push, and it becomes explicit the next time the owner
 saves the scene list. A frame running a clock scene never sees the account's
 OpenAI key, and neither does a weather scene the owner did not grant it to.
 The response also lists the granted groups that are *not* configured, so the
@@ -412,9 +442,16 @@ Both halves are in place.
   the update channel — the worst it can do is ask a frame to check for an
   update it will verify and refuse.
 
-Not covered: the buildroot `.img.gz` SD-card images, which are flashed by
-hand from a machine that already trusts what it downloaded. Nothing
-on-device verifies them, so a signature there would be decoration.
+The buildroot `.img.gz` SD-card images are signed in the same release job.
+They were once left out ("flashed by hand from a machine that already trusts
+what it downloaded"), but the self-hosted backend's SD-card builder and the
+cloud's "Download SD card image" flow fetch and patch them automatically, so
+every reader verifies the `.minisig` against the same release key: the
+backend on download and on every cache hit (`app/tasks/buildroot_image.py`),
+the cloud's `api/frames/sd-image` route before it streams a byte, and the
+browser flasher before it writes the card. The image itself stays a plain
+disk image — nothing on the device verifies its own root filesystem, which
+is why the check sits with whoever writes the card.
 
 ### Account hardening
 
@@ -538,7 +575,10 @@ New tables, hanging off existing machinery:
 
 Scenes themselves need no new storage: store scenes and private account
 scenes (`store_scenes` + versions) are already the unit of content. "My
-frames" becomes a sibling of `account/installs`.
+frames" becomes a sibling of the account's **Backends** page (the linked
+self-hosted backends; `/backends` in clean URLs, `/account/installs` in the
+app route, `connected_backends` + `linked_clients` in the schema — one page,
+three older names).
 
 ## Frontend: the fourth adapter
 
@@ -697,7 +737,8 @@ enforcement) is ever paywalled.
 
 ## Phasing
 
-In order:
+All four phases have shipped; the list stays as the record of the order they
+landed in.
 
 1. **Protocol + profile (foundations)** — cloud agent profile in
    the device runtime, keypair enrollment, claim tokens, WS hub + `frames` table
@@ -712,8 +753,9 @@ In order:
 4. **Fleet extras** — telemetry scopes, alerting, backups integration,
    paid-tier gating.
 
-Signed OTA (device-side) should land before or alongside provisioning, since
-widely distributed images make the unsigned update channel the weakest link.
+Signed OTA (device-side) landed alongside provisioning — widely distributed
+images would otherwise have made the unsigned update channel the weakest
+link. See "Signed OTA" above for what both planes verify.
 
 ## Open questions
 

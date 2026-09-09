@@ -38,7 +38,9 @@ import {
 } from "../../../../auth-web/src/lib/frames";
 import { derivedSigningKey } from "../../../../auth-web/src/lib/keys";
 import { hashSecret } from "../../../../auth-web/src/lib/secrets";
+import { cachedAssetFile } from "../../../../auth-web/src/lib/frame-asset-cache";
 import {
+  maxAssetStreamsPerSession,
   maxPayloadBytes,
   startFrameHub,
   type FrameHub,
@@ -1666,6 +1668,88 @@ describe("inbound size limits", () => {
       .from(frameLogs)
       .where(eq(frameLogs.frameId, frame.id));
     expect(rows[0]?.count).toBe(120);
+    device.ws.close();
+  });
+
+  it("rate limits a device that floods metrics, keeping the samples that got through", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    // 30 samples a minute per frame (deviceWriteRateLimits) — three times
+    // the ESP32's fastest metrics interval. Handling is serialized, so the
+    // 31st is answered after the first 30 were stored.
+    let limitedAck: Record<string, unknown> | undefined;
+    for (let i = 0; i < 31; i += 1) {
+      const msgId = randomUUID();
+      device.send({ id: msgId, metrics: { sample: i }, type: "metrics" });
+      if (i === 30) {
+        limitedAck = await device.next(
+          (msg) => msg.type === "ack" && msg.id === msgId,
+          "metrics rate limited ack",
+        );
+      }
+    }
+    expect(limitedAck?.error).toBe("rate_limited");
+    const rows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(frameMetrics)
+      .where(eq(frameMetrics.frameId, frame.id));
+    expect(rows[0]?.count).toBe(30);
+    // The dropped sample never became "latest": the row keeps the 30th.
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.lastMetrics).toEqual({ sample: 29 });
+    device.ws.close();
+  });
+
+  it("drops an asset stream that goes quiet and frees its slot", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    // Idle streams are swept on the heartbeat tick, so both timers are short.
+    const extra = await startExtraHub({
+      assetStreamIdleMs: 200,
+      heartbeatIntervalMs: 100,
+    });
+    const device = await openDevice(token, extra.port);
+    await handshake(device, privateKey);
+    // A real request, so a finished stream lands in the asset cache.
+    const command = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { path: "notes.txt" },
+      type: "asset_get",
+    });
+    await device.next((msg) => msg.type === "asset_get", "asset_get delivered");
+
+    // Every slot taken by a stream that sends its first chunk and nothing
+    // more — the shape of a device whose verb task died mid-file.
+    for (let i = 0; i < maxAssetStreamsPerSession; i += 1) {
+      device.send({
+        data: Buffer.from("partial").toString("base64"),
+        id: randomUUID(),
+        seq: 0,
+        type: "asset_chunk",
+      });
+    }
+    const reply = {
+      data: Buffer.from("hello").toString("base64"),
+      done: true,
+      id: command!.id,
+      seq: 0,
+      type: "asset_chunk",
+    };
+    device.send(reply);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Refused: the slots are still held by the silent streams.
+    expect(await cachedAssetFile(db, frame.id, "notes.txt", false)).toBeUndefined();
+
+    // Once they have been idle past the ceiling the sweep drops them, and
+    // the same reply goes through.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    device.send(reply);
+    const stored = await waitFor(
+      async () => await cachedAssetFile(db, frame.id, "notes.txt", false),
+      "asset stored after the sweep",
+    );
+    expect(stored.sizeBytes).toBe(5);
     device.ws.close();
   });
 

@@ -229,13 +229,27 @@ const maxBufferedBytes = 4 * 1024 * 1024;
 // at-least-once redelivery re-streams from scratch.
 interface AssetStream {
   chunks: Buffer[];
+  // When the last chunk landed (Date.now()); the heartbeat sweep drops a
+  // stream that has gone quiet for assetStreamIdleMs.
+  lastChunkAt: number;
   nextSeq: number;
   receivedBytes: number;
 }
 
 // Devices stream one file at a time (both reference firmwares serialize verb
 // handling), so this is a protocol-violation bound, not a throughput knob.
-const maxAssetStreamsPerSession = 4;
+export const maxAssetStreamsPerSession = 4;
+
+// A stream that stops mid-file (the device rebooted its verb task, or a
+// misbehaving peer opened every slot and went quiet) would otherwise hold up
+// to maxAssetStreamsPerSession × maxAssetFileBytes of chunks per session for
+// as long as the socket lives — and a device that keeps answering pings can
+// live for days. Both firmwares stream a file continuously (chunk after
+// chunk, no pauses beyond a socket send), so a minute of silence means the
+// stream is dead; the command's at-least-once redelivery re-streams from
+// scratch. Swept on the heartbeat tick, so the effective bound is
+// assetStreamIdleMs + heartbeatIntervalMs.
+export const defaultAssetStreamIdleMs = 60_000;
 
 interface DeviceSession {
   alive: boolean;
@@ -282,6 +296,7 @@ export interface FrameHubOptions {
   heartbeatIntervalMs?: number;
   sweepIntervalMs?: number;
   lifecycleAuditDebounceMs?: number;
+  assetStreamIdleMs?: number;
 }
 
 export interface FrameHub {
@@ -308,6 +323,8 @@ export async function startFrameHub(
     options.commandRedeliverAfterMs ?? commandRedeliverAfterMs;
   const lifecycleDebounceMs =
     options.lifecycleAuditDebounceMs ?? lifecycleAuditDebounceMs;
+  const assetStreamIdleMs =
+    options.assetStreamIdleMs ?? defaultAssetStreamIdleMs;
 
   const deviceSessions = new Map<string, DeviceSession>();
   // Browser subscriptions: per-frame sockets keyed by frame id, fleet-view
@@ -1554,11 +1571,13 @@ export async function startFrameHub(
       // can never choose what the app origin serves.
       stream = {
         chunks: [],
+        lastChunkAt: Date.now(),
         nextSeq: 0,
         receivedBytes: 0,
       };
       session.assetStreams.set(commandId, stream);
     }
+    stream.lastChunkAt = Date.now();
     if (seq !== stream.nextSeq) {
       logWarn("device.asset_chunk_out_of_order", {
         expected: stream.nextSeq,
@@ -2098,6 +2117,7 @@ export async function startFrameHub(
 
   // Liveness: ping every 30s, terminate sockets that missed a pong.
   const heartbeatTimer = setInterval(() => {
+    const now = Date.now();
     for (const session of deviceSessions.values()) {
       if (!session.alive) {
         logWarn("device.heartbeat_timeout", { frameId: session.frame.id });
@@ -2106,6 +2126,18 @@ export async function startFrameHub(
       }
       session.alive = false;
       session.ws.ping();
+      // Asset reply streams that went quiet: drop the buffered chunks and
+      // free the slot (see defaultAssetStreamIdleMs).
+      for (const [commandId, stream] of session.assetStreams) {
+        if (now - stream.lastChunkAt > assetStreamIdleMs) {
+          logWarn("device.asset_stream_timeout", {
+            commandId,
+            frameId: session.frame.id,
+            receivedBytes: stream.receivedBytes,
+          });
+          session.assetStreams.delete(commandId);
+        }
+      }
     }
     for (const registry of [frameBrowserSockets, accountBrowserSockets]) {
       for (const connections of registry.values()) {

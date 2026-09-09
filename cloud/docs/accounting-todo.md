@@ -1008,7 +1008,7 @@ The row links to the page. It is not a modal: what people want when that
 number surprises them is *which of my turns did this*, and that is a table,
 a date range and a switch — a page's job.
 
-**`/account/ai` — the page.** A new tab in `AccountNav`, alongside Installs,
+**`/account/ai` — the page.** A new tab in `AccountNav`, alongside Backends,
 Backups, Security, Developer and Activity, so it sits where every other
 "about my account" answer already lives. Friendly first, forensic
 underneath:

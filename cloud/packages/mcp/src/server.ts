@@ -40,13 +40,13 @@ export type FrameosMcpServerOptions = {
 
 const instructions = `FrameOS Cloud: cloud-managed e-paper/LCD frames, the scenes they display, the public scene store, and an AI that builds scenes.
 
-Vocabulary: a *frame* is a device enrolled with the cloud (frames_list). A *scene* is a graph of nodes (apps, code, events, state) that renders one screen; scenes live in the account as store scenes (private drafts or published), each with immutable numbered versions. A frame holds up to 20 assigned scenes and shows one at a time; a *schedule* switches between them. Scene JSON is the array from scenes.json — objects with id, name, nodes, edges, fields, settings (execution: "interpreted").
+Vocabulary: a *frame* is a device enrolled with the cloud (frames_list). A *scene* is a graph of nodes (apps, code, events, state) that renders one screen; scenes live in the account as store scenes (private drafts or published), each with immutable numbered versions. A frame holds up to 20 installed scenes and shows one at a time; a *schedule* switches between them. Scene JSON is the array from scenes.json — objects with id, name, nodes, edges, fields, settings (execution: "interpreted").
 
 Typical flows:
 - See what is on a frame: frame_get → frame_scenes_list → frame_screenshot; frame_logs when something looks wrong.
 - Put a scene on a frame: store_browse or scenes_list → frame_scene_install (activate=true to show it now).
 - Make a new scene: ai_scene_chat(prompt, apply="new_scene") or scene_create(scenes=…) → scene_render to preview → frame_scene_install.
-- Change a scene: scene_get_content → edit → scene_lint → scene_update_content (new version) → frame_scene_install to re-deploy; or ai_scene_chat(scene_id, prompt, apply="save_version").
+- Change a scene: scene_get_content → edit → scene_lint → scene_update_content (new version) → frame_scene_install to re-install; or ai_scene_chat(scene_id, prompt, apply="save_version").
 - Preview without a device: scene_render (real runtime, returns the image and logs).
 
 Device actions are asynchronous: they return a command_id the frame applies when it next talks to the hub (frame_commands_list shows what is still queued). Deep-sleeping battery frames apply commands when they wake (frame_get: next_wake_at).

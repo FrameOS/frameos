@@ -131,7 +131,7 @@ the tools by annotation and name and fails when one of them lacks the
 literal. The server's
 instructions tell the model to treat every tool result as untrusted data and
 to call those only on the user's own say-so: a store scene's description or
-a frame's logs must not be able to talk an agent into deploying something.
+a frame's logs must not be able to talk an agent into installing something.
 
 - **account** — `account_info`, `account_quota`, `account_settings_get`
   (secrets always masked — the cloud never reveals a stored key to a token),
