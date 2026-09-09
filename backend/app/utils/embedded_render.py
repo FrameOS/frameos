@@ -30,8 +30,26 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 RENDER_HARNESS = REPO_ROOT / "backend" / "tools" / "embedded_wasm_render.mjs"
 RENDER_TIMEOUT_SECONDS = 30
 # Renders are CPU-bound (a full QuickJS + pixie pass); two at a time keeps a
-# fleet of polling thin clients from forking a Node per request.
-_render_semaphore = asyncio.Semaphore(2)
+# fleet of polling thin clients from forking a Node per request. The queue
+# behind those two slots is bounded too: past MAX_RENDER_WAITERS a request
+# is refused with RenderQueueFull (the routes answer 503 + Retry-After) so a
+# fleet polling faster than the backend renders parks a fixed number of
+# coroutines, not one per poll for as long as the storm lasts.
+RENDER_CONCURRENCY = 2
+MAX_RENDER_WAITERS = 8
+RENDER_RETRY_AFTER_SECONDS = 5
+_render_semaphore = asyncio.Semaphore(RENDER_CONCURRENCY)
+_render_waiters = 0
+
+
+class RenderQueueFull(Exception):
+    """Every render slot is busy and the wait queue is at its cap."""
+
+    retry_after = RENDER_RETRY_AFTER_SECONDS
+
+
+def render_queue_depth() -> int:
+    return _render_waiters
 
 _WASM_ASSET_DIRS = (
     # Built by frameos/tools/build_wasm.sh (dev checkouts and the Docker
@@ -142,7 +160,15 @@ async def render_scene_rgba_and_state(
         request["assetsWriteBudget"] = max(0, int(assets_write_budget))
 
     expected = int(width) * int(height) * 4
-    async with _render_semaphore:
+    global _render_waiters
+    if _render_semaphore.locked() and _render_waiters >= MAX_RENDER_WAITERS:
+        raise RenderQueueFull()
+    _render_waiters += 1
+    try:
+        await _render_semaphore.acquire()
+    finally:
+        _render_waiters -= 1
+    try:
         process = await asyncio.create_subprocess_exec(
             node,
             str(RENDER_HARNESS),
@@ -159,6 +185,8 @@ async def render_scene_rgba_and_state(
             process.kill()
             await process.wait()
             return None, None, None
+    finally:
+        _render_semaphore.release()
 
     if process.returncode != 0 or len(stdout) != expected:
         detail = stderr.decode("utf-8", errors="replace").strip().splitlines()

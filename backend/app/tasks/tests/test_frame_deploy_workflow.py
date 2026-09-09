@@ -2817,3 +2817,92 @@ async def test_full_deploy_does_not_touch_a_frame_that_was_not_deploying(monkeyp
 
     assert updates == []
     assert deployer.logs == []
+
+
+@pytest.mark.asyncio
+async def test_full_plan_reports_a_mode_correction_without_persisting_it(monkeypatch: pytest.MonkeyPatch):
+    """GET /deploy_plan runs the workflow with persist_detected_mode=False: the
+    detected distro still shapes the plan, but nothing is logged to the frame
+    or written to the row — the change is reported in pending_mode_change."""
+    persisted: list[object] = []
+
+    class UbuntuDeployer(FakeDeployer):
+        def __init__(self):
+            super().__init__(installed_packages={"ntp"})
+            self.logs: list[tuple[str, str]] = []
+
+        async def get_distro(self) -> str:
+            return "ubuntu"
+
+        async def get_cpu_architecture(self) -> str:
+            return "aarch64"
+
+        async def get_distro_version(self) -> str:
+            return "noble"
+
+        async def log(self, log_type: str, message: str) -> None:
+            self.logs.append((log_type, message))
+
+    class UbuntuBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **kwargs) -> FrameBinaryPlan:
+            return FrameBinaryPlan(
+                build_id="build12345678",
+                target=TargetMetadata(arch="aarch64", distro="ubuntu", version="noble"),
+                compilation_mode="static",
+                allow_cross_compile=kwargs["allow_cross_compile"],
+                force_cross_compile=kwargs["force_cross_compile"],
+                cross_compile_supported=True,
+                build_host_configured=False,
+                will_attempt_cross_compile=False,
+                prebuilt_entry=None,
+                prebuilt_target=None,
+            )
+
+    frame = SimpleNamespace(
+        id=30,
+        name="MisconfiguredUbuntu",
+        mode="buildroot",
+        ssh_user="root",
+        ssh_keys=[],
+        buildroot={"compilationMode": "static"},
+        rpios={"crossCompilation": "never", "compilationMode": "precompiled"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 30, "name": "MisconfiguredUbuntu", "mode": frame.mode, "ssh_user": frame.ssh_user},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db, project_id=None: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    async def record_update_frame(*args, **kwargs):
+        persisted.append(args)
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", record_update_frame)
+
+    deployer = UbuntuDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=UbuntuBinaryBuilder(),
+        persist_detected_mode=False,
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    assert plan.full_deploy.target["distro"] == "ubuntu"
+    assert workflow.pending_mode_change == (
+        "Detected ubuntu: the frame is configured as buildroot; the next deploy switches it to rpios"
+    )
+    # The stand-in the caller handed over is corrected so the plan is the one
+    # the deploy will run (rpios sections, not Buildroot's); the row is
+    # untouched because nothing here reaches update_frame or the frame log.
+    assert plan.frame_dict["mode"] == "rpios"
+    assert plan.frame_dict["ssh_user"] == "pi"
+    assert deployer.logs == []
+    assert persisted == []

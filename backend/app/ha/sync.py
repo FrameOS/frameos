@@ -261,18 +261,27 @@ class HomeAssistantSync:
             project_id, frame_id = data.get("project_id"), data.get("id")
             if project_id not in self._enabled or frame_id is None:
                 return
+            # "update_frame" is also published with partial payloads (the Remote
+            # websocket sends just {id, project_id, active_connections} on
+            # connect/disconnect). Discovery and state always come from the
+            # persisted row, otherwise a partial payload renames the device to
+            # "Frame N" and retains a null status. The payload is only the
+            # fallback for a row that is already gone.
+            frame = self._load_frame_dict(frame_id) or data
+            if frame.get("project_id") != project_id:
+                return
             self._frames[frame_id] = {
                 "project_id": project_id,
-                "name": data.get("name"),
-                "archived": bool(data.get("archived")),
+                "name": frame.get("name"),
+                "archived": bool(frame.get("archived")),
             }
-            if data.get("archived"):
+            if frame.get("archived"):
                 await self._publish_messages(discovery.frame_removal_messages(project_id, frame_id))
             else:
-                await self._publish_messages(discovery.frame_discovery_messages(data))
+                await self._publish_messages(discovery.frame_discovery_messages(frame))
                 await self._publish_json(
                     discovery.frame_state_topic(project_id, frame_id),
-                    discovery.frame_state_payload(data, await self._active_scene_id(frame_id)),
+                    discovery.frame_state_payload(frame, await self._active_scene_id(frame_id)),
                     retain=True,
                 )
             await self._publish_summary(project_id)

@@ -75,6 +75,26 @@ async def test_virtual_image_serves_png_at_configured_size(async_client, no_auth
 
 
 @pytest.mark.asyncio
+async def test_virtual_image_answers_503_when_the_render_queue_is_full(async_client, no_auth_client, db, monkeypatch):
+    from app.utils.embedded_render import RenderQueueFull
+
+    frame = await create_virtual_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'Busy', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    async def queue_full(*_args, **_kwargs):
+        raise RenderQueueFull()
+
+    monkeypatch.setattr('app.api.virtual_frame.render_scene_rgba_and_state', queue_full)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/virtual/image?k={frame.device_config["viewToken"]}')
+    assert response.status_code == 503, response.text
+    assert response.headers['Retry-After'] == '5'
+
+
+@pytest.mark.asyncio
 async def test_virtual_image_bw_color_mode(async_client, no_auth_client, db):
     import io
 

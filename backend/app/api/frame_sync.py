@@ -38,6 +38,7 @@ from app.tasks.buildroot_image import (
 )
 from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
+from app.utils.network import device_server_host_error, is_safe_host
 from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
 from app.utils.timezone import stored_timezone
 from app.utils.versions import current_frameos_version
@@ -1439,7 +1440,10 @@ def _split_adopt_address(value: str, default_port: int) -> tuple[str, int]:
         host, _, port_text = text.partition(":")
         if port_text.isdigit():
             return host.strip(), int(port_text)
-        return host.strip(), port
+        # "user:pw@host" used to come back as just "user" — a valid host name
+        # that was not the one typed. Whatever follows the colon is kept so
+        # the host check below sees (and refuses) the whole thing.
+        return text, port
     return text, port
 
 
@@ -1474,6 +1478,13 @@ async def adopt_standalone_frame(
     host, frame_port = _split_adopt_address(data.frame_host, data.frame_port)
     if not host:
         _bad_request("A frame host is required")
+    # Both addresses end up persisted and one of them inside the device: the
+    # adoption target as the row's frame_host (the probe below re-checks it
+    # resolves somewhere the backend may reach), the server address as the
+    # device's serverHost. Neither may smuggle a scheme, path, userinfo or a
+    # control character past the form.
+    if not is_safe_host(host.strip("[]")):
+        _bad_request(f"Not a valid frame host name or address: {host!r}")
     server_host, server_port = _split_adopt_address(data.server_host, data.server_port)
     server_scheme = _adopt_server_scheme(data.server_host, data.server_scheme)
     if not server_host:
@@ -1483,6 +1494,9 @@ async def adopt_standalone_frame(
             f"The frame cannot reach this backend at {server_host}: enter this machine's address "
             "on the network the frame is on (for example 10.0.0.5:8989)"
         )
+    server_host_error = device_server_host_error(server_host, allow_loopback=False)
+    if server_host_error:
+        _bad_request(f"The frame cannot reach this backend at {server_host}: {server_host_error}")
 
     # Probe first, create later: _fetch_frame_http_bytes only needs host,
     # port, access mode and the admin credentials, so a transient (never

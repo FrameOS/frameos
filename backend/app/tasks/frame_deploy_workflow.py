@@ -449,12 +449,19 @@ class FrameDeployWorkflow:
         deployer: FrameDeployer,
         temp_dir: str,
         binary_builder: FrameBinaryBuilder | None = None,
+        persist_detected_mode: bool = True,
     ) -> None:
         self.db = db
         self.redis = redis
         self.frame = frame
         self.deployer = deployer
         self.temp_dir = temp_dir
+        # A plan computed for display (GET /deploy_plan) must not write to the
+        # frame row: the detected distro still shapes the plan, but the mode
+        # change is reported in `pending_mode_change` and applied by the
+        # deploy itself. The deploy jobs keep the default and persist it.
+        self.persist_detected_mode = persist_detected_mode
+        self.pending_mode_change: str | None = None
         self.binary_builder = binary_builder or FrameBinaryBuilder(
             db=db,
             redis=redis,
@@ -489,6 +496,12 @@ class FrameDeployWorkflow:
         ):
             self.frame.ssh_user = "pi"
         message = f"{icon} Detected {distro}; updating frame deployment mode from {previous_mode} to {detected_mode}"
+        if not self.persist_detected_mode:
+            self.pending_mode_change = (
+                f"Detected {distro}: the frame is configured as {previous_mode}; "
+                f"the next deploy switches it to {detected_mode}"
+            )
+            return
         if self.db is not None and self.redis is not None:
             await log(self.db, self.redis, int(self.frame.id), "stdinfo", message)
         else:

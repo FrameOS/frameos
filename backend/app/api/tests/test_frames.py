@@ -3591,6 +3591,92 @@ async def test_api_frame_adopt_accepts_host_port_and_schemes_and_refuses_localho
 
 
 @pytest.mark.asyncio
+async def test_api_frame_adopt_policy_checks_both_addresses_before_anything_is_written(async_client, db, redis):
+    """The adoption target becomes the row's frame_host and the server address
+    is written into the device: neither may smuggle a scheme, path, userinfo
+    or a control character, and the server address must be one another
+    machine can dial (no loopback, link-local, multicast, unspecified)."""
+    posted = []
+    mock = _adopt_mock_fetch(_standalone_device_payload(), posted)
+    frames_before = db.query(Frame).count()
+    for field, value, fragment in (
+        ('server_host', '169.254.169.254:8989', 'link-local'),
+        ('server_host', '127.0.0.2:8989', 'loopback'),
+        ('server_host', '0.0.0.0:8989', 'cannot reach this backend'),
+        ('server_host', 'backend.local\r\nX-Injected: 1', 'not a valid host'),
+        ('server_host', 'user:pw@backend.local', 'not a valid host'),
+        ('frame_host', '10.0.0.42;id', 'Not a valid frame host'),
+        ('frame_host', 'frame local', 'Not a valid frame host'),
+    ):
+        with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock)):
+            response = await async_client.post('/api/frames/adopt', json=_adopt_request_body(**{field: value}))
+        assert response.status_code == 400, (field, value, response.text)
+        assert fragment in response.json()['detail'], (field, value, response.json()['detail'])
+    assert posted == []
+    assert db.query(Frame).count() == frames_before
+
+    # A LAN address and a plain host name are what people actually type.
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body(server_host='10.0.0.5:8989'))
+    assert response.status_code == 200, response.text
+    assert posted[0]['server_host'] == '10.0.0.5'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_server_host_is_policy_checked_on_update_create_and_import(async_client, db, redis):
+    """`server_host` is what a frame is told to dial for every log batch and
+    settings pull; the form and an import may not hand it an unroutable or
+    smuggling value. `localhost` stays allowed here (single-machine dev)."""
+    frame = await new_frame(db, redis, 'HostPolicy', 'localhost', 'localhost')
+
+    for value, fragment in (
+        ('169.254.169.254', 'link-local'),
+        ('224.0.0.1', 'multicast'),
+        ('0.0.0.0', 'unspecified'),
+        ('backend.local/api', 'not a valid host'),
+        ('backend.local\r\nHost: evil', 'not a valid host'),
+        ('user:pw@backend.local', 'not a valid host'),
+    ):
+        response = await async_client.post(f'/api/frames/{frame.id}', json={'server_host': value})
+        assert response.status_code == 400, (value, response.text)
+        assert fragment in response.json()['detail'], (value, response.json()['detail'])
+        db.expire_all()
+        assert db.get(Frame, frame.id).server_host == 'localhost'
+
+        response = await async_client.post('/api/frames/new', json={
+            'name': 'Bad', 'frame_host': '10.0.0.9', 'server_host': value, 'mode': 'rpios',
+        })
+        assert response.status_code == 400, (value, response.text)
+
+        response = await async_client.post('/api/frames/import', json={
+            'name': 'Bad', 'frame_host': '10.0.0.9', 'server_host': value,
+        })
+        assert response.status_code == 400, (value, response.text)
+
+    # The update column is the bare host frame.json ships verbatim: a port or
+    # scheme typed into it would reach the device as "host:8443:8989".
+    for value in ('backend.local:8443', 'https://backend.local'):
+        response = await async_client.post(f'/api/frames/{frame.id}', json={'server_host': value})
+        assert response.status_code == 400, (value, response.text)
+
+    for value in ('backend.local', '10.0.0.5', 'localhost', ''):
+        response = await async_client.post(f'/api/frames/{frame.id}', json={'server_host': value})
+        assert response.status_code == 200, (value, response.text)
+        db.expire_all()
+        assert db.get(Frame, frame.id).server_host == value
+    assert db.query(Frame).filter(Frame.name == 'Bad').count() == 0
+
+    # Create and import take the typed address form and split it themselves.
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'Good', 'frame_host': '10.0.0.9', 'server_host': 'https://backend.example.com:8443', 'mode': 'rpios',
+    })
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    created = db.get(Frame, response.json()['frame']['id'])
+    assert (created.server_host, created.server_port) == ('backend.example.com', 8443)
+
+
+@pytest.mark.asyncio
 async def test_api_frame_device_upgrade_relays_the_frames_own_upgrade(async_client, db, redis):
     payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
     calls = []

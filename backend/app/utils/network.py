@@ -174,3 +174,29 @@ async def assert_url_target_allowed(url: str, *, allow_private: bool = True, wha
         raise HTTPException(status_code=400, detail=f"{what} must be an http(s) URL")
     await assert_target_allowed(parsed.hostname, allow_private=allow_private, what=f"{what} host")
     return parsed.hostname
+
+
+def device_server_host_error(host: str, *, allow_loopback: bool = True) -> str | None:
+    """Why `host` must not be handed to a device as the address of this
+    backend (frame.json `serverHost`, the adoption write-back), or None.
+
+    The device writes the value into its own config and dials it on every
+    log batch, so this is a syntax and address-class policy, not a
+    reachability probe: a valid host name or IP literal (no scheme, path,
+    userinfo, whitespace or control characters — the same `is_safe_host`
+    rule the SSH and HTTP paths apply), and a literal must not be an
+    unspecified, link-local, multicast or reserved address. Loopback is
+    refused only where the caller says so (adoption: the device is by
+    definition another machine); the frame form keeps accepting `localhost`,
+    the documented single-machine development setup.
+    """
+    text = (host or "").strip()
+    if not text:
+        return "a host name or address is required"
+    if not is_safe_host(text.strip("[]")):
+        return "not a valid host name or address"
+    literal = literal_address(text)
+    if literal is None:
+        return None
+    reason = address_block_reason(literal, allow_private=True, allow_loopback=allow_loopback)
+    return f"{reason} ({literal})" if reason else None
