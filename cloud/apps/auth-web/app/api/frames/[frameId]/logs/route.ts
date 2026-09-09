@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { frameLogs } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
-import { frameForAccount } from "../../../../../src/lib/frames";
+import { frameForAccount, requestDeviceLogRingIfEmpty } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
@@ -49,6 +49,13 @@ export async function GET(
     Number.isFinite(parsedAfterId) && parsedAfterId >= 0
       ? parsedAfterId
       : undefined;
+
+  // Opening the panel (no cursor) on a frame the cloud holds no logs for
+  // asks the device for its on-device ring — the lines a frame enrolled
+  // before its telemetry grant kept to itself (get_logs, docs/cloud-frames.md).
+  if (afterId === undefined) {
+    await requestDeviceLogRingIfEmpty(db, frame);
+  }
 
   // One row over the page so the caller can tell a full page from a
   // truncated one and knows to fetch again with after_id.

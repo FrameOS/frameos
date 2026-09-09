@@ -7,6 +7,7 @@ import {
   startTurn,
   stopTurn,
   turnStream,
+  TurnLimitError,
   TurnStoppedError,
   TurnTimeoutError,
 } from "./turn-runner";
@@ -182,5 +183,27 @@ describe("turn runner", () => {
     const turn = startTurn({ accountId: "owner", chatId: "c7", run: async () => {} });
     expect(getTurn(turn.id)?.accountId).toBe("owner");
     expect(getTurn("nope")).toBeUndefined();
+  });
+});
+
+describe("per-account turn cap", () => {
+  it("refuses the turn past the cap in the same step that would register it", async () => {
+    const gate = deferred();
+    const run = async () => {
+      await gate.promise;
+    };
+    startTurn({ accountId: "cap", chatId: "cap-1", maxActivePerAccount: 2, run });
+    startTurn({ accountId: "cap", chatId: "cap-2", maxActivePerAccount: 2, run });
+    expect(() =>
+      startTurn({ accountId: "cap", chatId: "cap-3", maxActivePerAccount: 2, run }),
+    ).toThrow(TurnLimitError);
+    // Nothing was registered for the refused chat, and another account is
+    // unaffected.
+    expect(activeTurnForChat("cap-3")).toBeUndefined();
+    expect(() =>
+      startTurn({ accountId: "other", chatId: "other-1", maxActivePerAccount: 2, run }),
+    ).not.toThrow();
+    gate.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 });

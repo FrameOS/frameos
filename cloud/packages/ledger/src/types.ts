@@ -121,7 +121,9 @@ export type LedgerErrorCode =
   | "unknown_account_code"
   | "currency_mismatch"
   | "entry_not_found"
-  | "already_reversed";
+  | "already_reversed"
+  | "reversal_of_reversal"
+  | "subscription_entry_not_reversible";
 
 export class LedgerError extends Error {
   readonly code: LedgerErrorCode;

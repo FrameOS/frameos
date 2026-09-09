@@ -161,6 +161,33 @@ describe("reversal rule", () => {
       ),
     ).rejects.toThrow(/already reversed/);
   });
+
+  it("refuses to reverse a reversal or a subscription entry", async () => {
+    await expect(
+      reversalRule.build(
+        event({ entryId: original.id, reason: "undo the undo" }),
+        context({
+          loadEntry: async () => ({
+            ...original,
+            entryType: "ai_usage_charge_reversal",
+            reversesEntryId: "44444444-4444-4444-4444-444444444444",
+          }),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "reversal_of_reversal" });
+    for (const entryType of [
+      "subscription_charge",
+      "subscription_recognition",
+      "subscription_refund_to_receivable",
+    ]) {
+      await expect(
+        reversalRule.build(
+          event({ entryId: original.id, reason: "wrong plan" }),
+          context({ loadEntry: async () => ({ ...original, entryType }) }),
+        ),
+      ).rejects.toMatchObject({ code: "subscription_entry_not_reversible" });
+    }
+  });
 });
 
 const customerId = "5f1c1b3e-2c9a-4a1e-9d3b-6f4f1a2b3c4d";

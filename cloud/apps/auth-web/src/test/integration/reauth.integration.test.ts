@@ -386,6 +386,44 @@ describe("sensitive routes require a recent credential check", () => {
     });
   });
 
+  it("a two-factor account re-proves with the second factor, never the password alone", async () => {
+    const user = await passwordUser();
+    const { secret } = await enrollTotp();
+    await ageSession(user.token);
+    // The password is no longer on offer…
+    expect(await reauthMethods(db, user.accountId)).toEqual({
+      code: true,
+      passkey: false,
+      password: false,
+      sign_in: false,
+    });
+    // …and no longer accepted, even when correct.
+    const viaPassword = await reauth(
+      request("/api/auth/reauth", { body: { password } }),
+    );
+    expect(viaPassword.status).toBe(403);
+    expect(await viaPassword.json()).toMatchObject({ error: "second_factor_required" });
+    const { frameId } = await seedFrame(user.accountId);
+    const stillStale = await revokeFrame(
+      request(`/api/frames/${frameId}/revoke`, { body: {} }),
+      { params: Promise.resolve({ frameId }) },
+    );
+    expect(stillStale.status).toBe(403);
+
+    // The authenticator does it.
+    const viaCode = await reauth(
+      request("/api/auth/reauth", {
+        body: { code: totpCodeAtStep(secret, totpStepFor() + 1) },
+      }),
+    );
+    expect(viaCode.status).toBe(200);
+    const revoked = await revokeFrame(
+      request(`/api/frames/${frameId}/revoke`, { body: {} }),
+      { params: Promise.resolve({ frameId }) },
+    );
+    expect(revoked.status).toBe(200);
+  });
+
   it("an account with nothing to check can only sign in again", async () => {
     const user = await googleUser();
     await ageSession(user.token);

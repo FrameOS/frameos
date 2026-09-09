@@ -30,13 +30,18 @@ if [ -z "${DATABASE_URL:-}" ]; then
   echo "DATABASE_URL is not set and .env.local does not provide it" >&2
   exit 1
 fi
+# The URL never goes on a command line (ps / /proc show argv to every local
+# account): it becomes libpq's PG* environment and psql runs bare.
+# shellcheck source=scripts/lib/pg-env.sh
+. scripts/lib/pg-env.sh
+pg_env_from_url "$DATABASE_URL"
 
 value=true
 if [ "$revoke" = true ]; then
   value=false
 fi
 
-updated="$(psql "$DATABASE_URL" --tuples-only --no-align \
+updated="$(psql --tuples-only --no-align \
   --set=email="$email" --set=value="$value" <<'SQL'
 UPDATE accounts
 SET is_superadmin = :'value'::boolean, updated_at = now()

@@ -48,7 +48,6 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -112,6 +111,14 @@ jobs:
       # the exact frameos-<version>-wasm.tar.gz the release attached —
       # extracted to where build_wasm.sh would have written it, so the
       # package build below does not know the difference.
+      # `runtime_run_id` is a free-form input, so before anything from that
+      # run reaches npm two things are checked: the run is a "Release FrameOS"
+      # run of this repository's main branch (not a fork's, not a PR's,
+      # not some other workflow's artifact that happens to share the name),
+      # and the tarball carries a signature by the release key (the
+      # build-wasm-runtime job signs it; release-assets/firmware-signing.pub
+      # is the committed public half). The run is usually still in progress
+      # when it dispatches this workflow, so its conclusion is not required.
       - name: Download the release's wasm runtime
         if: inputs.runtime_run_id != ''
         env:
@@ -119,11 +126,38 @@ jobs:
           RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
         run: |
           set -euo pipefail
+          case "$RUNTIME_RUN_ID" in
+            ''|*[!0-9]*) echo "::error::runtime_run_id must be a run id"; exit 1 ;;
+          esac
+          run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID")
+          run_path=$(jq -r '.path' <<<"$run_json")
+          run_branch=$(jq -r '.head_branch' <<<"$run_json")
+          run_repo=$(jq -r '.head_repository.full_name' <<<"$run_json")
+          run_event=$(jq -r '.event' <<<"$run_json")
+          run_status=$(jq -r '.status + "/" + (.conclusion // "-")' <<<"$run_json")
+          echo "run $RUNTIME_RUN_ID: $run_path on $run_repo@$run_branch ($run_event, $run_status)"
+          if [ "$run_path" != ".github/workflows/docker-publish-multi.yml" ]; then
+            echo "::error::run $RUNTIME_RUN_ID is not a Release FrameOS run ($run_path)"; exit 1
+          fi
+          if [ "$run_repo" != "$GITHUB_REPOSITORY" ] || [ "$run_branch" != "main" ]; then
+            echo "::error::run $RUNTIME_RUN_ID did not run on $GITHUB_REPOSITORY@main ($run_repo@$run_branch)"; exit 1
+          fi
+          case "$run_status" in
+            in_progress/*|completed/success) ;;
+            *) echo "::error::run $RUNTIME_RUN_ID is $run_status"; exit 1 ;;
+          esac
           version=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
           gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name "frameos-${version}-wasm" --dir release-assets
+          tarball="release-assets/frameos-${version}-wasm.tar.gz"
+          [ -f "$tarball" ] || { echo "::error::$tarball missing from the artifact"; exit 1; }
+          [ -f "$tarball.minisig" ] || { echo "::error::$tarball is unsigned"; exit 1; }
+          python3 -m pip install --quiet --require-hashes --break-system-packages \
+              -r tools/requirements-signing.txt \
+            || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
+          python3 tools/sign_firmware.py verify --public release-assets/firmware-signing.pub "$tarball"
           mkdir -p frontend/public/frameos-wasm
-          tar -xzf "release-assets/frameos-${version}-wasm.tar.gz" -C frontend/public/frameos-wasm
+          tar -xzf "$tarball" -C frontend/public/frameos-wasm
           ls -la frontend/public/frameos-wasm
 
       # The runtime assets (frameos.js/frameos.wasm) are build outputs, not

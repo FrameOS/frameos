@@ -816,7 +816,7 @@ describe("store publish and distribution", () => {
       .select({ shareToken: storeScenes.shareToken })
       .from(storeScenes)
       .where(eq(storeScenes.id, sceneId));
-    const share = storedScene!.shareToken;
+    const share = storedScene!.shareToken as string;
 
     const metadata = (await generateSceneMetadata({
       params: Promise.resolve({ slug }),
@@ -1351,6 +1351,116 @@ describe("store publish and distribution", () => {
     expect(patched.status).toBe(400);
     expect((await readJson(patched)).error).toBe("nothing_to_update");
   });
+  it("lets the owner rotate or turn off the share link", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const published = await publish(accessToken);
+    const scene = (await readJson(published)).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+    const [before] = await db
+      .select({ shareToken: storeScenes.shareToken })
+      .from(storeScenes)
+      .where(eq(storeScenes.id, sceneId));
+    const oldToken = before?.shareToken as string;
+    const ownerSession = cookieJar.get(sessionCookieName)!;
+
+    const rotated = await patchScene(
+      request(`/api/account/scenes/${sceneId}`, "PATCH", {
+        body: { share: "rotate" },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(rotated.status).toBe(200);
+    const rotatedScene = (await readJson(rotated)).scene as Record<string, unknown>;
+    expect(rotatedScene.share_url).toMatch(/\?share=/);
+    expect(rotatedScene.share_url).not.toContain(oldToken);
+
+    // The old link is dead, the new one works — checked anonymously, since
+    // the owner's own session opens the zip regardless.
+    cookieJar.clear();
+    const stale = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download?share=${oldToken}`, "GET"),
+      ctx(sceneId),
+    );
+    expect(stale.status).toBe(404);
+    const [after] = await db
+      .select({ shareToken: storeScenes.shareToken })
+      .from(storeScenes)
+      .where(eq(storeScenes.id, sceneId));
+    const fresh = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download?share=${after?.shareToken}`, "GET"),
+      ctx(sceneId),
+    );
+    expect(fresh.status).toBe(200);
+
+    cookieJar.set(sessionCookieName, ownerSession);
+    const disabled = await patchScene(
+      request(`/api/account/scenes/${sceneId}`, "PATCH", {
+        body: { share: "disable" },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(disabled.status).toBe(200);
+    expect(((await readJson(disabled)).scene as Record<string, unknown>).share_url).toBeNull();
+    cookieJar.clear();
+    const none = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download?share=${after?.shareToken}`, "GET"),
+      ctx(sceneId),
+    );
+    expect(none.status).toBe(404);
+
+    cookieJar.set(sessionCookieName, ownerSession);
+    const junk = await patchScene(
+      request(`/api/account/scenes/${sceneId}`, "PATCH", {
+        body: { share: "please" },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(junk.status).toBe(400);
+    expect((await readJson(junk)).error).toBe("invalid_share");
+  });
+
+  it("refuses a compiled scene at save and at fork, not at assign time", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const published = await publish(accessToken);
+    const sceneId = ((await readJson(published)).scene as Record<string, unknown>).id as string;
+    const compiledScenes = [
+      {
+        edges: [],
+        fields: [],
+        id: "scene-1",
+        name: "Compiled",
+        nodes: [{ data: { keyword: "render/color" }, id: "n1", position: { x: 0, y: 0 }, type: "app" }],
+        settings: { execution: "compiled" },
+      },
+    ];
+
+    const saved = await editSceneContent(
+      request(`/api/account/scenes/${sceneId}/content`, "POST", {
+        body: { scenes: compiledScenes },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(saved.status).toBe(400);
+    expect(await readJson(saved)).toMatchObject({
+      error: "scene_requires_compilation",
+      scenes: ["Compiled"],
+    });
+
+    const forked = await forkScene(
+      request(`/api/account/scenes/${sceneId}/fork`, "POST", {
+        body: { scenes: compiledScenes },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(forked.status).toBe(400);
+    expect((await readJson(forked)).error).toBe("scene_requires_compilation");
+  });
+
   it("serves scenes.json for the live preview with download access rules", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scenes = [

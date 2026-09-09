@@ -8,7 +8,7 @@ import {
   subscriptionRecognitionEventType,
   subscriptionRefundEventType,
 } from "./rules/subscription";
-import { LedgerError, type LedgerExecutor } from "./types";
+import { LedgerError, type LedgerDb, type LedgerExecutor } from "./types";
 
 // The subscription lifecycle: who is on what plan, and the cycle that charges
 // each period at its start and recognizes it at its end.
@@ -114,13 +114,43 @@ export async function setAccountPlan(
   planCode: string,
   options: PostEventOptions & { now?: Date | undefined } = {},
 ): Promise<SubscriptionRecord | null> {
+  return withSubscriptionLock(db, accountId, (tx) =>
+    setAccountPlanLocked(tx, accountId, planCode, options),
+  );
+}
+
+// Every mutation of an account's subscription runs inside one transaction
+// holding the account's advisory lock: select → upsert → open period →
+// charge used to run with nothing between the steps, so a double-submitted
+// PUT (two tabs, a retry) opened and charged two overlapping periods. The
+// kernel's own transaction nests as a savepoint inside this one, so an
+// event either posts with its subscription row or neither happens.
+async function withSubscriptionLock<T>(
+  db: LedgerExecutor,
+  accountId: string,
+  run: (tx: LedgerExecutor) => Promise<T>,
+): Promise<T> {
+  return (db as LedgerDb).transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`subscription:${accountId}`}))`,
+    );
+    return run(tx);
+  });
+}
+
+async function setAccountPlanLocked(
+  db: LedgerExecutor,
+  accountId: string,
+  planCode: string,
+  options: PostEventOptions & { now?: Date | undefined },
+): Promise<SubscriptionRecord | null> {
   const plan = await readPlan(db, planCode);
   if (!plan) {
     throw new LedgerError("invalid_draft", `Unknown plan ${planCode}`);
   }
   const now = options.now ?? new Date();
   if (plan.priceMicros === 0n) {
-    await cancelAccountPlan(db, accountId, { immediately: true, now });
+    await cancelAccountPlanLocked(db, accountId, { immediately: true, now });
     return null;
   }
 
@@ -216,6 +246,16 @@ export async function cancelAccountPlan(
   db: LedgerExecutor,
   accountId: string,
   options: { immediately?: boolean | undefined; now?: Date | undefined } = {},
+): Promise<void> {
+  return withSubscriptionLock(db, accountId, (tx) =>
+    cancelAccountPlanLocked(tx, accountId, options),
+  );
+}
+
+async function cancelAccountPlanLocked(
+  db: LedgerExecutor,
+  accountId: string,
+  options: { immediately?: boolean | undefined; now?: Date | undefined },
 ): Promise<void> {
   const [row] = await db
     .select()

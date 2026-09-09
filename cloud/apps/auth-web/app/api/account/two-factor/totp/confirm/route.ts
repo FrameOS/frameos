@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
   notifySecurityChange,
+  revokedTokensDetail,
   readJsonBody,
 } from "../../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
     eventType: "account.totp_enabled",
     metadata: { apiTokensRevoked, method: "totp" },
   });
-  await notifySecurityChange(context, "totp_enabled");
+  await notifySecurityChange(context, "totp_enabled", revokedTokensDetail(apiTokensRevoked));
   return NextResponse.json({
     api_tokens_revoked: apiTokensRevoked,
     ok: true,

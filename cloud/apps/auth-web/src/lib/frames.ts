@@ -1720,22 +1720,158 @@ export async function revokeFrame(
         isNull(linkedClients.revokedAt),
       ),
     );
+  await markFrameRevoked(db, frame.id, now);
+}
+
+// The frame half of a revocation: status, connectivity, the command queue
+// (nothing pending may be drained to a device that is no longer ours) and the
+// NOTIFY that makes the hub close a live socket with 4401. Shared by
+// revokeFrame and by the two routes that revoke a linked client directly —
+// /api/device/revoke (the owner) and /api/backends/unlink (the client
+// itself): a frame's linked client IS the frame's credential, so revoking
+// it through either door must leave the frame row saying so, not `active`.
+export async function markFrameRevoked(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  now = new Date(),
+) {
   await db
     .update(frames)
     .set({ connected: false, status: "revoked", updatedAt: now })
-    .where(eq(frames.id, frame.id));
+    .where(eq(frames.id, frameId));
   await db
     .update(frameCommands)
     .set({ error: "frame_revoked", status: "expired" })
     .where(
       and(
-        eq(frameCommands.frameId, frame.id),
+        eq(frameCommands.frameId, frameId),
         inArray(frameCommands.status, ["pending", "sent"]),
       ),
     );
   await db.execute(
-    sql`select pg_notify(${frameCommandsNotifyChannel}, ${frame.id})`,
+    sql`select pg_notify(${frameCommandsNotifyChannel}, ${frameId})`,
   );
+}
+
+// Revoke a linked client of any kind. When it is a frame's credential, the
+// frame follows (see markFrameRevoked); a backend link has no frame row.
+export async function revokeLinkedClient(
+  db: ReturnType<typeof createDb>,
+  linkedClientId: string,
+) {
+  const now = new Date();
+  await db
+    .update(linkedClients)
+    .set({ revokedAt: now, updatedAt: now })
+    .where(
+      and(eq(linkedClients.id, linkedClientId), isNull(linkedClients.revokedAt)),
+    );
+  const frame = await frameForLinkedClient(db, linkedClientId);
+  if (frame && frame.status !== "revoked") {
+    await markFrameRevoked(db, frame.id, now);
+  }
+  return frame;
+}
+
+// An undelivered command of this type still on the queue, if any: the
+// dedupe behind the "ask the device once, not once per page load" verbs
+// (get_state, get_logs — same shape as outstandingAssetGet).
+export async function outstandingFrameCommand(
+  db: FramesDatabase,
+  frameId: string,
+  type: string,
+) {
+  const [row] = await db
+    .select({ id: frameCommands.id })
+    .from(frameCommands)
+    .where(
+      and(
+        eq(frameCommands.frameId, frameId),
+        eq(frameCommands.type, type),
+        inArray(frameCommands.status, ["pending", "sent"]),
+        or(isNull(frameCommands.expiresAt), gt(frameCommands.expiresAt, new Date())),
+      ),
+    )
+    .limit(1);
+  return row;
+}
+
+// How long a "tell me now" verb waits for a socket before it is dropped.
+export const deviceQueryCommandTtlMs = 60 * 1000;
+
+// The cloud's per-scene state for a frame: what the device last reported
+// (`last_state` is the hello/state payload's `states` map plus
+// `active_scene`), in the {sceneId, states} shape the SPA's control drawer
+// reads from the backend's /states. When the frame is on a socket, a
+// `get_state` verb is queued (once — outstanding ones dedupe) so the copy is
+// refreshed; the reply lands in last_state through the hub's state handler
+// and the SPA re-syncs after `cache.retry_after`.
+export async function frameStatesRecord(
+  db: ReturnType<typeof createDb>,
+  frame: { id: string; accountId: string; connected: boolean; lastState: unknown },
+) {
+  const lastState =
+    frame.lastState && typeof frame.lastState === "object" && !Array.isArray(frame.lastState)
+      ? (frame.lastState as Record<string, unknown>)
+      : {};
+  const { active_scene: activeScene, ...rest } = lastState;
+  const states: Record<string, Record<string, unknown>> = {};
+  for (const [sceneId, state] of Object.entries(rest)) {
+    if (state && typeof state === "object" && !Array.isArray(state)) {
+      states[sceneId] = state as Record<string, unknown>;
+    }
+  }
+  let refreshing = false;
+  if (frame.connected) {
+    refreshing = true;
+    if (!(await outstandingFrameCommand(db, frame.id, "get_state"))) {
+      await enqueueFrameCommand(db, {
+        createdByAccountId: frame.accountId,
+        frameId: frame.id,
+        ttlMs: deviceQueryCommandTtlMs,
+        type: "get_state",
+      });
+    }
+  }
+  return {
+    sceneId: typeof activeScene === "string" ? activeScene : "",
+    states,
+    cache: { cached: true, refreshing, retry_after: 3 },
+  };
+}
+
+// Ask a connected frame for its on-device log ring once, when the cloud
+// holds nothing for it: a frame enrolled before its telemetry grant has
+// been logging into that ring the whole time and never shipped a line. The
+// reply is stored by the hub (log_batch or the Linux runtime's inline ack)
+// and reaches the open Logs panel as new_log events. Returns the command
+// when one was queued.
+export async function requestDeviceLogRingIfEmpty(
+  db: ReturnType<typeof createDb>,
+  frame: { id: string; accountId: string; connected: boolean; linkedClientId: string },
+) {
+  if (!frame.connected) {
+    return undefined;
+  }
+  const linkedClient = await linkedClientForFrame(db, frame);
+  if (!linkedClient || !linkedClientScopes(linkedClient).includes(frameTelemetryLogsScope)) {
+    return undefined;
+  }
+  const [stored] = await db
+    .select({ id: frameLogs.id })
+    .from(frameLogs)
+    .where(eq(frameLogs.frameId, frame.id))
+    .limit(1);
+  if (stored || (await outstandingFrameCommand(db, frame.id, "get_logs"))) {
+    return undefined;
+  }
+  return enqueueFrameCommand(db, {
+    createdByAccountId: frame.accountId,
+    frameId: frame.id,
+    payload: { limit: maxLogBatch },
+    ttlMs: deviceQueryCommandTtlMs,
+    type: "get_logs",
+  });
 }
 
 export function claimTokenExpiry(now = new Date()) {

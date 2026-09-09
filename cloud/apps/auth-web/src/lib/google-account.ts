@@ -43,6 +43,16 @@ export async function resolveGoogleSignIn(
 ): Promise<GoogleSignInResolution> {
   const existingIdentity = await findIdentity(db, issuer, claims.sub);
 
+  // A Google identity we have not seen, whose address Google itself does
+  // not vouch for: no account. It used to get a full session and then a
+  // dead end (no password could ever be added to it, since every lookup
+  // ignores unverified identities) while a stranger could still register a
+  // password account on the same address. An identity linked earlier keeps
+  // signing in — its account was verified when the link was made.
+  if (!existingIdentity && claims.email_verified !== true) {
+    return { status: "google_email_unverified" };
+  }
+
   if (!existingIdentity && claims.email) {
     const passwordAccount = await findAccountByPasswordEmail(db, claims.email);
     if (passwordAccount) {

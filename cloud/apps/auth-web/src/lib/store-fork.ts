@@ -28,6 +28,8 @@ import { jsonError } from "./device-flow";
 import { moderateStoreContent } from "./moderation";
 import { identityRateLimitResponse } from "./rate-limit";
 import {
+  compiledSceneHint,
+  compiledSceneNames,
   maxNewScenesPerDay,
   maxSceneZipBytes,
   maxScenesPerAccount,
@@ -61,6 +63,15 @@ export async function forkStoreScene(
   }
   if (!Array.isArray(input.scenes) || input.scenes.length === 0) {
     return jsonError("invalid_scenes", 400);
+  }
+  // Publishing refuses compiled scenes; so does the fork, now, rather than
+  // minting a private scene no frame can be given.
+  const compiled = compiledSceneNames(input.scenes);
+  if (compiled.length > 0) {
+    return jsonError("scene_requires_compilation", 400, {
+      hint: compiledSceneHint,
+      scenes: compiled,
+    });
   }
   // Same check-then-insert on the copy's name as the plain save path, same
   // per-account lock so two racing forks cannot both land on "(copy 3)".

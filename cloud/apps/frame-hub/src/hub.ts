@@ -17,7 +17,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import postgres from "postgres";
 import { WebSocket, WebSocketServer } from "ws";
 import {
@@ -59,6 +59,7 @@ import {
   sceneSnapshotAssetPath,
 } from "../../auth-web/src/lib/frame-asset-cache";
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
+import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
 import {
   allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
@@ -113,6 +114,8 @@ const browserFramePathPattern = /^\/api\/frames\/([0-9a-f-]{36})\/updates$/i;
 const closeAuthFailed = 4401;
 const closeAuthTimeout = 4408;
 const closeSuperseded = 4409;
+// The link's scopes changed under a live session: redial for a fresh `ready`.
+const closeRescoped = 4410;
 const closeSlowConsumer = 1013;
 
 // What the audit row says about a device close, from the WS close code the
@@ -608,9 +611,20 @@ export async function startFrameHub(
   // by the device that USED to own this row was authenticated with a
   // credential that no longer exists. It has to go the same way a revoked
   // one does — auth-web NOTIFYs this channel right after re-keying.
-  async function isFrameSessionStale(session: DeviceSession) {
+  //
+  // The same re-read carries the link's current scopes: `session.scopes` is
+  // what the device was told in `ready`, and the owner can grant or drop
+  // telemetry / service-settings scopes while the socket is up. A session
+  // whose scopes no longer match is "rescoped" — closed with 4410 so the
+  // device redials and hears the new grant in a fresh `ready` (neither
+  // device plane takes an unsolicited scope message; both reconnect on any
+  // close but 4401).
+  async function frameSessionStaleness(
+    session: DeviceSession,
+  ): Promise<"stale" | "rescoped" | undefined> {
     const [row] = await db
       .select({
+        providerClientMetadata: linkedClients.providerClientMetadata,
         publicKey: frames.publicKey,
         revokedAt: linkedClients.revokedAt,
         status: frames.status,
@@ -619,12 +633,39 @@ export async function startFrameHub(
       .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
       .where(eq(frames.id, session.frame.id))
       .limit(1);
-    return (
+    if (
       !row ||
       row.status === "revoked" ||
       row.revokedAt !== null ||
       row.publicKey !== session.frame.publicKey
-    );
+    ) {
+      return "stale";
+    }
+    if (!sameScopes(linkedClientScopes(row), session.scopes)) {
+      return "rescoped";
+    }
+    return undefined;
+  }
+
+  async function isFrameSessionStale(session: DeviceSession) {
+    return (await frameSessionStaleness(session)) === "stale";
+  }
+
+  function sameScopes(a: string[], b: string[]) {
+    if (a.length !== b.length) {
+      return false;
+    }
+    const sorted = [...a].sort();
+    return [...b].sort().every((scope, index) => scope === sorted[index]);
+  }
+
+  async function closeRescopedSession(session: DeviceSession) {
+    logInfo("device.rescoped", { frameId: session.frame.id });
+    await markDeviceDisconnected(session, { audit: false });
+    session.ws.close(closeRescoped, "scopes_changed");
+    await recordFrameAudit(session.frame, "frame.session_kicked", {
+      reason: "scopes_changed",
+    });
   }
 
   // Also the exit for a session left behind by a re-enrollment: from the
@@ -647,8 +688,13 @@ export async function startFrameHub(
     if (!session.ready || session.closed) {
       return;
     }
-    if (await isFrameSessionStale(session)) {
+    const staleness = await frameSessionStaleness(session);
+    if (staleness === "stale") {
       await kickRevokedSession(session);
+      return;
+    }
+    if (staleness === "rescoped") {
+      await closeRescopedSession(session);
       return;
     }
     // Anything still unacked well past its write is treated as lost.
@@ -689,6 +735,12 @@ export async function startFrameHub(
     const helloState = isRecord(hello.states)
       ? stateWithActiveScene(hello.states, hello.active_scene)
       : undefined;
+    // An unconfirmed frame (see isConfirmedFrame) gets its connectivity and
+    // its own hardware facts recorded — the confirm page shows both — and
+    // nothing else: no state, no scene checksum, no store resync, no audit
+    // row in the account's activity feed. Re-read rather than trusted from
+    // the upgrade-time row so a confirm during the handshake counts.
+    const confirmed = await isConfirmedFrameRow(session);
     await db
       .update(frames)
       .set({
@@ -705,10 +757,10 @@ export async function startFrameHub(
         ...(typeof hello.frameos_version === "string"
           ? { frameosVersion: hello.frameos_version.slice(0, 64) }
           : {}),
-        ...(helloState && acceptState(frameId, helloState)
+        ...(confirmed && helloState && acceptState(frameId, helloState)
           ? { lastState: helloState }
           : {}),
-        ...(isAcceptableChecksum(hello.scenes_checksum)
+        ...(confirmed && isAcceptableChecksum(hello.scenes_checksum)
           ? {
               scenesChecksum: hello.scenes_checksum,
               deployedSceneState: promotedSceneState(hello.scenes_checksum),
@@ -723,6 +775,40 @@ export async function startFrameHub(
           : {}),
       })
       .where(eq(frames.id, frameId));
+
+    // "Sign in with FrameOS Cloud" redirects to the linked client's
+    // local_origin and refuses when there is none. Claim-token enrollments
+    // before 2026.9.13 never recorded one, so a frame that reports the
+    // address it knows itself by on hello fills the gap — fill-only: an
+    // origin a browser recorded at enrollment stays the redirect target.
+    const helloOrigin = safeLocalOrigin(hello.local_origin);
+    if (helloOrigin && session.frame.linkedClientId) {
+      await db
+        .update(linkedClients)
+        .set({ localOrigin: helloOrigin, updatedAt: now })
+        .where(
+          and(
+            eq(linkedClients.id, session.frame.linkedClientId),
+            isNull(linkedClients.localOrigin),
+          ),
+        );
+    }
+
+    if (!confirmed) {
+      logInfo("device.connected_unconfirmed", { frameId });
+      if (session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(
+          JSON.stringify({
+            id: randomUUID(),
+            pending_commands: 0,
+            scopes: session.scopes,
+            type: "ready",
+          }),
+        );
+      }
+      await broadcastFrameUpdate(frameId);
+      return;
+    }
 
     await resyncEmptyStore(session, hello);
     await expireStaleCommands(frameId);
@@ -912,7 +998,7 @@ export async function startFrameHub(
     const ok = msg.ok === true;
     // A failed set_scenes deliberately leaves frames.assigned_checksum as is:
     // desired != acked keeps the frame showing out-of-sync in the UI.
-    await db
+    const [command] = await db
       .update(frameCommands)
       .set({
         ackedAt: new Date(),
@@ -929,7 +1015,22 @@ export async function startFrameHub(
           eq(frameCommands.frameId, session.frame.id),
           inArray(frameCommands.status, ["pending", "sent"]),
         ),
-      );
+      )
+      .returning({ type: frameCommands.type });
+    // The Linux runtime answers get_logs with the ring INSIDE the ack
+    // (`logs: [...]`, hub_client.nim handleGetLogs); the ESP32 sends a
+    // separate log_batch that lands in handleLogBatch. Both end up in
+    // frame_logs. Silent on refusal: the device never expects an answer to
+    // an ack, and the Nim runtime would audit one as an unknown verb.
+    if (ok && command?.type === "get_logs" && Array.isArray(msg.logs)) {
+      if (
+        !(await isConfirmedFrameRow(session)) ||
+        !session.scopes.includes(frameTelemetryLogsScope)
+      ) {
+        return;
+      }
+      await storeAndBroadcastLogs(session, msg.logs);
+    }
   }
 
   // Size guard shared by hello/state: an oversized last_state is not just a
@@ -970,6 +1071,9 @@ export async function startFrameHub(
     session: DeviceSession,
     msg: Record<string, unknown>,
   ) {
+    if (!(await isConfirmedFrame(session, msg))) {
+      return;
+    }
     const checksum = acceptChecksum(session.frame.id, msg.checksum);
     // active_scene is merged into last_state, so it needs the same ceiling a
     // scene id gets everywhere else (256 chars, as in auth-web's
@@ -1016,6 +1120,9 @@ export async function startFrameHub(
     session: DeviceSession,
     msg: Record<string, unknown>,
   ) {
+    if (!(await isConfirmedFrame(session, msg))) {
+      return;
+    }
     // `state` is hello-shaped; some payloads nest scene state under `states`,
     // so prefer that and fall back to the whole payload minus the envelope.
     // Either way the top-level active_scene must survive into last_state.
@@ -1098,6 +1205,16 @@ export async function startFrameHub(
         ? msg.reason.slice(0, 32)
         : null;
     session.sleeping = true;
+    // A pending frame halts like any other, so the socket is dropped the
+    // same way — but its forecast is not written into the account's data.
+    if (!(await isConfirmedFrameRow(session))) {
+      logWarn("device.message_from_unconfirmed_frame", {
+        frameId: session.frame.id,
+        type: msg.type,
+      });
+      session.ws.terminate();
+      return;
+    }
     if (lastSleepSeconds.size >= maxLastSleepEntries) {
       lastSleepSeconds.clear();
     }
@@ -1144,6 +1261,11 @@ export async function startFrameHub(
         ? msg.active_scene
         : undefined;
     if (!activeScene) {
+      return;
+    }
+    // Same gate as telemetry: a render announcement turns into asset_get /
+    // image_get commands whose replies seed the account's asset cache.
+    if (!(await isConfirmedFrame(session, msg))) {
       return;
     }
     const imageViaGet = msg.image === "image_get";
@@ -1222,10 +1344,7 @@ export async function startFrameHub(
   // origin the moment they open its page. The status is re-read from the
   // row on the way through so a confirm takes effect without a reconnect;
   // the re-read is cheap and only pending frames pay it.
-  async function isConfirmedFrame(
-    session: DeviceSession,
-    msg: Record<string, unknown>,
-  ) {
+  async function isConfirmedFrameRow(session: DeviceSession) {
     if (session.frame.status === "active") {
       return true;
     }
@@ -1236,6 +1355,16 @@ export async function startFrameHub(
       .limit(1);
     if (row?.status === "active") {
       session.frame = { ...session.frame, status: row.status };
+      return true;
+    }
+    return false;
+  }
+
+  async function isConfirmedFrame(
+    session: DeviceSession,
+    msg: Record<string, unknown>,
+  ) {
+    if (await isConfirmedFrameRow(session)) {
       return true;
     }
     logWarn("device.message_from_unconfirmed_frame", {
@@ -1268,7 +1397,11 @@ export async function startFrameHub(
       sendAckError(session, msg, "rate_limited");
       return;
     }
-    const entries = parseLogEntries(msg.logs);
+    await storeAndBroadcastLogs(session, msg.logs);
+  }
+
+  async function storeAndBroadcastLogs(session: DeviceSession, logs: unknown) {
+    const entries = parseLogEntries(logs);
     if (entries.length === 0) {
       return;
     }
@@ -1513,6 +1646,9 @@ export async function startFrameHub(
             ? { scenes_checksum: msg.scenes_checksum }
             : {}),
           ...(isRecord(msg.hardware) ? { hardware: msg.hardware } : {}),
+          ...(typeof msg.local_origin === "string"
+            ? { local_origin: msg.local_origin.slice(0, 256) }
+            : {}),
         };
       } else if (msg.type === "auth") {
         const signature =

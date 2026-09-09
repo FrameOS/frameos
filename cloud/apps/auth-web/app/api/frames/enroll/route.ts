@@ -13,6 +13,7 @@ import {
   parseOptionalString,
   readJsonObject,
   requireDatabase,
+  safeLocalOrigin,
 } from "../../../../src/lib/device-flow";
 import {
   enqueueFrameSettingsPush,
@@ -146,6 +147,13 @@ export async function POST(request: NextRequest) {
     64,
   );
   const name = parseOptionalString(body.name)?.slice(0, 256);
+  // Where a browser on the LAN reaches the device's admin panel — the
+  // redirect target the frameos/login handoff pins to (login/start refuses a
+  // linked client without one). The device flow records the browser's own
+  // origin at /api/device/start; a claim-token enrollment has no browser in
+  // the loop, so the device reports the address it knows itself by. Same
+  // validation: http(s), no credentials, a local-network host only.
+  const localOrigin = safeLocalOrigin(body.local_origin);
 
   const claimToken = parseOptionalString(body.claim_token);
   const authorizationHeader = request.headers.get("authorization");
@@ -156,6 +164,7 @@ export async function POST(request: NextRequest) {
       claimToken,
       frameosVersion,
       hardware,
+      localOrigin,
       name,
       publicKey,
     });
@@ -164,6 +173,7 @@ export async function POST(request: NextRequest) {
     return enrollLinkedFrame(db, authorizationHeader, wsUrl, {
       frameosVersion,
       hardware,
+      localOrigin,
       name,
       publicKey,
     });
@@ -174,6 +184,7 @@ export async function POST(request: NextRequest) {
 interface EnrollInput {
   frameosVersion: string | undefined;
   hardware: Record<string, unknown> | null;
+  localOrigin: string | undefined;
   name: string | undefined;
   publicKey: string;
 }
@@ -306,6 +317,7 @@ async function enrollWithClaimToken(
           },
           publicDisplayName: name,
           tokenReference: accessToken.tokenReference,
+          ...(input.localOrigin ? { localOrigin: input.localOrigin } : {}),
         })
         .returning();
       if (!linkedClient) {
@@ -488,6 +500,7 @@ async function replayEnrollment(
       previousTokenReference: sql`${linkedClients.tokenReference}`,
       tokenReference: accessToken.tokenReference,
       updatedAt: new Date(),
+      ...(input.localOrigin ? { localOrigin: input.localOrigin } : {}),
     })
     .where(eq(linkedClients.id, existing.frame.linkedClientId));
 
@@ -604,6 +617,8 @@ async function rebindEnrollment(
         previousTokenReference: null,
         tokenReference: accessToken.tokenReference,
         updatedAt: new Date(),
+        // A re-flashed card may come back under another hostname.
+        ...(input.localOrigin ? { localOrigin: input.localOrigin } : {}),
       })
       .where(eq(linkedClients.id, row.frame.linkedClientId));
     await tx
@@ -666,6 +681,21 @@ async function enrollLinkedFrame(
     !linkedClientHasScope(linkedClient, frameManagedScope)
   ) {
     return jsonError("insufficient_scope", 403);
+  }
+
+  // The device flow already recorded the browser's origin at
+  // /api/device/start; that one is what the owner actually typed, so the
+  // device's self-reported address only fills a gap, never replaces it.
+  if (input.localOrigin && !linkedClient.localOrigin) {
+    await db
+      .update(linkedClients)
+      .set({ localOrigin: input.localOrigin, updatedAt: new Date() })
+      .where(
+        and(
+          eq(linkedClients.id, linkedClient.id),
+          isNull(linkedClients.localOrigin),
+        ),
+      );
   }
 
   const [existing] = await db

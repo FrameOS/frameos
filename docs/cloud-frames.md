@@ -62,9 +62,22 @@ POST {provider}/api/frames/enroll
     "width": 800, "height": 480, "color": "…"
   },
   "frameos_version": "2026.8.1",
-  "name": "…optional, e.g. from the personalization file…"
+  "name": "…optional, e.g. from the personalization file…",
+  "local_origin": "http://kitchen.local:8787"
 }
 ```
+
+`local_origin` (optional) is where a browser on the LAN reaches the device's
+admin panel: the origin of the browser that pasted the claim token when there
+is one, otherwise `http(s)://<hostname>.local:<port>` as the device knows
+itself. The provider stores it on the linked client exactly as the device
+flow stores the browser's origin (`/api/device/start`), and it is the one
+redirect target `POST /api/frameos/login/start` accepts — a link without it
+cannot complete "Sign in with FrameOS Cloud" on the device's admin page.
+Same validation as the device flow: `http`/`https`, no credentials, and a
+local-network host (`localhost`, `.local`, private/link-local ranges); a
+value that fails is dropped, not refused. On a flow-B enrollment it only
+fills an empty field, never replaces what the browser recorded.
 
 Response `200`:
 

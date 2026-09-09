@@ -1,0 +1,19 @@
+[Unit]
+Description=FrameOS Cloud database cleanup (bookkeeping rows, aged frame logs and metrics)
+After=postgresql.service
+
+[Service]
+Type=oneshot
+# auth-web.env provides DATABASE_URL (reused, so there is no second copy of
+# the password); cleanup.env holds the retention overrides, if any. Both
+# optional (-) so a missing file degrades to the script's defaults.
+EnvironmentFile=-/etc/frameos-cloud/auth-web.env
+EnvironmentFile=-/etc/frameos-cloud/cleanup.env
+# The script is scripts/db-cleanup.sh from the live release: it and the
+# pg-env helper it sources ship with every deploy, so the box always runs
+# the version that matches its schema.
+WorkingDirectory=/opt/frameos-cloud/cloud
+ExecStart=/opt/frameos-cloud/cloud/scripts/db-cleanup.sh
+User=frameos-cloud
+Nice=10
+IOSchedulingClass=idle

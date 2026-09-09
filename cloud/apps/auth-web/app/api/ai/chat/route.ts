@@ -41,6 +41,7 @@ import {
   activeTurnForChat,
   activeTurnCountForAccount,
   startTurn,
+  TurnLimitError,
   turnStream,
 } from "../../../../src/lib/ai/turn-runner";
 import { csrfResponse } from "../../../../src/lib/csrf";
@@ -290,6 +291,8 @@ export async function POST(request: NextRequest) {
   if (accountLimited) {
     return accountLimited;
   }
+  // Cheap early refusal before the body is read; the binding check is the
+  // one startTurn makes below, atomic with registering the turn.
   if (activeTurnCountForAccount(accountId) >= maxActiveTurnsPerAccount) {
     return jsonError("too_many_turns", 429, {
       detail: `At most ${maxActiveTurnsPerAccount} AI turns can run at once. Wait for one to finish.`,
@@ -510,10 +513,15 @@ export async function POST(request: NextRequest) {
   // Reserved from here until onFinish: the next turn's admission gate counts
   // it, and the ledger takes over once the metering below has run.
   reserveTurnSpend(accountId, turnId);
-  const turn = startTurn({
+  let turn: ReturnType<typeof startTurn>;
+  try {
+    turn = startTurn({
     accountId,
     chatId: chat.id,
     id: turnId,
+    // The cap the early check above only estimates; this one is atomic with
+    // registering the turn (see startTurn).
+    maxActivePerAccount: maxActiveTurnsPerAccount,
     onFinish: (finished, outcome, failure) => {
       releaseTurnSpend(finished.id);
       const durationMs = Date.now() - finished.startedAt;
@@ -707,6 +715,13 @@ export async function POST(request: NextRequest) {
       }
     },
   });
+  } catch (error) {
+    releaseTurnSpend(turnId);
+    if (error instanceof TurnLimitError) {
+      return jsonError("too_many_turns", 429, { detail: error.message });
+    }
+    throw error;
+  }
 
   const stream = turnStream(turn, 0, {
     onDisconnect: (delivered) => {

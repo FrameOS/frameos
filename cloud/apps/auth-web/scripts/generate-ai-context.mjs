@@ -172,6 +172,33 @@ function splitMarkdownSections(markdown) {
   return sections
 }
 
+// The docs the customer-facing AI can search and read (`search_docs` /
+// `read_doc`). An allowlist, like read_repo_file's: docs/ also holds the
+// open-vulnerability lists, review and audit notes, the ops runbooks and
+// the deployment/backup procedures — public in the repo, but not something
+// the product should recite on request. Add a file here when it documents
+// what a user of FrameOS needs, not how the project is run.
+const aiDocsAllowlist = new Set([
+  'docs/api-triality.md',
+  'docs/boot-partition.md',
+  'docs/buildroot-privileges.md',
+  'docs/cloud-frames.md',
+  'docs/cloud-link.md',
+  'docs/esp32-image-size.md',
+  'docs/esp32-memory.md',
+  'docs/esp32-progressive-jpeg.md',
+  'docs/js-apps-and-code-nodes.md',
+  'docs/legacy-source-builds.md',
+  'docs/nim-to-js-conversion.md',
+  'docs/quickts.md',
+  'docs/value-pipeline.md',
+  'cloud/docs/auth.md',
+  'cloud/docs/cloud-frames.md',
+  'cloud/docs/esp32-large-image-spill.md',
+  'cloud/docs/frameos-integration.md',
+  'cloud/docs/mcp.md',
+])
+
 async function collectDocs() {
   const docs = []
   const sets = [
@@ -184,12 +211,12 @@ async function collectDocs() {
     }
     const entries = await fs.readdir(dir, { withFileTypes: true })
     for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith('.md')).sort((a, b) => a.name.localeCompare(b.name))) {
-      // todo.md is a task list, not documentation.
-      if (entry.name === 'todo.md') {
+      const docPath = `${prefix}/${entry.name}`
+      if (!aiDocsAllowlist.has(docPath)) {
         continue
       }
       const markdown = await fs.readFile(path.join(dir, entry.name), 'utf8')
-      docs.push({ path: `${prefix}/${entry.name}`, sections: splitMarkdownSections(markdown) })
+      docs.push({ path: docPath, sections: splitMarkdownSections(markdown) })
     }
   }
   return docs

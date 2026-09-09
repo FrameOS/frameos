@@ -22,11 +22,20 @@ export async function hostIsBlocked(hostname: string): Promise<boolean> {
   return addresses.length === 0 || addresses.some(addressIsPrivate);
 }
 
-export function addressIsPrivate(address: string): boolean {
-  const plain = address.split("%")[0] ?? address;
+// The classifier's source, kept as plain JavaScript on purpose: the headless
+// renderer (scene-render.ts) runs its HTTP bridge in a child Node started
+// with `-e` and cannot import this module, so it splices this string into
+// that script. One source, two guards that cannot drift — the renderer's
+// used to be a hand-copied subset missing 192.0.0.0/24, 198.18/15, NAT64 and
+// 6to4. `isIP` is the only dependency and is passed in.
+export const addressIsPrivateSource = String.raw`
+function addressIsPrivate(address) {
+  const plain = address.split("%")[0] || address;
   if (isIP(plain) === 4) {
     const octets = plain.split(".").map(Number);
-    const [a = -1, b = -1, c = -1] = octets;
+    const a = octets[0] === undefined ? -1 : octets[0];
+    const b = octets[1] === undefined ? -1 : octets[1];
+    const c = octets[2] === undefined ? -1 : octets[2];
     return (
       a === 0 || // unspecified
       a === 10 ||
@@ -60,6 +69,12 @@ export function addressIsPrivate(address: string): boolean {
     lower.startsWith("2002:")
   );
 }
+`;
+
+export const addressIsPrivate = new Function(
+  "isIP",
+  `${addressIsPrivateSource}\nreturn addressIsPrivate;`,
+)(isIP) as (address: string) => boolean;
 
 // A fetch that applies the guard before every request (redirects included:
 // each hop is checked, so a public URL cannot bounce to an internal one).

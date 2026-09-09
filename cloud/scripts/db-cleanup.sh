@@ -8,17 +8,38 @@ cd "$(dirname "$0")/.."
 # codes, and expired or revoked sessions. Audit and consent events are kept.
 # Run periodically (e.g. daily via cron); see docs/operational-runbooks.md.
 
-database_url="${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
+# The URL never goes on a command line (ps / /proc show argv to every local
+# account): it becomes libpq's PG* environment and psql runs bare.
+# shellcheck source=scripts/lib/pg-env.sh
+. scripts/lib/pg-env.sh
+pg_env_from_url "${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
+
+# Bookkeeping rows (device-flow requests, login codes, sessions, claim
+# tokens, finished commands) age out after this many days.
 retention_days="${FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS:-7}"
+# Device telemetry is the owner's history, not bookkeeping, and is bounded
+# per frame at insert time (5000 log rows / metrics samples per frame, plus
+# the account's byte budget), so its age limit is separate and longer. The
+# defaults are what production runs; a plan that sells longer retention
+# raises them here.
+log_retention_days="${FRAMEOS_CLOUD_FRAME_LOG_RETENTION_DAYS:-30}"
+metrics_retention_days="${FRAMEOS_CLOUD_FRAME_METRICS_RETENTION_DAYS:-30}"
 
 # A non-positive retention would flip make_interval into the future and delete
 # rows that have not aged out yet.
-if ! [[ "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ]; then
-  echo "FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS must be a positive integer, got: ${retention_days}" >&2
-  exit 1
-fi
+for pair in "FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS=$retention_days" \
+  "FRAMEOS_CLOUD_FRAME_LOG_RETENTION_DAYS=$log_retention_days" \
+  "FRAMEOS_CLOUD_FRAME_METRICS_RETENTION_DAYS=$metrics_retention_days"; do
+  value="${pair#*=}"
+  if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt 1 ]; then
+    echo "${pair%%=*} must be a positive integer, got: ${value}" >&2
+    exit 1
+  fi
+done
 
-psql "$database_url" -v ON_ERROR_STOP=1 -v retention_days="$retention_days" <<'SQL'
+psql -v ON_ERROR_STOP=1 -v retention_days="$retention_days" \
+  -v log_retention_days="$log_retention_days" \
+  -v metrics_retention_days="$metrics_retention_days" <<'SQL'
 DELETE FROM device_authorization_requests
 WHERE expires_at < now() - make_interval(days => :'retention_days'::int)
   AND status <> 'pending';
@@ -63,7 +84,12 @@ WHERE status IN ('pending', 'sent')
 -- would cascade to that client's backups) is a data-retention decision.
 
 DELETE FROM frame_logs
-WHERE inserted_at < now() - make_interval(days => :'retention_days'::int);
+WHERE inserted_at < now() - make_interval(days => :'log_retention_days'::int);
+
+-- Metrics samples have the same per-frame cap at insert and, until this
+-- line, no age limit at all.
+DELETE FROM frame_metrics
+WHERE inserted_at < now() - make_interval(days => :'metrics_retention_days'::int);
 SQL
 
-echo "Cleanup complete (retention: ${retention_days} days)"
+echo "Cleanup complete (retention: bookkeeping ${retention_days} days, frame logs ${log_retention_days} days, frame metrics ${metrics_retention_days} days)"

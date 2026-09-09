@@ -1852,11 +1852,47 @@ export async function executeTool(
       if (!scene) {
         return JSON.stringify({ error: `No accessible store scene with id ${sceneId}` });
       }
+      // Which version the model gets to read. A scene the user owns or that
+      // is public: the latest. A scene readable ONLY because a frame of
+      // theirs runs it (gone private or pulled since): the version that
+      // frame pinned — the bytes on the wall — never the latest, which the
+      // publisher withdrew from them. The payload builder refuses the same
+      // leak on the deploy path; this is the read side of that rule.
+      const readableAsListed =
+        scene.accountId === ctx.accountId ||
+        (scene.visibility === "public" && scene.status === "active");
+      let pinnedVersion: number | null = null;
+      if (!readableAsListed) {
+        const pins = await ctx.db
+          .select({ sceneVersion: frameSceneAssignments.sceneVersion })
+          .from(frameSceneAssignments)
+          .innerJoin(frames, eq(frames.id, frameSceneAssignments.frameId))
+          .where(
+            and(
+              eq(frameSceneAssignments.sceneId, scene.id),
+              eq(frames.accountId, ctx.accountId),
+            ),
+          );
+        const numbered = pins
+          .map((pin) => pin.sceneVersion)
+          .filter((value): value is number => typeof value === "number");
+        if (numbered.length === 0) {
+          return JSON.stringify({
+            error: `Store scene ${sceneId} is no longer available to you, and the frame that ran it pinned no version.`,
+          });
+        }
+        pinnedVersion = Math.max(...numbered);
+      }
       const [version] = await ctx.db
         .select()
         .from(storeSceneVersions)
         .where(
-          and(eq(storeSceneVersions.sceneId, scene.id), isNull(storeSceneVersions.yankedAt)),
+          and(
+            eq(storeSceneVersions.sceneId, scene.id),
+            ...(pinnedVersion === null
+              ? [isNull(storeSceneVersions.yankedAt)]
+              : [eq(storeSceneVersions.version, pinnedVersion)]),
+          ),
         )
         .orderBy(desc(storeSceneVersions.version))
         .limit(1);

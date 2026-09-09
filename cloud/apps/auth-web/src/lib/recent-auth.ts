@@ -33,10 +33,14 @@ export const recentApprovalMaxAgeSeconds = 2 * 60 * 60;
 
 export const reauthPath = "/login/reauth";
 
-// Which proofs /login/reauth can ask this account for. `password` when the
-// account has one; `code` when an authenticator is confirmed or recovery
-// codes remain; `passkey` when one is registered. An account with none of
-// them (Google-only, no second factor) can only sign in again through Google,
+// Which proofs /login/reauth can ask this account for. `code` when an
+// authenticator is confirmed or recovery codes remain; `passkey` when one is
+// registered; `password` when the account has one AND no second factor —
+// once two-factor is on, sudo mode asks for the second factor, the same
+// thing sign-in asks for, so a password alone (the one credential a phished
+// or reused secret gives an attacker) can no longer revoke frames, mint
+// tokens or turn two-factor itself off. An account with none of them
+// (Google-only, no second factor) can only sign in again through Google,
 // which mints a fresh session (`sign_in`).
 export type ReauthMethods = {
   code: boolean;
@@ -55,10 +59,22 @@ export async function reauthMethods(
     .where(eq(accounts.id, accountId))
     .limit(1);
   const status = await secondFactorStatus(db, accountId);
-  const password = Boolean(account?.passwordHash);
   const code = status.totpEnabled || status.recoveryCodesRemaining > 0;
   const passkey = status.passkeys.length > 0;
+  const password = Boolean(account?.passwordHash) && !secondFactorEnrolled(status);
   return { code, passkey, password, sign_in: !password && !code && !passkey };
+}
+
+// Two-factor is ON exactly when a confirmed authenticator or a passkey
+// exists (docs/auth.md: the credentials are the flag). Recovery codes alone
+// do not count — they outlive the factor they backed only until the last
+// one is removed, and an account with only codes left is not protected by
+// them.
+export function secondFactorEnrolled(status: {
+  passkeys: unknown[];
+  totpEnabled: boolean;
+}) {
+  return status.totpEnabled || status.passkeys.length > 0;
 }
 
 // When the current request's session last proved its credentials, or

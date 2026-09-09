@@ -108,7 +108,7 @@ function errorMessage(error: string) {
   }
 
   if (error === "google_email_unverified") {
-    return "Google could not confirm that email address, so it cannot be linked. Sign in with your password instead.";
+    return "Google has not verified that email address, so it cannot sign in here. Verify it with Google first, or sign up with a password.";
   }
 
   // Never echo unrecognized error strings: the query parameter is

@@ -19,6 +19,8 @@ import {
   sceneDisplayName,
 } from "../../../../../../src/lib/scene-title";
 import {
+  compiledSceneHint,
+  compiledSceneNames,
   maxSceneEditsPer15Minutes,
   maxSceneEditsPerHour,
   maxSceneZipBytes,
@@ -146,6 +148,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const scenes = (body.scenes as unknown[] | undefined) ?? previousScenes;
   if (!scenes || scenes.length === 0) {
     return jsonError("version_not_found", 404);
+  }
+  // The same refusal publishing makes, at the same moment: a save that
+  // turned the scene into a compiled one used to succeed here and fail much
+  // later, at assign time, with the same code and no way back.
+  if (body.scenes !== undefined) {
+    const compiled = compiledSceneNames(scenes);
+    if (compiled.length > 0) {
+      return jsonError("scene_requires_compilation", 400, {
+        hint: compiledSceneHint,
+        scenes: compiled,
+      });
+    }
   }
 
   // The listing title lives in the zip's template.json (that is what publishing

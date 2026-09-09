@@ -101,6 +101,13 @@ export async function PUT(request: NextRequest) {
   if (!session?.accountId) {
     return jsonError("login_required", 401);
   }
+  // Taking on a charge is a decision for the person, in a browser, never a
+  // script's bearer — the same line the frame-confirm and second-factor
+  // routes draw. Dormant until FRAMEOS_CLOUD_PLANS_SELF_SERVE flips, but the
+  // free downgrade branch below is reachable today too.
+  if (session.apiToken) {
+    return jsonError("api_token_not_allowed", 403);
+  }
   const { db, response } = requireDatabase();
   if (!db) {
     return response;

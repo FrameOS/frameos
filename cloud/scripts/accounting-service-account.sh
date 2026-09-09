@@ -52,6 +52,11 @@ if [ -z "${DATABASE_URL:-}" ]; then
   echo "DATABASE_URL is not set and .env.local does not provide it" >&2
   exit 1
 fi
+# The URL never goes on a command line (ps / /proc show argv to every local
+# account): it becomes libpq's PG* environment and psql runs bare.
+# shellcheck source=scripts/lib/pg-env.sh
+. scripts/lib/pg-env.sh
+pg_env_from_url "$DATABASE_URL"
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 token_prefix="fc_apijob_"
@@ -64,7 +69,7 @@ token_access="billing_nightly"
 # what opens the nightly route, and the flag would only widen what a leaked
 # token's account could do if it ever grew a login identity.
 
-account_id="$(psql "$DATABASE_URL" --tuples-only --no-align -v ON_ERROR_STOP=1 \
+account_id="$(psql --tuples-only --no-align -v ON_ERROR_STOP=1 \
   --set=email="$email" --set=name="$name" <<'SQL'
 INSERT INTO accounts (display_name, primary_email, is_superadmin)
 SELECT :'name', :'email', false
@@ -83,7 +88,7 @@ fi
 # A service account must never be able to log in: refuse if somebody has
 # attached an identity to it since.
 # (Heredoc, not -c: psql only interpolates :'var' in SQL read from stdin.)
-identities="$(psql "$DATABASE_URL" --tuples-only --no-align -v ON_ERROR_STOP=1 \
+identities="$(psql --tuples-only --no-align -v ON_ERROR_STOP=1 \
   --set=id="$account_id" <<'SQL'
 SELECT count(*) FROM account_identities WHERE account_id = :'id';
 SQL
@@ -94,7 +99,7 @@ if [ "$identities" != "0" ]; then
 fi
 
 if [ "$rotate" = true ]; then
-  revoked="$(psql "$DATABASE_URL" --tuples-only --no-align -v ON_ERROR_STOP=1 \
+  revoked="$(psql --tuples-only --no-align -v ON_ERROR_STOP=1 \
     --set=id="$account_id" --set=token_name="$token_name" <<'SQL'
 UPDATE account_api_tokens SET revoked_at = now(), updated_at = now()
  WHERE account_id = :'id' AND name = :'token_name' AND revoked_at IS NULL
@@ -104,7 +109,7 @@ SQL
   echo "Revoked: ${revoked:-nothing was live}"
 fi
 
-psql "$DATABASE_URL" --tuples-only --no-align -v ON_ERROR_STOP=1 \
+psql --tuples-only --no-align -v ON_ERROR_STOP=1 \
   --set=id="$account_id" --set=token_name="$token_name" --set=token_access="$token_access" \
   --set=token_hash="$token_hash" --set=token_hint="$token_hint" >/dev/null <<'SQL'
 INSERT INTO account_api_tokens (account_id, name, access, token_hash, token_hint)

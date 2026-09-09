@@ -585,7 +585,7 @@ describe("Esp32CloudFlasher", () => {
     ]);
   });
 
-  it("remembers WiFi credentials in localStorage only when asked to", async () => {
+  it("remembers the WiFi network name (never the password) in localStorage only when asked to", async () => {
     mockCloudApi();
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
@@ -597,13 +597,15 @@ describe("Esp32CloudFlasher", () => {
     fireEvent.change(screen.getByLabelText("WiFi password"), {
       target: { value: "hunter2" },
     });
-    fireEvent.click(screen.getByLabelText(/Remember WiFi credentials/));
+    fireEvent.click(screen.getByLabelText(/Remember the WiFi network name/));
     clickFlash();
     await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
 
     // Shared with the SD image builder: one stored network for the panel.
     expect(localStorage.getItem("frameos-sd-image-wifi")).toBe(
-      JSON.stringify({ password: "hunter2", ssid: "MyNet" }),
+      // The passphrase is retyped: a plaintext PSK in localStorage is
+      // readable by any script on the origin.
+      JSON.stringify({ ssid: "MyNet" }),
     );
     localStorage.removeItem("frameos-sd-image-wifi");
   });

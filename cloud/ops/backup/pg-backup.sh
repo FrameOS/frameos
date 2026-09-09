@@ -55,7 +55,57 @@ set -euo pipefail
 #                              newest base backup may be (default 36; 0 skips
 #                              the pgBackRest check entirely)
 
-database_url="${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
+# The URL never goes on pg_dump's command line (argv is readable by every
+# local account for the whole dump): it becomes libpq's PG* environment.
+# Inline copy of cloud/scripts/lib/pg-env.sh — this file is installed on its
+# own under /usr/local/bin; keep the two in step.
+pg_url_decode() {
+  local s="$1"
+  # %XX → the byte. `+` is NOT a space outside a query string, so it stays.
+  printf '%b' "${s//%/\\x}"
+}
+
+pg_env_from_url() {
+  local url="$1"
+  case "$url" in
+    postgres://* | postgresql://*) ;;
+    *)
+      echo "pg_env_from_url: DATABASE_URL must be a postgres:// URL" >&2
+      return 1
+      ;;
+  esac
+  local rest="${url#*://}" query="" db="" userinfo="" hostport="" user="" pass="" has_pass=0 host="" port=""
+  case "$rest" in *\?*) query="${rest#*\?}"; rest="${rest%%\?*}" ;; esac
+  case "$rest" in */*) db="${rest#*/}"; rest="${rest%%/*}" ;; esac
+  hostport="$rest"
+  case "$rest" in *@*) userinfo="${rest%@*}"; hostport="${rest##*@}" ;; esac
+  if [ -n "$userinfo" ]; then
+    case "$userinfo" in
+      *:*) user="${userinfo%%:*}"; pass="${userinfo#*:}"; has_pass=1 ;;
+      *) user="$userinfo" ;;
+    esac
+  fi
+  case "$hostport" in
+    \[*\]*) host="${hostport%%]*}"; host="${host#[}"; port="${hostport##*]}"; port="${port#:}" ;;
+    *:*) host="${hostport%%:*}"; port="${hostport#*:}" ;;
+    *) host="$hostport" ;;
+  esac
+  export PGHOST PGDATABASE
+  PGHOST="$(pg_url_decode "${host:-localhost}")"
+  PGDATABASE="$(pg_url_decode "$db")"
+  if [ -n "$port" ]; then export PGPORT="$port"; else unset PGPORT; fi
+  if [ -n "$user" ]; then export PGUSER; PGUSER="$(pg_url_decode "$user")"; else unset PGUSER; fi
+  if [ "$has_pass" = 1 ]; then export PGPASSWORD; PGPASSWORD="$(pg_url_decode "$pass")"; else unset PGPASSWORD; fi
+  unset PGSSLMODE
+  local pair
+  local IFS='&'
+  for pair in $query; do
+    case "$pair" in
+      sslmode=*) export PGSSLMODE="${pair#sslmode=}" ;;
+    esac
+  done
+}
+pg_env_from_url "${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
 rclone_remote="${RCLONE_REMOTE:-boxcrypt:backups}"
 capacity_remote="${CAPACITY_REMOTE:-${rclone_remote%%:*}:}"
 retention_days="${RETENTION_DAYS:-30}"
@@ -114,7 +164,7 @@ db_file="$local_dir/db-$stamp.dump"
 host_file="$local_dir/host-$stamp.tar.gz"
 
 echo "Dumping database to $db_file"
-pg_dump --format=custom --compress=6 --file "$db_file" "$database_url"
+pg_dump --format=custom --compress=6 --file "$db_file"
 chmod 600 "$db_file"
 
 # A dump pg_restore cannot read is not a backup. --list parses the full TOC

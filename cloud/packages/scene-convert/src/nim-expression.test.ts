@@ -212,6 +212,15 @@ describe("nimExpressionToJs — hostile input stays bounded", () => {
     }
   });
 
+  it("refuses runaway nesting and runaway length with a NimConvertError, not a RangeError", () => {
+    for (const source of ["(".repeat(5000), "-".repeat(5000) + "1", `${"f(".repeat(5000)}1${")".repeat(5000)}`]) {
+      expect(() => nimExpressionToJs(source)).toThrow(NimConvertError);
+    }
+    expect(() => nimExpressionToJs(`"${"a".repeat(70_000)}"`)).toThrow(/longer than/);
+    // A legitimately deep expression still converts.
+    expect(() => nimExpressionToJs(`${"(".repeat(50)}1${")".repeat(50)}`)).not.toThrow();
+  });
+
   it("emits the capitalizeAscii receiver once", () => {
     const js = nimExpressionToJs(`"hello".capitalizeAscii`);
     expect(js.split('"hello"').length - 1).toBe(1);

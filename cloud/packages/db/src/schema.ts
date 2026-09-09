@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   bigint,
@@ -539,7 +540,9 @@ export const storeScenes = pgTable(
     // High-entropy sharing secret: ?share={token} grants read access to a
     // private scene (page, zip, images) without an account. Never rendered
     // to anyone but the owner.
-    shareToken: uuid("share_token").defaultRandom().notNull(),
+    // NULL since migration 0051: the owner turned sharing off. Rotated by the
+    // same route; nothing else writes it.
+    shareToken: uuid("share_token").defaultRandom(),
     slug: text("slug").notNull(),
     // "active" | "pulled" — pulled scenes are hidden everywhere and their
     // downloads return 410, the fast moderation kill switch.
@@ -1022,6 +1025,10 @@ export const frameCommands = pgTable(
       table.status,
       table.createdAt,
     ),
+    // The hub's fleet-wide TTL sweep (0052): only the live rows, by deadline.
+    liveExpiresIdx: index("frame_commands_live_expires_idx")
+      .on(table.expiresAt)
+      .where(sql`${table.status} in ('pending', 'sent') and ${table.expiresAt} is not null`),
   }),
 );
 
@@ -1096,6 +1103,8 @@ export const frameLogs = pgTable(
   },
   (table) => ({
     frameIdx: index("frame_logs_frame_idx").on(table.frameId, table.id),
+    // Covers the per-batch account byte sum (usage.ts) — 0052.
+    frameSizeIdx: index("frame_logs_frame_size_idx").on(table.frameId, table.sizeBytes),
   }),
 );
 

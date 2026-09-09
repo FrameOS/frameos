@@ -41,6 +41,9 @@ export function ReauthForm({
     if (payload?.error === "invalid_password") {
       return "That password is not correct.";
     }
+    if (payload?.error === "second_factor_required") {
+      return "This account has two-factor authentication on, so confirm with your authenticator, a recovery code or a passkey instead of the password.";
+    }
     if (payload?.error === "invalid_code") {
       return mode === "recovery"
         ? "That recovery code is not valid (or was already used)."

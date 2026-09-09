@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
   notifySecurityChange,
+  revokedTokensDetail,
   readJsonBody,
 } from "../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
@@ -96,7 +97,11 @@ export async function POST(request: NextRequest) {
     metadata: { apiTokensRevoked, method: "passkey", name },
     target: { passkeyId },
   });
-  await notifySecurityChange(context, "passkey_added", name);
+  await notifySecurityChange(
+    context,
+    "passkey_added",
+    [name, revokedTokensDetail(apiTokensRevoked)].filter(Boolean).join(". "),
+  );
   const result = NextResponse.json({
     api_tokens_revoked: apiTokensRevoked,
     ok: true,

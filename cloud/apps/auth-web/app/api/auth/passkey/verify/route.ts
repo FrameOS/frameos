@@ -1,13 +1,8 @@
 // Passwordless sign-in, step 2: the assertion names the credential, the
 // credential names the account. A verified (PIN/biometric) passkey counts as
 // both factors, so no second step follows.
-import { eq } from "drizzle-orm";
-import {
-  accountIdentities,
-  accounts,
-  createDb,
-  passwordProviderIssuer,
-} from "@frameos-cloud/db";
+import { asc, eq } from "drizzle-orm";
+import { accountIdentities, accounts, createDb } from "@frameos-cloud/db";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { NextRequest, NextResponse } from "next/server";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
@@ -27,6 +22,7 @@ import {
   webauthnChallengeCookieOptions,
 } from "../../../../../src/lib/webauthn";
 import { defaultSignInRedirect } from "../../../../../src/lib/sign-in-redirect";
+import { pickSignInIdentity } from "../../../../../src/lib/sign-in-identity";
 
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
@@ -78,34 +74,47 @@ export async function POST(request: NextRequest) {
   if (!account) {
     return NextResponse.json({ error: "invalid_passkey" }, { status: 401 });
   }
-  // Prefer the verified password identity's email as the subject, the way
-  // the password route does; fall back to the snapshot.
-  const [identity] = await db
-    .select({
-      emailSnapshot: accountIdentities.emailSnapshot,
-      emailVerified: accountIdentities.emailVerified,
-      providerSubject: accountIdentities.providerSubject,
-    })
-    .from(accountIdentities)
-    .where(eq(accountIdentities.accountId, account.id))
-    .limit(1);
-  const email =
-    identity?.emailSnapshot ?? account.primaryEmail ?? undefined;
+  // The identity this session speaks for. A passkey is a credential on the
+  // account, not an identity, so the session borrows one — deterministically
+  // (pickSignInIdentity: the password identity first, the way the password
+  // route stamps it), because /api/frameos/login/authorize and
+  // /api/device/authorize resolve the session's (issuer, subject) pair back
+  // to a row, and a backend must see the same person as the same identity
+  // whichever way they signed in. An account with no identity row at all
+  // cannot be signed into: nothing downstream could name it.
+  const identity = pickSignInIdentity(
+    await db
+      .select({
+        createdAt: accountIdentities.createdAt,
+        emailSnapshot: accountIdentities.emailSnapshot,
+        emailVerified: accountIdentities.emailVerified,
+        id: accountIdentities.id,
+        providerIssuer: accountIdentities.providerIssuer,
+        providerSubject: accountIdentities.providerSubject,
+      })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.accountId, account.id))
+      .orderBy(asc(accountIdentities.createdAt), asc(accountIdentities.id)),
+  );
+  if (!identity) {
+    return NextResponse.json({ error: "invalid_passkey" }, { status: 401 });
+  }
+  const email = identity.emailSnapshot ?? account.primaryEmail ?? undefined;
 
   await recordAuditEvent(db, {
     accountId: account.id,
     actor: { accountId: account.id, providerSubject: email },
     eventType: "account.signed_in",
     metadata: { method: "passkey", passkey: result.passkeyName },
-    target: { providerIssuer: passwordProviderIssuer },
+    target: { providerIssuer: identity.providerIssuer },
   });
   const token = await createSession(db, {
     accountId: account.id,
     email,
-    emailVerified: identity?.emailVerified ?? true,
+    emailVerified: identity.emailVerified,
     name: account.displayName ?? undefined,
-    providerIssuer: passwordProviderIssuer,
-    providerSubject: identity?.providerSubject ?? account.id,
+    providerIssuer: identity.providerIssuer,
+    providerSubject: identity.providerSubject,
   });
 
   const returnTo =

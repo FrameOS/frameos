@@ -81,6 +81,7 @@ const eventLabels: Record<string, string> = {
   "store.scene_unfeatured": "Store scene unfeatured",
   "store.version_unyanked": "Store scene version republished",
   "store.version_yanked": "Store scene version unpublished",
+  "store.share_link_changed": "Store scene share link rotated or turned off",
   "store.visibility_changed": "Store scene visibility changed",
 };
 

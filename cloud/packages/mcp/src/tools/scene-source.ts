@@ -152,6 +152,51 @@ async function uploadSceneZip(
 }
 
 const maxImportBytes = 8 * 1024 * 1024;
+const importTimeoutMs = 30_000;
+
+// Reads a response body up to `maxBytes`, giving up the moment the cap is
+// passed instead of buffering whatever the remote sends and measuring it
+// afterwards. Undefined past the cap.
+export async function readBodyBounded(
+  response: Response,
+  maxBytes: number,
+): Promise<Uint8Array | undefined> {
+  const declared = Number(response.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return undefined;
+  }
+  const stream = response.body;
+  if (!stream || typeof stream.getReader !== "function") {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return bytes.length > maxBytes ? undefined : bytes;
+  }
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.length;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return undefined;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
 
 export async function resolveSceneSource(
   ctx: ToolContext,
@@ -188,20 +233,32 @@ export async function resolveSceneSource(
   if (ownRoute?.[1]) {
     return { created: false, sceneId: ownRoute[1] };
   }
+  // A remote we do not control: a deadline on the whole exchange, and the
+  // body read stops at the cap rather than after it.
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), importTimeoutMs);
   let response: Response;
+  let bytes: Uint8Array | undefined;
   try {
     response = await ctx.fetchExternal(url, {
       headers: { accept: "application/zip, application/json, */*" },
       redirect: "follow",
+      signal: deadline.signal,
     });
+    if (!response.ok) {
+      return { error: `Could not fetch ${url}: HTTP ${response.status}` };
+    }
+    bytes = await readBodyBounded(response, maxImportBytes);
   } catch (error) {
-    return { error: `Could not fetch ${url}: ${String(error)}` };
+    return {
+      error: deadline.signal.aborted
+        ? `Could not fetch ${url}: no complete response within ${importTimeoutMs / 1000} s.`
+        : `Could not fetch ${url}: ${String(error)}`,
+    };
+  } finally {
+    clearTimeout(timer);
   }
-  if (!response.ok) {
-    return { error: `Could not fetch ${url}: HTTP ${response.status}` };
-  }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > maxImportBytes) {
+  if (!bytes) {
     return { error: `${url} is larger than ${maxImportBytes} bytes.` };
   }
   const contentType = response.headers.get("content-type") ?? "";

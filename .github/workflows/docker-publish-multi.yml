@@ -190,7 +190,6 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -606,8 +605,11 @@ jobs:
             echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned firmware"
             exit 1
           fi
-          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
-            || python3 -m pip install --quiet cryptography==50.0.0
+          # Hash-pinned (tools/requirements-signing.txt): this runner holds
+          # the signing key, so nothing unverified from PyPI runs on it.
+          python3 -m pip install --quiet --require-hashes --break-system-packages \
+              -r tools/requirements-signing.txt \
+            || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
           keyfile=$(mktemp)
           printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
           status=0
@@ -708,13 +710,42 @@ jobs:
           rm -rf "$out"
           ls -lh release-assets/
 
+      # Signed here, on the GitHub-hosted runner, the same way the ESP32
+      # firmware is: the .minisig travels with the artifact so npm-publish.yml
+      # can verify the bundle it downloads by run id (an arbitrary run id is
+      # otherwise a way to publish any tarball to npm), and the github-release
+      # job keeps a signature that already exists.
+      - name: Sign wasm runtime
+        env:
+          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
+            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish an unsigned wasm runtime"
+            exit 1
+          fi
+          python3 -m pip install --quiet --require-hashes --break-system-packages \
+              -r tools/requirements-signing.txt \
+            || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
+          keyfile=$(mktemp)
+          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
+          status=0
+          python3 tools/sign_firmware.py sign --secret "$keyfile" \
+            release-assets/frameos-*-wasm.tar.gz || status=$?
+          shred -u "$keyfile"
+          [ "$status" -eq 0 ] || exit "$status"
+          python3 tools/sign_firmware.py verify \
+            --public release-assets/firmware-signing.pub release-assets/frameos-*-wasm.tar.gz
+
       - name: Upload wasm runtime
         uses: actions/upload-artifact@v4
         with:
           # frameos-<version>-* so the github-release job picks it up and
-          # signs it with the other archives.
+          # attaches it (with its signature) next to the other archives.
           name: frameos-${{ needs.update-versions.outputs.docker_version }}-wasm
-          path: release-assets/*-wasm.tar.gz
+          path: |
+            release-assets/*-wasm.tar.gz
+            release-assets/*-wasm.tar.gz.minisig
           if-no-files-found: error
 
   # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
@@ -954,9 +985,11 @@ jobs:
       # key) are signed here; images a GitHub-hosted job already signed keep
       # their .minisig. An unsigned asset must fail the release, loudly.
       #
-      # Not signed: the buildroot .img.gz SD-card images. Those are flashed by
-      # hand from a machine that already trusts what it downloaded; nothing
-      # on-device verifies them, so a signature there would be decoration.
+      # The buildroot .img.gz SD-card images are signed too: the backend's
+      # SD-card builder and the cloud's browser flasher fetch and patch them
+      # automatically (app/tasks/buildroot_image.py verifies the .minisig on
+      # download and on every cache hit), so they are no longer "flashed by
+      # hand from a machine that already trusts what it downloaded".
       - name: Sign release archives and firmware
         env:
           FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
@@ -967,17 +1000,18 @@ jobs:
             exit 1
           fi
           shopt -s nullglob
-          archives=(release-assets/frameos-*.tar.gz)
-          for bin in release-assets/frameos-*.bin; do
-            [ -f "$bin.minisig" ] || archives+=("$bin")
+          archives=()
+          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz; do
+            [ -f "$asset.minisig" ] || archives+=("$asset")
           done
           if [ ${#archives[@]} -eq 0 ]; then
             echo "::error::no release archives found to sign"
             exit 1
           fi
-          # Same pin as "Sign ESP32 firmware", for the same reason.
-          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
-            || python3 -m pip install --quiet cryptography==50.0.0
+          # Same hash pin as "Sign ESP32 firmware", for the same reason.
+          python3 -m pip install --quiet --require-hashes --break-system-packages \
+              -r tools/requirements-signing.txt \
+            || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
           keyfile=$(mktemp)
           printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
           status=0
@@ -989,7 +1023,7 @@ jobs:
           # failure would only show up on devices.
           # Every signable asset must now carry a signature — the ones signed
           # here and the ones a GitHub-hosted firmware job signed before upload.
-          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin; do
+          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz; do
             [ -f "$asset.minisig" ] || { echo "::error::$asset is unsigned"; exit 1; }
             python3 tools/sign_firmware.py verify \
               --public release-assets/firmware-signing.pub "$asset"

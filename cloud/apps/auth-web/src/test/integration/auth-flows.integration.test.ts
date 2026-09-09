@@ -764,6 +764,20 @@ describe("google sign-in merging", () => {
     expect(resolution).toEqual({ status: "google_email_unverified" });
   });
 
+  it("mints no account for a google identity whose email google did not verify", async () => {
+    const resolution = await resolveGoogleSignIn(db, googleIssuer, {
+      email: "unverified-google@example.com",
+      email_verified: false,
+      sub: "google-sub-unverified",
+    });
+    expect(resolution).toEqual({ status: "google_email_unverified" });
+    const rows = await db
+      .select({ id: accountIdentities.id })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.providerSubject, "google-sub-unverified"));
+    expect(rows).toHaveLength(0);
+  });
+
   it("creates a fresh account when the email is unknown", async () => {
     const resolution = await resolveGoogleSignIn(db, googleIssuer, {
       email: "fresh-google@example.com",

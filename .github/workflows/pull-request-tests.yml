@@ -72,7 +72,6 @@ jobs:
       - uses: pnpm/action-setup@v4
         if: steps.cache_assets.outputs.cache-hit != 'true'
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -231,7 +230,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -252,7 +251,6 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -449,7 +447,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -487,7 +485,6 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -630,10 +627,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -717,6 +714,51 @@ jobs:
           mkdir -p ../frontend/dist/static
           TEST=1 pytest
 
+  backend-lint:
+    name: Backend lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # The full requirement set, not just ruff+mypy: mypy's verdicts depend
+      # on which third-party packages it can see, and backend/mypy-baseline.txt
+      # was recorded against all of them.
+      - name: Install python dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade uv
+          uv venv
+          uv pip install -r requirements.txt
+
+      # backend/ruff.toml is the rule set; every violation fails.
+      - name: Ruff
+        run: |
+          cd backend
+          source .venv/bin/activate
+          ruff check --output-format github .
+
+      # Ratchet: mypy errors are compared with backend/mypy-baseline.txt —
+      # new ones fail, fixed ones ask for `python tools/mypy_gate.py --update`.
+      - name: Mypy (no new errors)
+        run: |
+          cd backend
+          source .venv/bin/activate
+          python tools/mypy_gate.py
+
   frameos-setup-script:
     name: Standalone setup script
     runs-on: ubuntu-latest
@@ -779,13 +821,12 @@ jobs:
       - uses: docker/setup-qemu-action@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -961,11 +1002,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -985,7 +1025,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install pico toolchain
         run: |

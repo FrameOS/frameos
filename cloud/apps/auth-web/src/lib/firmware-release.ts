@@ -77,6 +77,42 @@ export const otaAssets = esp32ReleasePlatforms.map((platform) => ({
   suffix: `-${platform}-app.bin`,
 }));
 
+// The chip family a release platform is built for, from its name
+// ("esp32-s3-16mb" -> "esp32-s3"); undefined for anything not an ESP32 image.
+export function releasePlatformChip(platform: string): string | undefined {
+  const match = /^(esp32-(?:s3|c3))(?:-|$)/.exec(platform);
+  return match?.[1];
+}
+
+/**
+ * Whether a device may be handed the image it asked for. The device names its
+ * own platform (fos_ota_platform: chip x flash layout it was BUILT with) and
+ * the cloud cannot know the layout — an E1002 is a 32 MB chip running the 8 MB
+ * layout — but it does know the chip: the enrollment / hello hardware report
+ * carries `platform: "esp32-s3" | "esp32-c3"` (fos_platform_name). A C3 asking
+ * for an S3 image is either a bug or a stolen token being used to fetch
+ * images, and either way the answer is no. Older reports that say just
+ * "esp32" (or a non-ESP32 board with no OTA at all) cannot be checked and pass.
+ */
+export function otaPlatformMatchesHardware(
+  platform: string,
+  hardware: unknown,
+): boolean {
+  const chip = releasePlatformChip(platform);
+  if (!chip) {
+    return false;
+  }
+  const reported =
+    hardware && typeof hardware === "object" && !Array.isArray(hardware)
+      ? (hardware as { platform?: unknown }).platform
+      : undefined;
+  if (typeof reported !== "string") {
+    return true;
+  }
+  const reportedChip = releasePlatformChip(reported);
+  return reportedChip === undefined ? true : reportedChip === chip;
+}
+
 /** The bare app image for a platform, or undefined on an older release. */
 export function findOtaAsset(release: Release, platform: string) {
   const entry = otaAssets.find((candidate) => candidate.platform === platform);

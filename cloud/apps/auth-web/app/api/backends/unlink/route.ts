@@ -1,9 +1,8 @@
-import { eq } from "drizzle-orm";
-import { linkedClients } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateLinkedClient } from "../../../../src/lib/backend-auth";
 import { jsonError, requireDatabase } from "../../../../src/lib/device-flow";
+import { revokeLinkedClient } from "../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -35,16 +34,15 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_link_token", 401);
   }
 
-  await db
-    .update(linkedClients)
-    .set({ revokedAt: new Date(), updatedAt: new Date() })
-    .where(eq(linkedClients.id, linkedClient.id));
+  // A frame unlinking itself is a frame revoking itself: the row must not
+  // stay `active` with a queue nobody will ever drain.
+  const frame = await revokeLinkedClient(db, linkedClient.id);
 
   await recordAuditEvent(db, {
     accountId: linkedClient.accountId,
     actor: { linkedClientId: linkedClient.id },
     eventType: "linked_client.unlinked",
-    target: { linkedClientId: linkedClient.id },
+    target: { linkedClientId: linkedClient.id, ...(frame ? { frameId: frame.id } : {}) },
   });
 
   return NextResponse.json({ status: "unlinked" });

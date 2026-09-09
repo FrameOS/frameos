@@ -8,6 +8,7 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
+import { revokeLinkedClient } from "../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { requireRecentAuth } from "../../../../src/lib/recent-auth";
 import { readSession } from "../../../../src/lib/session";
@@ -67,10 +68,10 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_linked_client", 404);
   }
 
-  await db
-    .update(linkedClients)
-    .set({ revokedAt: new Date(), updatedAt: new Date() })
-    .where(eq(linkedClients.id, linkedClient.id));
+  // A frame's link is the frame's credential: revoking it here must leave
+  // the frame row revoked (queue expired, live socket kicked), exactly as
+  // the frame's own revoke route does.
+  const frame = await revokeLinkedClient(db, linkedClient.id);
 
   await recordAuditEvent(db, {
     accountId: session.accountId,
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
       providerSubject: session.providerSubject,
     },
     eventType: "linked_client.revoked",
-    target: { linkedClientId: linkedClient.id },
+    target: { linkedClientId: linkedClient.id, ...(frame ? { frameId: frame.id } : {}) },
   });
 
   return NextResponse.json({ status: "revoked" });

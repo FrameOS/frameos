@@ -15,10 +15,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job declares its own least-privilege token; this is the floor for
+# any job that forgets to.
+permissions:
+  contents: read
+
 jobs:
   docker_image:
     name: Build Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -168,6 +175,11 @@ jobs:
                 embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
                 -o /tmp/test_fos_json_guard
               /tmp/test_fos_json_guard
+              # Upload bounds + usb_api payload timeout math (fos_upload_limits.h).
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/tests/test_fos_upload_limits.c \
+                -o /tmp/test_fos_upload_limits
+              /tmp/test_fos_upload_limits
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.
@@ -276,6 +288,7 @@ jobs:
   build-and-test:
     name: build-and-test
     runs-on: ubuntu-latest
+    permissions: {}
     needs:
       - docker_image
       - esp32_firmware_image

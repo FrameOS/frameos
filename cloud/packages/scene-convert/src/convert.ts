@@ -163,13 +163,24 @@ function addUsage(total: ModelUsage, part: ModelUsage): ModelUsage {
   };
 }
 
+// Where the numbering for each base left off, per `taken` set, so a scene
+// with a thousand same-named args costs a thousand probes rather than the
+// square of that. The cache lives and dies with the set it describes.
+const nextSuffixByTaken = new WeakMap<Set<string>, Map<string, number>>();
+
 function uniqueName(base: string, taken: Set<string>): string {
+  let suffixes = nextSuffixByTaken.get(taken);
+  if (!suffixes) {
+    suffixes = new Map();
+    nextSuffixByTaken.set(taken, suffixes);
+  }
   let candidate = base;
-  let n = 2;
+  let n = suffixes.get(base) ?? 2;
   while (taken.has(candidate) || reservedCodeArgNames.has(candidate.toLowerCase())) {
     candidate = `${base}${n}`;
     n += 1;
   }
+  suffixes.set(base, n);
   return candidate;
 }
 

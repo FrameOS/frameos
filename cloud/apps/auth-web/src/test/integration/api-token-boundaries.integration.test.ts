@@ -15,6 +15,7 @@ import {
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as createApiToken } from "../../../app/api/account/api-tokens/route";
 import { POST as deleteAccount } from "../../../app/api/account/delete/route";
+import { PUT as changePlan } from "../../../app/api/account/plan/route";
 import { GET as exportAccount } from "../../../app/api/account/export/route";
 import { PATCH as adminPatchUser } from "../../../app/api/admin/users/[accountId]/route";
 import { GET as listApiTokens } from "../../../app/api/account/api-tokens/route";
@@ -186,6 +187,18 @@ describe("what a personal API token may not do", () => {
     );
     expect(passkey.status).toBe(403);
     expect((await passkey.json()).error).toBe("api_token_not_allowed");
+  });
+
+  it("cannot change the account's plan", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const token = await switchToApiToken(accountId, email);
+    const response = await changePlan(
+      request("/api/account/plan", { plan: "free" }, "PUT", {
+        authorization: `Bearer ${token}`,
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toBe("api_token_not_allowed");
   });
 
   it("cannot delete the account", async () => {

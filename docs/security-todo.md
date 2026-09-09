@@ -38,15 +38,6 @@ batch after the third one; residue is in the medium / low list).
   pinned to the version it claims since 2026-09-09). The release workflow's
   "a signature would be decoration" rationale is stale now that the backend
   and the browser flasher fetch the image automatically — sign it.
-- **FrameOS Remote is plain `ws://` on every port but 443** — the same
-  `port mod 1000 == 443` heuristic the runtime's log shipper uses, because
-  `frame.json` carries no scheme for the backend. An https backend on 8443
-  is talked to in clear. Needs a scheme in the backend connection settings
-  (both control planes, `frameos-setup.sh`, the ESP32 provisioning that
-  derives `http://` from the port the same way). Closed 2026-09-09 on the
-  same protocol: the binary frames behind `file_write_chunk` are bound to a
-  `sha256` in the signed command, and envelopes are accepted only within a
-  300 s window and never twice (`acceptEnvelope`).
 - Smaller, what is left: a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).

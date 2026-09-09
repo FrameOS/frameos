@@ -216,6 +216,42 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("refuses an image for a different chip than the frame reported", async () => {
+    // fos_platform_name reports the chip at enrollment/hello; the flash
+    // layout is the device's own business (a 32 MB chip may run the 8 MB
+    // layout), so only the chip family is held against the request.
+    mockGitHub();
+    authMock.mockResolvedValue({
+      frame: { id: frameId, hardware: { platform: "esp32-c3" } } as never,
+      linkedClient: { scopes: ["frame:managed"] } as never,
+    });
+
+    const mismatch = await manifest("esp32-s3-generic");
+    expect(mismatch.status).toBe(409);
+    await expect(mismatch.json()).resolves.toEqual({
+      error: "platform_mismatch",
+      platform: "esp32-s3-generic",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const download = await getDownload(
+      request(`/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic`),
+      routeParams(frameId),
+    );
+    expect(download.status).toBe(409);
+
+    // Same chip, any layout: allowed (the release decides whether it exists).
+    const layout = await manifest("esp32-c3-16mb");
+    expect(layout.status).toBe(404);
+
+    // A report that only says "esp32" (older firmware) cannot be checked.
+    authMock.mockResolvedValue({
+      frame: { id: frameId, hardware: { platform: "esp32" } } as never,
+      linkedClient: { scopes: ["frame:managed"] } as never,
+    });
+    expect((await manifest("esp32-s3-generic")).status).toBe(200);
+  });
+
   it("404s when the release has no such asset", async () => {
     mockGitHub({ assets: [], tag_name: "v1.2.3" });
 
