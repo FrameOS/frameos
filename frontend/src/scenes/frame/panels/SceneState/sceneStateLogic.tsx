@@ -92,10 +92,12 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
       {
         editField: (state, { index }) => ({ ...state, [index]: true }),
         closeField: (state, { index }) => ({ ...state, [index]: false }),
+        // Drop the removed field's entry and shift the ones after it down;
+        // `=== index` kept exactly the wrong one (eventsLogic has the intent).
         removeField: (state, { index }) =>
           Object.fromEntries(
             Object.entries(state)
-              .filter(([key]) => parseInt(key) === index)
+              .filter(([key]) => parseInt(key) !== index)
               .map(([key, value]) => [parseInt(key) > index ? String(parseInt(key) - 1) : key, value])
           ),
       },

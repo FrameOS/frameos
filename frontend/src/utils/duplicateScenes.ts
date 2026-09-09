@@ -61,12 +61,19 @@ export function remapSceneIds(newScenes: FrameScene[], getNewSceneId: (id: strin
                 }
                 return field
               })
+              // The sources live under node.data; a top-level `sources` key
+              // was silently ignored by everything that reads a node (and
+              // saved as junk), so the rewrite this branch exists for never
+              // took effect.
               return {
                 ...node,
-                data: { ...data, config: newConfig },
-                sources: {
-                  ...data.sources,
-                  'config.json': JSON.stringify({ ...configSource, fields: newConfigFields }, null, 2),
+                data: {
+                  ...data,
+                  config: newConfig,
+                  sources: {
+                    ...data.sources,
+                    'config.json': JSON.stringify({ ...configSource, fields: newConfigFields }, null, 2),
+                  },
                 },
               }
             }
@@ -75,7 +82,11 @@ export function remapSceneIds(newScenes: FrameScene[], getNewSceneId: (id: strin
           }
           return node
         } else {
-          throw new Error(`Unknown node type, can't clone: ${node.type}`)
+          // A node type this mapper does not know carries no scene ids we
+          // could remap; copy it as-is. Throwing here aborted whole template
+          // and store installs inside a listener with no UI feedback.
+          console.warn(`remapSceneIds: unknown node type "${node.type}", copied unchanged`)
+          return node
         }
       }),
       edges: scene.edges.map((edge) => ({ ...edge })),
