@@ -56,11 +56,33 @@ export type RoundReport = {
   round: number;
   latencyMs: number;
   usage?: ResponseUsage;
+  // True when `usage` is an estimate: the round was aborted before OpenAI
+  // sent response.completed, so its real usage is unknown — but billed.
+  usageEstimated?: boolean;
   status: string;
   httpStatus?: number;
   error?: string;
   toolCalls: string[];
 };
+
+// Rough token count for a round that never reported one (see RoundReport
+// usageEstimated): ~4 UTF-16 characters per token, which errs high on
+// English prose and low on JSON — good enough for a meter that otherwise
+// records zero.
+function estimatedUsage(
+  instructions: string,
+  input: unknown[],
+  replyBefore: number,
+  replyNow: string,
+): ResponseUsage {
+  const inputChars = instructions.length + JSON.stringify(input).length;
+  return {
+    cachedInputTokens: 0,
+    inputTokens: Math.ceil(inputChars / 4),
+    outputTokens: Math.ceil(Math.max(0, replyNow.length - replyBefore) / 4),
+    reasoningTokens: 0,
+  };
+}
 
 // A function call whose arguments never parsed as JSON, so the tool did not
 // run. Reported separately from RoundReport because it is only discovered
@@ -148,6 +170,7 @@ export async function runAgentLoop({
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     rounds += 1;
     const startedAt = Date.now();
+    const replyBefore = reply.length;
     // Progress lines are throttled per call: one per ~4 KB of arguments, so
     // a 70 KB scene shows a steadily rising number instead of a firehose.
     const progressReported = new Map<string, number>();
@@ -181,6 +204,13 @@ export async function runAgentLoop({
         tools: toolDefinitions,
       });
     } catch (error) {
+      // An aborted or failed round is still a round OpenAI bills: everything
+      // sent was read, and the text streamed so far was generated. Without a
+      // usage record the meter saw nothing, so stopping each turn just
+      // before completion ran unmetered and uncapped on the shared key. The
+      // estimate is the standard ~4 characters per token over the request
+      // and the partial reply; the consumer meters it like any other round.
+      const requestFailed = error instanceof OpenAiRequestError && error.status >= 400;
       onRound?.({
         error: error instanceof Error ? error.message : String(error),
         ...(error instanceof OpenAiRequestError ? { httpStatus: error.status } : {}),
@@ -188,6 +218,12 @@ export async function runAgentLoop({
         round: rounds,
         status: "failed",
         toolCalls: [],
+        ...(requestFailed
+          ? {}
+          : {
+              usage: estimatedUsage(instructions, input, replyBefore, reply),
+              usageEstimated: true,
+            }),
       });
       throw error;
     }

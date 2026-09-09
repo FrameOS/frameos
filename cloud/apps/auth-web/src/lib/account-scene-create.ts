@@ -14,9 +14,15 @@
 import { and, eq, sql } from "drizzle-orm";
 import { createDb, storeScenes } from "@frameos-cloud/db";
 import { strToU8, zipSync } from "fflate";
+import type { NextResponse } from "next/server";
 import { jsonError } from "./device-flow";
 import { maxSceneZipBytes } from "./store";
-import { publishStoreScene, type PublishActor } from "./store-publish";
+import {
+  preflightStorePublish,
+  publishStoreScene,
+  type PublishActor,
+  type PublishPreflight,
+} from "./store-publish";
 
 type Database = ReturnType<typeof createDb>;
 
@@ -85,9 +91,57 @@ export async function createAccountScene(
   if (!Array.isArray(input.scenes) || input.scenes.length === 0) {
     return jsonError("invalid_scenes", 400);
   }
+  // Moderation and classification first, with no lock held: they are model
+  // calls of up to ~80 s, and inside the name lock they serialised every
+  // save and fork of the account behind one slow one. They run on the zip as
+  // requested; the lock below may still suffix the name ("Sunrise 2"),
+  // which changes nothing a moderator or classifier would judge.
+  const requested = buildSceneZip(input.name, input.description, input.previewImage, input.scenes);
+  if ("error" in requested) {
+    return requested.error;
+  }
+  const preflight = await preflightStorePublish(db, {
+    accountId: input.accountId,
+    actor: input.actor,
+    content: requested.content,
+    ...(input.description ? { description: input.description } : {}),
+    name: input.name,
+  });
+  if (preflight.response) {
+    return preflight.response;
+  }
   return withAccountSceneNameLock(db, input.accountId, (locked) =>
-    createAccountSceneLocked(locked, input),
+    createAccountSceneLocked(locked, input, preflight),
   );
+}
+
+// One version's zip: manifest, scenes.json, optional cover.
+function buildSceneZip(
+  name: string,
+  description: string | undefined,
+  previewImage: Buffer | undefined,
+  scenes: unknown[],
+): { content: Buffer } | { error: NextResponse } {
+  const folder = zipFolderName(name);
+  const manifest = {
+    name,
+    ...(description ? { description } : {}),
+    ...(previewImage ? { image: "./image.jpg" } : {}),
+    scenes: "./scenes.json",
+  };
+  const content = Buffer.from(
+    zipSync({
+      [`${folder}/template.json`]: strToU8(JSON.stringify(manifest, null, 2)),
+      [`${folder}/scenes.json`]: strToU8(JSON.stringify(scenes, null, 2)),
+      // The interchange format knows one cover path; the real raster format
+      // is sniffed from the bytes wherever it is read.
+      ...(previewImage ? { [`${folder}/image.jpg`]: new Uint8Array(previewImage) } : {}),
+    }),
+  );
+  if (content.length > maxSceneZipBytes) {
+    return { error: jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes }) };
+  }
+  return { content };
 }
 
 // "Pick a free name, then insert" is a check-then-act, and two saves racing
@@ -124,40 +178,23 @@ async function createAccountSceneLocked(
     previewImage?: Buffer | undefined;
     scenes: unknown[];
   },
+  preflight: PublishPreflight,
 ) {
   const finalName = await availableSceneName(db, input.accountId, input.name);
   if (!finalName) {
     return jsonError("scene_name_taken", 409, { name: input.name });
   }
-
-  const folder = zipFolderName(finalName);
-  const manifest = {
-    name: finalName,
-    ...(input.description ? { description: input.description } : {}),
-    ...(input.previewImage ? { image: "./image.jpg" } : {}),
-    scenes: "./scenes.json",
-  };
-  const content = Buffer.from(
-    zipSync({
-      [`${folder}/template.json`]: strToU8(JSON.stringify(manifest, null, 2)),
-      [`${folder}/scenes.json`]: strToU8(JSON.stringify(input.scenes, null, 2)),
-      // The interchange format knows one cover path; the real raster format
-      // is sniffed from the bytes wherever it is read.
-      ...(input.previewImage
-        ? { [`${folder}/image.jpg`]: new Uint8Array(input.previewImage) }
-        : {}),
-    }),
-  );
-  if (content.length > maxSceneZipBytes) {
-    return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
+  const built = buildSceneZip(finalName, input.description, input.previewImage, input.scenes);
+  if ("error" in built) {
+    return built.error;
   }
-
   return publishStoreScene(db, {
     accountId: input.accountId,
     actor: input.actor,
-    content,
+    content: built.content,
     ...(input.description ? { description: input.description } : {}),
     name: finalName,
+    preflight,
     visibility: "private",
   });
 }

@@ -1742,6 +1742,10 @@ export function claimTokenExpiry(now = new Date()) {
   return new Date(now.getTime() + claimTokenTtlMs);
 }
 
+// A frame-bound (re-enrollment) token's life: it re-keys an existing frame,
+// so it is minted for one flash-and-boot and expires within the hour.
+export const boundClaimTokenTtlMs = 60 * 60 * 1000;
+
 // Spend one use of a claim token, atomically: concurrent enrollments race on
 // use_count < max_uses, so a budget of N admits exactly N frames. used_at is
 // stamped when the budget is spent (single-use tokens: on their only use).
@@ -1794,7 +1798,9 @@ export async function sweepExpiredClaimTokens(
 //
 // Multi-use codes are never evicted: those back SD-card images that may have
 // been flashed to hardware already, where the code IS the enrollment path.
-// Returns the number of codes freed.
+// Neither are frame-bound (re-enrollment) codes, for the same reason — a
+// rescue card carrying one may already be in a slot, and evicting it turns a
+// planned re-key into a dead frame. Returns the number of codes freed.
 export async function evictOldestUnusedClaimTokens(
   db: ReturnType<typeof createDb>,
   accountId: string,
@@ -1811,6 +1817,7 @@ export async function evictOldestUnusedClaimTokens(
         eq(frameEnrollmentTokens.accountId, accountId),
         eq(frameEnrollmentTokens.maxUses, 1),
         eq(frameEnrollmentTokens.useCount, 0),
+        isNull(frameEnrollmentTokens.boundFrameId),
         gt(frameEnrollmentTokens.expiresAt, new Date()),
       ),
     )

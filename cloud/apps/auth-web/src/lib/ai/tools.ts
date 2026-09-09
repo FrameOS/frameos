@@ -6,7 +6,7 @@
 // JSON bounces back to the model as tool output instead of reaching the
 // editor).
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, exists, gt, isNull, or } from "drizzle-orm";
+import { and, desc, eq, exists, gt, isNull, or, sql } from "drizzle-orm";
 import {
   accounts,
   createDb,
@@ -1759,10 +1759,14 @@ export async function executeTool(
       return proposeSceneInstall(ctx, args);
     }
     case "search_store_scenes": {
-      const query = asString(args.query)?.toLowerCase();
+      const query = asString(args.query)?.trim().toLowerCase();
       // Same visibility rules as the store front (no verified-publisher
       // gate — verification is a trust signal in the results, not a filter),
-      // widened with the user's own scenes regardless of visibility.
+      // widened with the user's own scenes regardless of visibility. The
+      // text match is in SQL: filtering the top 100 by download count in JS
+      // made the tool the model is told to consult before saying "no such
+      // scene" blind to everything below the fold.
+      const needle = query ? `%${query.replace(/[\\%_]/g, "\\$&")}%` : undefined;
       const rows = await ctx.db
         .select({
           accountId: storeScenes.accountId,
@@ -1790,6 +1794,11 @@ export async function executeTool(
                 isNull(accounts.storeBannedAt),
               ),
             ),
+            ...(needle
+              ? [
+                  sql`concat_ws(' ', ${storeScenes.name}, coalesce(${storeScenes.description}, ''), array_to_string(${storeScenes.tags}, ' '), coalesce(${storeScenes.category}, ''), coalesce(${accounts.displayName}, '')) ilike ${needle}`,
+                ]
+              : []),
           ),
         )
         .orderBy(
@@ -1797,21 +1806,13 @@ export async function executeTool(
           desc(storeScenes.downloadCount),
           desc(storeScenes.updatedAt),
         )
-        .limit(100);
-      const results = (
-        query
-          ? rows.filter((row) =>
-              `${row.name} ${row.description ?? ""} ${(row.tags ?? []).join(" ")} ${row.category ?? ""} ${row.publisher ?? ""}`
-                .toLowerCase()
-                .includes(query),
-            )
-          : rows
-      ).map(({ accountId, verifiedPublisherAt, ...row }) => ({
+        .limit(50);
+      const results = rows.map(({ accountId, verifiedPublisherAt, ...row }) => ({
         ...row,
         owned_by_user: accountId === ctx.accountId,
         verified_publisher: verifiedPublisherAt !== null,
       }));
-      return untrustedResult("store_search", JSON.stringify({ scenes: results.slice(0, 50) }));
+      return untrustedResult("store_search", JSON.stringify({ scenes: results }));
     }
     case "get_store_scene": {
       const sceneId = asString(args.scene_id);

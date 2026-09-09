@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { confirmed } from "./confirm";
 import { failure, image, run, text, uuid, type ToolContext } from "../result";
 import { resolveSceneSource, sceneSourceSchema } from "./scene-source";
 
@@ -149,8 +150,8 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_confirm",
     {
       description:
-        "Confirm a frame that enrolled with a multi-use claim token and is waiting in `pending` status; makes it active and pushes the provisioning scenes.",
-      inputSchema: { frame_id: frameId },
+        "Confirm a frame that enrolled with a multi-use claim token and is waiting in `pending` status; makes it active and pushes the provisioning scenes. NOTE: this adopts whatever device booted with the code and lets it pull the account's service keys, so it is a sudo-mode action — it needs a fresh browser sign-in and is refused for API tokens (reauth_required). Ask the owner to confirm at /frames.",
+      inputSchema: { confirm: confirmed("adopts a physical device into the account"), frame_id: frameId },
     },
     async ({ frame_id }) =>
       run(async () =>
@@ -325,7 +326,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
       annotations: { destructiveHint: true },
       description:
         "Remove one scene from a frame (reads the current list and re-assigns it without that scene, keeping the other pins and the order). The store scene itself is untouched.",
-      inputSchema: { frame_id: frameId, scene_id: uuid() },
+      inputSchema: { confirm: confirmed("removes a scene from the frame and redeploys"), frame_id: frameId, scene_id: uuid() },
     },
     async ({ frame_id, scene_id }) =>
       run(async () => {
@@ -354,6 +355,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
       description:
         "Switch the frame to a scene now (store scene id or the runtime scene id from the device's scene list). Optional `state` seeds the scene's public fields (max 16 KiB). If the device is out of sync with its assigned scenes, the whole set is re-pushed with this scene active.",
       inputSchema: {
+        confirm: confirmed("changes what the physical frame shows"),
         frame_id: frameId,
         scene_id: z.string().max(256),
         state: z.record(z.string(), z.unknown()).optional(),
@@ -560,6 +562,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
       description:
         "Queue a raw device command. Types: render, get_metrics, reboot, restart_runtime, refresh_service_settings, set_schedule (re-push the stored schedule), set_current_scene (needs scene_id = runtime scene id; prefer frame_scene_activate), notify_update_available (start a signed OTA firmware update).",
       inputSchema: {
+        confirm: confirmed("sends the device a command (including set_current_scene and notify_update_available)"),
         frame_id: frameId,
         scene_id: z.string().max(256).optional(),
         type: z.enum([
@@ -588,7 +591,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_reboot",
     {
       description: "Reboot the frame (full device reboot).",
-      inputSchema: { frame_id: frameId },
+      inputSchema: { confirm: confirmed("reboots the physical device"), frame_id: frameId },
     },
     async ({ frame_id }) =>
       run(async () =>
@@ -600,7 +603,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_restart",
     {
       description: "Restart the FrameOS runtime on the frame (keeps the device up).",
-      inputSchema: { frame_id: frameId },
+      inputSchema: { confirm: confirmed("restarts the runtime on the physical device"), frame_id: frameId },
     },
     async ({ frame_id }) =>
       run(async () =>
@@ -636,6 +639,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
       description:
         "Replace the frame's schedule. Each event: {id, minute 0–59, hour 0–23, weekday? 0–9, event (e.g. \"setCurrentScene\"), payload? (e.g. {\"sceneId\": \"<store scene id>\"}), disabled?}. Max 64 events. Hours are in the frame's local time; utc_offset_minutes overrides the offset used when the device lacks a zone.",
       inputSchema: {
+        confirm: confirmed("changes when the physical frame switches scenes"),
         frame_id: frameId,
         schedule: z.object({
           disabled: z.boolean().optional(),
@@ -769,6 +773,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
       description:
         "Upload a file to the frame's asset storage (directory `path`, defaults to the root). Provide the content as base64 or as text. Large files are chunked by the cloud; the frame must be online (waits up to 30 s for the ack).",
       inputSchema: {
+        confirm: confirmed("writes to the frame's storage"),
         content_base64: z.string().optional(),
         filename: z.string().min(1).max(255),
         frame_id: frameId,
@@ -802,7 +807,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: true },
       description: "Delete a file or empty directory on the frame.",
-      inputSchema: { frame_id: frameId, path: z.string().min(1).max(1024) },
+      inputSchema: { confirm: confirmed("deletes from the frame's storage"), frame_id: frameId, path: z.string().min(1).max(1024) },
     },
     async ({ frame_id, path }) =>
       run(async () =>
@@ -818,7 +823,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_asset_mkdir",
     {
       description: "Create a directory on the frame's asset storage.",
-      inputSchema: { frame_id: frameId, path: z.string().min(1).max(1024) },
+      inputSchema: { confirm: confirmed("writes to the frame's storage"), frame_id: frameId, path: z.string().min(1).max(1024) },
     },
     async ({ frame_id, path }) =>
       run(async () =>
@@ -835,6 +840,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       description: "Rename or move a file on the frame.",
       inputSchema: {
+        confirm: confirmed("changes the frame's storage"),
         dst: z.string().min(1).max(1024),
         frame_id: frameId,
         src: z.string().min(1).max(1024),
@@ -855,7 +861,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       description:
         "Push the bundled font catalogue onto the frame's fonts/ folder (skips fonts already there). Streams per-font results; returns the summary when done.",
-      inputSchema: { frame_id: frameId },
+      inputSchema: { confirm: confirmed("writes to the frame's storage"), frame_id: frameId },
     },
     async ({ frame_id }) =>
       run(async () => {

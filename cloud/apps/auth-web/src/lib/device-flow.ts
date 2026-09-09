@@ -48,10 +48,12 @@ export type BoundedJsonObject =
 
 // Reads a JSON object body without letting the client decide how much memory
 // the parse costs. The declared content-length is checked first so an honest
-// oversize request is refused before a byte is read; the text itself is
-// measured afterwards, because a chunked request declares nothing. Over the
-// cap returns a 413 for the route to send back; a malformed or non-object
-// body is `{}`, as it always was.
+// oversize request is refused before a byte is read; the stream is then read
+// chunk by chunk and abandoned the moment it passes the cap — a
+// `Transfer-Encoding: chunked` request declares nothing, and `request.text()`
+// would have buffered all of it before any check. Over the cap returns a 413
+// for the route to send back; a malformed or non-object body is `{}`, as it
+// always was.
 export async function readBoundedJsonObject(
   request: NextRequest,
   maxBytes = defaultJsonBodyBytes,
@@ -60,17 +62,14 @@ export async function readBoundedJsonObject(
   if (Number.isFinite(declared) && declared > maxBytes) {
     return { response: payloadTooLarge(maxBytes) };
   }
-  let text: string;
-  try {
-    text = await request.text();
-  } catch {
+  const read = await readBodyUpTo(request, maxBytes);
+  if (read === undefined) {
     return { body: {} };
   }
-  // Bytes, not characters: the cap is what content-length would have said.
-  // (The length check first is the cheap way out for the obvious cases.)
-  if (text.length > maxBytes || Buffer.byteLength(text, "utf8") > maxBytes) {
+  if (read.overflow) {
     return { response: payloadTooLarge(maxBytes) };
   }
+  const text = read.bytes.toString("utf8");
   try {
     const body = JSON.parse(text) as unknown;
     if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -80,6 +79,47 @@ export async function readBoundedJsonObject(
   } catch {
     return { body: {} };
   }
+}
+
+// The body as bytes, or `overflow` once more than maxBytes have arrived (the
+// rest of the stream is cancelled, not drained). `undefined` when the body
+// cannot be read at all.
+async function readBodyUpTo(
+  request: NextRequest,
+  maxBytes: number,
+): Promise<{ bytes: Buffer; overflow: boolean } | undefined> {
+  const stream = request.body;
+  if (!stream) {
+    try {
+      const text = await request.text();
+      return { bytes: Buffer.from(text, "utf8"), overflow: false };
+    } catch {
+      return undefined;
+    }
+  }
+  const reader = stream.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { bytes: Buffer.alloc(0), overflow: true };
+      }
+      chunks.push(chunk);
+    }
+  } catch {
+    return undefined;
+  } finally {
+    reader.releaseLock();
+  }
+  return { bytes: Buffer.concat(chunks), overflow: false };
 }
 
 function payloadTooLarge(maxBytes: number) {

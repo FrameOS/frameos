@@ -228,7 +228,7 @@ describe("frameos-cloud MCP server", () => {
   it("removes one scene by re-assigning the rest with their pins", async () => {
     const client = await connect();
     const result = await client.callTool({
-      arguments: { frame_id: frameId, scene_id: sceneId },
+      arguments: { confirm: true,  frame_id: frameId, scene_id: sceneId },
       name: "frame_scene_remove",
     });
     const post = calls.find((call) => call.method === "POST");
@@ -275,6 +275,44 @@ describe("frameos-cloud MCP server", () => {
     });
     const add = calls.find((call) => call.url.includes("/scenes/add"));
     expect(add?.body).toEqual({ scene_id: sceneId, settings_groups: ["unsplash"] });
+  });
+
+  it("gates every destructive and frame-changing tool on confirm=true", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    // The gate is the only thing between injected text and a device: a tool
+    // that can change, remove or reflash something must carry the literal.
+    const frameChanging = [
+      "frame_scene_install",
+      "frame_scenes_set",
+      "frame_scene_activate",
+      "frame_scene_remove",
+      "frame_settings_update",
+      "frame_schedule_set",
+      "frame_command_send",
+      "frame_reboot",
+      "frame_restart",
+      "frame_asset_upload",
+      "frame_asset_delete",
+      "frame_asset_mkdir",
+      "frame_asset_rename",
+      "frame_assets_sync_fonts",
+      "frame_service_settings_enable",
+      "frame_firmware_update",
+      "frame_confirm",
+    ];
+    const gated = tools.filter(
+      (tool) => tool.annotations?.destructiveHint === true || frameChanging.includes(tool.name),
+    );
+    for (const name of frameChanging) {
+      expect(tools.map((tool) => tool.name), name).toContain(name);
+    }
+    expect(gated.length).toBeGreaterThanOrEqual(frameChanging.length + 5);
+    for (const tool of gated) {
+      const schema = tool.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
+      expect(schema.properties?.confirm, `${tool.name} has no confirm parameter`).toBeDefined();
+      expect(schema.required ?? [], `${tool.name} does not require confirm`).toContain("confirm");
+    }
   });
 
   it("refuses to deploy to a frame without confirm", async () => {

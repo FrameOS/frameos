@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { confirmed } from "./confirm";
 import { run, structured, text, uuid, type ToolContext } from "../result";
 
 // Account-level tools: who am I, how much room is left, the service keys
@@ -178,6 +179,7 @@ export function registerAccountTools(server: McpServer, ctx: ToolContext) {
       description:
         "Revoke a personal API token by id. Revoking the token this session uses ends the session on the next call — do that if you believe it leaked.",
       inputSchema: {
+        confirm: confirmed("revokes a credential"),
         token_id: uuid(),
       },
     },

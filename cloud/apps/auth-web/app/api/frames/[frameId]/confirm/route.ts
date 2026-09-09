@@ -7,6 +7,10 @@ import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { applyProvisioningScenes } from "../../../../../src/lib/frame-provisioning";
 import { frameForAccount, frameSummary } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import {
+  recentApprovalMaxAgeSeconds,
+  requireRecentAuth,
+} from "../../../../../src/lib/recent-auth";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -33,9 +37,24 @@ export async function POST(
   if (!session?.accountId) {
     return jsonError("login_required", 401);
   }
+  // Confirming adopts whatever booted with the multi-use code — possibly a
+  // stranger's board — and the device then pulls the account's service keys.
+  // That is the same kind of decision as approving a device link: a person,
+  // recently authenticated, not a script's bearer token.
+  if (session.apiToken) {
+    return jsonError("api_token_not_allowed", 403);
+  }
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
+  }
+  const reauth = await requireRecentAuth(
+    db,
+    session.accountId,
+    recentApprovalMaxAgeSeconds,
+  );
+  if (reauth) {
+    return reauth;
   }
 
   const { frameId } = await params;

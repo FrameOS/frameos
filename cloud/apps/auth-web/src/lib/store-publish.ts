@@ -49,6 +49,141 @@ export type PublishActor =
 // listing fields the manifest carries replace the row's; the ones it omits
 // are kept. The cover, when the zip has one, leads the image set and the
 // previous version's images follow; without one the set is inherited.
+// What the slow, lock-free half of a publish produced: the moderation
+// verdict (an error response, or nothing) and the classifier's suggestion.
+// createAccountScene / forkStoreScene run it BEFORE taking the per-account
+// name lock and hand it in, so an 80 s model call never serialises every
+// other save and fork of the account (it used to: the whole publish sat
+// inside the advisory-lock transaction).
+export type PublishPreflight =
+  | { response: NextResponse }
+  | { classified: Awaited<ReturnType<typeof classifyStoreScene>> | undefined; response?: undefined };
+
+export async function preflightStorePublish(
+  db: ReturnType<typeof createDb>,
+  input: {
+    accountId: string;
+    actor: PublishActor;
+    content: Buffer;
+    description?: string | undefined;
+    name?: string | undefined;
+  },
+): Promise<PublishPreflight> {
+  const validation = validateSceneZip(input.content);
+  if (!validation.ok) {
+    return { response: jsonError(validation.error, 400) };
+  }
+  const validated = validation.value;
+  const name = (input.name ?? validated.manifestName)?.trim().slice(0, 128);
+  if (!name) {
+    return { response: jsonError("invalid_name", 400) };
+  }
+  const [existing] = await db
+    .select({
+      category: storeScenes.category,
+      description: storeScenes.description,
+      tags: storeScenes.tags,
+    })
+    .from(storeScenes)
+    .where(
+      and(
+        eq(storeScenes.accountId, input.accountId),
+        sql`lower(${storeScenes.name}) = lower(${name})`,
+      ),
+    )
+    .limit(1);
+  const description =
+    input.description?.trim().slice(0, 2000) ||
+    validated.manifestDescription ||
+    existing?.description ||
+    null;
+  return slowPublishWork(db, {
+    accountId: input.accountId,
+    actor: input.actor,
+    description,
+    existing,
+    name,
+    validated,
+  });
+}
+
+// Moderation and classification: network calls to a model, up to ~80 s.
+// Never inside a transaction or a lock.
+async function slowPublishWork(
+  db: ReturnType<typeof createDb>,
+  input: {
+    accountId: string;
+    actor: PublishActor;
+    description: string | null;
+    existing: { category: string | null; tags: string[] | null } | undefined;
+    name: string;
+    validated: ReturnType<typeof validateSceneZip> extends { ok: true; value: infer V } | infer _ ? V : never;
+  },
+): Promise<PublishPreflight> {
+  const { accountId, actor, description, existing, name, validated } = input;
+  const uploadedPreview = validated.previewImage;
+  const moderation = await moderateStoreContent({
+    texts: [name, description, validated.manifestTags?.join(" ")],
+    ...(uploadedPreview
+      ? {
+          image: {
+            content: uploadedPreview,
+            contentType: detectImageContentType(uploadedPreview) ?? "image/jpeg",
+          },
+        }
+      : {}),
+  });
+  if (!moderation.ok) {
+    if (moderation.error === "content_rejected") {
+      await recordAuditEvent(db, {
+        accountId,
+        actor,
+        eventType: "store.publish_rejected",
+        metadata: { categories: moderation.categories, name },
+      });
+      return {
+        response: jsonError("content_rejected", 422, {
+          categories: moderation.categories,
+        }),
+      };
+    }
+    return { response: jsonError("moderation_unavailable", 503) };
+  }
+
+  // Auto-categorize: new scenes (and republishes of scenes that never got a
+  // category) are classified into the fixed store taxonomy, and get suggested
+  // tags when the owner has not set any. Owner-set values are never
+  // overwritten, and a classifier outage just leaves the scene uncategorized.
+  const category =
+    validated.manifestCategory !== undefined
+      ? validated.manifestCategory
+      : (existing?.category ?? null);
+  const tags = validated.manifestTags ?? existing?.tags ?? [];
+  const classified = category
+    ? undefined
+    : await classifyStoreScene({
+        appKeywords: validated.appKeywords,
+        description,
+        existingTags: tags,
+        name,
+      });
+  if (classified) {
+    // The classifier runs on the operator's key: our cost, the publisher's
+    // benefit, nobody's charge. Metered all the same — an unmetered model
+    // call is spend the books cannot explain.
+    await meterAiUsage({
+      accountId,
+      credentialSource: "shared",
+      model: classified.model,
+      rounds: 1,
+      surface: "store_classify",
+      turnId: crypto.randomUUID(),
+      usage: classified.usage,
+    });
+  }
+  return { classified };
+}
+
 export async function publishStoreScene(
   db: ReturnType<typeof createDb>,
   input: {
@@ -58,6 +193,9 @@ export async function publishStoreScene(
     description?: string | undefined;
     linkedClientId?: string | undefined;
     name?: string | undefined;
+    /** The moderation + classification already done outside the caller's
+     *  lock (preflightStorePublish). Omitted: done here. */
+    preflight?: PublishPreflight | undefined;
     visibility?: string | undefined;
   },
 ) {
@@ -186,31 +324,13 @@ export async function publishStoreScene(
     }
   }
 
-  const moderation = await moderateStoreContent({
-    texts: [name, description, validated.manifestTags?.join(" ")],
-    ...(uploadedPreview
-      ? {
-          image: {
-            content: uploadedPreview,
-            contentType: detectImageContentType(uploadedPreview) ?? "image/jpeg",
-          },
-        }
-      : {}),
-  });
-  if (!moderation.ok) {
-    if (moderation.error === "content_rejected") {
-      await recordAuditEvent(db, {
-        accountId,
-        actor,
-        eventType: "store.publish_rejected",
-        metadata: { categories: moderation.categories, name },
-      });
-      return jsonError("content_rejected", 422, {
-        categories: moderation.categories,
-      });
-    }
-    return jsonError("moderation_unavailable", 503);
+  const preflight =
+    input.preflight ??
+    (await slowPublishWork(db, { accountId, actor, description, existing, name, validated }));
+  if (preflight.response) {
+    return preflight.response;
   }
+  const classified = preflight.classified;
 
   // The listing this version records. Manifest values win where present;
   // otherwise the row's stand (a re-publish keeps the tags the owner set).
@@ -219,33 +339,6 @@ export async function publishStoreScene(
       ? validated.manifestCategory
       : (existing?.category ?? null);
   const tags = validated.manifestTags ?? existing?.tags ?? [];
-
-  // Auto-categorize: new scenes (and republishes of scenes that never got a
-  // category) are classified into the fixed store taxonomy, and get suggested
-  // tags when the owner has not set any. Owner-set values are never
-  // overwritten, and a classifier outage just leaves the scene uncategorized.
-  const classified = category
-    ? undefined
-    : await classifyStoreScene({
-        appKeywords: validated.appKeywords,
-        description,
-        existingTags: tags,
-        name,
-      });
-  if (classified) {
-    // The classifier runs on the operator's key: our cost, the publisher's
-    // benefit, nobody's charge. Metered all the same — an unmetered model
-    // call is spend the books cannot explain.
-    await meterAiUsage({
-      accountId,
-      credentialSource: "shared",
-      model: classified.model,
-      rounds: 1,
-      surface: "store_classify",
-      turnId: crypto.randomUUID(),
-      usage: classified.usage,
-    });
-  }
   const listing: SceneListing = {
     category: category ?? classified?.category ?? null,
     description,

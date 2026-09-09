@@ -62,6 +62,7 @@ import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import {
   allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
+  getMaxBrowserSocketsPerAccount,
   getMaxConnections,
   isAllowedBrowserOrigin,
 } from "./env";
@@ -1701,6 +1702,10 @@ export async function startFrameHub(
       registry.set(key, connections);
     }
     connections.add(connection);
+    browserSocketsByAccount.set(
+      session.accountId,
+      (browserSocketsByAccount.get(session.accountId) ?? 0) + 1,
+    );
 
     ws.on("pong", () => {
       connection.alive = true;
@@ -1729,7 +1734,20 @@ export async function startFrameHub(
           registry.delete(key);
         }
       }
+      const remaining = (browserSocketsByAccount.get(session.accountId) ?? 1) - 1;
+      if (remaining <= 0) {
+        browserSocketsByAccount.delete(session.accountId);
+      } else {
+        browserSocketsByAccount.set(session.accountId, remaining);
+      }
     });
+  }
+
+  // The per-account share of the browser sockets. The global cap in
+  // handleUpgrade protects the process; this protects the DEVICES from one
+  // account's browsers.
+  function browserSocketCapReached(accountId: string) {
+    return (browserSocketsByAccount.get(accountId) ?? 0) >= maxBrowserSocketsPerAccount;
   }
 
   const server = createServer((req, res) => {
@@ -1752,6 +1770,8 @@ export async function startFrameHub(
   const allowPrivateOrigins = allowsPrivateNetworkOrigins();
   const maxConnections = getMaxConnections();
   let openConnections = 0;
+  const maxBrowserSocketsPerAccount = getMaxBrowserSocketsPerAccount();
+  const browserSocketsByAccount = new Map<string, number>();
 
   // One counter for both socket flavors: the cap is on this process's total
   // socket footprint, not on either surface alone.
@@ -1860,6 +1880,11 @@ export async function startFrameHub(
         rejectUpgrade(socket, 401, "unauthorized");
         return;
       }
+      if (browserSocketCapReached(session.accountId)) {
+        logWarn("browser.account_socket_limit", { accountId: session.accountId });
+        rejectUpgrade(socket, 429, "too_many_connections");
+        return;
+      }
       wss.handleUpgrade(req, socket, head, (ws) => {
         trackConnection(ws);
         attachBrowserSocket(ws, accountBrowserSockets, session.accountId, session);
@@ -1888,6 +1913,11 @@ export async function startFrameHub(
         // 403 either way; the not-found case stays indistinguishable so the
         // endpoint does not confirm which frame ids exist.
         rejectUpgrade(socket, 403, "forbidden");
+        return;
+      }
+      if (browserSocketCapReached(session.accountId)) {
+        logWarn("browser.account_socket_limit", { accountId: session.accountId });
+        rejectUpgrade(socket, 429, "too_many_connections");
         return;
       }
       wss.handleUpgrade(req, socket, head, (ws) => {

@@ -10,6 +10,7 @@ import {
 } from "../../../../src/lib/device-flow";
 import {
   isValidTimeZoneName,
+  boundClaimTokenTtlMs,
   claimTokenExpiry,
   claimTokenPrefix,
   countActiveClaimTokens,
@@ -94,6 +95,10 @@ export async function POST(request: NextRequest) {
     // row: a second redemption would hand a second board the same identity.
     if (body.multi_use === true || (body.max_uses !== undefined && body.max_uses !== 1)) {
       return jsonError("invalid_max_uses", 400);
+    }
+    // And no long life either (see expiresAt below).
+    if (body.ttl_days !== undefined) {
+      return jsonError("invalid_ttl_days", 400);
     }
   }
 
@@ -204,7 +209,15 @@ export async function POST(request: NextRequest) {
   }
 
   const token = createSecretToken(claimTokenPrefix, 24);
-  const expiresAt = ttlMs ? new Date(Date.now() + ttlMs) : claimTokenExpiry();
+  // A frame-bound token hands a device the identity of an EXISTING frame —
+  // worth more than an ordinary code, and it sits on media anyone can read
+  // (a re-flashed card). It gets the short window whatever was asked for:
+  // long enough to flash and boot, not long enough to be found later.
+  const expiresAt = boundFrame
+    ? new Date(Date.now() + boundClaimTokenTtlMs)
+    : ttlMs
+      ? new Date(Date.now() + ttlMs)
+      : claimTokenExpiry();
   const [row] = await db
     .insert(frameEnrollmentTokens)
     .values({
