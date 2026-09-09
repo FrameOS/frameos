@@ -1,5 +1,5 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch,
-            terminal, times, os, httpclient, osproc, streams, unicode,
+            terminal, times, os, httpclient, osproc, unicode,
             monotimes, tables]
 import checksums/md5
 import json, jsony
@@ -7,6 +7,7 @@ import ws
 import nimcrypto
 import nimcrypto/hmac
 import zippy
+import frameos/utils/process
 
 const
   DefaultConfigPath* = "./frame.json" # secure location
@@ -273,21 +274,107 @@ proc recvBinary(ws: WebSocket): Future[string] {.async.} =
       discard # ignore text, pong …
 
 # TODO: split stdout and stderr
+const
+  ## The backend's longest single step over the Remote is an 1800 s apt /
+  ## compile run (deploy_remote.py); a `shell` command that outlives this is
+  ## killed and reported as timed out instead of holding the Remote forever.
+  ShellDefaultTimeoutSeconds* = 1800
+  ShellMaxTimeoutSeconds* = 4 * 3600
+  ## Output is streamed line by line; past this much the child keeps running
+  ## but its output is dropped, so a runaway `yes` cannot fill the websocket.
+  ShellMaxOutputBytes* = 8 * 1024 * 1024
+  ShellPollMs = 50
+  ## How long an exited-pipe child gets to be reaped before it is stopped.
+  ShellExitGraceMs = 5000
+
+type
+  ShellRunResult* = object
+    exitCode*: int
+    timedOut*: bool
+    outputTruncated*: bool
+
+proc shellTimeoutMs*(args: JsonNode): int =
+  ## `args.timeout` (seconds) when the backend sends one, clamped to a sane
+  ## range; the deploy-step default otherwise.
+  var seconds = args{"timeout"}.getInt(0)
+  if seconds <= 0:
+    seconds = ShellDefaultTimeoutSeconds
+  min(seconds, ShellMaxTimeoutSeconds) * 1000
+
+proc runShellStreaming*(rawCmd: string;
+                        timeoutMs: int;
+                        onLine: proc(line: string): Future[void] {.closure, gcsafe.}
+                       ): Future[ShellRunResult] {.async.} =
+  ## Runs `rawCmd` through the runtime's process wrapper (frameos/utils/process:
+  ## serialized spawn, non-blocking pipe reads, terminate-then-kill stop) and
+  ## hands every complete output line to `onLine` as it arrives. The wait is a
+  ## polling loop with `sleepAsync`, so the websocket heartbeat keeps running
+  ## while a long command works; at `timeoutMs` the child is stopped.
+  let shell = if fileExists("/bin/bash"): "bash" else: "sh"
+  var p = startProcessSerialized("/usr/bin/env",
+                                 args = @[shell, "-c", rawCmd],
+                                 options = {poUsePath, poStdErrToStdOut}) # <- merge stderr
+  var reader = initProcessOutputReader(p)
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  var outputBytes = 0
+  try:
+    while true:
+      for line in reader.readAvailableLines():
+        outputBytes += line.len + 1
+        if outputBytes > ShellMaxOutputBytes:
+          result.outputTruncated = true
+        else:
+          await onLine(line & '\n')
+      if reader.eof:
+        break
+      if getMonoTime() >= deadline:
+        result.timedOut = true
+        p.stopProcess()
+        # whatever the child managed to write before it was stopped
+        for line in reader.readAvailableLines():
+          if not result.outputTruncated:
+            await onLine(line & '\n')
+        break
+      await sleepAsync(ShellPollMs)
+
+    # The pipe is closed (or the child was stopped): reap it, bounded.
+    let graceDeadline = getMonoTime() + initDuration(milliseconds = ShellExitGraceMs)
+    var exitCode = p.peekExitCode()
+    while exitCode == -1 and getMonoTime() < graceDeadline:
+      await sleepAsync(ShellPollMs)
+      exitCode = p.peekExitCode()
+    if exitCode == -1:
+      # closed its stdout but never exited (a stuck child): stop it
+      p.stopProcess()
+      exitCode = p.peekExitCode()
+    result.exitCode = if result.timedOut: -1 else: exitCode
+  finally:
+    p.close()
+
 proc execShellSimple(rawCmd: string;
                      ws: WebSocket;
                      cfg: FrameConfig;
-                     id: string): Future[void] {.async.} =
-  let shell = if fileExists("/bin/bash"): "bash" else: "sh"
-  var p = startProcess("/usr/bin/env",
-                       args = [shell, "-c", rawCmd],
-                       options = {poUsePath, poStdErrToStdOut}) # <- merge stderr
-
-  var line: string
-  while p.outputStream.readLine(line):
-    await streamChunk(ws, cfg, id, "stdout", line & '\n')
-
-  let rc = p.waitForExit() # closes pipe & reaps the child
-  await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+                     id: string;
+                     timeoutMs: int): Future[void] {.async.} =
+  var run: ShellRunResult
+  try:
+    run = await runShellStreaming(rawCmd, timeoutMs,
+      proc(line: string): Future[void] {.closure, gcsafe.} =
+        streamChunk(ws, cfg, id, "stdout", line))
+  except CatchableError as e:
+    await sendResp(ws, cfg, id, false, %*{"exit": -1, "error": "shell failed to start: " & e.msg})
+    return
+  if run.timedOut:
+    await sendResp(ws, cfg, id, false, %*{
+      "exit": -1,
+      "timedOut": true,
+      "error": &"command timed out after {timeoutMs div 1000}s and was stopped"
+    })
+  else:
+    var res = %*{"exit": run.exitCode}
+    if run.outputTruncated:
+      res["outputTruncated"] = %*true
+    await sendResp(ws, cfg, id, run.exitCode == 0, res)
 
 # ----------------------------------------------------------------------------
 # All command handlers
@@ -361,7 +448,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       if not args.hasKey("cmd"):
         await sendResp(ws, cfg, id, false, %*{"error": "`cmd` missing"})
       else:
-        asyncCheck execShellSimple(args["cmd"].getStr(), ws, cfg, id)
+        asyncCheck execShellSimple(args["cmd"].getStr(), ws, cfg, id, shellTimeoutMs(args))
 
     of "file_md5":
       let path = args{"path"}.getStr("")

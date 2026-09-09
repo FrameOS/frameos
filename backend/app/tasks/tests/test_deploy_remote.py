@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 
 from app.tasks.deploy_remote import (
+    REMOTE_RUNTIME_MODULES,
+    REPO_ROOT,
     RemoteDeployer,
     delayed_remote_restart_command,
     deploy_remote,
@@ -723,3 +725,23 @@ async def test_remote_source_build_requires_gcc_on_buildroot(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="Cannot source-build FrameOS Remote on buildroot"):
         await deployer._ensure_remote_source_build_dependencies("buildroot")
+
+
+def test_remote_build_folders_stage_the_runtime_modules_the_remote_imports(tmp_path: Path):
+    # remote/config.nims puts ../src on the Nim path so the `shell` verb can
+    # spawn through frameos/utils/process.nim; a copy of remote/ alone would
+    # fail to compile on the frame, so the staging has to carry that module.
+    deployer = FakeRemoteDeployer(tmp_path)
+    deployer.build_id = "abc"
+
+    build_dir, source_dir = RemoteDeployer._create_remote_build_folders(deployer)
+
+    assert Path(build_dir) == tmp_path / "remote_abc"
+    assert Path(source_dir) == tmp_path / "remote"
+    assert (Path(source_dir) / "config.nims").is_file()
+    assert (Path(source_dir) / "src" / "frameos_remote.nim").is_file()
+    assert "frameos/utils/process.nim" in REMOTE_RUNTIME_MODULES
+    for relative in REMOTE_RUNTIME_MODULES:
+        staged = tmp_path / "src" / relative
+        assert staged.is_file(), relative
+        assert staged.read_bytes() == (REPO_ROOT / "frameos" / "src" / relative).read_bytes()
