@@ -6,9 +6,11 @@
 // than a TCP segment is ever buffered, which is what lets an RP2040 with
 // 264KB of SRAM drive a 192KB panel payload.
 //
-// v1 is deliberately http:// only (the self-hosted backend on the LAN).
-// TLS via pico mbedTLS is a follow-up; until then https:// URLs are
-// refused up front at provisioning time rather than failing mid-fetch.
+// Plain http:// talks to a self-hosted backend on the LAN; https:// runs
+// TLS 1.2 through pico-sdk's mbedTLS behind lwIP altcp, with hostname
+// verification against the embedded root bundle (certs/pk_ca_roots.h), so
+// the server is authenticated on both schemes. See the README's "TLS"
+// section for the SNTP / build-time validity floor.
 #ifndef PK_HTTP_H
 #define PK_HTTP_H
 

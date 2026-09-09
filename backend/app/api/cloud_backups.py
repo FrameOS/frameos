@@ -31,6 +31,7 @@ from app.api.auth import get_current_user
 from app.api.templates import parse_template_zip, safe_template_name, template_zip_bytes
 from app.database import get_db
 from app.models.cloud import current_cloud_backend_link
+from app.utils.frame_secrets import websocket_frame_payload
 from app.models.frame import Frame
 from app.models.organization import OrganizationMember, Project
 from app.models.template import Template
@@ -339,7 +340,9 @@ async def restore_cloud_backup(
         db.add(frame)
         db.commit()
         db.refresh(frame)
-        await publish_message(redis, "new_frame", frame.to_dict())
+        # The restored row carries ssh_pass, server_api_key, the Remote secret
+        # and the TLS key; the broadcast reaches every socket in the project.
+        await publish_message(redis, "new_frame", websocket_frame_payload(frame.to_dict()))
         return {"status": "restored", "kind": "frame", "id": frame.id}
 
     raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Unknown backup kind")

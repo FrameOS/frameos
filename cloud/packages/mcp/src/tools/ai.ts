@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { confirmed } from "./confirm";
 import { CloudApiError } from "../client";
 import { failure, run, text, uuid, type ToolContext } from "../result";
 import { resolveStoreSceneId } from "./scene-source";
@@ -379,7 +380,7 @@ export function registerAiTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: true },
       description: "Delete an AI chat and its messages.",
-      inputSchema: { chat_id: uuid() },
+      inputSchema: { confirm: confirmed("deletes a conversation"), chat_id: uuid() },
     },
     async ({ chat_id }) =>
       run(async () => text(await api.json("DELETE", `/api/ai/chats/${chat_id}`))),

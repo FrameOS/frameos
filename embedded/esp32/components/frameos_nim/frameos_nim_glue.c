@@ -1430,6 +1430,39 @@ static char *trim_ascii(char *s)
     return s;
 }
 
+/* Headers that authenticate the caller to ONE origin. A redirect to another
+ * origin must not carry them: an open redirect on a scene's API host (or a
+ * compromised first hop) would otherwise hand the owner's Home Assistant,
+ * Immich or OpenAI credential to whatever host the Location header names.
+ * Mirrors CrossOriginHeaders in frameos/src/frameos/utils/http_client.nim. */
+static const char *const s_cross_origin_headers[] = {
+    "Authorization", "Proxy-Authorization", "Cookie", "X-Api-Key",
+};
+
+/* scheme + host + effective port, the way the Pi's sameHttpOrigin compares. An
+ * unparseable side counts as a different origin: closed, not open. */
+static bool http_same_origin(const char *a, const char *b)
+{
+    if (a == NULL || b == NULL) return false;
+    bool a_https = strncasecmp(a, "https://", 8) == 0;
+    bool b_https = strncasecmp(b, "https://", 8) == 0;
+    if (a_https != b_https) return false;
+    char host_a[FOS_NETGUARD_HOST_LEN];
+    char host_b[FOS_NETGUARD_HOST_LEN];
+    int port_a = 0;
+    int port_b = 0;
+    if (!fos_netguard_parse_url(a, host_a, sizeof(host_a), &port_a)) return false;
+    if (!fos_netguard_parse_url(b, host_b, sizeof(host_b), &port_b)) return false;
+    return port_a == port_b && strcasecmp(host_a, host_b) == 0;
+}
+
+static void drop_cross_origin_headers(esp_http_client_handle_t client)
+{
+    for (size_t i = 0; i < sizeof(s_cross_origin_headers) / sizeof(s_cross_origin_headers[0]); i++) {
+        esp_http_client_delete_header(client, s_cross_origin_headers[i]);
+    }
+}
+
 static bool set_extra_headers(esp_http_client_handle_t client, const char *headers, size_t headers_len)
 {
     bool has_content_type = false;
@@ -1684,12 +1717,21 @@ static esp_http_client_handle_t http_open_request(
          * as unparseable and therefore refuses. Fine: an IPv6-literal redirect
          * target is not a thing scenes do, and the failure is closed.
          * A truncated render is refused for the same reason. */
+        char redirect_url[256];
+        bool redirect_url_ok =
+            esp_http_client_get_url(client, redirect_url, sizeof(redirect_url)) == ESP_OK &&
+            strlen(redirect_url) < sizeof(redirect_url) - 1;
+        /* Credentials stay with the origin they were meant for: the scene's
+         * Authorization / X-Api-Key follow the redirect only while it stays on
+         * the same scheme, host and port (the Pi's client does the same;
+         * ESP-IDF's own perform() loop would have kept every header). */
+        if (!redirect_url_ok || !http_same_origin(url, redirect_url)) {
+            drop_cross_origin_headers(client);
+        }
         if (fos_netguard_policy_active()) {
-            char redirect_url[256];
             bool redirect_ok = false;
             netguard_reason[0] = '\0';
-            if (esp_http_client_get_url(client, redirect_url, sizeof(redirect_url)) != ESP_OK ||
-                strlen(redirect_url) == sizeof(redirect_url) - 1) {
+            if (!redirect_url_ok) {
                 strlcpy(netguard_reason, "redirect target unreadable", sizeof(netguard_reason));
             } else {
                 redirect_ok = fos_netguard_url_allowed(redirect_url, netguard_reason,

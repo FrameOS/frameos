@@ -45,8 +45,7 @@ import { isCloudMode } from '../../utils/cloudMode'
 import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import {
-  cloudFrameSettingKeys,
-  extendedCloudFrameSettingKeys,
+  cloudFrameFormDiffKeys,
   esp32PowerSettingKeys,
   numericCloudFrameSettingKeys,
 } from '../../utils/cloudFrameSettings'
@@ -714,21 +713,15 @@ function frameDiffKeys(): (keyof FrameType)[] {
     // `schedule` rides its own verb (POST /api/frames/{id}/schedule →
     // set_schedule), not the settings allowlist — but it round-trips through
     // GET /api/frames/{id} like the settings do, so it diffs cleanly.
-    // The extended batch diffs on every cloud frame, supported or not: a
-    // frame below the firmware floor renders the fields disabled, so they
-    // never change, and normalizeFrameKeyValueForComparison keeps the form's
-    // materialized defaults from reading as edits.
-    return [
-      ...(cloudFrameSettingKeys as readonly (keyof FrameType)[]),
-      ...(extendedCloudFrameSettingKeys as readonly (keyof FrameType)[]),
-      // ESP32 power keys (top-level on cloud frames). Left out, the "is the
-      // form untouched?" check ignored every Power-section edit and each
-      // sync-status poll reset the form to the server copy mid-typing. On a
-      // Pi frame they are undefined on both sides and diff to nothing.
-      ...(esp32PowerSettingKeys as readonly (keyof FrameType)[]),
-      'scenes',
-      'schedule',
-    ]
+    // Every batch diffs on every cloud frame, supported or not: a frame below
+    // a firmware floor renders those fields disabled, so they never change,
+    // and normalizeFrameKeyValueForComparison keeps the form's materialized
+    // defaults from reading as edits; keys of the other profile (ESP32 power
+    // keys on a Pi) are undefined on both sides and diff to nothing. One
+    // shared list, so a batch added to what the form SENDS cannot be missing
+    // from what it DIFFS — the palette/partial-refresh/GPIO batch was, and
+    // every sync poll reset those fields mid-typing.
+    return cloudFrameFormDiffKeys() as (keyof FrameType)[]
   }
   return FRAME_KEYS
 }

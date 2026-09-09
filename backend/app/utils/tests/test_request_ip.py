@@ -52,3 +52,17 @@ def test_missing_peer_and_missing_headers():
     assert extract_client_ip({}, None) is None
     assert extract_client_ip({}, "127.0.0.1") == "127.0.0.1"
     assert extract_client_ip({"x-forwarded-for": "10.0.0.5"}, None) is None
+
+
+def test_strict_mode_ignores_the_implicit_private_range_trust(monkeypatch):
+    headers = {"x-forwarded-for": "10.8.0.99"}
+    # Attribution: a private peer may forward.
+    assert extract_client_ip(headers, "10.8.0.5") == "10.8.0.99"
+    # Deciding: it may not — only a named proxy vouches for an address.
+    assert extract_client_ip(headers, "10.8.0.5", strict=True) == "10.8.0.5"
+    assert extract_client_ip(headers, "127.0.0.1", strict=True) == "127.0.0.1"
+    monkeypatch.setattr(app_config.config, "FRAMEOS_TRUSTED_PROXIES", "10.8.0.5")
+    assert extract_client_ip(headers, "10.8.0.5", strict=True) == "10.8.0.99"
+    monkeypatch.setattr(app_config.config, "FRAMEOS_TRUSTED_PROXIES", "")
+    monkeypatch.setattr(app_config.config, "HASSIO_TOKEN", "token")
+    assert extract_client_ip(headers, HASSIO_INGRESS_PROXY, strict=True) == "10.8.0.99"

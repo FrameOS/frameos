@@ -24,11 +24,29 @@ main/                     boot orchestration + platform modules
   fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
+  fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
+  fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
+  fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
+  fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
+  fos_schedule.c          schedule evaluation and catch-up after sleep
+  fos_assets.c            asset verbs (list/get/put/mkdir/delete/rename) + path sanitiser
+  fos_assets_sd.c         SD card mount/probe/format for the assets root
+  fos_sd_probe.c          SD presence probe used by the assets layer
+  fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
+  fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
+  fos_board.c             board table: pins, panel defaults, battery divider per board
+  fos_buttons.c           GPIO button map → scene events
+  fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
+  fos_power.c             deep sleep, wake-check render skip, VBUS truth
+  fos_wake.c              wake scheduling (next render / schedule event)
+  fos_tz.c                IANA zone → POSIX TZ rule
   fos_defaults.h          compile-time defaults of the generic image (NVS wins)
 components/
   frameos_display/        DEV_Config on ESP-IDF (spi_master/gpio, runtime pin remap);
-                          one selected root Waveshare EPD_*.c symlinked at
-                          configure time and wrapped from generated metadata
+                          every root Waveshare EPD_*.c compiled in, with a
+                          runtime table from generate_panel_table.py picking
+                          the configured panel (see "Every supported panel
+                          driver is compiled into each firmware image")
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
                           builds a stub when nimcache/ is absent
 partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
@@ -314,7 +332,10 @@ Redials use jittered exponential backoff (5 s → 5 min), and three consecutive
 authentication rejections (HTTP 401 on the upgrade, or a 4401 close) demote
 the device back to standalone: the access token, frame id and WS path are
 dropped from NVS, the device key is kept, and the last pushed scenes keep
-rendering. `factory-reset` erases all cloud state, including the device key.
+rendering. `factory-reset` erases all cloud state, including the device key,
+and wipes the `/state` partition (scenes with whatever secrets their node
+fields carried, the schedule, cached payloads); the SD card is the owner's
+and is left alone (`sd format` if it should go too).
 
 A single management WebSocket message is capped at **512 KiB** (the same
 ceiling as the on-device scene store); larger frames are dropped and acked

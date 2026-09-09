@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { normalizeAssetPath } from "../../../../../../src/lib/frame-asset-cache";
 import {
+  assetChunkRateLimit,
   assetUploadChunkBytes,
   assetWriteErrorResponse,
   assetWriteRequestContext,
@@ -39,7 +40,19 @@ export async function POST(
   { params }: { params: Promise<{ frameId: string }> },
 ) {
   const { frameId } = await params;
-  const context = await assetWriteRequestContext(request, frameId);
+  // A continuation chunk (offset > 0 of an upload already under way) is
+  // counted against the chunk window, not the per-action one — see
+  // assetChunkRateLimit. The first chunk still pays the action price.
+  const offset = Number(request.nextUrl.searchParams.get("offset") ?? "0");
+  const continuation =
+    request.nextUrl.searchParams.has("upload_id") && Number.isFinite(offset) && offset > 0;
+  const context = await assetWriteRequestContext(
+    request,
+    frameId,
+    continuation
+      ? { rateLimit: assetChunkRateLimit, rateLimitKey: "frames:asset_write_chunk" }
+      : {},
+  );
   if (context.response) {
     return context.response;
   }

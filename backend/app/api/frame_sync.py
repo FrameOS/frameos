@@ -131,7 +131,11 @@ async def store_frame_sync_hint_headers(redis: Redis, frame_id: int, frame_heade
 # runs it — which control mode it is in, whether FrameOS Remote may run
 # commands and with what shared secret, and the admin login the backend uses
 # against it. They never appear in the sync diff (docs/security-todo.md).
-FRAME_SYNC_BACKEND_OWNED_KEYS = frozenset({"mode", "agent", "frame_admin_auth"})
+# `service_setting_groups` is the owner's GRANT of the account's API keys to
+# this frame: a device that reported `["openAI", …]` would have had those keys
+# shipped to it on the next deploy, and an adopted card imports the device's
+# payload wholesale — so the grant is decided here, never read back.
+FRAME_SYNC_BACKEND_OWNED_KEYS = frozenset({"mode", "agent", "frame_admin_auth", "service_setting_groups"})
 
 FRAME_SYNC_FRAME_KEYS = tuple(
     key

@@ -12,6 +12,7 @@ idf_component_register(
         "fos_client.c"
         "fos_cloud.c"
         "fos_cloud_contract.c"
+        "fos_json_guard.c"
         "fos_ota.c"
         "fos_status_screen.c"
         "fos_console.c"

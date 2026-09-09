@@ -150,8 +150,14 @@ export async function requireWeakeningProof(
     if (!matched) {
       return NextResponse.json({ error: "invalid_code" }, { status: 403 });
     }
+    return undefined;
   }
-  return undefined;
+  // No password, no authenticator, no codes left (a passkey-only account, or
+  // Google-only with the codes spent): the body can carry nothing, so the
+  // session itself has to have proved its credentials recently — the passkey
+  // or Google on /login/reauth. Without this, a stale cookie could mint fresh
+  // recovery codes or delete the passkey with no proof at all.
+  return requireRecentAuth(db, context.accountId);
 }
 
 // The proof a STRENGTHENING action carries: enrolling an authenticator or a

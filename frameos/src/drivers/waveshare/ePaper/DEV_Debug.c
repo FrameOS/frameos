@@ -11,6 +11,8 @@
  *   display:dataPreview {count, bytes:[...]}
  *   busy:wait:start / busy:wait / busy:wait:end / busy:wait:timeout
  */
+#include <stdarg.h>
+#include <string.h>
 #include "DEV_Config.h"
 
 #include <stdio.h>
@@ -125,6 +127,25 @@ void DEV_Debug_Preview(const UBYTE *image, unsigned long totalBytes)
     char buf[192];
     snprintf(buf, sizeof(buf), "\"count\":%d,\"bytes\":%s", count, bytes);
     DEV_Debug_Log("display:dataPreview", buf);
+}
+
+/* The vendor drivers' Debug() (Debug.h). A busy timeout becomes a driver
+ * error whatever the DEBUG gate says; everything else prints only when
+ * debugging is compiled in, as before. */
+void DEV_Debug_Vendor(const char *fmt, ...)
+{
+    if (fmt != NULL && strcmp(fmt, DEV_DEBUG_BUSY_TIMEOUT_MSG) == 0) {
+        DEV_Error("e-Paper busy timeout after %lu ms (vendor driver)", (unsigned long)EPD_BUSY_TIMEOUT_MS);
+    }
+#if DEBUG
+    va_list args;
+    va_start(args, fmt);
+    printf("Debug: ");
+    vprintf(fmt, args);
+    va_end(args);
+#else
+    (void)fmt;
+#endif
 }
 
 int DEV_Busy_Wait(const char *stage, int busy_level, UDOUBLE poll_ms)

@@ -12,15 +12,18 @@
 
 - The cloud CI job named **`verify`** (`.github/workflows/cloud-ci.yml`) runs
   `turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend` and then
-  TWO integration suites against a real Postgres: `@frameos-cloud/auth-web`
-  and `@frameos-cloud/frame-hub`. Run the same three locally from `cloud/`
-  before pushing — a green `pnpm test` alone proves little, because the
-  integration suites are where the interesting failures live:
+  THREE integration suites against a real Postgres: `@frameos-cloud/auth-web`,
+  `@frameos-cloud/frame-hub` and `@frameos-cloud/ledger` (the accounting
+  kernel — the module whose own todo records a shipped billing bypass, so do
+  not skip it). Run the same four locally from `cloud/` before pushing — a
+  green `pnpm test` alone proves little, because the integration suites are
+  where the interesting failures live (`pnpm verify` is the first line):
 
   ```
-  pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend
+  pnpm verify
   pnpm --filter @frameos-cloud/auth-web test:integration
   pnpm --filter @frameos-cloud/frame-hub test:integration
+  pnpm --filter @frameos-cloud/ledger test:integration
   ```
 
 - **Never run two copies of one integration suite at once.** All of a suite's
@@ -67,7 +70,7 @@
 ## Backend notes
 - Environment configuration uses `Config` classes driven by env vars such as `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `HASSIO_RUN_MODE`, and debug/test toggles. During development (`DEBUG=1`) it autogenerates a `.env` with a fallback `SECRET_KEY`. 【F:backend/app/config.py†L1-L86】
 - FastAPI application wiring (in `app/fastapi.py`):
-  - Registers gzip middleware, websocket routers, and routes grouped by auth level (`api_public`, `api_no_auth`, `api_with_auth`).
+  - Registers gzip middleware, websocket routers, and routes grouped by auth level (`api_public`, `api_open`, `api_user`, `api_project` — see `backend/app/api/__init__.py` for what each means with and without Home Assistant ingress).
   - Serves compiled frontend assets (or source HTML during tests) unless running in Home Assistant public ingress mode.
   - Initializes a shared `httpx.AsyncClient`, Redis listener, and PostHog analytics integration during startup.
   - Custom exception handlers degrade gracefully to JSON for API calls and reuse the SPA shell for 404/validation errors in non-test scenarios. 【F:backend/app/fastapi.py†L1-L112】

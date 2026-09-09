@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -639,6 +640,27 @@ static esp_err_t write_slot(int slot, const char *data, size_t len)
     char path[SCENES_SLOT_PATH_LEN];
     slot_path(slot, path, sizeof(path));
     return write_file_replace(path, SCENES_SLOT_TMP_PATH, data, len);
+}
+
+void fos_scenes_wipe_state(void)
+{
+    /* SPIFFS has a flat namespace: readdir("/state") lists every file,
+     * whatever slashes its name carries. */
+    DIR *dir = opendir("/state");
+    if (dir == NULL) {
+        ESP_LOGW(TAG, "wipe: /state not mounted");
+        return;
+    }
+    int removed = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        /* d_name is up to 255 bytes; sized so -Wformat-truncation is happy. */
+        char path[sizeof("/state/") + sizeof(entry->d_name)];
+        snprintf(path, sizeof(path), "/state/%s", entry->d_name);
+        if (unlink(path) == 0) removed++;
+    }
+    closedir(dir);
+    ESP_LOGI(TAG, "wipe: removed %d file(s) from /state", removed);
 }
 
 static void remove_slots_from(int first_slot)

@@ -1,7 +1,9 @@
-# FrameOS Cloud — plan and work tracker
+# FrameOS Cloud — principles, scope and protocol summary
 
-This file tracks the work to link FrameOS backends (and frames directly) to
-FrameOS Cloud (`https://cloud.frameos.net`, the `cloud/` app in this repo).
+How FrameOS backends (and frames directly) relate to FrameOS Cloud
+(`https://cloud.frameos.net`, the `cloud/` app in this repo). Principles and
+scope only — open work is in `docs/todo.md`. (Until 2026-09-09 this file was
+`CLOUD-TODO.md`, a name that promised todos it did not hold.)
 
 Two sides are involved:
 
@@ -12,7 +14,7 @@ Two sides are involved:
 - **FrameOS Cloud** (`cloud/`) — the hosted service: accounts, linked
   backends, the device-authorization flow, the scene store, and the paid
   services below. Store decisions and threat model: `cloud/STORE-TODO.md`;
-  cloud-app scope guardrails: `cloud/TODO.md`; billing model and ledger:
+  cloud-app scope guardrails: `cloud/SCOPE.md`; billing model and ledger:
   `cloud/docs/accounting-todo.md`.
 
 Remaining work, open questions, and the ideas parking lot are tracked in

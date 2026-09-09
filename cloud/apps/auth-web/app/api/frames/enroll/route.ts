@@ -109,16 +109,14 @@ function parseHardware(value: unknown): Record<string, unknown> | null {
 // Device enrollment (wire contract: docs/cloud-frames.md "Enrollment").
 //
 // Flow A — unauthenticated, with a claim token from "Add frame".
-//   The FIRST enrollment of a token is born `active`: minting the token was
-//   the owner's deliberate, authenticated act, and the overwhelmingly common
-//   first redeemer is the owner's own board booting minutes later (SD images
-//   mint multi-use tokens so a card can be reflashed, so "single-use only"
-//   would miss exactly that case). If a stolen token or leaked image beats
-//   the owner to it, the owner's own card lands `pending` behind a foreign
-//   active frame — loud, auditable, and revocable. Every LATER enrollment of
-//   a multi-use token is born `pending` and needs the owner's confirmation
-//   click: any card holding a fleet image can enroll, so each additional
-//   board brings its own proof.
+//   A SINGLE-USE token's enrollment is born `active`: minting the token was
+//   the owner's deliberate, authenticated act, and its budget means only one
+//   device can ever redeem it. EVERY enrollment of a multi-use token — the
+//   first one included — is born `pending` and needs the owner's confirmation
+//   click (`token.maxUses === 1 ? "active" : "pending"` below): a multi-use
+//   token is baked into an SD image that can be copied or leaked, so whoever
+//   boots a card first is not thereby the owner: any card holding a fleet
+//   image can enroll, so each board brings its own proof (the owner's click).
 // Flow B — Bearer token from the RFC 8628 device flow (client_kind "frame").
 //   The consent screen was the ownership proof, so the frame is born
 //   `active`; this call registers the device public key.

@@ -53,6 +53,12 @@ NESTED_SECRET_PATHS = (
     ("agent", "agentSharedSecret"),
     ("frame_admin_auth", "pass"),
     ("mountpoints", "items", "*", "password"),
+    # The home Wi-Fi passphrase and the setup hotspot's: on the device they
+    # are the two most consequential strings in frame.json, and until now
+    # neither was fingerprinted for the deploy baseline nor kept off the
+    # project-wide socket.
+    ("network", "wifiPassword"),
+    ("network", "wifiHotspotPassword"),
 )
 
 # The top-level objects a nested secret lives in. Popped whole from websocket

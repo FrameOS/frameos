@@ -83,7 +83,12 @@ async def post_api_log(
     for log in data.logs or []:
         _check_log_entry(log)
 
-    client_ip = client_ip_for_request(request)
+    # Strict: a `bootup` may move frame_host to this address, after which the
+    # backend logs in there and pushes settings. With the default proxy trust
+    # every LAN peer could forward any address, so the header would only be
+    # compared with itself (docs/security-todo.md). Only a configured proxy
+    # may vouch for a device's address here.
+    client_ip = client_ip_for_request(request, strict=True)
 
     if data.log:
         await process_log(db, redis, frame, data.log, ip=client_ip)

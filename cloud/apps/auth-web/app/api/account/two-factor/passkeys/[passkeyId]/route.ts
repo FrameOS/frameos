@@ -77,6 +77,8 @@ export async function DELETE(
   const context = await accountSecurityContext(request, db, {
     action: "two-factor-passkeys",
     mutating: true,
+    // Removing a passkey weakens the account; renaming (PATCH above) does not.
+    recentAuth: true,
   });
   if ("response" in context) {
     return context.response;

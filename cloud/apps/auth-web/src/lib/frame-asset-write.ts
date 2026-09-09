@@ -252,9 +252,19 @@ export async function invalidateCachedAssetSubtree(
  * session, database, frame ownership, and the frame being active. Returns
  * either an error response to relay or the context to work with.
  */
+// Budgets for the write routes. A whole-file write (one asset_put, an mkdir,
+// a rename) is a user action and gets the tight window; a continuation chunk
+// of an upload already under way is one of many hundreds for a single file
+// (256 KiB each on the ESP32), so the same 120 would have refused a 40 MB
+// file at chunk 121 while the route advertises 60 MB. The chunk window is
+// sized for the advertised cap at the smallest chunk with headroom.
+export const assetWriteRateLimit = { limit: 120, windowMs: 15 * 60 * 1000 };
+export const assetChunkRateLimit = { limit: 2400, windowMs: 15 * 60 * 1000 };
+
 export async function assetWriteRequestContext(
   request: NextRequest,
   frameId: string,
+  options: { rateLimit?: { limit: number; windowMs: number }; rateLimitKey?: string } = {},
 ): Promise<
   | { response: Response }
   | {
@@ -269,10 +279,11 @@ export async function assetWriteRequestContext(
   if (csrf) {
     return { response: csrf };
   }
-  const limited = await rateLimitResponse(request, "frames:asset_write", {
-    limit: 120,
-    windowMs: 15 * 60 * 1000,
-  });
+  const limited = await rateLimitResponse(
+    request,
+    options.rateLimitKey ?? "frames:asset_write",
+    options.rateLimit ?? assetWriteRateLimit,
+  );
   if (limited) {
     return { response: limited };
   }

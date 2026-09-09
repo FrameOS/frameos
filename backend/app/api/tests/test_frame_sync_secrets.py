@@ -132,7 +132,7 @@ def test_backend_owned_keys_are_never_pulled_from_the_device():
     # A device that claims another control mode, a Remote that may run
     # commands under a secret of its choosing, or a different admin login
     # must never even appear as a sync choice.
-    for key in ("mode", "agent", "frame_admin_auth"):
+    for key in ("mode", "agent", "frame_admin_auth", "service_setting_groups"):
         assert key in FRAME_SYNC_BACKEND_OWNED_KEYS
         assert key not in FRAME_SYNC_FRAME_KEYS
     backend = _backend_frame()

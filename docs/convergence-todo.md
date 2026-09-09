@@ -115,7 +115,7 @@ Both architectures exist and work: `localRenderSupported` already forks
 esp32-s3 (17.5k lines of local-render C) from esp32-c3/Pico (539-line
 backend FOSB path + 2k Pico C). The two decisions that make the fork
 policy instead of accretion are taken: the "no image proxies, ever"
-principle is bounded in `CLOUD-TODO.md` (a hub rendering a whole *scene*
+principle is bounded in `docs/cloud-principles.md` (a hub rendering a whole *scene*
 for a board below the capability line is the thin-client design, not a
 proxy), and the money question is answered in
 `cloud/docs/accounting-todo.md` §0.2 — cloud rendering is a paid-plan

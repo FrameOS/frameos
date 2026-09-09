@@ -37,11 +37,19 @@
 
 #include <stdio.h>
 
-#if DEBUG
-	#define Debug(__info,...) printf("Debug: " __info,##__VA_ARGS__)
-#else
-	#define Debug(__info,...)  
-#endif
+/* FrameOS: every vendor driver reports a busy-pin timeout the same way —
+ *   Debug("e-Paper busy timeout\r\n"); break;
+ * — and then carries on as if the panel had answered, so a wedged panel
+ * logged "render: complete" and the cloud showed a healthy frame with a
+ * blank screen (72 drivers; the FrameOS forks use DEV_Busy_Wait instead).
+ * Rather than patch 72 files that a vendor resync would overwrite, the Debug
+ * macro they all already call routes through DEV_Debug_Vendor(), which
+ * recognises that one message and parks a DEV_Error() for the render to
+ * raise (raiseIfDriverError on the Pi, the error log on the ESP32). The
+ * printing half keeps its old DEBUG gate. */
+void DEV_Debug_Vendor(const char *fmt, ...);
+#define DEV_DEBUG_BUSY_TIMEOUT_MSG "e-Paper busy timeout\r\n"
+#define Debug(__info,...) DEV_Debug_Vendor(__info,##__VA_ARGS__)
 
 #endif
 

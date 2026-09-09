@@ -65,7 +65,9 @@ def _accepted_boot_ip(frame: Frame, log: dict, ip: str | None) -> str | None:
     then pushes ssh credentials and frame.json at whatever host it records, so
     the device's own claim is not enough. An embedded frame that DHCP moved is
     still followed: its claimed address must be the one the request really
-    came from (`ip`, derived through the trusted-proxy rules). An explicit
+    came from (`ip`: the socket peer, or what a proxy named in
+    FRAMEOS_TRUSTED_PROXIES forwarded — never a header from an arbitrary
+    LAN peer). An explicit
     `embedded.followBootIp` opt-in trusts the claim as-is; a hostname in
     `frame_host` is never replaced.
     """
@@ -84,7 +86,8 @@ def _accepted_boot_ip(frame: Frame, log: dict, ip: str | None) -> str | None:
     if claimed == ip or _follow_boot_ip_enabled(frame):
         return claimed
     logger.warning(
-        "Ignoring bootup ip %s for frame %s: request came from %s and embedded.followBootIp is off",
+        "Ignoring bootup ip %s for frame %s: request came from %s and embedded.followBootIp is off "
+        "(behind a reverse proxy, name it in FRAMEOS_TRUSTED_PROXIES so its X-Forwarded-For counts)",
         claimed, frame.id, ip,
     )
     return None

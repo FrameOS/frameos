@@ -36,6 +36,7 @@ import type {
   ScenesEvent,
   ToolContext,
 } from "../../../../src/lib/ai/tools";
+import { untrustedResult } from "../../../../src/lib/ai/tools";
 import {
   activeTurnForChat,
   activeTurnCountForAccount,
@@ -120,9 +121,14 @@ async function frameContextBlock(
     .where(eq(frameSceneAssignments.frameId, frame.id))
     .orderBy(asc(frameSceneAssignments.position));
   if (assignments.length > 0) {
+    // Scene names are publisher-authored text; they enter the context only
+    // inside the untrusted frame the tool results use.
     lines.push(
       "- Assigned scenes: " +
-        assignments.map((row) => `${row.name} (${row.sceneId})`).join(", "),
+        untrustedResult(
+          "assigned_scene_names",
+          assignments.map((row) => `${row.name} (${row.sceneId})`).join(", "),
+        ),
     );
   } else {
     lines.push("- No scenes assigned yet.");
@@ -200,16 +206,24 @@ async function storeSceneContextBlock(
   const description = draft?.description !== undefined ? draft.description : scene.description;
   const category = draft?.category !== undefined ? draft.category : scene.category;
   const tags = draft?.tags ?? scene.tags;
+  // The listing of a scene the user does not own is someone else's text —
+  // up to 2000 characters of it — and the whole prompt-injection defence
+  // rests on such text never reaching the model outside the untrusted frame.
+  // The user's own listing (and their unsaved draft of it) is first-party.
+  const thirdParty = (source: string, text: string) =>
+    owned ? text : untrustedResult(source, text);
   const lines = [
     "The user is on the scene store, looking at this store scene in its editor:",
     `- Store scene id: ${scene.id} (slug "${scene.slug}", version ${scene.latestVersion})`,
-    `- Name: ${scene.name}`,
+    `- Name: ${thirdParty("store_scene_name", scene.name)}`,
     // Always stated, empty included: "update the description" on a scene
     // with none must not read as an invitation to find one elsewhere.
-    `- Listing description${draft ? " (the editor's draft)" : ""}: ${description || "(none yet)"}`,
-    ...(category ? [`- Category: ${category}`] : []),
-    ...(tags.length > 0 ? [`- Tags: ${tags.join(", ")}`] : []),
-    `- Publisher: ${scene.publisher ?? "FrameOS user"}${owned ? " (this is the user's own scene)" : ""}`,
+    `- Listing description${draft ? " (the editor's draft)" : ""}: ${
+      description ? thirdParty("store_scene_description", description) : "(none yet)"
+    }`,
+    ...(category ? [`- Category: ${thirdParty("store_scene_category", category)}`] : []),
+    ...(tags.length > 0 ? [`- Tags: ${thirdParty("store_scene_tags", tags.join(", "))}`] : []),
+    `- Publisher: ${thirdParty("store_scene_publisher", scene.publisher ?? "FrameOS user")}${owned ? " (this is the user's own scene)" : ""}`,
     `- Visibility: ${scene.visibility}`,
     ...(owned
       ? [

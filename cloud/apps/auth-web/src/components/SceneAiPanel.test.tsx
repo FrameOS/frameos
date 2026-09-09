@@ -305,17 +305,17 @@ describe("SceneAiPanel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  // An initial prompt is submitted on mount; with AI off it must not be.
   it("does not auto-submit an initial prompt when AI is off", () => {
     renderPanel({ aiDisabled: true, initialPrompt: "make it blue" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("submits the initial prompt on mount and shows suggestion chips otherwise", async () => {
-    fetchMock.mockResolvedValueOnce(ndjson([{ reply: "Hi", tool: "reply", type: "done" }]));
+  // A ?prompt= / ?ai= link prefills the box and waits for the click: a turn
+  // writes scenes and spends the shared key, so a link alone must not run one.
+  it("prefills the initial prompt without sending it, and shows suggestion chips otherwise", () => {
     const { unmount } = renderPanel({ initialPrompt: "make it blue" });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string).prompt).toBe("make it blue");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("make it blue");
     unmount();
 
     renderPanel();

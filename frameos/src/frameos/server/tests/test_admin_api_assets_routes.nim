@@ -40,6 +40,22 @@ suite "Server admin api asset helpers":
     check contentTypeForAsset("bundle.js") == "application/javascript"
     check contentTypeForAsset("font.woff2") == "font/woff2"
 
+  test "scene-writable assets go out inert: nosniff, sandboxed, active types as downloads":
+    for active in ["image/svg+xml", "application/javascript", "text/css", "text/html; charset=utf-8"]:
+      check isActiveContentType(active)
+    for inert in ["image/png", "image/jpeg", "font/woff2", "application/octet-stream"]:
+      check not isActiveContentType(inert)
+    var headers: mummy.HttpHeaders
+    setInertAssetHeaders(headers, "image/svg+xml", "/srv/assets/evil\"name.svg")
+    check headers["Content-Type"] == "image/svg+xml"
+    check headers["X-Content-Type-Options"] == "nosniff"
+    check headers["Content-Security-Policy"] == "default-src 'none'; sandbox"
+    check headers["Content-Disposition"] == "attachment; filename=\"evil_name.svg\""
+    var image: mummy.HttpHeaders
+    setInertAssetHeaders(image, "image/png", "/srv/assets/a.png")
+    check image["X-Content-Type-Options"] == "nosniff"
+    check not image.contains("Content-Disposition")
+
   test "content type for regular files":
     check contentTypeForFilePath("image.png") == "image/png"
     check contentTypeForFilePath("image.jpeg") == "image/jpeg"

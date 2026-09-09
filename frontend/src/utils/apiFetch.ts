@@ -154,7 +154,12 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
       // Next.js owns auth on the cloud: hand over to its login page and
       // come back to where we were. Never resolve — mirrors the
       // frame-admin redirect below.
-      window.location.href = '/login?return_to=' + encodeURIComponent(window.location.pathname)
+      // The whole location, not just the path: the query names the frame tool
+      // and the hash the scene, and a session that expired mid-edit should
+      // come back to the same view.
+      window.location.href =
+        '/login?return_to=' +
+        encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)
       return new Promise(() => {})
     }
 

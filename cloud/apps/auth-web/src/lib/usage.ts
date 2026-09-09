@@ -253,17 +253,38 @@ async function splitBytes(
   };
 }
 
-// A scene's bytes = its versions + the images its versions link.
+// Images this account uploaded that no version has bound yet. They belong
+// to no scene, so the visibility split above never sees them; they are
+// metered as private until a Save links them (or the sweep removes them),
+// otherwise the upload route's quota check passes for every upload forever.
+async function unboundImageBytes(
+  db: FramesDatabase,
+  accountId: string,
+): Promise<number> {
+  const [row] = await db.execute<{ bytes: number }>(
+    sql`select coalesce(sum(i.size_bytes), 0)::float8 as bytes
+          from ${storeImages} i
+         where i.account_id = ${accountId}
+           and not exists (
+             select 1 from ${storeSceneVersionImages} vi
+              where vi.image_sha256 = i.sha256)`,
+  );
+  return Number(row?.bytes ?? 0);
+}
+
+// A scene's bytes = its versions + the images its versions link (+ the
+// account's uploads still waiting to be linked).
 export async function sceneBytesForAccount(
   db: FramesDatabase,
   accountId: string,
 ): Promise<SceneBytesBreakdown> {
-  const [versions, images] = await Promise.all([
+  const [versions, images, unbound] = await Promise.all([
     splitBytes(db, accountId, distinctVersionBytes),
     splitBytes(db, accountId, distinctImageBytes),
+    unboundImageBytes(db, accountId),
   ]);
   return {
-    privateBytes: versions.privateBytes + images.privateBytes,
+    privateBytes: versions.privateBytes + images.privateBytes + unbound,
     publicBytes: versions.publicBytes + images.publicBytes,
   };
 }

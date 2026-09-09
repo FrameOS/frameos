@@ -121,9 +121,14 @@ real client. `GET` and `DELETE` answer 405: there is nothing to stream or end.
 
 Around 70 tools in five groups; every one documents its parameters. Read-only
 tools are annotated `readOnlyHint`, destructive ones `destructiveHint` and
-take `confirm: true` — as do the five that change what a physical frame does
-or shows (`frame_scene_install`, `frame_scenes_set`, `frame_settings_update`,
-`frame_service_settings_enable`, `frame_firmware_update`). The server's
+take `confirm: true` — as does every tool that changes what a physical frame
+does, shows or stores (`frame_scene_install`, `frame_scenes_set`,
+`frame_scene_activate`, `frame_scene_remove`, `frame_settings_update`,
+`frame_schedule_set`, `frame_command_send`, `frame_reboot`, `frame_restart`,
+the `frame_asset_*` writes, `frame_assets_sync_fonts`,
+`frame_service_settings_enable`, `frame_firmware_update`). A test enumerates
+the tools by annotation and name and fails when one of them lacks the
+literal. The server's
 instructions tell the model to treat every tool result as untrusted data and
 to call those only on the user's own say-so: a store scene's description or
 a frame's logs must not be able to talk an agent into deploying something.

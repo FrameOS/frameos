@@ -69,17 +69,17 @@ Status legend:
 | Logs | `GET /api/frames/:id/logs` | Full, DB logs | Full, in-memory UI logs | Full, on-device ring (last 128 lines) | Same `{ logs: [...] }` shape. |
 | Full logs | `GET /api/frames/:id/logs/full` | Full | N/A | N/A | Backend-only for historical logs. |
 | Metrics | `GET /api/frames/:id/metrics` | Full, DB metrics | Full, local UI metrics | Full, ring of last 32 samples (one per render pass) | Same `{ metrics: [...] }` shape. |
-| Recent metrics | `GET /api/frames/:id/metrics/recent` | Full | N/A | N/A | Backend-only historical query. |
+| Recent metrics | `GET /api/frames/:id/metrics/recent` | Full | Full, the in-memory ring | N/A | Same `{ metrics: [...] }` shape; the backend's is the historical query. |
 | Asset list | `GET /api/frames/:id/assets` | Full, frame/proxy aware (embedded frames proxy to the device) | Full, local assets | Full, SD walk (`{assets, truncated?, mounted}`) | Same `{ assets: [...] }` shape. |
 | Asset file | `GET /api/frames/:id/asset?path=...` | Full (embedded frames proxy to the device) | Full | Full, streamed off the SD card | Same route for local files. Must preserve path safety. |
 | Asset sync | `POST /api/frames/:id/assets/sync` | Full; on an ESP32 it uploads the project's fonts onto the SD card (400 with no card, 400 for virtual frames) | N/A | N/A | Also on FrameOS Cloud, which pushes the bundled catalogue one `asset_put` at a time and answers NDJSON progress rather than one response minutes later. The ESP32 renderer loads a named face from `{assets}/fonts`, one at a time. |
-| Asset upload image | `POST /api/frames/:id/assets/upload_image` | Full (embedded frames proxy to the device) | Available through Pi admin asset API, not canonical frame API | Via `POST /api/frames/:id/assets/upload` | Add canonical Pi routes before using from shared standalone UI. |
-| Asset upload file | `POST /api/frames/:id/assets/upload` | Full (embedded frames proxy to the device) | Available through Pi admin asset API, not canonical frame API | Full, raw body + `?path=` query, streamed to SD | Same as above. |
-| Asset mkdir/delete/rename | `POST /api/frames/:id/assets/{mkdir,delete,rename}` | Full (embedded frames proxy to the device) | Available through Pi admin asset API, not canonical frame API | Full, form-encoded | Add canonical aliases if local asset management is part of standalone UI. |
+| Asset upload image | `POST /api/frames/:id/assets/upload_image` | Full (embedded frames proxy to the device) | Via `POST /api/frames/:id/assets/upload` (canonical since 2026-08-18) | Via `POST /api/frames/:id/assets/upload` | Same upload route on both device planes. |
+| Asset upload file | `POST /api/frames/:id/assets/upload` | Full (embedded frames proxy to the device) | Full, canonical alias of the admin route (`admin_api_assets_routes.nim`, 2026-08-18) | Full, raw body + `?path=` query, streamed to SD | Same route everywhere; the Pi also keeps `/api/admin/frames/:id/assets/upload`. |
+| Asset mkdir/delete/rename | `POST /api/frames/:id/assets/{mkdir,delete,rename}` | Full (embedded frames proxy to the device) | Full, canonical aliases of the admin routes (2026-08-18) | Full, form-encoded | Same routes everywhere. FrameOS Cloud has them too, over its `asset_*` verbs. |
 | Pending actions | `GET /api/frames/:id/commands`, `DELETE /api/frames/:id/commands/:command_id` | Full, over the one action it records instead of pushing (a queued ESP32 OTA request) | N/A | N/A | Same `{ commands: [...] }` shape as the cloud's durable queue, so the workspace's "Waiting for the frame" panel is one component. A control plane with nothing durable to observe answers an empty list, never an error. |
 | Clear build cache | `POST /api/frames/:id/clear_build_cache` | Backend only | N/A | N/A | Build cache is backend-owned. |
 | Reset frame | `POST /api/frames/:id/reset` | Backend only | N/A | N/A | Backend operation; local reset should become an explicit local command if needed. |
-| Restart/reboot/stop | `POST /api/frames/:id/{restart,reboot,stop}` | Full for restart/reboot/stop | Alias via events/reload where meaningful | Partial via events/reload where meaningful | Avoid exposing unsupported power controls in local mode. FrameOS Cloud serves `/restart` and `/reboot` as aliases onto its durable queue (`restart_runtime` / `reboot`, 5-minute TTL); `stop` stays backend-only. |
+| Restart/reboot/stop | `POST /api/frames/:id/{restart,reboot,stop}` | Full for restart/reboot/stop | `POST /api/frames/:id/restart` is a real route (restarts the runtime); reboot/stop N/A | Partial via events/reload where meaningful | Avoid exposing unsupported power controls in local mode. FrameOS Cloud serves `/restart` and `/reboot` as aliases onto its durable queue (`restart_runtime` / `reboot`, 5-minute TTL); `stop` stays backend-only. |
 | Deploy | `POST /api/frames/:id/deploy` | Backend only | N/A | N/A | Backend-only orchestration. |
 | Fast deploy | `POST /api/frames/:id/fast_deploy` | Backend only | N/A | N/A | Backend-only orchestration. |
 | Deploy plan | `GET/POST /api/frames/:id/deploy_plan` | Backend only | N/A | N/A | Backend-only planning. |
@@ -96,11 +96,45 @@ Status legend:
 | Embedded settings fetch | `GET /api/frames/:id/embedded/settings` | Device-facing backend route | N/A | Full consumer | ESP32 pulls device settings. Requires bearer auth. |
 | Embedded OTA manifest/download | `GET/HEAD /api/frames/:id/embedded/ota/...?platform=` | Device-facing backend route | `GET /api/frames/:id/firmware/{manifest,download}` | Full consumer | Same manifest shape on both planes (`platform, version, size, minisig, downloadUrl`): the release relayed, verified on the device. Requires bearer auth. |
 | Local setup | `POST /api/setup` | N/A | N/A | Full | ESP32 captive portal setup route. Target: eventually mirror enough canonical save behavior for local UI. |
+| Pi setup hotspot | `POST /setup`, `GET /setup/status`, `GET /wifi` | N/A | Full while the hotspot is up (`web_routes.nim`; `/setup/status` answers off-hotspot too, without error detail) | N/A (the ESP32 has `/api/setup` above) | The Pi's first-boot captive portal (`docs/security-todo.md` lists what the unauthenticated form accepts). |
+| Pi settings, repositories, cloud link, upgrade, LAN access | `/api/settings`, `/api/repositories*`, `/api/cloud/*`, `/api/upgrade*`, `/api/network/local-access*` | Backend has its own `/api/settings` and `/api/repositories` (project-scoped) | Full, admin-session routes | N/A | Pi-local admin surface; not shared UI. |
+| ESP32 actions and status | `/api/action/*` (eight routes), `/status` | N/A | N/A | Full | Portal/console helpers; not shared UI. |
+| Backend device and sync verbs | `device/upgrade`, `sync`, `set_next_scene`, `scenes/{id}/convert`, the scene-image writers | Backend only | N/A | N/A | Backend orchestration and the Nim→JS converter (`docs/nim-to-js-scene-converter`). |
 | Local scene metadata | `GET /api/scenes`, `GET /api/scene-state` | N/A | Alias/legacy equivalents exist through canonical state routes | Full simple routes | Keep for simple portals and diagnostics. Shared UI should use canonical state routes. |
 | Legacy upload | `POST /uploadScenes` | N/A | Alias | Alias | Keep as frame runtime compatibility target; backend forwards hot uploads here internally. |
 | Legacy reload | `POST /reload` | N/A | Alias | Alias | Keep as compatibility route. Prefer `/api/frames/:id/event/reload`. |
 | Legacy state/image | `GET /state`, `/states`, `/image` | N/A | Alias | Alias | Keep for lightweight viewers and old clients. Prefer canonical frame routes. |
 | Web admin shell | `/admin`, `/login`, `/ws/admin` | N/A | Full | Planned/separate portal | Pi serves the shared admin shell. ESP32 currently has a simpler portal/UI. |
+
+## The fourth plane: FrameOS Cloud
+
+The table above has three columns because it predates cloud-managed frames;
+FrameOS Cloud is the fourth control plane and the shared SPA runs against it
+too (`cloud-frontend/`). Its shape is different enough that a column would
+mislead: there is no shell, no compiled build and no proxying to the device —
+every frame-facing action is one of the verbs in
+`docs/cloud-frames-contract.json` (`set_scenes`, `set_settings`,
+`set_current_scene`, `asset_*`, `render`, `reboot`, `restart_runtime`,
+`notify_update_available`, …) queued over the management WebSocket, plus the
+declarative settings allowlist behind `POST /api/frames/{id}/settings`.
+
+Verified absent on the cloud (2026-09-09): `/api/frames/:id/state`, `/states`,
+`/uploaded_scenes`, `/upload_scenes`, `/ping`, `/assets/upload_image`,
+`/api/apps`, `/api/templates`, `/api/assets`, `/api/cloud/status`. The SPA
+answers the catalog ones with an empty body itself — `cloudEmptyCatalogs` in
+`frontend/src/utils/apiFetch.ts` is the live record of that list, and
+`workspaceSurfaces.ts` is the allow-list of panels and actions per plane; a
+route or panel added to the shared SPA must be entered in one of the two or
+it is cloud-visible and errors. What the cloud *does* serve of the table:
+frame list/detail, rename (`POST /api/frames/:id` with `{name}` only),
+scene list/assign, image and scene images, logs and metrics, assets
+(list/get + the write verbs), `restart`/`reboot`, `commands`, the OTA
+manifest. Everything else is `N/A`.
+
+This file is hand-maintained; when a route family moves, regenerate the Pi
+and ESP32 columns from the route registrations (`server/routes/*.nim`,
+`fos_http.c`) rather than editing cells one at a time — the four-plane drift
+found in the 2026-09 review was all in hand-edited cells.
 
 ## Canonical Payloads
 
@@ -213,6 +247,5 @@ Hot upload:
 
 - ESP32 `POST /api/frames/:id` persists embedded-owned fields and scenes, but it does not yet support every backend/Pi field such as full asset management, timezone updater config, or backend deploy settings.
 - ESP32 image routes currently return BMP previews. Shared UI should continue to use browser image loading and avoid assuming PNG.
-- Pi asset mutation has admin routes, but the canonical `/api/frames/:id/assets/...` mutation aliases are not complete. Add them before enabling full local asset management in the shared UI.
 - Standalone adoption is explicit: `POST /api/frames/adopt` (backend) logs into the frame's local admin API, reads `GET /api/frames/1`, imports scenes/config, then writes backend server credentials back through `POST /api/frames/1` (`adopt_standalone_frame`, `backend/app/api/frame_sync.py`). It requires the frame's admin login; ESP32 frames have no admin-session login and stay out of scope. Logs start flowing after the frame's next restart or deploy — the device log shipper binds its target at process start.
 - Backend embedded device routes are bearer-authenticated device-consumer routes, not local admin UI routes. Do not make the shared frontend depend on them directly.

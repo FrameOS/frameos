@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { confirmed } from "./confirm";
 import { failure, image, run, text, uuid, type ToolContext } from "../result";
 import {
   resolveSceneSource,
@@ -398,7 +399,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
       annotations: { destructiveHint: true },
       description:
         "Remove an image (by sha256; without one, the cover) from one of the account's scenes: publishes a new version without it. Older versions keep it.",
-      inputSchema: { message: z.string().max(200).optional(), scene_id: sceneId, sha256: imageSha.optional() },
+      inputSchema: { confirm: confirmed("removes an image from the scene's listing"), message: z.string().max(200).optional(), scene_id: sceneId, sha256: imageSha.optional() },
     },
     async ({ message, scene_id, sha256 }) =>
       run(async () => {

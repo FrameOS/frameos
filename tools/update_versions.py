@@ -113,10 +113,23 @@ def _validate_base_version(value: str) -> str:
 
 
 def _next_calver(previous: str | None, today: dt.date) -> str:
+    """The next version after `previous` for a release cut today.
+
+    Guarded against going backwards: a release cut early (``2026.10.0``
+    shipped in September) followed by a computed one would otherwise produce
+    ``2026.9.N``, tag it, and offer the whole fleet a downgrade that both the
+    ESP32 and the Pi door refuse — the same class as the 2026.9.2
+    runtime-stamp incident. The explicit ``--next-version`` path already
+    checked this; the automatic one did not.
+    """
     if previous:
         prev_year, prev_month, prev_patch = _parse_version(previous)
         if prev_year == today.year and prev_month == today.month:
             return f"{today.year}.{today.month}.{prev_patch + 1}"
+        if (prev_year, prev_month) > (today.year, today.month):
+            # Ahead of the calendar: keep counting patches on the newer base
+            # rather than stepping back to today's month.
+            return f"{prev_year}.{prev_month}.{prev_patch + 1}"
     return f"{today.year}.{today.month}.0"
 
 
@@ -208,6 +221,11 @@ def main(argv: List[str] | None = None) -> int:
     if changed_projects:
         max_existing_base = _max_base_version(existing_versions)
         next_version = explicit_next_version or _next_calver(max_existing_base, today)
+        if max_existing_base and _parse_version(next_version) <= _parse_version(max_existing_base):
+            raise SystemExit(
+                f"computed version {next_version} is not newer than existing version {max_existing_base}; "
+                "pass --next-version explicitly"
+            )
 
         for project_name in changed_projects:
             updated_versions[project_name] = f"{next_version}+{project_hashes[project_name]}"

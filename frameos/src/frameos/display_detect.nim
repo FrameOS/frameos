@@ -17,6 +17,7 @@
 import std/[json, os, strutils]
 import frameos/config
 import frameos/types
+import frameos/utils/system
 
 var lastPersistedWidth = 0
 var lastPersistedHeight = 0
@@ -55,11 +56,10 @@ proc persistDetectedDisplaySize*(frameConfig: FrameConfig, logger: Logger,
       return false
     data["width"] = %frameConfig.width
     data["height"] = %frameConfig.height
-    # Rename over the target: an interrupted write leaves the old file, not
-    # half a file.
-    let tempPath = path & ".tmp"
-    writeFile(tempPath, pretty(data, indent = 4) & "\n")
-    moveFile(tempPath, path)
+    # Atomic and 0600 from the first byte: frame.json holds the Wi-Fi PSK,
+    # the server key, the cloud token and the admin password, and a plain
+    # writeFile+moveFile carried the umask default (0644) onto it.
+    writePrivateFile(path, pretty(data, indent = 4) & "\n")
     if not logger.isNil:
       logger.log(%*{"event": "display:detected", "device": frameConfig.device,
         "width": frameConfig.width, "height": frameConfig.height,

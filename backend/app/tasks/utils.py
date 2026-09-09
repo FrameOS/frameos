@@ -17,9 +17,10 @@ def get_fresh_frame(db: Session, id: int) -> Frame | None:
 
 def get_nim_version(executable_path: str):
     try:
+        # `nim --version` answering an API request must not be able to hang it.
         result = subprocess.run([executable_path, '--version'],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True)
+                                text=True, timeout=15)
         output = result.stdout.split('\n')[0]
         version_str = output.split()[3]
         return version.parse(version_str)
@@ -29,9 +30,9 @@ def get_nim_version(executable_path: str):
 
 def is_executable_in_path(executable: str):
     try:
-        subprocess.run([executable, '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run([executable, '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
         return True
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
 
 
@@ -78,10 +79,10 @@ def find_nimbase_file(nim_executable: str):
     try:
         nim_dump_output = subprocess.run(
             [nim_executable, "dump"], text=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30
         ).stderr
         nimbase_paths.extend(line for line in nim_dump_output.splitlines() if 'lib' in line)
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         print(f"Error running 'nim dump': {e}")
 
     os_type = platform.system()

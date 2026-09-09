@@ -136,9 +136,24 @@ async def download_precompiled_frameos_release(
 
 
 def precompiled_frameos_cache_dir() -> Path:
+    """Where downloaded release archives are kept between deploys.
+
+    Next to the database (``db/precompiled-cache``, the directory only the
+    backend writes), not under the system temp dir: that one is writable by
+    every local user, and the cache path of an archive is predictable (the
+    sha256 of its URL), so a local user could park an OLDER, validly signed
+    release under the expected name. The signature check on every hit
+    (``_cached_archive_verifies``) accepts any release the key signed; the
+    version pin (``_cached_archive_matches_version``) closes the downgrade.
+    """
     configured = os.environ.get("FRAMEOS_PRECOMPILED_CACHE_DIR")
     if configured:
         return Path(configured)
+    database_url = getattr(config, "DATABASE_URL", "") or ""
+    if database_url.startswith("sqlite:///"):
+        db_file = database_url[len("sqlite:///"):]
+        if db_file and not db_file.startswith(":"):
+            return (Path(db_file).expanduser().resolve().parent / "precompiled-cache")
     return Path(tempfile.gettempdir()) / "frameos-precompiled-cache"
 
 
@@ -153,22 +168,53 @@ def precompiled_frameos_signature_path(cache_path: Path) -> Path:
     return cache_path.with_name(cache_path.name + ".minisig")
 
 
-def _cached_archive_verifies(cache_path: Path) -> bool:
-    """A cache hit is only a hit if the archive still matches its signature.
+def _cached_archive_verifies(cache_path: Path, version: str | None = None) -> bool:
+    """A cache hit is only a hit if the archive still matches its signature
+    AND names the release the URL asked for.
 
-    The cache lives under tempfile.gettempdir() by default — a path every
-    local user can write to and predict (sha256 of the URL) — so the check
-    that runs when the archive is downloaded has to run again before the
-    bytes are handed to a frame. A miss here is treated as no cache at all:
-    both files are removed and the release is fetched afresh.
+    The signature binds bytes, not versions: any archive the release key ever
+    signed passes it, so a planted older archive under the expected name
+    would deploy a downgrade with a valid signature. ``metadata.json`` inside
+    the archive carries the version it was built as; when the URL names a
+    version (it always does for release downloads) the two must agree. A miss
+    on either check is treated as no cache at all: both files are removed
+    and the release is fetched afresh.
     """
     signature_path = precompiled_frameos_signature_path(cache_path)
     if not _has_cached_archive(cache_path) or not _has_cached_archive(signature_path):
         return False
     try:
         verify_release_archive_signature(cache_path, signature_path.read_text(encoding="utf-8"))
-        return True
     except (ValueError, OSError):
+        return False
+    if version and not _cached_archive_matches_version(cache_path, version):
+        return False
+    return True
+
+
+def _cached_archive_matches_version(cache_path: Path, version: str) -> bool:
+    """True when every metadata.json in the archive says `version` (or the
+    archive carries none — releases before the stamp are not refused, they
+    are simply not protected)."""
+    try:
+        with tarfile.open(cache_path, "r:gz") as tar:
+            seen = False
+            for member in tar.getmembers():
+                if not member.isfile() or os.path.basename(member.name) != "metadata.json":
+                    continue
+                handle = tar.extractfile(member)
+                if handle is None:
+                    continue
+                try:
+                    metadata = json.loads(handle.read().decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    return False
+                seen = True
+                stamped = str(metadata.get("version") or "").split("+", 1)[0].lstrip("v")
+                if stamped and stamped != version:
+                    return False
+            return True if seen else True
+    except (tarfile.TarError, OSError):
         return False
 
 

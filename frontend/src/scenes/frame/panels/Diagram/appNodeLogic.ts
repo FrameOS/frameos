@@ -703,9 +703,25 @@ export const appNodeLogic = kea<appNodeLogicType>([
           props.updateNodeInternals?.(nodeId)
         })
       } else {
+        // `fieldOutput` is the output handle of EVERY data app and code node,
+        // so the node behind this argument may be a shared weather or OpenAI
+        // node feeding other targets too. Only a node that exists for this
+        // argument alone (a code node with no other connections) goes with
+        // it; anything else keeps its node and loses just the edge.
+        const nodes = values.nodes ?? []
+        const removedEdgeIds = new Set(codeFieldEdges.map((edge) => edge.id))
+        let remainingEdges = edges.filter((edge) => !removedEdgeIds.has(edge.id))
         for (const edge of codeFieldEdges) {
-          actions.deleteApp(edge.source)
+          const source = nodes.find((n) => n.id === edge.source)
+          const dedicated =
+            source?.type === 'code' &&
+            !remainingEdges.some((other) => other.source === edge.source || other.target === edge.source)
+          if (dedicated) {
+            actions.deleteApp(edge.source)
+            remainingEdges = remainingEdges.filter((other) => other.source !== edge.source && other.target !== edge.source)
+          }
         }
+        actions.setEdges(remainingEdges)
         actions.updateNodeData(nodeId, { codeArgs: codeArgs.filter((f) => f.name !== field) })
         window.requestAnimationFrame(() => {
           props.updateNodeInternals?.(nodeId)

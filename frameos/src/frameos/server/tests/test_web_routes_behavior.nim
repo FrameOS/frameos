@@ -41,21 +41,35 @@ suite "web route behavior":
     check proxiedAuthRedirect.header("set-cookie").contains("frame_access_key=test-key")
     check proxiedAuthRedirect.header("set-cookie").contains("Secure")
 
-  test "setup status is public, uncached and readable cross-origin":
+  test "setup status is public and uncached, cross-origin only for the hotspot page":
     var config = defaultFrameConfig()
     configureServerState(config, hotspotActive = true)
     let response = httpRequest(server.port, "GET", "/setup/status")
     check response.status == 200
-    check response.header("access-control-allow-origin") == "*"
+    # No Origin header (same-origin poll): no CORS grant, and none for a
+    # stranger's page either — the wildcard used to hand any site the SSID.
+    check response.header("access-control-allow-origin") == ""
     check response.header("cache-control") == "no-store"
     let status = parseJson(response.body)
     check status["hotspot"].getBool()
     check status.hasKey("internet")
     check status.hasKey("network")
+    check status.hasKey("error")
     check status["frameUrl"].getStr().len > 0
 
+    let foreign = httpRequest(server.port, "GET", "/setup/status",
+      headers = [("Origin", "https://evil.example")])
+    check foreign.header("access-control-allow-origin") == ""
+    let hotspotPage = httpRequest(server.port, "GET", "/setup/status",
+      headers = [("Origin", "http://10.42.0.1")])
+    check hotspotPage.header("access-control-allow-origin") == "http://10.42.0.1"
+    check hotspotPage.header("vary") == "Origin"
+
     configureServerState(config, hotspotActive = false)
-    check parseJson(httpRequest(server.port, "GET", "/setup/status").body)["hotspot"].getBool() == false
+    let after = parseJson(httpRequest(server.port, "GET", "/setup/status").body)
+    check after["hotspot"].getBool() == false
+    # Once the hotspot is down the error text (SSID, driver output) stays home.
+    check after["error"].getStr() == ""
 
   test "captive-portal probes and stray hosts redirect to the setup form while the hotspot is up":
     var config = defaultFrameConfig()
@@ -171,7 +185,7 @@ suite "web route behavior":
     let loginWithSession = httpRequest(
       server.port,
       "GET",
-      "/login?__login_user=admin&__login_pass=secret",
+      "/login",
       headers = [("Cookie", adminCookie)],
     )
     check loginWithSession.status == 302

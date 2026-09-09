@@ -286,7 +286,9 @@ async def login(
     email = form_data.username
     password = form_data.password
     account = normalize_login_email(email)
-    ip = client_ip_for_request(request) or "unknown"
+    # Strict: the limiter keys on this address, so a header any LAN peer can
+    # set must not pick the bucket (docs/cloud-link.md, FRAMEOS_TRUSTED_PROXIES).
+    ip = client_ip_for_request(request, strict=True) or "unknown"
     locked_for = await _login_locked_seconds(redis, account)
     if locked_for:
         raise HTTPException(

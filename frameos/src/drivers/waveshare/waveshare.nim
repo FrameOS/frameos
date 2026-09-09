@@ -600,9 +600,16 @@ proc render*(self: Driver, image: Image) =
       if started:
         waveshareDriver.sleep()
   else:
-    waveshareDriver.start(self)
-    self.renderForColor(image)
-    waveshareDriver.sleep()
+    # sleep() whatever happens: a driver error (a busy timeout now raises,
+    # see Debug.h) must not leave the panel's high-voltage rails powered.
+    var started = false
+    try:
+      waveshareDriver.start(self)
+      started = true
+      self.renderForColor(image)
+    finally:
+      if started:
+        waveshareDriver.sleep()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
 proc toPng*(rotate: int = 0, flip: string = ""): string =

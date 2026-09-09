@@ -1237,15 +1237,25 @@ export async function buildScenesPayloadForFrame(
     }
   | { error: string }
 > {
+  const [frameRow] = await db
+    .select({ accountId: frames.accountId })
+    .from(frames)
+    .where(eq(frames.id, frameId))
+    .limit(1);
+  if (!frameRow) {
+    return { error: "invalid_frame" };
+  }
   const assignments = await db
     .select({
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       id: frameSceneAssignments.id,
+      sceneAccountId: storeScenes.accountId,
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
       sceneSlug: storeScenes.slug,
       sceneStatus: storeScenes.status,
       sceneVersion: frameSceneAssignments.sceneVersion,
+      sceneVisibility: storeScenes.visibility,
     })
     .from(frameSceneAssignments)
     .innerJoin(storeScenes, eq(storeScenes.id, frameSceneAssignments.sceneId))
@@ -1260,6 +1270,17 @@ export async function buildScenesPayloadForFrame(
   for (const assignment of assignments) {
     if (assignment.sceneStatus !== "active") {
       return { error: "scene_pulled" };
+    }
+    // Visibility is decided here, on the path that produces the bytes, not
+    // only at assignment: a scene flipped private after a stranger installed
+    // it must stop streaming its future versions to that frame — the
+    // assignment re-push and the hub's empty-store resync both come through
+    // here, while every HTTP surface already refused the same scene.
+    if (
+      assignment.sceneVisibility !== "public" &&
+      assignment.sceneAccountId !== frameRow.accountId
+    ) {
+      return { error: "scene_private" };
     }
     const versionRows = await db
       .select({
@@ -1721,6 +1742,12 @@ export function claimTokenExpiry(now = new Date()) {
   return new Date(now.getTime() + claimTokenTtlMs);
 }
 
+// The most a frame-bound (re-enrollment) token may live: it re-keys an
+// existing frame, so it is minted for one flash-and-boot — the ordinary day
+// by default, a week at the outside, never a year or "forever" like an
+// ordinary multi-use code can be.
+export const boundClaimTokenMaxTtlMs = 7 * 24 * 60 * 60 * 1000;
+
 // Spend one use of a claim token, atomically: concurrent enrollments race on
 // use_count < max_uses, so a budget of N admits exactly N frames. used_at is
 // stamped when the budget is spent (single-use tokens: on their only use).
@@ -1773,7 +1800,9 @@ export async function sweepExpiredClaimTokens(
 //
 // Multi-use codes are never evicted: those back SD-card images that may have
 // been flashed to hardware already, where the code IS the enrollment path.
-// Returns the number of codes freed.
+// Neither are frame-bound (re-enrollment) codes, for the same reason — a
+// rescue card carrying one may already be in a slot, and evicting it turns a
+// planned re-key into a dead frame. Returns the number of codes freed.
 export async function evictOldestUnusedClaimTokens(
   db: ReturnType<typeof createDb>,
   accountId: string,
@@ -1790,6 +1819,7 @@ export async function evictOldestUnusedClaimTokens(
         eq(frameEnrollmentTokens.accountId, accountId),
         eq(frameEnrollmentTokens.maxUses, 1),
         eq(frameEnrollmentTokens.useCount, 0),
+        isNull(frameEnrollmentTokens.boundFrameId),
         gt(frameEnrollmentTokens.expiresAt, new Date()),
       ),
     )

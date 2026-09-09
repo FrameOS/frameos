@@ -32,6 +32,14 @@ the Pi turns the render into a failed one via `raiseIfDriverError`
 driver debug logging is on; on ESP32 it prints at debug level). The ESP32
 header `include/DEV_Config.h` must declare the same API.
 
+The vendor drivers do not call `DEV_Busy_Wait`: each has its own bounded
+`ReadBusy` / `WaitUntilIdle` loop that, on timeout, prints
+`Debug("e-Paper busy timeout\r\n")` and carries on. Since 2026-09-09 that
+`Debug` macro (`Debug.h`, FrameOS-maintained) routes through
+`DEV_Debug_Vendor`, which recognises that one message and parks the same
+`DEV_Error` — so a wedged panel is a failed render in all 72 drivers without
+touching vendor code, and a resync cannot undo it.
+
 ## FrameOS-maintained forks (do not overwrite on resync)
 
 | File | Why it differs from the vendor tree |

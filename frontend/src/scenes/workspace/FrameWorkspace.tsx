@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
-import { useCallback, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
 import { frameToolDefinitions, frameToolDefinitionsForMode, type FrameToolDefinition } from './frameToolDefinitions'
 import {
   frameCheckin,
@@ -1345,6 +1345,22 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
 
   const { framesList } = useValues(framesModel)
   const { frame, scenes, undeployedChanges, unsavedChanges } = useValues(frameLogic(frameLogicProps))
+  // Every edit lives in frameForm in memory until Save; closing or reloading
+  // the tab used to throw the whole graph away with no prompt. The browser
+  // shows its own generic dialog — the string is ignored by modern browsers
+  // but returning one is what arms it.
+  useEffect(() => {
+    if (!unsavedChanges) {
+      return
+    }
+    const warn = (event: BeforeUnloadEvent): string => {
+      event.preventDefault()
+      event.returnValue = ''
+      return ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [unsavedChanges])
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
     useValues(workspaceLogic)
   const { location, searchParams } = useValues(router)

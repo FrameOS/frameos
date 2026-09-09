@@ -157,6 +157,21 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
 )
 
 /**
+ * What the cloud frame form diffs against the server copy (frameLogic
+ * frameDiffKeys): every setting any profile may push, plus the two that ride
+ * their own verbs but round-trip through GET /api/frames/{id}. A key left out
+ * here is a field the form renders and sends but never notices changing —
+ * "unsaved changes" stays false and the 15 s sync poll wipes the edit
+ * mid-typing (the palette / partial-refresh / GPIO batch and, before it, the
+ * ESP32 power keys both shipped that way). Pinned by a test against
+ * cloudFrameSettingKeysForVersion / esp32CloudFrameSettingKeysForVersion at
+ * a far-future version, so a new batch cannot be added to one and not here.
+ */
+export function cloudFrameFormDiffKeys(): (CloudFrameSettingKey | 'scenes' | 'schedule')[] {
+  return [...allCloudFrameSettingKeys, 'scenes', 'schedule']
+}
+
+/**
  * The keys a Pi/Linux cloud frame reporting `frameosVersion` can be sent:
  * the base six, then each gated batch its firmware knows, in floor order.
  */

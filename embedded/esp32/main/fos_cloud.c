@@ -1,5 +1,7 @@
 #include "fos_cloud.h"
 #include "fos_cloud_contract.h"
+#include "fos_cloud_contract_gen.h"
+#include "fos_json_guard.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,7 +118,10 @@ static const char *NVS_NS = "frameos";
  * caps match the reference provider: it refuses to cache anything bigger. */
 #define FOS_CLOUD_ASSET_MAX_FILE_BYTES (8u * 1024u * 1024u)
 #define FOS_CLOUD_ASSET_CHUNK_BYTES (24u * 1024u)
-#define FOS_CLOUD_ASSET_LIST_MAX_ENTRIES 2000
+/* The asset limits are the contract's (fos_cloud_contract_gen.h, generated
+ * from docs/cloud-frames-contract.json): the two planes must agree on what
+ * the device accepts, and a private copy here drifted from it once. */
+#define FOS_CLOUD_ASSET_LIST_MAX_ENTRIES FOS_CONTRACT_ASSET_LIST_MAX_ENTRIES
 #define FOS_CLOUD_ASSET_LIST_MAX_DEPTH 8
 #define FOS_CLOUD_ASSET_PATH_MAX 256
 #define FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH 8
@@ -1567,7 +1572,7 @@ static volatile bool s_asset_job_running = false;
  * one WS frame each (so each is bounded by FOS_CLOUD_WS_MAX_MSG anyway); the
  * whole is a disk question. Mirrors HubMaxChunkedUploadBytes on the Linux
  * runtime. */
-#define FOS_CLOUD_ASSET_CHUNKED_MAX_BYTES (64LL * 1024 * 1024)
+#define FOS_CLOUD_ASSET_CHUNKED_MAX_BYTES ((long long)FOS_CONTRACT_CHUNKED_UPLOAD_MAX_BYTES)
 
 static QueueHandle_t s_asset_jobs = NULL;
 
@@ -2066,6 +2071,14 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
             ws_ack(id, false, "too_large");
             return;
         }
+        /* The contract's per-message ceiling for a whole-file put; bigger
+         * files ride asset_put_chunk. Enforced here so the device and the
+         * cloud agree on what one asset_put may carry (the WS frame cap
+         * happens to be close, but it is not the contract). */
+        if (kind == ASSET_JOB_PUT && (long long)((b64_len / 4) * 3) > (long long)FOS_CONTRACT_ASSET_PUT_MAX_BYTES + 3) {
+            ws_ack(id, false, "too_large");
+            return;
+        }
         size_t raw_cap = (b64_len / 4) * 3 + 4;
         uint8_t *raw = fos_big_malloc(raw_cap);
         if (!raw) {
@@ -2554,6 +2567,14 @@ static void ws_ack_unparseable(const char *data, size_t len)
 
 static void ws_handle_message(const char *data, size_t len)
 {
+    /* Depth first: cJSON recurses per nesting level on this task's 10 KB
+     * stack, so a few hundred brackets from the provider would reset the
+     * frame instead of failing the message (fos_json_guard.h). */
+    if (!fos_json_depth_ok(data, len, FOS_JSON_MAX_DEPTH)) {
+        ESP_LOGW(TAG, "ws: message nests deeper than %d (%u bytes)", FOS_JSON_MAX_DEPTH, (unsigned)len);
+        ws_ack_unparseable(data, len);
+        return;
+    }
     cJSON *root = cJSON_ParseWithLength(data, len);
     if (!root) {
         ESP_LOGW(TAG, "ws: unparseable message (%u bytes)", (unsigned)len);

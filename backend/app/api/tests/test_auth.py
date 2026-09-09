@@ -1,4 +1,6 @@
 import pytest
+
+from app import config as app_config
 from starlette.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 from sqlalchemy.orm import Session
 from app.models.user import User
@@ -128,13 +130,14 @@ async def test_login_per_ip_failure_limit(no_auth_client, redis, db, monkeypatch
         assert resp.status_code == HTTP_401_UNAUTHORIZED
     resp = await no_auth_client.post("/api/login", data={"username": "user9@example.com", "password": "x"})
     assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS
-    # The test client connects from loopback, a trusted proxy, so a forwarded
-    # address counts as a different caller.
-    resp = await no_auth_client.post(
-        "/api/login",
-        data={"username": "user9@example.com", "password": "x"},
-        headers={"X-Forwarded-For": "203.0.113.9"},
-    )
+    # The limiter keys on the address, so a forwarded header counts only from
+    # a proxy named in FRAMEOS_TRUSTED_PROXIES — never from the implicit
+    # private-range trust, which every LAN peer would satisfy.
+    forwarded = {"X-Forwarded-For": "203.0.113.9"}
+    resp = await no_auth_client.post("/api/login", data={"username": "user9@example.com", "password": "x"}, headers=forwarded)
+    assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS
+    monkeypatch.setattr(app_config.config, "FRAMEOS_TRUSTED_PROXIES", "127.0.0.1, testclient")
+    resp = await no_auth_client.post("/api/login", data={"username": "user9@example.com", "password": "x"}, headers=forwarded)
     assert resp.status_code == HTTP_401_UNAUTHORIZED
 
 

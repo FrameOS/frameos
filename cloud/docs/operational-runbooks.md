@@ -184,7 +184,11 @@ deleted by this job.
 already removes an object when the last row referencing it goes; what it
 cannot see is a row that vanishes underneath it — `delete from accounts`
 cascades through scenes, versions, images and frames with no application code
-running, orphaning every object those rows named.
+running, orphaning every object those rows named. It also deletes
+`store_images` rows older than a week that no version ever bound (an owner
+upload whose draft was never saved) so their objects fall out with the same
+run; until then those bytes are metered against the uploader
+(`usage.ts unboundImageBytes`).
 
 ```sh
 # on the app host, from the release directory

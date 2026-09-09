@@ -27,42 +27,34 @@ Two rules that came out of the review and apply to new code:
 
 ### Cloud
 
-Nothing critical is open. The nine items that were here (scene-declared
-settings groups honoured as-is, prompt injection reaching deploy tools,
-plaintext third-party credentials, multi-use claim tokens born active,
-concurrent AI turns overshooting the cap, Google auto-linking into a
-password account, non-expiring API tokens surviving 2FA changes, the nightly
-job on a superadmin token, second-factor enrolment without the password)
-shipped in the batch after the third one; what they left behind is in the
-medium / low list below.
+Nothing critical is open (the nine items that were here shipped in the
+batch after the third one; residue is in the medium / low list).
 
 ### Self-hosted backend
 
-- The precompiled SD image and Remote binary are unverified server-side
-  (the Buildroot base image is sha256-checked). The `curl | sudo sh`
-  bootstrap is closed (2026-09-06): the script downloads the archive's
-  `.minisig` and verifies minisign's prehashed Ed25519 signature with
-  openssl against the release key before `tar -xzf`
-  (`backend/app/utils/release_signing.py`, pinned to `ota_pubkey.nim`), and
-  the API answers `plain_http` + a warning the drawer shows when the
-  script URL is `http://` (the key and Remote secret cross the LAN in
-  clear, once).
+- **The precompiled Buildroot SD image is unverified server-side** (the
+  base image is sha256-checked; the FrameOS runtime and Remote archives are
+  minisign-verified on download and on every cache hit, and the cache is
+  pinned to the version it claims since 2026-09-09). The release workflow's
+  "a signature would be decoration" rationale is stale now that the backend
+  and the browser flasher fetch the image automatically — sign it.
+- **FrameOS Remote is plain `ws://` on every port but 443** — the same
+  `port mod 1000 == 443` heuristic the runtime's log shipper uses, because
+  `frame.json` carries no scheme for the backend. An https backend on 8443
+  is talked to in clear. Needs a scheme in the backend connection settings
+  (both control planes, `frameos-setup.sh`, the ESP32 provisioning that
+  derives `http://` from the port the same way). Closed 2026-09-09 on the
+  same protocol: the binary frames behind `file_write_chunk` are bound to a
+  `sha256` in the signed command, and envelopes are accepted only within a
+  300 s window and never twice (`acceptEnvelope`).
 - Smaller, what is left: a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).
-  Closed 2026-09-06 — the HA sync connects to one broker per run and shares
-  only the projects that configured that broker (others are logged and
-  skipped; `partition_projects_by_broker`); the frame sync never pulls
-  `mode`, `agent` or `frame_admin_auth` from a device and drops certificate
-  material from `https_proxy` (`FRAME_SYNC_BACKEND_OWNED_KEYS`); WebSocket
-  handshakes are cookie-only (the dormant `?token=` JWT form is gone) and
-  refuse a cross-site `Origin` before reading the cookie; the unauthenticated
-  `/api/cloud/setup/*` routes answer only on IP literals and local names
-  (`.local`, `.lan`, `.home.arpa`, …) or `FRAMEOS_SETUP_ALLOWED_HOSTS`, which
-  is what a DNS-rebinding page cannot present; the precompiled release cache
-  under `/tmp` keeps each archive's `.minisig` beside it and verifies the
-  signature on download and on every hit (a planted archive is discarded and
-  fetched again).
+  Closed 2026-09-06 (pointers, not open work): one HA broker per run
+  (`partition_projects_by_broker`); `FRAME_SYNC_BACKEND_OWNED_KEYS`;
+  cookie-only WebSocket handshakes with an Origin check; `/api/cloud/setup/*`
+  answers local names only or `FRAMEOS_SETUP_ALLOWED_HOSTS`; the release
+  cache verifies on every hit.
 
 ### Device runtime (Nim) and ESP32
 
@@ -75,49 +67,15 @@ medium / low list below.
   are gone. A self-hosted backend reached over plain http still carries the
   bearer in clear on every request, OTA included; that is the http-backend
   problem, not an OTA one.)
-- Service keys on a backend-managed frame — closed 2026-09-07: a scene from
-  the public store no longer receives every settings group its apps declare.
-  `get_frame_json` ships a group declared only by store-origin scenes when the
-  owner granted it on the frame (`frame.service_setting_groups`, Frame
-  settings → "Service keys for store scenes", migration `e1f2a3b4c5d6`);
-  scenes the owner authored keep declaration-as-grant. Installing a store
-  scene from the workspace is the grant (the declared groups join
-  `service_setting_groups` on install, as the cloud's assignment call does),
-  so nothing changes for the owner until they untick a key. The same field
-  name and meaning as the cloud's per-frame grant. A key that would ship
-  differently from the deploy baseline is an undeployed change (2026-09-08):
-  `to_dict` fingerprints the settings groups frame.json would carry
-  (`settings_fingerprints`, HMAC per group, never a value) and every deploy
-  path snapshots that dict, so a key added or rotated in Settings, or a
-  store scene's newly granted group, lights the deploy button as "Service
-  keys: OpenAI added" — universal, no per-path plumbing.
-- Browser previews and store scenes — closed 2026-09-08: the in-browser
-  preview (live preview modal, tile "Preview in browser", store template
-  try-out) fetches the account's real service keys. It now asks before a
-  scene from the scene store gets them ("Preview with your API keys?", per
-  settings group, remembered per group on request; answers listed and
-  forgotten under Settings → Browser previews and store scenes; a "deny"
-  strips those groups from the preview's settings). Scenes the owner wrote
-  keep the click-to-preview gate they always had. An embed that never
-  mounts the dialog is not blocked (answers allow, the old behaviour). The LAN-egress half is closed
-  (2026-09-06): both runtimes arm the private-network deny when the
-  resident scene carries `origin.storeSceneId`, whoever installed it
-  (`storeOriginScenesResident` / `fos_scenes_store_origin_resident`), with
-  the frame's own backend host exempted; `allowLocalNetworkAccess` still
-  lifts it. Also closed: ESP32 OTA now refuses an offered version below the
-  running one on both planes (`fos_version.c`, `ota:… downgrade-refused`)
-  unless the console arms `ota downgrade` for one fetch — the manifest's
-  `version` stays outside the signed payload, so this is device-side
-  policy, not a signature; signing `version || image` remains the fuller
-  fix. The Pi door already refused downgrades.
-- Smaller ESP32: netguard exemptions are by hostname and a provider can
-  point `ws_url` at a LAN address; `esp_http_client` still auto-follows
-  redirects during the OTA download, so a first-party 302 carries the
-  bearer to its target (the bearer is now attached only for the cloud /
-  `ws_url` origin; `disable_auto_redirect` would break CDN-hosted images —
-  decide); device key signs provider-chosen bytes with no domain
-  separation; unbounded SD consumption by provider `upload_id`s; console
-  is unauthenticated (physical access, document it).
+- Closed (pointers): store-scene service keys are granted per frame on
+  the backend too (2026-09-07, `frame.service_setting_groups`, migration
+  `e1f2a3b4c5d6`) and a changed grant is an undeployed change
+  (`settings_fingerprints`, 2026-09-08); the browser preview asks before a
+  store scene gets the account's keys (2026-09-08); the LAN-egress deny is
+  armed on all three runtimes for store-origin scenes (device planes
+  2026-09-06, the backend's headless renderer 2026-09-09); ESP32 OTA
+  refuses downgrades (`fos_version.c`) — signing `version || image` is
+  still the fuller fix (below).
 - **`POST /setup` on the Pi hotspot is unauthenticated while it is up**,
   and the hotspot keeps its well-known default PSK (`frame1234`) — decided
   2026-09-03: security is layered, the default still deters some, and a Pi
@@ -125,53 +83,41 @@ medium / low list below.
   a per-device PSK in #443 because its USB console can always print it).
   Release images bake the default with `wifiHotspot: "bootOnly"` for
   300 s; the setup form accepts `controlMode`, `cloudUrl`, `claimToken`,
-  `serverHost`, `adminUser/Pass`, `runDriverSetup` and persists them to
-  `frame.json` (`portal.nim` `parseSetupOptions` / `persistPortalSetup`),
-  so anyone in radio range during a boot where the home AP is down can
-  re-enrol the frame or repoint `serverHost`. Require a panel-shown code
+  `serverHost`, `adminUser/Pass`, `runDriverSetup`, `device` and
+  `httpUploadUrl` (the last two mean whoever is in range can also make the
+  frame POST every rendered image to a URL of their choosing) and persists
+  them to `frame.json` (`portal.nim` `parseSetupOptions` /
+  `persistPortalSetup`), so anyone in radio range during a boot where the
+  home AP is down can re-enrol the frame or repoint `serverHost`.
+  `/setup/status` answers cross-origin only to the hotspot's own origin and
+  drops its error text once the hotspot is down (2026-09-09). Require a panel-shown code
   for the control-plane/admin fields (a headless frame then needs the
   local admin password instead); strip current config from the
   unauthenticated setup page; cache the root `iw scan` / `nmcli` Wi-Fi
   scans behind a rate limit.
-- Provenance for the process-spawning apps — closed 2026-09-07:
-  `data/chromiumScreenshot` and `data/rstpSnapshot` are refused for any
-  scene that carries `origin.storeSceneId`, however it reached the frame
-  (`frameos/spawn_guard.nim`), unless the local admin allowed "shell apps
-  for store scenes" through the same on-panel ceremony as the LAN elevation
-  (`POST /api/network/local-access` with `scope: "shellApps"`, stored in
-  `state/local_access.json`); and whatever the scene's origin, the URL they
-  hand to the child process must be http(s) (rtsp(s) for the camera) with a
-  host that passes the private-network policy when it is on — `file://` and
-  router addresses never reach Chromium or ffmpeg. `localImage.path` reads
-  anywhere on disk remain: the asset sandbox (`js.assetSandbox: "scene"`) is
-  the answer there and is still opt-in.
+- Closed (pointer): `chromiumScreenshot` / `rstpSnapshot` are refused for
+  store-origin scenes unless the admin allows shell apps on the panel
+  (`frameos/spawn_guard.nim`, 2026-09-07); `localImage.path` reads anywhere
+  on disk remain — the `scene` asset sandbox is the answer and is opt-in.
 - **OTA signature binds archive bytes only**: version and target come from
   GitHub metadata, so anyone with release-upload rights (no signing key) can
   attach an older or other-arch signed archive under a new tag. Verify the
   global signature / trusted comment naming version + target.
-- **Interpreter robustness — closed 2026-09-06** (the node depth /
-  self-reference guard and the SVG / canvas dimension cap were already in):
-  every run of a scene now arms a wall-clock deadline that counts native
-  calls (`js.renderDeadlineMs`, 120 s Pi / 90 s ESP32; the HTTP client caps
-  each request to what is left and the interrupt handler stops the script
-  when it passes — a 600 s `httpRequest` tarpit costs one render, not the
-  900 s watchdog), the JS heap ceiling is per scene and shared by all of the
-  scene's runtimes (`js.memoryLimitMb`, 256 MB Pi / 8 MB ESP32, through
-  budgeted QuickJS allocators on both planes), and a run may fire at most
-  `js.dispatchBudget` (64) events — the Pi's message loop also yields to the
-  render loop every 32 events, and the ESP32 refuses events nested more
-  than four deep. Reference: `docs/js-apps-and-code-nodes.md`, "What the
-  runtime will not let a scene do". Left: the budgets are per run, not per
-  scene per minute — a scene that spends its whole deadline on every render
-  is slow, not stopped.
+- Closed (pointer): interpreter robustness — per-run wall-clock deadline,
+  per-scene JS heap ceiling, dispatch budget (2026-09-06;
+  `docs/js-apps-and-code-nodes.md`, "What the runtime will not let a scene
+  do"). Left: the budgets are per run, not per scene per minute.
 - Smaller: the frame's TLS material and admin login now ride the
   `/embedded/settings` pull (bearer-authenticated, but in clear on an http
   backend — same exposure as the API keys that pull already carried; an
   https backend is the fix); JS asset API is frame-wide
   by default (fonts, other scenes' assets, `.frameos/scene_images` writable) — default the `scene` sandbox
   for store-origin scenes; Samba mount target unconfined; `http://`
-  providers accepted device-side; `exiftool` runs on untrusted downloads
-  (not on Buildroot); the cloud link-code overlay is still drawn into the
+  providers accepted device-side; the EXIF reader is pure Nim
+  (`utils/exif.nim`) and the `exiftool` fallback is argv with a timeout and
+  an output cap — what is left is that exiftool's parser sees untrusted
+  bytes, plus a missing `--` before the path (not on Buildroot); the cloud
+  link-code overlay is still drawn into the
   stored render (the local-presence code no longer is).
 - **Not reviewed on the device**: the HTTP-server lane (`server/*.nim`,
   routes, admin session mechanics, control-mode whitelist) did not complete;
@@ -181,24 +127,10 @@ medium / low list below.
 
 ### Frontends, wasm preview, CI
 
-- The CI deploy key on the production box — closed 2026-09-07: the forced
-  command (`frameos-cloud-update --archive -`) now unpacks the uploaded
-  archive as the service user (`runuser … tar --no-same-owner
-  --no-same-permissions` into a directory that user owns), so the key's
-  reach ends at the service account; root only moves the finished tree into
-  place and flips the units, with scripts that come from a human's checkout
-  (#451). ESP32 firmware built on the self-hosted runner is no longer signed
-  there: the GitHub-hosted `github-release` job signs every `frameos-*.bin`
-  without a `.minisig` alongside the Linux archives, and refuses to publish
-  an unsigned asset. The signing key is unsealed on GitHub-hosted runners
-  only.
-- Embedded editor postMessage — closed 2026-09-07: an iframe-hosted editor
-  accepts `init` / `get-scenes` / `select-scene` only from its parent window
-  and only from an origin the host declared (`?parentOrigin=` on the iframe
-  URL, else the framing document's referrer origin), replies to that origin
-  (never `'*'`), and honours `previewProxyUrl` only when it is same-origin
-  with the editor (`frontend/src/embed/embedOrigins.ts`; the direct mount
-  talks to its own window and is unchanged).
+- Closed (pointers): the production deploy key's reach ends at the service
+  account (#451, 2026-09-07); ESP32 firmware is signed on GitHub-hosted
+  runners only; the iframe-hosted editor accepts postMessage only from its
+  declared parent origin (`frontend/src/embed/embedOrigins.ts`).
 - **Preview worker isolation.** Same-origin direct requests from scene code
   are refused in `frameos_library.js`, but the worker still shares the app
   origin. Host `preview-worker.js` + wasm in a sandboxed iframe or a

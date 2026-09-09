@@ -99,3 +99,11 @@ bool fos_scenes_stored(void);
  * would otherwise loop the board (abort, leak, abort, restart, restore,
  * …) faster than the cloud can switch it away. */
 void fos_scenes_mark_oom_restart(void);
+
+/* Remove every file on the /state partition: the scene payload and its
+ * split slots, the schedule, the cached cloud payloads, the OTA spill.
+ * `factory-reset` calls this before erasing NVS, so a handed-on board does
+ * not bring the previous owner's scenes — and the secrets typed into their
+ * node fields — back on the next enrollment. The SD card is left alone (it
+ * is the owner's photos; format it with `sd format`). */
+void fos_scenes_wipe_state(void);

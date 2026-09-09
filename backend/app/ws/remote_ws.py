@@ -271,11 +271,18 @@ async def file_write_chunk_on_frame(
     timeout: int = 60, redis: Redis | None = None,
 ):
     # Chunks are small (<300KB), so attaching the blob to the command is OK.
+    # The binary frames that carry the bytes are not signed themselves; the
+    # digest in the signed command is what binds them, and the Remote refuses
+    # a chunk whose bytes do not hash to it.
     async with _redis_for_command(redis) as command_redis:
         return await send_cmd(
             command_redis,
             frame_id,
-            {"type": "cmd", "name": "file_write_chunk", "args": {"size": len(chunk)}},
+            {
+                "type": "cmd",
+                "name": "file_write_chunk",
+                "args": {"size": len(chunk), "sha256": hashlib.sha256(chunk).hexdigest()},
+            },
             blob=chunk,
             timeout=timeout,
         )

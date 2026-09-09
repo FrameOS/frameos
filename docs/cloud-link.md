@@ -6,7 +6,7 @@ user-editable and the protocol below is the complete contract, so anyone can
 run their own compatible provider. FrameOS works fully without any provider;
 the link only adds optional services.
 
-Related reading: `CLOUD-TODO.md` (roadmap and permission scopes),
+Related reading: `docs/cloud-principles.md` (principles and permission scopes),
 `backend/app/api/cloud.py` and `backend/app/utils/cloud_link.py` (backend
 implementation), `frameos/src/frameos/server/routes/cloud_api_routes.nim`
 (on-frame implementation).
@@ -40,7 +40,7 @@ Behind a reverse proxy, also set:
 | Variable | Meaning |
 |---|---|
 | `FRAMEOS_PUBLIC_URL` | The origin this install is reached at, e.g. `https://frameos.example`. It becomes the login `redirect_uri` and the logout `return_to`, so setting it explicitly is what stops a caller choosing them through `X-Forwarded-Host` |
-| `FRAMEOS_TRUSTED_PROXIES` | Comma-separated proxy addresses whose `X-Forwarded-*` headers are honoured. Empty means loopback and private-range peers only |
+| `FRAMEOS_TRUSTED_PROXIES` | Comma-separated proxy addresses whose `X-Forwarded-*` headers are honoured. Empty means loopback and private-range peers are trusted for *attribution* (log lines, most rate limits) — but anything the address *decides* (following an embedded frame's `bootup` to a new `frame_host`, the per-IP login and cloud-login limiters) honours forwarded headers only from an address listed here (or the Home Assistant ingress proxy). Behind a reverse proxy, list it, or the login limiter sees every user as the proxy |
 | `FRAMEOS_SETUP_ALLOWED_HOSTS` | Comma-separated hostnames on which the unauthenticated first-run setup (`/api/cloud/setup/*`, before any user exists) answers. IP literals, single-label names and local suffixes (`.local`, `.lan`, `.home.arpa`, …) always do; a public DNS name is refused unless listed, which is what a DNS-rebinding page cannot present |
 
 (`FRAMEOS_AUTH_PROVIDER_URL` is accepted as a fallback name.) The provider URL

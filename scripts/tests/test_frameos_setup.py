@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import shutil
@@ -13,9 +15,43 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SETUP_SCRIPT = ROOT / "scripts" / "frameos-setup.sh"
-IMAGE = os.environ.get("FRAMEOS_SETUP_TEST_IMAGE", "python:3.12-slim-bookworm")
+BASE_IMAGE = os.environ.get("FRAMEOS_SETUP_TEST_IMAGE", "python:3.12-slim-bookworm")
+# The installer verifies the release signature with the openssl CLI, which
+# the slim Python image lacks; the tests run in a derived image that adds it
+# (built once per run, cached by Docker afterwards).
+IMAGE = "frameos-setup-test:openssl"
 VERSION = "2026.6.8"
 TARGET = "debian-bookworm-amd64"
+
+
+def _openssl() -> str | None:
+    """An OpenSSL 3 (or 1.1) CLI on the host, for signing the fake release:
+    LibreSSL (macOS's default) has no `pkeyutl -rawin`."""
+    for candidate in [
+        shutil.which("openssl"),
+        "/opt/homebrew/opt/openssl@3/bin/openssl",
+        "/usr/local/opt/openssl@3/bin/openssl",
+    ]:
+        if candidate and Path(candidate).is_file():
+            version = subprocess.run([candidate, "version"], capture_output=True, text=True).stdout
+            if version.startswith("OpenSSL 3") or version.startswith("OpenSSL 1.1"):
+                return candidate
+    return None
+
+
+def _ensure_test_image() -> None:
+    exists = subprocess.run(
+        ["docker", "image", "inspect", IMAGE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    if exists.returncode == 0:
+        return
+    dockerfile = f"FROM {BASE_IMAGE}\nRUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*\n"
+    subprocess.run(
+        ["docker", "build", "--platform", "linux/amd64", "-t", IMAGE, "-"],
+        input=dockerfile.encode("utf-8"),
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
 
 
 class FrameOSSetupScriptTest(unittest.TestCase):
@@ -29,6 +65,10 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         )
         if docker_info.returncode != 0:
             self.skipTest("docker daemon is required for setup script container tests")
+        self.openssl = _openssl()
+        if self.openssl is None:
+            self.skipTest("an OpenSSL 3 CLI is required to sign the fake release")
+        _ensure_test_image()
         self.tmp = tempfile.TemporaryDirectory(prefix="frameos-setup-test-")
         self.tmp_path = Path(self.tmp.name)
         self.releases_dir = self.tmp_path / "releases"
@@ -503,6 +543,38 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         archive_path = release_version_dir / f"frameos-{VERSION}-{TARGET}.tar.gz"
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(artifact_root, arcname=artifact_root.name)
+        self._sign_fake_release(archive_path)
+
+    def _sign_fake_release(self, archive_path: Path) -> None:
+        """A minisign-shaped signature (prehashed Ed25519 over BLAKE2b-512)
+        from a throwaway key, the way the release workflow signs — the script
+        verifies it with openssl against FRAMEOS_RELEASE_SIGNING_KEY_SPKI_OVERRIDE."""
+        keys = self.tmp_path / "keys"
+        keys.mkdir(exist_ok=True)
+        private_pem = keys / "release.key"
+        public_pem = keys / "release.pub"
+        if not private_pem.exists():
+            subprocess.run([self.openssl, "genpkey", "-algorithm", "ed25519", "-out", str(private_pem)], check=True)
+            subprocess.run([self.openssl, "pkey", "-in", str(private_pem), "-pubout", "-out", str(public_pem)], check=True)
+        digest = hashlib.blake2b(archive_path.read_bytes(), digest_size=64).digest()
+        digest_path = keys / "digest.bin"
+        digest_path.write_bytes(digest)
+        signature = subprocess.run(
+            [self.openssl, "pkeyutl", "-sign", "-inkey", str(private_pem), "-rawin", "-in", str(digest_path)],
+            check=True,
+            capture_output=True,
+        ).stdout
+        blob = b"ED" + b"\x01" * 8 + signature
+        (archive_path.parent / (archive_path.name + ".minisig")).write_text(
+            "untrusted comment: signature from the test key\n"
+            + base64.b64encode(blob).decode("ascii")
+            + "\ntrusted comment: test\n"
+            + base64.b64encode(b"x" * 64).decode("ascii")
+            + "\n",
+            encoding="utf-8",
+        )
+        pem_lines = [line for line in public_pem.read_text(encoding="utf-8").splitlines() if not line.startswith("-----")]
+        self.signing_key_spki = "".join(pem_lines)
 
     def _write_stubs(self) -> None:
         stub_dir = self.out_dir / "stubbin"
@@ -567,6 +639,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         merged_env = {
             "FRAMEOS_RELEASE_VERSION": VERSION,
             "FRAMEOS_RELEASE_BASE_URL": "file:///tmp/releases",
+            "FRAMEOS_RELEASE_SIGNING_KEY_SPKI_OVERRIDE": self.signing_key_spki,
             "FRAMEOS_DIR": "/tmp/out/srv/frameos",
             "FRAMEOS_AGENT_DIR": "/tmp/out/srv/frameos/remote",
             "FRAMEOS_ASSETS_DIR": "/tmp/out/srv/assets",

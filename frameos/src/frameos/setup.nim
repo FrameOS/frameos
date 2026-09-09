@@ -678,8 +678,13 @@ proc setupPersistentStateMounts*(liveApply = true, fstabPath = "/etc/fstab"): Se
   try:
     if fileExists(fstabPath):
       fstab = readFile(fstabPath)
-  except CatchableError:
-    discard
+  except CatchableError as e:
+    # An unreadable fstab must not read as an EMPTY one: every entry would
+    # look missing and the rewrite below would replace root, boot and state
+    # with just the FrameOS lines — an unbootable device. Leave it alone.
+    setupLog("FrameOS setup: persistent state mounts: cannot read " & fstabPath &
+      " (" & e.msg & "), leaving it untouched")
+    return
   var missing: seq[PersistentStateMount] = @[]
   for entry in persistentStateMounts:
     if not fstabMentionsMount(fstab, entry.mount):

@@ -182,3 +182,13 @@ export function getMaxConnections() {
   const parsed = Number(process.env.FRAME_HUB_MAX_CONNECTIONS);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 5000;
 }
+
+// Browser sockets one signed-in account may hold open at once (the fleet
+// socket plus one per frame page, across tabs). Without it a single account
+// could open sockets until the global ceiling above refused every DEVICE,
+// knocking the whole fleet offline from one browser. Sixty-four is a lot of
+// tabs and far below the 5000 that matter.
+export function getMaxBrowserSocketsPerAccount() {
+  const parsed = Number(process.env.FRAME_HUB_MAX_BROWSER_SOCKETS_PER_ACCOUNT);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 64;
+}

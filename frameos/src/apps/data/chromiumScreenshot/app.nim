@@ -280,7 +280,11 @@ proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bo
 
   self.log "Starting background Chromium process for Browser Snapshot..."
   try:
-    let chromiumArgs = LIGHTWEIGHT_CHROMIUM_ARGS & @["--window-size=" & $width & "," & $height]
+    # The viewport is scene-supplied; hold it to the decode ceiling like any
+    # other requested raster, or a 20000x20000 window is Chromium's problem
+    # and then the frame's.
+    let (windowWidth, windowHeight) = boundedRequestedDimensions(width, height)
+    let chromiumArgs = LIGHTWEIGHT_CHROMIUM_ARGS & @["--window-size=" & $windowWidth & "," & $windowHeight]
     let argString = chromiumArgs.mapIt(shellQuote(it)).join(" ")
     let startCommand = &"nohup {shellQuote(chromiumBinary)} {argString} >> {shellQuote(CHROMIUM_LOG_FILE)} 2>&1 & echo $! > {shellQuote(CHROMIUM_PID_FILE)}"
     # the shell backgrounds chromium with nohup and exits right away

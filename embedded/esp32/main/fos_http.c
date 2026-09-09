@@ -1,4 +1,5 @@
 #include "fos_http.h"
+#include "fos_json_guard.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -450,7 +451,7 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
         while (*first == ' ' || *first == '\n' || *first == '\r' || *first == '\t') {
             first++;
         }
-        if (*first == '{') {
+        if (*first == '{' && fos_json_depth_ok(body, strlen(body), FOS_JSON_MAX_DEPTH)) {
             root = cJSON_Parse(body);
         }
     }
@@ -1725,6 +1726,12 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
     }
     if (read_err != ESP_OK) return httpd_resp_send_500(req);
 
+    /* Depth pre-scan: esp_http_server's task has an 8 KB stack and cJSON
+     * recurses per nesting level (fos_json_guard.h). */
+    if (body && body[0] && !fos_json_depth_ok(body, strlen(body), FOS_JSON_MAX_DEPTH)) {
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "json too deep");
+    }
     cJSON *root = body && body[0] ? cJSON_Parse(body) : cJSON_CreateObject();
     if (!cJSON_IsObject(root)) {
         cJSON_Delete(root);

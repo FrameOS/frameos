@@ -498,6 +498,14 @@ export interface scenesLogicMeta {
 
 export type scenesLogicType = MakeLogicType<scenesLogicValues, scenesLogicActions, ScenesLogicProps> & scenesLogicMeta
 
+// The frame form's scene list as the user has it (unsorted). Writes must
+// start from THIS, not from the `scenes` selector, which is the display order
+// (unsaved first, then by name): unsavedChanges compares order-sensitively
+// and Save writes the list into scenes.json.
+function formScenesOf(values: { frameForm: Partial<FrameType>; scenes: FrameScene[] }): FrameScene[] {
+  return values.frameForm.scenes ?? values.scenes
+}
+
 export const scenesLogic = kea<scenesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'scenesLogic']),
   props({} as ScenesLogicProps),
@@ -1238,16 +1246,22 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.installMissingActiveSceneFailure()
       }
     },
+    // Every write below starts from the FORM's scene list, never from
+    // `values.scenes`: that selector is the display order (unsaved first,
+    // then by name), while unsavedChanges compares order-sensitively and Save
+    // writes the list into scenes.json. Writing the sorted view marked the
+    // whole frame changed after toggling "start on boot" back, and saved the
+    // alphabetised order to the device.
     setAsDefault: ({ sceneId }) => {
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: values.scenes.map((s) =>
+        scenes: formScenesOf(values).map((s) =>
           s.id === sceneId ? { ...s, default: true } : s['default'] ? { ...s, default: false } : s
         ),
       })
     },
     removeDefault: () => {
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: values.scenes.map((scene) => {
+        scenes: formScenesOf(values).map((scene) => {
           if ('default' in scene) {
             const { default: _, ...rest } = scene
             return rest
@@ -1263,7 +1277,7 @@ export const scenesLogic = kea<scenesLogicType>([
       }
       const newSceneId = uuidv4()
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: [...values.scenes, { ...scene, default: false, id: newSceneId }],
+        scenes: [...formScenesOf(values), { ...scene, default: false, id: newSceneId }],
       })
       // The copy looks exactly like the original until it is edited, so it
       // should not sit at "no snapshot" while its twin shows a picture. The
@@ -1299,13 +1313,13 @@ export const scenesLogic = kea<scenesLogicType>([
         return
       }
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: values.scenes.map((s) => (s.id === dialog.sceneId ? { ...s, name: sceneName } : s)),
+        scenes: formScenesOf(values).map((s) => (s.id === dialog.sceneId ? { ...s, name: sceneName } : s)),
       })
       actions.closeRenameSceneDialog()
     },
     deleteScene: ({ sceneId }) => {
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: values.scenes.filter((s) => s.id !== sceneId),
+        scenes: formScenesOf(values).filter((s) => s.id !== sceneId),
       })
       actions.closeSceneEditors([sceneId])
     },
@@ -1315,7 +1329,7 @@ export const scenesLogic = kea<scenesLogicType>([
         return
       }
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: values.scenes.filter((scene) => !values.selectedSceneIds.has(scene.id)),
+        scenes: formScenesOf(values).filter((scene) => !values.selectedSceneIds.has(scene.id)),
       })
       selectedIds.forEach((sceneId) => {
         actions.closeSceneEditors([sceneId])

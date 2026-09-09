@@ -6,6 +6,7 @@ import frameos/scenes
 import frameos/channels
 import frameos/setup_proxy
 import frameos/utils/process
+import frameos/utils/system
 import frameos/network/backend as netbackend
 import frameos/network/supplicant as wpa
 import frameos/cloud/device_flow
@@ -1039,7 +1040,11 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       data["frameAdminAuth"] = %*{"enabled": false, "user": adminUser, "pass": ""}
     frameConfig.frameAdminAuth = data["frameAdminAuth"]
 
-    writeFile(filename, pretty(data, indent = 4) & "\n")
+    # Atomic and private: this runs from the unauthenticated first-boot
+    # POST /setup with frameAdminAuth.pass in clear, so a power cut mid-write
+    # must leave the old frame.json, not a truncated one the frame cannot
+    # boot from — and the file must never sit at 0644.
+    writePrivateFile(filename, pretty(data, indent = 4) & "\n")
     writeHostnameBestEffort(hostnameBase)
 
     if options.controlMode == "cloud":
@@ -2230,18 +2235,30 @@ proc plainHttpFrameUrl(frameOS: FrameOS): string =
   let port = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
   result = "http://" & host & (if port == 80: "" else: ":" & $port) & "/"
 
-proc setupStatusJson*(frameOS: FrameOS): JsonNode =
+proc isSetupHotspotOrigin*(origin: string): bool =
+  ## The one cross-origin reader /setup/status admits: the "Saved!" page
+  ## served from the hotspot address (http://10.42.0.1[:port]).
+  let hotspotIp = nmHotspotAddress.split('/')[0]
+  let lower = origin.strip().toLowerAscii()
+  lower == "http://" & hotspotIp or lower.startsWith("http://" & hotspotIp & ":")
+
+proc setupStatusJson*(frameOS: FrameOS, includeError = true): JsonNode =
   ## What the "Saved!" page polls, from both the hotspot origin and the
-  ## frame's LAN address: nothing here that the status screen on the panel
-  ## does not already show whoever can see the frame.
+  ## frame's LAN address. `error` (the last setup failure: it can name the
+  ## home SSID, driver-setup output, filesystem paths) is included only while
+  ## the hotspot is up — the window in which the page that needs it exists.
   let check = lastNetworkCheck()
-  %*{
+  result = %*{
     "hotspot": isHotspotActive(frameOS),
     "network": $frameOS.network.status,
     "internet": check.status == NetworkStatus.connected,
-    "error": getLastError(),
     "frameUrl": postSetupFrameUrl(frameOS),
   }
+  let lastError = getLastError()
+  if includeError:
+    result["error"] = %lastError
+  else:
+    result["error"] = %(if lastError.len > 0: "setup reported an error; see the frame log" else: "")
 
 proc confirmHtml*(frameOS: FrameOS, ssid = ""): string =
   let frameUrl = postSetupFrameUrl(frameOS)

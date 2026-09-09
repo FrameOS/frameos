@@ -44,6 +44,9 @@ export type ConvertOptions = {
   typeDeclarations?: string | undefined;
   /** Model attempts per app / code node before giving up. Default 3. */
   maxAttempts?: number | undefined;
+  /** Hard ceiling on model calls for this scene; past it the leftovers are
+   * reported as needs_model instead of calling again. Default: unlimited. */
+  maxModelCalls?: number | undefined;
   /** "cloud" | "cli" | …, stamped into settings.convertedFrom. */
   tool?: string | undefined;
   now?: (() => Date) | undefined;
@@ -243,11 +246,37 @@ class SceneConverter {
     const pendingApps = this.collectApps();
 
     if (this.options.model) {
+      // A model that is out of budget (the port threw, or maxModelCalls is
+      // reached) leaves the rest as needs_model — a partial, honest report
+      // rather than an unbounded loop over 20 scenes × every node × 3 tries.
+      let budgetLeft = true;
       for (const app of pendingApps) {
-        await this.convertApp(app);
+        if (!budgetLeft || !this.modelBudgetLeft()) {
+          budgetLeft = false;
+          this.items.push({ id: app.id, kind: "app", name: app.name, reason: "model call budget exhausted: needs the model", status: "needs_model" });
+          continue;
+        }
+        try {
+          await this.convertApp(app);
+        } catch (error) {
+          if (!(error instanceof ModelBudgetExceededError)) throw error;
+          budgetLeft = false;
+          this.items.push({ id: app.id, kind: "app", name: app.name, reason: "model call budget exhausted: needs the model", status: "needs_model" });
+        }
       }
       for (const pending of pendingCode) {
-        await this.convertCodeNodeWithModel(pending);
+        if (!budgetLeft || !this.modelBudgetLeft()) {
+          budgetLeft = false;
+          this.items.push({ kind: "code", nim: pending.nim, nodeId: pending.node.id, reason: "model call budget exhausted: " + pending.reason, status: "needs_model" });
+          continue;
+        }
+        try {
+          await this.convertCodeNodeWithModel(pending);
+        } catch (error) {
+          if (!(error instanceof ModelBudgetExceededError)) throw error;
+          budgetLeft = false;
+          this.items.push({ kind: "code", nim: pending.nim, nodeId: pending.node.id, reason: "model call budget exhausted: " + pending.reason, status: "needs_model" });
+        }
       }
     } else {
       for (const app of pendingApps) {
@@ -537,8 +566,16 @@ class SceneConverter {
 
   // --- pass 2 -----------------------------------------------------------------
 
+  private modelBudgetLeft(): boolean {
+    const cap = this.options.maxModelCalls;
+    return cap === undefined || this.modelCalls < cap;
+  }
+
   private async callModel(input: string): Promise<{ args: JsonObject | undefined; text: string }> {
     const port = this.options.model!;
+    if (!this.modelBudgetLeft()) {
+      throw new ModelBudgetExceededError(this.options.maxModelCalls!);
+    }
     this.modelCalls += 1;
     const result = await port({ input, instructions: this.instructions, tool: deliverConversionTool }, this.options.signal);
     this.usage = addUsage(this.usage, result.usage);
@@ -850,6 +887,15 @@ function categoryOf(sources: Record<string, string>): string | undefined {
 function appName(sources: Record<string, string>, fallback: string): string {
   const name = parseConfig(sources)?.name;
   return typeof name === "string" && name.trim() ? name.trim() : fallback;
+}
+
+/** Thrown by the model port wrapper (or the converter's own maxModelCalls cap) when
+ * no more model calls may be made; the scene's leftovers are reported as needs_model. */
+export class ModelBudgetExceededError extends Error {
+  constructor(public readonly maxModelCalls: number) {
+    super(`model call budget of ${maxModelCalls} exhausted`);
+    this.name = "ModelBudgetExceededError";
+  }
 }
 
 /** Convert one scene. Never throws for a scene the grammar rejects; only for transport failures of the model port. */

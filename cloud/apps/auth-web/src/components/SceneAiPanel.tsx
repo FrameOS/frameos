@@ -902,17 +902,15 @@ export function SceneAiPanel({
     [aiDisabled, signedIn, updateMessage],
   );
 
-  // The entry points hand over a prompt (?ai=… / ?prompt=…): send it right
-  // away when signed in, otherwise leave it in the box for after sign-in.
+  // The entry points hand over a prompt (?ai=… / ?prompt=…): it lands in the
+  // box for the user to send. Never submitted on their behalf — a turn has
+  // side effects (save_scene writes a scene into the account, and the shared
+  // key is spent), so an unsolicited link must not be able to run one; the
+  // click is the consent.
   const initialPromptRef = useRef(initialPrompt);
   useEffect(() => {
     const prompt = initialPromptRef.current?.trim();
-    if (!prompt) {
-      return;
-    }
-    if (signedIn) {
-      void submit(prompt);
-    } else {
+    if (prompt) {
       setInput(prompt);
     }
     // Runs once on mount by design: the prompt is a one-off hand-over.

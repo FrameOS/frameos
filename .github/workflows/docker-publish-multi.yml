@@ -910,7 +910,7 @@ jobs:
           EOF
 
       - name: Commit changes
-        uses: EndBug/add-and-commit@v9
+        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5 # v9.1.4 — SHA-pinned: a tag can be moved, and this job holds a write token
         with:
           message: 'Update FrameOS version to ${{ env.DOCKER_VERSION }}'
           add: '.'

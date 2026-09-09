@@ -25,6 +25,8 @@ export async function POST(request: NextRequest) {
     action: "two-factor-disable",
     limit: 10,
     mutating: true,
+    // Weakening: a stolen cookie must not get to do this hours later.
+    recentAuth: true,
   });
   if ("response" in context) {
     return context.response;

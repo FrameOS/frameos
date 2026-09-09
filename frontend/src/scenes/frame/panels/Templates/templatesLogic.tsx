@@ -14,7 +14,7 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
-import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import { scenesRunShellCommands, templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
 import { parseSceneUpload, sceneNeedsAutoArrange } from '../../../../utils/sceneUpload'
 import { scenesLogic } from '../Scenes/scenesLogic'
@@ -986,6 +986,17 @@ export const templatesLogic = kea<templatesLogicType>([
           window.alert('No scenes found at this URL.')
           return
         }
+        // Same gate as applyRemoteToFrame. A URL carries no catalog flags, so
+        // the scenes themselves are inspected for apps that run shell commands.
+        if (
+          scenesRunShellCommands(scenes, values.apps) &&
+          !window.confirm(
+            'The scenes at this URL configure apps or custom code that run shell commands on the frame. ' +
+              'Only install them if you trust the source. Install anyway?'
+          )
+        ) {
+          return
+        }
         actions.applyTemplate({ scenes }, openDrawer)
         if (values.search === url) {
           actions.setSearch('')
@@ -1026,8 +1037,9 @@ export const templatesLogic = kea<templatesLogicType>([
     applyRemoteToFrame: async ({ template, repository, openDrawer }) => {
       // Cloud store scenes carry risk flags; installing one that can run shell
       // commands on the frame deserves an explicit confirmation. This listener
-      // is the funnel for every remote install — buttons, menus and
-      // drag-and-drop alike.
+      // is the funnel for every CATALOG install — buttons, menus and
+      // drag-and-drop alike; "Add scene from URL" (addUrlToFrame) has no
+      // catalog flags and inspects the scenes instead, with the same dialog.
       if (
         template.flags?.includes('shell') &&
         !window.confirm(
