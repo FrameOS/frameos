@@ -93,7 +93,7 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
       <TextInput placeholder="Search scenes, or paste a scene URL..." onChange={setSearch} value={search} />
       {searchedUrl && !inFrameAdminMode ? (
         <Box className="frame-tool-card space-y-2 rounded-[22px] p-4">
-          <H6>Add scene from URL</H6>
+          <H6>Install scene from URL</H6>
           <div className="frame-tool-muted break-all text-sm">{searchedUrl}</div>
           <Button
             size="small"
@@ -101,7 +101,7 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
             disabled={addingUrlToFrame}
             onClick={() => addUrlToFrame(searchedUrl, openInstalledSceneDrawer)}
           >
-            {addingUrlToFrame ? 'Adding…' : 'Add to this frame'}
+            {addingUrlToFrame ? 'Installing…' : 'Install on this frame'}
           </Button>
         </Box>
       ) : null}

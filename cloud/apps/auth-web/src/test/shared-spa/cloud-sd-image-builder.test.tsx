@@ -18,6 +18,8 @@ import {
 } from "../../../../../../cloud-frontend/src/lib/sd-image-patch";
 import { SdImageBuilder } from "../../../../../../cloud-frontend/src/components/SdImageBuilder";
 import { resetReleaseListingCacheForTests } from "../../../../../../cloud-frontend/src/lib/release-lookup";
+import { overrideReleaseSigningKeyForTests } from "../../../../../../cloud-frontend/src/lib/release-signing";
+import { testSigningKey } from "./fixtures/releaseSigning";
 import { initKea } from "../../../../../../frontend/src/initKea";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -45,6 +47,9 @@ function buildPlaceholderImage(): Uint8Array {
 
 const image = buildPlaceholderImage();
 const gzippedImage = new Uint8Array(gzipSync(image));
+// The builder refuses an image the release key did not sign; the tests sign
+// their fixtures with a throwaway key it is told to trust.
+const signer = testSigningKey();
 
 // A deliberately incompressible image, big enough that the re-gzip stream
 // emits output (and therefore builds backpressure) while the write loop is
@@ -104,6 +109,9 @@ function mockReleaseAndImage() {
     }
     if (url.startsWith("/api/frames/firmware")) {
       return Promise.resolve(Response.json(firmwarePayload));
+    }
+    if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
+      return Promise.resolve(new Response(signer.minisigFor(gzippedImage)));
     }
     if (url.startsWith("/api/frames/sd-image")) {
       return Promise.resolve(
@@ -216,6 +224,7 @@ function nameFrame(value = "Kitchen Frame") {
 beforeEach(() => {
   // The listing is memoised in the browser; each test mocks its own release.
   resetReleaseListingCacheForTests();
+  overrideReleaseSigningKeyForTests(signer.publicKeyBase64);
   accountSettings = {};
   vi.stubGlobal("fetch", fetchMock);
   // The SSH key list is a kea logic shared with the rest of the workspace,
@@ -226,6 +235,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  overrideReleaseSigningKeyForTests(undefined);
   fetchMock.mockReset();
   vi.unstubAllGlobals();
   delete (window as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG;
@@ -915,6 +925,9 @@ describe("SdImageBuilder", () => {
       if (url.startsWith("/api/frames/firmware")) {
         return Promise.resolve(Response.json(firmwarePayload));
       }
+      if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
+        return Promise.resolve(new Response(signer.minisigFor(large)));
+      }
       return Promise.resolve(new Response(large.slice()));
     });
     stubFailingSaveFilePicker("The target volume is full.");
@@ -965,6 +978,91 @@ describe("SdImageBuilder", () => {
     ).toBeNull();
   });
 
+  // The route pipes GitHub's bytes through unchecked and nothing else
+  // stands between the download and the card: the browser is the reader
+  // that verifies the release signature, before the file is committed.
+  it("refuses an image the release key did not sign, discarding the file", async () => {
+    // A well-formed image (placeholder and all) that differs from the
+    // published one by a byte: only the signature can tell them apart.
+    const forgedImage = new Uint8Array(image);
+    forgedImage[forgedImage.length - 1] = (forgedImage[forgedImage.length - 1] ?? 0) ^ 0x01;
+    const forged = new Uint8Array(gzipSync(forgedImage));
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith("/api/settings") || url.startsWith("/api/fonts") || url.startsWith("/api/frames?")) {
+        return Promise.resolve(Response.json(url.startsWith("/api/settings") ? accountSettings : {}));
+      }
+      if (url.startsWith("/api/frames/firmware")) {
+        return Promise.resolve(Response.json(firmwarePayload));
+      }
+      if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
+        // A real signature — over the bytes the release published, which are
+        // not the ones this download returns.
+        return Promise.resolve(new Response(signer.minisigFor(gzippedImage)));
+      }
+      return Promise.resolve(new Response(forged.slice()));
+    });
+    const saved = stubSaveFilePicker();
+    const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={mint}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+
+    nameFrame();
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
+
+    await screen.findByText(/does not match the FrameOS release signature/, undefined, { timeout: 5000 });
+    expect(screen.queryByTestId("sd-image-done")).toBeNull();
+    // The writable was opened (the bytes streamed to disk as they were
+    // hashed) and then aborted: nothing is committed.
+    expect(saved.aborted).toBe(true);
+    expect(saved.closed).toBe(false);
+    // Under the pinned production key the same download is refused too —
+    // the throwaway key is a test convenience, not a bypass.
+    overrideReleaseSigningKeyForTests(undefined);
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
+    await screen.findByText(/does not match the FrameOS release signature/, undefined, { timeout: 5000 });
+  });
+
+  it("refuses to write an image whose signature cannot be fetched", async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith("/api/settings") || url.startsWith("/api/fonts") || url.startsWith("/api/frames?")) {
+        return Promise.resolve(Response.json(url.startsWith("/api/settings") ? accountSettings : {}));
+      }
+      if (url.startsWith("/api/frames/firmware")) {
+        return Promise.resolve(Response.json(firmwarePayload));
+      }
+      if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
+        return Promise.resolve(new Response("not found", { status: 404 }));
+      }
+      return Promise.resolve(new Response(gzippedImage.slice()));
+    });
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+
+    nameFrame();
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
+
+    await screen.findByText(/release signature could not be fetched \(404\)/, undefined, { timeout: 5000 });
+    expect(screen.queryByTestId("sd-image-done")).toBeNull();
+    expect(saved.closed).toBe(false);
+  });
+
   it("refuses an image without the placeholder instead of shipping a broken card", async () => {
     const noPlaceholder = new Uint8Array(64 * 1024).fill(0xaa);
     const gzipped = new Uint8Array(gzipSync(noPlaceholder));
@@ -972,6 +1070,9 @@ describe("SdImageBuilder", () => {
       const url = String(input);
       if (url.startsWith("/api/frames/firmware")) {
         return Promise.resolve(Response.json(firmwarePayload));
+      }
+      if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
+        return Promise.resolve(new Response(signer.minisigFor(gzipped)));
       }
       return Promise.resolve(new Response(gzipped.slice()));
     });

@@ -4,6 +4,7 @@ import { Eye, EyeOff, MoreHorizontal, Trash2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import posthog from "posthog-js";
 import { useEffect, useRef, useState } from "react";
+import { ownerActionErrorMessage } from "./ownerActionError";
 
 // env.ts's myScenesPath, repeated here so this client component does not pull
 // the server-side env module into the browser bundle.
@@ -54,16 +55,7 @@ function useStoreSceneActions({
       } catch {
         // no JSON body; the generic message below covers it
       }
-      if (detail.error === "content_rejected") {
-        const categories = Array.isArray(detail.categories)
-          ? ` (${detail.categories.join(", ")})`
-          : "";
-        setError(`Rejected by content moderation${categories}`);
-      } else if (detail.error === "moderation_unavailable") {
-        setError("Moderation service unavailable — try again later");
-      } else {
-        setError("Failed");
-      }
+      setError(ownerActionErrorMessage(detail, response.status));
     }
     setBusy(false);
     return response.ok;

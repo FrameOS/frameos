@@ -1,6 +1,7 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { useState, type FormEvent } from 'react'
 import { v4 as uuidv4 } from 'uuid'
+import copy from 'copy-to-clipboard'
 import {
   ArrowPathIcon,
   ClipboardDocumentIcon,
@@ -19,12 +20,13 @@ import { TextInput } from '../../components/TextInput'
 import type { FrameScene, FrameType } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
-import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { findConnectedScenes } from '../frame/panels/Scenes/utils'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
+import { appsModel } from '../../models/appsModel'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { stripSecretFieldValues } from '../../utils/stripSecretFieldValues'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 import { openWorkspaceSceneUtility, workspaceLogic } from './workspaceLogic'
@@ -56,7 +58,7 @@ export function WorkspaceSceneDropDown({
   const { updateSceneFromRepo } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId: frame.id }))
-  const { copySceneJSON } = useActions(scenesLogic({ frameId: frame.id }))
+  const { apps } = useValues(appsModel)
   const { hasDriveScope } = useValues(cloudDriveLogic)
   const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes
   const currentScene = currentScenes.find((candidate) => candidate.id === scene.id) ?? scene
@@ -114,7 +116,10 @@ export function WorkspaceSceneDropDown({
           },
           {
             label: 'Copy scene JSON',
-            onClick: () => copySceneJSON(scene.id),
+            // Inline (not scenesLogic.copySceneJSON): mounting scenesLogic here
+            // would drag controlLogic — and its /states fetch — onto the frames
+            // home for every scene row.
+            onClick: () => copy(JSON.stringify(stripSecretFieldValues(currentScene, apps))),
             icon: <ClipboardDocumentIcon className="h-5 w-5" />,
           },
           // Legacy compiled scenes only: the way off the source-build path —

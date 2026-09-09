@@ -784,7 +784,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           title={
             installableFavouriteTemplateCount === 0
               ? 'No personal favourites are supported by this frame'
-              : 'Add all personal favourites to this frame'
+              : 'Install all personal favourites on this frame'
           }
           onClick={() => applyFavouriteTemplatesToFrame(false)}
           className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-white/80 disabled:hover:shadow-sm"
@@ -793,7 +793,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
             <StarIcon className="h-6 w-6" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="frameos-strong block truncate text-sm font-semibold">Add all starred scenes</span>
+            <span className="frameos-strong block truncate text-sm font-semibold">Install all starred scenes</span>
             <span className="frameos-muted block truncate text-xs">
               Personal favourites saved for this user
               {installableFavouriteTemplateCount !== favouriteTemplateCount

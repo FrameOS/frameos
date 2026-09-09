@@ -142,7 +142,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     // The rest of the SD builder's new controls.
     // Both add-frame flows offer it (SD builder and ESP32 flasher, sharing
     // one stored network), so the drawer has two of these.
-    await expect(drawer.getByText('Remember WiFi credentials in this browser').first()).toBeVisible()
+    await expect(drawer.getByText(/Remember the WiFi network name in this browser/).first()).toBeVisible()
     // The card's claim code lasts forever unless you ask for a limit; the
     // validity picker only appears then, defaulting to three months.
     await expect(drawer.getByLabel('Claim code validity')).toHaveCount(0)

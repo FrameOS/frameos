@@ -138,6 +138,43 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByText(/viewing it through a sharing link/)).toBeTruthy();
     // A private scene cannot be reported.
     expect(screen.queryByRole("button", { name: "Report scene" })).toBeNull();
+    // Only the owner manages the link.
+    expect(screen.queryByTestId("share-link-controls")).toBeNull();
+  });
+
+  it("hands the owner of a private scene its sharing link with the controls to copy, replace or turn it off", () => {
+    render(
+      <SceneInfoPanel
+        {...info}
+        isOwner
+        pageUrl="https://scenes.frameos.net/s/clock?share=tok"
+        scene={{ ...info.scene, visibility: "private" }}
+        share="tok"
+        signedIn
+      />,
+    );
+    expect(screen.getByTestId("share-link-url").textContent).toBe("https://scenes.frameos.net/s/clock?share=tok");
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Replace link" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Turn sharing off" })).toBeTruthy();
+    expect(screen.getByText(/sharing link below/)).toBeTruthy();
+  });
+
+  it("says so when sharing is off, and offers to turn it back on", () => {
+    render(
+      <SceneInfoPanel
+        {...info}
+        isOwner
+        scene={{ ...info.scene, visibility: "private" }}
+        share={undefined}
+        signedIn
+      />,
+    );
+    expect(screen.getByText(/sharing is off, so it is only visible to you/)).toBeTruthy();
+    expect(screen.queryByTestId("share-link-url")).toBeNull();
+    expect(screen.getByRole("button", { name: "Turn sharing on" })).toBeTruthy();
+    // The rest of the owner controls are still there.
+    expect(screen.getByRole("button", { name: "Make public" })).toBeTruthy();
   });
 
   it("gives the owner the editors, the image controls and the visibility actions — all writing the draft", () => {

@@ -42,7 +42,7 @@ export interface LivePreviewLogLine {
   line: string
 }
 
-/** The template a preview was opened from, so the modal can offer "Add to frame". */
+/** The template a preview was opened from, so the modal can offer "Install on frame". */
 export interface LivePreviewSourceTemplate {
   template: TemplateType
   repository?: RepositoryType

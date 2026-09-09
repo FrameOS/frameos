@@ -271,7 +271,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
       </Button>
     ) : null
 
-  // "Add to frame": offered when the preview was opened from a template row.
+  // "Install on frame": offered when the preview was opened from a template row.
   // Installed templates are matched by scene name, same as the template list.
   const sourceTemplateAdded = Boolean(
     livePreviewSourceTemplate && frameScenes.some((scene) => scene.name === livePreviewSourceTemplate.template.name)
@@ -292,11 +292,11 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
       title={
         sourceTemplateAdded
           ? 'This scene is already on the frame'
-          : 'Add this scene to the frame (saved when you save the frame)'
+          : 'Install this scene on the frame (saved when you save the frame)'
       }
     >
       {sourceTemplateAdded ? <CheckIcon className="h-4 w-4" /> : <FolderPlusIcon className="h-4 w-4" />}
-      {sourceTemplateAdded ? 'Added' : 'Add to frame'}
+      {sourceTemplateAdded ? 'Installed' : 'Install on frame'}
     </Button>
   ) : null
 
