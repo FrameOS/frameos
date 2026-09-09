@@ -12,7 +12,14 @@ import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { SecretField } from '../../../../components/SecretField'
 import { Select, type Option } from '../../../../components/Select'
-import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
+import {
+  frameAdminUrl,
+  frameControlUrl,
+  frameHost,
+  frameImageUrl,
+  frameRootUrl,
+  frameUrl,
+} from '../../../../decorators/frame'
 import {
   DEFAULT_FRAME_ERROR_BEHAVIOR,
   DEFAULT_TIMEZONE_UPDATE_HOUR,
@@ -87,6 +94,7 @@ import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameSettingsSectionIsAllowed, isEsp32CloudFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
+import { frameDeleteCopy } from '../../../workspace/frameDeleteCopy'
 import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
@@ -1885,8 +1893,9 @@ export function FrameSettings({
               },
               {
                 label: 'Delete frame',
+                title: frameDeleteCopy(workspaceMode()).title,
                 onClick: () => {
-                  if (confirm('Are you sure you want to DELETE this frame?')) {
+                  if (confirm(frameDeleteCopy(workspaceMode()).confirm(frame.name || frameHost(frame)))) {
                     deleteFrame(frame.id)
                   }
                 },

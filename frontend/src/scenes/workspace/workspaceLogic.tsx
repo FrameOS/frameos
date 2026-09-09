@@ -13,28 +13,13 @@ import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 
 import type { WorkspaceUtilityPanel } from './workspaceSurfaces'
+import { isFrameToolPanel } from './frameToolRoute'
 
 // Re-exported so the SPA's existing `from './workspaceLogic'` imports keep
-// working; the union itself lives with the allow-lists that gate it.
+// working; the union itself lives with the allow-lists that gate it, and the
+// list of panels a frame URL may name with the route resolver
+// (frameToolRoute.ts).
 export type { WorkspaceUtilityPanel }
-
-const frameToolPanels = [
-  'overview',
-  'preview',
-  'schedule',
-  'logs',
-  'metrics',
-  'assets',
-  'terminal',
-  'ping',
-  'debug',
-  'settings',
-  'activity',
-] as const satisfies readonly WorkspaceUtilityPanel[]
-
-function isFrameToolPanel(panel: unknown): panel is (typeof frameToolPanels)[number] {
-  return typeof panel === 'string' && (frameToolPanels as readonly string[]).includes(panel)
-}
 
 function searchValue(search: Record<string, unknown>, key: string): string | null {
   const value = Array.isArray(search[key]) ? (search[key] as unknown[])[0] : search[key]
@@ -60,14 +45,23 @@ export function frameToolFromRoute(routeTool: unknown, search: Record<string, un
   return isFrameToolPanel(tool) ? tool : 'overview'
 }
 
-// The tool segment of `pathname` when it is a frame route — null when it is
-// the bare frame path or not a frame route at all.
-export function frameToolFromPathname(pathname: string, frameId: FrameId): WorkspaceUtilityPanel | null {
+// The raw segment after the frame id in `pathname` (/frames/<id>/<segment>)
+// — null when it is the bare frame path or not a frame route at all. What
+// the segment means for this control plane is frameToolRoute.ts's business.
+export function frameToolSegmentFromPathname(pathname: string, frameId: FrameId): string | null {
   const framePath = urls.frame(frameId)
   if (!pathname.startsWith(`${framePath}/`)) {
     return null
   }
   const segment = decodeURIComponent(pathname.slice(framePath.length + 1))
+  return segment === '' ? null : segment
+}
+
+// The tool segment of `pathname` when it is a frame route naming a known
+// tool — null when it is the bare frame path, an unknown segment, or not a
+// frame route at all.
+export function frameToolFromPathname(pathname: string, frameId: FrameId): WorkspaceUtilityPanel | null {
+  const segment = frameToolSegmentFromPathname(pathname, frameId)
   return isFrameToolPanel(segment) ? segment : null
 }
 

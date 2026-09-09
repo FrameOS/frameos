@@ -20,6 +20,8 @@ import { urls } from '../../urls'
 import { Tooltip } from '../../components/Tooltip'
 import { getFrameCertificateStatus } from '../../utils/certificates'
 import { CURRENT_FRAMEOS_VERSION } from '../frame/frameDeployUtils'
+import { frameMenuActionIsAllowed, workspaceMode } from '../workspace/workspaceSurfaces'
+import { frameDeleteCopy } from '../workspace/frameDeleteCopy'
 
 interface FrameProps {
   frame: FrameType
@@ -101,6 +103,11 @@ export function Frame({ frame }: FrameProps): JSX.Element {
       ? frame.last_successful_deploy.frameos_version.split('+')[0]
       : null
   const hasFrameOSUpdate = Boolean(deployedFrameOSVersion && deployedFrameOSVersion !== CURRENT_FRAMEOS_VERSION)
+  // Same allow-list and copy as the workspace menu (FrameActionsMenu): the
+  // cloud has no archive, and deleting there unlinks the device rather than
+  // erasing its scenes.
+  const mode = workspaceMode()
+  const deleteCopy = frameDeleteCopy(mode)
 
   return (
     <Box id={`frame-${frame.id}`} className="relative">
@@ -113,25 +120,32 @@ export function Frame({ frame }: FrameProps): JSX.Element {
               onClick: () => router.actions.push(urls.frame(frame.id)),
               icon: <PencilSquareIcon className="w-5 h-5" />,
             },
-            frame.archived
-              ? {
-                  label: 'Restore frame',
-                  onClick: () => setFrameArchived(frame.id, false),
-                  icon: <ArrowUturnLeftIcon className="w-5 h-5" />,
-                }
-              : {
-                  label: 'Archive frame',
-                  onClick: () => setFrameArchived(frame.id, true),
-                  icon: <ArchiveBoxIcon className="w-5 h-5" />,
-                },
-            {
-              label: 'Delete frame',
-              onClick: () =>
-                window.confirm(
-                  `Delete the frame "${frame.name}" and all of its scenes? This cannot be undone. (Archive it instead to hide it without losing anything.)`
-                ) && deleteFrame(frame.id),
-              icon: <TrashIcon className="w-5 h-5" />,
-            },
+            ...(frameMenuActionIsAllowed(mode, 'archive', frame)
+              ? [
+                  frame.archived
+                    ? {
+                        label: 'Restore frame',
+                        onClick: () => setFrameArchived(frame.id, false),
+                        icon: <ArrowUturnLeftIcon className="w-5 h-5" />,
+                      }
+                    : {
+                        label: 'Archive frame',
+                        onClick: () => setFrameArchived(frame.id, true),
+                        icon: <ArchiveBoxIcon className="w-5 h-5" />,
+                      },
+                ]
+              : []),
+            ...(frameMenuActionIsAllowed(mode, 'delete', frame)
+              ? [
+                  {
+                    label: 'Delete frame',
+                    title: deleteCopy.title,
+                    confirm: deleteCopy.confirm(frame.name || frameHost(frame)),
+                    onClick: () => deleteFrame(frame.id),
+                    icon: <TrashIcon className="w-5 h-5" />,
+                  },
+                ]
+              : []),
           ]}
         />
       </div>
