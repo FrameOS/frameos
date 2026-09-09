@@ -768,6 +768,14 @@ jobs:
         uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
+        with:
+          # The daemon's own buildkit. The default docker-container driver
+          # boots a separate buildkit container, and on the ephemeral epyc
+          # VMs that container sometimes never exposes its socket ("dial
+          # unix /run/buildkit/buildkitd.sock: no such file" — main was red
+          # on 2026-09-08 and 2026-09-09 for exactly this). This job builds
+          # one single-platform test image and needs none of that.
+          driver: docker
       - uses: docker/setup-qemu-action@v3
 
       - name: Set up Python
