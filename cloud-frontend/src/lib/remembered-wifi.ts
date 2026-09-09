@@ -1,6 +1,10 @@
 // "Remember WiFi" for the add-frame flows (SD image builder and ESP32
 // flasher): one stored network, shared between both, kept in this browser's
 // localStorage only — credentials never reach the server either way.
+//
+// Only the network NAME is remembered. The passphrase used to be stored
+// beside it in plaintext localStorage, readable by any script on the origin
+// and by anyone at the keyboard; it is retyped now (the form says so).
 
 const wifiStorageKey = 'frameos-sd-image-wifi'
 
@@ -11,18 +15,22 @@ export function loadRememberedWifi(): { password: string; ssid: string } | undef
       return undefined
     }
     const parsed = JSON.parse(raw) as { password?: unknown; ssid?: unknown }
-    if (typeof parsed.ssid !== 'string' || typeof parsed.password !== 'string') {
+    if (typeof parsed.ssid !== 'string' || !parsed.ssid) {
       return undefined
     }
-    return { password: parsed.password, ssid: parsed.ssid }
+    // A value written by the older code carries the passphrase: drop it now.
+    if (typeof parsed.password === 'string' && parsed.password) {
+      storeRememberedWifi(parsed.ssid, '')
+    }
+    return { password: '', ssid: parsed.ssid }
   } catch {
     return undefined
   }
 }
 
-export function storeRememberedWifi(ssid: string, password: string): void {
+export function storeRememberedWifi(ssid: string, _password: string): void {
   try {
-    localStorage.setItem(wifiStorageKey, JSON.stringify({ password, ssid }))
+    localStorage.setItem(wifiStorageKey, JSON.stringify({ ssid }))
   } catch {
     // Storage full or blocked — remembering is best-effort.
   }
