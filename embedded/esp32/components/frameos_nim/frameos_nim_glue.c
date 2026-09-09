@@ -1447,8 +1447,8 @@ static bool http_same_origin(const char *a, const char *b)
     bool a_https = strncasecmp(a, "https://", 8) == 0;
     bool b_https = strncasecmp(b, "https://", 8) == 0;
     if (a_https != b_https) return false;
-    char host_a[FOS_NETGUARD_HOST_MAX];
-    char host_b[FOS_NETGUARD_HOST_MAX];
+    char host_a[FOS_NETGUARD_HOST_LEN];
+    char host_b[FOS_NETGUARD_HOST_LEN];
     int port_a = 0;
     int port_b = 0;
     if (!fos_netguard_parse_url(a, host_a, sizeof(host_a), &port_a)) return false;
