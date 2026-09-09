@@ -19,6 +19,13 @@ FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS
 # already runs as root, and a hostile mirror behind FRAMEOS_RELEASE_BASE_URL
 # must never be able to bring its own key along.
 FRAMEOS_RELEASE_SIGNING_KEY_SPKI="MCowBQYDK2VwAyEA0LvFbK8ePu0fSujVkabbyzo0gEppxSV3qhyBHQfaoMw="
+# Test builds only (scripts/tests/test_frameos_setup.py signs its fake
+# release with a throwaway key). Whoever can set this runs the script as
+# root already, so it takes nothing away — but it is announced, every time.
+if [ -n "${FRAMEOS_RELEASE_SIGNING_KEY_SPKI_OVERRIDE:-}" ]; then
+  FRAMEOS_RELEASE_SIGNING_KEY_SPKI="$FRAMEOS_RELEASE_SIGNING_KEY_SPKI_OVERRIDE"
+  echo "WARNING: release signing key overridden by FRAMEOS_RELEASE_SIGNING_KEY_SPKI_OVERRIDE — test builds only" >&2
+fi
 FRAMEOS_DIR="${FRAMEOS_DIR:-/srv/frameos}"
 FRAMEOS_REMOTE_DIR="${FRAMEOS_REMOTE_DIR:-${FRAMEOS_AGENT_DIR:-/srv/frameos/remote}}"
 FRAMEOS_ASSETS_DIR="${FRAMEOS_ASSETS_DIR:-/srv/assets}"

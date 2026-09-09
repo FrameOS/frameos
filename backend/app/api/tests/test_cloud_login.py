@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from app import config as app_config
+
 from app.models.cloud import CloudBackendLink, CloudIdentity
 from app.models.user import User
 from app.utils import cloud_link
@@ -121,10 +123,13 @@ async def test_login_start_is_rate_limited_per_ip(async_client, db, redis, login
         assert response.status_code == 200
     response = await async_client.post("/api/cloud/login/start", json={})
     assert response.status_code == 429
-    # Another address (forwarded by the loopback test client, a trusted proxy) is not affected.
-    response = await async_client.post(
-        "/api/cloud/login/start", json={}, headers={"X-Forwarded-For": "203.0.113.5"}
-    )
+    # A forwarded address counts only from a proxy named in
+    # FRAMEOS_TRUSTED_PROXIES (strict mode: the limiter acts on the address).
+    forwarded = {"X-Forwarded-For": "203.0.113.5"}
+    response = await async_client.post("/api/cloud/login/start", json={}, headers=forwarded)
+    assert response.status_code == 429
+    monkeypatch.setattr(app_config.config, "FRAMEOS_TRUSTED_PROXIES", "127.0.0.1, testclient")
+    response = await async_client.post("/api/cloud/login/start", json={}, headers=forwarded)
     assert response.status_code == 200
 
 

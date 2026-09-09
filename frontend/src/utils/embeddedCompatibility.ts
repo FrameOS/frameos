@@ -37,6 +37,39 @@ function appHasShellFlag(app?: (Partial<AppConfig> & { flags?: string[] }) | nul
   return Boolean(app?.flags?.includes('shell'))
 }
 
+/**
+ * Whether any scene in the set uses an app that runs shell commands on the
+ * frame — the catalog app behind a node's keyword, or the node's own bundled
+ * config.json flags for a scene-local app. The store's `shell` risk flag is
+ * derived the same way server-side; this is the client-side check for scenes
+ * that arrive without a catalog entry ("Add scene from URL").
+ */
+export function scenesRunShellCommands(scenes: FrameScene[], apps: Record<string, AppConfig>): boolean {
+  for (const scene of scenes) {
+    for (const node of scene.nodes ?? []) {
+      if (node.type !== 'app') {
+        continue
+      }
+      const data = node.data as AppNodeData
+      const configJson = data.sources?.['config.json']
+      if (configJson) {
+        try {
+          if (appHasShellFlag(JSON.parse(configJson))) {
+            return true
+          }
+        } catch {
+          // an unparseable config.json carries no flag
+        }
+        continue
+      }
+      if (appHasShellFlag(apps[data.keyword])) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 function cloudAppCompatibility(
   app?: (Partial<AppConfig> & { flags?: string[] }) | null,
   sources?: Record<string, string> | null

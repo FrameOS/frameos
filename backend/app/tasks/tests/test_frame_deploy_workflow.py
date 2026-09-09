@@ -2160,13 +2160,21 @@ async def test_execute_full_marks_stuck_deploy_as_undeployed(monkeypatch: pytest
         ),
     )
 
-    await workflow._execute_full(plan)
+    # A stale "deploying" row (a killed worker, a lost cancellation) is
+    # cleared and the deploy CONTINUES — the per-frame Redis lock guards
+    # against a concurrent one. Returning early used to log "completed" for
+    # a deploy that never ran and cost the user a third click. The fake
+    # builder has no build step, so the deploy stops right after the reset
+    # and the status log shows the reset followed by the real start.
+    with pytest.raises(AttributeError):
+        await workflow._execute_full(plan)
 
-    assert frame.status == "uninitialized"
-    assert updated_statuses == ["uninitialized"]
-    assert deployer.logs == [
-        ("stderr", "Already deploying. Marked frame as undeployed; request deploy again to start fresh."),
-    ]
+    assert updated_statuses[:2] == ["uninitialized", "deploying"]
+    assert deployer.logs[0] == (
+        "stderr",
+        'A previous deploy left the frame marked "deploying"; cleared it and continuing with this one.',
+    )
+    assert "Deploying frame StuckFrame" in deployer.logs[1][1]
 
 
 @pytest.mark.asyncio

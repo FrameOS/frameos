@@ -14,7 +14,7 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
-import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import { scenesRunShellCommands, templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
 import { parseSceneUpload, sceneNeedsAutoArrange } from '../../../../utils/sceneUpload'
 import { scenesLogic } from '../Scenes/scenesLogic'
@@ -989,7 +989,7 @@ export const templatesLogic = kea<templatesLogicType>([
         // Same gate as applyRemoteToFrame. A URL carries no catalog flags, so
         // the scenes themselves are inspected for apps that run shell commands.
         if (
-          scenesRunShellCommands(scenes) &&
+          scenesRunShellCommands(scenes, values.apps) &&
           !window.confirm(
             'The scenes at this URL configure apps or custom code that run shell commands on the frame. ' +
               'Only install them if you trust the source. Install anyway?'
