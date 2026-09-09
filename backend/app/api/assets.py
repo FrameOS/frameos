@@ -1,5 +1,4 @@
 import uuid
-import re
 from typing import Optional
 from http import HTTPStatus
 from fastapi import Depends, HTTPException, File, Form, Request, UploadFile, Query

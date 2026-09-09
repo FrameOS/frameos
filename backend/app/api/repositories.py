@@ -10,14 +10,13 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from urllib.parse import urlparse
 
 from app.database import SessionLocal, get_db
 from app.api.project_scope import project_get_or_404, project_query
 from app.models.settings import Settings
 from app.models.repository import Repository
 from app.tenancy import current_project_id
-from app.utils.network import assert_url_target_allowed, is_safe_host
+from app.utils.network import assert_url_target_allowed
 from app.schemas.repositories import (
     RepositoryCreateRequest,
     RepositoryUpdateRequest,

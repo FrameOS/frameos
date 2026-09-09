@@ -283,7 +283,6 @@ async def test_create_template_caps_zip_members(async_client, db, monkeypatch):
     """scenes.json is inflated in memory: a tiny zip whose scenes.json
     expands past the member cap is refused, whether uploaded or fetched."""
     import app.api.templates as templates_module
-    from app.utils import upload_limits
 
     monkeypatch.setattr(templates_module, "MAX_TEMPLATE_MEMBER_BYTES", 64 * 1024)
 

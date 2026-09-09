@@ -23,11 +23,16 @@ from app.utils.build_host import BuildHostConfig
 from app.utils.ssh_host_keys import host_key_fingerprint
 from app.utils.modal_sandbox import ModalSandboxConfig
 from app.utils.posthog import initialize_posthog
+from app.utils.settings_secrets import mask_settings, resolve_masked_settings
 from . import api_project
 
 @api_project.get("/settings", response_model=SettingsResponse)
-async def get_settings(db: Session = Depends(get_db)):
-    return get_settings_dict(db, project_id=current_project_id())
+async def get_settings(reveal: str | None = None, db: Session = Depends(get_db)):
+    """Secrets come back masked (app/utils/settings_secrets) — the form posts
+    the mask back to keep a key. `?reveal=1` is for the in-browser wasm
+    preview, which runs the scene here and needs the real bytes."""
+    settings = get_settings_dict(db, project_id=current_project_id())
+    return settings if reveal == "1" else mask_settings(settings)
 
 @api_project.post("/settings", response_model=SettingsResponse)
 async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
@@ -38,6 +43,8 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
 
     try:
         current_settings = get_settings_dict(db, project_id=project_id)
+        # A secret posted as its own mask keeps the stored value.
+        payload = resolve_masked_settings(payload, current_settings)
         merged_settings = {**current_settings, **payload}
         provider = selected_build_environment_provider(merged_settings)
         if isinstance(payload.get("buildHost"), dict):
@@ -64,7 +71,7 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
         # Wake the sync service (it lives in the worker process) so it picks up
         # the new configuration and republishes discovery data.
         await redis.publish(HA_SYNC_CHANNEL, json.dumps({"event": "settings_changed", "project_id": project_id}))
-    return updated_settings
+    return mask_settings(updated_settings)
 
 
 HA_SYNC_REPLY_TIMEOUT_SECONDS = 30.0
@@ -202,8 +209,9 @@ def _probe_failure_detail(prefix: str, exc: Exception) -> str:
 
 
 @api_project.post("/settings/test_build_host")
-async def test_build_host(data: SettingsUpdateRequest):
-    payload = data.to_dict()
+async def test_build_host(data: SettingsUpdateRequest, db: Session = Depends(get_db)):
+    # The form holds masks for the keys it never saw; the probe needs the real ones.
+    payload = resolve_masked_settings(data.to_dict(), get_settings_dict(db, project_id=current_project_id()))
     raw_build_host_settings = payload.get("buildHost") if isinstance(payload, dict) else None
     build_host_config = BuildHostConfig.from_settings(
         {**raw_build_host_settings, "enabled": True} if isinstance(raw_build_host_settings, dict) else raw_build_host_settings
@@ -252,8 +260,8 @@ async def test_build_host(data: SettingsUpdateRequest):
 
 
 @api_project.post("/settings/test_modal_sandbox")
-async def test_modal_sandbox(data: SettingsUpdateRequest):
-    payload = data.to_dict()
+async def test_modal_sandbox(data: SettingsUpdateRequest, db: Session = Depends(get_db)):
+    payload = resolve_masked_settings(data.to_dict(), get_settings_dict(db, project_id=current_project_id()))
     raw_modal_settings = payload.get("modalSandbox") if isinstance(payload, dict) else None
     modal_config = ModalSandboxConfig.from_settings(raw_modal_settings)
     if modal_config is None:

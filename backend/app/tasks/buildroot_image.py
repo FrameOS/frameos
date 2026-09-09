@@ -50,6 +50,7 @@ from app.tasks.precompiled_frameos import (
     frame_compiled_scene_count,
     release_version,
 )
+from app.utils.release_signing import verify_release_archive_signature
 from app.tasks.sd_image_blob_patch import (
     build_setup_blob_payload,
     patch_setup_blob_into_image,
@@ -535,6 +536,33 @@ def precompiled_buildroot_sd_image_cache_path(url: str) -> Path:
     return buildroot_precompiled_sd_image_cache_dir() / f"{digest}-{safe_filename}"
 
 
+def precompiled_buildroot_sd_image_signature_path(cache_path: Path) -> Path:
+    return cache_path.with_name(cache_path.name + ".minisig")
+
+
+def _cached_sd_image_verifies(cache_path: Path) -> bool:
+    """A cached SD image counts as a hit only while it still matches the
+    release signature stored beside it — same rule as the precompiled
+    runtime archives (precompiled_frameos._cached_archive_verifies): the
+    cache lives on disk for ever, is patched into every card the backend
+    writes, and a planted image under the predictable cache name would
+    otherwise be flashed as-is."""
+    signature_path = precompiled_buildroot_sd_image_signature_path(cache_path)
+    try:
+        if not (cache_path.is_file() and cache_path.stat().st_size > 0 and signature_path.is_file()):
+            return False
+        verify_release_archive_signature(cache_path, signature_path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _discard_cached_sd_image(cache_path: Path) -> None:
+    for path in (cache_path, precompiled_buildroot_sd_image_signature_path(cache_path)):
+        with suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
 async def download_precompiled_buildroot_sd_image(
     *,
     platform: str,
@@ -547,13 +575,25 @@ async def download_precompiled_buildroot_sd_image(
         return None
 
     cache_path = precompiled_buildroot_sd_image_cache_path(url)
+    signature_path = precompiled_buildroot_sd_image_signature_path(cache_path)
     if cache_path.is_file() and cache_path.stat().st_size > 0:
-        await logger("stdout", f"Using cached full precompiled Buildroot SD image release for {platform}")
-        return PrecompiledBuildrootSdImageResult(release_url=url, archive_path=cache_path, cache_hit=True)
+        if _cached_sd_image_verifies(cache_path):
+            await logger(
+                "stdout",
+                f"Using cached full precompiled Buildroot SD image release for {platform} (signature verified)",
+            )
+            return PrecompiledBuildrootSdImageResult(release_url=url, archive_path=cache_path, cache_hit=True)
+        await logger(
+            "stdout",
+            f"Cached full precompiled Buildroot SD image release for {platform} fails its signature check; "
+            "downloading it again",
+        )
+        _discard_cached_sd_image(cache_path)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     await logger("stdout", f"Checking for full precompiled Buildroot SD image release for {platform}")
     temp_path: Path | None = None
+    temp_signature_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             prefix=f".{cache_path.name}.",
@@ -562,6 +602,13 @@ async def download_precompiled_buildroot_sd_image(
             delete=False,
         ) as temp_file:
             temp_path = Path(temp_file.name)
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{signature_path.name}.",
+            suffix=".part",
+            dir=cache_path.parent,
+            delete=False,
+        ) as temp_file:
+            temp_signature_path = Path(temp_file.name)
 
         try:
             await download_release_file(url, temp_path, timeout)
@@ -574,6 +621,21 @@ async def download_precompiled_buildroot_sd_image(
         if not temp_path.is_file() or temp_path.stat().st_size == 0:
             await logger("stderr", "Downloaded full precompiled Buildroot SD image release was empty")
             return None
+        # The detached minisign signature published beside every release
+        # asset (the release workflow signs the SD images with the same key
+        # as the runtime archives). An image without one, or with one that
+        # does not verify, is not used — it would be patched into a card
+        # and booted with nothing else ever checking it.
+        await download_release_file(f"{url}.minisig", temp_signature_path, timeout)
+        minisig = temp_signature_path.read_text(encoding="utf-8", errors="replace")
+        try:
+            verify_release_archive_signature(temp_path, minisig)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Full precompiled Buildroot SD image release for {platform} failed its signature check: {exc}"
+            ) from exc
+        os.replace(temp_signature_path, signature_path)
+        temp_signature_path = None
         os.replace(temp_path, cache_path)
         temp_path = None
         return PrecompiledBuildrootSdImageResult(release_url=url, archive_path=cache_path)
@@ -587,8 +649,9 @@ async def download_precompiled_buildroot_sd_image(
         await logger("stderr", f"Could not use full precompiled Buildroot SD image release for {platform}: {exc}")
         return None
     finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+        for leftover in (temp_path, temp_signature_path):
+            if leftover is not None:
+                leftover.unlink(missing_ok=True)
 
 
 async def resolve_buildroot_base_entry(platform: str, frameos_version: str | None = None) -> dict[str, Any]:
@@ -1591,7 +1654,6 @@ class BuildrootImageBuilder:
                     remote_binary=remote_binary,
                 )
 
-                script_path = temp_dir / "buildroot-build.sh"
                 config_path = temp_dir / "frameos-buildroot.config"
                 post_build_path = temp_dir / "post-build.sh"
                 partition_post_build_path = temp_dir / "partition-post-build.sh"
@@ -2979,7 +3041,7 @@ fi
         # firmware-nonfree repo; older base images may lack it.
         zero_2_w_wifi_firmware_section = ""
         if self.platform.needs_zero_2_w_wifi_firmware:
-            zero_2_w_wifi_firmware_section = f"""if ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin" "$rootfs" >/dev/null 2>&1 || \\
+            zero_2_w_wifi_firmware_section = """if ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin" "$rootfs" >/dev/null 2>&1 || \\
    ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" "$rootfs" >/dev/null 2>&1; then
 python3 - "$firmware_tmp" <<'PY'
 import hashlib
@@ -3001,11 +3063,11 @@ firmware_files = [
     ("37a8b85a5a9742761101b764a07bc4d0c8b09f2e180eaea3b503a834277ad595", "brcmfmac43436s-sdio.txt"),
 ]
 for expected_sha, name in firmware_files:
-    url = f"{{base_url}}/{{urllib.parse.quote(name, safe='')}}"
+    url = f"{base_url}/{urllib.parse.quote(name, safe='')}"
     data = urllib.request.urlopen(url, timeout=60).read()
     actual_sha = hashlib.sha256(data).hexdigest()
     if actual_sha != expected_sha:
-        raise SystemExit(f"Checksum mismatch for {{name}}: {{actual_sha}}")
+        raise SystemExit(f"Checksum mismatch for {name}: {actual_sha}")
     (destination / name).write_bytes(data)
 PY
 cat >> "$cmds" <<EOF
@@ -4650,7 +4712,6 @@ def _shrink_data_partitions(
     frameos_size = frameos_image.stat().st_size
     assets_size = assets_image.stat().st_size
     frameos_partition = partitions[2]
-    assets_partition = partitions[3]
 
     frameos_start = frameos_partition["start"]
     assets_start = _align_up_bytes(frameos_start + frameos_size)

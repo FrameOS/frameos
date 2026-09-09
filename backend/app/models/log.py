@@ -268,10 +268,12 @@ async def process_log(
         log = log[1]
     else:
         timestamp = datetime.utcnow()
+    if not isinstance(log, dict):
+        # The HTTP route validates the shape before anything is written
+        # (app/schemas/log.py); this is the guard for every other caller.
+        raise ValueError(f"Log must be a dict, got {type(log).__name__}")
 
     await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp, ip=ip)
-
-    assert isinstance(log, dict), f"Log must be a dict, got {type(log)}"
 
     event = log.get('event', 'log')
 

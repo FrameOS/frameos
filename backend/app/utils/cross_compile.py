@@ -1053,14 +1053,12 @@ class CrossCompiler:
             if status == 0:
                 return resolved_image
 
-            if resolved_image != image:
-                status, _out, _err = await self._run_command(
-                    f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1",
-                    log_command=False,
-                    log_output=False,
-                )
-                if status == 0:
-                    return image
+            # No fallback from `repo:tag@sha256:…` to the bare `repo:tag`: the
+            # digest file is the pin, and the tag is mutable (`latest`). A
+            # local image under the tag may be older or newer than the pinned
+            # build; an unpinned pull would take whatever the registry serves.
+            # When the digest is unavailable the deploy falls through to the
+            # local toolchain build below, which says so.
 
             legacy_image = self._legacy_toolchain_image(container_platform)
             status, _out, _err = await self._run_command(
@@ -1080,15 +1078,6 @@ class CrossCompiler:
                 )
                 if status == 0:
                     return resolved_image
-
-                if resolved_image != image and not TOOLCHAIN_SKIP_PULL:
-                    status, _pull_out, pull_err = await self._run_command(
-                        f"docker pull {shlex.quote(image)}",
-                        log_command=f"docker pull {shlex.quote(image)}",
-                        log_output=False,
-                    )
-                    if status == 0:
-                        return image
 
                 await self._log(
                     "stderr",

@@ -464,7 +464,7 @@ async def test_delete_cloud_backup(async_client, db, backup_calls):
 @pytest.mark.asyncio
 async def test_export_tarball(async_client, db):
     frame = make_frame(db, async_client.project_id)
-    template = make_template(db, async_client.project_id)
+    make_template(db, async_client.project_id)
 
     response = await async_client.get("/api/backup/export")
     assert response.status_code == 200

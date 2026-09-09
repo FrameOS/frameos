@@ -318,7 +318,7 @@ async def test_a_tampered_cached_archive_is_not_used(tmp_path: Path, monkeypatch
 @pytest.mark.asyncio
 async def test_a_release_with_a_bad_signature_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     archive = tmp_path / "release.tar.gz"
-    with tarfile.open(archive, "w:gz") as tar:
+    with tarfile.open(archive, "w:gz"):
         pass
     other_key = ed25519.Ed25519PrivateKey.generate()
 

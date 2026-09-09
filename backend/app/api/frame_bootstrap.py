@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import config, normalize_ingress_path
 from app.api.project_scope import project_get_or_404
 from app.database import get_db
-from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json, update_frame
+from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json, server_scheme_for_frame, update_frame
 from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.deploy_remote import legacy_remote_cleanup_script
@@ -113,7 +113,7 @@ def _frame_server_base_url(frame: Frame) -> str | None:
         return None
 
     parsed = urlparse(server_host if "://" in server_host else f"//{server_host}")
-    scheme = parsed.scheme or "http"
+    scheme = parsed.scheme or server_scheme_for_frame(frame)
     host = parsed.netloc or parsed.path
     path = parsed.path if parsed.netloc else ""
     if not host:
@@ -482,6 +482,10 @@ WatchdogSec=900
 MemoryHigh=${{mem_high_kb}}K
 MemoryMax=${{mem_max_kb}}K
 MemorySwapMax=64M
+# Its own /tmp (same as setup.nim's frameosServiceContents): the
+# browser-snapshot app stages an executable script and a Chromium profile
+# there; privileged work goes through sudo, which shares the namespace.
+PrivateTmp=yes
 ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf "serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n" "$SERVICE_RESULT" "$EXIT_CODE" "$EXIT_STATUS" > /srv/frameos/runtime/frameos-last-exit'
 {frameos_service_tty}
 

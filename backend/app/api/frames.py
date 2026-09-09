@@ -23,7 +23,7 @@ import tempfile
 import time
 import zipfile
 from tempfile import NamedTemporaryFile
-from typing import Any, Awaitable, Optional, Tuple, cast
+from typing import Any, Awaitable, Optional, Tuple
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -96,7 +96,14 @@ from app.schemas.frames import (
 from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, is_safe_host
-from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES, read_upload_limited, reject_oversized_content_length
+from app.utils.asset_headers import inert_asset_headers
+from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
+from app.utils.upload_limits import (
+    MAX_ASSET_UPLOAD_BYTES,
+    read_body_limited,
+    read_upload_limited,
+    reject_oversized_content_length,
+)
 from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.remote_exec import (
     RemoteTransport,
@@ -174,7 +181,6 @@ from app.codegen.drivers_nim import frame_compilation_mode
 from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_button_defaults
 from app.api.project_scope import project_get_or_404
 from app.api.firmware_release import latest_published_provisioning_assets
-from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
 from . import api_project, api_open
@@ -1836,7 +1842,7 @@ async def _embedded_asset_file_response(
         cache_key = f"asset:thumb:{full_md5}"
         if cached := await redis.get(cache_key):
             return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
-        thumb_data = embedded_assets.thumbnail_jpeg(data)
+        thumb_data = await asyncio.to_thread(embedded_assets.thumbnail_jpeg, data)
         if thumb_data is None:
             # Undecodable image (or Pillow missing): serve the original bytes.
             media_type = mimetypes.guess_type(filename or rel_path)[0] or "application/octet-stream"
@@ -1857,13 +1863,7 @@ async def _embedded_asset_file_response(
     return StreamingResponse(
         io.BytesIO(data),
         media_type=media_type,
-        headers={
-            "Content-Disposition": (
-                f"{'attachment' if mode == 'download' else 'inline'}; "
-                f'filename="{_ascii_safe(filename)}"; '
-                f"filename*=UTF-8''{quote(filename, safe='')}"
-            ),
-        },
+        headers=inert_asset_headers(media_type, filename, inline=mode != "download"),
     )
 
 
@@ -1955,7 +1955,7 @@ async def api_frame_get_asset(
                 # original once and render the preview here.
                 original = await _remote_download_file(db, redis, frame, full_path)
                 try:
-                    data = render_thumbnail_png(original)
+                    data = await asyncio.to_thread(render_thumbnail_png, original)
                 except Exception as exc:
                     raise HTTPException(
                         status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -2001,13 +2001,7 @@ async def api_frame_get_asset(
     return StreamingResponse(
         io.BytesIO(data),
         media_type=media_type,
-        headers={
-            "Content-Disposition": (
-                f"{'attachment' if mode == 'download' else 'inline'}; "
-                f'filename="{_ascii_safe(filename)}"; '
-                f"filename*=UTF-8''{quote(filename, safe='')}"
-            ),
-        },
+        headers=inert_asset_headers(media_type, filename, inline=mode != "download"),
     )
 
 
@@ -2053,6 +2047,9 @@ async def api_frame_scene_preview_settings(
 # The largest upstream body the live-preview proxy relays (generated images
 # are a few MB); the rest is dropped mid-stream instead of buffered.
 PREVIEW_PROXY_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+# The JSON envelope the preview posts (an image-edit request carries the
+# image base64-encoded); anything larger is not a scene's HTTP call.
+PREVIEW_PROXY_MAX_REQUEST_BYTES = 16 * 1024 * 1024
 
 
 async def _preview_proxy_host_is_blocked(host: str) -> bool:
@@ -2082,7 +2079,13 @@ async def api_frame_scene_preview_proxy(
     SSRF-guarded. Request body: {method, url, headers, bodyBase64, timeoutMs}.
     The response mirrors the upstream status code and body bytes."""
     try:
-        envelope = await request.json()
+        envelope = json.loads(
+            await read_body_limited(request, PREVIEW_PROXY_MAX_REQUEST_BYTES, "Proxy request body too large")
+        )
+        if not isinstance(envelope, dict):
+            raise ValueError("not an object")
+    except HTTPException:
+        raise
     except Exception:
         _bad_request("Invalid proxy request body")
 
@@ -2425,6 +2428,11 @@ async def api_frame_get_image(
                     await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
 
 
+# A frame's screenshot: a full-size PNG of a large panel is a few MB; the
+# body used to be read unbounded.
+MAX_FRAME_IMAGE_BYTES = 32 * 1024 * 1024
+
+
 @api_project.post("/frames/{id:int}/image")
 async def api_frame_upload_image(
     id: int,
@@ -2434,7 +2442,7 @@ async def api_frame_upload_image(
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
-    body = await request.body()
+    body = await read_body_limited(request, MAX_FRAME_IMAGE_BYTES, "Image too large")
     if not body:
         _bad_request("Missing image payload")
 
@@ -2828,9 +2836,13 @@ async def _chunked_asset_upload(
     if chunk_index == 0 and offset < 0:
         offset = 0
     complete = (qp.get("complete") or "1") == "1"
-    chunk = await request.body()
+    chunk = await read_body_limited(request, MAX_ASSET_UPLOAD_BYTES, "Uploaded file too large")
     if not chunk and not complete:
         _bad_request("Empty chunk")
+    # The whole file is bounded like a one-shot upload, whichever chunk
+    # carries the bytes that cross the line.
+    if (offset if offset >= 0 else 0) + len(chunk) > MAX_ASSET_UPLOAD_BYTES:
+        raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Uploaded file too large")
 
     assets_path, combined_path = _asset_upload_combined_path(frame, qp.get("path") or "", filename)
 
@@ -2879,6 +2891,9 @@ async def _chunked_asset_upload(
         seek_to = offset if offset >= 0 else part_size
         if seek_to > part_size:
             raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
+        if seek_to + len(chunk) > MAX_ASSET_UPLOAD_BYTES:
+            os.unlink(part_path)
+            raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Uploaded file too large")
         with open(part_path, "r+b") as fh:
             fh.seek(seek_to)
             fh.write(chunk)
@@ -2920,6 +2935,7 @@ async def api_frame_assets_upload(
     if "upload_id" in request.query_params:
         return await _chunked_asset_upload(request, frame, db, redis)
 
+    reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     form = await request.form()
     upload = form.get("file")
     if upload is None or isinstance(upload, str):
@@ -2928,7 +2944,7 @@ async def api_frame_assets_upload(
         frame, str(form.get("path") or ""), upload.filename or ""
     )
 
-    data = await upload.read()
+    data = await read_upload_limited(upload, MAX_ASSET_UPLOAD_BYTES)
     await _asset_upload_store(db, redis, frame, combined_path, data)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
 
@@ -3879,6 +3895,16 @@ async def api_frame_new(
 ):
     project_id = current_project_id()
     settings = get_settings_dict(db, project_id=project_id)
+    if isinstance(data.network, dict) and is_masked_setting_value(data.network.get("wifiPassword")):
+        # The add-frame form prefills the passphrase from GET /api/settings,
+        # which answers a mask (app/utils/settings_secrets); the real default
+        # is substituted here so the frame never carries the mask.
+        data.network = {
+            **data.network,
+            "wifiPassword": resolve_masked_secret(
+                data.network.get("wifiPassword"), (settings.get("defaults") or {}).get("wifiPassword")
+            ),
+        }
     try:
         if data.mode == "buildroot":
             normalize_buildroot_platform(data.platform)
@@ -4041,11 +4067,10 @@ async def api_frame_import(
     """
     try:
         if file is not None:
-            content = await file.read()
+            reject_oversized_content_length(request, MAX_FRAME_IMPORT_BYTES)
+            content = await read_upload_limited(file, MAX_FRAME_IMPORT_BYTES)
         else:
-            content = await request.body()
-        if len(content) > MAX_FRAME_IMPORT_BYTES:
-            raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Frame export too large")
+            content = await read_body_limited(request, MAX_FRAME_IMPORT_BYTES, "Frame export too large")
         data = json.loads(content)
         if not isinstance(data, dict):
             raise ValueError("not an object")
@@ -4196,8 +4221,8 @@ def _reboot_hint_from_log(log: Log) -> dict[str, Any] | None:
 
 
 def _reboot_hint_for_boot(logs_before_boot: list[Log]) -> dict[str, Any]:
-    for log in reversed(logs_before_boot):
-        hint = _reboot_hint_from_log(log)
+    for entry in reversed(logs_before_boot):
+        hint = _reboot_hint_from_log(entry)
         if hint:
             return hint
     return {}

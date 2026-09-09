@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
-from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, tls_settings_changed
+from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, tls_settings_changed  # noqa: F401  (tests import it from here)
 from app.tasks.utils import get_fresh_frame
 from app.tasks.deploy_frame import clear_active_deploy_job, deploy_task_log_line, register_active_deploy_job
 

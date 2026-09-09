@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import HTTPException
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -7,7 +9,9 @@ from app.schemas.ssh import SSHKeyResponse
 @api_user.post("/generate_ssh_keys", response_model=SSHKeyResponse)
 async def generate_ssh_keys():
     try:
-        private_key = rsa.generate_private_key(
+        # A 3072-bit keygen is hundreds of milliseconds of CPU: off the loop.
+        private_key = await asyncio.to_thread(
+            rsa.generate_private_key,
             public_exponent=65537,
             key_size=3072,
         )

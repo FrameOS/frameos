@@ -1131,6 +1131,13 @@ async def cloud_identity_unlink(
             status_code=HTTPStatus.CONFLICT,
             detail="Local password login is disabled; re-enable it before unlinking your cloud account",
         )
+    if not current_user.password:
+        # A user created through the cloud sign-in has no local password; the
+        # cloud identity is their only way in.
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail="Set a local password first: without one, unlinking your cloud account would lock you out",
+        )
     db.query(CloudIdentity).filter(CloudIdentity.user_id == current_user.id).delete()
     db.commit()
     return _status_payload(db, link, current_user)

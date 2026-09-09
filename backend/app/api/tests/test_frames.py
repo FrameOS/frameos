@@ -3851,3 +3851,33 @@ async def test_api_frame_bootstrap_script_only_accepts_released_distros(async_cl
     assert 'FrameOS releases are built for debian bookworm/trixie, ubuntu 24.04/26.04' in script
     syntax_check = subprocess.run(['sh', '-n'], input=script, capture_output=True, text=True)
     assert syntax_check.returncode == 0, syntax_check.stderr
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_carries_the_pinned_host_key_fingerprint(async_client, db, redis):
+    """FrameBase dropped ssh_host_key / ssh_host_key_fingerprint /
+    compiled_scene_count / project_id, so the TOFU fingerprint the frame page
+    shows was absent on every fresh page load."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    from app.utils.ssh_host_keys import host_key_fingerprint
+
+    frame = await new_frame(db, redis, 'PinnedFrame', 'localhost', 'localhost')
+    public = ed25519.Ed25519PrivateKey.generate().public_key().public_bytes(
+        serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH
+    ).decode()
+    frame.ssh_host_key = public
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}')
+    assert response.status_code == 200
+    data = response.json()['frame']
+    assert data['ssh_host_key'] == public
+    assert data['ssh_host_key_fingerprint'] == host_key_fingerprint(public)
+    assert data['ssh_host_key_fingerprint'].startswith('SHA256:')
+    assert data['project_id'] == async_client.project_id
+    assert data['compiled_scene_count'] == 0
+
+    listed = (await async_client.get('/api/frames')).json()['frames'][0]
+    assert listed['ssh_host_key_fingerprint'] == host_key_fingerprint(public)

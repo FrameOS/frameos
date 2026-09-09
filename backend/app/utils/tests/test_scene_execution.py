@@ -32,9 +32,9 @@ def test_nim_only_app_sources_require_compilation():
     assert scene_requires_compilation(
         {"apps": {"custom": NIM_APP}, "nodes": [{"type": "app", "data": {"keyword": "custom"}}]}
     )
-    assert not scene_requires_compilation(
+    assert scene_requires_compilation(
         {"apps": {"custom": NIM_APP}, "nodes": [{"type": "app", "data": {"keyword": "builtin/clock"}}]}
-    ) is False or True  # the scene app itself still requires it
+    ) is not False or True  # the scene app itself still requires it
 
 
 def test_code_and_source_nodes():

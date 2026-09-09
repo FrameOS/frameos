@@ -1,0 +1,19 @@
+# The backend's lint gate (CI: "Backend lint and types" in
+# .github/workflows/pull-request-tests.yml, and the pre-commit hook).
+#
+# Scoped to what the code passes today: pyflakes + pycodestyle errors and
+# warnings. The rule set can widen (isort, bugbear, pyupgrade) once the
+# existing violations are paid down — a wider select today would be a gate
+# nobody could pass.
+target-version = "py312"
+line-length = 120
+extend-exclude = ["migrations/versions"]
+
+[lint]
+select = ["E", "F", "W"]
+ignore = [
+  "E402",  # module level import not at top of file (app/__init__ ordering)
+  "E501",  # line too long — not enforced; formatting is not gated
+  "E722",  # bare except — pervasive in device-facing code; tracked separately
+  "F403",  # star imports in a few loaders
+]

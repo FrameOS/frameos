@@ -328,6 +328,10 @@ class Frame(Base):
     # receiving logs, connection from frame to us
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
+    # "http" | "https": stated, never guessed from the port (the log shipper,
+    # FrameOS Remote and ESP32 provisioning all read this). NULL only on rows
+    # the migration has not seen; server_scheme_for_frame() covers that.
+    server_scheme = mapped_column(String(8), nullable=True)
     server_api_key = mapped_column(String(64), nullable=True, unique=True)
     server_send_logs = mapped_column(Boolean, default=True)
     # frame metadata
@@ -403,6 +407,7 @@ class Frame(Base):
             'ssh_host_key_fingerprint': host_key_fingerprint(self.ssh_host_key),
             'server_host': self.server_host,
             'server_port': self.server_port,
+            'server_scheme': server_scheme_for_frame(self),
             'server_api_key': self.server_api_key,
             'server_send_logs': self.server_send_logs,
             'status': self.status,
@@ -470,6 +475,42 @@ class Frame(Base):
             pass
         return result
 
+def server_scheme_from_port(port: Optional[int]) -> str:
+    """The pre-2026.9.13 guess, kept only to seed rows and frame.json files
+    that predate the explicit setting: 443 meant https, everything else http."""
+    return "https" if int(port or 0) == 443 else "http"
+
+
+def normalize_server_scheme(value: Any, port: Optional[int] = None) -> str:
+    scheme = str(value or "").strip().lower().rstrip(":/")
+    if scheme in ("http", "https"):
+        return scheme
+    return server_scheme_from_port(port)
+
+
+def server_scheme_for_frame(frame: "Frame") -> str:
+    return normalize_server_scheme(getattr(frame, "server_scheme", None), frame.server_port)
+
+
+def split_server_address(server_host: str) -> tuple[str, int, Optional[str]]:
+    """'https://host:8443' / 'host:8989' / 'host' → (host, port, scheme or None).
+    A scheme prefix decides the scheme; a bare address leaves it to the caller."""
+    scheme: Optional[str] = None
+    server_host = str(server_host or "").strip()
+    for prefix in ("http://", "https://"):
+        if server_host.lower().startswith(prefix):
+            scheme = prefix[:-3]
+            server_host = server_host[len(prefix):]
+            break
+    server_host = server_host.rstrip("/")
+    if ':' in server_host:
+        server_host, server_port_initial = server_host.rsplit(':', 1)
+        server_port = int(server_port_initial or '8989')
+    else:
+        server_port = {"https": 443, "http": 80}.get(scheme or "", 8989)
+    return server_host, server_port, scheme
+
+
 async def new_frame(
     db: Session,
     redis: Redis,
@@ -500,11 +541,7 @@ async def new_frame(
     else:
         user, password = user_pass, None
 
-    if ':' in server_host:
-        server_host, server_port_initial = server_host.split(':')
-        server_port = int(server_port_initial or '8989')
-    else:
-        server_port = 8989
+    server_host, server_port, server_scheme = split_server_address(server_host)
 
     tls_material = generate_frame_tls_material(frame_host)
     dimensions = device_dimensions(device)
@@ -537,6 +574,7 @@ async def new_frame(
         },
         server_host=server_host,
         server_port=int(server_port),
+        server_scheme=normalize_server_scheme(server_scheme, server_port),
         server_api_key=secure_token(32),
         server_send_logs=True,
         width=dimensions[0] if dimensions else None,
@@ -796,6 +834,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         # frame stays free to enroll with FrameOS Cloud. Only None falls back.
         "serverHost": frame.server_host if frame.server_host is not None else "localhost",
         "serverPort": frame.server_port or 8989,
+        "serverScheme": server_scheme_for_frame(frame),
         "serverApiKey": frame.server_api_key,
         "serverSendLogs": bool(frame.server_send_logs if frame.server_send_logs is not None else True),
         "width": frame.width or (fallback_dimensions[0] if fallback_dimensions else 0),

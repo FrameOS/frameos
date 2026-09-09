@@ -15,6 +15,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED
+from app.config import config
 from app.codegen.release_drivers_nim import release_driver_specs
 from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame

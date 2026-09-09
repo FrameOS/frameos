@@ -284,3 +284,31 @@ async def test_api_log_bootup_version_updates_a_shell_less_frames_baseline(async
     assert response.status_code == 200
     db.refresh(shell)
     assert shell.last_successful_deploy['frameos_version'] == '2026.9.11'
+
+
+@pytest.mark.asyncio
+async def test_api_log_rejects_malformed_entries_before_writing_anything(async_client, db, redis):
+    """`log`/`logs` were typed Any and shape-checked by an `assert` AFTER the
+    row was committed (and `-O` strips asserts): junk rows for every typo."""
+    frame = await new_frame(db, redis, 'ShapeFrame', 'localhost', 'localhost')
+    frame.server_api_key = 'testkey'
+    await update_frame(db, redis, frame)
+    headers = {'Authorization': 'Bearer testkey'}
+    before = db.query(Log).filter_by(frame_id=frame.id).count()
+
+    for body in (
+        {'log': 'banana'},
+        {'log': ['not-a-timestamp', {'event': 'log'}]},
+        {'log': [1.0, 'not-a-dict']},
+        {'logs': [{'event': 'log'}, 42]},
+        {'logs': 'banana'},
+    ):
+        response = await async_client.post('/api/log', json=body, headers=headers)
+        assert response.status_code == 422, (body, response.text)
+
+    assert db.query(Log).filter_by(frame_id=frame.id).count() == before
+
+    # The batched `[timestamp, entry]` form is still fine.
+    response = await async_client.post('/api/log', json={'logs': [[1700000000, {'event': 'log', 'message': 'ok'}]]}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert db.query(Log).filter_by(frame_id=frame.id).count() == before + 1

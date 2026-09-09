@@ -832,3 +832,36 @@ async def test_upload_asset_legacy_firmware_falls_back_to_single_shot(
     assert len(device.calls) == 2
     assert device.calls[1]["body"] == data
     assert "upload_id" not in _device_query(device.calls[1])
+
+
+@pytest.mark.asyncio
+async def test_get_asset_image_mode_serves_inert_headers(async_client, db, redis):
+    """Every asset body from the backend origin: nosniff, sandboxed CSP."""
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([(200, b"png-bytes", {"content-type": "image/png"})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(asset_url(async_client, frame, "path=pic.png&mode=image"))
+
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-security-policy"] == "default-src 'none'; sandbox"
+    assert response.headers["content-disposition"].startswith("inline")
+
+
+@pytest.mark.asyncio
+async def test_get_asset_active_types_are_downloads_even_in_image_mode(async_client, db, redis):
+    """An SVG or an HTML file opened inline from the backend origin would run
+    same-origin with the session cookie; they go out as attachments, the
+    same treatment the device's own asset route applies."""
+    frame = await create_embedded_frame(async_client, db)
+    for name in ("evil.svg", "page.html", "app.js"):
+        device = FakeDevice([(200, b"<svg onload=alert(1)/>", {"content-type": "image/svg+xml"})])
+        with patch(FETCH, new=device):
+            response = await async_client.get(asset_url(async_client, frame, f"path={name}&mode=image"))
+        assert response.status_code == 200, response.text
+        disposition = response.headers["content-disposition"]
+        assert disposition.startswith("attachment"), (name, disposition)
+        assert f'filename="{name}"' in disposition
+        assert response.headers["content-security-policy"] == "default-src 'none'; sandbox"
+        assert response.headers["x-content-type-options"] == "nosniff"

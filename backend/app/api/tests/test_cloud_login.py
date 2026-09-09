@@ -1,6 +1,5 @@
 """Cloud login: login handoff, identity linking, first-run setup,
 and the local password fallback guard."""
-import json
 
 import pytest
 
@@ -356,7 +355,7 @@ async def test_setup_connect_flow_without_login(no_auth_client, db, monkeypatch)
 @pytest.mark.asyncio
 async def test_local_fallback_disable_and_login_guard(async_client, db, redis, login_handoff, monkeypatch):
     calls, _ = login_handoff
-    link = make_connected_link(db)
+    make_connected_link(db)
 
     # Cannot disable before the user has linked the owning cloud account.
     response = await async_client.post("/api/cloud/local-fallback", json={"enabled": False})
@@ -452,7 +451,7 @@ async def test_local_fallback_uses_identity_for_active_provider(async_client, db
 @pytest.mark.asyncio
 async def test_disconnect_reenables_local_fallback(async_client, db, redis, login_handoff, monkeypatch):
     calls, _ = login_handoff
-    link = make_connected_link(db)
+    make_connected_link(db)
     state = await _start_and_get_state(async_client, calls, path="/api/cloud/identity/link")
     await async_client.get(f"/api/cloud/login/callback?code=abc&state={state}")
 
@@ -541,3 +540,21 @@ async def test_cloud_created_user_can_set_a_recovery_password(no_auth_client, db
     db.refresh(user)
     assert user.check_password("a-recovery-password")
     assert not user.check_password("")
+
+
+@pytest.mark.asyncio
+async def test_identity_unlink_refuses_a_user_without_a_local_password(async_client, db):
+    """A user created through the cloud sign-in has no local password; the
+    cloud identity is their only way in, so unlinking it is refused."""
+    user = db.query(User).filter_by(email="test@example.com").one()
+    user.password = None
+    db.commit()
+
+    response = await async_client.post("/api/cloud/identity/unlink")
+    assert response.status_code == 409, response.text
+    assert "password" in response.json()["detail"].lower()
+
+    user.set_password("testpassword")
+    db.commit()
+    response = await async_client.post("/api/cloud/identity/unlink")
+    assert response.status_code == 200, response.text
