@@ -30,6 +30,18 @@ import { hostMessageTarget, isHostReply } from './embedOrigins'
 // buttons, live scene state and the runtime log. Same livePreviewLogic as the
 // main app's "Preview in browser" modal, rendered as panel content and
 // without the frame-dependent actions (there is no frame to preview on).
+// The embed runs in an iframe on the cloud's origin; re-authentication must
+// bring the user back to the page hosting the editor, not the iframe URL.
+function reauthHref(): string {
+  let returnTo = window.location.href
+  try {
+    returnTo = window.top?.location.href ?? returnTo
+  } catch {
+    // Cross-origin host: fall back to our own URL.
+  }
+  return `/login/reauth?return_to=${encodeURIComponent(returnTo)}`
+}
+
 export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element {
   const {
     livePreviewScene,
@@ -41,6 +53,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     previewDimensions,
     gpioButtons,
     wasmUnsupportedApps,
+    storedKeysNotice,
     lastRenderMs,
     renderCount,
     previewSettings,
@@ -268,6 +281,14 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
           ))}
           . {wasmUnsupportedApps.length === 1 ? 'That node' : 'Those nodes'} will fail here but{' '}
           {wasmUnsupportedApps.length === 1 ? 'works' : 'work'} on a frame.
+        </div>
+      ) : null}
+      {storedKeysNotice ? (
+        <div className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700">
+          {storedKeysNotice}{' '}
+          <a className="font-semibold underline" href={reauthHref()} target="_top">
+            Confirm it is you
+          </a>
         </div>
       ) : null}
 

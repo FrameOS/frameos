@@ -209,6 +209,12 @@ standard sign-in holds the account to: sudo mode is "prove it again", not
   cookie into a durable token, but a login fresh that afternoon is proof
   enough. The `/device` page sends a stale session through `/login/reauth`
   *before* showing the approve button; the route check is the backstop.
+  The same window guards `GET /api/settings?reveal=1` — every stored
+  third-party key in one response, which the in-browser scene preview needs
+  all through an editing session (fifteen minutes would mean re-proving
+  while building a scene). The masked `GET /api/settings` is not gated; the
+  preview surfaces degrade to "no saved keys" with a link to `/login/reauth`
+  rather than failing.
 
 Routes call `requireRecentAuth(db, accountId)` right after `readSession()`;
 pages call `hasRecentAuth(db)`. The client components behind those buttons

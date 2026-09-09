@@ -25,6 +25,10 @@ import {
   frameServiceSettingsScope,
 } from "../../../src/lib/frames";
 import { rateLimitResponse } from "../../../src/lib/rate-limit";
+import {
+  recentApprovalMaxAgeSeconds,
+  requireRecentAuth,
+} from "../../../src/lib/recent-auth";
 import { readSession } from "../../../src/lib/session";
 import { reportError } from "../../../src/lib/log";
 
@@ -46,6 +50,17 @@ export const runtime = "nodejs";
 // the browser and needs the bytes. An API token never gets them: a leaked
 // token can rotate the keys but cannot read them, and a read-only token can
 // do neither.
+//
+// The browser session does not get them for free either: `?reveal=1` is a
+// sudo-mode route (recent-auth.ts), on the two-hour approval window rather
+// than the fifteen-minute revoke one. Every stored third-party key in one
+// response is exactly what a cookie lifted from an unattended laptop should
+// not be able to fetch hours later — but the preview that needs the keys is
+// used all through an editing session, and re-proving credentials every
+// fifteen minutes while building a scene is the kind of gate people turn
+// off. A session that signed in this afternoon is proof enough; an older one
+// gets 403 `reauth_required` and the callers degrade to a preview without
+// stored keys (the masked GET still answers) until the user re-proves.
 
 // Tell every cloud-managed frame that holds `settings:services` to re-pull.
 // The nudge carries NO payload — the keys ride the device-authed HTTPS pull
@@ -106,6 +121,16 @@ export async function GET(request: NextRequest) {
   }
   const reveal =
     !session.apiToken && request.nextUrl.searchParams.get("reveal") === "1";
+  if (reveal) {
+    const stale = await requireRecentAuth(
+      db,
+      session.accountId,
+      recentApprovalMaxAgeSeconds,
+    );
+    if (stale) {
+      return stale;
+    }
+  }
   return NextResponse.json(
     await storedAccountSettings(db, session.accountId, { reveal }),
   );

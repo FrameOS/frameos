@@ -12,15 +12,20 @@
 //
 // Kept out of frames.ts on purpose — that file is under concurrent edit.
 
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like } from "drizzle-orm";
 import {
+  frameAssetFiles,
   frames,
   frameSceneAssignments,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
-import { readBlob } from "./blobs";
-import { cachedAssetFile, sceneSnapshotAssetPath } from "./frame-asset-cache";
+import { deleteBlobIfUnreferenced, readBlob } from "./blobs";
+import {
+  cachedAssetFile,
+  sceneSnapshotAssetPath,
+  sceneSnapshotAssetPrefix,
+} from "./frame-asset-cache";
 import { imageSetForVersion } from "./store-images";
 import {
   extractScenesJson,
@@ -303,6 +308,140 @@ export async function resolveStoreSceneForFrameScene(
     }
   }
   return undefined;
+}
+
+// Every snapshot-cache path an assigned scene can legitimately occupy on
+// this frame: the store uuid form and every runtime id of the version the
+// assignment pins (the same walk resolveStoreSceneForFrameScene does, for
+// all assignments at once).
+async function assignedSceneSnapshotPaths(
+  db: FramesDatabase,
+  frameId: string,
+): Promise<Set<string>> {
+  const assignments = await db
+    .select({
+      sceneId: frameSceneAssignments.sceneId,
+      sceneVersion: frameSceneAssignments.sceneVersion,
+    })
+    .from(frameSceneAssignments)
+    .where(eq(frameSceneAssignments.frameId, frameId));
+  const paths = new Set<string>();
+  for (const assignment of assignments) {
+    paths.add(sceneSnapshotAssetPath(assignment.sceneId));
+    const version = await pinnedVersionNumber(
+      db,
+      assignment.sceneId,
+      assignment.sceneVersion,
+    );
+    if (version === undefined) {
+      continue;
+    }
+    for (const id of await runtimeIdsForVersion(db, assignment.sceneId, version)) {
+      paths.add(sceneSnapshotAssetPath(id));
+    }
+  }
+  return paths;
+}
+
+// Bounds on covers uploaded for scenes NO assignment owns yet — the zip
+// upload's image.jpg or a split-screen render, posted before the save that
+// turns the form scene into a store scene and an assignment. They live in
+// the same per-frame LRU cache as the device's real snapshots
+// (maxAssetFilesPerFrame = 64 rows, 24 MB), and the cache prunes by age
+// alone: 32 posts under made-up scene ids, two rows each, used to push every
+// real snapshot out. Pending covers now compete only with each other: at
+// most this many scenes and bytes, oldest dropped first, so the device's
+// snapshots of assigned scenes always keep the larger share of the cache.
+// A multi-scene zip is a handful of scenes; eight is generous.
+export const maxPendingSceneCoverScenes = 8;
+export const maxPendingSceneCoverBytes = 8 * 1024 * 1024;
+// Per image, so that one upload can never hold more than half the pending
+// budget (each lands as two rows: full and thumb).
+export const maxPendingSceneCoverImageBytes = maxPendingSceneCoverBytes / 2 / 2;
+
+/**
+ * Before a cover for `sceneId` is stored: when no assignment owns the scene,
+ * drop the oldest pending covers until this one fits within the pending
+ * budget. A cover for an assigned scene competes as a real snapshot and is
+ * left to the cache's own LRU; a pending one over the per-image bound is
+ * reported `tooLarge` and nothing is evicted for it.
+ */
+export async function makeRoomForPendingSceneCover(
+  db: FramesDatabase,
+  frameId: string,
+  sceneId: string,
+  incomingBytes: number,
+): Promise<{ assigned: boolean; tooLarge?: boolean }> {
+  const assigned = await assignedSceneSnapshotPaths(db, frameId);
+  const path = sceneSnapshotAssetPath(sceneId);
+  if (assigned.has(path)) {
+    return { assigned: true };
+  }
+  if (incomingBytes > maxPendingSceneCoverImageBytes) {
+    // Refused by the caller; nothing is evicted for an upload that will not
+    // be stored.
+    return { assigned: false, tooLarge: true };
+  }
+  const rows = await db
+    .select({
+      id: frameAssetFiles.id,
+      objectKey: frameAssetFiles.objectKey,
+      path: frameAssetFiles.path,
+      sizeBytes: frameAssetFiles.sizeBytes,
+      updatedAt: frameAssetFiles.updatedAt,
+    })
+    .from(frameAssetFiles)
+    .where(
+      and(
+        eq(frameAssetFiles.frameId, frameId),
+        like(frameAssetFiles.path, `${sceneSnapshotAssetPrefix}%`),
+      ),
+    )
+    .orderBy(asc(frameAssetFiles.updatedAt), asc(frameAssetFiles.id));
+  // Pending = a snapshot path no assignment owns, other than the one being
+  // replaced (its rows are upserted in place, so they are not counted).
+  const pending = rows.filter((row) => row.path !== path && !assigned.has(row.path));
+  const scenes = new Set(pending.map((row) => row.path));
+  let bytes = pending.reduce((sum, row) => sum + row.sizeBytes, 0);
+  // The incoming cover lands as two rows.
+  const incoming = incomingBytes * 2;
+  const evict: typeof pending = [];
+  // Oldest scene first (rows are sorted oldest-first, and a scene's two rows
+  // are written together); drop whole scenes until both bounds hold.
+  for (const row of pending) {
+    if (
+      scenes.size < maxPendingSceneCoverScenes &&
+      bytes + incoming <= maxPendingSceneCoverBytes
+    ) {
+      break;
+    }
+    if (!scenes.has(row.path)) {
+      continue;
+    }
+    for (const sibling of pending) {
+      if (sibling.path === row.path) {
+        evict.push(sibling);
+        bytes -= sibling.sizeBytes;
+      }
+    }
+    scenes.delete(row.path);
+  }
+  if (evict.length > 0) {
+    await db
+      .delete(frameAssetFiles)
+      .where(inArray(frameAssetFiles.id, evict.map((row) => row.id)));
+    for (const row of evict) {
+      await deleteBlobIfUnreferenced(row.objectKey, async () => {
+        const [remaining] = await db
+          .select({ id: frameAssetFiles.id })
+          .from(frameAssetFiles)
+          .where(eq(frameAssetFiles.objectKey, row.objectKey!))
+          .limit(1);
+        return remaining !== undefined;
+      });
+    }
+  }
+  return { assigned: false };
 }
 
 // The cover image for a store scene: position 0 of its latest version's

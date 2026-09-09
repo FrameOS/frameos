@@ -18,6 +18,8 @@ import {
   storeFrameAssetFile,
 } from "../../../../../../src/lib/frames";
 import {
+  makeRoomForPendingSceneCover,
+  maxPendingSceneCoverImageBytes,
   resolveStoreSceneForFrameScene,
   storeSceneCoverImage,
 } from "../../../../../../src/lib/scene-images";
@@ -208,6 +210,11 @@ export async function GET(
 // the user chose this image for this scene. The private cloud scene the next
 // save creates picks it up from here (preview_from_frame on
 // POST /api/account/scenes), so it outlives the cache's LRU pruning.
+//
+// Any scene id is accepted — the scene an upload names does not exist on the
+// server until that save — but a cover for a scene no assignment owns is a
+// PENDING cover, bounded separately (makeRoomForPendingSceneCover) so a run
+// of posts under made-up ids can never evict the device's real snapshots.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string; sceneId: string }> },
@@ -257,6 +264,17 @@ export async function POST(
     return jsonError("invalid_image", 400);
   }
   const path = sceneSnapshotAssetPath(sceneId);
+  const room = await makeRoomForPendingSceneCover(
+    db,
+    frame.id,
+    sceneId,
+    content.length,
+  );
+  if (room.tooLarge) {
+    return jsonError("image_too_large", 413, {
+      max_bytes: maxPendingSceneCoverImageBytes,
+    });
+  }
   // The thumb row gets the full bytes too (as the install-time cover copy
   // does); the device's 320px thumbnail replaces it on the first render.
   for (const thumb of [false, true]) {

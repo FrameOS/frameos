@@ -182,10 +182,22 @@ export async function uploadAssetBytes(
   frame: { id: string; hardware: unknown },
   path: string,
   bytes: Uint8Array,
-  options: { onChunk?: (ackedBytes: number) => void } = {},
+  options: {
+    onChunk?: (ackedBytes: number) => void;
+    /**
+     * The caller's request signal. Checked before every chunk: once the
+     * browser has gone, no further chunk is queued toward the device (a
+     * chunk already in flight still completes — its command is queued and
+     * the device will ack it). Answers `aborted`, never throws.
+     */
+    signal?: AbortSignal;
+  } = {},
 ): Promise<AssetCommandResult> {
   if (bytes.length > maxChunkedAssetUploadBytes) {
     return { ok: false, error: "too_large" };
+  }
+  if (options.signal?.aborted) {
+    return { ok: false, error: "aborted" };
   }
   if (bytes.length <= maxAssetUploadBytes) {
     return runAssetWriteCommand(db, accountId, frame.id, "asset_put", {
@@ -198,6 +210,9 @@ export async function uploadAssetBytes(
   let uploadId = randomUUID().replace(/-/g, "");
   let offset = 0;
   while (offset < bytes.length) {
+    if (options.signal?.aborted) {
+      return { ok: false, error: "aborted" };
+    }
     const end = Math.min(bytes.length, offset + chunkBytes);
     const result = await putAssetChunk(db, accountId, frame.id, {
       uploadId,

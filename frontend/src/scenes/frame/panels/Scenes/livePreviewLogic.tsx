@@ -220,6 +220,7 @@ export interface livePreviewLogicValues {
   previewState: Record<string, any>
   previewStatus: 'error' | 'loading' | 'running'
   renderCount: number
+  storedKeysNotice: string | null
   wasmUnsupportedApps: WasmUnsupportedApp[]
 }
 
@@ -291,6 +292,9 @@ export interface livePreviewLogicActions {
     info: PreviewAssetsInfo | null
   }
   previewErrored: (message: string) => {
+    message: string
+  }
+  storedKeysUnavailable: (message: string) => {
     message: string
   }
   previewFrame: (
@@ -398,6 +402,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       fps,
     }),
     previewErrored: (message: string) => ({ message }),
+    // The cloud's stored keys need a recent sign-in (GET /api/settings?reveal=1
+    // is sudo-mode); when they are withheld the preview runs without them and
+    // the modal says so.
+    storedKeysUnavailable: (message: string) => ({ message }),
     appendPreviewLog: (message: string) => ({ message, timestamp: new Date().toISOString() }),
     appendPreviewLogs: (lines: LivePreviewLogLine[]) => ({ lines }),
     setPreviewState: (state: Record<string, any>) => ({ state }),
@@ -442,6 +450,13 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       {
         openLivePreview: () => null,
         previewErrored: (_, { message }) => message,
+      },
+    ],
+    storedKeysNotice: [
+      null as string | null,
+      {
+        openLivePreview: () => null,
+        storedKeysUnavailable: (_, { message }) => message,
       },
     ],
     previewLogs: [
@@ -709,6 +724,20 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           const response = await apiFetch(`/api/settings?reveal=1`)
           if (response.ok) {
             settings = (await response.json()) ?? {}
+          } else if (response.status === 403) {
+            // Sudo mode: the session is older than the reveal window. Run
+            // without the saved keys rather than fail — a scene with no
+            // secret-using apps previews fine — and tell the user why the
+            // ones that need keys will not.
+            const detail = (await response
+              .clone()
+              .json()
+              .catch(() => ({}))) as { error?: string }
+            if (detail.error === 'reauth_required') {
+              actions.storedKeysUnavailable(
+                'Your saved API keys were not loaded: this session signed in a while ago. Confirm it is you to use them in the preview.'
+              )
+            }
           }
         } else {
           const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
