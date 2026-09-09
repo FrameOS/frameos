@@ -1,4 +1,17 @@
-import { MakeLogicType, actions, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import {
+  MakeLogicType,
+  actions,
+  beforeUnmount,
+  BuiltLogic,
+  connect,
+  kea,
+  key,
+  listeners,
+  path,
+  props,
+  reducers,
+  selectors,
+} from 'kea'
 import { AppNodeData, FrameId } from '../../types'
 
 import { frameLogic } from './frameLogic'
@@ -120,6 +133,28 @@ export type frameEditorsLogicType = MakeLogicType<
 > &
   frameEditorsLogicMeta
 
+/** The editor logics each mounted workspace keeps alive, by editor key —
+ * module state keyed by logic path rather than `cache`, because under
+ * StrictMode / Fast Refresh kea can run afterMount on one built object and
+ * beforeUnmount on another for the same path (see diagramLogic). */
+const persistedEditors = new Map<string, Map<string, () => void>>()
+
+function unmountPersistedEditors(pathString: string, matches: (editorKey: string) => boolean): void {
+  const persisted = persistedEditors.get(pathString)
+  if (!persisted) {
+    return
+  }
+  for (const [editorKey, unmount] of Array.from(persisted.entries())) {
+    if (matches(editorKey)) {
+      persisted.delete(editorKey)
+      unmount()
+    }
+  }
+  if (persisted.size === 0) {
+    persistedEditors.delete(pathString)
+  }
+}
+
 export const frameEditorsLogic = kea<frameEditorsLogicType>([
   path(['src', 'scenes', 'frame', 'frameEditorsLogic']),
   props({} as FrameEditorsLogicProps),
@@ -234,34 +269,33 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
         ) === 'interpreted',
     ],
   })),
-  listeners(({ cache }) => ({
+  listeners(({ pathString }) => ({
     persistUntilClosed: ({ editorKey, logic }) => {
-      if (!cache.closeListeners) {
-        cache.closeListeners = {} as Record<string, () => void>
-      }
-      if (!cache.closeListeners[editorKey]) {
-        cache.closeListeners[editorKey] = logic.mount()
+      const persisted = persistedEditors.get(pathString) ?? new Map<string, () => void>()
+      if (!persisted.has(editorKey)) {
+        persisted.set(editorKey, logic.mount())
+        persistedEditors.set(pathString, persisted)
       }
     },
     closeEditor: ({ editorKey }) => {
-      if (cache.closeListeners?.[editorKey]) {
-        cache.closeListeners[editorKey]()
-        delete cache.closeListeners[editorKey]
-      }
+      unmountPersistedEditors(pathString, (key) => key === editorKey)
     },
     closeSceneEditors: ({ sceneIds }) => {
-      for (const sceneId of sceneIds) {
-        for (const editorKey of Object.keys(cache.closeListeners ?? {})) {
-          if (
+      unmountPersistedEditors(pathString, (editorKey) =>
+        sceneIds.some(
+          (sceneId) =>
             editorKey === diagramEditorKey(sceneId) ||
             editorKey === sceneJSONEditorKey(sceneId) ||
             editorKey.startsWith(`editApp:${sceneId}.`)
-          ) {
-            cache.closeListeners[editorKey]()
-            delete cache.closeListeners[editorKey]
-          }
-        }
-      }
+        )
+      )
     },
   })),
+  // Leaving the workspace (another frame, the dashboard) unmounts this logic
+  // but nothing closes the editors: every diagram/app/JSON logic they kept
+  // mounted, and through kea's connect the whole frameLogic behind them, used
+  // to live on until the page reloaded.
+  beforeUnmount(({ pathString }) => {
+    unmountPersistedEditors(pathString, () => true)
+  }),
 ])

@@ -30,6 +30,18 @@ export function CodeArg({ codeArg, onChange, onDelete }: CodeArgProps): JSX.Elem
   if (!node) {
     return <div />
   }
+  const trimmedName = name.trim()
+  const otherNames = ((node.data as { codeArgs?: CodeArg[] }).codeArgs ?? [])
+    .map((arg) => arg.name)
+    .filter((existing) => existing !== codeArg.name)
+  // An argument needs a name the code can reference, and two arguments with
+  // one name would share a `codeField/<name>` handle and overwrite each other.
+  const nameError = !trimmedName
+    ? 'The field needs a name'
+    : otherNames.includes(trimmedName)
+    ? `"${trimmedName}" is already an argument of this node`
+    : null
+  const changed = type !== codeArg.type || trimmedName !== codeArg.name
   const codeNode = (
     <div className={clsx('flex items-center gap-1', onChange && 'hover:underline cursor-pointer')}>
       <div>{codeArg.name}</div>
@@ -49,6 +61,7 @@ export function CodeArg({ codeArg, onChange, onDelete }: CodeArgProps): JSX.Elem
           <div className="space-y-1">
             <Label>Field name</Label>
             <TextInput value={name} onChange={(value) => setName(value)} placeholder="name" />
+            {nameError ? <div className="text-xs text-red-400">{nameError}</div> : null}
           </div>
           <div className="space-y-1">
             <Label>Data type</Label>
@@ -60,9 +73,14 @@ export function CodeArg({ codeArg, onChange, onDelete }: CodeArgProps): JSX.Elem
           </div>
           <div className="flex gap-2">
             <Button
-              color={type !== codeArg.type || name !== codeArg.name ? 'primary' : 'secondary'}
+              color={changed && !nameError ? 'primary' : 'secondary'}
               size="small"
-              onClick={() => onChange?.({ name, type })}
+              disabled={!!nameError}
+              onClick={() => {
+                if (!nameError) {
+                  onChange?.({ name: trimmedName, type })
+                }
+              }}
             >
               Update
             </Button>

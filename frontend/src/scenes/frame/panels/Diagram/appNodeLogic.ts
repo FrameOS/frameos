@@ -113,19 +113,8 @@ export interface appNodeLogicActions {
     data: Record<string, any>
     id: string
   } // diagramLogic
-  editCodeField: (
-    field: string,
-    newField: string
-  ) => {
+  deleteCodeField: (field: string) => {
     field: string
-    newField: string
-  }
-  editCodeFieldOutput: (
-    field: string,
-    newField: string
-  ) => {
-    field: string
-    newField: string
   }
   select: () => {
     value: true
@@ -246,9 +235,9 @@ export const appNodeLogic = kea<appNodeLogicType>([
   })),
   actions({
     select: true,
-    editCodeField: (field: string, newField: string) => ({ field, newField }),
-    editCodeFieldOutput: (field: string, newField: string) => ({ field, newField }),
-    // updateCodeOutput: (index: number, codeArg: CodeArg) => ({ field, newField }),
+    // Renaming an argument lives in CodeNode (CodeArg's Update button): it
+    // rewrites the node's codeArgs and the edges' target handles in place.
+    deleteCodeField: (field: string) => ({ field }),
   }),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
@@ -679,104 +668,38 @@ export const appNodeLogic = kea<appNodeLogicType>([
         actions.selectNode(values.nodeId)
       }
     },
-    editCodeField: ({ field, newField }) => {
+    deleteCodeField: ({ field }) => {
       const { nodeId, node, nodeEdges, edges } = values
       const codeFieldEdges = nodeEdges.filter(
         (edge) =>
           edge.target === nodeId && edge.sourceHandle === 'fieldOutput' && edge.targetHandle === `codeField/${field}`
       )
       const codeArgs = (node?.data as CodeNodeData)?.codeArgs ?? []
-      if (newField) {
-        actions.setEdges(
-          edges.map((edge) =>
-            edge.target === nodeId && edge.sourceHandle === 'fieldOutput' && edge.targetHandle === `codeField/${field}`
-              ? { ...edge, targetHandle: `codeField/${newField}` }
-              : edge
+      // `fieldOutput` is the output handle of EVERY data app and code node,
+      // so the node behind this argument may be a shared weather or OpenAI
+      // node feeding other targets too. Only a node that exists for this
+      // argument alone (a code node with no other connections) goes with
+      // it; anything else keeps its node and loses just the edge.
+      const nodes = values.nodes ?? []
+      const removedEdgeIds = new Set(codeFieldEdges.map((edge) => edge.id))
+      let remainingEdges = edges.filter((edge) => !removedEdgeIds.has(edge.id))
+      for (const edge of codeFieldEdges) {
+        const source = nodes.find((n) => n.id === edge.source)
+        const dedicated =
+          source?.type === 'code' &&
+          !remainingEdges.some((other) => other.source === edge.source || other.target === edge.source)
+        if (dedicated) {
+          actions.deleteApp(edge.source)
+          remainingEdges = remainingEdges.filter(
+            (other) => other.source !== edge.source && other.target !== edge.source
           )
-        )
-        actions.updateNodeData(nodeId, {
-          codeFields: codeArgs.find((a) => a.name === newField)
-            ? codeArgs.filter((f) => f.name !== field)
-            : codeArgs.map((f) => (f.name === field ? newField : f)),
-        })
-        window.requestAnimationFrame(() => {
-          props.updateNodeInternals?.(nodeId)
-        })
-      } else {
-        // `fieldOutput` is the output handle of EVERY data app and code node,
-        // so the node behind this argument may be a shared weather or OpenAI
-        // node feeding other targets too. Only a node that exists for this
-        // argument alone (a code node with no other connections) goes with
-        // it; anything else keeps its node and loses just the edge.
-        const nodes = values.nodes ?? []
-        const removedEdgeIds = new Set(codeFieldEdges.map((edge) => edge.id))
-        let remainingEdges = edges.filter((edge) => !removedEdgeIds.has(edge.id))
-        for (const edge of codeFieldEdges) {
-          const source = nodes.find((n) => n.id === edge.source)
-          const dedicated =
-            source?.type === 'code' &&
-            !remainingEdges.some((other) => other.source === edge.source || other.target === edge.source)
-          if (dedicated) {
-            actions.deleteApp(edge.source)
-            remainingEdges = remainingEdges.filter((other) => other.source !== edge.source && other.target !== edge.source)
-          }
-        }
-        actions.setEdges(remainingEdges)
-        actions.updateNodeData(nodeId, { codeArgs: codeArgs.filter((f) => f.name !== field) })
-        window.requestAnimationFrame(() => {
-          props.updateNodeInternals?.(nodeId)
-        })
-      }
-    },
-    editCodeFieldOutput: ({ field, newField }) => {
-      const { nodeId, node, nodes, nodeEdges, edges } = values
-      const codeOutputEdges = nodeEdges.filter(
-        (edge) =>
-          edge.source === nodeId && edge.sourceHandle === `fieldOutput` && edge.targetHandle === `codeField/${field}`
-      )
-
-      const updatedNodes: Record<string, DiagramNode | false> = {}
-      const updatedEdges: Record<string, DiagramEdge | false> = {}
-      for (const edge of codeOutputEdges) {
-        const otherNode = nodes.find((n) => n.id === edge.target)
-        if (!otherNode) {
-          continue
-        }
-        const codeArgs = (otherNode?.data as CodeNodeData)?.codeArgs ?? []
-
-        if (newField) {
-          updatedEdges[edge.id] = { ...edge, targetHandle: `codeField/${newField}` }
-          updatedNodes[edge.target] = {
-            ...otherNode,
-            data: {
-              ...otherNode.data,
-              codeArgs: codeArgs.map((f) => (f.name === field ? { ...f, name: newField } : f)),
-            },
-          }
-        } else {
-          updatedEdges[edge.id] = false
-          updatedNodes[edge.source] = false
-          updatedNodes[edge.target] = {
-            ...otherNode,
-            data: {
-              ...otherNode.data,
-              codeArgs: codeArgs.filter((f) => f.name !== field),
-            },
-          }
         }
       }
-
-      const newEdges = edges.map((edge) => updatedEdges[edge.id] ?? edge).filter((e): e is DiagramEdge => e !== false)
-      const newNodes = nodes.map((node) => updatedNodes[node.id] ?? node).filter((n): n is DiagramNode => n !== false)
-      actions.setEdges(newEdges)
-      actions.setNodes(newNodes)
-      if (newNodes.length > 0) {
-        window.setTimeout(() => {
-          window.requestAnimationFrame(() => {
-            props.updateNodeInternals?.(newNodes.map((n) => n.id))
-          })
-        }, 100)
-      }
+      actions.setEdges(remainingEdges)
+      actions.updateNodeData(nodeId, { codeArgs: codeArgs.filter((f) => f.name !== field) })
+      window.requestAnimationFrame(() => {
+        props.updateNodeInternals?.(nodeId)
+      })
     },
   })),
 ])

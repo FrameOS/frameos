@@ -1,6 +1,6 @@
 import { MakeLogicType, actions, connect, events, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
-import { frameLogic } from '../../frameLogic'
+import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { FrameScene, FrameId } from '../../../../types'
 import type { FrameType } from '../../../../types'
 
@@ -145,16 +145,30 @@ export const sceneJSONLogic = kea<sceneJSONLogicType>([
         if (!props.sceneId) {
           return
         }
-        const { id: _, default: __, name, ...scene } = JSON.parse(values.sceneJSON)
-        actions.updateScene(props.sceneId, {
-          id: props.sceneId,
-          name,
-          ...(values.scene?.default ? { default: true } : {}),
-          ...scene,
-        })
+        const parsed: unknown = JSON.parse(values.sceneJSON)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('A scene is a JSON object')
+        }
+        const { id: _, default: __, name, ...scene } = parsed as Partial<FrameScene>
+        // Hand-typed JSON is as untrusted as an imported file: a node without a
+        // `position` takes reactflow down, so it goes through the same
+        // sanitizer inbound scenes do. The backend's frameLogic sanitizes in
+        // updateScene as well; the embedded editor's shim does not.
+        actions.updateScene(
+          props.sceneId,
+          sanitizeScene(
+            {
+              id: props.sceneId,
+              name,
+              ...(values.scene?.default ? { default: true } : {}),
+              ...scene,
+            },
+            values.frameForm
+          )
+        )
         actions.setEditedSceneJSON(null)
-      } catch {
-        console.error('Cannot save invalid JSON')
+      } catch (error) {
+        console.error('Cannot save invalid JSON', error)
       }
     },
   })),

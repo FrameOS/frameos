@@ -42,7 +42,28 @@ function renderOption(option: SelectOption): JSX.Element {
   )
 }
 
+function optionValues(options: SelectOptionEntry[]): Set<string> {
+  const values = new Set<string>()
+  for (const option of options) {
+    if (isOptionGroup(option)) {
+      option.options.forEach((entry) => values.add(String(entry.value)))
+    } else {
+      values.add(String(option.value))
+    }
+  }
+  return values
+}
+
 export function Select({ className, onChange, options, theme, value, ...props }: SelectProps) {
+  // A native <select> whose value matches no <option> shows the first option
+  // while the form still holds the old value: a field pointing at a scene or
+  // state key that was renamed looked like it had picked the first entry, and
+  // saving kept the stale one. Show the stored value instead, so what the user
+  // sees is what gets saved.
+  // An empty string is the placeholder idiom ("nothing chosen") and is left
+  // to the browser.
+  const stored = value === null || value === undefined || Array.isArray(value) ? '' : String(value)
+  const missing = stored !== '' && !optionValues(options).has(stored)
   return (
     <select
       className={clsx(
@@ -56,6 +77,11 @@ export function Select({ className, onChange, options, theme, value, ...props }:
       {...(value === null ? { value: '' } : value !== undefined ? { value } : {})}
       {...props}
     >
+      {missing ? (
+        <option key={`missing:${stored}`} value={stored}>
+          {`${stored} (not an option)`}
+        </option>
+      ) : null}
       {options.map((option) =>
         isOptionGroup(option) ? (
           <optgroup key={option.label} label={option.label}>
