@@ -1,4 +1,4 @@
-import { lazy, LazyExoticComponent, Suspense } from 'react'
+import { lazy, type ComponentType, type LazyExoticComponent, Suspense } from 'react'
 import { useValues } from 'kea'
 
 import { AccountHeader } from '../components/AccountHeader'
@@ -33,7 +33,7 @@ const PreviewKeyConsentModal = lazy(() =>
 // scrollbar — that is what would break the drawers' sizing.
 export function App(): JSX.Element {
   const { scene, params } = useValues(sceneLogic)
-  const SceneComponent: (() => JSX.Element) | LazyExoticComponent<any> =
+  const SceneComponent: ComponentType<any> | LazyExoticComponent<any> =
     scenes[scene as keyof typeof scenes] || scenes.error404
 
   return (

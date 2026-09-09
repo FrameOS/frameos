@@ -2,7 +2,9 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
-import { frameToolDefinitions, frameToolDefinitionsForMode, type FrameToolDefinition } from './frameToolDefinitions'
+import { frameToolDefinitionsForMode, type FrameToolDefinition } from './frameToolDefinitions'
+import { frameToolNotFoundMessage, resolveFrameToolRoute, type FrameToolRouteResolution } from './frameToolRoute'
+import { NotFoundContent } from '../NotFound'
 import {
   frameCheckin,
   frameCheckinDescription,
@@ -28,7 +30,7 @@ import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import {
-  frameToolFromPathname,
+  frameToolSegmentFromPathname,
   frameToolScrollKey,
   isMobileWorkspaceViewport,
   workspaceLogic,
@@ -227,22 +229,51 @@ function frameToolInitialScrollTop(
 }
 
 // The tool the URL asks for: /frames/<id>/<tool>, or `?tool=` on an old
-// link. Unknown or disabled tools fall back to the overview.
-function frameToolPanelFromRoute(
+// link, resolved against the control plane's allow-list and the frame's
+// device profile (frameToolRoute.ts). A tool this mode does not implement is
+// a 404 and a tool the device cannot serve is an explanation — neither is a
+// silent overview any more, which is what /frames/<id>/terminal on the cloud
+// used to render.
+function frameToolRouteFromLocation(
   pathname: string,
   searchParams: Record<string, unknown>,
   frameId: FrameId | null,
-  availableDefinitions: FrameToolDefinition[] = frameToolDefinitions
-): WorkspaceUtilityPanel | null {
-  const fromPath = frameId !== null ? frameToolFromPathname(pathname, frameId) : null
+  mode: WorkspaceMode,
+  frame?: FrameType | null
+): FrameToolRouteResolution {
+  const fromPath = frameId !== null ? frameToolSegmentFromPathname(pathname, frameId) : null
   const value = searchParams.tool
-  const tool = fromPath ?? (Array.isArray(value) ? value[0] : value)
-  if (!tool) {
-    return 'overview'
-  }
-  return typeof tool === 'string' && availableDefinitions.some((definition) => definition.panel === tool)
-    ? (tool as WorkspaceUtilityPanel)
-    : 'overview'
+  const segment = fromPath ?? (Array.isArray(value) ? value[0] : value)
+  return resolveFrameToolRoute(segment, mode, frame)
+}
+
+function FrameToolNotFound({ segment, mode }: { segment: string; mode: WorkspaceMode }): JSX.Element {
+  const { location } = useValues(router)
+  return (
+    <div className="flex min-h-[32rem] items-center justify-center">
+      <NotFoundContent path={location.pathname} message={frameToolNotFoundMessage(segment, mode)} />
+    </div>
+  )
+}
+
+function FrameToolDisabled({
+  definition,
+  frameId,
+  reason,
+}: {
+  definition: FrameToolDefinition | undefined
+  frameId: FrameId
+  reason: string
+}): JSX.Element {
+  return (
+    <div className="flex min-h-[32rem] items-center justify-center">
+      <NotFoundContent
+        title={`${definition?.label ?? 'This tool'} is not available for this frame`}
+        message={reason}
+        link={{ href: urls.frame(frameId), label: 'Back to the frame' }}
+      />
+    </div>
+  )
 }
 
 const allFrameSettingsSections = [
@@ -1372,7 +1403,8 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   // user inside one.
   const availableToolDefinitions = frameToolDefinitionsForMode(mode, frame)
   const enabledToolDefinitions = availableToolDefinitions.filter((definition) => !definition.disabledReason)
-  const requestedPanel = frameToolPanelFromRoute(location.pathname, searchParams, frameId, enabledToolDefinitions)
+  const toolRoute = frameToolRouteFromLocation(location.pathname, searchParams, frameId, mode, frame)
+  const requestedPanel = toolRoute.kind === 'panel' ? toolRoute.panel : null
   const fallbackPanel = enabledToolDefinitions.some((definition) => definition.panel === utilityPanel)
     ? utilityPanel
     : 'overview'
@@ -1380,13 +1412,16 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
     enabledToolDefinitions.find((definition) => definition.panel === (requestedPanel ?? fallbackPanel)) ??
     enabledToolDefinitions[0]
   const activeToolPanel = activeTool.panel
+  // The rail highlights the tool the URL names even when the device profile
+  // has it disabled — that is the entry whose tooltip explains the page.
+  const railToolPanel = toolRoute.kind === 'disabled' ? toolRoute.panel : activeToolPanel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
   const lastObservedFrameToolScrollTopRef = useRef(0)
   const visibleScenes = scenes
   const frameLoaded = !!frame
   const toolUsesSearch = false
-  const toolUsesPageScroll = frameToolUsesPageScroll(activeToolPanel)
+  const toolUsesPageScroll = toolRoute.kind === 'panel' ? frameToolUsesPageScroll(activeToolPanel) : true
 
   frameToolScrollPositionsRef.current = frameToolScrollPositions
 
@@ -1492,7 +1527,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
             <FrameTree
               frame={frame}
               frames={framesList}
-              activeTool={activeToolPanel}
+              activeTool={railToolPanel}
               toolDefinitions={availableToolDefinitions}
               unsavedChanges={unsavedChanges}
               undeployedChanges={undeployedChanges}
@@ -1520,13 +1555,23 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
                   : 'overflow-y-auto'
               )}
             >
-              <FrameToolSurface
-                activeTool={activeToolPanel}
-                frame={frame}
-                scenes={visibleScenes}
-                totalScenes={scenes.length}
-                pageScroll={toolUsesPageScroll}
-              />
+              {toolRoute.kind === 'notFound' ? (
+                <FrameToolNotFound segment={toolRoute.segment} mode={mode} />
+              ) : toolRoute.kind === 'disabled' ? (
+                <FrameToolDisabled
+                  definition={availableToolDefinitions.find((definition) => definition.panel === toolRoute.panel)}
+                  frameId={frameId}
+                  reason={toolRoute.reason}
+                />
+              ) : (
+                <FrameToolSurface
+                  activeTool={activeToolPanel}
+                  frame={frame}
+                  scenes={visibleScenes}
+                  totalScenes={scenes.length}
+                  pageScroll={toolUsesPageScroll}
+                />
+              )}
             </div>
           </div>
         </FrameosShell>
@@ -1541,7 +1586,6 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
   const { location, searchParams } = useValues(router)
-  const availableToolDefinitions = frameToolDefinitionsForMode()
   const routeFrameId = parseFrameId(id)
   const firstFrame =
     (routeFrameId ? framesList.find((frame) => frameIdsEqual(frame.id, routeFrameId)) : null) ??
@@ -1551,8 +1595,8 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     null
 
   if (!firstFrame && framesLoading) {
-    const loadingTool =
-      frameToolPanelFromRoute(location.pathname, searchParams, routeFrameId, availableToolDefinitions) ?? 'overview'
+    const loadingRoute = frameToolRouteFromLocation(location.pathname, searchParams, routeFrameId, workspaceMode())
+    const loadingTool = loadingRoute.kind === 'panel' ? loadingRoute.panel : 'overview'
     const loadingToolUsesPageScroll = frameToolUsesPageScroll(loadingTool)
 
     return (

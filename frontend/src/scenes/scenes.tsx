@@ -3,12 +3,13 @@ import { urls } from '../urls'
 import { getRouteBasePath } from '../utils/getBasePath'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
 import { isCloudMode } from '../utils/cloudMode'
+import { NotFound } from './NotFound'
 
 export type SceneComponent = ComponentType<Record<string, any>>
 
-export function Error404(): JSX.Element {
-  return <div>404</div>
-}
+// One 404 for every shell — see NotFound.tsx. Kept under this name so the
+// scene table and App.tsx's load-failure fallback keep their imports.
+export const Error404 = NotFound
 
 const sceneLoaders = {
   frames: () => import('./frames/Frames'),
@@ -100,4 +101,4 @@ export const getRoutes = () =>
     [urls.setupUnavailable()]: 'setupUnavailable',
     [urls.frame(':id')]: 'frame',
     [urls.frame(':id', ':tool')]: 'frame',
-  }) as const
+  } as const)

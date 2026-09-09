@@ -28,6 +28,7 @@ import {
   workspaceMode,
   type FrameMenuAction,
 } from './workspaceSurfaces'
+import { frameDeleteCopy } from './frameDeleteCopy'
 
 interface FrameActionsMenuProps {
   frame: FrameType
@@ -68,6 +69,11 @@ export function FrameActionsMenu({
   // hidden because there is no device — see workspaceSurfaces.ts.
   const mode = workspaceMode()
   const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action, frame)
+  // "Delete" is a different act per control plane (frameDeleteCopy.ts): the
+  // backend drops the frame and its scenes, the cloud unlinks a device that
+  // keeps running. The words come from the same allow-list module as the
+  // verbs, so the copy cannot describe an Archive the mode does not have.
+  const deleteCopy = frameDeleteCopy(mode)
   const disabledReason = (action: FrameMenuAction): string | null => frameMenuActionDisabledReason(mode, action, frame)
   const renameDisabledReason = disabledReason('rename')
 
@@ -217,8 +223,8 @@ export function FrameActionsMenu({
           ? [
               {
                 label: 'Delete frame',
-                title: 'Permanently delete this frame and all of its scenes',
-                confirm: `Delete the frame "${frameName}" and all of its scenes? This cannot be undone. (Archive it instead to hide it without losing anything.)`,
+                title: deleteCopy.title,
+                confirm: deleteCopy.confirm(frameName),
                 onClick: () => deleteFrame(frame.id),
                 icon: <TrashIcon className="h-5 w-5" />,
               },
