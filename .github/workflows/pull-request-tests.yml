@@ -404,7 +404,7 @@ jobs:
           git status --short e2e/snapshots
 
       - name: Commit visual regression snapshots
-        uses: EndBug/add-and-commit@v9
+        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5 # v9.1.4 — SHA-pinned: a tag can be moved, and this job holds a write token
         with:
             add: 'e2e/snapshots/**'
             author_name: FrameOS Bot
@@ -617,7 +617,7 @@ jobs:
           git status --short e2e/frontend-visual/snapshots
 
       - name: Commit frontend visual snapshots
-        uses: EndBug/add-and-commit@v9
+        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5 # v9.1.4 — SHA-pinned: a tag can be moved, and this job holds a write token
         with:
             add: 'e2e/frontend-visual/snapshots/**'
             author_name: FrameOS Bot

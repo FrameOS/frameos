@@ -163,6 +163,11 @@ jobs:
                 embedded/esp32/main/fos_cloud_contract.c embedded/esp32/main/tests/test_fos_cloud_contract.c \
                 -lm -o /tmp/test_fos_cloud_contract
               /tmp/test_fos_cloud_contract /fixtures/cloud-frames-fixtures.json
+              # The JSON depth pre-scan that guards the 8-10 KB parser tasks.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
+                -o /tmp/test_fos_json_guard
+              /tmp/test_fos_json_guard
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.
