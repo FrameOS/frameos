@@ -1518,6 +1518,58 @@ describe("inbound size limits", () => {
     expect(await device.closed).toBe(1009);
   });
 
+  it("fails a queued command the device could never assemble, and keeps draining", async () => {
+    // The device drops the socket on any frame over maxPayloadBytes, so an
+    // oversized command used to loop: send → close → reconnect → redeliver.
+    // It is now failed in place; the small command queued behind it still
+    // goes out on the same socket.
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    const oversized = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { scenes: [{ blob: "x".repeat(maxPayloadBytes) }] },
+      type: "set_scenes",
+    });
+    const small = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { scene_id: "scene-a" },
+      type: "set_current_scene",
+    });
+
+    const delivered = await device.next(
+      (msg) => msg.id === small?.id,
+      "the small command behind the oversized one",
+    );
+    expect(delivered.type).toBe("set_current_scene");
+
+    const [row] = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.id, String(oversized?.id)));
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toBe("payload_too_large");
+    expect(row?.sentAt).toBeNull();
+    expect(device.ws.readyState).toBe(WebSocket.OPEN);
+
+    // Nothing to redeliver on the next connect: failed is terminal (the
+    // small one is acked so at-least-once redelivery has nothing to requeue).
+    device.send({ id: small?.id, ok: true, type: "ack" });
+    await waitFor(async () => {
+      const [acked] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.id, String(small?.id)));
+      return acked?.status === "acked" ? acked : undefined;
+    }, "small command acked");
+    device.ws.close();
+    const second = await openDevice(token);
+    const ready = await handshake(second, privateKey);
+    expect(ready.pending_commands).toBe(0);
+    second.ws.close();
+  });
+
   it("rejects an oversized state and keeps the last good one", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     const device = await openDevice(token);

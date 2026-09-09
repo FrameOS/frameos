@@ -605,7 +605,34 @@ export async function startFrameHub(
             });
             return;
           }
-          session.ws.send(JSON.stringify(commandMessage(command)));
+          // The device caps what it will assemble at maxPayloadBytes
+          // (HubMaxInboundBytes in hub_client.nim, the same number) and drops
+          // the socket on a bigger frame. Sending one anyway would go: send →
+          // device closes → reconnect → redeliverSentCommands requeues it →
+          // send again, forever, with every other command behind it stuck.
+          // Fail the row instead, where the owner can see it.
+          const message = JSON.stringify(commandMessage(command));
+          const messageBytes = Buffer.byteLength(message, "utf8");
+          if (messageBytes > maxPayloadBytes) {
+            logWarn("command.payload_too_large", {
+              bytes: messageBytes,
+              commandId: command.id,
+              frameId: session.frame.id,
+              limit: maxPayloadBytes,
+              type: command.type,
+            });
+            await db
+              .update(frameCommands)
+              .set({ error: "payload_too_large", status: "failed" })
+              .where(
+                and(
+                  eq(frameCommands.id, command.id),
+                  eq(frameCommands.status, "pending"),
+                ),
+              );
+            continue;
+          }
+          session.ws.send(message);
           await db
             .update(frameCommands)
             .set({ sentAt: new Date(), status: "sent" })
@@ -2190,11 +2217,24 @@ export async function startFrameHub(
   // Fallback sweep in case a NOTIFY was missed, plus global expiry of
   // pending/sent commands whose TTL passed while no one was draining them,
   // plus the browser-session revocation recheck.
+  //
+  // One session's failure (a database error mid-drain, a socket that went
+  // away between the readyState check and the write) must not skip the wake
+  // of every session after it in iteration order — the sweep is the fallback
+  // for a missed NOTIFY, so a frame skipped here waits a whole interval.
   async function runSweep() {
     await expireStaleCommands();
     for (const session of deviceSessions.values()) {
-      if (session.ready) {
+      if (!session.ready) {
+        continue;
+      }
+      try {
         await wakeSession(session);
+      } catch (error) {
+        logError("sweep.wake_failed", {
+          error: errorField(error),
+          frameId: session.frame.id,
+        });
       }
     }
     await closeRevokedBrowserSockets();
