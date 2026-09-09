@@ -73,6 +73,7 @@ import {
   type FrameSyncChoices,
   type SummaryItem,
   frameSyncChangeKey,
+  deviceUpgradeInFlight,
 } from '../frame/frameLogic'
 import {
   buildRemoteUpgradeNotice,
@@ -937,10 +938,23 @@ function ShellLessFrameSection({
   onCheck: () => void
   onUpgrade: () => void
 }): JSX.Element {
-  const inFlight =
-    Boolean(status?.status) &&
-    !['success', 'reboot_required', 'failed', 'up_to_date', 'idle'].includes(String(status?.status))
+  const inFlight = deviceUpgradeInFlight(status)
   const updateAvailable = status?.update_available === true
+  // upgrade-status.json on the device is the record of its LAST upgrade run
+  // and stays there for good, so a finished run is history, not the answer
+  // to "Check for updates": it is shown dated, below the current
+  // up-to-date / update-available line, and an "up_to_date" record from a
+  // past check is dropped once a newer release exists (the two would
+  // contradict each other on one screen).
+  const finishedRun =
+    status &&
+    !inFlight &&
+    status.status &&
+    status.status !== 'idle' &&
+    !(status.status === 'up_to_date' && updateAvailable)
+      ? status
+      : null
+  const finishedAt = finishedRun ? String(finishedRun.finished_at ?? finishedRun.updated_at ?? '') : ''
   const buttonClass =
     'frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
   return (
@@ -960,13 +974,19 @@ function ShellLessFrameSection({
               <span className="frame-tool-muted">
                 {' '}
                 · latest {status.latest_version}
-                {updateAvailable ? ' — update available' : status.status === 'idle' ? ' — up to date' : ''}
+                {updateAvailable ? ' — update available' : inFlight ? '' : ' — up to date'}
               </span>
             ) : null}
-            {status.status && status.status !== 'idle' ? (
+            {inFlight ? (
               <div className="frame-tool-muted mt-1">
                 {status.status}
                 {status.message ? `: ${status.message}` : ''}
+              </div>
+            ) : finishedRun ? (
+              <div className="frame-tool-muted mt-1">
+                Last upgrade{finishedAt ? ` (${finishedAt.replace('T', ' ').replace(/Z$/, ' UTC')})` : ''}:{' '}
+                {finishedRun.status}
+                {finishedRun.message ? ` — ${finishedRun.message}` : ''}
               </div>
             ) : null}
             {status.latest_error ? <div className="mt-1 text-amber-600">{status.latest_error}</div> : null}

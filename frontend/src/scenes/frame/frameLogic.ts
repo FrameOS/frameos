@@ -213,7 +213,14 @@ export interface DeviceUpgradeStatus {
 }
 
 // frameos/upgrade.nim UpgradeTerminalStatuses: anything else is in flight.
-const DEVICE_UPGRADE_TERMINAL_STATUSES = ['success', 'reboot_required', 'failed', 'up_to_date', 'idle']
+export const DEVICE_UPGRADE_TERMINAL_STATUSES = ['success', 'reboot_required', 'failed', 'up_to_date', 'idle']
+// 5 s polls: how long a running upgrade may go unanswered (the runtime
+// restarting, a reboot) before the watch gives up.
+const DEVICE_UPGRADE_MAX_POLL_FAILURES = 36
+
+export function deviceUpgradeInFlight(status: DeviceUpgradeStatus | null | undefined): boolean {
+  return Boolean(status?.status) && !DEVICE_UPGRADE_TERMINAL_STATUSES.includes(String(status?.status))
+}
 
 function frameHasSyncCredentials(frame: FrameType | null): boolean {
   const frameAdminAuth = frame?.frame_admin_auth
@@ -893,7 +900,7 @@ function withServiceKeyFingerprints(
   const fingerprints = frame?.settings_fingerprints
   return fingerprints && !frameForm?.settings_fingerprints
     ? { ...(frameForm ?? {}), settings_fingerprints: fingerprints }
-    : (frameForm ?? {})
+    : frameForm ?? {}
 }
 
 export function serviceKeysChangeDetail(
@@ -921,6 +928,14 @@ function computeChangeDetails(
     includeFrameosVersion = false
   }
   const previousFrameosVersion = includeFrameosVersion ? deployedFrameosVersion(previous) : null
+  // ...but a release the frame has not installed yet is still something
+  // waiting on it, so the change indicator lights up and the drawer names
+  // it — the frame installs it itself ("Update FrameOS" in the drawer), and
+  // the row learns the new version from the device (the upgrade status it
+  // answers, its bootup line), never from a fast deploy.
+  const shellLessDeviceVersion = shellLess ? deployedFrameosVersion(previous) : null
+  const shellLessUpdateWaiting =
+    shellLess && Boolean(shellLessDeviceVersion) && frameosVersionRequiresDeploy(shellLessDeviceVersion)
 
   for (const key of frameDiffKeys().filter((k) => k !== 'scenes')) {
     if (shellLess && SHELL_LESS_BACKEND_ONLY_KEYS.has(key)) {
@@ -947,6 +962,18 @@ function computeChangeDetails(
       frameosVersionChange: {
         kind: 'upgrade',
         previousVersion: previousFrameosVersion,
+        currentVersion: CURRENT_FRAMEOS_VERSION,
+      },
+    })
+  }
+
+  if (shellLessUpdateWaiting) {
+    details.push({
+      label: `FrameOS ${shellLessDeviceVersion} -> ${CURRENT_FRAMEOS_VERSION} (the frame installs it itself: Update FrameOS)`,
+      requiresFullDeploy: false,
+      frameosVersionChange: {
+        kind: 'upgrade',
+        previousVersion: shellLessDeviceVersion,
         currentVersion: CURRENT_FRAMEOS_VERSION,
       },
     })
@@ -1965,6 +1992,7 @@ export interface frameLogicValues {
   deployWithAgent: boolean
   deviceUpgradeError: string | null
   deviceUpgradeLoading: boolean
+  deviceUpgradePollFailures: number
   deviceUpgradeStatus: DeviceUpgradeStatus | null
   fastDeployPlan: DeployPlanResponse | null
   fastDeployPlanSummary: SummaryItem[]
@@ -2059,6 +2087,9 @@ export interface frameLogicActions {
   ) => {
     recompile: boolean
     transport: RemoteTaskTransport
+  }
+  deviceUpgradePollFailed: () => {
+    value: true
   }
   fastDeployFrame: () => {
     value: true
@@ -2404,6 +2435,7 @@ export const frameLogic = kea<frameLogicType>([
     loadDeviceUpgradeStatus: (check: boolean = false) => ({ check }),
     loadDeviceUpgradeStatusSuccess: (status: DeviceUpgradeStatus) => ({ status }),
     loadDeviceUpgradeStatusFailure: (error: string) => ({ error }),
+    deviceUpgradePollFailed: true,
     startDeviceUpgrade: true,
     startDeviceUpgradeSuccess: (status: DeviceUpgradeStatus) => ({ status }),
     startDeviceUpgradeFailure: (error: string) => ({ error }),
@@ -2520,6 +2552,14 @@ export const frameLogic = kea<frameLogicType>([
       {
         loadDeviceUpgradeStatusSuccess: (_, { status }) => status,
         startDeviceUpgradeSuccess: (_, { status }) => status,
+      },
+    ],
+    deviceUpgradePollFailures: [
+      0,
+      {
+        deviceUpgradePollFailed: (state) => state + 1,
+        loadDeviceUpgradeStatusSuccess: () => 0,
+        startDeviceUpgrade: () => 0,
       },
     ],
     deviceUpgradeLoading: [
@@ -2807,17 +2847,42 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     loadDeviceUpgradeStatus: async ({ check }, breakpoint) => {
-      const response = await apiFetch(`/api/frames/${values.frameId}/device/upgrade${check ? '?check=1' : ''}`)
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        actions.loadDeviceUpgradeStatusFailure(getResponseDetail(payload) ?? 'Could not read the upgrade status')
+      const wasInFlight = deviceUpgradeInFlight(values.deviceUpgradeStatus)
+      let response: Response | null = null
+      let payload: Record<string, unknown> = {}
+      try {
+        response = await apiFetch(`/api/frames/${values.frameId}/device/upgrade${check ? '?check=1' : ''}`)
+        payload = await response.json().catch(() => ({}))
+      } catch {
+        response = null
+      }
+      if (!response || !response.ok) {
+        // While an upgrade runs the frame restarts its services (a refused
+        // connection for a few seconds) and the backend may answer 502 for
+        // the same reason: keep watching for a couple of minutes before
+        // giving up, instead of ending the watch on the first blip.
+        if (wasInFlight && values.deviceUpgradePollFailures < DEVICE_UPGRADE_MAX_POLL_FAILURES) {
+          actions.deviceUpgradePollFailed()
+          await breakpoint(5000)
+          actions.loadDeviceUpgradeStatus(false)
+          return
+        }
+        actions.loadDeviceUpgradeStatusFailure(
+          (payload && getResponseDetail(payload)) ?? 'Could not read the upgrade status'
+        )
         return
       }
       actions.loadDeviceUpgradeStatusSuccess(payload as DeviceUpgradeStatus)
-      if (!DEVICE_UPGRADE_TERMINAL_STATUSES.includes(String(payload?.status ?? 'idle'))) {
+      if (deviceUpgradeInFlight(payload as DeviceUpgradeStatus)) {
         // Still downloading / verifying / installing: keep watching.
         await breakpoint(5000)
         actions.loadDeviceUpgradeStatus(false)
+      } else if (wasInFlight) {
+        // The upgrade just finished: the backend recorded the version the
+        // frame now reports, so the row and the deploy plan (its "FrameOS
+        // a -> b" line, the change indicator) must be re-read.
+        framesModel.actions.loadFrame(values.frameId)
+        actions.loadDeployPlans()
       }
     },
     startDeviceUpgrade: async (_, breakpoint) => {
@@ -3058,10 +3123,8 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode
           ? []
           : lastDeploy
-            ? sortDeployChangeDetails(
-                deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode)
-              )
-            : firstDeployChangeDetails(frameForm, mode),
+          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode))
+          : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],

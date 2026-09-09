@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import copy
+import hashlib
 from datetime import datetime, timezone
 from http import HTTPStatus
 import json
@@ -748,7 +749,15 @@ def _frame_sync_snapshot(frame: Frame) -> dict[str, Any]:
     snapshot.pop("last_successful_deploy", None)
     snapshot.pop("last_successful_deploy_at", None)
     frameos_version = current_frameos_version()
-    if isinstance(frameos_version, str) and frameos_version:
+    previous = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else {}
+    device_reported = previous.get("frameos_version")
+    if not frame_has_shell_access(frame) and isinstance(device_reported, str) and device_reported:
+        # A sync over the admin API installs no FrameOS: the baseline keeps
+        # the version the device last reported (upgrade status, bootup line)
+        # rather than claiming the backend's own — after one fast deploy a
+        # 2026.9.11 card read as 2026.9.12 here.
+        snapshot["frameos_version"] = device_reported
+    elif isinstance(frameos_version, str) and frameos_version:
         snapshot["frameos_version"] = frameos_version
     return snapshot
 
@@ -816,11 +825,10 @@ def _restore_write_only_secrets(remote_frame: dict[str, Any], backend_frame: Fra
 async def _load_live_frame_api_payload(
     frame: Frame, redis: Redis, fetch_frame_http_bytes: FrameFetch
 ) -> dict[str, Any]:
-    headers = await _frame_admin_session_headers(frame, redis, fetch_frame_http_bytes)
     last_status = 0
     last_body = b""
     for path in ("/api/frames/1", f"/api/frames/{frame.id}", "/api/frames"):
-        status, body, _headers = await fetch_frame_http_bytes(frame, redis, path=path, headers=headers)
+        status, body, _headers = await _frame_admin_request(frame, redis, fetch_frame_http_bytes, path=path)
         last_status = status
         last_body = body
         if status != 200:
@@ -852,9 +860,32 @@ def _frame_error_detail(body: bytes) -> str:
     return ""
 
 
+# A device admin session lives a day (frameos/server/auth.nim
+# ADMIN_SESSION_TTL_SECONDS); the cached cookie is kept well under that and
+# dropped the moment the device answers 401/403 (a rotated password, a
+# restarted device with a new session key), see _frame_admin_request.
+FRAME_ADMIN_SESSION_CACHE_TTL_SECONDS = 6 * 60 * 60
+
+
+def _frame_admin_session_cache_key(frame: Frame) -> str:
+    auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    # The credentials are part of the key so a changed login never reuses the
+    # session the old one opened.
+    fingerprint = hashlib.sha256(
+        json.dumps([frame.frame_host, frame.frame_port, auth.get("user"), auth.get("pass")], default=str).encode()
+    ).hexdigest()[:16]
+    return f"frame:{frame.id}:admin_session:{fingerprint}"
+
+
 async def _frame_admin_session_headers(
-    frame: Frame, redis: Redis, fetch_frame_http_bytes: FrameFetch
+    frame: Frame, redis: Redis, fetch_frame_http_bytes: FrameFetch, *, fresh: bool = False
 ) -> dict[str, str]:
+    """The Cookie header for the frame's admin API. One login opens a
+    session the device honours for a day, so the cookie is cached: the deploy
+    drawer polls an upgrade every few seconds, the device allows ten logins
+    per five minutes per client address, and logging in on every poll ran
+    into that limiter ("Frame admin login failed: 429 Too many login
+    attempts") about a minute into every upgrade. `fresh` skips the cache."""
     auth = normalize_frame_admin_auth(frame.frame_admin_auth)
     username = str(auth.get("user") or "").strip()
     password = str(auth.get("pass") or "").strip()
@@ -863,6 +894,15 @@ async def _frame_admin_session_headers(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Frame admin credentials are required before syncing from the backend",
         )
+    cache_key = _frame_admin_session_cache_key(frame)
+    if not fresh:
+        try:
+            cached = await redis.get(cache_key)
+        except Exception:  # noqa: BLE001 - the cache is an optimisation
+            cached = None
+        if isinstance(cached, (bytes, str)) and cached:
+            cookie = cached.decode("utf-8") if isinstance(cached, bytes) else cached
+            return {"Cookie": cookie}
     status, body, headers = await fetch_frame_http_bytes(
         frame,
         redis,
@@ -880,7 +920,43 @@ async def _frame_admin_session_headers(
     if not set_cookie:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Frame admin login did not return a session")
     cookie = set_cookie.split(";", 1)[0]
+    try:
+        await redis.set(cache_key, cookie, ex=FRAME_ADMIN_SESSION_CACHE_TTL_SECONDS)
+    except Exception:  # noqa: BLE001 - the cache is an optimisation
+        pass
     return {"Cookie": cookie}
+
+
+async def _forget_frame_admin_session(frame: Frame, redis: Redis) -> None:
+    try:
+        await redis.delete(_frame_admin_session_cache_key(frame))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _frame_admin_request(
+    frame: Frame,
+    redis: Redis,
+    fetch_frame_http_bytes: FrameFetch,
+    *,
+    path: str,
+    method: str = "GET",
+    body: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, bytes, dict[str, str]]:
+    """One request against the frame's admin API with the cached session; a
+    401/403 drops the cached cookie, logs in again and retries once."""
+    auth_headers = await _frame_admin_session_headers(frame, redis, fetch_frame_http_bytes)
+    status, response_body, response_headers = await fetch_frame_http_bytes(
+        frame, redis, path=path, method=method, body=body, headers={**(headers or {}), **auth_headers}
+    )
+    if status in (401, 403):
+        await _forget_frame_admin_session(frame, redis)
+        auth_headers = await _frame_admin_session_headers(frame, redis, fetch_frame_http_bytes, fresh=True)
+        status, response_body, response_headers = await fetch_frame_http_bytes(
+            frame, redis, path=path, method=method, body=body, headers={**(headers or {}), **auth_headers}
+        )
+    return status, response_body, response_headers
 
 
 def _frame_sync_baseline(frame: Frame, backend_frame: dict[str, Any]) -> dict[str, Any]:
@@ -1233,14 +1309,14 @@ async def _push_frame_sync_payload(
             **({"skip_runtime_reload": True} if not reload_runtime else {}),
         }
     )
-    auth_headers = await _frame_admin_session_headers(frame, redis, fetch_frame_http_bytes)
-    status, response_body, _headers = await fetch_frame_http_bytes(
+    status, response_body, _headers = await _frame_admin_request(
         frame,
         redis,
+        fetch_frame_http_bytes,
         path="/api/frames/1",
         method="POST",
         body=body,
-        headers={**auth_headers, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
     )
     if status != 200:
         raise HTTPException(

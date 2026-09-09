@@ -23,6 +23,7 @@ export default tseslint.config(
       // package tsconfig for its pre-strict FrameEvent typing; the project
       // service therefore cannot parse it. Vitest still runs it.
       "**/src/test/shared-spa/duplicate-scenes.test.ts",
+      "**/src/test/shared-spa/frame-secrets-mirror.test.ts",
       // Same exclusion, same reason: mounts the real framesModel, whose
       // import graph reaches the legacy workspace components.
       "**/src/test/shared-spa/cloud-scene-deploy.test.ts",

@@ -3646,6 +3646,102 @@ async def test_api_frame_device_upgrade_relays_the_frames_own_upgrade(async_clie
 
 
 @pytest.mark.asyncio
+async def test_api_frame_device_admin_session_is_cached_and_reopened_on_401(async_client, db, redis):
+    """The deploy drawer polls an upgrade every 5 s and the device allows ten
+    admin logins per five minutes: one login must serve every poll, and a
+    session the device no longer honours is reopened once, not surfaced."""
+    payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
+    logins = []
+    reject_next = {'count': 0}
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            logins.append(json.loads(body))
+            return 200, b'{"status":"ok"}', {'set-cookie': f'frame_admin_session=s{len(logins)}; Path=/'}
+        if path.startswith('/api/upgrade/status'):
+            if reject_next['count'] > 0:
+                reject_next['count'] -= 1
+                return 401, b'{"detail":"Not authenticated"}', {'content-type': 'application/json'}
+            assert headers and headers.get('Cookie', '').startswith('frame_admin_session=s')
+            return 200, json.dumps({'status': 'running', 'current_version': '2026.9.11'}).encode(), {}
+        if method == 'POST':
+            return 200, b'{"message":"ok"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': payload}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        adopted = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+        assert adopted.status_code == 200, adopted.text
+        frame_id = adopted.json()['frame']['id']
+        logins_after_adopt = len(logins)
+
+        for _ in range(12):
+            status = await async_client.get(f'/api/frames/{frame_id}/device/upgrade')
+            assert status.status_code == 200, status.text
+        assert len(logins) == logins_after_adopt, "twelve polls reused the session the adoption opened"
+
+        reject_next['count'] = 1
+        status = await async_client.get(f'/api/frames/{frame_id}/device/upgrade')
+        assert status.status_code == 200, status.text
+        assert len(logins) == logins_after_adopt + 1, "a 401 reopens the session exactly once"
+
+        # A rotated password never reuses the old session.
+        db.expire_all()
+        frame = db.get(Frame, frame_id)
+        frame.frame_admin_auth = {**frame.frame_admin_auth, 'pass': 'rotated'}
+        db.commit()
+        status = await async_client.get(f'/api/frames/{frame_id}/device/upgrade')
+        assert status.status_code == 200, status.text
+        assert logins[-1]['password'] == 'rotated'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_device_upgrade_status_records_the_version_the_frame_reports(async_client, db, redis):
+    """A shell-less card upgrades itself; the row's deploy baseline learns
+    the new version from the status it answers, so the drawer stops saying
+    "2026.9.11 -> 2026.9.12" once the frame is on 2026.9.12. A fast deploy
+    over the admin API must not overwrite it with the backend's version."""
+    payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
+    device_version = {'value': '2026.9.11'}
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        if path.startswith('/api/upgrade/status'):
+            return 200, json.dumps({'status': 'success', 'current_version': device_version['value'],
+                                    'update_available': False}).encode(), {}
+        if method == 'POST':
+            return 200, b'{"message":"ok"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': payload}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        adopted = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+        assert adopted.status_code == 200, adopted.text
+        frame_id = adopted.json()['frame']['id']
+        db.expire_all()
+        frame = db.get(Frame, frame_id)
+        frame.last_successful_deploy = {**(frame.last_successful_deploy or {}), 'frameos_version': '2026.9.11'}
+        db.commit()
+
+        device_version['value'] = '2026.9.12'
+        status = await async_client.get(f'/api/frames/{frame_id}/device/upgrade')
+        assert status.status_code == 200, status.text
+        db.expire_all()
+        frame = db.get(Frame, frame_id)
+        assert frame.last_successful_deploy['frameos_version'] == '2026.9.12'
+        # The rest of the baseline is untouched by a version report.
+        assert frame.last_successful_deploy['name'] == 'Kitchen frame'
+
+        from app.api.frame_sync import _frame_sync_snapshot
+        assert _frame_sync_snapshot(frame)['frameos_version'] == '2026.9.12'
+
+        # A frame the backend deploys FrameOS to keeps the backend's version.
+        frame.ssh_pass = 'raspberry'
+        db.commit()
+        from app.utils.versions import current_frameos_version
+        assert _frame_sync_snapshot(frame)['frameos_version'] == current_frameos_version()
+
+
+@pytest.mark.asyncio
 async def test_push_backend_state_to_device_is_the_http_fast_deploy(async_client, db, redis):
     from app.api.frame_sync import push_backend_state_to_device
 

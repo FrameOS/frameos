@@ -60,6 +60,7 @@ from app.models.frame import (
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
     record_successful_deploy,
+    remember_device_reported_frameos_version,
     update_frame,
 )
 from app.models.log import FRAME_ACTIVITY_LOG_TYPES, Log, new_log as log
@@ -114,7 +115,7 @@ from app.utils.frame_http import (
 )
 from app.utils import embedded_assets, virtual_assets
 from app.api.frame_sync import (
-    _frame_admin_session_headers,
+    _frame_admin_request,
     frame_has_shell_access,
     adopt_standalone_frame,
     apply_frame_sync,
@@ -3407,16 +3408,34 @@ async def api_frame_embedded_firmware_ota(
     return {"message": "Firmware update requested", "device": device_payload}
 
 
+async def _record_device_reported_frameos_version(db: Session, redis: Redis, frame: Frame, payload: dict) -> None:
+    """A frame the backend cannot deploy FrameOS to updates itself, so the
+    version in its deploy baseline (what the drawer's "FrameOS a -> b" line
+    and the change indicator compare against) is only ever learnt from the
+    device: here from the upgrade status it just answered, and from the
+    version its bootup log carries (models/log.py)."""
+    if frame_has_shell_access(frame):
+        return
+    version = payload.get("current_version") if isinstance(payload, dict) else None
+    if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version.strip()):
+        return
+    if remember_device_reported_frameos_version(frame, version.strip()):
+        await update_frame(db, redis, frame)
+
+
 async def _relay_device_admin(
     frame: Frame, redis: Redis, path: str, *, method: str = "GET", body: dict | None = None
 ) -> dict:
     """One request against the frame's admin API with the stored admin login;
     the device's JSON comes back as-is, its errors as a 502 with the detail."""
-    headers = await _frame_admin_session_headers(frame, redis, _fetch_frame_http_bytes)
-    if body is not None:
-        headers = {**headers, "Content-Type": "application/json"}
-    status, raw, _headers = await _fetch_frame_http_bytes(
-        frame, redis, path=path, method=method, body=json.dumps(body) if body is not None else None, headers=headers
+    status, raw, _headers = await _frame_admin_request(
+        frame,
+        redis,
+        _fetch_frame_http_bytes,
+        path=path,
+        method=method,
+        body=json.dumps(body) if body is not None else None,
+        headers={"Content-Type": "application/json"} if body is not None else None,
     )
     try:
         payload = json.loads(raw.decode("utf-8")) if raw else {}
@@ -3445,6 +3464,7 @@ async def api_frame_device_upgrade_status(
         _not_found()
     payload = await _relay_device_admin(frame, redis, "/api/upgrade/status" + ("?check=1" if check else ""))
     payload["shell_access"] = frame_has_shell_access(frame)
+    await _record_device_reported_frameos_version(db, redis, frame, payload)
     return payload
 
 
@@ -3468,6 +3488,7 @@ async def api_frame_device_upgrade(
     dry_run = bool(isinstance(body, dict) and body.get("dry_run"))
     payload = await _relay_device_admin(frame, redis, "/api/upgrade", method="POST", body={"dry_run": dry_run})
     payload["shell_access"] = frame_has_shell_access(frame)
+    await _record_device_reported_frameos_version(db, redis, frame, payload)
     return payload
 
 

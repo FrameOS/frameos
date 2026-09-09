@@ -251,3 +251,36 @@ async def test_gzip_body_over_the_cap_is_rejected_before_decompression(async_cli
     monkeypatch.setattr(middleware, "MAX_DECOMPRESSED_BODY", len(body) - 1)
     response = await async_client.post('/api/log', content=body, headers=headers)
     assert response.status_code == 413
+
+
+
+@pytest.mark.asyncio
+async def test_api_log_bootup_version_updates_a_shell_less_frames_baseline(async_client, db, redis):
+    """An adopted generic card upgrades itself and the runtime says which
+    FrameOS it booted; the deploy baseline's version follows, nothing else
+    in the baseline moves, and a frame the backend can deploy to ignores it."""
+    frame = await new_frame(db, redis, 'AdoptedCard', 'localhost', 'localhost')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'adopted': True, 'platform': 'raspberry-pi-64'}
+    frame.ssh_keys = []
+    frame.ssh_pass = None
+    frame.server_api_key = 'testkey'
+    frame.last_successful_deploy = {'name': 'AdoptedCard', 'frameos_version': '2026.9.11'}
+    await update_frame(db, redis, frame)
+
+    headers = {'Authorization': 'Bearer testkey'}
+    response = await async_client.post('/api/log', json={'log': {'event': 'bootup', 'version': '2026.9.12'}}, headers=headers)
+    assert response.status_code == 200
+    db.refresh(frame)
+    assert frame.last_successful_deploy == {'name': 'AdoptedCard', 'frameos_version': '2026.9.12'}
+
+    shell = await new_frame(db, redis, 'SshFrame', 'localhost', 'localhost')
+    shell.server_api_key = 'sshkey'
+    shell.ssh_pass = 'raspberry'
+    shell.last_successful_deploy = {'name': 'SshFrame', 'frameos_version': '2026.9.11'}
+    await update_frame(db, redis, shell)
+    response = await async_client.post('/api/log', json={'log': {'event': 'bootup', 'version': '2026.9.12'}},
+                                       headers={'Authorization': 'Bearer sshkey'})
+    assert response.status_code == 200
+    db.refresh(shell)
+    assert shell.last_successful_deploy['frameos_version'] == '2026.9.11'
