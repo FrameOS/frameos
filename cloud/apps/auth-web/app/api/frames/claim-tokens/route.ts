@@ -10,7 +10,7 @@ import {
 } from "../../../../src/lib/device-flow";
 import {
   isValidTimeZoneName,
-  boundClaimTokenTtlMs,
+  boundClaimTokenMaxTtlMs,
   claimTokenExpiry,
   claimTokenPrefix,
   countActiveClaimTokens,
@@ -96,8 +96,12 @@ export async function POST(request: NextRequest) {
     if (body.multi_use === true || (body.max_uses !== undefined && body.max_uses !== 1)) {
       return jsonError("invalid_max_uses", 400);
     }
-    // And no long life either (see expiresAt below).
-    if (body.ttl_days !== undefined) {
+    // And no long life either (see expiresAt below): a week at most, never
+    // "forever".
+    if (
+      body.ttl_days === "forever" ||
+      (typeof body.ttl_days === "number" && body.ttl_days * 24 * 60 * 60 * 1000 > boundClaimTokenMaxTtlMs)
+    ) {
       return jsonError("invalid_ttl_days", 400);
     }
   }
@@ -211,13 +215,12 @@ export async function POST(request: NextRequest) {
   const token = createSecretToken(claimTokenPrefix, 24);
   // A frame-bound token hands a device the identity of an EXISTING frame —
   // worth more than an ordinary code, and it sits on media anyone can read
-  // (a re-flashed card). It gets the short window whatever was asked for:
-  // long enough to flash and boot, not long enough to be found later.
-  const expiresAt = boundFrame
-    ? new Date(Date.now() + boundClaimTokenTtlMs)
-    : ttlMs
-      ? new Date(Date.now() + ttlMs)
-      : claimTokenExpiry();
+  // (a re-flashed card). It keeps the ordinary day default (an hour left SD
+  // images dead by the time the card was in the Pi) but its ceiling is a
+  // week, never a year or "forever" — bounded above, not up to the caller.
+  const expiresAt = ttlMs
+    ? new Date(Date.now() + (boundFrame ? Math.min(ttlMs, boundClaimTokenMaxTtlMs) : ttlMs))
+    : claimTokenExpiry();
   const [row] = await db
     .insert(frameEnrollmentTokens)
     .values({

@@ -152,9 +152,10 @@ POST {provider}/api/frames/claim-tokens
 ```
 
 The response is an ordinary claim token plus the `frame_id` echoed back, and
-the binding forces `max_uses: 1` and a one-hour expiry regardless of what
-was asked for (`ttl_days` with `frame_id` is refused, `400 invalid_ttl_days`)
-— redeeming one hands a device the identity
+the binding forces `max_uses: 1` and caps the lifetime at a week (the
+default is the ordinary day; `ttl_days` above 7 or `"forever"` with
+`frame_id` is refused, `400 invalid_ttl_days`) — redeeming one hands a device
+the identity
 of an existing frame, which is worth more than an ordinary code. Minting is
 refused for a frame the session account does not own (`404 invalid_frame`), a
 revoked one (`409 frame_revoked`), or any `multi_use`/`max_uses > 1`

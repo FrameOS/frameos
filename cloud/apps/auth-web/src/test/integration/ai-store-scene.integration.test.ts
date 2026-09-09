@@ -243,8 +243,12 @@ describe("AI chat on a store scene", () => {
 
     const context = contextShownToModel();
     expect(context).toContain(`Store scene id: ${scene.id}`);
-    expect(context).toContain("Name: Big counter");
-    expect(context).toContain("Tags: counter");
+    // Someone else's listing is third-party text: it reaches the model only
+    // inside the untrusted frame the tool results use, never bare.
+    expect(context).toContain('Name: <untrusted_data source="store_scene_name">');
+    expect(context).toContain("Big counter");
+    expect(context).toContain('<untrusted_data source="store_scene_tags">');
+    expect(context).toContain("counter");
     expect(context).toContain("does not own this scene");
     expect(context).toContain("FORK");
     expect(context).not.toContain("this is the user's own scene");

@@ -1742,9 +1742,11 @@ export function claimTokenExpiry(now = new Date()) {
   return new Date(now.getTime() + claimTokenTtlMs);
 }
 
-// A frame-bound (re-enrollment) token's life: it re-keys an existing frame,
-// so it is minted for one flash-and-boot and expires within the hour.
-export const boundClaimTokenTtlMs = 60 * 60 * 1000;
+// The most a frame-bound (re-enrollment) token may live: it re-keys an
+// existing frame, so it is minted for one flash-and-boot — the ordinary day
+// by default, a week at the outside, never a year or "forever" like an
+// ordinary multi-use code can be.
+export const boundClaimTokenMaxTtlMs = 7 * 24 * 60 * 60 * 1000;
 
 // Spend one use of a claim token, atomically: concurrent enrollments race on
 // use_count < max_uses, so a budget of N admits exactly N frames. used_at is
