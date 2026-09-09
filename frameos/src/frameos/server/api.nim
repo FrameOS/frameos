@@ -397,8 +397,11 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
     result["errorBehavior"] = frontendErrorBehaviorToRuntime(payload["error_behavior"], result{"errorBehavior"})
 
   var frameApi = if result{"frameApi"} != nil and result{"frameApi"}.kind == JObject: copy(result["frameApi"]) else: %*{}
+  # `settings` lives once, under its own key: the echo must not keep a
+  # second copy of the service keys that GET then has to strip again.
   for key in payload.keys:
-    if key != "next_action" and key != "skip_runtime_reload" and key != frameSyncMarkDeployedKey:
+    if key != "next_action" and key != "skip_runtime_reload" and key != frameSyncMarkDeployedKey and
+        key != "settings":
       frameApi[key] = copy(payload[key])
   # The echo is what GET prefers for these fields, so it carries what was
   # actually kept — never the blank a secret-less form sent back.
@@ -755,7 +758,6 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   result["interval"] = storedConfigValue(configJson, "interval", %300)
   result["background_color"] = storedConfigValue(configJson, "backgroundColor", %"#000000")
   result["upload_fonts"] = storedApiOrConfigValue(configJson, storedFrameApi, "upload_fonts", "uploadFonts", %"")
-  result.delete("settings") # app secrets never ride the frame payload; see /api/settings
   result["https_proxy"] = apiHttpsProxy(live{"httpsProxy"}, exposeSecrets)
   result["error_behavior"] = apiErrorBehavior(live{"errorBehavior"})
   result["device_config"] = apiDeviceConfig(configJson{"deviceConfig"}, live{"deviceConfig"})
@@ -816,6 +818,11 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   for key in storedFrameApi.keys:
     if exposeSecrets or not result.hasKey(key):
       result[key] = copy(storedFrameApi[key])
+  # App service keys never ride the frame payload (see /api/settings, the
+  # admin-only reader). This has to come LAST: the echo loop above used to
+  # put `settings` back after an earlier delete — for a masked reader
+  # precisely because the delete had made the key "absent".
+  result.delete("settings")
 
 const frameSyncExposeHeaders = "X-Scene-Id, X-FrameOS-Sync-Changed, X-FrameOS-Sync-Revision, X-FrameOS-Deployed-Revision, X-FrameOS-Frame-Config-Modified-At, X-FrameOS-Scenes-Modified-At, X-FrameOS-Last-Successful-Deploy-At"
 

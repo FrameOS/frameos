@@ -145,7 +145,7 @@ suite "frame api route behavior":
     # this frame is linked to (or the default one). Unreachable → nothing,
     # the SPA falls back to the bundled repositories above.
     resetCloudStoreCacheForTest()
-    setCloudStoreFetchHookForTest(proc(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.} =
+    setCloudStoreFetchHookForTest(proc(url: string, maxBytes: int): tuple[body: string, status: int] {.gcsafe, nimcall.} =
       (body: "connection refused", status: 0))
     let customRepositories = httpRequest(server.port, "GET", "/api/repositories", headers = [("Cookie", adminCookie)])
     check customRepositories.status == 200
@@ -155,7 +155,7 @@ suite "frame api route behavior":
     # shape, "./" assets resolved against the index, scenes routed through
     # this frame so the browser never talks to the provider directly.
     resetCloudStoreCacheForTest()
-    setCloudStoreFetchHookForTest(proc(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.} =
+    setCloudStoreFetchHookForTest(proc(url: string, maxBytes: int): tuple[body: string, status: int] {.gcsafe, nimcall.} =
       if url.endsWith("/repository.json"):
         return (body: $(%*{
           "name": "FrameOS Cloud store",

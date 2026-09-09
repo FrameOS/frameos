@@ -161,26 +161,68 @@ suite "metrics loop":
     check runtime["nodeType"].getStr() == "app"
     check runtime["keyword"].getStr() == "data/demo"
 
-  test "sample exceptions are logged as error state":
+  test "one failing probe nulls its field and keeps the rest of the sample":
+    # A ValueError from one probe (a thermal zone reading "N/A", a loadavg
+    # with an unexpected shape, a hook that raises) used to replace the whole
+    # sample with an error line. Every other field must still be reported.
     setMetricsHooksForTest(
       readFileHook = proc(path: string): string {.gcsafe, nimcall.} =
         if path == "/proc/loadavg":
           "0.10 0.20 0.30 1/123 456\n"
         elif path == "/sys/class/thermal/thermal_zone0/temp":
-          "42000\n"
+          "N/A\n"
         else:
           raise newException(IOError, "unexpected path"),
       cpuUsageHook = proc(interval: float): float {.gcsafe, nimcall.} =
         raise newException(ValueError, "cpu probe failed"),
-      sleepHook = proc(ms: int) {.gcsafe, nimcall.} = discard
+      sleepHook = proc(ms: int) {.gcsafe, nimcall.} = discard,
+      memoryUsageHook = proc(): tuple[total, used: int64, percentage: float] {.gcsafe, nimcall.} =
+        (1234'i64, 778'i64, 63.0),
+      diskUsageHook = proc(): JsonNode {.gcsafe, nimcall.} = %*{"total": 16000'i64},
+      openFileDescriptorsHook = proc(): int {.gcsafe, nimcall.} = 7
     )
 
     runMetricsLoopForTest(FrameConfig(metricsInterval: 1), iterations = 1)
 
-    let (okError, errorPayload) = logChannel.tryRecv()
-    check okError
-    check errorPayload.event == "metrics"
-    let errorJson = logJson(errorPayload)
-    check errorJson["event"].getStr() == "metrics"
-    check errorJson["state"].getStr() == "error"
-    check "cpu probe failed" in errorJson["error"].getStr()
+    let (okSample, samplePayload) = logChannel.tryRecv()
+    check okSample
+    check samplePayload.event == "metrics"
+    let sampleJson = logJson(samplePayload)
+    check not sampleJson.hasKey("state")
+    check sampleJson["load"].len == 3
+    check sampleJson["load"][2].getFloat() == 0.3
+    check sampleJson["cpuTemperature"].kind == JNull
+    check sampleJson["cpuUsage"].kind == JNull
+    check sampleJson["memoryUsage"]["used"].getInt() == 778
+    check sampleJson["diskUsage"]["total"].getInt() == 16000
+    check sampleJson["openFileDescriptors"].getInt() == 7
+    check sampleJson["runtime"].kind == JObject
+    check "cpu probe failed" in sampleJson["errors"]["cpuUsage"].getStr()
+    check sampleJson["errors"].hasKey("cpuTemperature")
+    let (hasNext, _) = logChannel.tryRecv()
+    check not hasNext
+
+  test "the loop keeps sampling after a probe fails":
+    setMetricsHooksForTest(
+      readFileHook = proc(path: string): string {.gcsafe, nimcall.} =
+        raise newException(ValueError, "no proc here"),
+      cpuUsageHook = proc(interval: float): float {.gcsafe, nimcall.} = 1.0,
+      sleepHook = proc(ms: int) {.gcsafe, nimcall.} = discard,
+      memoryUsageHook = proc(): tuple[total, used: int64, percentage: float] {.gcsafe, nimcall.} =
+        (10'i64, 5'i64, 50.0),
+      diskUsageHook = proc(): JsonNode {.gcsafe, nimcall.} = newJObject(),
+      openFileDescriptorsHook = proc(): int {.gcsafe, nimcall.} = 1
+    )
+
+    runMetricsLoopForTest(FrameConfig(metricsInterval: 1), iterations = 3)
+
+    var samples = 0
+    while true:
+      let (ok, payload) = logChannel.tryRecv()
+      if not ok:
+        break
+      let sampleJson = logJson(payload)
+      check sampleJson["load"].kind == JNull
+      check sampleJson["cpuUsage"].getFloat() == 1.0
+      inc samples
+    check samples == 3

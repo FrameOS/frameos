@@ -228,18 +228,12 @@ var metricsMemoryUsageHook: MemoryUsageHook = proc(): tuple[total, used: int64, 
 var metricsDiskUsageHook: DiskUsageHook = proc(): JsonNode = defaultDiskUsage()
 
 proc getLoadAverage(self: MetricsLoggerThread): seq[float] =
-  try:
-    let cpuTempLine = metricsReadFileHook("/proc/loadavg")
-    result = cpuTempLine.split(" ")[0..2].map(parseFloat)
-  except IOError:
-    result = @[]
+  let loadLine = metricsReadFileHook("/proc/loadavg")
+  loadLine.split(" ")[0..2].map(parseFloat)
 
 proc getCPUTemperature(self: MetricsLoggerThread): float =
-  try:
-    let cpuTempLine = metricsReadFileHook("/sys/class/thermal/thermal_zone0/temp")
-    result = parseFloat(cpuTempLine.strip()) / 1000.0
-  except IOError:
-    result = 0.0
+  let cpuTempLine = metricsReadFileHook("/sys/class/thermal/thermal_zone0/temp")
+  parseFloat(cpuTempLine.strip()) / 1000.0
 
 proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
   let memoryInfo = metricsMemoryUsageHook()
@@ -264,20 +258,36 @@ proc getOpenFileDescriptors(self: MetricsLoggerThread): int =
 proc getProcessMemoryUsage*(self: MetricsLoggerThread): JsonNode =
   defaultProcessMemoryUsage()
 
+# Every probe runs on its own: a `/proc` line that fails to parse, a thermal
+# zone that is missing, or a hook that raises leaves that one field `null`
+# (and names itself under `errors`) while the rest of the sample still goes
+# out. Building the sample as one expression meant one ValueError — a
+# "cpu_temp not available" board, a loadavg with an unexpected field — threw
+# away every metric the frame would ever have logged.
+template probe(payload: JsonNode, errors: JsonNode, key: string, body: untyped) =
+  try:
+    payload[key] = %(body)
+  except CatchableError as e:
+    payload[key] = newJNull()
+    errors[key] = %e.msg
+
+proc buildMetricsSample(self: MetricsLoggerThread): JsonNode =
+  result = %*{"event": "metrics"}
+  var errors = newJObject()
+  probe(result, errors, "load"): self.getLoadAverage()
+  probe(result, errors, "cpuTemperature"): self.getCPUTemperature()
+  probe(result, errors, "memoryUsage"): self.getMemoryUsage()
+  probe(result, errors, "diskUsage"): self.getDiskUsage()
+  probe(result, errors, "processMemory"): self.getProcessMemoryUsage()
+  probe(result, errors, "cpuUsage"): self.getCPUUsage()
+  probe(result, errors, "cpuCount"): self.getCPUCount()
+  probe(result, errors, "openFileDescriptors"): self.getOpenFileDescriptors()
+  probe(result, errors, "runtime"): runtimeDiagnosticsSnapshot()
+  if errors.len > 0:
+    result["errors"] = errors
+
 proc logMetrics(self: MetricsLoggerThread) =
-  var payload = %*{
-    "event": "metrics",
-    "load": self.getLoadAverage(),
-    "cpuTemperature": self.getCPUTemperature(),
-    "memoryUsage": self.getMemoryUsage(),
-    "diskUsage": self.getDiskUsage(),
-    "processMemory": self.getProcessMemoryUsage(),
-    "cpuUsage": self.getCPUUsage(),
-    "cpuCount": self.getCPUCount(),
-    "openFileDescriptors": self.getOpenFileDescriptors(),
-    "runtime": runtimeDiagnosticsSnapshot(),
-  }
-  log(payload)
+  log(self.buildMetricsSample())
 
 proc logMetricsSample(self: MetricsLoggerThread) =
   try:

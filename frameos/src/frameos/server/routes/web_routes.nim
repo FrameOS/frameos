@@ -201,7 +201,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       if not netportal.persistPortalSetup(globalFrameOS, options):
         request.respond(Http500, body = netportal.setupHtml(globalFrameOS))
         return
-      spawn netportal.connectToWifi(globalFrameOS, options)
+      spawn netportal.connectToWifiDetached(netportal.runtimeHandle(globalFrameOS), options)
       request.respond(Http200, body = netportal.confirmHtml(globalFrameOS, ssid = options.ssid))
   )
 

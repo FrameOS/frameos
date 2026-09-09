@@ -142,7 +142,22 @@ proc defaultPortalReadFileHook(path: string): string {.gcsafe, nimcall.} =
 proc defaultPortalPathExistsHook(path: string): bool {.gcsafe, nimcall.} =
   fileExists(path) or dirExists(path)
 
-proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nimcall.}
+# What crosses to a threadpool worker. `spawn` copies its arguments into the
+# task: a `ref` would carry ORC's non-atomic refcount across threads (the
+# same class of race that took the admin panel down on 2026-09-06,
+# server/auth.nim). The runtime's one FrameOS outlives every thread the
+# portal starts, so the worker gets its raw address and reads it back through
+# a cursor — no refcount traffic on either side. Everything else that rides
+# along (a MonoTime, an object of strings) is a plain value and is copied.
+type RuntimeHandle* = distinct pointer
+
+proc runtimeHandle*(frameOS: FrameOS): RuntimeHandle =
+  RuntimeHandle(cast[pointer](frameOS))
+
+template frameOSOf(handle: RuntimeHandle): FrameOS =
+  cast[FrameOS](pointer(handle))
+
+proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime) {.gcsafe, nimcall.}
 
 var portalRunHook: PortalRunHook = defaultPortalRunHook
 var portalNmcliConnectHook: PortalNmcliConnectHook = defaultPortalNmcliConnectHook
@@ -1311,7 +1326,7 @@ proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
   pLog("portal:startAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
   if portalAutoTimeoutEnabledHook():
-    spawn hotspotAutoTimeoutLoop(frameOS, hotspotStarted)
+    spawn hotspotAutoTimeoutLoop(runtimeHandle(frameOS), hotspotStarted)
   true
 
 proc startApSupplicant(frameOS: FrameOS) {.gcsafe.} =
@@ -1445,7 +1460,8 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   pLog("portal:startAp:error")
 
 
-proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nimcall.} =
+proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime) {.gcsafe, nimcall.} =
+  let frameOS {.cursor.} = frameOSOf(handle)
   while true:
     portalSleepHook(1000)
     if frameOS.network.hotspotStatus != HotspotStatus.enabled:
@@ -1661,6 +1677,12 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
     noteNetworkCheck(NetworkStatus.error, "Wi-Fi join failed")
     rememberError("Wifi connection failed. Check your credentials.")
     startAp(frameOS)
+
+proc connectToWifiDetached*(handle: RuntimeHandle, options: PortalSetupOptions) {.gcsafe, nimcall.} =
+  ## The `spawn` entry point for POST /setup: the runtime by handle (see
+  ## RuntimeHandle), the form as a value.
+  let frameOS {.cursor.} = frameOSOf(handle)
+  connectToWifi(frameOS, options)
 
 proc checkNetwork*(self: FrameOS): bool =
   # A "bootOnly" hotspot needs the connectivity probe even when networkCheck
