@@ -32,7 +32,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
     appNodeLogic(appNodeLogicProps)
   )
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
-  const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
+  const { select, deleteCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   // State, not a ref: the declarations effect below has to re-run once the
@@ -202,17 +202,26 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                       key={`${codeField.type}/${codeField.name}`}
                       codeArg={codeField}
                       onChange={(value) => {
+                        // CodeArg refuses these in its form; guard here too so no
+                        // caller can write an argument the code cannot reference or
+                        // two arguments sharing one `codeField/<name>` handle.
+                        const name = typeof value.name === 'string' ? value.name.trim() : codeField.name
+                        if (!name || data.codeArgs?.some((c, j) => j !== i && c.name === name)) {
+                          return
+                        }
                         updateNodeData(id, {
-                          codeArgs: data.codeArgs?.map((c, j) => (i === j ? { ...c, ...value } : c)),
+                          codeArgs: data.codeArgs?.map((c, j) => (i === j ? { ...c, ...value, name } : c)),
                         })
-                        nodeEdges.forEach((edge) => {
-                          if (edge.target === id && edge.targetHandle === `codeField/${codeField.name}`) {
-                            updateEdge({ ...edge, targetHandle: `codeField/${value.name}` })
-                          }
-                        })
+                        if (name !== codeField.name) {
+                          nodeEdges.forEach((edge) => {
+                            if (edge.target === id && edge.targetHandle === `codeField/${codeField.name}`) {
+                              updateEdge({ ...edge, targetHandle: `codeField/${name}` })
+                            }
+                          })
+                        }
                         updateNodeInternals(id)
                       }}
-                      onDelete={() => editCodeField(codeField.name, '')}
+                      onDelete={() => deleteCodeField(codeField.name)}
                     />
                   </div>
                 ) : null}

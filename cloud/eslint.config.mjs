@@ -75,6 +75,12 @@ export default tseslint.config(
       "**/src/test/shared-spa/diagram-history.test.ts",
       "**/src/test/shared-spa/editor-export-secrets.test.ts",
       "**/src/test/shared-spa/preview-key-consent.test.ts",
+      // The scene-editor logic tests (2026-09 review §11), same reason.
+      "**/src/test/shared-spa/diagram-clipboard.test.ts",
+      "**/src/test/shared-spa/app-node-logic.test.ts",
+      "**/src/test/shared-spa/scene-json-logic.test.ts",
+      "**/src/test/shared-spa/select-options.test.ts",
+      "**/src/test/shared-spa/select-missing-value.test.tsx",
     ],
   },
   js.configs.recommended,

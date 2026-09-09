@@ -95,6 +95,14 @@
     // reach frameLogic / duplicateScenes. Vitest still runs both; only tsc
     // leaves them out.
     "src/test/shared-spa/diagram-history.test.ts",
-    "src/test/shared-spa/editor-export-secrets.test.ts"
+    "src/test/shared-spa/editor-export-secrets.test.ts",
+    // The first scene-editor logic tests (2026-09 review §11): diagramLogic
+    // clipboard, appNodeLogic, sceneJSONLogic against the embed shim, and the
+    // shared <Select>, all reaching frontend/src.
+    "src/test/shared-spa/diagram-clipboard.test.ts",
+    "src/test/shared-spa/app-node-logic.test.ts",
+    "src/test/shared-spa/scene-json-logic.test.ts",
+    "src/test/shared-spa/select-options.test.ts",
+    "src/test/shared-spa/select-missing-value.test.tsx"
   ]
 }

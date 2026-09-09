@@ -420,6 +420,20 @@ const collectSceneAppsForNodes = (
 // paste used to be silently dead there. Same-tab paste falls back to this.
 let lastCopiedPayload: string | null = null
 
+/** The render `type` reactflow picks a component by: app-flow edges (prev/next)
+ * against data edges into code and field handles. Stamped on read, so a stored
+ * scene never needs to carry it. */
+const decorateEdges = (edges: DiagramEdge[]): DiagramEdge[] =>
+  edges.map((edge) =>
+    edge.targetHandle === 'prev' || edge.sourceHandle === 'next'
+      ? edge.type !== 'appNodeEdge'
+        ? { ...edge, type: 'appNodeEdge' }
+        : edge
+      : edge.type !== 'codeNodeEdge'
+      ? { ...edge, type: 'codeNodeEdge' }
+      : edge
+  )
+
 const clipboardPayloadForNodes = (
   nodes: DiagramNode[],
   edges: DiagramEdge[],
@@ -1154,21 +1168,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (nodes: diagramLogicValues['nodes']): string[] => nodes.filter((node) => node.selected).map((node) => node.id),
     ],
     selectedNodes: [(s) => [s.nodes], (nodes: DiagramNode[]): DiagramNode[] => nodes.filter((node) => node.selected)],
-    edges: [
-      (s) => [s.rawEdges],
-      (rawEdges: diagramLogicValues['rawEdges']): DiagramEdge[] =>
-        rawEdges.map((edge) => {
-          const newEdge =
-            edge.targetHandle === 'prev' || edge.sourceHandle === 'next'
-              ? edge.type !== 'appNodeEdge'
-                ? { ...edge, type: 'appNodeEdge' }
-                : edge
-              : edge.type !== 'codeNodeEdge'
-              ? { ...edge, type: 'codeNodeEdge' }
-              : edge
-          return newEdge
-        }),
-    ],
+    edges: [(s) => [s.rawEdges], (rawEdges: diagramLogicValues['rawEdges']): DiagramEdge[] => decorateEdges(rawEdges)],
     selectedEdge: [
       (s) => [s.edges],
       (edges: diagramLogicValues['edges']): DiagramEdge | null => edges.find((edge) => edge.selected) ?? null,
@@ -1207,11 +1207,14 @@ export const diagramLogic = kea<diagramLogicType>([
         originalFrame: diagramLogicValues['originalFrame']
       ) => {
         const scene = originalFrame?.scenes?.find((s) => s.id === sceneId)
+        // The stored edges are decorated too: a scene whose edges never had a
+        // render `type` (hand written, imported, AI-built) used to show as
+        // changed from the moment it opened, until a save wrote the type back.
         return (
           !equal(normalizeNodes(nodes), scene?.nodes) ||
           !equal(
             edges?.map((e) => (e.selected ? { ...e, selected: false } : e)),
-            scene?.edges
+            scene?.edges ? decorateEdges(scene.edges) : scene?.edges
           ) ||
           !equal(sceneApps, normalizeSceneApps(scene?.apps))
         )

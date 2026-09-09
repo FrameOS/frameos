@@ -1934,6 +1934,9 @@ function trimFieldName<T extends { name?: string }>(field: T): T {
   return { ...field, name: field.name.trim() }
 }
 
+/** The Cmd+S window listener of each mounted frameLogic, by logic path — see afterMount. */
+const saveKeydownHandlers = new Map<string, (event: KeyboardEvent) => void>()
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   // AI-generated scenes used to carry the user's prompt here. It was never
   // needed to run the scene and could hold more than the user meant to share
@@ -3593,7 +3596,7 @@ export const frameLogic = kea<frameLogicType>([
       },
     }
   }),
-  afterMount(({ actions, values, cache, props }) => {
+  afterMount(({ actions, values, props, pathString }) => {
     const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default' && !scene.default)
     if (defaultScene) {
       const { name, id, default: _def, ...rest } = defaultScene
@@ -3606,7 +3609,15 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadFrameSyncStatus()
     }
 
-    cache.keydownHandler = (event: KeyboardEvent) => {
+    // Keyed by path in module state, not `cache`: under StrictMode / Fast
+    // Refresh afterMount can run on one built object and beforeUnmount on
+    // another for the same path, which left a Cmd+S listener behind that
+    // saved through a dead logic (diagramLogic's keydown handler, same fix).
+    const previousHandler = saveKeydownHandlers.get(pathString)
+    if (previousHandler) {
+      window.removeEventListener('keydown', previousHandler)
+    }
+    const keydownHandler = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       if (!(event.metaKey || event.ctrlKey) || key !== 's') {
         return
@@ -3623,12 +3634,14 @@ export const frameLogic = kea<frameLogicType>([
       event.preventDefault()
       actions.saveFrame()
     }
-    window.addEventListener('keydown', cache.keydownHandler)
+    saveKeydownHandlers.set(pathString, keydownHandler)
+    window.addEventListener('keydown', keydownHandler)
   }),
-  beforeUnmount(({ cache }) => {
-    if (cache.keydownHandler) {
-      window.removeEventListener('keydown', cache.keydownHandler)
-      cache.keydownHandler = null
+  beforeUnmount(({ pathString }) => {
+    const keydownHandler = saveKeydownHandlers.get(pathString)
+    if (keydownHandler) {
+      window.removeEventListener('keydown', keydownHandler)
+      saveKeydownHandlers.delete(pathString)
     }
   }),
 ])
