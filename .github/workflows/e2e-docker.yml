@@ -180,6 +180,33 @@ jobs:
                 embedded/esp32/main/tests/test_fos_upload_limits.c \
                 -o /tmp/test_fos_upload_limits
               /tmp/test_fos_upload_limits
+              # The IDF-free security boundaries, each a plain-C module so it
+              # can be argued about on a laptop (main/tests/*.c carry the same
+              # command lines): the assets-path rule behind every asset verb,
+              # the provider URL / transport / origin rules, the minisign
+              # parser that gates OTA, the setting parsers, and the schedule's
+              # catch-up window.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_assets_path.c embedded/esp32/main/tests/test_fos_assets_path.c \
+                -o /tmp/test_fos_assets_path
+              /tmp/test_fos_assets_path
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_url_guard.c embedded/esp32/main/tests/test_fos_url_guard.c \
+                -o /tmp/test_fos_url_guard
+              /tmp/test_fos_url_guard
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_minisig.c embedded/esp32/main/tests/test_fos_minisig.c \
+                -o /tmp/test_fos_minisig
+              /tmp/test_fos_minisig
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                -Iembedded/esp32/main/tests/host_shim \
+                embedded/esp32/main/fos_config_parse.c embedded/esp32/main/tests/test_fos_config_parse.c \
+                -o /tmp/test_fos_config_parse
+              /tmp/test_fos_config_parse
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/tests/test_fos_schedule_catchup.c \
+                -o /tmp/test_fos_schedule_catchup
+              /tmp/test_fos_schedule_catchup
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.

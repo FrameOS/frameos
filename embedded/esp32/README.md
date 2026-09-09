@@ -18,18 +18,23 @@ uses a single app slot to leave room for the firmware and state partition.
 main/                     boot orchestration + platform modules
   main.c                  app_main: config → display → wifi/portal → http → render loop
   fos_config.c            NVS config store (wifi, backend, panel, pins, intervals)
+  fos_config_parse.c      the setting parsers/normalisers behind every writer (host-tested)
   fos_wifi.c              STA connect, SoftAP portal, DNS hijack, SNTP
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
+  fos_url_guard.c         provider URL rules: local-host exception for plain http/ws, ws_url
+                          override guard, origin comparison for the OTA bearer (host-tested)
+  fos_minisig.c           minisign .minisig parser gating every OTA image (host-tested)
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
-  fos_schedule.c          schedule evaluation and catch-up after sleep
-  fos_assets.c            asset verbs (list/get/put/mkdir/delete/rename) + path sanitiser
+  fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
+  fos_assets.c            asset verbs (list/get/put/mkdir/delete/rename)
+  fos_assets_path.c       the assets-path rule behind every asset verb (host-tested)
   fos_assets_sd.c         SD card mount/probe/format for the assets root
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
@@ -54,6 +59,14 @@ partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 
 partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M state
 partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
+main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
+                          header carries its command line). The netguard, SD probe, board,
+                          power, wake, battery-filter and version tests run from the backend's
+                          pytest suite (backend/app/tasks/tests/test_esp32_*.py); the contract
+                          walker, JSON guard, upload limits, assets-path, URL guard, minisig,
+                          config-parse and schedule catch-up tests run in the ESP32 job of
+                          .github/workflows/e2e-docker.yml. Nothing else runs them, so a new
+                          host test is not a test until it is wired into one of the two.
 ```
 
 ## Toolchain
@@ -200,6 +213,19 @@ unconnected; the PhotoPainter 13.3" has both). `sdkconfig.defaults` makes
 UART0 the primary console and USB-Serial/JTAG the secondary: stdout reaches
 both, and `fos_console.c` reads commands from both drivers. GPIO 43/44 (U0TXD/
 U0RXD) are therefore off-limits for panel or button pins.
+
+The UART console runs without flow control, by decision rather than
+omission: a CH340-only board wires neither RTS nor CTS, and no host tool the
+firmware is driven by (the cloud flasher, the backend, `usb_api` scripts)
+speaks XON/XOFF, so the driver's 8 KB receive ring is the whole buffer. Two
+mitigations in `fos_console.c` stand in for it — the console task climbs
+above the render task for as long as a `usb_api` payload is on the wire
+(`FOS_CONSOLE_PAYLOAD_PRIORITY`), so the ring is drained the moment the ISR
+posts even on the single-core C3, and the payload timeout scales with the
+payload size and the channel's bit rate (`fos_upload_limits.h`) instead of
+being a fixed wait. A host that floods faster than 115200 baud sustained is
+not a case this can cover; the USB-Serial/JTAG channel has its own flow
+control at the USB layer and does not need either.
 
 ```
 frameos> status

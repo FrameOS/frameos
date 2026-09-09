@@ -1,4 +1,5 @@
 #include "fos_schedule.h"
+#include "fos_schedule_catchup.h"
 #include "fos_tz.h"
 
 #include <stdio.h>
@@ -45,13 +46,9 @@ static int s_event_count = 0;
 static int s_utc_offset_minutes = 0;
 static int64_t s_last_fired_minute = -1;
 
-/* A scheduled reboot/restart persists the minute it fired in: the board is
- * back within seconds, still inside that minute, and without the marker it
- * fired the same entry again (2026-09-04, Wood7.3: two reboots in one
- * minute). Only a marker from the last few minutes is honoured at boot; an
- * older one would make the catch-up replay hours of stale scene changes. */
+/* The reboot marker + catch-up window rules live in fos_schedule_catchup.h
+ * (host-tested); this file persists the marker and applies the window. */
 #define SCHEDULE_FIRED_NVS_KEY "sched_fired"
-#define SCHEDULE_FIRED_MARKER_MAX_MINUTES 3
 
 static void persist_fired_minute(int64_t minute)
 {
@@ -325,13 +322,6 @@ static void fire_event(const schedule_event_t *event)
     }
 }
 
-/* An EPD render + refresh can hold the render task for minutes, and this
- * tick only runs between renders — so evaluation CATCHES UP over every
- * wall-clock minute since the last tick (bounded), instead of sampling only
- * the current one. Events that fell inside a render window fire late (right
- * after it), oldest first, so the last matching scene change wins the
- * display — the correct behavior for a slow e-ink frame. */
-#define SCHEDULE_CATCH_UP_MAX_MINUTES 180
 
 bool fos_schedule_tick(void)
 {
@@ -345,33 +335,14 @@ bool fos_schedule_tick(void)
     int offset_minutes = fos_tz_active() ? fos_tz_offset_minutes(now) : s_utc_offset_minutes;
     time_t local = now + (time_t)offset_minutes * 60;
     int64_t minute_key = (int64_t)local / 60;
-    /* First tick with a valid clock (boot, or SNTP landing late): treat the
-     * current minute as un-evaluated — the alternative (arming ON the minute)
-     * swallowed events whose minute arrived while the clock was still syncing
-     * or a render was running. The one exception is the minute a scheduled
-     * reboot itself fired in (persisted below): re-evaluating it rebooted the
-     * board again. */
-    if (s_last_fired_minute < 0) {
-        int64_t persisted = load_persisted_fired_minute();
-        if (persisted >= 0 && minute_key >= persisted &&
-            minute_key - persisted <= SCHEDULE_FIRED_MARKER_MAX_MINUTES) {
-            s_last_fired_minute = persisted;
-        } else {
-            s_last_fired_minute = minute_key - 1;
-        }
-    }
-    if (minute_key == s_last_fired_minute) return false;
-    int64_t from = s_last_fired_minute + 1;
-    if (minute_key - from >= SCHEDULE_CATCH_UP_MAX_MINUTES) {
-        /* A very long gap (deep sleep, NTP step): evaluate only the recent
-         * window rather than replaying hours of stale scene changes. */
-        from = minute_key - SCHEDULE_CATCH_UP_MAX_MINUTES + 1;
-    }
-    if (minute_key < from) { /* NTP stepped the clock backwards */
-        s_last_fired_minute = minute_key;
+    /* Which minutes to evaluate: fos_schedule_catchup.h (first-tick arming,
+     * the reboot marker, the bounded catch-up, a clock stepped backwards). */
+    int64_t from = 0;
+    if (!fos_schedule_catch_up_window(minute_key,
+                                      s_last_fired_minute < 0 ? load_persisted_fired_minute() : -1,
+                                      &s_last_fired_minute, &from)) {
         return false;
     }
-    s_last_fired_minute = minute_key;
 
     bool fired = false;
     if (!ensure_lock()) return false;
