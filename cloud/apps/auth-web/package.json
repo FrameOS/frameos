@@ -20,6 +20,7 @@
     "lint": "eslint . --max-warnings=0",
     "pretest": "node scripts/generate-ai-context.mjs",
     "test": "vitest run",
+    "pretest:integration": "node scripts/generate-ai-context.mjs",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "pretypecheck": "node scripts/generate-ai-context.mjs",
     "typecheck": "tsc --noEmit",
