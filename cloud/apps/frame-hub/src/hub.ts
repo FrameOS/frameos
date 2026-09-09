@@ -270,6 +270,11 @@ interface DeviceSession {
   handling: Promise<void>;
   nonce: Buffer;
   ready: boolean;
+  // The hello finished and the `ready` frame went out. Until then a NOTIFY
+  // or sweep must not drain the queue: the empty-store resync enqueues a
+  // push mid-hello, and draining it before the pending count is taken
+  // tells the device "0 pending" while a set_scenes is already in flight.
+  readySent: boolean;
   scopes: string[];
   // The device announced a deep sleep (handleSleep): the close that follows
   // is the frame going dark on purpose, not a lost connection.
@@ -702,7 +707,7 @@ export async function startFrameHub(
 
   // Command wake-up entry point shared by LISTEN/NOTIFY and the sweep.
   async function wakeSession(session: DeviceSession) {
-    if (!session.ready || session.closed) {
+    if (!session.ready || !session.readySent || session.closed) {
       return;
     }
     const staleness = await frameSessionStaleness(session);
@@ -823,6 +828,7 @@ export async function startFrameHub(
           }),
         );
       }
+      session.readySent = true;
       await broadcastFrameUpdate(frameId);
       return;
     }
@@ -858,6 +864,7 @@ export async function startFrameHub(
         }),
       );
     }
+    session.readySent = true;
     logInfo("device.connected", { frameId, pendingCommands: pendingCount });
     await broadcastFrameUpdate(frameId);
     const reportedVersion =
@@ -1761,6 +1768,7 @@ export async function startFrameHub(
       hubSessionId: randomUUID(),
       nonce: randomBytes(32),
       ready: false,
+      readySent: false,
       scopes,
       sleeping: false,
       ws,
