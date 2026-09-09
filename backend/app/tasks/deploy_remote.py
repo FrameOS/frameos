@@ -41,6 +41,10 @@ REMOTE_SOURCE_BUILD_APT_PACKAGES = ("build-essential", "libssl-dev")
 REMOTE_BINARY = "frameos_remote"
 REMOTE_SERVICE = "frameos-remote"
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# Runtime modules frameos_remote imports from ../src (see remote/config.nims).
+# Only std-library-dependent modules belong here: the staged copy carries no
+# other part of the runtime tree.
+REMOTE_RUNTIME_MODULES: tuple[str, ...] = ("frameos/utils/process.nim",)
 
 
 def legacy_remote_cleanup_script(delay_seconds: int = 0) -> str:
@@ -294,13 +298,21 @@ class RemoteDeployer(FrameDeployer):
         Return `(build_dir, source_dir)`.
 
         * ``build_dir`` holds the Nim intermediate artefacts.
-        * ``source_dir`` is a fresh copy of `../remote`.
+        * ``source_dir`` is a fresh copy of `../remote`, with the one runtime
+          module it imports staged next to it: remote/config.nims puts
+          ``../src`` on the Nim path so the `shell` verb can spawn through
+          ``frameos/utils/process.nim`` (the runtime's bounded process
+          wrapper) instead of raw osproc.
         """
         build_dir = os.path.join(self.temp_dir, f"remote_{self.build_id}")
         source_dir = os.path.join(self.temp_dir, "remote")
 
         os.makedirs(source_dir, exist_ok=True)
         shutil.copytree(REPO_ROOT / "frameos" / "remote", source_dir, dirs_exist_ok=True)  # idempotent copy
+        for relative in REMOTE_RUNTIME_MODULES:
+            target = os.path.join(self.temp_dir, "src", relative)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy(REPO_ROOT / "frameos" / "src" / relative, target)
         os.makedirs(build_dir, exist_ok=True)
 
         return build_dir, source_dir

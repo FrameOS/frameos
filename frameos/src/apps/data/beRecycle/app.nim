@@ -3,6 +3,7 @@ import times
 import options
 import json
 import strutils
+import std/uri
 import chrono
 import frameos/apps
 import frameos/types
@@ -41,6 +42,25 @@ var
   beRecycleAuthenticateHook*: BeRecycleAuthenticateHook = nil
   beRecycleFetchCollectionsHook*: BeRecycleFetchCollectionsHook = nil
 
+proc queryParam(value: string): string =
+  ## Percent-encodes one query value. Street names carry spaces and accents;
+  ## the runtime's HTTP client refuses a request line with either in it.
+  encodeUrl(value, usePlus = false)
+
+proc zipcodesUrl*(postalCode: int): string =
+  API_ENDPOINT & "/zipcodes?q=" & queryParam($postalCode)
+
+proc streetsUrl*(streetName: string, zipId: string): string =
+  API_ENDPOINT & "/streets?q=" & queryParam(streetName) & "&zipcodes=" & queryParam(zipId)
+
+proc collectionsUrl*(zipId: string, streetId: string, houseNumber: int,
+                     fromDate: string, toDate: string): string =
+  API_ENDPOINT & "/collections?zipcodeId=" & queryParam(zipId) &
+    "&streetId=" & queryParam(streetId) &
+    "&houseNumber=" & queryParam($houseNumber) &
+    "&fromDate=" & queryParam(fromDate) &
+    "&untilDate=" & queryParam(toDate) & "&size=200"
+
 proc fetchBody(self: App, url: string, httpMethod = "GET", body = ""): string =
   let response = boundedRequestWithHeaders(url,
     httpMethod = httpMethod,
@@ -68,7 +88,7 @@ proc authenticate(self: App) =
     raise newException(ValueError, "Error occurred while requesting access-token.")
 
 proc fetchAddressIds(self: App): AddressIds =
-  let url = API_ENDPOINT & "/zipcodes?q=" & $self.appConfig.postalCode
+  let url = zipcodesUrl(self.appConfig.postalCode)
   let zipResp = self.fetchBody(url)
   let zipJson = parseJson(zipResp)
   var zipId = ""
@@ -81,7 +101,7 @@ proc fetchAddressIds(self: App): AddressIds =
   if zipId == "":
     raise newException(ValueError, "Could not find the right zip code.")
 
-  let streetUrl = API_ENDPOINT & "/streets?q=" & self.appConfig.streetName & "&zipcodes=" & zipId
+  let streetUrl = streetsUrl(self.appConfig.streetName, zipId)
   let streetResp = self.fetchBody(streetUrl, httpMethod = "POST")
   let streetJson = parseJson(streetResp)
   var streetId = ""
@@ -96,8 +116,7 @@ proc fetchAddressIds(self: App): AddressIds =
   result = AddressIds(zip: zipId, street: streetId, housenumber: self.appConfig.number)
 
 proc fetchCollections(self: App, addressIds: AddressIds, fromDate: string, toDate: string): JsonNode =
-  let url = API_ENDPOINT & "/collections?zipcodeId=" & addressIds.zip & "&streetId=" & addressIds.street &
-      "&houseNumber=" & $addressIds.housenumber & "&fromDate=" & fromDate & "&untilDate=" & toDate & "&size=200"
+  let url = collectionsUrl(addressIds.zip, addressIds.street, addressIds.housenumber, fromDate, toDate)
   let collectionResp = self.fetchBody(url)
   let collections = parseJson(collectionResp)
 

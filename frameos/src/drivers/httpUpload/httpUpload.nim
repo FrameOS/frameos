@@ -2,13 +2,19 @@ import pixie
 import pixie/fileformats/png
 import std/httpclient
 import std/json
-import std/net
 import std/strutils
-import std/uri
 import checksums/md5
 import frameos/driver_context
+import frameos/utils/http_client
 
-const DEFAULT_TIMEOUT_MS = 30000
+const
+  DEFAULT_TIMEOUT_MS = 30000
+  ## The upload is bounded end to end: DNS, connect, TLS, the PNG going out
+  ## and the reply coming back all fit inside this budget.
+  UPLOAD_MAX_SECONDS = 90.0
+  ## The reply is only ever logged (truncated to 512 bytes), so a receiver
+  ## that answers with a page is cut off here rather than buffered whole.
+  UPLOAD_MAX_RESPONSE_BYTES = 256 * 1024
 
 type
   Driver* = ref object of FrameOSDriver
@@ -41,11 +47,22 @@ proc addDefaultHeader(headers: var HttpHeaders, name: string, value: string) =
   if not headers.hasKey(name):
     headers[name] = value
 
-proc buildHeaders(self: Driver, image: Image, bodyBytes: int, hashValue: string): HttpHeaders =
+proc buildHeaders*(self: Driver, image: Image, bodyBytes: int, hashValue: string): HttpHeaders =
+  ## Configured headers first, then the driver's own defaults where the user
+  ## set nothing. Every configured header goes through the runtime client's
+  ## validator: a name that is not an RFC 9110 token or a value carrying CR,
+  ## LF or another control byte would otherwise become a second header on the
+  ## wire. Hop-by-hop and framing headers (Host, Content-Length, Connection…)
+  ## belong to the client and are dropped rather than sent twice.
   var headers = newHttpHeaders()
   for header in self.headers:
-    if header.name.len > 0:
-      headers.add(header.name, header.value)
+    let name = header.name.strip()
+    if name.len == 0:
+      continue
+    if isReservedHttpHeader(name):
+      continue
+    validateHttpHeader(name, header.value)
+    headers.add(name, header.value)
   headers.addDefaultHeader("Content-Type", "image/png")
   headers.addDefaultHeader("X-FrameOS-Driver", self.name)
   headers.addDefaultHeader("X-FrameOS-Image-Hash", hashValue)
@@ -54,88 +71,22 @@ proc buildHeaders(self: Driver, image: Image, bodyBytes: int, hashValue: string)
   headers.addDefaultHeader("X-FrameOS-Image-Bytes", $bodyBytes)
   return headers
 
-proc isManagedPlainHttpHeader(name: string): bool =
-  cmpIgnoreCase(name, "Host") == 0 or
-    cmpIgnoreCase(name, "Connection") == 0 or
-    cmpIgnoreCase(name, "Content-Length") == 0
-
-proc plainHttpRequest(url: string, body: string, headers: HttpHeaders): tuple[status: int, body: string] =
-  let parsed = parseUri(url)
-  if cmpIgnoreCase(parsed.scheme, "http") != 0:
-    raise newException(ValueError, "plainHttpRequest only supports http URLs")
-  if parsed.hostname.len == 0:
-    raise newException(ValueError, "HTTP upload URL is missing a host")
-
-  let port =
-    if parsed.port.len > 0:
-      Port(parseInt(parsed.port))
-    else:
-      Port(80)
-  var path =
-    if parsed.path.len > 0:
-      parsed.path
-    else:
-      "/"
-  if parsed.query.len > 0:
-    path &= "?" & parsed.query
-
-  var request = "POST " & path & " HTTP/1.1\r\n"
-  request &= "Host: " & parsed.hostname
-  if parsed.port.len > 0:
-    request &= ":" & parsed.port
-  request &= "\r\n"
-  request &= "Connection: close\r\n"
-  request &= "Content-Length: " & $body.len & "\r\n"
-  for key, value in headers:
-    if not isManagedPlainHttpHeader(key):
-      request &= key & ": " & value & "\r\n"
-  request &= "\r\n"
-  request &= body
-
-  var socket = newSocket()
-  try:
-    socket.connect(parsed.hostname, port, timeout = DEFAULT_TIMEOUT_MS)
-    socket.send(request)
-
-    var response = ""
-    while true:
-      let chunk = socket.recv(8192, timeout = DEFAULT_TIMEOUT_MS)
-      if chunk.len == 0:
-        break
-      response &= chunk
-
-    let headerEnd = response.find("\r\n\r\n")
-    let responseHeaders =
-      if headerEnd >= 0:
-        response[0 ..< headerEnd]
-      else:
-        response
-    result.body =
-      if headerEnd >= 0 and headerEnd + 4 < response.len:
-        response[(headerEnd + 4) .. ^1]
-      else:
-        ""
-
-    let lines = responseHeaders.splitLines()
-    if lines.len == 0:
-      raise newException(ValueError, "HTTP upload response is empty")
-    let statusParts = lines[0].splitWhitespace()
-    if statusParts.len < 2:
-      raise newException(ValueError, "HTTP upload response is missing a status code")
-    result.status = parseInt(statusParts[1])
-  finally:
-    socket.close()
-
 proc defaultRequest(url: string, body: string, headers: HttpHeaders): tuple[status: int, body: string] =
-  if cmpIgnoreCase(parseUri(url).scheme, "http") == 0:
-    return plainHttpRequest(url, body, headers)
-
-  var client = newHttpClient(timeout = DEFAULT_TIMEOUT_MS)
-  try:
-    let response = client.request(url, httpMethod = HttpPost, body = body, headers = headers)
-    result = (response.code.int, response.body)
-  finally:
-    client.close()
+  ## One POST on the runtime's bounded client (frameos/utils/http_client):
+  ## resolve-once, connect and socket timeouts, TLS, a response cap and no
+  ## redirect following — an upload target is a literal endpoint, and a
+  ## 301/302 would turn the POST into a bodiless GET that "succeeds".
+  let response = boundedRequest(
+    url,
+    httpMethod = HttpPost,
+    body = body,
+    headers = headers,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    maxBytes = UPLOAD_MAX_RESPONSE_BYTES,
+    maxSeconds = UPLOAD_MAX_SECONDS,
+    maxRedirects = 0,
+  )
+  (response.code, response.body)
 
 proc logSuccess(self: Driver, status: int, hashValue: string) =
   self.logger.log(%*{

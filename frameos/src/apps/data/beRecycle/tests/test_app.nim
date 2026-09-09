@@ -1,7 +1,8 @@
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 
 import ../app
 import frameos/types
+import frameos/utils/http_client
 
 type LogStore = ref object
   items: seq[JsonNode]
@@ -87,3 +88,22 @@ suite "data/beRecycle app":
     check capturedToDay == "2026-01-07"
     check output.len == 1
     check output[0]["summary"].getStr() == "Trash: Paper"
+
+  test "query parameters are percent-encoded so the runtime client accepts them":
+    # "Rue de la Loi" used to go out unencoded; validateHttpRequestUrl refuses a
+    # request line with a space, so every street with one failed to resolve.
+    let streets = streetsUrl("Rue de la Loi", "zip-1")
+    validateHttpRequestUrl(streets)
+    check streets.contains("/streets?q=Rue%20de%20la%20Loi&zipcodes=zip-1")
+    check not streets.contains(" ")
+    check not streets.contains("+")
+
+    let accented = streetsUrl("Sint-Jorisstraat & Co/é", "z&1")
+    validateHttpRequestUrl(accented)
+    check accented.contains("q=Sint-Jorisstraat%20%26%20Co%2F%C3%A9&zipcodes=z%261")
+
+    check zipcodesUrl(1000).endsWith("/zipcodes?q=1000")
+    let collections = collectionsUrl("zip 1", "street/2", 12, "2026-01-05", "2026-01-07")
+    validateHttpRequestUrl(collections)
+    check collections.contains("zipcodeId=zip%201&streetId=street%2F2&houseNumber=12" &
+      "&fromDate=2026-01-05&untilDate=2026-01-07&size=200")
