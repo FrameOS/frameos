@@ -1108,7 +1108,7 @@ export function Esp32CloudFlasher({
             }}
             type="checkbox"
           />
-          Remember the WiFi network name in this browser (the password is never stored or sent to the cloud)
+          Remember WiFi credentials in this browser (never sent to the cloud)
         </label>
         <div className="flex flex-wrap items-center gap-2">
           <button

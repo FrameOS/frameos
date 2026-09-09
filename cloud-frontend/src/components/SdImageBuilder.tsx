@@ -952,7 +952,7 @@ export function SdImageBuilder({
                 }}
                 type="checkbox"
               />
-              Remember the WiFi network name in this browser (the password is never stored or sent to the cloud)
+              Remember WiFi credentials in this browser (never sent to the cloud)
             </label>
           </FormGroup>
           <FormGroup

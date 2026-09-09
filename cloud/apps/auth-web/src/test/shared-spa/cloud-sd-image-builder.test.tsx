@@ -826,7 +826,7 @@ describe("SdImageBuilder", () => {
     ).toBe(false);
   });
 
-  it("remembers the WiFi network name (never the password) in localStorage only when asked to", async () => {
+  it("remembers WiFi credentials in localStorage only when asked to", async () => {
     mockReleaseAndImage();
     stubSaveFilePicker();
     render(
@@ -851,13 +851,11 @@ describe("SdImageBuilder", () => {
     // Unchecked by default: nothing is stored.
     expect(localStorage.getItem("frameos-sd-image-wifi")).toBeNull();
 
-    fireEvent.click(screen.getByLabelText(/Remember the WiFi network name/));
+    fireEvent.click(screen.getByLabelText(/Remember WiFi credentials/));
     fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
     expect(localStorage.getItem("frameos-sd-image-wifi")).toBe(
-      // The passphrase is retyped: a plaintext PSK in localStorage is
-      // readable by any script on the origin.
-      JSON.stringify({ ssid: "MyNet" }),
+      JSON.stringify({ password: "hunter2", ssid: "MyNet" }),
     );
     localStorage.removeItem("frameos-sd-image-wifi");
   });
