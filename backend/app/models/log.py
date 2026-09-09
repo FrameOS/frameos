@@ -7,7 +7,7 @@ from ipaddress import ip_address
 from typing import Any, Optional
 from arq import ArqRedis as Redis
 
-from .frame import Frame, record_successful_deploy, update_frame
+from .frame import Frame, frame_has_shell_access, record_successful_deploy, remember_device_reported_frameos_version, update_frame
 from .metrics import new_metrics
 from app.database import Base
 from app.utils.timezone import stored_timezone
@@ -297,6 +297,13 @@ async def process_log(
         )
 
         marked_buildroot_sd_image_booted = await mark_buildroot_sd_image_booted(db, redis, frame)
+        if (frame.mode or "rpios") != "embedded" and not frame_has_shell_access(frame):
+            # A shell-less card upgrades itself; its bootup line is where the
+            # backend learns which FrameOS it now runs (the runtime sends
+            # `version` since 2026.9.13). The baseline keeps everything else.
+            boot_version = _frameos_version_from_boot(log.get("version"))
+            if boot_version and remember_device_reported_frameos_version(frame, boot_version):
+                changes["last_successful_deploy"] = frame.last_successful_deploy
         if (frame.mode or "rpios") == "embedded":
             embedded_boot_metadata = _embedded_boot_metadata(log, timestamp, ip=ip)
             embedded = dict(frame.embedded or {})

@@ -17,7 +17,7 @@ import frameos/timezone_updater
 import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
-from frameos/upgrade import reconcileInterruptedUpgradeStatus
+from frameos/upgrade import reconcileInterruptedUpgradeStatus, installedFrameOSVersion
 import frameos/cloud/hub_client
 import frameos/tls_proxy
 import frameos/setup_proxy
@@ -263,7 +263,9 @@ proc newFrameOS*(): FrameOS =
   startTimezoneUpdater(result)
 
 proc start*(self: FrameOS) {.async.} =
-  var message = %*{"event": "bootup", "config": {
+  # `version` is what a backend that cannot deploy FrameOS to this frame
+  # (an adopted shell-less card) uses to learn the release it now runs.
+  var message = %*{"event": "bootup", "version": installedFrameOSVersion(), "config": {
     "frameHost": self.frameConfig.frameHost,
     "framePort": self.frameConfig.framePort,
     "frameAccess": self.frameConfig.frameAccess,

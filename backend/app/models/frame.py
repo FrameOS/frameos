@@ -629,6 +629,23 @@ def frame_has_shell_access(frame: Any) -> bool:
     return not bool((getattr(frame, "buildroot", None) or {}).get("adopted"))
 
 
+def remember_device_reported_frameos_version(frame: Frame, version: str) -> bool:
+    """Set the deploy baseline's `frameos_version` to what the device says it
+    runs, leaving the rest of the baseline (scenes, settings, fingerprints)
+    exactly as deployed. For a frame the backend cannot install FrameOS on —
+    an adopted shell-less card, which upgrades itself — this is the only way
+    the row ever learns a new version; without it the deploy drawer kept
+    showing "2026.9.11 -> 2026.9.12" after the frame had upgraded. Returns
+    whether anything changed."""
+    snapshot = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None
+    if not snapshot or not version:
+        return False
+    if snapshot.get("frameos_version") == version:
+        return False
+    frame.last_successful_deploy = {**snapshot, "frameos_version": version}
+    return True
+
+
 def record_successful_deploy(frame: Frame, frame_dict: dict, deployed_at: Optional[datetime] = None) -> None:
     """Store ``frame_dict`` as the frame's deploy baseline, minus its secrets."""
     frame.last_successful_deploy = deploy_snapshot(frame_dict)

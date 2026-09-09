@@ -24,6 +24,7 @@
     // Imports frontend/src/utils/duplicateScenes, whose FrameEvent typing
     // predates exactOptionalPropertyTypes. Vitest still runs it.
     "src/test/shared-spa/duplicate-scenes.test.ts",
+    "src/test/shared-spa/frame-secrets-mirror.test.ts",
     // Same story: mounts the real framesModel, whose import graph reaches
     // the legacy workspace components (bare JSX namespace, pre-strict
     // typing). Vitest still runs it; only tsc leaves it out.

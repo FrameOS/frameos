@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-08 (setup portal round two + adopt #380 closed on 2026.9.11), after release 2026.9.11.
+empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.12, five papercuts fixed on main), after release 2026.9.12.
 
 ## Open
 
@@ -21,17 +21,14 @@ empty. Last refreshed 2026-09-08 (setup portal round two + adopt #380 closed on 
 
 ### Backend (self-hosted) bench
 
-- [ ] **"Update FrameOS" on a shell-less card (needs a release newer than
-  2026.9.11):** on frame-2c2ea9 (or any adopted generic card) press Update
-  FrameOS in the deploy drawer: the frame downloads the release for its
-  target, verifies the minisign signature and installs through the
-  privileged door; the drawer polls the status to `success` /
-  `reboot_required` and the frame comes back on the new version. The rest of
-  that box passed 2026-09-08 (see Done). Watch the door's file modes on the
-  way — the 9.5 OTA left `drivers/*.so` 0640 and loaded no drivers.
-
 - [ ] **Adopted card, round two (2026-09-08 findings on frame-2c2ea9, all
-  fixed on main the same day, needs the next backend release):** re-adopt
+  fixed on main the same day, needs the next backend release):** *(2026-09-09
+  on the 2026.9.12 add-on: "Pending changes" did NOT open clean — "Network
+  settings" came back after every fast deploy. Cause found and fixed on main
+  (`ha-upgrade-papercuts`): the frontend's secret-path mirror lacked the two
+  `network.*` passwords PR #460 fingerprinted, so the baseline never equalled
+  the row; a shared-spa test now reads the backend list. Re-check with the
+  next add-on.)* re-adopt
   a fresh generic card (or the same one, un-adopted) and check: logs arrive
   without touching the device (the adopt log line says it restarted
   FrameOS); "Current image" shows the panel and the scene gets its
@@ -391,6 +388,37 @@ empty. Last refreshed 2026-09-08 (setup portal round two + adopt #380 closed on 
   evidenced by the release dir, the service restart and the activity feed.)
 
 ### Backend (self-hosted) bench
+
+- [x] **"Update FrameOS" on a shell-less card** — PASSED 2026-09-09 on
+  frame-2c2ea9 (adopted generic card, 2026.9.11 → 2026.9.12, from the
+  2026.9.12 Home Assistant add-on): Check for updates saw 2026.9.12, Update
+  FrameOS queued → `running` → "installing the staged release 2026.9.12" →
+  `success: FrameOS upgraded to 2026.9.12. Restarting services.`, and the
+  frame came back rendering on 2026.9.12. **Papercuts, all fixed on main
+  2026-09-09 (`ha-upgrade-papercuts`), need the next add-on:** (1) the frame
+  rail icon stayed gray although a release was waiting — the change details
+  skipped the version gap for shell-less frames; it is now a change of its
+  own ("the frame installs it itself: Update FrameOS"), so the icon goes
+  brass and the drawer names it. (2) "Check for updates" showed "update
+  available" and, under it, `up_to_date: FrameOS is already on the latest
+  stable GitHub release.` — the device's `upgrade-status.json` is the record
+  of its LAST run and was rendered as if it were the answer; finished runs
+  now show as a dated "Last upgrade: …" line and a stale `up_to_date` is
+  dropped once a newer release exists. (3) About a minute in: `Frame admin
+  login failed: 429 {"detail":"Too many login attempts"}` and the watch
+  ended — the backend logged into the frame on every 5 s poll against the
+  device's 10-logins-per-5-minutes limiter; the admin session cookie is now
+  cached (6 h, reopened once on 401, keyed by the credentials) and the poll
+  survives the runtime restart instead of stopping on the first failed
+  request. (4) After success the drawer's bottom still said
+  `2026.9.11 -> 2026.9.12` and the status line stayed on "Restarting
+  services" — the row never learnt the device's version; the backend now
+  records `current_version` from the upgrade status (and, from 2026.9.13,
+  the `version` the runtime puts on its bootup line) into the deploy
+  baseline, the fast/sync path keeps that device-reported version instead of
+  stamping the backend's, and the drawer re-reads the frame and plan once
+  the upgrade finishes. (5) "Pending changes: Network settings" after every
+  fast deploy — see the open "round two" box (secret-path mirror).
 
 - [x] **Shell-less frame from the deploy drawer** — everything but the update
   itself PASSED 2026-09-08 on frame-2c2ea9 (adopted generic 2026.9.11 card,

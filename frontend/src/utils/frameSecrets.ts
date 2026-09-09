@@ -13,8 +13,12 @@ import type { FrameType } from '../types'
  */
 
 // Mirrors TOP_LEVEL_SECRET_KEYS + NESTED_SECRET_PATHS on the backend; "*"
-// walks a list.
-const SECRET_PATHS: readonly (readonly string[])[] = [
+// walks a list. A path the backend fingerprints but this list lacks makes
+// that leaf "changed since deploy" forever (the baseline has no value, the
+// row does), which is how "Network settings" stayed pending after every
+// fast deploy once the Wi-Fi passwords became secrets — the shared-spa
+// `frame-secrets-mirror` test reads the backend list and fails on drift.
+export const SECRET_PATHS: readonly (readonly string[])[] = [
   ['ssh_pass'],
   ['server_api_key'],
   ['frame_access_key'],
@@ -22,6 +26,8 @@ const SECRET_PATHS: readonly (readonly string[])[] = [
   ['agent', 'agentSharedSecret'],
   ['frame_admin_auth', 'pass'],
   ['mountpoints', 'items', '*', 'password'],
+  ['network', 'wifiPassword'],
+  ['network', 'wifiHotspotPassword'],
 ]
 
 const FINGERPRINTS_KEY = 'secret_fingerprints'
