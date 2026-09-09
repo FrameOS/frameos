@@ -262,3 +262,22 @@ suite "Server admin api asset helpers":
     cleanupStaleAssetUploadChunks(maxAgeSeconds = -60)
     expect OSError:
       discard finishAssetUploadChunks("cloud-up-old", "old.bin")
+
+  test "a NUL byte or a bare slash never resolves to the assets root":
+    let tempRoot = getTempDir() / "frameos-api-asset-nul"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    writeFile(tempRoot / "keep.txt", "still here")
+    globalFrameConfig = baseConfig(tempRoot)
+
+    # "\0" used to normalise to "<root>/\0", pass the lexical checks as a
+    # child of the root, and be seen by rmdir as the root itself.
+    for bad in ["\0", "/\0", "sub\0dir", "a\x01b", "\x7f", "/", "//", "./", " / "]:
+      expect ValueError:
+        discard resolveAssetPath(bad)
+      expect ValueError:
+        deleteAssetEntry(bad)
+      check getAssetPayload(bad, false).status == Http400
+    check dirExists(tempRoot)
+    check fileExists(tempRoot / "keep.txt")
+    removeDir(tempRoot)

@@ -92,7 +92,7 @@ proc newServer*(frameOS: FrameOS): types.Server =
   let adminConnectionsState = initConnectionsState()
   globalAdminConnectionsState = adminConnectionsState
   let router = buildRouter(connectionsState, adminConnectionsState)
-  let routerHandler = router.toHandler()
+  let routerHandler = buildRouterHandler(router)
   let loggingHandler = proc(request: Request) {.gcsafe.} =
     if shouldLogHttpRequest(request.path):
       log(%*{"event": "http", "method": request.httpMethod, "path": request.path})

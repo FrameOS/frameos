@@ -113,6 +113,14 @@ proc realPathWithin(fullPath, root: string): bool =
 proc resolveAssetPath*(path: string, allowRoot = false): string =
   let assetsPath = configuredAssetsPath()
   let stripped = path.strip()
+  # A NUL byte ends the C string every stat/unlink/rmdir underneath sees:
+  # `path=%00` normalised to "<root>/\0", passed the lexical checks below as
+  # a child of the root, and removeDir() then emptied the root itself. No
+  # legitimate asset name carries a control character, so refuse them all
+  # before any path arithmetic.
+  for ch in stripped:
+    if ch < ' ' or ch == '\127':
+      raise newException(ValueError, "Invalid asset path")
   if stripped.len == 0:
     if allowRoot:
       return assetsPath
@@ -353,6 +361,10 @@ proc finishChunkedImageUpload*(uploadId: string, filename: string): JsonNode =
 
 proc deleteAssetEntry*(path: string) =
   let targetPath = resolveAssetPath(path)
+  # Belt to the resolver's braces: whatever the resolver decided, the assets
+  # root itself is never a deletable entry.
+  if normalizedPath(targetPath) == configuredAssetsPath():
+    raise newException(ValueError, "Path is required")
   if fileExists(targetPath):
     removeFile(targetPath)
   elif dirExists(targetPath):
