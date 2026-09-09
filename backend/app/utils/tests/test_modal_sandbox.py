@@ -1,5 +1,4 @@
 import contextlib
-from pathlib import Path
 import sys
 from types import SimpleNamespace
 

@@ -28,8 +28,10 @@
  * partition table matches the one on the board. */
 const char *fos_ota_platform(void);
 
-/* Mark the running image valid (cancels pending rollback). Call once per
- * boot after the system proves healthy. */
+/* Mark the running image valid (cancels pending rollback). Called after the
+ * first successful render of a boot (fos_client.c), before an orderly deep
+ * sleep, and on a fresh device with no Wi-Fi to lose (main.c). Idempotent:
+ * only a pending-verify image is touched. */
 void fos_ota_mark_boot_valid(void);
 /* Backend-managed frames: GET the backend's OTA manifest, compare it to the
  * running version, download + verify the release image into the inactive

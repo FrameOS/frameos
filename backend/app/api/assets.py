@@ -1,8 +1,8 @@
 import uuid
-import re
 from typing import Optional
 from http import HTTPStatus
 from fastapi import Depends, HTTPException, File, Form, Request, UploadFile, Query
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from fastapi.responses import Response
@@ -50,19 +50,16 @@ async def list_assets(
     Return a list of all stored Assets (without the binary data).
     Optionally filter by `path` if specified.
     """
-    query = project_query(db, Assets)
+    # Only the columns the response needs: ``data`` stays in the database.
+    # Loading every blob to call len() on it made this listing cost the whole
+    # asset store in memory per call.
+    query = project_query(db, Assets).with_entities(Assets.id, Assets.path, func.length(Assets.data))
     if path:
         query = query.filter(Assets.path.ilike(f"%{path}%"))
-    results = query.all()
-
-    output = []
-    for asset in results:
-        output.append(AssetResponse(
-            id=asset.id,
-            path=asset.path,
-            size=len(asset.data) if asset.data else 0
-        ))
-    return output
+    return [
+        AssetResponse(id=asset_id, path=asset_path, size=int(size or 0))
+        for asset_id, asset_path, size in query.all()
+    ]
 
 
 @api_project.get("/assets/{asset_id}", response_model=AssetResponse)

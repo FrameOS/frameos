@@ -1,6 +1,0 @@
-# pip install pip-tools
-# pip-compile requirements.in
--i https://piwheels.org/simple
---extra-index-url https://pypi.org/simple
-
-RPi.GPIO==0.7.1

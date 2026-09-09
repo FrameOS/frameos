@@ -401,8 +401,16 @@ export function mapNimTimeFormat(pattern: string, position = 0): string {
 
 // --- parser -----------------------------------------------------------------
 
+// A code node's expression is one line of a scene someone pasted, so a
+// nesting bound this generous costs nothing real — and without it
+// "(".repeat(1e6) walks the recursive descent off the stack (a RangeError
+// the route turns into a 500) before the grammar ever says no.
+const maxExpressionLength = 64 * 1024;
+const maxNestingDepth = 200;
+
 class Parser {
   private index = 0;
+  private depth = 0;
   private readonly scope = new Map<string, Emitted>();
 
   constructor(
@@ -489,13 +497,30 @@ class Parser {
   }
 
   parseExpression(): Emitted {
-    if (this.isKeyword("if")) {
-      return this.parseIf();
+    return this.nested(() => {
+      if (this.isKeyword("if")) {
+        return this.parseIf();
+      }
+      if (this.isKeyword("case")) {
+        return this.parseCase();
+      }
+      return this.parseOr();
+    });
+  }
+
+  // Every recursion into the grammar passes through here or parseExpression;
+  // past the bound the expression is refused as unsupported, like any other
+  // construct outside the grammar, instead of exhausting the stack.
+  private nested<T>(parse: () => T): T {
+    if (this.depth >= maxNestingDepth) {
+      this.fail(`expression nests deeper than ${maxNestingDepth} levels`);
     }
-    if (this.isKeyword("case")) {
-      return this.parseCase();
+    this.depth += 1;
+    try {
+      return parse();
+    } finally {
+      this.depth -= 1;
     }
-    return this.parseOr();
   }
 
   private parseIf(): Emitted {
@@ -661,6 +686,10 @@ class Parser {
   }
 
   private parseUnary(): Emitted {
+    return this.nested(() => this.parseUnaryInner());
+  }
+
+  private parseUnaryInner(): Emitted {
     const token = this.peek();
     if (token.kind === "op" && token.text === "-") {
       this.next();
@@ -1130,6 +1159,12 @@ export function nimExpressionToJs(source: string, options: NimExpressionOptions 
   const trimmed = source.trim();
   if (!trimmed) {
     throw new NimConvertError("empty expression", 0);
+  }
+  if (trimmed.length > maxExpressionLength) {
+    throw new NimConvertError(
+      `expression is longer than ${maxExpressionLength} characters`,
+      maxExpressionLength,
+    );
   }
   const parser = new Parser(tokenize(trimmed), options);
   return parser.parseProgram().js;

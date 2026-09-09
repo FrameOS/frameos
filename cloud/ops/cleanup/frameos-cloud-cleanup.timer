@@ -1,0 +1,12 @@
+[Unit]
+Description=FrameOS Cloud database cleanup, nightly
+
+[Timer]
+# Before the 04:00 backup window, so the dump does not carry rows the
+# cleanup is about to delete.
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

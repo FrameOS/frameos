@@ -8,7 +8,9 @@ carries the work. **When an item ships, delete it.** Larger tracks keep their
 own files: security findings in `docs/security-todo.md`, architecture
 convergence in `docs/convergence-todo.md`, store
 content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`,
-cloud billing in `cloud/docs/accounting-todo.md`.
+cloud billing in `cloud/docs/accounting-todo.md`, ESP32/Pico firmware in
+`docs/embedded-todo.md`, CI and the release chain in
+`docs/release-chain-todo.md`.
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
 new Nim, every surface that shows a compiled scene warns and points at the

@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import re
@@ -20,6 +21,7 @@ from app.models.template import Template
 from . import api_open, api_project
 from app.utils.jwt_tokens import validate_scoped_token
 from app.utils.network import assert_target_allowed, is_safe_host
+from app.utils.upload_limits import read_body_limited
 from app.api.auth import get_current_user_from_request
 from app.tenancy import current_project_id, get_user_project
 
@@ -138,7 +140,7 @@ async def get_scene_image(
         # Fresh snapshot found. Generate and save thumbnail only when a
         # thumbnail is requested, so full-size image reads stay cheap.
         if wants_thumb and not getattr(img_row, 'thumb_image', None):
-            thumb, t_width, t_height = _generate_thumbnail(img_row.image)
+            thumb, t_width, t_height = await asyncio.to_thread(_generate_thumbnail, img_row.image)
             img_row.thumb_image = thumb
             img_row.thumb_width = t_width
             img_row.thumb_height = t_height
@@ -179,21 +181,34 @@ async def get_scene_image(
     return StreamingResponse(io.BytesIO(png), media_type="image/png", headers=SCENE_IMAGE_CACHE_HEADERS)
 
 
-def _store_scene_image(db: Session, project_id: int, frame_id: int, scene_id: str, body: bytes) -> SceneImage:
+# One scene snapshot, as posted by the frame or copied from a cover.
+MAX_SCENE_IMAGE_BYTES = 32 * 1024 * 1024
+
+
+def _normalize_scene_image(body: bytes) -> tuple[bytes, int, int, bytes, int, int]:
+    """PNG + thumbnail from whatever bytes arrived. Pure CPU (two PIL passes),
+    so the async routes run it on a thread rather than the event loop."""
+    with Image.open(io.BytesIO(body)) as img:
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        width, height = img.size
+        png_buffer = io.BytesIO()
+        img.save(png_buffer, format="PNG")
+        png_buffer.seek(0)
+        image_bytes = png_buffer.read()
+    thumb, t_width, t_height = _generate_thumbnail(image_bytes)
+    return image_bytes, width, height, thumb, t_width, t_height
+
+
+async def _store_scene_image(db: Session, project_id: int, frame_id: int, scene_id: str, body: bytes) -> SceneImage:
     """Normalize `body` to PNG + thumbnail and upsert the scene's snapshot."""
+    if len(body) > MAX_SCENE_IMAGE_BYTES:
+        raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Image too large")
     try:
-        with Image.open(io.BytesIO(body)) as img:
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            width, height = img.size
-            png_buffer = io.BytesIO()
-            img.save(png_buffer, format="PNG")
-            png_buffer.seek(0)
-            image_bytes = png_buffer.read()
+        image_bytes, width, height, thumb, t_width, t_height = await asyncio.to_thread(_normalize_scene_image, body)
     except Exception:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
 
-    thumb, t_width, t_height = _generate_thumbnail(image_bytes)
     now = datetime.utcnow()
     img_row = db.query(SceneImage).filter_by(project_id=project_id, frame_id=frame_id, scene_id=scene_id).first()
     if img_row:
@@ -240,11 +255,11 @@ async def upsert_scene_image(
     project_id = current_project_id()
     _frame_or_404(db, project_id, frame_id)
 
-    body = await request.body()
+    body = await read_body_limited(request, MAX_SCENE_IMAGE_BYTES, "Image too large")
     if not body:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Missing image payload")
 
-    return _store_scene_image(db, project_id, frame_id, scene_id, body).to_dict()
+    return (await _store_scene_image(db, project_id, frame_id, scene_id, body)).to_dict()
 
 
 class SceneImageCopyRequest(BaseModel):
@@ -395,4 +410,4 @@ async def copy_scene_image(
             detail="Provide source_scene_id, template_id or url",
         )
 
-    return _store_scene_image(db, project_id, frame_id, scene_id, image_bytes).to_dict()
+    return (await _store_scene_image(db, project_id, frame_id, scene_id, image_bytes)).to_dict()

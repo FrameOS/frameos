@@ -201,7 +201,7 @@ credential never changes. The approval screen labels these requests as a
 feature change and shows human-readable feature names ("Cloud login") from
 `deviceScopeLabels`.
 
-Cloud-session logout for linked installs: `GET /logout?return_to=…` revokes
+Cloud-session logout for linked backends: `GET /logout?return_to=…` revokes
 the session and redirects to `return_to` when its origin matches one of the
 account's linked clients (loopback hosts allowed for development), else to the
 sign-in page. FrameOS backends send users here after a local logout so cloud

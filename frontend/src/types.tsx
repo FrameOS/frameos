@@ -171,6 +171,8 @@ export interface FrameType {
   ssh_keys?: string[]
   server_host?: string
   server_port: number
+  /** "http" | "https": how the frame reaches the backend. Stated, never derived from the port. */
+  server_scheme?: 'http' | 'https'
   server_api_key?: string
   server_send_logs?: boolean
   status: string

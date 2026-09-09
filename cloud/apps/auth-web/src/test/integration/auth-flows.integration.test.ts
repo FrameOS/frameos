@@ -16,6 +16,7 @@ import {
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DELETE as adminDeleteUser, PATCH as adminPatchUser } from "../../../app/api/admin/users/[accountId]/route";
 import { POST as adminRevokeSessions } from "../../../app/api/admin/users/[accountId]/revoke-sessions/route";
+import { POST as revokeOtherSessions } from "../../../app/api/account/sessions/revoke-all/route";
 import { GET as adminListUsers } from "../../../app/api/admin/users/route";
 import { POST as login } from "../../../app/api/auth/login/route";
 import { POST as logout } from "../../../app/api/auth/logout/route";
@@ -279,6 +280,86 @@ describe("password signup and login", () => {
     });
   });
 
+  it("audits a refused password so the Activity page can show credential guessing", async () => {
+    const { accountId, email } = await signUpUser();
+    const wrong = await login(
+      postJson("/api/auth/login", { email, password: "not the password" }),
+    );
+    expect(wrong.status).toBe(401);
+
+    const [attempt] = await db
+      .select({
+        accountId: auditEvents.accountId,
+        actor: auditEvents.actor,
+        metadata: auditEvents.metadata,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.eventType, "auth.login_failed"));
+    // Hangs off the account, so the owner sees it on their Activity page.
+    expect(attempt?.accountId).toBe(accountId);
+    expect(attempt?.metadata).toMatchObject({
+      method: "password",
+      reason: "wrong_password",
+    });
+    // The address itself is not written for a miss: a digest is enough to
+    // correlate a spray and says nothing about who was targeted.
+    expect(JSON.stringify(attempt?.actor)).not.toContain(email);
+    expect(attempt?.actor).toMatchObject({ accountId });
+
+    // An unknown address leaves an unattached row for the operator's eyes.
+    const unknown = await login(
+      postJson("/api/auth/login", {
+        email: "nobody@example.com",
+        password: "whatever password",
+      }),
+    );
+    expect(unknown.status).toBe(401);
+    const rows = await db
+      .select({ accountId: auditEvents.accountId, metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(eq(auditEvents.eventType, "auth.login_failed"));
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.accountId === null)?.metadata).toMatchObject({
+      reason: "unknown_email",
+    });
+  });
+
+  it("refuses a weak password or a malformed address before spending the Turnstile token", async () => {
+    // A Turnstile token is single-use and the server spends it by verifying
+    // it. Validation that needs no database must therefore come first, or
+    // the corrected resubmit fails the anti-spam check instead.
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "test-site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "test-secret");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    try {
+      const weak = await signup(
+        postJson("/api/auth/signup", {
+          email: "weak@example.com",
+          password: "short",
+          turnstile_token: "unspent",
+        }),
+      );
+      expect(weak.status).toBe(400);
+      expect(await readJson(weak)).toMatchObject({ error: "weak_password" });
+
+      const malformed = await resetRequest(
+        postJson("/api/auth/reset/request", {
+          email: "not an address",
+          turnstile_token: "unspent",
+        }),
+      );
+      expect(malformed.status).toBe(400);
+      expect(await readJson(malformed)).toMatchObject({ error: "invalid_request" });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("revokes the session row on logout", async () => {
     const { accountId, email } = await signUpUser();
     const token = await establishSession(accountId, email);
@@ -298,6 +379,76 @@ describe("password signup and login", () => {
       .from(sessions)
       .where(eq(sessions.tokenHash, hashSecret(token)));
     expect(row?.revokedAt).not.toBeNull();
+  });
+});
+
+describe("sign out everywhere else", () => {
+  function revokeRequest() {
+    return new NextRequest(new URL("/api/account/sessions/revoke-all", baseUrl), {
+      headers: { "content-type": "application/json", origin: baseUrl },
+      method: "POST",
+    });
+  }
+
+  it("revokes every other session, keeps this one, and audits it", async () => {
+    const { accountId, email } = await signUpUser();
+    const laptop = await establishSession(accountId, email);
+    const phone = await establishSession(accountId, email);
+    // The cookie jar now holds the phone's session: that is "this one".
+    expect(cookieJar.get(sessionCookieName)).toBe(phone);
+
+    const response = await revokeOtherSessions(revokeRequest());
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({ ok: true, revoked: 1 });
+
+    const rows = await db
+      .select({ revokedAt: sessions.revokedAt, tokenHash: sessions.tokenHash })
+      .from(sessions)
+      .where(eq(sessions.accountId, accountId));
+    expect(rows.find((row) => row.tokenHash === hashSecret(laptop))?.revokedAt).not.toBeNull();
+    expect(rows.find((row) => row.tokenHash === hashSecret(phone))?.revokedAt).toBeNull();
+    // Still signed in here.
+    expect((await readSession())?.accountId).toBe(accountId);
+
+    const [event] = await db
+      .select({ accountId: auditEvents.accountId, metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(eq(auditEvents.eventType, "account.sessions_revoked"));
+    expect(event).toMatchObject({ accountId, metadata: { sessions: 1 } });
+  });
+
+  it("is behind sudo mode: a stale session is sent to re-authenticate first", async () => {
+    const { accountId, email } = await signUpUser();
+    await establishSession(accountId, email);
+    const current = await establishSession(accountId, email);
+    await db
+      .update(sessions)
+      .set({ authenticatedAt: new Date(Date.now() - 20 * 60 * 1000) })
+      .where(eq(sessions.tokenHash, hashSecret(current)));
+
+    const response = await revokeOtherSessions(revokeRequest());
+    expect(response.status).toBe(403);
+    expect(await readJson(response)).toMatchObject({ error: "reauth_required" });
+    const live = await db
+      .select({ revokedAt: sessions.revokedAt })
+      .from(sessions)
+      .where(eq(sessions.accountId, accountId));
+    expect(live.every((row) => row.revokedAt === null)).toBe(true);
+  });
+
+  it("wants a session and a same-origin request", async () => {
+    const anonymous = await revokeOtherSessions(revokeRequest());
+    expect(anonymous.status).toBe(401);
+
+    const { accountId, email } = await signUpUser();
+    await establishSession(accountId, email);
+    const crossSite = await revokeOtherSessions(
+      new NextRequest(new URL("/api/account/sessions/revoke-all", baseUrl), {
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        method: "POST",
+      }),
+    );
+    expect(crossSite.status).toBe(403);
   });
 });
 
@@ -762,6 +913,20 @@ describe("google sign-in merging", () => {
       sub: `google-sub-${email}`,
     });
     expect(resolution).toEqual({ status: "google_email_unverified" });
+  });
+
+  it("mints no account for a google identity whose email google did not verify", async () => {
+    const resolution = await resolveGoogleSignIn(db, googleIssuer, {
+      email: "unverified-google@example.com",
+      email_verified: false,
+      sub: "google-sub-unverified",
+    });
+    expect(resolution).toEqual({ status: "google_email_unverified" });
+    const rows = await db
+      .select({ id: accountIdentities.id })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.providerSubject, "google-sub-unverified"));
+    expect(rows).toHaveLength(0);
   });
 
   it("creates a fresh account when the email is unknown", async () => {

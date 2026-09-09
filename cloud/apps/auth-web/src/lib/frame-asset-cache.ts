@@ -217,6 +217,8 @@ export async function queueImageGetIfIdle(
  * Runtime scene ids arrive both bare and as "uploaded/<id>"; the device
  * strips the prefix, so we do too.
  */
+export const sceneSnapshotAssetPrefix = ".frameos/scene_images/";
+
 export function sceneSnapshotAssetPath(sceneId: string): string {
   const uploadedPrefix = "uploaded/";
   const publicId = sceneId.startsWith(uploadedPrefix)
@@ -234,7 +236,7 @@ export function sceneSnapshotAssetPath(sceneId: string): string {
     safe = safe.slice(0, 64);
   }
   const digest = createHash("md5").update(publicId).digest("hex");
-  return `.frameos/scene_images/${safe}-${digest}.png`;
+  return `${sceneSnapshotAssetPrefix}${safe}-${digest}.png`;
 }
 
 // ---------------------------------------------------------------------------

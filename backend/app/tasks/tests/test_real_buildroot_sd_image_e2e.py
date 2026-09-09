@@ -8,7 +8,6 @@ import pytest
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED
 from app.models.frame import Frame
 from app.models.log import Log
-from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import BuildrootImageBuilder, ensure_buildroot_frame_defaults
 from app.tenancy import ensure_default_project
 

@@ -17,7 +17,7 @@ provides:
   scenes.
 - **Cloud-managed frames**: a WebSocket control plane (`apps/frame-hub`) for
   frames that enroll with the cloud directly and have no self-hosted backend
-  at all — scene assignment, screenshots, logs, metrics, and signed OTA
+  at all — scene installs, screenshots, logs, metrics, and signed OTA
   updates. Design: [`docs/cloud-frames.md`](docs/cloud-frames.md).
 - **Config backups** for linked self-hosted backends.
 - **API tokens and an MCP server**: personal bearer tokens for the JSON API,
@@ -25,6 +25,13 @@ provides:
   scene AI, server-side previews) as Model Context Protocol tools for AI
   agents, implemented in `packages/mcp` as a thin wrapper over the routes.
   Design: [`docs/mcp.md`](docs/mcp.md).
+- **The scene AI and its metering**: an agent that builds and edits scenes
+  from plain language, with every model call metered into a double-entry
+  ledger (`packages/ledger`) that bills usage beyond the plan's allowance.
+  Design: [`docs/accounting-todo.md`](docs/accounting-todo.md).
+- **A Nim → JS scene converter** (`packages/scene-convert`) that turns
+  compiled-era scenes into interpreted ones, as `POST /api/scenes/convert`,
+  the `/nim-converter` page and a CLI.
 
 **You do not need any of this to use FrameOS.** The self-hosted backend and
 the frames themselves work with zero cloud, forever — that is a hard rule of
@@ -55,8 +62,10 @@ ready to be run by other people. Concretely:
   shared session cookie domain. Nothing is parameterised for a different
   brand or topology.
 - The docs under `docs/` are operational runbooks for our instance, not a
-  self-hosting guide. There is no multi-tenant model, no billing, no quota
-  enforcement beyond fixed caps, and no operator surface.
+  self-hosting guide. There is no multi-tenant model, the billing and plan
+  quotas (frames per account, enforced at enrollment; AI usage, metered in
+  the ledger) are shaped around our plans, and the operator surface is the
+  superadmin panel plus scripts.
 - The security posture is reviewed against our threat model, not a general
   one. Running an internet-facing auth service and frame control plane is on
   you.
@@ -69,18 +78,20 @@ works fine locally; just don't put it in front of frames you care about.
 ## Status
 
 This directory is part of the monorepo's single pnpm workspace: one root
-lockfile, `frameos-wasm` and `frameos-editor` consumed as `workspace:`
-packages, and Turborepo building whatever a task depends on (frontend →
-editor, wasm runtime → wasm) automatically and cached. Run pnpm commands
-from `cloud/`; sharing the full frontend is the next step — see
-`docs/cloud-frames.md`.
+lockfile, `frameos-wasm`, `frameos-editor` and the full FrameOS frontend
+(`cloud-frontend`, the same SPA the self-hosted backend and the on-device
+admin panel serve, built as a thin wrapper bundle for the cloud) consumed as
+`workspace:` packages, and Turborepo building whatever a task depends on
+(frontend → editor, wasm runtime → wasm) automatically and cached. Run pnpm
+commands from `cloud/`; the frontend adapter is described in
+`docs/cloud-frames.md`, "Frontend: the fourth adapter".
 
 Current scope:
 
 - Flox-managed Node/pnpm development environment.
 - Flox-managed local Postgres setup through `pnpm db:setup`.
-- pnpm monorepo with `apps/auth-web`, `apps/frame-hub`,
-  `packages/auth-client`, and `packages/db`.
+- pnpm monorepo with `apps/auth-web`, `apps/frame-hub` and
+  `packages/{auth-client,db,ledger,mcp,scene-convert}` (see "Layout").
 - Branded login, signup, reset, recovery, backend-code, and account screens.
 - First-party email/password auth (scrypt-hashed credentials, single-use
   password reset links) and optional Google SSO through a direct OIDC
@@ -91,9 +102,8 @@ Current scope:
   rotation endpoints.
 - Linked backend inventory sync and account-owner grant fetch endpoints.
 - The cloud-managed frames control plane: `apps/frame-hub` (WebSocket), frame
-  enrollment, scene assignment and deploys, current-image and per-scene
-  previews, logs and metrics, and signed OTA updates for both esp32 and
-  buildroot frames.
+  enrollment, scene installs, current-image and per-scene previews, logs and
+  metrics, and signed OTA updates for both esp32 and buildroot frames.
 - The scene store at `scenes.frameos.net`, with the hosted scene editor
   served at `/frameos-editor`.
 - Shared FrameOS Cloud database schema for accounts, identities, linked clients,
@@ -101,10 +111,11 @@ Current scope:
   events.
 - Rate limits, CSRF origin checks for cookie-authenticated mutations, encrypted
   link credentials, audit events, and baseline security headers.
-- Vitest unit and component tests (Testing Library) plus Postgres-backed
-  integration tests for the backend-linking flow, with GitHub Actions CI
-  running lint, typecheck, tests, build, and the integration suite on every
-  push and pull request.
+- Vitest unit and component tests (Testing Library) plus three Postgres-backed
+  integration suites (auth-web: linking, frames, store, AI; frame-hub: the
+  device and browser sockets; ledger: metering and posting), with GitHub
+  Actions CI running lint, typecheck, tests, build, and the integration
+  suites on every push and pull request.
 - Single-instance production deployment shared by `cloud.frameos.net`
   (login + account) and `scenes.frameos.net` (store), updated with
   `pnpm deploy:prod` (see `docs/deployment.md`). The legacy
@@ -159,12 +170,12 @@ step serves it from `public/`. The wasm runtime is reused from
 `frameos/wasm/dist/assets` unless regenerated with
 `turbo run build:runtime --filter=frameos-wasm` (needs nim + emscripten).
 
-`pnpm test:integration` exercises the full backend-linking flow (device
-authorization, token issuance and rotation, deny/revoke) against a real
-Postgres. It uses the local server from `pnpm db:setup` and creates a separate
-`frameos_cloud_test` database, rebuilt from the SQL migrations on every run;
-set `TEST_DATABASE_URL` to use another server. CI runs it against a Postgres
-service container.
+`pnpm test:integration` runs the three Postgres-backed suites (auth-web,
+frame-hub, ledger) against a real Postgres: the local server from
+`pnpm db:setup`, each suite in its own database (`frameos_cloud_test`,
+`frameos_cloud_frame_hub_test`, `frameos_cloud_ledger_test`) rebuilt from the
+SQL migrations on every run; set `TEST_DATABASE_URL` to use another server.
+CI runs them against a Postgres service container.
 
 `pnpm db:setup` starts a local Flox-provided Postgres instance on port `55432`,
 applies migrations, and creates `.env.local` with local database settings and
@@ -187,6 +198,12 @@ value were unset. `db-setup.sh` warns when it finds one and prints the fix.
 - `packages/auth-client`: generic OIDC discovery, PKCE, token exchange, and ID
   token verification helpers.
 - `packages/db`: Drizzle schema and database helpers for cloud-owned data.
+- `packages/ledger`: the accounting module — usage events → pricing rules →
+  a double-entry ledger in micro-USD, and the postpay billing that reads it.
+- `packages/mcp`: the Model Context Protocol server (`POST /api/mcp` and the
+  stdio binary), a thin wrapper over the HTTP routes.
+- `packages/scene-convert`: the Nim → JS scene converter shared by the API
+  route, the page and the CLI.
 - `scripts`: local database setup, migration, and cleanup scripts, plus the
   production deploy script.
 - `ops`: the production host's deploy, backup, and monitoring pieces.

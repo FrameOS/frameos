@@ -281,3 +281,30 @@ def test_cloud_headers_only_for_provider_urls(db):
     assert cloud_headers_for_url(db, "https://evil.example.com/api/store/scenes/x/download") == {}
     assert cloud_headers_for_url(db, f"{PROVIDER}.evil.example.com/zip") == {}
     assert cloud_headers_for_url(db, None) == {}
+
+
+@pytest.mark.asyncio
+async def test_drive_image_proxy_serves_svg_as_a_download(async_client, db, monkeypatch):
+    """A scripted SVG cover is `image/*` but a document to the browser: it is
+    relayed inert (sandboxed CSP, nosniff) and as an attachment."""
+    make_connected_link(db)
+
+    async def cloud_get_binary(provider_url, path, access_token):
+        return 200, "image/svg+xml", b"<svg onload=alert(1)/>"
+
+    monkeypatch.setattr(cloud_link, "cloud_get_binary", cloud_get_binary)
+    response = await async_client.get("/api/cloud/store/drive/image/abc")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("attachment")
+    assert 'filename="abc.svg"' in response.headers["content-disposition"]
+    assert response.headers["content-security-policy"] == "default-src 'none'; sandbox"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+    # A raster cover stays inline, with the same inert headers.
+    async def cloud_get_png(provider_url, path, access_token):
+        return 200, "image/png", b"png"
+
+    monkeypatch.setattr(cloud_link, "cloud_get_binary", cloud_get_png)
+    response = await async_client.get("/api/cloud/store/drive/image/abc")
+    assert response.headers["content-disposition"].startswith("inline")
+    assert response.headers["content-security-policy"] == "default-src 'none'; sandbox"

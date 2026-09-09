@@ -8,7 +8,7 @@ import {
   sign,
   type KeyObject,
 } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { SignJWT } from "jose";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -34,10 +34,13 @@ import {
   frameTelemetryMetricsScope,
   maxLogBatch,
   revokeFrame,
+  revokeLinkedClient,
 } from "../../../../auth-web/src/lib/frames";
 import { derivedSigningKey } from "../../../../auth-web/src/lib/keys";
 import { hashSecret } from "../../../../auth-web/src/lib/secrets";
+import { cachedAssetFile } from "../../../../auth-web/src/lib/frame-asset-cache";
 import {
+  maxAssetStreamsPerSession,
   maxPayloadBytes,
   startFrameHub,
   type FrameHub,
@@ -1258,6 +1261,208 @@ describe("telemetry", () => {
     device.ws.close();
   });
 
+  it("fills a linked client's missing local_origin from hello, and only when missing", async () => {
+    const { frame, linkedClient, privateKey, token } = await createFrameFixture();
+    expect(linkedClient.localOrigin).toBeNull();
+
+    // A public host is not a local origin: dropped, the link stays empty.
+    const first = await openDevice(token);
+    await handshake(first, privateKey, {
+      local_origin: "https://frameos.example.com",
+    });
+    first.ws.close();
+    await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return r && !r.connected ? r : undefined;
+    }, "first session closed");
+    let [link] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, linkedClient.id));
+    expect(link?.localOrigin).toBeNull();
+
+    const second = await openDevice(token);
+    await handshake(second, privateKey, {
+      local_origin: "http://frame.local:8787/",
+    });
+    link = (
+      await waitFor(async () => {
+        const [r] = await db
+          .select()
+          .from(linkedClients)
+          .where(eq(linkedClients.id, linkedClient.id));
+        return r?.localOrigin ? r : undefined;
+      }, "local_origin filled from hello")
+    );
+    expect(link.localOrigin).toBe("http://frame.local:8787");
+    second.ws.close();
+    await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return r && !r.connected ? r : undefined;
+    }, "second session closed");
+
+    // Fill-only: a recorded origin (the browser's, at enrollment) wins.
+    const third = await openDevice(token);
+    await handshake(third, privateKey, {
+      local_origin: "http://192.168.1.50:8787",
+    });
+    await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return r?.connected ? r : undefined;
+    }, "third session connected");
+    [link] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, linkedClient.id));
+    expect(link?.localOrigin).toBe("http://frame.local:8787");
+    third.ws.close();
+  });
+
+  it("keeps an unconfirmed frame's state, scene ack, sleep and render out of the row", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    await db
+      .update(frames)
+      .set({ previewWatchedAt: new Date(), status: "pending" })
+      .where(eq(frames.id, frame.id));
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, {
+      hardware: { platform: "esp32-s3" },
+      scenes_checksum: "sum-pending",
+      states: { active_scene: "boot", boot: { secret: 1 } },
+    });
+    expect(ready.scopes).toEqual(allScopes);
+
+    // Hello: online, with its own hardware facts (the confirm page shows
+    // both) — and nothing the device claims about scenes or state.
+    const row = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return r?.connected ? r : undefined;
+    }, "pending frame connected");
+    expect(row.hardware).toEqual({ platform: "esp32-s3" });
+    expect(row.lastState).toBeNull();
+    expect(row.scenesChecksum).toBeNull();
+
+    const stateId = randomUUID();
+    device.send({ id: stateId, states: { boot: { x: 1 } }, type: "state" });
+    const stateAck = await device.next(
+      (msg) => msg.type === "ack" && msg.id === stateId,
+      "state unconfirmed ack",
+    );
+    expect(stateAck.error).toBe("frame_not_confirmed");
+
+    const sceneAckId = randomUUID();
+    device.send({ checksum: "sum-x", id: sceneAckId, type: "scene_ack" });
+    const sceneAck = await device.next(
+      (msg) => msg.type === "ack" && msg.id === sceneAckId,
+      "scene_ack unconfirmed ack",
+    );
+    expect(sceneAck.error).toBe("frame_not_confirmed");
+
+    device.send({ active_scene: "scene-a", type: "render" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(
+      await db
+        .select()
+        .from(frameCommands)
+        .where(and(eq(frameCommands.frameId, frame.id), inArray(frameCommands.type, ["asset_get", "image_get"]))),
+    ).toHaveLength(0);
+
+    const [after] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(after?.lastState).toBeNull();
+    expect(after?.scenesChecksum).toBeNull();
+
+    // A pending chip that halts is still dropped (nobody answers a close
+    // handshake), but its forecast is not recorded.
+    device.send({ type: "sleep", wake_in_seconds: 300 });
+    expect(await device.closed).toBe(1006);
+    const asleep = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return r?.connected === false ? r : undefined;
+    }, "pending frame disconnected");
+    expect(asleep.nextWakeAt).toBeNull();
+  });
+
+  it("closes a live socket with 4410 when the link's scopes change; the redial hears the new grant", async () => {
+    const { linkedClient, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey);
+    expect(ready.scopes).toEqual(allScopes);
+
+    // The owner turns telemetry off: the routes rewrite requestedScopes on
+    // the linked client and nothing else — the hub must notice by itself.
+    await db
+      .update(linkedClients)
+      .set({ providerClientMetadata: { requestedScopes: [frameManagedScope] } })
+      .where(eq(linkedClients.id, linkedClient.id));
+    await hub.sweep();
+    expect(await device.closed).toBe(4410);
+
+    const again = await openDevice(token);
+    const readyAgain = await handshake(again, privateKey);
+    expect(readyAgain.scopes).toEqual([frameManagedScope]);
+    // Steady state: the sweep leaves a session whose scopes match alone.
+    await hub.sweep();
+    const msgId = randomUUID();
+    again.send({ id: msgId, logs: [{ payload: { line: "y" }, timestamp: Date.now() / 1000 }], type: "log_batch" });
+    const ack = await again.next((msg) => msg.type === "ack" && msg.id === msgId, "log ack");
+    expect(ack.error).toBe("insufficient_scope");
+    expect(
+      await db.select().from(auditEvents).where(eq(auditEvents.eventType, "frame.session_kicked")),
+    ).toHaveLength(1);
+    again.ws.close();
+  });
+
+  it("stores the log ring a Linux runtime returns inside its get_logs ack", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    const command = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { limit: 50 },
+      type: "get_logs",
+    });
+    const delivered = await device.next(
+      (msg) => msg.type === "get_logs" && msg.id === command?.id,
+      "get_logs delivered",
+    );
+    expect(delivered.limit).toBe(50);
+    // hub_client.nim handleGetLogs: the ring rides in the ack itself.
+    device.send({
+      id: command?.id,
+      logs: [
+        { payload: { event: "ring", line: "one" }, timestamp: Date.now() / 1000 - 60 },
+        { payload: { event: "ring", line: "two" }, timestamp: Date.now() / 1000 },
+      ],
+      ok: true,
+      type: "ack",
+    });
+    const rows = await waitFor(async () => {
+      const stored = await db.select().from(frameLogs).where(eq(frameLogs.frameId, frame.id));
+      return stored.length === 2 ? stored : undefined;
+    }, "ring stored");
+    expect(rows.map((row) => (row.payload as { line: string }).line).sort()).toEqual(["one", "two"]);
+    const [acked] = await db.select().from(frameCommands).where(eq(frameCommands.id, command!.id));
+    expect(acked?.status).toBe("acked");
+    device.ws.close();
+  });
+
+  it("revoking a frame's linked client directly kicks the socket and marks the frame revoked", async () => {
+    const { frame, linkedClient, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    await enqueueFrameCommand(db, { frameId: frame.id, type: "render" });
+
+    // /api/device/revoke and /api/backends/unlink go through this: the
+    // frame row follows the link, exactly as revokeFrame does.
+    const revoked = await revokeLinkedClient(db, linkedClient.id);
+    expect(revoked?.id).toBe(frame.id);
+    expect(await device.closed).toBe(4401);
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.status).toBe("revoked");
+    const commands = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.id));
+    expect(commands.every((command) => command.status === "expired")).toBe(true);
+  });
+
   it("refuses telemetry without the matching scopes", async () => {
     const { frame, privateKey, token } = await createFrameFixture([
       frameManagedScope,
@@ -1311,6 +1516,58 @@ describe("inbound size limits", () => {
     );
     // 1009 = message too big; ws refuses it without buffering the payload.
     expect(await device.closed).toBe(1009);
+  });
+
+  it("fails a queued command the device could never assemble, and keeps draining", async () => {
+    // The device drops the socket on any frame over maxPayloadBytes, so an
+    // oversized command used to loop: send → close → reconnect → redeliver.
+    // It is now failed in place; the small command queued behind it still
+    // goes out on the same socket.
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    const oversized = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { scenes: [{ blob: "x".repeat(maxPayloadBytes) }] },
+      type: "set_scenes",
+    });
+    const small = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { scene_id: "scene-a" },
+      type: "set_current_scene",
+    });
+
+    const delivered = await device.next(
+      (msg) => msg.id === small?.id,
+      "the small command behind the oversized one",
+    );
+    expect(delivered.type).toBe("set_current_scene");
+
+    const [row] = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.id, String(oversized?.id)));
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toBe("payload_too_large");
+    expect(row?.sentAt).toBeNull();
+    expect(device.ws.readyState).toBe(WebSocket.OPEN);
+
+    // Nothing to redeliver on the next connect: failed is terminal (the
+    // small one is acked so at-least-once redelivery has nothing to requeue).
+    device.send({ id: small?.id, ok: true, type: "ack" });
+    await waitFor(async () => {
+      const [acked] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.id, String(small?.id)));
+      return acked?.status === "acked" ? acked : undefined;
+    }, "small command acked");
+    device.ws.close();
+    const second = await openDevice(token);
+    const ready = await handshake(second, privateKey);
+    expect(ready.pending_commands).toBe(0);
+    second.ws.close();
   });
 
   it("rejects an oversized state and keeps the last good one", async () => {
@@ -1463,6 +1720,88 @@ describe("inbound size limits", () => {
       .from(frameLogs)
       .where(eq(frameLogs.frameId, frame.id));
     expect(rows[0]?.count).toBe(120);
+    device.ws.close();
+  });
+
+  it("rate limits a device that floods metrics, keeping the samples that got through", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    // 30 samples a minute per frame (deviceWriteRateLimits) — three times
+    // the ESP32's fastest metrics interval. Handling is serialized, so the
+    // 31st is answered after the first 30 were stored.
+    let limitedAck: Record<string, unknown> | undefined;
+    for (let i = 0; i < 31; i += 1) {
+      const msgId = randomUUID();
+      device.send({ id: msgId, metrics: { sample: i }, type: "metrics" });
+      if (i === 30) {
+        limitedAck = await device.next(
+          (msg) => msg.type === "ack" && msg.id === msgId,
+          "metrics rate limited ack",
+        );
+      }
+    }
+    expect(limitedAck?.error).toBe("rate_limited");
+    const rows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(frameMetrics)
+      .where(eq(frameMetrics.frameId, frame.id));
+    expect(rows[0]?.count).toBe(30);
+    // The dropped sample never became "latest": the row keeps the 30th.
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.lastMetrics).toEqual({ sample: 29 });
+    device.ws.close();
+  });
+
+  it("drops an asset stream that goes quiet and frees its slot", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    // Idle streams are swept on the heartbeat tick, so both timers are short.
+    const extra = await startExtraHub({
+      assetStreamIdleMs: 200,
+      heartbeatIntervalMs: 100,
+    });
+    const device = await openDevice(token, extra.port);
+    await handshake(device, privateKey);
+    // A real request, so a finished stream lands in the asset cache.
+    const command = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { path: "notes.txt" },
+      type: "asset_get",
+    });
+    await device.next((msg) => msg.type === "asset_get", "asset_get delivered");
+
+    // Every slot taken by a stream that sends its first chunk and nothing
+    // more — the shape of a device whose verb task died mid-file.
+    for (let i = 0; i < maxAssetStreamsPerSession; i += 1) {
+      device.send({
+        data: Buffer.from("partial").toString("base64"),
+        id: randomUUID(),
+        seq: 0,
+        type: "asset_chunk",
+      });
+    }
+    const reply = {
+      data: Buffer.from("hello").toString("base64"),
+      done: true,
+      id: command!.id,
+      seq: 0,
+      type: "asset_chunk",
+    };
+    device.send(reply);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Refused: the slots are still held by the silent streams.
+    expect(await cachedAssetFile(db, frame.id, "notes.txt", false)).toBeUndefined();
+
+    // Once they have been idle past the ceiling the sweep drops them, and
+    // the same reply goes through.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    device.send(reply);
+    const stored = await waitFor(
+      async () => await cachedAssetFile(db, frame.id, "notes.txt", false),
+      "asset stored after the sweep",
+    );
+    expect(stored.sizeBytes).toBe(5);
     device.ws.close();
   });
 

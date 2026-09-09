@@ -33,6 +33,33 @@ describe("remapSceneIds", () => {
     expect("sources" in node).toBe(false);
   });
 
+  it("rewrites scene nodes, scene-typed fields and custom-event fields, and copies the edges", () => {
+    const [out] = remapSceneIds(
+      [
+        {
+          ...scene([
+            { id: "n1", type: "scene", data: { keyword: "scene-b" } },
+            { id: "n2", type: "code", data: { code: "return 1" } },
+          ]),
+          edges: [{ id: "e1", source: "n1", target: "n2" }],
+          fields: [
+            { name: "next", type: "scene", value: "scene-b" },
+            { name: "title", type: "string", value: "scene-b" },
+          ],
+          customEvents: [{ name: "go", fields: [{ name: "to", type: "scene", value: "scene-a" }] }],
+        },
+      ] as never,
+      (id: string) => `${id}-copy`,
+    ) as unknown as Array<Record<string, any>>;
+    expect(out!.id).toBe("scene-a-copy");
+    expect(out!.nodes[0].data.keyword).toBe("scene-b-copy");
+    // Code nodes carry no scene ids; untouched.
+    expect(out!.nodes[1].data).toEqual({ code: "return 1" });
+    expect(out!.edges).toEqual([{ id: "e1", source: "n1", target: "n2" }]);
+    expect(out!.fields.map((f: { value: string }) => f.value)).toEqual(["scene-b-copy", "scene-b"]);
+    expect(out!.customEvents[0].fields[0].value).toBe("scene-a-copy");
+  });
+
   it("copies a node type it does not know instead of throwing", () => {
     const unknown: AnyNode = { id: "n2", type: "widget", data: { anything: 1 } };
     const [out] = remap([scene([unknown])]);

@@ -270,7 +270,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: true },
       description:
-        "Delete one of the account's scenes with all versions and images. Frames that had it assigned keep running what they hold until their next deploy. Requires confirm=true.",
+        "Delete one of the account's scenes with all versions and images. Frames it is installed on keep running what they hold until their next scene push. Requires confirm=true.",
       inputSchema: { confirm: z.literal(true), scene_id: sceneId },
     },
     async ({ scene_id }) =>

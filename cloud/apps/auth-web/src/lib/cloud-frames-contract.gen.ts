@@ -519,102 +519,182 @@ export const cloudFramesContract = {
     {
       "type": "set_scenes",
       "scope": null,
-      "content": true
+      "content": true,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "set_current_scene",
       "scope": null,
-      "content": true
+      "content": true,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "set_settings",
       "scope": null,
-      "content": true
+      "content": true,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "set_schedule",
       "scope": null,
-      "content": true
+      "content": true,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "refresh_service_settings",
       "scope": "settings:services",
-      "content": true
+      "content": true,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "get_state",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "get_logs",
       "scope": "telemetry:logs",
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "get_metrics",
       "scope": "telemetry:metrics",
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "render",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "reboot",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "restart_runtime",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "notify_update_available",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "assets_list",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "asset_get",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "asset_put",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "asset_put_chunk",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "asset_mkdir",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "asset_delete",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "asset_rename",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     },
     {
       "type": "image_get",
       "scope": null,
-      "content": false
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
     }
   ],
   "errors": {

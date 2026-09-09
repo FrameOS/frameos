@@ -455,6 +455,8 @@ describe("cloud-managed frame enrollment", () => {
     // The device asserts its own name — a stock ESP32 always sends its
     // default hostname "frameos" — and the owner's mint-time name must win.
     const response = await enroll(claimToken, keys.publicKeyBase64, {
+      // Where the device's admin page lives, for the cloud sign-in redirect.
+      local_origin: "http://kitchen.local:8787/",
       name: "frameos",
     });
     expect(response.status).toBe(200);
@@ -484,6 +486,10 @@ describe("cloud-managed frame enrollment", () => {
       .from(linkedClients)
       .where(eq(linkedClients.id, frame!.linkedClientId));
     expect(client?.clientKind).toBe("frame");
+    // Recorded like the device flow records the browser's origin: it is the
+    // only redirect target /api/frameos/login/start accepts, so without it
+    // "Sign in with FrameOS Cloud" on the device fails invalid_redirect_uri.
+    expect(client?.localOrigin).toBe("http://kitchen.local:8787");
 
     // Single use: replaying the claim token fails.
     const replay = await enroll(claimToken, deviceKeypair().publicKeyBase64);
@@ -532,6 +538,32 @@ describe("cloud-managed frame enrollment", () => {
     expect(response.status).toBe(200);
     const payload = (await response.json()) as Record<string, unknown>;
     expect(payload.ws_url).toBe("ws://localhost:3100/api/frames/ws");
+  });
+
+  it("never hands a production device the loopback dev hub", async () => {
+    // Behind nginx the standalone server sees every request as localhost
+    // (request.url is not rebuilt from the forwarded Host), so the dev
+    // default above would ship `ws://localhost:3100` to real frames. In
+    // production the hub is same-origin; only FRAME_HUB_PUBLIC_URL overrides.
+    await signIn();
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const claimToken = await mintToken();
+      const response = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as Record<string, unknown>;
+      expect(payload.ws_path).toBe("/api/frames/ws");
+      expect("ws_url" in payload).toBe(false);
+
+      process.env.FRAME_HUB_PUBLIC_URL = "https://hub.frameos.net";
+      const second = await enroll(await mintToken(), deviceKeypair().publicKeyBase64);
+      expect(second.status).toBe(200);
+      const explicit = (await second.json()) as Record<string, unknown>;
+      expect(explicit.ws_url).toBe("wss://hub.frameos.net/api/frames/ws");
+    } finally {
+      vi.unstubAllEnvs();
+      delete process.env.FRAME_HUB_PUBLIC_URL;
+    }
   });
 
   it("omits ws_url for a public host without FRAME_HUB_PUBLIC_URL", async () => {
@@ -809,6 +841,44 @@ describe("cloud-managed frame enrollment", () => {
     const payload = (await response.json()) as Record<string, unknown>;
     expect(payload.status).toBe("active");
     expect(payload.access_token).toBeUndefined();
+
+    // A device-reported local_origin only fills an empty field (the device
+    // flow normally records the browser's own origin at /api/device/start),
+    // and a non-local host is dropped rather than refused.
+    const [before] = await db
+      .select({ localOrigin: linkedClients.localOrigin })
+      .from(linkedClients)
+      .where(eq(linkedClients.tokenReference, hashSecret(token)));
+    expect(before?.localOrigin).toBeNull();
+    const publicHost = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { local_origin: "https://evil.example.com", public_key: keys.publicKeyBase64 },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    expect(publicHost.status).toBe(200);
+    const fill = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { local_origin: "http://hallway.local:8787", public_key: keys.publicKeyBase64 },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    expect(fill.status).toBe(200);
+    const keep = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { local_origin: "http://10.0.0.9:8787", public_key: keys.publicKeyBase64 },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    expect(keep.status).toBe(200);
+    const [after] = await db
+      .select({ localOrigin: linkedClients.localOrigin })
+      .from(linkedClients)
+      .where(eq(linkedClients.tokenReference, hashSecret(token)));
+    expect(after?.localOrigin).toBe("http://hallway.local:8787");
 
     // Re-registering with a different key is refused — a stolen bearer token
     // must not be able to swap the device identity.

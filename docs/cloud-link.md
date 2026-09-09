@@ -90,6 +90,8 @@ falls back to the provider's default.
 | `backend:link` | register a backend, sync inventory/health, rotate its token |
 | `backend:read` | read basic backend connection details |
 | `frame:link` | register a frame that links directly, without a backend |
+| `frame:managed` | manage a cloud-managed frame: scenes, declarative settings, state, reboot (base scope of every frame enrolled per `docs/cloud-frames.md`) |
+| `settings:services` | serve the frame the account's service API keys (Unsplash, OpenAI, Home Assistant, Immich, GitHub, gallery) — the store-scene "service settings" pull |
 | `auth:login` | sign users in to this installation via their cloud account |
 | `store:read` | browse/install from scene & app repositories |
 | `store:publish` | publish scenes/apps to the user's collections or the store |

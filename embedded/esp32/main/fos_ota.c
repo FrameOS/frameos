@@ -1,6 +1,5 @@
 #include "fos_ota.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,14 +23,15 @@
 #include "nvs.h"
 #include "sdkconfig.h"
 
-#include "mbedtls/base64.h"
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
 
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_http.h"
+#include "fos_minisig.h"
 #include "fos_ota_pubkey.h"
+#include "fos_url_guard.h"
 #include "fos_version.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
@@ -164,7 +164,8 @@ void fos_ota_mark_boot_valid(void)
     esp_ota_img_states_t state;
     if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
         state == ESP_OTA_IMG_PENDING_VERIFY) {
-        ESP_LOGI(TAG, "first boot of new image on %s: marking valid", running->label);
+        ESP_LOGI(TAG, "first boot of new image on %s reached rendering: marking valid",
+                 running->label);
         esp_ota_mark_app_valid_cancel_rollback();
     }
 }
@@ -176,7 +177,8 @@ void fos_ota_mark_boot_valid(void)
  * with incremental hashing; the boot partition switches ONLY after the
  * signature verifies against the baked release key (fos_ota_pubkey.h).
  * Rollback protection stays on top: the new image boots pending-verify and
- * rolls back unless it reaches Wi-Fi. */
+ * rolls back unless it reaches its first successful render (or an orderly
+ * deep sleep) — fos_ota_mark_boot_valid, called from fos_client.c. */
 
 /* Where one run pulls from. Both control planes fill one of these; nothing
  * below knows which plane it serves beyond the log event name. */
@@ -235,42 +237,6 @@ static bool ota_gave_up(const char *version)
            s_ota_failures >= FOS_OTA_MAX_FAILURES;
 }
 
-/* Parse the first signature line of a .minisig: base64(ED + keyid8 + sig64).
- * Trusted-comment lines are ignored (the device trusts only the key). */
-static bool parse_minisig(const char *minisig, uint8_t sig_out[64])
-{
-    const char *line = minisig;
-    while (line != NULL && *line != '\0') {
-        while (*line == '\r' || *line == '\n' || *line == ' ') line++;
-        if (strncmp(line, "untrusted comment:", 18) == 0 ||
-            strncmp(line, "trusted comment:", 16) == 0) {
-            line = strchr(line, '\n');
-            continue;
-        }
-        break;
-    }
-    if (line == NULL || *line == '\0') return false;
-    const char *end = strchr(line, '\n');
-    size_t b64_len = end != NULL ? (size_t)(end - line) : strlen(line);
-    while (b64_len > 0 && (line[b64_len - 1] == '\r' || line[b64_len - 1] == ' ')) b64_len--;
-    uint8_t blob[80];
-    size_t blob_len = 0;
-    if (mbedtls_base64_decode(blob, sizeof(blob), &blob_len,
-                              (const unsigned char *)line, b64_len) != 0) {
-        return false;
-    }
-    if (blob_len != 74 || blob[0] != 'E' || blob[1] != 'D') {
-        ESP_LOGW(TAG, "ota: unsupported signature format");
-        return false;
-    }
-    if (memcmp(blob + 2, FOS_OTA_SIGNING_KEY_ID, 8) != 0) {
-        ESP_LOGW(TAG, "ota: signature key id mismatch");
-        return false;
-    }
-    memcpy(sig_out, blob + 10, 64);
-    return true;
-}
-
 /* Every exit names itself in the frame log as a structured `ota:<plane>`
  * line: "downloading" followed by silence is what a deep-sleep frame used to
  * leave behind, and the control plane's Logs panel is the only place an owner
@@ -296,45 +262,6 @@ static void ota_log_progress(const ota_source_t *src, size_t written, size_t exp
         snprintf(detail, sizeof(detail), "%u", (unsigned)written);
     }
     ota_log(src, "progress", detail);
-}
-
-/* "scheme://host[:port]" of an http(s)/ws(s) URL, lowercased, with ws
- * mapped onto http so a wss:// ws_url compares equal to the https:// origin
- * it serves. False for any other shape, including userinfo ("a@b"). */
-static bool url_origin(const char *url, char *out, size_t out_len)
-{
-    const char *scheme;
-    const char *rest;
-    if (!url) return false;
-    if (strncasecmp(url, "https://", 8) == 0) { scheme = "https://"; rest = url + 8; }
-    else if (strncasecmp(url, "http://", 7) == 0) { scheme = "http://"; rest = url + 7; }
-    else if (strncasecmp(url, "wss://", 6) == 0) { scheme = "https://"; rest = url + 6; }
-    else if (strncasecmp(url, "ws://", 5) == 0) { scheme = "http://"; rest = url + 5; }
-    else return false;
-    size_t host_len = strcspn(rest, "/?#");
-    if (host_len == 0 || memchr(rest, '@', host_len)) return false;
-    int n = snprintf(out, out_len, "%s%.*s", scheme, (int)host_len, rest);
-    if (n <= 0 || (size_t)n >= out_len) return false;
-    for (char *p = out; *p; p++) *p = (char)tolower((unsigned char)*p);
-    return true;
-}
-
-/* The manifest's downloadUrl may be absolute (a CDN, GitHub). The frame's
- * bearer is the control plane's credential: it goes only to that plane's own
- * origin (base_url, or the cloud's enrollment ws_url host), never wherever a
- * manifest points. */
-static bool download_url_is_first_party(const char *download_url, const ota_source_t *src)
-{
-    char have[FOS_URL_LEN];
-    char want[FOS_URL_LEN];
-    if (!url_origin(download_url, have, sizeof(have))) return false;
-    if (url_origin(src->base_url, want, sizeof(want)) && strcmp(want, have) == 0) return true;
-    const char *ws_url = fos_cloud_ws_url();
-    if (ws_url && ws_url[0] && url_origin(ws_url, want, sizeof(want)) &&
-        strcmp(want, have) == 0) {
-        return true;
-    }
-    return false;
 }
 
 typedef struct {
@@ -445,7 +372,11 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
         s_ota_allow_downgrade = 0;
     }
 
-    if (!parse_minisig(minisig->valuestring, out->sig)) {
+    /* base64(ED + keyid8 + sig64); trusted-comment lines are ignored, the
+     * device trusts only the key (fos_minisig.c, host-tested). */
+    const char *sig_why = NULL;
+    if (!fos_minisig_parse(minisig->valuestring, FOS_OTA_SIGNING_KEY_ID, out->sig, &sig_why)) {
+        ESP_LOGW(TAG, "ota (%s): signature rejected: %s", src->plane, sig_why ? sig_why : "invalid");
         cJSON_Delete(root);
         ota_log(src, "error", "bad-signature-format");
         return ESP_FAIL;
@@ -636,7 +567,12 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
      * unless the download comes from the control plane's own origin and that
      * plane is trusted on its own transport (a LAN backend). A manifest
      * cannot send the image fetch over cleartext to the internet. */
-    const bool first_party = download_url_is_first_party(manifest.download_url, src);
+    /* The manifest's downloadUrl may be absolute (a CDN, GitHub). The frame's
+     * bearer is the control plane's credential: it goes only to that plane's
+     * own origin (base_url, or the cloud's enrollment ws_url host), never
+     * wherever a manifest points. */
+    const bool first_party = fos_url_download_is_first_party(
+        manifest.download_url, src->base_url, fos_cloud_ws_url());
     const char *transport_why = NULL;
     if (!(first_party && src->trust_base_transport) &&
         !fos_cloud_url_transport_ok(manifest.download_url, &transport_why)) {

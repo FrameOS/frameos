@@ -30,7 +30,11 @@ for arg in "$@"; do
   esac
 done
 
-database_url="${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
+# The URL never goes on a command line (ps / /proc show argv to every local
+# account): it becomes libpq's PG* environment and psql runs bare.
+# shellcheck source=scripts/lib/pg-env.sh
+. scripts/lib/pg-env.sh
+pg_env_from_url "${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
 remote="${OBJECT_STORE_REMOTE:-r2:frameos-cloud}"
 # An object younger than this is never a candidate, however unreferenced it
 # looks. A publish writes the object BEFORE the row that points at it, so a
@@ -56,20 +60,20 @@ unbound_sql="
    where i.created_at < now() - interval '7 days'
      and not exists (select 1 from store_scene_version_images vi where vi.image_sha256 = i.sha256)
      and not exists (select 1 from store_scenes s where s.preview_object_key = i.object_key)"
-unbound_count="$(psql "$database_url" -Atq -v ON_ERROR_STOP=1 -c \
+unbound_count="$(psql -Atq -v ON_ERROR_STOP=1 -c \
   "select count(*) from store_images i
     where i.created_at < now() - interval '7 days'
       and not exists (select 1 from store_scene_version_images vi where vi.image_sha256 = i.sha256)
       and not exists (select 1 from store_scenes s where s.preview_object_key = i.object_key)")"
 if [ "$apply" = true ] && [ "$unbound_count" != "0" ]; then
   echo "Deleting $unbound_count unbound store_images rows older than 7 days"
-  psql "$database_url" -Atq -v ON_ERROR_STOP=1 -c "$unbound_sql" >/dev/null
+  psql -Atq -v ON_ERROR_STOP=1 -c "$unbound_sql" >/dev/null
 else
   echo "unbound store_images rows older than 7 days: $unbound_count (deleted with --apply)"
 fi
 
 echo "Listing referenced keys in the database"
-psql "$database_url" -Atq -v ON_ERROR_STOP=1 > "$work/referenced" <<'SQL'
+psql -Atq -v ON_ERROR_STOP=1 > "$work/referenced" <<'SQL'
 SELECT object_key FROM store_scene_versions WHERE object_key IS NOT NULL
 UNION
 SELECT preview_object_key FROM store_scenes WHERE preview_object_key IS NOT NULL
@@ -110,7 +114,7 @@ while IFS= read -r key; do
   # Re-check immediately before deleting: the listing above is a snapshot, and
   # a publish may have claimed this key since. Costs one indexed query per
   # orphan, and the orphan set is small by construction.
-  still_referenced="$(psql "$database_url" -Atq -v ON_ERROR_STOP=1 -v key="$key" <<'SQL'
+  still_referenced="$(psql -Atq -v ON_ERROR_STOP=1 -v key="$key" <<'SQL'
 SELECT 1 WHERE EXISTS (
   SELECT 1 FROM store_scene_versions WHERE object_key = :'key'
   UNION ALL SELECT 1 FROM store_scenes WHERE preview_object_key = :'key'

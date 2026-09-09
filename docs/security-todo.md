@@ -38,15 +38,6 @@ batch after the third one; residue is in the medium / low list).
   pinned to the version it claims since 2026-09-09). The release workflow's
   "a signature would be decoration" rationale is stale now that the backend
   and the browser flasher fetch the image automatically — sign it.
-- **FrameOS Remote is plain `ws://` on every port but 443** — the same
-  `port mod 1000 == 443` heuristic the runtime's log shipper uses, because
-  `frame.json` carries no scheme for the backend. An https backend on 8443
-  is talked to in clear. Needs a scheme in the backend connection settings
-  (both control planes, `frameos-setup.sh`, the ESP32 provisioning that
-  derives `http://` from the port the same way). Closed 2026-09-09 on the
-  same protocol: the binary frames behind `file_write_chunk` are bound to a
-  `sha256` in the signed command, and envelopes are accepted only within a
-  300 s window and never twice (`acceptEnvelope`).
 - Smaller, what is left: a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).
@@ -221,3 +212,26 @@ practice); a frame whose SSH host key was already impersonated before the
 TOFU pin stays pinned to the impostor until "Forget host key" — the
 fingerprint is shown so an owner can compare it with
 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device.
+
+Cloud identity, from the 2026-09-09 full-repo review (its Medium items
+shipped in PR #461): `clientIpFromHeaders`
+(`cloud/apps/auth-web/src/lib/rate-limit.ts`) falls back to the
+client-controlled `x-real-ip` when the chain is empty, contradicting the
+comment above it; `POST /api/device/poll` inserts a rate-limit row per
+arbitrary `device_code`, unauthenticated, before any existence check; every
+Google sign-in overwrites `displayName` and `primaryEmail`, so an account
+ends up with three different notions of "its address"; `email_unverified`
+copy claims a mail was sent even when the resend limit suppressed it; signup
+accepts `return_to` and then loses it; `/login?error=<anything>` shows the
+sign-in form to a signed-in user; the account layout re-implements
+return-path validation instead of reusing `safeAuthReturnPath`; CSP allows
+`form-action https:`; PostHog receives the signup email regardless of
+consent while the processor list says otherwise; recovery from a lost second
+factor is support-only and `/login/verify` does not say so; `jwtVerify`
+never pins `algorithms`; `verifySecondFactorCode` has a two-submission race
+that burns a spare recovery code.
+
+Ops, not code: the session cookie is scoped to the registrable domain, so
+the browser also sends it to `cloud-cdn.frameos.net` (R2 behind
+Cloudflare). The fix is to serve the CDN from its own registrable domain;
+the `/admin` system check flags the shared domain until that is done.

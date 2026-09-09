@@ -94,6 +94,10 @@ proc requestHeader(request: Request, name: string): string =
   ""
 
 proc localOrigin*(request: Request): string =
+  ## The origin the browser used to reach this frame, from the request it
+  ## sent. Recorded on the provider when a link is made (device flow, claim
+  ## token) so the cloud sign-in has a redirect target; never used AS the
+  ## redirect target of a later sign-in — see /api/cloud/login/start.
   let forwardedProto = requestHeader(request, "x-forwarded-proto")
     .split(",", 1)[0].strip().toLowerAscii()
   let scheme = if forwardedProto == "https": "https" else: "http"
@@ -101,6 +105,18 @@ proc localOrigin*(request: Request): string =
   if host.len == 0:
     host = "localhost"
   scheme & "://" & host
+
+proc sameOrigin(a, b: string): bool =
+  ## Origins compare case-insensitively on scheme and host; a default port
+  ## spelled out equals one left off.
+  proc canonical(origin: string): string =
+    var value = origin.strip().toLowerAscii()
+    if value.endsWith(":80") and value.startsWith("http://"):
+      value = value[0 ..< value.len - 3]
+    elif value.endsWith(":443") and value.startsWith("https://"):
+      value = value[0 ..< value.len - 4]
+    value
+  canonical(a) == canonical(b)
 
 const CLOUD_LOGIN_STATE_TTL_SECONDS = 600
 const MAX_LOGIN_STATES = 16
@@ -303,8 +319,15 @@ proc addCloudApiRoutes*(router: var Router) =
         let fromBody = normalizeProviderUrl(payload{"provider_url"}.getStr(""))
         providerUrl = if fromBody.len > 0: fromBody else: providerUrlFromState(state)
 
+      # The browser that submitted the claim token is the one that will sign
+      # in later: its origin is the sign-in redirect target (what the device
+      # flow records too), with the device's own hostname as the fallback.
+      var origin = localOrigin(request)
+      if origin.len == 0:
+        origin = deviceLocalOrigin(globalFrameConfig)
       let outcome = enrollManagedFrame(
-        providerUrl, claimToken, "", payload{"name"}.getStr(""), globalFrameConfig)
+        providerUrl, claimToken, "", payload{"name"}.getStr(""), globalFrameConfig,
+        localOrigin = origin)
       if not outcome.ok:
         let status =
           if outcome.status == 400: Http400
@@ -379,8 +402,28 @@ proc addCloudApiRoutes*(router: var Router) =
         providerUrl = providerUrlFromState(state)
         accessToken = state{"access_token"}.getStr("")
         origin = state{"local_origin"}.getStr("")
+      # The redirect target is the origin recorded when the link was made —
+      # never the Host header of this (unauthenticated) request, which any
+      # LAN client can set. A link without one cannot complete the handoff
+      # at all: the provider pins redirect_uri to that recorded origin and
+      # answers invalid_redirect_uri otherwise, so say so here instead of
+      # letting the provider's refusal surface as "rejected the login".
       if origin.len == 0:
-        origin = localOrigin(request)
+        jsonResponse(request, Http409, %*{
+          "detail": "This frame's cloud link has no local address on record, so FrameOS Cloud " &
+                    "cannot send the sign-in back here. Disconnect and reconnect the frame to " &
+                    "FrameOS Cloud (or upgrade it) to record one."})
+        return
+      # The handoff returns to `origin`, but the state cookie set below lives
+      # on the origin the browser is using now. Refuse a mismatch up front
+      # with the address that works, rather than bouncing through the
+      # provider into a state-cookie failure.
+      let requestOrigin = localOrigin(request)
+      if not sameOrigin(origin, requestOrigin):
+        jsonResponse(request, Http409, %*{
+          "detail": "Open this frame at " & origin & " to sign in with FrameOS Cloud " &
+                    "(the sign-in returns to that address)."})
+        return
 
       let loginState = secureRandomToken(32)
       var startCode = 0

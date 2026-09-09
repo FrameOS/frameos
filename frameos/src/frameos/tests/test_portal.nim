@@ -182,10 +182,13 @@ suite "portal network orchestration":
     check getLastError() == ""
 
   test "masked and maskedPasswordArgs hide credentials for logging":
-    check masked("secret1234") == "se********"
-    check masked("a") == "*"
+    # Nothing of the secret survives: not a prefix, not the length.
+    check masked("secret1234") == "********"
+    check masked("ab") == "********"
+    check masked("") == ""
+    check masked("a") == "********"
     check maskedPasswordArgs(@["-n", "nmcli", "password", "secret1234", "name", "x"]) ==
-          @["-n", "nmcli", "password", "se********", "name", "x"]
+          @["-n", "nmcli", "password", "********", "name", "x"]
     check maskedPasswordArgs(@["password"]) == @["password"]
 
   test "confirmHtml tells user the post-WiFi frame URL":
@@ -752,6 +755,31 @@ suite "portal setup control mode":
     writeFile(setupDir / "frame.json", $(%*{"name": "Kitchen", "frameHost": "frame-c486eb.local"}))
     check persistPortalSetup(frame, parseSetupOptions({"ssid": "x", "hostname": "hallway"}.toTable, frame.frameConfig))
     check parseFile(setupDir / "frame.json"){"name"}.getStr() == "Kitchen"
+
+  test "a minimal POST /setup leaves the control plane alone":
+    # Wi-Fi and hostname only (a script, an older portal page): the frame
+    # keeps its backend, and a queued cloud claim is not touched either.
+    writeFile(setupDir / "frame.json", $(%*{"serverHost": "backend.example.com", "serverPort": 8989}))
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "backend.example.com"
+    let options = parseSetupOptions({"ssid": "home-wifi", "hostname": "kitchen"}.toTable, frame.frameConfig)
+    check not options.controlModeExplicit
+    check options.controlMode == "backend"
+    check persistPortalSetup(frame, options)
+    check parseFile(setupDir / "frame.json"){"serverHost"}.getStr("missing") == "backend.example.com"
+    check frame.frameConfig.serverHost == "backend.example.com"
+
+    writeFile(setupDir / "pending.json",
+      $(%*{"claim_token": "FRCT-pending", "provider_url": "https://cloud.example.com"}))
+    frame.frameConfig.serverHost = ""
+    writeFile(setupDir / "frame.json", $(%*{"serverHost": ""}))
+    check persistPortalSetup(frame, parseSetupOptions({"ssid": "x", "hostname": "kitchen"}.toTable, frame.frameConfig))
+    check fileExists(setupDir / "pending.json")
+    # An explicit choice still moves the frame.
+    let explicit = parseSetupOptions({"ssid": "x", "hostname": "kitchen", "controlMode": "none"}.toTable, frame.frameConfig)
+    check explicit.controlModeExplicit
+    check persistPortalSetup(frame, explicit)
+    check parseFile(setupDir / "frame.json"){"serverHost"}.getStr("missing") == ""
 
   test "cloud mode clears serverHost and queues the typed claim code":
     writeFile(setupDir / "frame.json", $(%*{"serverHost": "localhost", "serverPort": 8989}))

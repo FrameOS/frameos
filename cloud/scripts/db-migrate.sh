@@ -30,9 +30,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-database_url="${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
+# The URL never goes on a command line (ps / /proc show argv to every local
+# account): it becomes libpq's PG* environment and psql runs bare.
+# shellcheck source=scripts/lib/pg-env.sh
+. scripts/lib/pg-env.sh
+pg_env_from_url "${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
 
-psql "$database_url" -v ON_ERROR_STOP=1 \
+psql -v ON_ERROR_STOP=1 \
   -c "CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" \
   >/dev/null
 
@@ -42,7 +46,7 @@ psql "$database_url" -v ON_ERROR_STOP=1 \
 # than interpolated into the SQL text.
 for migration in packages/db/drizzle/*.sql; do
   name="$(basename "$migration")"
-  applied="$(psql "$database_url" -At -v name="$name" <<'SQL'
+  applied="$(psql -At -v name="$name" <<'SQL'
 SELECT 1 FROM schema_migrations WHERE name = :'name';
 SQL
 )"
@@ -53,8 +57,8 @@ SQL
 
   if head -n 1 "$migration" | grep -qE '^--[[:space:]]*migrate:[[:space:]]*no-transaction[[:space:]]*$'; then
     echo "Applying $name (no-transaction: autocommit, ledger row afterwards)"
-    psql "$database_url" -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
-    psql "$database_url" -v ON_ERROR_STOP=1 -v name="$name" >/dev/null <<'SQL'
+    psql -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
+    psql -v ON_ERROR_STOP=1 -v name="$name" >/dev/null <<'SQL'
 INSERT INTO schema_migrations (name) VALUES (:'name');
 SQL
     continue
@@ -67,7 +71,7 @@ SQL
   # the :'name' interpolation is honoured. The file keeps its own -f so an
   # error names it and its line. ON_ERROR_STOP makes psql quit on the first
   # failed statement, so the open transaction is never committed.
-  psql "$database_url" --single-transaction -v ON_ERROR_STOP=1 -v name="$name" \
+  psql --single-transaction -v ON_ERROR_STOP=1 -v name="$name" \
     -f "$migration" -f - >/dev/null <<'SQL'
 INSERT INTO schema_migrations (name) VALUES (:'name');
 SQL

@@ -196,6 +196,10 @@ posthog==7.38.0
     # via -r requirements.in
 pre-commit==4.6.1
     # via -r requirements.in
+psycopg[binary]==3.3.5
+    # via -r requirements.in
+psycopg-binary==3.3.5
+    # via psycopg
 propcache==0.5.2
     # via
     #   aiohttp

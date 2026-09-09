@@ -5,7 +5,8 @@ Revises: fa715fc28251
 Create Date: 2024-01-18 23:47:48.016511
 
 """
-from sqlalchemy.orm import attributes, load_only
+from alembic import op
+from sqlalchemy.orm import Session, attributes, load_only
 
 
 # revision identifiers, used by Alembic.
@@ -17,8 +18,7 @@ depends_on = None
 
 def upgrade():
     from app.models import Frame
-    from app.database import SessionLocal
-    db = SessionLocal()
+    db = Session(bind=op.get_bind())
     frames = db.query(Frame).options(load_only(Frame.id, Frame.scenes)).all()
     for frame in frames:
         frame.scenes = list(frame.scenes)
@@ -40,8 +40,7 @@ def upgrade():
 
 def downgrade():
     from app.models import Frame
-    from app.database import SessionLocal
-    db = SessionLocal()
+    db = Session(bind=op.get_bind())
     frames = db.query(Frame).all()
     for frame in frames:
         frame.scenes = list(frame.scenes)

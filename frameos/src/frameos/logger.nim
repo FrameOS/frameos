@@ -221,7 +221,7 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
     frameConfig: frameConfig,
     host: frameConfig.serverHost,
     port: frameConfig.serverPort,
-    useTls: frameConfig.serverPort mod 1000 == 443,
+    useTls: normalizeServerScheme(frameConfig.serverScheme, frameConfig.serverPort) == "https",
     logs: @[],
     lastSendAt: 0.0,
     lastLogFilePath: "",

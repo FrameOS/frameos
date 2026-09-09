@@ -2749,3 +2749,71 @@ async def test_execute_embedded_full_needs_a_device_that_has_reported_once(
 
     assert requested == []
     assert frame.status == "uninitialized"
+
+
+@pytest.mark.asyncio
+async def test_full_deploy_clears_a_stale_deploying_status_and_continues(monkeypatch: pytest.MonkeyPatch):
+    """A row left at "deploying" by a dead worker is stale state, not a
+    running deploy (the Redis lock guards concurrency). The workflow must note
+    it, reset it and carry on — returning early here logged "completed" for
+    a deploy that never ran."""
+    from app.tasks import frame_deploy_workflow as workflow_module
+
+    updates: list[tuple[int, str]] = []
+
+    async def record_update(db, redis, frame):
+        updates.append((frame.id, frame.status))
+
+    monkeypatch.setattr(workflow_module, "update_frame", record_update)
+
+    frame = SimpleNamespace(id=41, name="StuckFrame", status="deploying", mode="rpios", to_dict=lambda: {"id": 41})
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,  # type: ignore[arg-type]
+        redis=None,  # type: ignore[arg-type]
+        frame=frame,  # type: ignore[arg-type]
+        deployer=deployer,  # type: ignore[arg-type]
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),  # type: ignore[arg-type]
+    )
+    # A plan without a full section: proves execution CONTINUED past the
+    # stale-status branch (it fails on the next check, not silently before).
+    plan = FrameDeployPlan(mode="full", frame_id=41, frame_name="StuckFrame", build_id="b", frame_dict={}, previous_frameos_version=None)
+
+    with pytest.raises(RuntimeError, match="Full deploy plan missing"):
+        await workflow._execute_full(plan)
+
+    assert updates[0] == (41, "uninitialized")
+    assert deployer.logs[0] == (
+        "stderr",
+        'A previous deploy left the frame marked "deploying"; cleared it and continuing with this one.',
+    )
+
+
+@pytest.mark.asyncio
+async def test_full_deploy_does_not_touch_a_frame_that_was_not_deploying(monkeypatch: pytest.MonkeyPatch):
+    from app.tasks import frame_deploy_workflow as workflow_module
+
+    updates: list[tuple[int, str]] = []
+
+    async def record_update(db, redis, frame):
+        updates.append((frame.id, frame.status))
+
+    monkeypatch.setattr(workflow_module, "update_frame", record_update)
+    frame = SimpleNamespace(id=42, name="IdleFrame", status="ready", mode="rpios", to_dict=lambda: {"id": 42})
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,  # type: ignore[arg-type]
+        redis=None,  # type: ignore[arg-type]
+        frame=frame,  # type: ignore[arg-type]
+        deployer=deployer,  # type: ignore[arg-type]
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),  # type: ignore[arg-type]
+    )
+    plan = FrameDeployPlan(mode="full", frame_id=42, frame_name="IdleFrame", build_id="b", frame_dict={}, previous_frameos_version=None)
+
+    with pytest.raises(RuntimeError, match="Full deploy plan missing"):
+        await workflow._execute_full(plan)
+
+    assert updates == []
+    assert deployer.logs == []

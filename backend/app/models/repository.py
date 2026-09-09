@@ -1,7 +1,7 @@
 import httpx
 import json
 import uuid
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import JSON
 from datetime import datetime
 from urllib.parse import urljoin
 from sqlalchemy import ForeignKey, Integer, String, Text, DateTime

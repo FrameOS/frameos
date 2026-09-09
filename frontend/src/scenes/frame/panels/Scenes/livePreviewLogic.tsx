@@ -42,7 +42,7 @@ export interface LivePreviewLogLine {
   line: string
 }
 
-/** The template a preview was opened from, so the modal can offer "Add to frame". */
+/** The template a preview was opened from, so the modal can offer "Install on frame". */
 export interface LivePreviewSourceTemplate {
   template: TemplateType
   repository?: RepositoryType
@@ -220,6 +220,7 @@ export interface livePreviewLogicValues {
   previewState: Record<string, any>
   previewStatus: 'error' | 'loading' | 'running'
   renderCount: number
+  storedKeysNotice: string | null
   wasmUnsupportedApps: WasmUnsupportedApp[]
 }
 
@@ -291,6 +292,9 @@ export interface livePreviewLogicActions {
     info: PreviewAssetsInfo | null
   }
   previewErrored: (message: string) => {
+    message: string
+  }
+  storedKeysUnavailable: (message: string) => {
     message: string
   }
   previewFrame: (
@@ -398,6 +402,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       fps,
     }),
     previewErrored: (message: string) => ({ message }),
+    // The cloud's stored keys need a recent sign-in (GET /api/settings?reveal=1
+    // is sudo-mode); when they are withheld the preview runs without them and
+    // the modal says so.
+    storedKeysUnavailable: (message: string) => ({ message }),
     appendPreviewLog: (message: string) => ({ message, timestamp: new Date().toISOString() }),
     appendPreviewLogs: (lines: LivePreviewLogLine[]) => ({ lines }),
     setPreviewState: (state: Record<string, any>) => ({ state }),
@@ -442,6 +450,13 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       {
         openLivePreview: () => null,
         previewErrored: (_, { message }) => message,
+      },
+    ],
+    storedKeysNotice: [
+      null as string | null,
+      {
+        openLivePreview: () => null,
+        storedKeysUnavailable: (_, { message }) => message,
       },
     ],
     previewLogs: [
@@ -576,9 +591,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         scenes: livePreviewLogicValues['scenes']
       ): FrameScene | null =>
         livePreviewSceneId
-          ? ((livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
+          ? (livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
             scenes.find((scene) => scene.id === livePreviewSceneId) ??
-            null)
+            null
           : null,
     ],
     gpioButtons: [
@@ -654,7 +669,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     ],
   }),
   listeners(({ actions, values, cache, props }) => ({
-    openLivePreview: async ({ sceneId, state, scenes }) => {
+    openLivePreview: async ({ sceneId, state, scenes }, breakpoint) => {
       cache.worker?.terminate()
       cache.worker = null
       cache.pendingFrame = null
@@ -709,6 +724,20 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           const response = await apiFetch(`/api/settings?reveal=1`)
           if (response.ok) {
             settings = (await response.json()) ?? {}
+          } else if (response.status === 403) {
+            // Sudo mode: the session is older than the reveal window. Run
+            // without the saved keys rather than fail — a scene with no
+            // secret-using apps previews fine — and tell the user why the
+            // ones that need keys will not.
+            const detail = (await response
+              .clone()
+              .json()
+              .catch(() => ({}))) as { error?: string }
+            if (detail.error === 'reauth_required') {
+              actions.storedKeysUnavailable(
+                'Your saved API keys were not loaded: this session signed in a while ago. Confirm it is you to use them in the preview.'
+              )
+            }
           }
         } else {
           const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
@@ -720,6 +749,11 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       } catch (error) {
         // fall through with empty settings
       }
+      // A second open while this one awaited the settings fetch or the
+      // consent dialog below already terminated our worker slot; without
+      // this the older call would still assign a second, orphaned runtime
+      // that keeps rendering (and holding revealed keys) until the tab closes.
+      breakpoint()
       // User-entered keys (setPreviewSettings) win over the backend's, merged
       // per settings group.
       for (const [group, groupValues] of Object.entries(values.previewSettings ?? {})) {
@@ -735,6 +769,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         settings,
         Boolean(values.livePreviewSourceTemplate?.template?.sceneId)
       )
+      breakpoint()
       if (gated.settings === null) {
         actions.closeLivePreview()
         return
@@ -771,6 +806,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           // preview still runs; external fetches will fail with CORS as before
         }
       }
+      breakpoint()
 
       let worker: Worker
       try {

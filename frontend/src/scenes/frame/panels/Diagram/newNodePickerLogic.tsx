@@ -183,6 +183,13 @@ export interface newNodePickerLogicActions {
   setNodes: (nodes: DiagramNode[]) => {
     nodes: DiagramNode[]
   } // diagramLogic
+  setNodesAndEdges: (
+    nodes: DiagramNode[],
+    edges: DiagramEdge[]
+  ) => {
+    edges: DiagramEdge[]
+    nodes: DiagramNode[]
+  } // diagramLogic
   setSceneApps: (
     apps: Record<string, SceneApp>,
     forceCompiled?: boolean | undefined
@@ -296,7 +303,15 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       frameLogic({ frameId }),
       ['setFrameFormValues', 'applyTemplate'],
       diagramLogic({ frameId, sceneId }),
-      ['setNodes', 'setEdges', 'addEdge', 'setCursorPosition', 'pasteFromClipboard', 'setSceneApps'],
+      [
+        'setNodes',
+        'setEdges',
+        'setNodesAndEdges',
+        'addEdge',
+        'setCursorPosition',
+        'pasteFromClipboard',
+        'setSceneApps',
+      ],
       sceneStateLogic({ frameId, sceneId }),
       ['createField'],
     ],
@@ -1010,28 +1025,33 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           name: keyword === '+' ? getNewFieldName(codeArgs) : keyword,
           type: type ?? 'string',
         } satisfies CodeArg
-        actions.setNodes([
-          ...values.nodes.map((node) =>
-            node.id === nodeId ? { ...node, data: { ...node.data, codeArgs: [...codeArgs, newArg] } } : node
-          ),
-          newNode,
-        ])
+        // Node and edge in one action = one history entry (a setNodes plus
+        // a setEdges 200 ms later recorded two, and one Cmd+Z left a
+        // dangling node). Handles are measured afterwards, as paste does.
+        actions.setNodesAndEdges(
+          [
+            ...values.nodes.map((node) =>
+              node.id === nodeId ? { ...node, data: { ...node.data, codeArgs: [...codeArgs, newArg] } } : node
+            ),
+            newNode,
+          ],
+          [
+            ...values.edges,
+            {
+              id: uuidv4(),
+              target: nodeId,
+              targetHandle: `codeField/${newArg.name}`,
+              source: newNode.id,
+              sourceHandle: newNodeOutputHandle,
+            },
+          ]
+        )
         window.setTimeout(() => {
-          actions.addEdge({
-            id: uuidv4(),
-            target: nodeId,
-            targetHandle: `codeField/${newArg.name}`,
-            source: newNode.id,
-            sourceHandle: newNodeOutputHandle,
-          })
-          window.setTimeout(() => {
-            props.updateNodeInternals?.(nodeId)
-            props.updateNodeInternals?.(newNode.id)
-          }, 200)
+          props.updateNodeInternals?.(nodeId)
+          props.updateNodeInternals?.(newNode.id)
         }, 200)
       } else {
-        actions.setNodes([...values.nodes, newNode])
-        window.setTimeout(() => {
+        {
           const edges = values.edges
           let oldEdge: DiagramEdge | undefined
           let newEdge: DiagramEdge
@@ -1071,20 +1091,17 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 : undefined
           }
 
-          if (oldEdge) {
-            actions.setEdges(
-              [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter(
+          const nextEdges = oldEdge
+            ? ([...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter(
                 (a) => !!a
-              ) as DiagramEdge[]
-            )
-          } else {
-            actions.setEdges([...values.edges, newEdge])
-          }
+              ) as DiagramEdge[])
+            : [...edges, newEdge]
+          actions.setNodesAndEdges([...values.nodes, newNode], nextEdges)
           window.setTimeout(() => {
             props.updateNodeInternals?.(nodeId)
             props.updateNodeInternals?.(newNode.id)
           }, 200)
-        }, 200)
+        }
       }
 
       actions.setSearchValue('')

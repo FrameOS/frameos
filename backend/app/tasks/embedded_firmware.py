@@ -30,6 +30,7 @@ from app.models.frame import (
     Frame,
     normalize_frame_admin_auth,
     normalize_https_proxy,
+    server_scheme_for_frame,
 )
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
@@ -1305,8 +1306,8 @@ def embedded_backend_url_for_frame(frame: Frame) -> str:
     if not server_host:
         return ""
     server_port = int(frame.server_port or 8989)
-    scheme = "https" if server_port == 443 else "http"
-    if server_port in (80, 443):
+    scheme = server_scheme_for_frame(frame)
+    if (scheme == "http" and server_port == 80) or (scheme == "https" and server_port == 443):
         return f"{scheme}://{server_host}"
     return f"{scheme}://{server_host}:{server_port}"
 

@@ -81,3 +81,20 @@ def read_zip_member_limited(zip_file: zipfile.ZipFile, name: str, max_bytes: int
                 raise HTTPException(status_code=413, detail=f"{name} in the zip is too large")
             chunks.append(chunk)
     return b"".join(chunks)
+
+
+async def read_body_limited(request: Request, max_bytes: int, detail: str = "Request body too large") -> bytes:
+    """`await request.body()` with a ceiling: 413 on the declared size first,
+    then on what actually arrives, so a raw-body route (an image POST, a
+    chunk, a JSON envelope) never buffers more than `max_bytes`."""
+    content_length = request.headers.get("content-length") or ""
+    if content_length.isdigit() and int(content_length) > max_bytes:
+        raise HTTPException(status_code=413, detail=detail)
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail=detail)
+        chunks.append(chunk)
+    return b"".join(chunks)

@@ -42,6 +42,7 @@ import {
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
 import type { PreviewLogLine } from "../lib/preview-log";
+import { isReauthRequired, reauthHref } from "../lib/reauth-client";
 import { selectFieldOptions } from "../lib/select-options";
 import { ImageLightbox } from "./ImageLightbox";
 import { PreviewAssetsDialog } from "./PreviewAssetsDialog";
@@ -379,6 +380,10 @@ export function SceneLivePreviewPanel({
   // values being tried out rather than snapping back to the defaults.
   const appliedStateRef = useRef<Record<string, unknown>>({});
   const [status, setStatus] = useState("");
+  // GET /api/settings?reveal=1 is sudo-mode: a session that signed in long
+  // ago gets 403 reauth_required. The preview still runs (without the saved
+  // keys), and the credentials block says how to get them back.
+  const [storedKeysStale, setStoredKeysStale] = useState(false);
   // Runtime output, one entry per line, stamped when it arrived (the
   // runtime's lines carry no time of their own); ids are list keys.
   const [logs, setLogs] = useState<PreviewLogLine[]>([]);
@@ -398,6 +403,14 @@ export function SceneLivePreviewPanel({
         // bytes, not the masked hint GET answers by default. Only a signed-in
         // browser session gets them (app/api/settings/route.ts).
         const response = await fetch("/api/settings?reveal=1");
+        if (response.status === 403) {
+          const payload = (await response.json().catch(() => undefined)) as
+            | { error?: string }
+            | undefined;
+          if (isReauthRequired(response, payload) && !cancelled) {
+            setStoredKeysStale(true);
+          }
+        }
         if (response.ok) {
           // {group: {field: value}} — keep the non-empty string fields; the
           // wasm runtime consumes exactly that shape.
@@ -1372,6 +1385,14 @@ export function SceneLivePreviewPanel({
               ? "This scene uses services that need credentials"
               : "This scene uses keys saved in your account"}
           </h4>
+          {storedKeysStale ? (
+            <p className="copy preview-settings__hint">
+              Your saved keys were not loaded: this session signed in a while
+              ago.{" "}
+              <a href={reauthHref()}>Confirm it is you</a> to use them here,
+              or type keys below for this tab.
+            </p>
+          ) : null}
           {anyCredentialsFormShown ? (
             <p className="copy preview-settings__hint">
               Keys saved in your{" "}

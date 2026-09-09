@@ -11,6 +11,7 @@ declare global {
   interface Window {
     turnstile?: {
       remove: (widgetId: string) => void;
+      reset: (widgetId: string) => void;
       render: (
         container: HTMLElement,
         options: {
@@ -54,13 +55,19 @@ function loadTurnstileScript() {
 
 export function TurnstileWidget({
   onToken,
+  resetKey = 0,
   siteKey,
 }: {
   /** Called with a fresh token, or undefined when it expires or errors. */
   onToken: (token: string | undefined) => void;
+  /** Bump after a rejected submit: a token is single-use and the server
+   *  spends it before answering, so the corrected resubmit needs a new one.
+   *  The widget re-arms in place and calls onToken again. */
+  resetKey?: number;
   siteKey: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | undefined>(undefined);
   // The callback identity changes on every parent render (it closes over
   // setState); keeping it in a ref means the widget is rendered once instead
   // of being torn down and rebuilt on each keystroke in the form above it.
@@ -83,6 +90,7 @@ export function TurnstileWidget({
           sitekey: siteKey,
           theme: "auto",
         });
+        widgetIdRef.current = widgetId;
       })
       .catch(() => {
         // Blocked by an extension or an offline CDN. Leave the token unset:
@@ -93,11 +101,23 @@ export function TurnstileWidget({
 
     return () => {
       cancelled = true;
+      widgetIdRef.current = undefined;
       if (widgetId && window.turnstile) {
         window.turnstile.remove(widgetId);
       }
     };
   }, [siteKey]);
+
+  useEffect(() => {
+    if (resetKey === 0) {
+      return;
+    }
+    onTokenRef.current(undefined);
+    const widgetId = widgetIdRef.current;
+    if (widgetId && window.turnstile) {
+      window.turnstile.reset(widgetId);
+    }
+  }, [resetKey]);
 
   return <div className="turnstile-widget" ref={containerRef} />;
 }

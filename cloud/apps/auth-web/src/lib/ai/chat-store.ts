@@ -9,6 +9,45 @@ type Database = ReturnType<typeof createDb>;
 
 export const maxChatsPerAccount = 100;
 export const maxMessagesPerChat = 400;
+// What one persisted message may weigh. The message cap bounds the count;
+// without these, one turn that delivered twenty large scenes (or a scene the
+// model padded with a megabyte of markdown) would go whole into
+// ai_chat_messages.payload and be re-read on every chat open. Over the cap
+// the payload is replaced by a marker the client renders as "too large to
+// replay" and the text is cut; the turn's live stream already showed both.
+export const maxMessageContentBytes = 256 * 1024;
+export const maxMessagePayloadBytes = 1024 * 1024;
+
+export type PersistedMessage = {
+  role: "user" | "assistant";
+  content: string;
+  tool?: string | null;
+  payload?: unknown;
+};
+
+// The message as stored: content and payload each within their byte cap.
+// Pure so the rule is unit-testable without a database.
+export function boundMessageForStorage(message: PersistedMessage): {
+  content: string;
+  payload: unknown;
+  truncated: boolean;
+} {
+  let truncated = false;
+  let content = message.content;
+  if (Buffer.byteLength(content, "utf8") > maxMessageContentBytes) {
+    content = `${Buffer.from(content, "utf8").subarray(0, maxMessageContentBytes).toString("utf8")}\n\n[message truncated]`;
+    truncated = true;
+  }
+  let payload: unknown = message.payload ?? null;
+  if (payload !== null) {
+    const bytes = Buffer.byteLength(JSON.stringify(payload) ?? "", "utf8");
+    if (bytes > maxMessagePayloadBytes) {
+      payload = { bytes, max_bytes: maxMessagePayloadBytes, truncated: true };
+      truncated = true;
+    }
+  }
+  return { content, payload, truncated };
+}
 const chatIdPattern = /^[0-9a-f-]{36}$/i;
 
 export function isChatId(value: unknown): value is string {
@@ -91,17 +130,13 @@ export async function ensureChat(
 export async function appendChatMessage(
   db: Database,
   chatId: string,
-  message: {
-    role: "user" | "assistant";
-    content: string;
-    tool?: string | null;
-    payload?: unknown;
-  },
+  message: PersistedMessage,
 ) {
+  const bounded = boundMessageForStorage(message);
   await db.insert(aiChatMessages).values({
     chatId,
-    content: message.content,
-    payload: message.payload ?? null,
+    content: bounded.content,
+    payload: bounded.payload,
     role: message.role,
     tool: message.tool ?? null,
   });

@@ -775,6 +775,23 @@ describe("SceneLivePreviewPanel paid scenes", () => {
     expect(screen.getByRole("button", { name: /Apply & reload preview/ })).toBeTruthy();
   });
 
+  it("says why saved keys are missing when the session is too old to reveal them", async () => {
+    // GET /api/settings?reveal=1 is sudo-mode: an old session gets 403
+    // reauth_required. The preview still runs, the form asks for a key, and
+    // the hint points at /login/reauth.
+    fetchMock.mockImplementationOnce(async () =>
+      Response.json(
+        { error: "reauth_required", reauth: { path: "/login/reauth" } },
+        { status: 403 },
+      ),
+    );
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[openAiScene]} />);
+    await screen.findByText(/Your saved keys were not loaded/);
+    const link = screen.getByRole("link", { name: "Confirm it is you" }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toMatch(/^\/login\/reauth\?return_to=/);
+    expect(screen.getByLabelText("API key")).toBeTruthy();
+  });
+
   it("offers auto apply for a scene without paid services", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));

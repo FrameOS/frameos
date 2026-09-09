@@ -14,7 +14,29 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
       return newId
     }
   }
-  return remapSceneIds(newScenes, getNewSceneId)
+  return remapSceneIds(newScenes, getNewSceneId).map(remapNodeIds)
+}
+
+/**
+ * Fresh ids for every node and edge of a copied scene. Node ids key the
+ * Monaco models (`inmemory://code-node/<id>.tsx`) and the picker's
+ * `updateNodeInternals` calls, so a copy that kept them shared one buffer per
+ * code node with the original while both were open.
+ */
+export function remapNodeIds(scene: FrameScene): FrameScene {
+  const nodeIds = new Map<string, string>()
+  const nodes = scene.nodes.map((node) => {
+    const id = uuidv4()
+    nodeIds.set(node.id, id)
+    return { ...node, id }
+  })
+  const edges = scene.edges.map((edge) => ({
+    ...edge,
+    id: uuidv4(),
+    source: nodeIds.get(edge.source) ?? edge.source,
+    target: nodeIds.get(edge.target) ?? edge.target,
+  }))
+  return { ...scene, nodes, edges }
 }
 
 /** Rewrite each scene's id and every scene-to-scene reference through the given id mapper. */

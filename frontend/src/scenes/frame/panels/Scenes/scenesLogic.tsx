@@ -7,6 +7,9 @@ import { appsModel } from '../../../../models/appsModel'
 import { sceneUpdatesLogic } from './sceneUpdatesLogic'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
+import copy from 'copy-to-clipboard'
+import { duplicateScenes } from '../../../../utils/duplicateScenes'
+import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { controlLogic } from './controlLogic'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
@@ -1275,9 +1278,13 @@ export const scenesLogic = kea<scenesLogicType>([
       if (!scene) {
         return
       }
-      const newSceneId = uuidv4()
+      // Fresh scene AND node ids: node ids key the Monaco models
+      // (inmemory://code-node/<id>.tsx), so a copy that kept them shared
+      // one buffer per code node with the original.
+      const [copied] = duplicateScenes([{ ...scene, default: false }])
+      const newSceneId = copied.id
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: [...formScenesOf(values), { ...scene, default: false, id: newSceneId }],
+        scenes: [...formScenesOf(values), copied],
       })
       // The copy looks exactly like the original until it is edited, so it
       // should not sit at "no snapshot" while its twin shows a picture. The
@@ -1383,7 +1390,9 @@ export const scenesLogic = kea<scenesLogicType>([
       if (!scene) {
         return
       }
-      navigator.clipboard.writeText(JSON.stringify(scene))
+      // copy-to-clipboard falls back to execCommand outside a secure context
+      // (plain-HTTP self-hosted installs), where navigator.clipboard is undefined.
+      copy(JSON.stringify(stripSecretFieldValues(scene, values.apps)))
     },
   })),
   afterMount(({ actions }) => {

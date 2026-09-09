@@ -34,7 +34,13 @@ import { StateNode } from './StateNode'
 import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import { ArrowsPointingInIcon, EyeIcon, WindowIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowUturnLeftIcon,
+  ArrowUturnRightIcon,
+  ArrowsPointingInIcon,
+  EyeIcon,
+  WindowIcon,
+} from '@heroicons/react/24/outline'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
@@ -146,7 +152,10 @@ export function DiagramToolbar({
 }) {
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
-  const { fitDiagramView, rearrangeCurrentScene } = useActions(diagramLogic(diagramLogicProps))
+  const { fitDiagramView, rearrangeCurrentScene, requestUndo, requestRedo } = useActions(
+    diagramLogic(diagramLogicProps)
+  )
+  const { canUndo, canRedo } = useValues(diagramLogic(diagramLogicProps))
   const { previewScene } = useActions(scenesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const { sceneChanging } = useValues(controlLogic({ frameId }))
@@ -230,6 +239,12 @@ export function DiagramToolbar({
       ) : null}
       {floating ? (
         <>
+          <FloatingDiagramButton onClick={requestUndo} disabled={!canUndo} title="Undo (⌘Z / Ctrl+Z)">
+            <ArrowUturnLeftIcon className="h-5 w-5" />
+          </FloatingDiagramButton>
+          <FloatingDiagramButton onClick={requestRedo} disabled={!canRedo} title="Redo (⌘⇧Z / Ctrl+Y)">
+            <ArrowUturnRightIcon className="h-5 w-5" />
+          </FloatingDiagramButton>
           <FloatingDiagramButton onClick={fitDiagramView} title="Fit to View">
             <ZoomOutArea className="h-5 w-5" />
           </FloatingDiagramButton>
@@ -245,6 +260,12 @@ export function DiagramToolbar({
         </>
       ) : (
         <>
+          <Button size="tiny" onClick={requestUndo} disabled={!canUndo} title="Undo (⌘Z / Ctrl+Z)" color="secondary">
+            <ArrowUturnLeftIcon className="w-5 h-5" />
+          </Button>
+          <Button size="tiny" onClick={requestRedo} disabled={!canRedo} title="Redo (⌘⇧Z / Ctrl+Y)" color="secondary">
+            <ArrowUturnRightIcon className="w-5 h-5" />
+          </Button>
           <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
             <ZoomOutArea className="w-5 h-5" />
           </Button>

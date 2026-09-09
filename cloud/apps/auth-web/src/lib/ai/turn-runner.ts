@@ -39,6 +39,15 @@ export class TurnTimeoutError extends Error {
   }
 }
 
+export class TurnLimitError extends Error {
+  readonly limit: number;
+  constructor(limit: number) {
+    super(`At most ${limit} AI turns can run at once. Wait for one to finish.`);
+    this.name = "TurnLimitError";
+    this.limit = limit;
+  }
+}
+
 export type Turn = {
   id: string;
   chatId: string;
@@ -113,6 +122,12 @@ function finish(turn: Turn) {
 // the whole job (loop, persistence, final done/error event); the runner
 // never throws for it — a rejection is turned into an error event so no
 // turn ends without a terminal event for the client.
+//
+// `maxActivePerAccount` is the account's concurrency cap, checked HERE — in
+// the same synchronous step that registers the turn — rather than by the
+// route somewhere before its awaits: a check that ran ten queries ago is a
+// count from ten queries ago, and N requests arriving together all passed
+// it. Throws TurnLimitError, with nothing registered.
 export function startTurn(input: {
   id?: string;
   chatId: string;
@@ -120,7 +135,14 @@ export function startTurn(input: {
   run: (emit: (event: ChatStreamEvent) => void, signal: AbortSignal) => Promise<void>;
   onFinish?: (turn: Turn, outcome: "ok" | "error" | "stopped" | "timeout", error?: unknown) => void;
   maxMs?: number;
+  maxActivePerAccount?: number;
 }): Turn {
+  if (
+    input.maxActivePerAccount !== undefined &&
+    activeTurnCountForAccount(input.accountId) >= input.maxActivePerAccount
+  ) {
+    throw new TurnLimitError(input.maxActivePerAccount);
+  }
   const turn: Turn = {
     accountId: input.accountId,
     chatId: input.chatId,

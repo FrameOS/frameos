@@ -294,7 +294,8 @@ export default async function ScenePage({
   // page (install link, zip meta tag, download/version links), so the links
   // keep working for people — and frames — without the owner's session.
   const isPrivate = scene.visibility !== "public";
-  const share = isPrivate ? scene.shareToken : undefined;
+  // NULL once the owner turned sharing off (migration 0051): no link then.
+  const share = isPrivate ? (scene.shareToken ?? undefined) : undefined;
   const withShare = (path: string) =>
     share ? `${path}${path.includes("?") ? "&" : "?"}share=${share}` : path;
   const downloadHref = withShare(

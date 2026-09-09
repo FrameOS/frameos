@@ -1,0 +1,16 @@
+# What the release signing steps install on the GitHub-hosted runner that
+# holds FRAMEOS_FIRMWARE_SIGNING_KEY (docker-publish-multi.yml "Sign ESP32
+# firmware" / "Sign release archives and firmware", npm-publish.yml's
+# artifact check). Installed with --require-hashes so a substituted PyPI
+# wheel cannot run next to the key: hashes are the manylinux x86_64
+# CPython 3.12 wheels those runners resolve. Refresh with
+#   pip download cryptography==<v> --only-binary=:all: \
+#     --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 \
+#     --platform manylinux_2_17_x86_64 --python-version 3.12 -d wheels
+#   sha256sum wheels/*
+cryptography==50.0.0 \
+    --hash=sha256:b42a28c1844fd9de8f3f7d540e36b66f3a9c83fceac7170ebc7a6a19edd9dcae
+cffi==2.1.1 \
+    --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf
+pycparser==3.0 \
+    --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992

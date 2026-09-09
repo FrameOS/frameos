@@ -63,7 +63,8 @@ an interpreted scene at
 (or in the editor, or with the CLI in `cloud/packages/scene-convert`; see
 `docs/nim-to-js-conversion.md`). Until then such a scene still forces the
 old whole-frame source build on every deploy — `docs/legacy-source-builds.md`
-— which goes away one release after the converter shipped (2026-08-30).
+— which stays until it is deleted: not before October 2026, and possibly
+much later or never (the gate is in `docs/convergence-todo.md`, item 1).
 
 ### Quick install
 
@@ -80,7 +81,7 @@ bash <(curl -fsSL https://frameos.net/install.sh)
 SECRET_KEY=$(openssl rand -base64 32)
 mkdir -p db
 docker run -d -p 8989:8989 \
-    -v ./db:/app/db \ 
+    -v ./db:/app/db \
     --name frameos \
     --restart always \
     -e SECRET_KEY="$SECRET_KEY" \
@@ -133,6 +134,10 @@ docker run -d -p 8989:8989 \
     -e TMPDIR=/tmp/frameos-cross \
     frameos
 ```
+
+### Database
+
+The backend stores everything in SQLite (`./db/frameos.db` in the volume above) and needs nothing else. PostgreSQL is supported too: set `DATABASE_URL=postgresql+psycopg://user:password@host:5432/frameos` (the driver ships in the image, and CI runs the backend test suite against both databases).
 
 ### Cross-toolchain build container images
 

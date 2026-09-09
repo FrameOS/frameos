@@ -117,6 +117,36 @@ proc connectedLoginLink(localFallback: bool): JsonNode =
     "local_fallback_enabled": localFallback,
   }
 
+suite "cloud sign-in redirect target":
+  setup:
+    drainEventChannel()
+    configureServerState(adminConfig(""))
+
+  test "login/start never derives the redirect from the Host header":
+    # No recorded local_origin: the provider would answer
+    # invalid_redirect_uri, so the frame says what is wrong itself and
+    # never reaches the provider with a Host-header-derived address.
+    writeLinkState(connectedLoginLink(true))
+    let missing = httpRequest(server.port, "POST", "/api/cloud/login/start",
+      headers = [("Host", "attacker.example:8787")])
+    check missing.status == 409
+    check missing.body.contains("no local address on record")
+
+    # A recorded origin is the redirect target; a browser on another origin
+    # is pointed at the right one instead of bounced into a cookie mismatch.
+    var state = connectedLoginLink(true)
+    state["local_origin"] = %"http://kitchen.local:8787"
+    writeLinkState(state)
+    let elsewhere = httpRequest(server.port, "POST", "/api/cloud/login/start",
+      headers = [("Host", "10.0.0.5:8787")])
+    check elsewhere.status == 409
+    check elsewhere.body.contains("http://kitchen.local:8787")
+    # The matching origin passes the gate (and then fails only at the
+    # unreachable stub provider).
+    let matching = httpRequest(server.port, "POST", "/api/cloud/login/start",
+      headers = [("Host", "KITCHEN.local:8787")])
+    check matching.status == 502
+
 suite "local password login can be handed to the cloud":
   setup:
     drainEventChannel()

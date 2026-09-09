@@ -296,7 +296,7 @@ export function TemplateRow({
                   color={installedTemplatesByName[template.name] ? 'secondary' : 'primary'}
                   onClick={() => applyTemplate?.(template)}
                   disabled={!canInstall}
-                  title={unsupported ? unsupportedReason : 'Add scene'}
+                  title={unsupported ? unsupportedReason : 'Install scene'}
                 >
                   {!installedTemplatesByName[template.name] ? (
                     <FolderPlusIcon className="w-5 h-5" />
@@ -305,9 +305,9 @@ export function TemplateRow({
                   )}
                   <span className="hidden @xs:inline">
                     {installedTemplatesByName[template.name] ? (
-                      'Added'
+                      'Installed'
                     ) : (
-                      <>Add{templateScenes.length > 1 ? ` (${templateScenes.length})` : ''}</>
+                      <>Install{templateScenes.length > 1 ? ` (${templateScenes.length})` : ''}</>
                     )}
                   </span>
                 </Button>
@@ -336,8 +336,8 @@ export function TemplateRow({
                     ? [
                         {
                           label: templateScenes.length
-                            ? `Add ${templateScenes.length} scene${templateScenes.length === 1 ? '' : 's'} onto frame`
-                            : 'Add onto frame',
+                            ? `Install ${templateScenes.length} scene${templateScenes.length === 1 ? '' : 's'} on frame`
+                            : 'Install on frame',
                           onClick: () => applyTemplate?.(template),
                           disabled: !canInstall,
                           title: unsupported ? unsupportedReason : undefined,

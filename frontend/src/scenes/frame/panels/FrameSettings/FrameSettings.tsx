@@ -3593,12 +3593,31 @@ export function FrameSettings({
                   >
                     <TextInput name="server_host" placeholder="localhost" required />
                   </Field>
-                  <Field
-                    name="server_port"
-                    label="Backend port"
-                    tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
-                  >
+                  <Field name="server_port" label="Backend port" tooltip="The port the backend server is running on.">
                     <TextInput name="server_port" placeholder="8989" required />
+                  </Field>
+                  <Field
+                    name="server_scheme"
+                    label="Backend scheme"
+                    tooltip={
+                      <>
+                        Whether the frame reaches the backend over plain HTTP or HTTPS. This decides the log shipper,
+                        FrameOS Remote (ws:// vs wss://) and ESP32 provisioning alike; it is never guessed from the
+                        port.
+                      </>
+                    }
+                  >
+                    {({ value, onChange }) => (
+                      <Select
+                        name="server_scheme"
+                        value={value === 'https' ? 'https' : 'http'}
+                        onChange={(v) => onChange(v === 'https' ? 'https' : 'http')}
+                        options={[
+                          { value: 'http', label: 'http (plain)' },
+                          { value: 'https', label: 'https (TLS)' },
+                        ]}
+                      />
+                    )}
                   </Field>
                   <Field
                     name="server_api_key"

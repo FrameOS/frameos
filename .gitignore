@@ -2,10 +2,16 @@
 env
 __pycache__
 *.db
+*.db-wal
+*.db-shm
 /db/
 !.flox/
 !.flox/env/
 !.flox/env/manifest.toml
+
+# Local telemetry state (nix-era leftovers; an install identifier is not source)
+metrics-lock
+metrics-uuid
 
 # Logs
 *.log

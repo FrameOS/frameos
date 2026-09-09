@@ -41,6 +41,7 @@ export default tseslint.config(
       // Same exclusion, same reason: builds every logic the embedded editor
       // mounts; workspaceLogic reaches the legacy workspace components.
       "**/src/test/shared-spa/embedded-editor-logics.test.ts",
+      "**/src/test/shared-spa/scene-state-logic.test.ts",
       // Same exclusion, same reason: frameStatusGroups's import graph
       // reaches decorators/frame.tsx and the legacy components.
       "**/src/test/shared-spa/frame-status-groups.test.ts",
@@ -69,6 +70,10 @@ export default tseslint.config(
       "**/src/test/shared-spa/cloud-frame-settings-panel.test.tsx",
       // Same exclusion, same reason: imports frameLogic.
       "**/src/test/shared-spa/frame-service-keys-change.test.ts",
+      // Same exclusion, same reason: diagramLogic against the embed shim,
+      // and export helpers that reach frameLogic / duplicateScenes.
+      "**/src/test/shared-spa/diagram-history.test.ts",
+      "**/src/test/shared-spa/editor-export-secrets.test.ts",
       "**/src/test/shared-spa/preview-key-consent.test.ts",
     ],
   },

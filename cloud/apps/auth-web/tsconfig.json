@@ -53,6 +53,8 @@
     // (FrameConnectionDot's bare JSX namespace). Vitest still runs it; only
     // tsc leaves it out.
     "src/test/shared-spa/embedded-editor-logics.test.ts",
+    // Same shim, same import graph (frameLogic → the legacy workspace).
+    "src/test/shared-spa/scene-state-logic.test.ts",
     // Same story: imports frameLogic for the service-keys change detail.
     "src/test/shared-spa/frame-service-keys-change.test.ts",
     // Same story: the preview key gate reaches utils/sceneApps through secretSettings.
@@ -87,6 +89,12 @@
     // The widest graph of the lot: it mounts the whole FrameSettings panel,
     // which reaches the colour picker and every device-settings component
     // behind it. Vitest still runs it; only tsc leaves it out.
-    "src/test/shared-spa/cloud-frame-settings-panel.test.tsx"
+    "src/test/shared-spa/cloud-frame-settings-panel.test.tsx",
+    // Same story: builds diagramLogic against the embed shim (workspaceLogic
+    // and the legacy components sit behind it), and the export helpers
+    // reach frameLogic / duplicateScenes. Vitest still runs both; only tsc
+    // leaves them out.
+    "src/test/shared-spa/diagram-history.test.ts",
+    "src/test/shared-spa/editor-export-secrets.test.ts"
   ]
 }

@@ -36,6 +36,7 @@ from app.redis import get_redis
 from app.schemas.cloud import CloudStatusResponse, CloudStorePublishRequest
 from app.tenancy import get_user_project
 from app.utils import cloud_link
+from app.utils.asset_headers import inert_asset_headers
 
 from . import api_user
 
@@ -169,8 +170,19 @@ async def cloud_store_drive_image(
     # a misbehaving provider must not be able to hand the browser e.g. text/html.
     if status_code != 200 or not (content_type or "").lower().startswith("image/"):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Image not found")
+    # Actual images still go out inert: an `image/svg+xml` cover is a
+    # document with scripts as far as the browser is concerned, so it is a
+    # download, and nothing served here may script or frame anything.
     return Response(
         content,
         media_type=content_type,
-        headers={"cache-control": "private, max-age=300", "x-content-type-options": "nosniff"},
+        headers={
+            "cache-control": "private, max-age=300",
+            **inert_asset_headers(content_type, f"{scene_id}.{_image_extension(content_type)}", inline=True),
+        },
     )
+
+
+def _image_extension(content_type: str) -> str:
+    subtype = (content_type or "").lower().split("/", 1)[-1].split(";", 1)[0].strip()
+    return {"svg+xml": "svg", "jpeg": "jpg"}.get(subtype, subtype or "img")

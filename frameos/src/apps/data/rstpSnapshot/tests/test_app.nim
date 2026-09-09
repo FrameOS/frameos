@@ -52,6 +52,31 @@ proc makeApp(scene: FrameScene, frameConfig: FrameConfig, url = "rtsp://cam/live
   )
 
 suite "data/rstpSnapshot app":
+  test "the scene's timeout is clamped below the service watchdog":
+    check ffmpegTimeoutMs(0) == 15000
+    check ffmpegTimeoutMs(3) == 3000
+    check ffmpegTimeoutMs(MaxFfmpegTimeoutSeconds) == MaxFfmpegTimeoutSeconds * 1000
+    check ffmpegTimeoutMs(100_000) == MaxFfmpegTimeoutSeconds * 1000
+    check MaxFfmpegTimeoutSeconds * 1000 < 900_000
+
+  test "ffmpeg may only open the protocols the URL's scheme needs":
+    let rtsp = ffmpegArgs("rtsp://cam/live", "pipe:1", scheme = "rtsp")
+    let whitelistAt = rtsp.find("-protocol_whitelist")
+    check whitelistAt >= 0
+    check rtsp[whitelistAt + 1] == "rtsp,rtp,udp,tcp"
+    check not rtsp[whitelistAt + 1].contains("file")
+    check ffmpegProtocolWhitelist("https") == "https,http,tcp,tls"
+    check ffmpegProtocolWhitelist("http") == "http,tcp"
+    check ffmpegProtocolWhitelist("rtsps").contains("tls")
+    # Without a scheme (the log preview) no whitelist is emitted.
+    check ffmpegArgs("rtsp://cam/live", "pipe:1").find("-protocol_whitelist") == -1
+    # A pinned http target keeps the scene's hostname as the Host header.
+    let pinned = ffmpegArgs("http://10.0.0.9/snap.jpg", "pipe:1", scheme = "http", hostHeader = "cam.example")
+    let headersAt = pinned.find("-headers")
+    check headersAt >= 0
+    check pinned[headersAt + 1] == "Host: cam.example\r\n"
+    check pinned[pinned.find("-i") + 1] == "http://10.0.0.9/snap.jpg"
+
   test "a store-origin scene is refused before ffmpeg is spawned":
     let previousHook = rtspSnapshotFfmpegRunHook
     defer:

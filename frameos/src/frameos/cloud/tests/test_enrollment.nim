@@ -236,6 +236,53 @@ suite "cloud enrollment":
     let (bodies, _) = recordedRequests()
     check bodies[0]{"name"}.getStr("") == "Boot frame"
 
+  test "a claim-token enrollment records where the admin page lives":
+    # The provider pins the cloud sign-in redirect to the linked client's
+    # local_origin and refuses without one, so a boot-time enrollment (no
+    # browser in the loop) reports the address the device knows itself by.
+    var config = standaloneConfig()
+    config.frameHost = "kitchen.local"
+    config.framePort = 8787
+    check deviceLocalOrigin(config) == "http://kitchen.local:8787"
+    config.framePort = 80
+    check deviceLocalOrigin(config) == "http://kitchen.local"
+    config.httpsProxy = HttpsProxyConfig(enable: true)
+    config.framePort = 443
+    check deviceLocalOrigin(config) == "https://kitchen.local"
+    config.httpsProxy = nil
+    config.framePort = 8787
+    # The image placeholder is no address at all; the OS hostname stands in.
+    config.frameHost = "localhost"
+    setSystemHostnameForTest("hallway")
+    check deviceLocalOrigin(config) == "http://hallway.local:8787"
+    setSystemHostnameForTest("")
+    check deviceLocalOrigin(nil) == ""
+
+    clearLinkState()
+    setStubResponse(200, %*{
+      "access_token": "frame-token-origin",
+      "scope": "frame:managed",
+      "frame_id": "frame-origin",
+      "ws_path": "/api/frames/ws",
+    })
+    writeFile(pendingEnrollmentPath(), $(%*{
+      "claim_token": "FRCT-boot-origin",
+      "provider_url": providerUrl,
+    }))
+    config.frameHost = "kitchen.local"
+    let (resolved, _, outcome, _) = processPendingCloudEnrollment(config)
+    check resolved and outcome.ok
+    let (bodies, _) = recordedRequests()
+    check bodies[0]{"local_origin"}.getStr("") == "http://kitchen.local:8787"
+    check linkState(){"local_origin"}.getStr("") == "http://kitchen.local:8787"
+    # An explicit origin (the browser that pasted the token) wins.
+    clearLinkState()
+    setStubResponse(200, %*{"access_token": "t", "frame_id": "f", "ws_path": "/api/frames/ws"})
+    check enrollManagedFrame(providerUrl, "FRCT-browser", "", "", config,
+                             localOrigin = "http://10.0.0.7:8787").ok
+    check recordedRequests()[0][0]{"local_origin"}.getStr("") == "http://10.0.0.7:8787"
+    check linkState(){"local_origin"}.getStr("") == "http://10.0.0.7:8787"
+
   test "pending enrollment with a dead token is dropped, not retried":
     clearLinkState()
     setStubResponse(400, %*{"error": "invalid_claim_token"})

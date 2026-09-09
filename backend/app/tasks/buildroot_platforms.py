@@ -13,7 +13,7 @@ Boards whose bring-up has not happened yet are registered with
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.utils.cross_compile import TargetMetadata
 

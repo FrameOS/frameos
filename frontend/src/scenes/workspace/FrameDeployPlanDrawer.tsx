@@ -22,6 +22,7 @@ import { Checkbox } from '../../components/Checkbox'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
+import { Select } from '../../components/Select'
 import { Spinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
 import { SshKeysSection } from '../../components/sshKeys/SshKeysSection'
@@ -1322,6 +1323,7 @@ function BuildrootSdCardSection({
   const buildroot = frameForm.buildroot ?? frame.buildroot ?? {}
   const serverHost = frameForm.server_host ?? frame.server_host ?? ''
   const serverPort = frameForm.server_port ?? frame.server_port ?? 8989
+  const serverScheme = frameForm.server_scheme ?? frame.server_scheme ?? 'http'
   const device = frameForm.device ?? frame.device ?? 'web_only'
   const deviceConfig = frameForm.device_config ?? frame.device_config ?? {}
   const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
@@ -1392,6 +1394,17 @@ function BuildrootSdCardSection({
               placeholder="8989"
               type="number"
               autoComplete="off"
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Backend scheme</span>
+            <Select
+              value={serverScheme}
+              onChange={(value) => updateFrameValue('server_scheme', value === 'https' ? 'https' : 'http')}
+              options={[
+                { value: 'http', label: 'http (plain)' },
+                { value: 'https', label: 'https (TLS)' },
+              ]}
             />
           </label>
           <label className="block space-y-1">
@@ -3374,6 +3387,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         ssh_keys: effectiveSshKeyIds(frame, frameForm, savedSettings),
         server_host: frameForm.server_host ?? frame.server_host,
         server_port: frameForm.server_port ?? frame.server_port,
+        server_scheme: frameForm.server_scheme ?? frame.server_scheme,
         timezone: normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone),
         network: {
           ...(frame.network ?? {}),

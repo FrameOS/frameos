@@ -27,6 +27,8 @@
 #include "cJSON.h"
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
+#include "fos_cloud_contract_gen.h"
+#include "fos_upload_limits.h"
 #include "fos_battery.h"
 #include "fos_board.h"
 #include "fos_client.h"
@@ -2361,6 +2363,16 @@ static esp_err_t asset_upload_post_handler(httpd_req_t *req)
             complete = strcmp(val, "1") == 0;
         }
     }
+    /* The assembled file's ceiling is the contract's chunkedUploadMaxBytes on
+     * every path (cloud asset_put_chunk, the Linux runtime's
+     * HubMaxChunkedUploadBytes, and this one): an authenticated LAN client
+     * could otherwise fill the card one chunk at a time. Checked before a
+     * byte is read, so an oversized request costs one 413 and no card write. */
+    if (!fos_upload_range_ok(offset, (long long)total, (long long)FOS_CONTRACT_CHUNKED_UPLOAD_MAX_BYTES)) {
+        httpd_resp_set_status(req, "413 Payload Too Large");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"error\":\"too_large\"}");
+    }
     const char *asset_err = NULL;
     fos_assets_writer_t writer;
     esp_err_t begin = chunked
@@ -2372,6 +2384,13 @@ static esp_err_t asset_upload_post_handler(httpd_req_t *req)
             httpd_resp_set_status(req, "409 Conflict");
             httpd_resp_set_type(req, "application/json");
             return httpd_resp_sendstr(req, "{\"error\":\"chunk_gap\"}");
+        }
+        if (asset_err && strcmp(asset_err, "too_many_uploads") == 0) {
+            /* FOS_UPLOAD_MAX_PENDING_PARTS parts already sit under .uploads:
+             * finish or abandon one (the boot sweep clears them all). */
+            httpd_resp_set_status(req, "429 Too Many Requests");
+            httpd_resp_set_type(req, "application/json");
+            return httpd_resp_sendstr(req, "{\"error\":\"too_many_uploads\"}");
         }
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    asset_err ? asset_err : "write failed");

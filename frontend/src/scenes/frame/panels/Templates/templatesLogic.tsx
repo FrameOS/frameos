@@ -10,6 +10,7 @@ import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
+import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
@@ -572,6 +573,10 @@ export const templatesLogic = kea<templatesLogicType>([
           // otherwise the first selected scene's cached snapshot.
           const activeSceneId = values.frame?.active_scene_id
           const imageSceneId = activeSceneId && exportScenes.includes(activeSceneId) ? undefined : exportScenes[0]
+          // Never ship a `secret: true` field value in a template or a store zip.
+          const exportedScenes = (values.frameForm.scenes || [])
+            .filter((scene) => exportScenes.includes(scene.id))
+            .map((scene) => stripSecretFieldValues(scene, values.apps))
 
           if (target === 'cloud') {
             const response = await apiFetch('/api/cloud/store/publish', {
@@ -580,7 +585,7 @@ export const templatesLogic = kea<templatesLogicType>([
               body: JSON.stringify({
                 name: formValues.name,
                 description: formValues.description,
-                scenes: (values.frameForm.scenes || []).filter((scene) => exportScenes.includes(scene.id)),
+                scenes: exportedScenes,
                 from_frame_id: props.frameId,
                 ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
                 ...(formValues.visibility === 'private' || formValues.visibility === 'public'
@@ -617,7 +622,7 @@ export const templatesLogic = kea<templatesLogicType>([
           const request: TemplateType & Record<string, any> = {
             name: formValues.name,
             description: formValues.description,
-            scenes: (values.frameForm.scenes || []).filter((scene) => exportScenes.includes(scene.id)),
+            scenes: exportedScenes,
             from_frame_id: props.frameId,
             ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
             format: target === 'zip' ? 'zip' : 'json',

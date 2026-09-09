@@ -12,6 +12,7 @@ import { SceneFrameosVersionEditor } from "./SceneFrameosVersionEditor";
 import { SceneImageGallery } from "./SceneImageGallery";
 import { SceneMarkdown } from "./SceneMarkdown";
 import { SceneTagsEditor } from "./SceneTagsEditor";
+import { ShareLinkControls } from "./ShareLinkControls";
 import { StoreSceneActions } from "./StoreSceneActions";
 
 /** The listing a version records (and the workspace drafts): plain JSON. */
@@ -115,6 +116,7 @@ export function SceneInfoPanel({
   isAdmin,
   signedIn,
   share,
+  pageUrl,
   heading,
   shown,
   draft,
@@ -233,10 +235,13 @@ export function SceneInfoPanel({
       {isPrivate && isActive ? (
         <div className="notice">
           {isOwner || isAdmin
-            ? "This scene is private — it is only visible to you and to anyone you give the sharing link below."
+            ? share
+              ? "This scene is private — it is only visible to you and to anyone you give the sharing link below."
+              : "This scene is private — sharing is off, so it is only visible to you."
             : "This scene is private — you are viewing it through a sharing link."}
           {isOwner ? (
             <div className="notice__actions">
+              <ShareLinkControls sceneId={scene.id} shareUrl={share ? pageUrl : null} />
               <StoreSceneActions
                 name={scene.name}
                 sceneId={scene.id}

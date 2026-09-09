@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import JSON
 from app.utils.timezone import guess_system_timezone
 
 

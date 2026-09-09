@@ -134,6 +134,7 @@ export function FrameActionsMenu({
               {
                 label: 'Stop FrameOS',
                 title: 'Stop FrameOS service',
+                confirm: `Stop FrameOS on "${frameName}"? The display keeps its last image until the service is started again.`,
                 onClick: () => stopFrame(frame.id),
                 icon: <StopCircleIcon className="h-5 w-5" />,
               },
@@ -144,6 +145,7 @@ export function FrameActionsMenu({
               {
                 label: 'Restart FrameOS',
                 title: 'Restart the FrameOS runtime',
+                confirm: `Restart the FrameOS runtime on "${frameName}"?`,
                 onClick: () => restartFrame(frame.id),
                 icon: <ArrowPathIcon className="h-5 w-5" />,
               },
@@ -154,6 +156,7 @@ export function FrameActionsMenu({
               {
                 label: 'Reboot device',
                 title: 'Reboot device',
+                confirm: `Reboot the device "${frameName}"?`,
                 onClick: () => rebootFrame(frame.id),
                 icon: <PowerIcon className="h-5 w-5" />,
               },

@@ -86,6 +86,18 @@ function describeError(
   }
 }
 
+// Enrolling a factor revokes every personal API token (they were minted
+// before it existed and would keep walking past it). The routes report how
+// many; the notice has to say so, or an agent's scripts start failing with
+// 401 and nothing on this page explains why.
+function revokedTokensNote(payload: Record<string, unknown>) {
+  const revoked = typeof payload.api_tokens_revoked === "number" ? payload.api_tokens_revoked : 0;
+  if (revoked <= 0) {
+    return "";
+  }
+  return ` ${revoked} API ${revoked === 1 ? "token was" : "tokens were"} revoked — create new ones under Developer.`;
+}
+
 function formatDate(value: string | null) {
   if (!value) {
     return "never";
@@ -218,7 +230,7 @@ export function TwoFactorSettings({
       if (Array.isArray(payload.recovery_codes)) {
         setRecoveryCodes(payload.recovery_codes as string[]);
       }
-      setNotice("Authenticator app enabled.");
+      setNotice(`Authenticator app enabled.${revokedTokensNote(payload)}`);
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
@@ -263,7 +275,7 @@ export function TwoFactorSettings({
       if (Array.isArray(payload.recovery_codes)) {
         setRecoveryCodes(payload.recovery_codes as string[]);
       }
-      setNotice("Passkey added.");
+      setNotice(`Passkey added.${revokedTokensNote(payload)}`);
       await refresh();
     } catch (caught) {
       if (caught instanceof Error && caught.name === "NotAllowedError") {

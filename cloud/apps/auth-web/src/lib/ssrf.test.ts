@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addressIsPrivate } from "./ssrf";
+import { isIP } from "node:net";
+import { addressIsPrivate, addressIsPrivateSource } from "./ssrf";
 
 describe("addressIsPrivate", () => {
   it("blocks the RFC 1918, loopback, link-local and CGNAT v4 ranges", () => {
@@ -57,5 +58,24 @@ describe("addressIsPrivate", () => {
     }
     expect(addressIsPrivate("2606:4700:4700::1111")).toBe(false);
     expect(addressIsPrivate("2001:db8::1")).toBe(false);
+  });
+});
+
+describe("addressIsPrivateSource", () => {
+  it("is the same classifier the renderer's child process splices in", () => {
+    const spliced = new Function("isIP", `${addressIsPrivateSource}\nreturn addressIsPrivate;`)(isIP) as (
+      address: string,
+    ) => boolean;
+    for (const address of [
+      "192.0.0.1",
+      "198.18.0.1",
+      "64:ff9b::7f00:1",
+      "2002:7f00:1::",
+      "8.8.8.8",
+      "2606:4700::1111",
+      "fe80::1%eth0",
+    ]) {
+      expect(spliced(address), address).toBe(addressIsPrivate(address));
+    }
   });
 });

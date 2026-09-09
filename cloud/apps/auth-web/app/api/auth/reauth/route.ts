@@ -12,6 +12,7 @@ import {
   reauthenticatedResponse,
   recordReauthFailed,
 } from "../../../../src/lib/reauth";
+import { reauthMethods, secondFactorEnrolled } from "../../../../src/lib/recent-auth";
 import {
   secondFactorStatus,
   verifySecondFactorCode,
@@ -32,6 +33,20 @@ export async function POST(request: NextRequest) {
   const db = createDb();
 
   if (typeof body?.password === "string" && body.password) {
+    // Sudo mode on a two-factor account is the second factor, never the
+    // password alone (reauthMethods says so to the form; this is the route
+    // saying it to a client that did not ask). Checked before the password
+    // so the refusal is not also a password oracle.
+    const status = await secondFactorStatus(db, context.accountId);
+    if (secondFactorEnrolled(status)) {
+      return NextResponse.json(
+        {
+          error: "second_factor_required",
+          reauth: { methods: await reauthMethods(db, context.accountId) },
+        },
+        { status: 403 },
+      );
+    }
     const [account] = await db
       .select({ passwordHash: accounts.passwordHash })
       .from(accounts)

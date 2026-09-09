@@ -197,6 +197,13 @@ block test_frameos_service_contents_uses_detected_user:
   doAssert service.contains("WorkingDirectory=/srv/frameos/current")
   doAssert service.contains("ExecStart=/srv/frameos/current/frameos")
   doAssert service.contains("RestartSec=5")
+  doAssert service.contains("PrivateTmp=yes\n")
+  # No ProtectSystem on the sudo-based unit: the privileged steps (systemd
+  # drop-ins, cron, fstab, localtime, cmdline.txt, apt-get) run inside its
+  # mount namespace and write /etc, /boot and /usr. The hardened Buildroot
+  # unit is the one with ProtectSystem=strict (test_buildroot_privileges.py).
+  doAssert not service.contains("ProtectSystem=")
+  doAssert not service.contains("NoNewPrivileges=")
   doAssert service.contains("ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime")
   doAssert service.contains("/srv/frameos/runtime/frameos-last-exit")
   # systemd expands a bare %s in ExecStopPost= to the user's shell, which

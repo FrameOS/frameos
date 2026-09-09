@@ -9,12 +9,13 @@
 
 #include "cJSON.h"
 
+#include "fos_assets_path.h" /* FOS_ASSETS_PATH_MAX + the sanitize rules */
+
 /* Shared asset-directory layer: one path-safety + listing + write
  * implementation behind the cloud verbs, the local HTTP API and the USB
  * console. All paths are RELATIVE to the assets root (`assets_path`,
  * default /srv/assets — the SD card mount). */
 
-#define FOS_ASSETS_PATH_MAX 256
 #define FOS_ASSETS_FULL_PATH_MAX (FOS_ASSETS_PATH_MAX + 128)
 #define FOS_ASSETS_LIST_MAX_ENTRIES 2000
 #define FOS_ASSETS_LIST_MAX_DEPTH 8
@@ -25,16 +26,6 @@
 bool fos_assets_available(void);
 
 const char *fos_assets_root(void);
-
-/* Read-path rule: relative, non-empty, no dot-segments ("." / ".."), no
- * empty segments, no backslashes (a FatFS separator that would bypass the
- * segment checks). Dotfiles are readable when named directly (the walk
- * skips them, mirroring the Linux runtime). */
-bool fos_assets_sanitize_path(const char *raw, char *out, size_t out_len);
-
-/* Write-path rule: read rule plus refusing ANY dot-component — dot
- * directories are reserved for device-local state (docs/cloud-frames.md). */
-bool fos_assets_sanitize_write_path(const char *raw, char *out, size_t out_len);
 
 void fos_assets_full_path(char *out, size_t out_len, const char *rel);
 

@@ -41,6 +41,7 @@
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_tz.h"
+#include "fos_url_guard.h"
 #include "fos_settings.h"
 #include "fos_wifi.h"
 #include "fos_netguard.h"
@@ -235,203 +236,25 @@ static void nvs_erase_key_quiet(const char *key)
 
 /* ------------------------------------------------- provider URL transport */
 
-/* Strict dotted-quad parser: exactly four 1-3 digit decimal groups, each
- * 0-255, single dots, nothing before or after. Deliberately stricter than the
- * `sscanf(host, "%u.%u.%u.%u%c", ...)` this replaces, which also accepted
- * leading whitespace, a `+`/`-` sign and leading zeros ("010.0.0.1"): Python's
- * `ipaddress.ip_address()` — the backend half of this rule, in
- * backend/app/utils/cloud_link.py::_is_local_host — rejects all three, so the
- * strict reading is the one that matches, and every rejection here fails
- * closed (the host is treated as public, so plain http:// is refused).
- *
- * (It was also an attempt to drop newlib's float-capable scanf, ~10 KB: that
- * failed — ESP-IDF's own console component calls sscanf from linenoise.c, so
- * the code stays linked either way. The parser is kept for the parity.) */
-static bool parse_ipv4_literal(const char *host, unsigned *a, unsigned *b,
-                               unsigned *c, unsigned *d)
-{
-    unsigned *out[4] = { a, b, c, d };
-    const char *p = host;
-
-    for (int i = 0; i < 4; i++) {
-        if (i > 0) {
-            if (*p != '.') return false;
-            p++;
-        }
-        if (*p < '0' || *p > '9') return false;
-        if (*p == '0' && p[1] >= '0' && p[1] <= '9') return false;  /* no leading zeros */
-        unsigned value = 0;
-        int digits = 0;
-        while (*p >= '0' && *p <= '9') {
-            if (++digits > 3) return false;
-            value = value * 10 + (unsigned)(*p - '0');
-            p++;
-        }
-        if (value > 255) return false;
-        *out[i] = value;
-    }
-    return *p == '\0';
-}
+/* The rules themselves live in fos_url_guard.c (host-tested); these are
+ * the two wire shapes the cloud link uses. */
+_Static_assert(FOS_URL_GUARD_LEN == FOS_URL_LEN, "fos_url_guard buffers mirror FOS_URL_LEN");
 
 /* Everything this link carries — the single-use claim token, the bearer
  * access token, every scene push — is forgeable by an on-path attacker over
  * plain HTTP, so http:// (and its ws:// downgrade) is accepted only for hosts
- * where there is no meaningful third party on the path. Same rule as
- * `docs/cloud-link.md` and backend/app/utils/cloud_link.py::_is_local_host:
- * localhost, `.local`/`.localhost` names, loopback, RFC1918, link-local and
- * CGNAT literals. */
-static bool host_is_local(const char *host)
-{
-    if (!host || !host[0]) return false;
-
-    /* Case-insensitive suffix/exact name checks. */
-    size_t len = strlen(host);
-    char lower[128];
-    if (len < sizeof(lower)) { /* longer than this is never a local name */
-        for (size_t i = 0; i <= len; i++) {
-            char c = host[i];
-            lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-        }
-        if (strcmp(lower, "localhost") == 0) return true;
-        size_t n = strlen(lower);
-        if (n > 6 && strcmp(lower + n - 6, ".local") == 0) return true;
-        if (n > 10 && strcmp(lower + n - 10, ".localhost") == 0) return true;
-    }
-
-    /* IPv6 literals arrive without brackets here. */
-    if (strchr(host, ':')) {
-        if (strcmp(host, "::1") == 0) return true;
-        if (strncasecmp(host, "fe80:", 5) == 0) return true;          /* link-local */
-        if ((host[0] == 'f' || host[0] == 'F') &&
-            (host[1] == 'c' || host[1] == 'C' || host[1] == 'd' || host[1] == 'D')) {
-            return true;                                              /* ULA fc00::/7 */
-        }
-        return false;
-    }
-
-    unsigned a = 0, b = 0, c = 0, d = 0;
-    if (!parse_ipv4_literal(host, &a, &b, &c, &d)) return false;
-    if (a == 127) return true;                                        /* loopback */
-    if (a == 10) return true;                                         /* RFC1918 */
-    if (a == 172 && b >= 16 && b <= 31) return true;                  /* RFC1918 */
-    if (a == 192 && b == 168) return true;                            /* RFC1918 */
-    if (a == 169 && b == 254) return true;                            /* link-local */
-    if (a == 100 && b >= 64 && b <= 127) return true;                 /* CGNAT */
-    return false;
-}
-
-/* Split "scheme://host[:port][/path]" into scheme flag + host[:port].
- * Returns false when the URL has neither the secure nor the plain scheme,
- * or no host. */
-static bool split_scheme_url(const char *url, const char *secure_scheme,
-                             const char *plain_scheme, bool *is_secure,
-                             char *host, size_t host_len)
-{
-    const char *rest;
-    if (strncasecmp(url, secure_scheme, strlen(secure_scheme)) == 0) {
-        *is_secure = true;
-        rest = url + strlen(secure_scheme);
-    } else if (strncasecmp(url, plain_scheme, strlen(plain_scheme)) == 0) {
-        *is_secure = false;
-        rest = url + strlen(plain_scheme);
-    } else {
-        return false;
-    }
-    strlcpy(host, rest, host_len);
-    size_t cut = strcspn(host, "/?#");
-    host[cut] = '\0';
-    /* Anything with userinfo, or otherwise not a bare host[:port], is left
-     * intact here and fails the host check below rather than being guessed. */
-    return host[0] != '\0';
-}
-
-/* Strip [] and :port so host_is_local() sees a bare name or literal. */
-static void host_only(const char *hostport, char *out, size_t out_len)
-{
-    strlcpy(out, hostport, out_len);
-    if (out[0] == '[') {
-        memmove(out, out + 1, strlen(out)); /* includes the NUL */
-        char *close = strchr(out, ']');
-        if (close) *close = '\0';
-        return;
-    }
-    /* A bare IPv6 literal has several colons; only strip a single :port. */
-    char *colon = strrchr(out, ':');
-    if (colon && strchr(out, ':') == colon) *colon = '\0';
-}
-
-/* One transport rule for both wire shapes: the secure scheme (https/wss) is
- * fine anywhere; the plain one (http/ws) only for the dev hosts
- * host_is_local() accepts. */
-static bool url_transport_ok(const char *url, bool ws, const char **reason)
-{
-    const char *why = NULL;
-    bool is_secure = false;
-    char hostport[FOS_URL_LEN];
-    char host[FOS_URL_LEN];
-    bool ok = false;
-
-    if (!url || !url[0]) {
-        why = "empty";
-    } else if (!split_scheme_url(url, ws ? "wss://" : "https://",
-                                 ws ? "ws://" : "http://", &is_secure,
-                                 hostport, sizeof(hostport))) {
-        why = ws ? "must be a ws:// or wss:// URL"
-                 : "must be an http:// or https:// URL";
-    } else if (is_secure) {
-        ok = true;
-    } else {
-        host_only(hostport, host, sizeof(host));
-        if (host_is_local(host)) {
-            ok = true;
-        } else {
-            why = ws ? "ws:// is allowed only for localhost, .local and "
-                       "private-network hosts (development)"
-                     : "http:// is allowed only for localhost, .local and "
-                       "private-network hosts (development)";
-        }
-    }
-    if (reason) *reason = why;
-    return ok;
-}
-
+ * where there is no meaningful third party on the path (docs/cloud-link.md,
+ * fos_url_host_is_local). */
 bool fos_cloud_url_transport_ok(const char *url, const char **reason)
 {
-    return url_transport_ok(url, false, reason);
+    return fos_url_transport_ok(url, false, reason);
 }
 
 /* Enrollment's optional ws_url override (docs/cloud-frames.md): a full
  * WebSocket URL, held to the same rule as cloud_url. */
 static bool ws_url_transport_ok(const char *url, const char **reason)
 {
-    return url_transport_ok(url, true, reason);
-}
-
-/* Is this ws_url override plausible for the provider we are enrolled with?
- *
- * The override exists for development, where the frame hub is a separate
- * process on another port, so it is allowed to be a loopback or LAN address.
- * That makes it dangerous to leave behind: a board moved from a dev cloud to
- * a real one keeps dialing `ws://localhost:3100`, gets an instant TCP reset
- * from its own stack, and reports a "Connection reset by peer" that looks
- * exactly like a network fault — while enrollment over cloud_url keeps
- * working, because that path never reads this value. One frame lost a day to
- * this.
- *
- * So: a loopback override is only credible when cloud_url is loopback too.
- * Anything else is a leftover from a previous life and is refused (and
- * erased by the caller) rather than dialed forever. */
-static bool ws_url_matches_provider(const char *ws_url, const char *cloud_url)
-{
-    if (ws_url == NULL || ws_url[0] == '\0') return true;
-    bool ws_loopback = strstr(ws_url, "://localhost") != NULL ||
-                       strstr(ws_url, "://127.0.0.1") != NULL ||
-                       strstr(ws_url, "://[::1]") != NULL;
-    if (!ws_loopback) return true;
-    if (cloud_url == NULL) return false;
-    return strstr(cloud_url, "://localhost") != NULL ||
-           strstr(cloud_url, "://127.0.0.1") != NULL ||
-           strstr(cloud_url, "://[::1]") != NULL;
+    return fos_url_transport_ok(url, true, reason);
 }
 
 /* Drop a ws_url override: NVS, the live copy, and the dial URI built from it.
@@ -475,11 +298,11 @@ static void netguard_exempt_provider_url(const char *url, bool ws)
     char host[FOS_URL_LEN];
 
     if (url == NULL || url[0] == '\0') return;
-    if (!split_scheme_url(url, ws ? "wss://" : "https://", ws ? "ws://" : "http://",
+    if (!fos_url_split_scheme(url, ws ? "wss://" : "https://", ws ? "ws://" : "http://",
                           &is_secure, hostport, sizeof(hostport))) {
         return;
     }
-    host_only(hostport, host, sizeof(host));
+    fos_url_host_only(hostport, host, sizeof(host));
     if (host[0] == '\0') return;
 
     int port = is_secure ? 443 : 80;
@@ -489,7 +312,7 @@ static void netguard_exempt_provider_url(const char *url, bool ws)
     } else {
         const char *colon = strrchr(hostport, ':');
         /* Only a single colon is a port; more than one is a bare IPv6
-         * literal, which host_only() has already dealt with. */
+         * literal, which fos_url_host_only() has already dealt with. */
         if (colon != NULL && strchr(hostport, ':') == colon) port = atoi(colon + 1);
     }
     if (port <= 0 || port > 65535) return;
@@ -2982,7 +2805,7 @@ static bool build_ws_uri(void)
         /* Self-heal a leftover dev override rather than dialing a loopback
          * port forever: erase it and fall through to cloud_url + ws_path,
          * which is the value the provider actually enrolled us with. */
-        if (!ws_url_matches_provider(s_ws_url, fos_config()->cloud_url)) {
+        if (!fos_ws_url_matches_provider(s_ws_url, fos_config()->cloud_url)) {
             ESP_LOGW(TAG, "ws: ws_url override points at loopback but cloud_url is %s; "
                           "discarding the stale override",
                      fos_config()->cloud_url);
@@ -3001,7 +2824,7 @@ static bool build_ws_uri(void)
     }
     bool is_https = false;
     char host[FOS_URL_LEN];
-    if (!split_scheme_url(config->cloud_url, "https://", "http://", &is_https,
+    if (!fos_url_split_scheme(config->cloud_url, "https://", "http://", &is_https,
                           host, sizeof(host))) {
         return false;
     }

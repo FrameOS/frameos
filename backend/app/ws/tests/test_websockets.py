@@ -626,3 +626,19 @@ async def test_remote_stream_chunk_logs_by_default(monkeypatch) -> None:
     )
 
     assert logged == [(88, "stdout", "visible")]
+
+
+def test_terminal_ws_ingress_needs_no_session_cookie(client: TestClient, monkeypatch) -> None:
+    # Under Home Assistant ingress the Supervisor authenticated the browser and
+    # no session cookie ever exists; /ws already special-cases it and the
+    # Terminal panel used to die on this route with a bare "connection closed".
+    from app import config as app_config
+
+    project_id = create_user(email="ingress-terminal@example.com", password="testpassword")
+    monkeypatch.setattr(app_config.config, "HASSIO_RUN_MODE", "ingress")
+
+    with client.websocket_connect(f"/ws/projects/{project_id}/terminal/999") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.code == 1008
+    assert exc.value.reason == "Frame not found"

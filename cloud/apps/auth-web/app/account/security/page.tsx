@@ -3,6 +3,7 @@ import { Download } from "lucide-react";
 import { accounts, createDb } from "@frameos-cloud/db";
 import { ChangePasswordForm } from "../../../src/components/ChangePasswordForm";
 import { DeleteAccountForm } from "../../../src/components/DeleteAccountForm";
+import { SignOutEverywhereForm } from "../../../src/components/SignOutEverywhereForm";
 import {
   TwoFactorSettings,
   type TwoFactorStatusPayload,
@@ -57,6 +58,23 @@ export default async function AccountSecurityPage() {
               emailed link proves you control the address.
             </p>
           )}
+        </section>
+      </section>
+
+      <section className="section-block">
+        <div className="content-header compact-header">
+          <div>
+            <h2>Sessions</h2>
+            <p className="copy">
+              Left a laptop signed in somewhere? Sign out every other browser
+              and device at once; this session stays. Personal API tokens are
+              separate — revoke those on the{" "}
+              <a href="/account/developer">Developer</a> page.
+            </p>
+          </div>
+        </div>
+        <section className="card">
+          <SignOutEverywhereForm />
         </section>
       </section>
 

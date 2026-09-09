@@ -942,6 +942,57 @@ def test_precompiled_buildroot_sd_image_release_url_uses_release_image_name(monk
     )
 
 
+@pytest.mark.asyncio
+async def test_precompiled_buildroot_sd_image_is_verified_on_download_and_on_every_hit(tmp_path, monkeypatch):
+    from app.tasks.tests.release_signing_helpers import minisig_for, signing_download, trust_test_key
+
+    image = tmp_path / "release.img.gz"
+    image.write_bytes(gzip.compress(b"release-image", mtime=0))
+    calls: list[str] = []
+    trust_test_key(monkeypatch)
+    monkeypatch.setenv("FRAMEOS_PRECOMPILED_SD_IMAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL", "https://example.test/releases")
+    monkeypatch.setattr(buildroot_image_module, "release_version", lambda: "2026.6.3")
+    monkeypatch.setattr(buildroot_image_module, "download_release_file", signing_download(image, calls))
+    logs: list[str] = []
+
+    async def logger(_level, message):
+        logs.append(message)
+
+    result = await buildroot_image_module.download_precompiled_buildroot_sd_image(platform="raspberry-pi-64", logger=logger)
+    assert result is not None and result.cache_hit is False
+    assert calls == [result.release_url, result.release_url + ".minisig"]
+    assert buildroot_image_module.precompiled_buildroot_sd_image_signature_path(result.archive_path).is_file()
+
+    again = await buildroot_image_module.download_precompiled_buildroot_sd_image(platform="raspberry-pi-64", logger=logger)
+    assert again is not None and again.cache_hit is True
+    assert len(calls) == 2
+
+    # A planted image under the cached name fails the signature and is fetched afresh.
+    result.archive_path.write_bytes(gzip.compress(b"planted", mtime=0))
+    replaced = await buildroot_image_module.download_precompiled_buildroot_sd_image(platform="raspberry-pi-64", logger=logger)
+    assert replaced is not None and replaced.cache_hit is False
+    assert len(calls) == 4
+    assert replaced.archive_path.read_bytes() == image.read_bytes()
+
+    # A signature by another key is refused and nothing is cached.
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    other_key = ed25519.Ed25519PrivateKey.generate()
+    buildroot_image_module._discard_cached_sd_image(result.archive_path)
+
+    async def bad_download(url, destination, _timeout):
+        if url.endswith(".minisig"):
+            destination.write_text(minisig_for(image, other_key), encoding="utf-8")
+        else:
+            destination.write_bytes(image.read_bytes())
+
+    monkeypatch.setattr(buildroot_image_module, "download_release_file", bad_download)
+    with pytest.raises(RuntimeError, match="signature"):
+        await buildroot_image_module.download_precompiled_buildroot_sd_image(platform="raspberry-pi-64", logger=logger)
+    assert not result.archive_path.exists()
+
+
 def test_precompiled_sd_image_status_does_not_require_cached_base_metadata(tmp_path):
     image_path = tmp_path / "frameos.img.gz"
     image_path.write_bytes(b"image")
@@ -2418,7 +2469,6 @@ def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
             "terminal_history": [],
             "apps": [],
             "image_url": None,
-            "background_color": None,
             "last_successful_deploy": None,
             "last_successful_deploy_at": None,
         },

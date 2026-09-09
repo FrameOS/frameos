@@ -1008,7 +1008,7 @@ The row links to the page. It is not a modal: what people want when that
 number surprises them is *which of my turns did this*, and that is a table,
 a date range and a switch — a page's job.
 
-**`/account/ai` — the page.** A new tab in `AccountNav`, alongside Installs,
+**`/account/ai` — the page.** A new tab in `AccountNav`, alongside Backends,
 Backups, Security, Developer and Activity, so it sits where every other
 "about my account" answer already lives. Friendly first, forensic
 underneath:
@@ -2095,3 +2095,19 @@ own.
 
 Also in this round: `docs/todo.md`'s two stale lines now point here.
 
+## 10. Open findings — 2026-09-09 full-repo review
+
+The four §9.2 audit items (surface spoof, gap billing, cap off-by-overdraft,
+cascade FK) were re-verified as genuinely fixed. Nothing below is critical;
+all are low. **Delete an item when it ships.**
+
+- Admin billing routes 500 instead of 400 on a malformed uuid.
+- Anniversary drift: a subscription started on the 31st is clamped to the
+  28th and stays there forever.
+- `/api/account/usage` reports the wrong cap for shared-key accounts.
+- The unposted-usage sweep re-includes permanently failing rows and can
+  stall on them.
+- A pending downgrade to a plan that has since been deleted is silently
+  ignored.
+- The nightly script posts revenue figures in the healthchecks ping body.
+- The settings form takes micro-dollars with no dollar preview.

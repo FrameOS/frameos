@@ -6,7 +6,9 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
+from app import config as app_config
 from app.database import SessionLocal
+from app.models.organization import Project
 from app.redis import get_redis
 from app.models.frame import Frame
 from app.api.auth import get_current_user_from_websocket
@@ -28,19 +30,21 @@ async def ssh_terminal(
     frame_id: int,
     redis: Redis = Depends(get_redis),
 ):
+    # Same rule as /ws (app/websockets.py): under Home Assistant ingress the
+    # Supervisor authenticated the browser and IngressPeerGuard refused every
+    # other peer, and no session cookie ever exists — requiring one here left
+    # the Terminal panel dead with a bare "connection closed".
+    ingress = app_config.config.HASSIO_RUN_MODE == "ingress"
     db: Session = SessionLocal()
     try:
-        user, error_reason = get_current_user_from_websocket(websocket, db)
-    finally:
-        db.close()
-
-    if user is None:
-        await websocket.close(code=1008, reason=error_reason or "Could not validate credentials")
-        return
-
-    db = SessionLocal()
-    try:
-        project = get_user_project(db, user, project_id)
+        if ingress:
+            project = db.query(Project).filter(Project.id == project_id).first()
+        else:
+            user, error_reason = get_current_user_from_websocket(websocket, db)
+            if user is None:
+                await websocket.close(code=1008, reason=error_reason or "Could not validate credentials")
+                return
+            project = get_user_project(db, user, project_id)
     finally:
         db.close()
 

@@ -1,6 +1,6 @@
 import uuid
 from datetime import timezone
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import JSON
 from sqlalchemy import Index, Integer, String, ForeignKey, DateTime, delete, event, func, select
 from arq import ArqRedis as Redis
 from app.database import Base

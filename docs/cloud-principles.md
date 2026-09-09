@@ -68,6 +68,10 @@ link, re-checkable via the grants endpoint:
 | Scope | Grants the cloud/backend the ability to | Paid? |
 |---|---|---|
 | `backend:link` | Base scope: identify this backend, sync inventory/health, rotate token | free |
+| `backend:read` | Read basic backend connection details | free |
+| `frame:link` | Base scope of a frame that links directly, without a backend | free |
+| `frame:managed` | Base scope of a cloud-managed frame: assign scenes, declarative settings, state, reboot (`docs/cloud-frames.md`) | free |
+| `settings:services` | Serve the frame the account's service API keys its scenes need (the store-scene "service settings" pull) | free |
 | `auth:login` | Log users into this backend via their FrameOS Cloud account (login handoff) | free |
 | `store:read` | Browse/install from the scene & app store (public repositories) | free |
 | `store:publish` | Publish scenes/apps to the user's cloud collections or public store | free |

@@ -168,15 +168,41 @@ recorded in [backups.md](backups.md#results-so-far). Take a manual
 
 ## Maintenance Tasks
 
-Run `pnpm db:cleanup` on a schedule (daily is fine). It deletes:
+`scripts/db-cleanup.sh` (`pnpm db:cleanup` locally) runs nightly on
+production as `frameos-cloud-cleanup.timer` (03:30, before the backup
+window), installed with `ops/cleanup/install.sh`; the unit runs the script
+out of the live release so it follows every deploy. It deletes:
 
 - Device authorization requests past their expiry plus the retention window.
 - Expired FrameOS login handoff codes.
 - Expired or revoked sessions past the retention window.
+- Spent or expired claim tokens and finished (`acked`/`failed`/`expired`)
+  frame commands past the retention window; live commands whose TTL passed
+  are marked expired.
+- **Frame logs and frame metrics older than their own retention.** Both are
+  already capped per frame at insert time; this bounds them by age too.
 
-The retention window defaults to 7 days and can be overridden with
-`FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS`. Audit and consent events are never
-deleted by this job.
+Three windows, all in days, overridable in `/etc/frameos-cloud/cleanup.env`
+(`ops/cleanup/cleanup.env.example`):
+
+| Variable | Default | Covers |
+|---|---|---|
+| `FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS` | 7 | the bookkeeping rows above |
+| `FRAMEOS_CLOUD_FRAME_LOG_RETENTION_DAYS` | 30 | `frame_logs` |
+| `FRAMEOS_CLOUD_FRAME_METRICS_RETENTION_DAYS` | 30 | `frame_metrics` |
+
+Audit and consent events are never deleted by this job, and neither are
+revoked frames (the owner's record of a device that existed). A manual run:
+`systemctl start frameos-cloud-cleanup.service`; the log is in
+`journalctl -u frameos-cloud-cleanup`.
+
+Every script that talks to Postgres (`db-migrate.sh`, `db-cleanup.sh`,
+`object-store-sweep.sh`, `grant-superadmin.sh`,
+`accounting-service-account.sh`, `ops/backup/pg-backup.sh`) takes
+`DATABASE_URL` from the environment and turns it into libpq's `PG*`
+variables (`scripts/lib/pg-env.sh`) — the password never appears on a
+`psql`/`pg_dump` command line, where `ps` would show it to every local
+account.
 
 ### Sweeping the object store
 
@@ -277,8 +303,13 @@ front of it.
   page, re-authenticating first (password, or typing their email for
   Google-only accounts). Everything cascades from `accounts.id`;
   `audit_events.account_id` is `ON DELETE SET NULL`, so the security trail
-  survives de-identified. Superadmins cannot self-delete (the panel must keep
-  a way in) — hand the flag over first.
+  survives — NOT de-identified: sign-in, refused sign-in, reset and deletion
+  rows keep the email, IP and user agent that acted, which is what makes the
+  trail useful after the fact. The privacy policy says so, promises up to
+  two years, and `scripts/db-cleanup.sh` prunes orphaned rows after
+  `FRAMEOS_CLOUD_ORPHAN_AUDIT_RETENTION_DAYS` (default 730). Superadmins
+  cannot self-delete (the panel must keep a way in) — hand the flag over
+  first.
 - **What an operator still has to do**: rectification, restriction, objection,
   and anything the export does not cover. One month to respond (art. 12(3)).
 - **Backups**: deleted data persists in off-site backups for up to 30 days

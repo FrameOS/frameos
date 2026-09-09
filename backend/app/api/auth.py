@@ -399,7 +399,7 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     if cookie_claims is not None:
         revoke_user_session(db, cookie_claims[1])
     if user is not None:
-        from urllib.parse import quote, urlparse
+        from urllib.parse import quote
 
         from app.api.cloud import _browser_origin, _connected_link, _link_has_scope
         from app.models.cloud import CloudIdentity

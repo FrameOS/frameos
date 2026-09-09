@@ -13,6 +13,7 @@ import {
   SdImagePatchError,
   patchCloudConfig,
 } from '../lib/sd-image-patch'
+import { Blake2b512, ReleaseSignatureError, hashingTransform, verifyReleaseDigest } from '../lib/release-signing'
 import { useValues } from 'kea'
 import { SshKeysSection } from '../../../frontend/src/components/sshKeys/SshKeysSection'
 import { sshKeysLogic } from '../../../frontend/src/components/sshKeys/sshKeysLogic'
@@ -142,6 +143,33 @@ async function* streamChunks(stream: ReadableStream<Uint8Array>): AsyncGenerator
   }
 }
 
+/**
+ * The release's minisign signature for this platform's image, from the same
+ * route that serves the image (`app/api/frames/sd-image`, `signature=1`).
+ * Without one the image is refused — an unverified card is exactly what
+ * this closes.
+ */
+async function fetchReleaseSignature(platform: string): Promise<string> {
+  let response: Response
+  try {
+    response = await fetch(`/api/frames/sd-image?platform=${encodeURIComponent(platform)}&signature=1`)
+  } catch (error) {
+    throw new ReleaseSignatureError(
+      `The release signature could not be fetched (${
+        error instanceof Error ? error.message : String(error)
+      }) — refusing to write an unverified image.`,
+      'signature_unavailable'
+    )
+  }
+  if (!response.ok) {
+    throw new ReleaseSignatureError(
+      `The release signature could not be fetched (${response.status}) — refusing to write an unverified image.`,
+      'signature_unavailable'
+    )
+  }
+  return await response.text()
+}
+
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -173,13 +201,7 @@ function FormGroup({
   )
 }
 
-function FormRow({
-  label,
-  children,
-}: {
-  label: string
-  children: ReactElement | ReactElement[]
-}): ReactElement {
+function FormRow({ label, children }: { label: string; children: ReactElement | ReactElement[] }): ReactElement {
   return (
     <label className="grid gap-1">
       <span className="frameos-muted text-xs font-semibold">{label}</span>
@@ -579,7 +601,17 @@ export function SdImageBuilder({
             : `Image download failed (${detail.error ?? response.status})`
         )
       }
-      const decompressed = response.body.pipeThrough(new DecompressionStream('gzip'))
+      // The release workflow signs every .img.gz and the route pipes GitHub's
+      // bytes through unchanged, so the signature is checked here — over the
+      // compressed bytes as they stream past, before anything is committed
+      // to disk (the writable is only closed once the digest verifies; an
+      // abort discards the file). The route hands out the release's .minisig
+      // for the same platform with `signature=1`.
+      const minisig = await fetchReleaseSignature(board.platform)
+      const hasher = new Blake2b512()
+      const decompressed = response.body
+        .pipeThrough(hashingTransform(hasher))
+        .pipeThrough(new DecompressionStream('gzip'))
 
       setStatus('Personalizing and compressing the image…')
       // Re-gzip the patched stream so what lands on disk is a compressed
@@ -643,6 +675,8 @@ export function SdImageBuilder({
       }
       await drain
       setProgressBytes(written)
+      setStatus('Verifying the release signature…')
+      await verifyReleaseDigest(hasher.digest(), minisig)
       if (writable) {
         await writable.close()
         writable = undefined
@@ -741,275 +775,282 @@ export function SdImageBuilder({
       {release.status === 'ready' ? (
         <div className="grid gap-3">
           <FormGroup title="Board and name">
-          <FormRow label="Board">
-          <select
-            aria-label="Board"
-            className={controlClassName}
-            disabled={building}
-            onChange={(event) => setPlatform(event.target.value)}
-            value={platform}
-          >
-            <option disabled value="">
-              Pick a board…
-            </option>
-            {release.boards.map((board) => (
-              <option disabled={!board.asset} key={board.platform} value={board.platform}>
-                {board.asset ? `${board.label} (${release.version})` : `${board.label} — image not published yet`}
-              </option>
-            ))}
-          </select>
-          </FormRow>
-          <FormRow label="Frame name">
-          <input
-            aria-label="Frame name"
-            className={controlClassName}
-            // The name belongs to the frame row being re-keyed; letting the
-            // image disagree with the workspace would just be confusing.
-            disabled={building || Boolean(reenrollFrame)}
-            maxLength={256}
-            onChange={(event) => setFrameName(event.target.value)}
-            placeholder="Frame name"
-            required
-            value={frameName}
-          />
-          </FormRow>
-          </FormGroup>
-          <FormGroup title="Display" hint="Every driver ships in the image; this only picks the one to start with.">
-          <FormRow label="Display">
-          <select
-            aria-label="Display"
-            className={controlClassName}
-            disabled={building}
-            onChange={(event) => pickDisplay(event.target.value)}
-            value={displayChoice}
-          >
-            <option value="">Pick the display later (FrameOS-Setup portal)</option>
-            {piDeviceGroups.map((group) => (
-              <optgroup key={group.label} label={group.label}>
-                {group.options.map((choice) => (
-                  <option key={choice.value} value={choice.value}>
-                    {choice.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          </FormRow>
-          {showDisplayDetails ? (
-            <div className="grid grid-cols-3 gap-2">
-              <input
-                aria-label="Display width"
-                className={controlClassName}
-                disabled={building}
-                inputMode="numeric"
-                maxLength={5}
-                onChange={(event) => setWidth(event.target.value)}
-                placeholder="Width"
-                required={dimensionsRequired}
-                value={width}
-              />
-              <input
-                aria-label="Display height"
-                className={controlClassName}
-                disabled={building}
-                inputMode="numeric"
-                maxLength={5}
-                onChange={(event) => setHeight(event.target.value)}
-                placeholder="Height"
-                required={dimensionsRequired}
-                value={height}
-              />
+            <FormRow label="Board">
               <select
-                aria-label="Rotation"
+                aria-label="Board"
                 className={controlClassName}
                 disabled={building}
-                onChange={(event) => setRotate(event.target.value)}
-                value={rotate}
+                onChange={(event) => setPlatform(event.target.value)}
+                value={platform}
               >
-                {rotationChoices.map((value) => (
-                  <option key={value} value={value}>
-                    Rotate {value}°
+                <option disabled value="">
+                  Pick a board…
+                </option>
+                {release.boards.map((board) => (
+                  <option disabled={!board.asset} key={board.platform} value={board.platform}>
+                    {board.asset ? `${board.label} (${release.version})` : `${board.label} — image not published yet`}
                   </option>
                 ))}
               </select>
-            </div>
-          ) : null}
-          {dimensionsOptional ? (
-            <p className="frameos-muted text-xs">
-              Width and height are optional for HDMI — the panel size is autodetected.
-            </p>
-          ) : dimensionsRequired ? (
-            <p className="frameos-muted text-xs">Width and height are required — this display has no default size.</p>
-          ) : null}
-          {showDisplayDetails && showVcom ? (
-            <input
-              aria-label="VCOM (optional)"
-              className={controlClassName}
-              disabled={building}
-              maxLength={12}
-              onChange={(event) => setVcom(event.target.value)}
-              placeholder="VCOM (optional — e.g. -1.48, printed on the panel's flex cable)"
-              value={vcom}
-            />
-          ) : null}
-          {showDisplayDetails && showUploadUrl ? (
-            <input
-              aria-label="Upload URL"
-              className={controlClassName}
-              disabled={building}
-              maxLength={512}
-              onChange={(event) => setUploadUrl(event.target.value)}
-              placeholder={device === 'http.upload' ? 'Upload URL (required)' : 'Upload URL (optional)'}
-              value={uploadUrl}
-            />
-          ) : null}
+            </FormRow>
+            <FormRow label="Frame name">
+              <input
+                aria-label="Frame name"
+                className={controlClassName}
+                // The name belongs to the frame row being re-keyed; letting the
+                // image disagree with the workspace would just be confusing.
+                disabled={building || Boolean(reenrollFrame)}
+                maxLength={256}
+                onChange={(event) => setFrameName(event.target.value)}
+                placeholder="Frame name"
+                required
+                value={frameName}
+              />
+            </FormRow>
           </FormGroup>
-          <FormGroup title="WiFi" hint="Optional — without it the frame opens the FrameOS-Setup portal to be configured.">
-          <FormRow label="Network name">
-          <input
-            aria-label="WiFi network name (optional)"
-            className={controlClassName}
-            disabled={building}
-            maxLength={64}
-            onChange={(event) => setWifiSsid(event.target.value)}
-            placeholder="WiFi network (optional — the FrameOS-Setup portal works too)"
-            value={wifiSsid}
-          />
-          </FormRow>
-          <FormRow label="Password">
-          <input
-            aria-label="WiFi password"
-            className={controlClassName}
-            disabled={building || !wifiSsid}
-            maxLength={128}
-            onChange={(event) => setWifiPassword(event.target.value)}
-            placeholder="WiFi password"
-            type="password"
-            value={wifiPassword}
-          />
-          </FormRow>
-          <FormRow label="Country">
-          <input
-            aria-label="WiFi country (two-letter code)"
-            className={controlClassName}
-            disabled={building}
-            maxLength={2}
-            onChange={(event) => setWifiCountry(event.target.value.toUpperCase())}
-            placeholder="FR"
-            value={wifiCountry}
-          />
-          </FormRow>
-          <p className="frameos-muted text-xs">
-            Two-letter country code — the radio&apos;s regulatory domain. Without it the frame cannot join access
-            points on 2.4 GHz channels 12 or 13.
-          </p>
-          <label className="frameos-muted flex items-center gap-2 text-xs">
-            <input
-              checked={rememberWifi}
-              disabled={building}
-              onChange={(event) => {
-                setRememberWifi(event.target.checked)
-                if (!event.target.checked) {
-                  clearRememberedWifi()
-                }
-              }}
-              type="checkbox"
-            />
-            Remember WiFi credentials in this browser (never sent to the cloud)
-          </label>
+          <FormGroup title="Display" hint="Every driver ships in the image; this only picks the one to start with.">
+            <FormRow label="Display">
+              <select
+                aria-label="Display"
+                className={controlClassName}
+                disabled={building}
+                onChange={(event) => pickDisplay(event.target.value)}
+                value={displayChoice}
+              >
+                <option value="">Pick the display later (FrameOS-Setup portal)</option>
+                {piDeviceGroups.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.options.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </FormRow>
+            {showDisplayDetails ? (
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  aria-label="Display width"
+                  className={controlClassName}
+                  disabled={building}
+                  inputMode="numeric"
+                  maxLength={5}
+                  onChange={(event) => setWidth(event.target.value)}
+                  placeholder="Width"
+                  required={dimensionsRequired}
+                  value={width}
+                />
+                <input
+                  aria-label="Display height"
+                  className={controlClassName}
+                  disabled={building}
+                  inputMode="numeric"
+                  maxLength={5}
+                  onChange={(event) => setHeight(event.target.value)}
+                  placeholder="Height"
+                  required={dimensionsRequired}
+                  value={height}
+                />
+                <select
+                  aria-label="Rotation"
+                  className={controlClassName}
+                  disabled={building}
+                  onChange={(event) => setRotate(event.target.value)}
+                  value={rotate}
+                >
+                  {rotationChoices.map((value) => (
+                    <option key={value} value={value}>
+                      Rotate {value}°
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            {dimensionsOptional ? (
+              <p className="frameos-muted text-xs">
+                Width and height are optional for HDMI — the panel size is autodetected.
+              </p>
+            ) : dimensionsRequired ? (
+              <p className="frameos-muted text-xs">Width and height are required — this display has no default size.</p>
+            ) : null}
+            {showDisplayDetails && showVcom ? (
+              <input
+                aria-label="VCOM (optional)"
+                className={controlClassName}
+                disabled={building}
+                maxLength={12}
+                onChange={(event) => setVcom(event.target.value)}
+                placeholder="VCOM (optional — e.g. -1.48, printed on the panel's flex cable)"
+                value={vcom}
+              />
+            ) : null}
+            {showDisplayDetails && showUploadUrl ? (
+              <input
+                aria-label="Upload URL"
+                className={controlClassName}
+                disabled={building}
+                maxLength={512}
+                onChange={(event) => setUploadUrl(event.target.value)}
+                placeholder={device === 'http.upload' ? 'Upload URL (required)' : 'Upload URL (optional)'}
+                value={uploadUrl}
+              />
+            ) : null}
+          </FormGroup>
+          <FormGroup
+            title="WiFi"
+            hint="Optional — without it the frame opens the FrameOS-Setup portal to be configured."
+          >
+            <FormRow label="Network name">
+              <input
+                aria-label="WiFi network name (optional)"
+                className={controlClassName}
+                disabled={building}
+                maxLength={64}
+                onChange={(event) => setWifiSsid(event.target.value)}
+                placeholder="WiFi network (optional — the FrameOS-Setup portal works too)"
+                value={wifiSsid}
+              />
+            </FormRow>
+            <FormRow label="Password">
+              <input
+                aria-label="WiFi password"
+                className={controlClassName}
+                disabled={building || !wifiSsid}
+                maxLength={128}
+                onChange={(event) => setWifiPassword(event.target.value)}
+                placeholder="WiFi password"
+                type="password"
+                value={wifiPassword}
+              />
+            </FormRow>
+            <FormRow label="Country">
+              <input
+                aria-label="WiFi country (two-letter code)"
+                className={controlClassName}
+                disabled={building}
+                maxLength={2}
+                onChange={(event) => setWifiCountry(event.target.value.toUpperCase())}
+                placeholder="FR"
+                value={wifiCountry}
+              />
+            </FormRow>
+            <p className="frameos-muted text-xs">
+              Two-letter country code — the radio&apos;s regulatory domain. Without it the frame cannot join access
+              points on 2.4 GHz channels 12 or 13.
+            </p>
+            <label className="frameos-muted flex items-center gap-2 text-xs">
+              <input
+                checked={rememberWifi}
+                disabled={building}
+                onChange={(event) => {
+                  setRememberWifi(event.target.checked)
+                  if (!event.target.checked) {
+                    clearRememberedWifi()
+                  }
+                }}
+                type="checkbox"
+              />
+              Remember WiFi credentials in this browser (never sent to the cloud)
+            </label>
           </FormGroup>
           <FormGroup
             title="Root access"
             hint="How you log in to the frame. Everything here is written into the image in your browser; the cloud keeps only the public keys."
           >
-          <FormRow label="Root password">
-          <input
-            aria-label="Root password"
-            className={controlClassName}
-            disabled={building || passwordlessRoot}
-            maxLength={128}
-            onChange={(event) => setRootPassword(event.target.value)}
-            placeholder="Root password (written into the image in your browser)"
-            type="password"
-            value={rootPassword}
-          />
-          </FormRow>
-          <label className="frameos-muted flex items-center gap-2 text-xs">
-            <input
-              checked={passwordlessRoot}
-              disabled={building || rootPassword !== ''}
-              onChange={(event) => setPasswordlessRoot(event.target.checked)}
-              type="checkbox"
-            />
-            Enable passwordless root login on this device (console only — needs physical access; SSH password login
-            stays disabled)
-          </label>
-          <div className="grid min-w-0 gap-1">
-            <span className="frameos-muted text-xs font-semibold">SSH keys</span>
-            <SshKeysSection
-              compact
-              hideRemove
-              selectedIds={selectedSshKeyIds}
-              onSelectionChange={setChosenSshKeyIds}
-              description="Selected keys become root's authorized keys on the card, so you can ssh in without a password."
-            />
-          </div>
-          <p
-            className={configOverBudget ? 'frameos-warning-button rounded-lg border px-2 py-1 text-xs' : 'frameos-muted text-xs'}
-            data-testid="sd-image-config-budget"
-            role={configOverBudget ? 'alert' : undefined}
-          >
-            {configOverBudget
-              ? `This configuration needs ${configBytes} bytes but the card's config area holds ${CLOUD_CONFIG_REGION_SIZE} — pick fewer SSH keys (an RSA key is ~570 bytes, ed25519 ~100).`
-              : `Config area: ${configBytes} of ${CLOUD_CONFIG_REGION_SIZE} bytes used.`}
-          </p>
+            <FormRow label="Root password">
+              <input
+                aria-label="Root password"
+                className={controlClassName}
+                disabled={building || passwordlessRoot}
+                maxLength={128}
+                onChange={(event) => setRootPassword(event.target.value)}
+                placeholder="Root password (written into the image in your browser)"
+                type="password"
+                value={rootPassword}
+              />
+            </FormRow>
+            <label className="frameos-muted flex items-center gap-2 text-xs">
+              <input
+                checked={passwordlessRoot}
+                disabled={building || rootPassword !== ''}
+                onChange={(event) => setPasswordlessRoot(event.target.checked)}
+                type="checkbox"
+              />
+              Enable passwordless root login on this device (console only — needs physical access; SSH password login
+              stays disabled)
+            </label>
+            <div className="grid min-w-0 gap-1">
+              <span className="frameos-muted text-xs font-semibold">SSH keys</span>
+              <SshKeysSection
+                compact
+                hideRemove
+                selectedIds={selectedSshKeyIds}
+                onSelectionChange={setChosenSshKeyIds}
+                description="Selected keys become root's authorized keys on the card, so you can ssh in without a password."
+              />
+            </div>
+            <p
+              className={
+                configOverBudget
+                  ? 'frameos-warning-button rounded-lg border px-2 py-1 text-xs'
+                  : 'frameos-muted text-xs'
+              }
+              data-testid="sd-image-config-budget"
+              role={configOverBudget ? 'alert' : undefined}
+            >
+              {configOverBudget
+                ? `This configuration needs ${configBytes} bytes but the card's config area holds ${CLOUD_CONFIG_REGION_SIZE} — pick fewer SSH keys (an RSA key is ~570 bytes, ed25519 ~100).`
+                : `Config area: ${configBytes} of ${CLOUD_CONFIG_REGION_SIZE} bytes used.`}
+            </p>
           </FormGroup>
           <FormGroup title="Claim code">
-          {reenrollFrame ? (
-            // Bound codes key exactly one card (the claim-tokens route
-            // enforces single use), and like a new frame's image they stay
-            // valid until that card boots — a card written today is often
-            // flashed next week.
-            <p className="frameos-muted text-xs">
-              The claim code in this image is single-use and bound to this frame. It stays valid until the card boots
-              and enrols, so flash it whenever you get to it; build another image here if you need a second card.
-            </p>
-          ) : (
-            <div className="space-y-1.5">
-              <label className="frameos-muted flex items-center gap-2 text-xs">
-                <input
-                  checked={limitClaimValidity}
-                  disabled={building}
-                  onChange={(event) => setLimitClaimValidity(event.target.checked)}
-                  type="checkbox"
-                />
-                Stop this SD card from adding frames after a while
-              </label>
-              {limitClaimValidity ? (
-                <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
-                  <span>Card stops adding frames after</span>
-                  <select
-                    aria-label="Claim code validity"
-                    className={`${controlClassName} w-auto`}
+            {reenrollFrame ? (
+              // Bound codes key exactly one card (the claim-tokens route
+              // enforces single use), and like a new frame's image they stay
+              // valid until that card boots — a card written today is often
+              // flashed next week.
+              <p className="frameos-muted text-xs">
+                The claim code in this image is single-use and bound to this frame. It stays valid until the card boots
+                and enrols, so flash it whenever you get to it; build another image here if you need a second card.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <label className="frameos-muted flex items-center gap-2 text-xs">
+                  <input
+                    checked={limitClaimValidity}
                     disabled={building}
-                    onChange={(event) => setClaimValidity(event.target.value)}
-                    value={claimValidity}
-                  >
-                    {claimValidityChoices.map((choice) => (
-                      <option key={choice.value} value={choice.value}>
-                        {choice.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(event) => setLimitClaimValidity(event.target.checked)}
+                    type="checkbox"
+                  />
+                  Stop this SD card from adding frames after a while
                 </label>
-              ) : (
-                <p className="frameos-muted text-xs">
-                  You can flash and boot this image as many times as you like, forever. Each new frame shows up in your
-                  account within your frame limit.
-                </p>
-              )}
-            </div>
-          )}
+                {limitClaimValidity ? (
+                  <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
+                    <span>Card stops adding frames after</span>
+                    <select
+                      aria-label="Claim code validity"
+                      className={`${controlClassName} w-auto`}
+                      disabled={building}
+                      onChange={(event) => setClaimValidity(event.target.value)}
+                      value={claimValidity}
+                    >
+                      {claimValidityChoices.map((choice) => (
+                        <option key={choice.value} value={choice.value}>
+                          {choice.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <p className="frameos-muted text-xs">
+                    You can flash and boot this image as many times as you like, forever. Each new frame shows up in
+                    your account within your frame limit.
+                  </p>
+                )}
+              </div>
+            )}
           </FormGroup>
           {!canStreamToDisk ? (
             <p className="frameos-muted flex items-start gap-1.5 text-xs">

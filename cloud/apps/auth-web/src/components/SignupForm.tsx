@@ -22,6 +22,9 @@ export function SignupForm({
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | undefined>();
+  // The server spends the Turnstile token before answering, so every
+  // rejected submit needs a fresh one for the corrected resubmit.
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   const googleHref = `/api/auth/google/start${
     returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ""
@@ -51,6 +54,7 @@ export function SignupForm({
         return;
       }
 
+      setTurnstileReset((n) => n + 1);
       const payload = (await response.json().catch(() => undefined)) as
         | { error?: string; message?: string }
         | undefined;
@@ -63,9 +67,7 @@ export function SignupForm({
       } else if (payload?.error === "weak_password" && payload.message) {
         setError(payload.message);
       } else if (payload?.error === "turnstile_failed") {
-        setError(
-          "The anti-spam check did not pass. Reload the page and try again.",
-        );
+        setError("The anti-spam check did not pass. Try again.");
       } else if (response.status === 429) {
         setError("Too many attempts. Wait a few minutes and try again.");
       } else {
@@ -137,7 +139,11 @@ export function SignupForm({
         />
       </div>
       {turnstileSiteKey ? (
-        <TurnstileWidget onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+        <TurnstileWidget
+          onToken={setTurnstileToken}
+          resetKey={turnstileReset}
+          siteKey={turnstileSiteKey}
+        />
       ) : null}
       <div className="actions">
         <button

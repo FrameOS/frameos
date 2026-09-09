@@ -133,8 +133,13 @@ jobs:
               encoding="utf-8",
           )
           PY
+      # A manual dispatch that publishes `latest` (the default tag) commits
+      # the refreshed digests as well: the backend pins toolchain images by
+      # the digest in this file and never falls back to the mutable tag, so
+      # a publish that leaves the file stale would leave every install
+      # pulling an image that no longer exists under that digest.
       - name: Commit updated cross-toolchain digests
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.image_tag == '' || github.event.inputs.image_tag == 'latest'))
         run: |
           set -euo pipefail
           git add cross-toolchain-images.json

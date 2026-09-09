@@ -177,18 +177,11 @@ export const controlLogic = kea<controlLogicType>([
             return emptyFrameStateRecord
           }
 
-          // The cloud has no /states or /state route (both used to 404 and
-          // log a loader error every time the drawer or scene editor
-          // mounted). The hub stores the device's last reported state on the
-          // frame row instead — the active scene is what the drawer's
-          // controls need; per-scene public state has no cloud store yet.
-          if (isCloudMode()) {
-            return normaliseFrameStateRecord({
-              sceneId: activeSceneFromLastState(values.frame?.last_state) ?? '',
-              states: {},
-            })
-          }
-
+          // Both planes answer /states in the same {sceneId, states, cache}
+          // shape. The cloud's copy is the device's last report (hello /
+          // `state`, mirrored onto the frame row by the hub) and the route
+          // queues a `get_state` verb for a connected frame, answering with
+          // cache.refreshing so the drawer syncs once more for the reply.
           try {
             const statesResponse = await apiFetch(`/api/frames/${props.frameId}/states`)
             if (statesResponse.ok) {
@@ -196,6 +189,15 @@ export const controlLogic = kea<controlLogicType>([
             }
           } catch (error) {
             console.error(error)
+          }
+
+          // No /state fallback on the cloud: the frame row's last_state at
+          // least names the active scene, which is what the controls need.
+          if (isCloudMode()) {
+            return normaliseFrameStateRecord({
+              sceneId: activeSceneFromLastState(values.frame?.last_state) ?? '',
+              states: {},
+            })
           }
 
           const response = await apiFetch(`/api/frames/${props.frameId}/state`)

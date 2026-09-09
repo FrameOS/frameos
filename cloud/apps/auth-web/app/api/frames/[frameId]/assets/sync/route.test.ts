@@ -57,10 +57,11 @@ function grantAccess(listing: ListingEntry[] | null = null) {
 
 type SyncEvent = Record<string, unknown> & { type: string };
 
-async function runSync(): Promise<SyncEvent[]> {
+async function runSync(signal?: AbortSignal): Promise<SyncEvent[]> {
   const response = await POST(
     new NextRequest(`https://cloud.example/api/frames/${frameId}/assets/sync`, {
       method: "POST",
+      ...(signal ? { signal } : {}),
     }),
     { params: Promise.resolve({ frameId }) },
   );
@@ -223,6 +224,37 @@ describe("font sync for a cloud frame", () => {
     expect(done.uploaded).toBe(catalogueFonts.length - 1);
     const failure = events.find((event) => event.status === "failed")!;
     expect(failure.reason).toBe("no_space");
+  });
+
+  it("stops pushing fonts once the browser has gone", async () => {
+    grantAccess();
+    // The tab closes while the second font is in flight: the request signal
+    // fires, that upload completes (its command is already queued), and no
+    // third font is queued toward the device.
+    const controller = new AbortController();
+    uploadMock.mockImplementation(async () => {
+      if (uploadMock.mock.calls.length === 2) {
+        controller.abort();
+      }
+      return { ok: true };
+    });
+    const events = await runSync(controller.signal);
+    expect(uploadMock).toHaveBeenCalledTimes(2);
+    const done = events.find((event) => event.type === "done");
+    expect(done).toMatchObject({ uploaded: 2, stopped: "the browser went away" });
+    expect(events.filter((event) => event.type === "font")).toHaveLength(2);
+  });
+
+  it("treats an upload the signal cut short as the end of the run", async () => {
+    grantAccess();
+    uploadMock
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, error: "aborted" });
+    const events = await runSync();
+    expect(uploadMock).toHaveBeenCalledTimes(2);
+    const done = events.find((event) => event.type === "done");
+    // Not a failure: nothing was refused, the caller left.
+    expect(done).toMatchObject({ uploaded: 1, failed: 0, stopped: "the browser went away" });
   });
 
   it("reports progress as it goes, not in one lump at the end", async () => {

@@ -23,12 +23,25 @@ import {
 } from '../scenes/frame/panels/Scenes/LivePreviewModal'
 import { StateFieldEdit } from '../scenes/frame/panels/Scenes/StateFieldEdit'
 import type { FrameId } from '../types'
+import { hostMessageTarget, isHostReply } from './embedOrigins'
 
 // The Preview drawer panel of the standalone embedded editor: runs the edited
 // scenes through the frameos-wasm runtime, in the browser — canvas, event
 // buttons, live scene state and the runtime log. Same livePreviewLogic as the
 // main app's "Preview in browser" modal, rendered as panel content and
 // without the frame-dependent actions (there is no frame to preview on).
+// The embed runs in an iframe on the cloud's origin; re-authentication must
+// bring the user back to the page hosting the editor, not the iframe URL.
+function reauthHref(): string {
+  let returnTo = window.location.href
+  try {
+    returnTo = window.top?.location.href ?? returnTo
+  } catch {
+    // Cross-origin host: fall back to our own URL.
+  }
+  return `/login/reauth?return_to=${encodeURIComponent(returnTo)}`
+}
+
 export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element {
   const {
     livePreviewScene,
@@ -40,6 +53,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     previewDimensions,
     gpioButtons,
     wasmUnsupportedApps,
+    storedKeysNotice,
     lastRenderMs,
     renderCount,
     previewSettings,
@@ -127,9 +141,10 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     const dataUrl = flattened.toDataURL('image/png')
     setScreenshotStatus('Saving…')
     let settled = false
+    const host = hostMessageTarget()
     const onAck = (event: MessageEvent): void => {
       const message = event.data
-      if (!message || message.type !== 'frameos-editor:screenshot-saved') {
+      if (!isHostReply(event, host) || !message || message.type !== 'frameos-editor:screenshot-saved') {
         return
       }
       settled = true
@@ -141,7 +156,9 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
       }
     }
     window.addEventListener('message', onAck)
-    window.parent?.postMessage({ type: 'frameos-editor:save-screenshot', dataUrl, sceneId }, '*')
+    // Never '*': the data URL goes only to the origin that drives this editor
+    // (EmbeddedEditor's locked parent, or our own window in the direct mount).
+    host.target.postMessage({ type: 'frameos-editor:save-screenshot', dataUrl, sceneId }, host.origin)
     window.setTimeout(() => {
       if (!settled) {
         window.removeEventListener('message', onAck)
@@ -264,6 +281,14 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
           ))}
           . {wasmUnsupportedApps.length === 1 ? 'That node' : 'Those nodes'} will fail here but{' '}
           {wasmUnsupportedApps.length === 1 ? 'works' : 'work'} on a frame.
+        </div>
+      ) : null}
+      {storedKeysNotice ? (
+        <div className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700">
+          {storedKeysNotice}{' '}
+          <a className="font-semibold underline" href={reauthHref()} target="_top">
+            Confirm it is you
+          </a>
         </div>
       ) : null}
 

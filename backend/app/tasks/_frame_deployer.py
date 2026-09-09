@@ -5,7 +5,6 @@ import codecs
 import contextlib
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import random
@@ -13,7 +12,6 @@ import re
 import shlex
 import shutil
 import string
-import tempfile
 from typing import Iterable, Optional
 from gzip import compress
 from arq import ArqRedis as Redis
@@ -861,17 +859,6 @@ $(OBJECTS): pre-build
         drivers = drivers_override or drivers_for_frame(frame)
         if inkyPython := drivers.get('inkyPython'):
             vendor_folder = inkyPython.vendor_folder or ""
-            os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-            shutil.copytree(
-                os.path.join(source_dir, "vendor", vendor_folder),
-                os.path.join(build_dir, "vendor", vendor_folder),
-                dirs_exist_ok=True
-            )
-            shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
-            shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
-
-        if inkyHyperPixel2r := drivers.get('inkyHyperPixel2rLegacyFb'):
-            vendor_folder = inkyHyperPixel2r.vendor_folder or ""
             os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
             shutil.copytree(
                 os.path.join(source_dir, "vendor", vendor_folder),

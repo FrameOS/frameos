@@ -31,6 +31,7 @@
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_mem.h"
+#include "fos_upload_limits.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -109,10 +110,18 @@ static int console_channel_read(fos_console_channel_t channel, uint8_t *buf, siz
 #endif
 #define FOS_USB_API_MAX_SCENE_ID 256
 #define FOS_USB_API_RAW_CHUNK 384
-#define FOS_USB_API_PAYLOAD_TIMEOUT_MS 180000
 #define FOS_USB_API_PAYLOAD_READ_CHUNK 2048
 #define FOS_CONSOLE_MAX_CMDLINE_LENGTH 512
 #define FOS_CONSOLE_TASK_STACK_SIZE 8192
+/* Idle priority of the console task, and the one it climbs to while a
+ * usb_api payload is on the wire. The render task runs at 5 (fos_client.c);
+ * at 2 the console lost the CPU for whole renders on the single-core C3 and
+ * the UART's 8 KB ring (0.7 s at 115200 baud, with no RTS/CTS on a CH340
+ * bridge to push back) overflowed. Above the render task, the ring is
+ * drained the moment the ISR posts; the task blocks on the driver between
+ * bytes, so nothing else starves. */
+#define FOS_CONSOLE_TASK_PRIORITY 2
+#define FOS_CONSOLE_PAYLOAD_PRIORITY 6
 
 static const char *USB_API_OK = "__FRAMEOS_USB_OK__";
 static const char *USB_API_ERROR = "__FRAMEOS_USB_ERROR__";
@@ -1117,7 +1126,35 @@ static void usb_api_ready(const char *name)
     fflush(stdout);
 }
 
-static bool usb_api_read_exact(uint8_t *buf, size_t len, TickType_t timeout_ticks, size_t *bytes_read)
+/* The bit rate the active channel actually carries: the UART's configured
+ * baud, or USB full speed for the Serial/JTAG port (12 Mbit/s nominal; the
+ * console path sees far less, so it is treated as 921600 — still a small
+ * fraction of the floor for any payload the caps allow). */
+static uint32_t console_channel_bits_per_second(fos_console_channel_t channel)
+{
+    switch (channel) {
+#if FOS_CONSOLE_HAS_UART
+    case FOS_CONSOLE_CHANNEL_UART:
+        return (uint32_t)CONFIG_ESP_CONSOLE_UART_BAUDRATE;
+#endif
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+    case FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG:
+        return 921600;
+#endif
+    default:
+        return 115200;
+    }
+}
+
+/* How long a payload of `len` bytes may take on the active channel: a 30 s
+ * floor plus twice the wire time (fos_upload_limits.h), so the 32 MB
+ * layout's 4 MB scene cap fits at 115200 baud where a fixed 180 s did not. */
+static TickType_t usb_api_payload_timeout_ticks(size_t len)
+{
+    return pdMS_TO_TICKS(fos_upload_payload_timeout_ms(len, console_channel_bits_per_second(s_active_channel)));
+}
+
+static bool usb_api_read_exact_locked(uint8_t *buf, size_t len, TickType_t timeout_ticks, size_t *bytes_read)
 {
     size_t off = 0;
     TickType_t start = xTaskGetTickCount();
@@ -1142,6 +1179,18 @@ static bool usb_api_read_exact(uint8_t *buf, size_t len, TickType_t timeout_tick
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     return true;
+}
+
+/* Reads `len` payload bytes with the console task raised above the render
+ * task for the duration (see FOS_CONSOLE_PAYLOAD_PRIORITY). The timeout is
+ * sized from `len` and the channel's bit rate. */
+static bool usb_api_read_exact(uint8_t *buf, size_t len, size_t *bytes_read)
+{
+    UBaseType_t idle_priority = uxTaskPriorityGet(NULL);
+    vTaskPrioritySet(NULL, FOS_CONSOLE_PAYLOAD_PRIORITY);
+    bool ok = usb_api_read_exact_locked(buf, len, usb_api_payload_timeout_ticks(len), bytes_read);
+    vTaskPrioritySet(NULL, idle_priority);
+    return ok;
 }
 
 static void usb_api_payload_timeout_error(const char *name, size_t read, size_t expected)
@@ -1319,7 +1368,7 @@ static int cmd_usb_api(int argc, char **argv)
         char scene_id[FOS_USB_API_MAX_SCENE_ID];
         usb_api_ready(subcommand);
         size_t bytes_read = 0;
-        if (!usb_api_read_exact((uint8_t *)scene_id, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS), &bytes_read)) {
+        if (!usb_api_read_exact((uint8_t *)scene_id, len, &bytes_read)) {
             usb_api_payload_timeout_error(subcommand, bytes_read, len);
             return 1;
         }
@@ -1578,7 +1627,7 @@ static int cmd_usb_api(int argc, char **argv)
         }
         usb_api_ready(subcommand);
         size_t bytes_read = 0;
-        if (!usb_api_read_exact(body, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS), &bytes_read)) {
+        if (!usb_api_read_exact(body, len, &bytes_read)) {
             free(body);
             usb_api_payload_timeout_error(subcommand, bytes_read, len);
             return 1;
@@ -1649,7 +1698,7 @@ static int cmd_usb_api(int argc, char **argv)
         }
         usb_api_ready(subcommand);
         size_t bytes_read = 0;
-        if (!usb_api_read_exact(body, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS), &bytes_read)) {
+        if (!usb_api_read_exact(body, len, &bytes_read)) {
             free(body);
             usb_api_payload_timeout_error(subcommand, bytes_read, len);
             return 1;
@@ -1867,7 +1916,11 @@ static esp_err_t console_init_uart(void)
     esp_err_t err = uart_param_config(FOS_CONSOLE_UART_NUM, &uart_config);
     if (err != ESP_OK) return err;
     /* Pins stay where the ROM routed them (U0TXD/U0RXD): that is where a
-     * board's USB-UART bridge sits, or it could not have flashed the chip. */
+     * board's USB-UART bridge sits, or it could not have flashed the chip.
+     * No flow control is possible on that bridge: RTS/CTS are not wired on
+     * a CH340-only board and no host tool speaks XON/XOFF, so the 8 KB ring
+     * is the whole buffer — payload reads run above the render task to keep
+     * it drained (FOS_CONSOLE_PAYLOAD_PRIORITY). */
     err = uart_driver_install(FOS_CONSOLE_UART_NUM, 8192, 2048, 0, NULL, 0);
     if (err != ESP_OK) return err;
     /* Interrupt-driven stdout: a polled FIFO write would spin the CPU for the
@@ -1907,7 +1960,8 @@ esp_err_t fos_console_start(void)
     ESP_ERROR_CHECK(esp_console_register_help_command());
     ESP_ERROR_CHECK(register_frameos_console_commands());
 
-    if (xTaskCreate(fos_console_task, "console", FOS_CONSOLE_TASK_STACK_SIZE, NULL, 2, NULL) != pdTRUE) {
+    if (xTaskCreate(fos_console_task, "console", FOS_CONSOLE_TASK_STACK_SIZE, NULL,
+                    FOS_CONSOLE_TASK_PRIORITY, NULL) != pdTRUE) {
         return ESP_FAIL;
     }
     return ESP_OK;

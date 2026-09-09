@@ -105,8 +105,9 @@ static void on_portal_exit(void)
     fos_http_stop();
     fos_http_start(false);
     fos_wifi_sync_time(SNTP_TIMEOUT_MS);
-    /* Network up = this image is good; cancel any pending rollback. */
-    fos_ota_mark_boot_valid();
+    /* Not marking the image valid here: that happens after the first
+     * successful render (fos_client.c) — "reached Wi-Fi" said nothing about
+     * whether the Nim runtime or the scene survive. */
     frameos_nim_set_log_upload_enabled(true);
     log_bootup_event(true);
     fos_ota_start_periodic_task(24);
@@ -262,8 +263,10 @@ void app_main(void)
 
     if (online) {
         fos_wifi_sync_time(SNTP_TIMEOUT_MS);
-        /* Network up = this image is good; cancel any pending rollback. */
-        fos_ota_mark_boot_valid();
+        /* A pending-verify image stays pending until its first render
+         * completes (fos_client.c: fos_ota_mark_boot_valid there), so a
+         * release that boots, joins Wi-Fi and then dies in Nim or scene init
+         * rolls back instead of boot-looping with a valid mark. */
         if (fos_ota_boot_request_pending()) {
             esp_err_t ota_err = fos_ota_run_boot_request();
             if (ota_err != ESP_OK) {
@@ -401,7 +404,9 @@ void app_main(void)
             fos_ota_mark_boot_valid();
         }
         /* If Wi-Fi creds exist but fail after an OTA, we deliberately do NOT
-         * mark valid: a reset rolls back to the previous image. */
+         * mark valid: a reset rolls back to the previous image. (An offline
+         * frame that still renders its scenes marks itself valid on that
+         * render, the same as an online one.) */
         s_blink_period_ms = 400;
         fos_wifi_start_portal();
         fos_http_start(true);

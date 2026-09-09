@@ -10,7 +10,8 @@ Revises: e7a3b9c4d2f6
 Create Date: 2026-08-13
 
 """
-from sqlalchemy.orm import attributes, load_only
+from alembic import op
+from sqlalchemy.orm import Session, attributes, load_only
 
 # revision identifiers, used by Alembic.
 revision = 'a9c1e5f2b8d4'
@@ -22,10 +23,9 @@ depends_on = None
 def upgrade():
     from app.models import Frame
     from app.models.template import Template
-    from app.database import SessionLocal
     from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 
-    db = SessionLocal()
+    db = Session(bind=op.get_bind())
     try:
         frames = db.query(Frame).options(load_only(Frame.id, Frame.scenes)).all()
         for frame in frames:

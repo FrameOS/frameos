@@ -147,8 +147,19 @@ RUN apt-get update \
       > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g pnpm@10.27.0 \
     && rm -rf /var/lib/apt/lists/*
+
+# The pnpm version is package.json's `packageManager` — the one pin (CI's
+# pnpm/action-setup and flox read the same field); corepack installs exactly
+# that version. Only package.json is copied here so the layer survives
+# source changes.
+COPY package.json /tmp/package-manager/package.json
+RUN npm install -g corepack@latest \
+    && corepack enable \
+    && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare \
+         "$(node -p "require('/tmp/package-manager/package.json').packageManager")" --activate \
+    && rm -rf /tmp/package-manager \
+    && pnpm --version
 
 WORKDIR /app
 

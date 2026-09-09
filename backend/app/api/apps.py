@@ -4,6 +4,7 @@ import json
 import tempfile
 import os
 import asyncio
+import contextlib
 import httpx
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -47,7 +48,9 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
     if file.endswith('.py'):
         errors = validate_python(source)
     elif file.endswith(('.js', '.ts', '.jsx', '.tsx')):
-        errors = validate_js_source(file, source)
+        # A 30 s subprocess, and on a cold cache a Nim build of the checker
+        # under a lock: off the event loop.
+        errors = await asyncio.to_thread(validate_js_source, file, source)
     elif file.endswith('.nim'):
         errors = await validate_nim(source)
     elif file.endswith('.json'):
@@ -115,6 +118,10 @@ def validate_python(source: str):
         return [{"line": e.lineno, "column": e.offset, "error": str(e)}]
 
 
+# `nim check` of one app file; the first run also compiles the stdlib cache.
+NIM_CHECK_TIMEOUT_SECONDS = 120
+
+
 async def validate_nim(source: str):
     temp_file_name = ''
     try:
@@ -131,7 +138,14 @@ async def validate_nim(source: str):
             stderr=asyncio.subprocess.PIPE,
         )
 
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=NIM_CHECK_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+            return [{"line": 1, "column": 1, "error": f"nim check timed out after {NIM_CHECK_TIMEOUT_SECONDS} s"}]
         stdout = stdout.decode('utf-8', errors='replace')
         stderr = stderr.decode('utf-8', errors='replace')
 

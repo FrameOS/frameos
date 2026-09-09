@@ -41,6 +41,28 @@ export const reversalRule: PostingRule = {
       );
     }
 
+    // A reversal of a reversal is not a correction, it is the original
+    // entry again by another name — with the reversed one still standing
+    // and the pair's mirror check now lying. Post the original fact afresh
+    // instead.
+    if (original.reversesEntryId) {
+      throw new LedgerError(
+        "reversal_of_reversal",
+        `Ledger entry ${entryId} is itself a reversal (of ${original.reversesEntryId}); post the corrected entry instead of reversing the reversal`,
+      );
+    }
+    // A subscription entry is one half of a fact the other half of which
+    // lives in subscription_periods (charged_at, recognized_to, refunded).
+    // Mirroring the journal leg alone desynchronises the two and the
+    // nightly invariant fires every night from then on; the cancel and
+    // refund recipes in subscriptions.ts move both together.
+    if (original.entryType.startsWith("subscription_")) {
+      throw new LedgerError(
+        "subscription_entry_not_reversible",
+        `Ledger entry ${entryId} is a ${original.entryType}; subscription entries are corrected through cancelAccountPlan / refundUnearnedPeriod, which keep subscription_periods in step`,
+      );
+    }
+
     // The unique index on reverses_entry_id would refuse the second one
     // anyway; catching it here says why instead of surfacing a constraint.
     const existing = await context.findReversal(entryId);

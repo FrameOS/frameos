@@ -237,6 +237,7 @@ def main(argv: List[str] | None = None) -> int:
     VERSIONS_FILE.write_text(output, encoding="utf-8")
 
     _sync_npm_package_versions(ordered_versions)
+    _sync_setup_script_default(ordered_versions)
 
     changed = "yes" if ordered_versions != existing_versions else "no"
     print(f"versions_updated={changed}")
@@ -265,6 +266,34 @@ def _sync_npm_package_versions(versions: Dict[str, str]) -> None:
         data["version"] = component_version
         package_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         print(f"{data.get('name')} version set to {component_version}")
+
+
+SETUP_SCRIPT = ROOT / "scripts" / "frameos-setup.sh"
+SETUP_SCRIPT_DEFAULT_RE = re.compile(
+    r'^(FRAMEOS_RELEASE_VERSION_DEFAULT=")[^"]*("\s*# __FRAMEOS_RELEASE_VERSION_DEFAULT__[ \t]*)$',
+    re.MULTILINE,
+)
+
+
+def _sync_setup_script_default(versions: Dict[str, str]) -> None:
+    """Point scripts/frameos-setup.sh's fallback release at the `docker` version.
+
+    The script installs FRAMEOS_RELEASE_VERSION_DEFAULT when nobody passes a
+    version. cloud.frameos.net/install.sh stamps the newest GitHub release
+    over that line at serve time, but the raw script does not get that, and
+    its pin once sat nine releases stale. `docker` is the release tag, so
+    the default follows it on every release
+    (scripts/tests/test_setup_script_defaults.py pins the two together).
+    scripts/ is in no project's hash set, so rewriting it cannot force a bump.
+    """
+    release = (versions.get("docker") or "").split("+", 1)[0]
+    if not BASE_VERSION_RE.fullmatch(release) or not SETUP_SCRIPT.exists():
+        return
+    text = SETUP_SCRIPT.read_text(encoding="utf-8")
+    updated, count = SETUP_SCRIPT_DEFAULT_RE.subn(rf"\g<1>{release}\g<2>", text, count=1)
+    if count and updated != text:
+        SETUP_SCRIPT.write_text(updated, encoding="utf-8")
+        print(f"scripts/frameos-setup.sh release default set to {release}")
 
 
 if __name__ == "__main__":

@@ -40,11 +40,121 @@ async def test_get_settings(async_client):
 
 @pytest.mark.asyncio
 async def test_set_settings(async_client):
-    payload = {"some_setting": "hello"}
+    payload = {"unsplash": {"accessKey": "hello"}}
     response = await async_client.post('/api/settings', json=payload)
     assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
     updated = response.json()
-    assert updated["some_setting"] == "hello"
+    # Secrets come back masked (see test_settings_secrets_are_masked_by_default).
+    assert updated["unsplash"]["accessKey"] == "••••••••"
+
+
+@pytest.mark.asyncio
+async def test_set_settings_rejects_unknown_keys(async_client):
+    """The row store used to take any key (`extra='allow'`): a stray field
+    became a permanent settings row nothing could read or remove."""
+    response = await async_client.post('/api/settings', json={"some_setting": "hello"})
+    assert response.status_code == 422, response.text
+    response = await async_client.get('/api/settings')
+    assert "some_setting" not in response.json()
+
+
+@pytest.mark.asyncio
+async def test_settings_secrets_are_masked_by_default(async_client):
+    response = await async_client.post(
+        '/api/settings',
+        json={
+            "openAI": {"apiKey": "sk-1234567890abcdef", "model": "gpt-5"},
+            "homeAssistant": {"url": "http://ha.local", "accessToken": "short"},
+            "defaults": {"wifiSSID": "home", "wifiPassword": "hunter2hunter2"},
+        },
+    )
+    assert response.status_code == 200, response.text
+    masked = response.json()
+    assert masked["openAI"]["apiKey"] == "••••••••cdef"
+    assert masked["openAI"]["model"] == "gpt-5"
+    assert masked["homeAssistant"]["accessToken"] == "••••••••"
+    assert masked["homeAssistant"]["url"] == "http://ha.local"
+    assert masked["defaults"]["wifiPassword"] == "••••••••ter2"
+
+    response = await async_client.get('/api/settings')
+    assert response.json()["openAI"]["apiKey"] == "••••••••cdef"
+    assert response.json()["defaults"]["wifiPassword"] == "••••••••ter2"
+
+    # The wasm preview runs the scene in the browser and needs the bytes.
+    response = await async_client.get('/api/settings?reveal=1')
+    assert response.json()["openAI"]["apiKey"] == "sk-1234567890abcdef"
+    assert response.json()["homeAssistant"]["accessToken"] == "short"
+    assert response.json()["defaults"]["wifiPassword"] == "hunter2hunter2"
+
+
+@pytest.mark.asyncio
+async def test_settings_mask_posted_back_keeps_the_stored_secret(async_client):
+    await async_client.post('/api/settings', json={"openAI": {"apiKey": "sk-1234567890abcdef"}})
+
+    # The form posts the whole group back, mask included: nothing changes.
+    response = await async_client.post('/api/settings', json={"openAI": {"apiKey": "••••••••cdef", "model": "gpt-5"}})
+    assert response.status_code == 200, response.text
+    revealed = (await async_client.get('/api/settings?reveal=1')).json()
+    assert revealed["openAI"] == {"apiKey": "sk-1234567890abcdef", "model": "gpt-5"}
+
+    # A mask for a field with nothing stored is dropped, never stored.
+    response = await async_client.post('/api/settings', json={"unsplash": {"accessKey": "••••••••zzzz"}})
+    assert response.status_code == 200, response.text
+    assert "accessKey" not in (await async_client.get('/api/settings?reveal=1')).json()["unsplash"]
+
+    # A new value replaces, an empty string clears.
+    await async_client.post('/api/settings', json={"openAI": {"apiKey": "sk-newkey-0000000000"}})
+    assert (await async_client.get('/api/settings?reveal=1')).json()["openAI"]["apiKey"] == "sk-newkey-0000000000"
+    await async_client.post('/api/settings', json={"openAI": {"apiKey": ""}})
+    assert (await async_client.get('/api/settings?reveal=1')).json()["openAI"]["apiKey"] == ""
+
+
+@pytest.mark.asyncio
+async def test_settings_ssh_private_keys_are_masked_and_kept(async_client):
+    keys = [
+        {"id": "k1", "name": "one", "private": "-----BEGIN PRIVATE KEY----- one", "public": "ssh-ed25519 AAAA one"},
+        {"id": "k2", "name": "two", "private": "-----BEGIN PRIVATE KEY----- two", "public": "ssh-ed25519 AAAA two"},
+    ]
+    response = await async_client.post('/api/settings', json={"ssh_keys": {"keys": keys, "default": "k1"}})
+    assert response.status_code == 200, response.text
+    masked = response.json()["ssh_keys"]["keys"]
+    assert masked[0]["private"] == "•••••••• one"
+    assert masked[1]["private"] == "•••••••• two"
+    assert masked[0]["public"] == "ssh-ed25519 AAAA one"
+
+    # Post the masked list back with one key removed and one renamed.
+    posted = [dict(masked[1], name="renamed")]
+    response = await async_client.post('/api/settings', json={"ssh_keys": {"keys": posted, "default": "k2"}})
+    assert response.status_code == 200, response.text
+    revealed = (await async_client.get('/api/settings?reveal=1')).json()["ssh_keys"]
+    assert revealed["keys"] == [
+        {"id": "k2", "name": "renamed", "private": "-----BEGIN PRIVATE KEY----- two", "public": "ssh-ed25519 AAAA two"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_new_frame_resolves_a_masked_default_wifi_password(async_client, db):
+    """The add-frame form prefills the passphrase from the (masked) defaults."""
+    from app.models.frame import Frame
+
+    await async_client.post('/api/settings', json={"defaults": {"wifiSSID": "home", "wifiPassword": "hunter2hunter2"}})
+    masked = (await async_client.get('/api/settings')).json()["defaults"]["wifiPassword"]
+    assert masked.startswith("••••••••")
+
+    response = await async_client.post(
+        '/api/frames/new',
+        json={
+            "name": "Masked Wi-Fi",
+            "frame_host": "",
+            "server_host": "localhost",
+            "mode": "embedded",
+            "platform": "esp32-s3",
+            "network": {"wifiSSID": "home", "wifiPassword": masked},
+        },
+    )
+    assert response.status_code == 200, response.text
+    frame = db.get(Frame, response.json()["frame"]["id"])
+    assert frame.network["wifiPassword"] == "hunter2hunter2"
 
 
 @pytest.mark.asyncio

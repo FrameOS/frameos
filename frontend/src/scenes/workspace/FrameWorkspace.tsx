@@ -1596,6 +1596,27 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     )
   }
 
+  // The URL names a frame this account does not have (deleted, a stale
+  // link, a typo). Say so instead of silently showing another frame's tools
+  // under the wrong id — or, before the list arrived, the skeleton forever.
+  if (routeFrameId && !frameIdsEqual(firstFrame.id, routeFrameId)) {
+    return (
+      <FrameosShell
+        mode="frame"
+        title="Frame"
+        subtitle="Not found"
+        tree={<div className="px-3 py-2 text-slate-400">No frame with this id.</div>}
+      >
+        <div className="frameos-muted flex h-[60vh] flex-col items-center justify-center gap-3 text-sm font-medium">
+          <div>Frame not found.</div>
+          <A href={urls.frames()} className="text-blue-500 hover:underline">
+            Back to all frames
+          </A>
+        </div>
+      </FrameosShell>
+    )
+  }
+
   return <FrameWorkspaceForFrame frameId={firstFrame.id} />
 }
 

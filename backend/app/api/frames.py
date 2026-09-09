@@ -23,7 +23,7 @@ import tempfile
 import time
 import zipfile
 from tempfile import NamedTemporaryFile
-from typing import Any, Awaitable, Optional, Tuple, cast
+from typing import Any, Awaitable, Optional, Tuple
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -63,8 +63,8 @@ from app.models.frame import (
     remember_device_reported_frameos_version,
     update_frame,
 )
-from app.models.log import FRAME_ACTIVITY_LOG_TYPES, Log, new_log as log
-from app.models.metrics import Metrics
+from app.models.log import FRAME_ACTIVITY_LOG_TYPES, LOG_LIMIT_PER_FRAME, Log, new_log as log
+from app.models.metrics import METRICS_RETAINED_PER_FRAME, Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import (
     get_ssh_connection,
@@ -96,7 +96,14 @@ from app.schemas.frames import (
 from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, is_safe_host
-from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES, read_upload_limited, reject_oversized_content_length
+from app.utils.asset_headers import inert_asset_headers
+from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
+from app.utils.upload_limits import (
+    MAX_ASSET_UPLOAD_BYTES,
+    read_body_limited,
+    read_upload_limited,
+    reject_oversized_content_length,
+)
 from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.remote_exec import (
     RemoteTransport,
@@ -174,7 +181,6 @@ from app.codegen.drivers_nim import frame_compilation_mode
 from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_button_defaults
 from app.api.project_scope import project_get_or_404
 from app.api.firmware_release import latest_published_provisioning_assets
-from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
 from . import api_project, api_open
@@ -1836,7 +1842,7 @@ async def _embedded_asset_file_response(
         cache_key = f"asset:thumb:{full_md5}"
         if cached := await redis.get(cache_key):
             return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
-        thumb_data = embedded_assets.thumbnail_jpeg(data)
+        thumb_data = await asyncio.to_thread(embedded_assets.thumbnail_jpeg, data)
         if thumb_data is None:
             # Undecodable image (or Pillow missing): serve the original bytes.
             media_type = mimetypes.guess_type(filename or rel_path)[0] or "application/octet-stream"
@@ -1857,13 +1863,7 @@ async def _embedded_asset_file_response(
     return StreamingResponse(
         io.BytesIO(data),
         media_type=media_type,
-        headers={
-            "Content-Disposition": (
-                f"{'attachment' if mode == 'download' else 'inline'}; "
-                f'filename="{_ascii_safe(filename)}"; '
-                f"filename*=UTF-8''{quote(filename, safe='')}"
-            ),
-        },
+        headers=inert_asset_headers(media_type, filename, inline=mode != "download"),
     )
 
 
@@ -1955,7 +1955,7 @@ async def api_frame_get_asset(
                 # original once and render the preview here.
                 original = await _remote_download_file(db, redis, frame, full_path)
                 try:
-                    data = render_thumbnail_png(original)
+                    data = await asyncio.to_thread(render_thumbnail_png, original)
                 except Exception as exc:
                     raise HTTPException(
                         status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -2001,13 +2001,7 @@ async def api_frame_get_asset(
     return StreamingResponse(
         io.BytesIO(data),
         media_type=media_type,
-        headers={
-            "Content-Disposition": (
-                f"{'attachment' if mode == 'download' else 'inline'}; "
-                f'filename="{_ascii_safe(filename)}"; '
-                f"filename*=UTF-8''{quote(filename, safe='')}"
-            ),
-        },
+        headers=inert_asset_headers(media_type, filename, inline=mode != "download"),
     )
 
 
@@ -2053,6 +2047,9 @@ async def api_frame_scene_preview_settings(
 # The largest upstream body the live-preview proxy relays (generated images
 # are a few MB); the rest is dropped mid-stream instead of buffered.
 PREVIEW_PROXY_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+# The JSON envelope the preview posts (an image-edit request carries the
+# image base64-encoded); anything larger is not a scene's HTTP call.
+PREVIEW_PROXY_MAX_REQUEST_BYTES = 16 * 1024 * 1024
 
 
 async def _preview_proxy_host_is_blocked(host: str) -> bool:
@@ -2082,7 +2079,13 @@ async def api_frame_scene_preview_proxy(
     SSRF-guarded. Request body: {method, url, headers, bodyBase64, timeoutMs}.
     The response mirrors the upstream status code and body bytes."""
     try:
-        envelope = await request.json()
+        envelope = json.loads(
+            await read_body_limited(request, PREVIEW_PROXY_MAX_REQUEST_BYTES, "Proxy request body too large")
+        )
+        if not isinstance(envelope, dict):
+            raise ValueError("not an object")
+    except HTTPException:
+        raise
     except Exception:
         _bad_request("Invalid proxy request body")
 
@@ -2215,25 +2218,70 @@ def _format_frame_log_line(log_entry: Log) -> str:
     return f"[{timestamp}] ({log_entry.type}) {log_entry.line}"
 
 
+# The full-log download is bounded to the retained window: maybe_prune_logs
+# trims a frame back to LOG_LIMIT_PER_FRAME rows (checked every 100 inserts,
+# so up to 100 more sit there briefly). Anything older is gone from the
+# database anyway, so this cap only ever bites between two prune checks.
+FULL_LOG_DOWNLOAD_MAX_ROWS = LOG_LIMIT_PER_FRAME
+# Rows per SELECT while streaming the download. Small enough that a page is
+# formatted and flushed before the next is fetched, so the request never holds
+# the whole window as ORM objects (10k rows of 64 KiB lines is 640 MiB).
+FULL_LOG_DOWNLOAD_PAGE_ROWS = 1000
+
+
+def _iter_frame_log_pages(db: Session, frame: Frame, max_rows: int, page_rows: int):
+    """Yield the newest ``max_rows`` log rows of ``frame``, oldest first, one
+    page at a time. Each page is its own bounded SELECT keyed on the row id,
+    which is unique and monotonic within a frame's log stream."""
+    scoped = db.query(Log).filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+    # The id of the oldest row inside the retained window: everything from
+    # here up is what the download contains.
+    oldest_kept = (
+        scoped.with_entities(Log.id)
+        .order_by(Log.timestamp.desc(), Log.id.desc())
+        .offset(max_rows - 1)
+        .limit(1)
+        .scalar()
+    )
+    if oldest_kept is None:
+        # Fewer rows than the cap: the whole log fits.
+        floor_id = 0
+    else:
+        floor_id = int(oldest_kept)
+    after_id = floor_id - 1
+    remaining = max_rows
+    while remaining > 0:
+        page = (
+            scoped.filter(Log.id > after_id)
+            .order_by(Log.id.asc())
+            .limit(min(page_rows, remaining))
+            .all()
+        )
+        if not page:
+            return
+        yield page
+        after_id = int(page[-1].id)
+        remaining -= len(page)
+        if len(page) < page_rows:
+            return
+
+
 @api_project.get("/frames/{id:int}/logs/full")
 async def api_frame_download_full_logs(id: int, db: Session = Depends(get_db)):
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    logs = (
-        db.query(Log)
-        .filter_by(project_id=frame.project_id, frame_id=id)
-        .order_by(Log.timestamp.asc(), Log.id.asc())
-        .all()
-    )
-    content = "\n".join(_format_frame_log_line(log_entry) for log_entry in logs)
-    if content:
-        content += "\n"
+    def render_pages():
+        for page in _iter_frame_log_pages(db, frame, FULL_LOG_DOWNLOAD_MAX_ROWS, FULL_LOG_DOWNLOAD_PAGE_ROWS):
+            yield "".join(_format_frame_log_line(log_entry) + "\n" for log_entry in page)
+            # Drop the page's ORM objects before fetching the next one.
+            db.expunge_all()
+
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     filename = f"frame-{id}-full-logs-{timestamp}.log"
-    return Response(
-        content,
+    return StreamingResponse(
+        render_pages(),
         media_type="text/plain; charset=utf-8",
         headers={
             "Content-Disposition": (
@@ -2425,6 +2473,11 @@ async def api_frame_get_image(
                     await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
 
 
+# A frame's screenshot: a full-size PNG of a large panel is a few MB; the
+# body used to be read unbounded.
+MAX_FRAME_IMAGE_BYTES = 32 * 1024 * 1024
+
+
 @api_project.post("/frames/{id:int}/image")
 async def api_frame_upload_image(
     id: int,
@@ -2434,7 +2487,7 @@ async def api_frame_upload_image(
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
-    body = await request.body()
+    body = await read_body_limited(request, MAX_FRAME_IMAGE_BYTES, "Image too large")
     if not body:
         _bad_request("Missing image payload")
 
@@ -2828,9 +2881,13 @@ async def _chunked_asset_upload(
     if chunk_index == 0 and offset < 0:
         offset = 0
     complete = (qp.get("complete") or "1") == "1"
-    chunk = await request.body()
+    chunk = await read_body_limited(request, MAX_ASSET_UPLOAD_BYTES, "Uploaded file too large")
     if not chunk and not complete:
         _bad_request("Empty chunk")
+    # The whole file is bounded like a one-shot upload, whichever chunk
+    # carries the bytes that cross the line.
+    if (offset if offset >= 0 else 0) + len(chunk) > MAX_ASSET_UPLOAD_BYTES:
+        raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Uploaded file too large")
 
     assets_path, combined_path = _asset_upload_combined_path(frame, qp.get("path") or "", filename)
 
@@ -2879,6 +2936,9 @@ async def _chunked_asset_upload(
         seek_to = offset if offset >= 0 else part_size
         if seek_to > part_size:
             raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
+        if seek_to + len(chunk) > MAX_ASSET_UPLOAD_BYTES:
+            os.unlink(part_path)
+            raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Uploaded file too large")
         with open(part_path, "r+b") as fh:
             fh.seek(seek_to)
             fh.write(chunk)
@@ -2920,6 +2980,7 @@ async def api_frame_assets_upload(
     if "upload_id" in request.query_params:
         return await _chunked_asset_upload(request, frame, db, redis)
 
+    reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     form = await request.form()
     upload = form.get("file")
     if upload is None or isinstance(upload, str):
@@ -2928,7 +2989,7 @@ async def api_frame_assets_upload(
         frame, str(form.get("path") or ""), upload.filename or ""
     )
 
-    data = await upload.read()
+    data = await read_upload_limited(upload, MAX_ASSET_UPLOAD_BYTES)
     await _asset_upload_store(db, redis, frame, combined_path, data)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
 
@@ -3879,6 +3940,16 @@ async def api_frame_new(
 ):
     project_id = current_project_id()
     settings = get_settings_dict(db, project_id=project_id)
+    if isinstance(data.network, dict) and is_masked_setting_value(data.network.get("wifiPassword")):
+        # The add-frame form prefills the passphrase from GET /api/settings,
+        # which answers a mask (app/utils/settings_secrets); the real default
+        # is substituted here so the frame never carries the mask.
+        data.network = {
+            **data.network,
+            "wifiPassword": resolve_masked_secret(
+                data.network.get("wifiPassword"), (settings.get("defaults") or {}).get("wifiPassword")
+            ),
+        }
     try:
         if data.mode == "buildroot":
             normalize_buildroot_platform(data.platform)
@@ -4041,11 +4112,10 @@ async def api_frame_import(
     """
     try:
         if file is not None:
-            content = await file.read()
+            reject_oversized_content_length(request, MAX_FRAME_IMPORT_BYTES)
+            content = await read_upload_limited(file, MAX_FRAME_IMPORT_BYTES)
         else:
-            content = await request.body()
-        if len(content) > MAX_FRAME_IMPORT_BYTES:
-            raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Frame export too large")
+            content = await read_body_limited(request, MAX_FRAME_IMPORT_BYTES, "Frame export too large")
         data = json.loads(content)
         if not isinstance(data, dict):
             raise ValueError("not an object")
@@ -4196,8 +4266,8 @@ def _reboot_hint_from_log(log: Log) -> dict[str, Any] | None:
 
 
 def _reboot_hint_for_boot(logs_before_boot: list[Log]) -> dict[str, Any]:
-    for log in reversed(logs_before_boot):
-        hint = _reboot_hint_from_log(log)
+    for entry in reversed(logs_before_boot):
+        hint = _reboot_hint_from_log(entry)
         if hint:
             return hint
     return {}
@@ -4214,55 +4284,113 @@ def _merge_reboot_details(primary: dict[str, Any], secondary: dict[str, Any]) ->
     return merged
 
 
-def _frame_reboot_markers(db: Session, frame: Frame, since: Optional[datetime] = None) -> list[dict[str, Any]]:
-    query = db.query(Log).filter_by(project_id=frame.project_id, frame_id=frame.id)
+# Reboot markers come from the frame's ``bootup`` webhook lines. Both metrics
+# routes used to walk EVERY log row of the frame (up to LOG_LIMIT_PER_FRAME,
+# each parsed as JSON) on every GET; now only the bootup lines inside the
+# requested window are selected, at most REBOOT_MARKERS_MAX of them, and the
+# context that classifies each boot (the lines just before it) is a second
+# bounded SELECT per marker.
+REBOOT_MARKERS_MAX = 100
+REBOOT_CONTEXT_MAX_LINES = 200
+# A boot that precedes the first metric sample by up to this much still
+# belongs to that sample's window: the runtime posts its first metrics one
+# ``metrics_interval`` after it comes up.
+REBOOT_MARKERS_WINDOW_LEAD = timedelta(hours=1)
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _frame_reboot_markers(
+    db: Session,
+    frame: Frame,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    scoped = db.query(Log).filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+    boots = scoped.filter(Log.type == "webhook", Log.line.contains("bootup"))
     if since is not None:
-        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
-        query = query.filter(Log.timestamp >= (since_utc - REBOOT_CONTEXT_LOOKBACK).replace(tzinfo=None))
+        boots = boots.filter(Log.timestamp >= _naive_utc(since))
+    if until is not None:
+        boots = boots.filter(Log.timestamp <= _naive_utc(until))
+    boot_logs = boots.order_by(Log.timestamp.desc(), Log.id.desc()).limit(REBOOT_MARKERS_MAX).all()
 
     markers: list[dict[str, Any]] = []
-    context_logs: list[Log] = []
-    for log_entry in query.order_by(Log.timestamp).all():
-        payload = _json_log_payload(log_entry.line) if log_entry.type == "webhook" else None
-        if payload and payload.get("event") == "bootup":
-            details = _reboot_details_from_payload(payload)
-            lookback_start = log_entry.timestamp - REBOOT_CONTEXT_LOOKBACK
-            nearby_context = [log for log in context_logs if log.timestamp >= lookback_start]
-            details = _merge_reboot_details(details, _reboot_hint_for_boot(nearby_context))
-            timestamp = log_entry.timestamp
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
-            else:
-                timestamp = timestamp.astimezone(timezone.utc)
-            markers.append(
-                {
-                    "timestamp": timestamp.isoformat(),
-                    "log_id": log_entry.id,
-                    **details,
-                }
-            )
-        context_logs.append(log_entry)
-        if len(context_logs) > 200:
-            context_logs = context_logs[-200:]
-
-    if since is not None:
-        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
-        return [
-            marker
-            for marker in markers
-            if datetime.fromisoformat(marker["timestamp"]).astimezone(timezone.utc) >= since_utc
-        ]
+    for log_entry in reversed(boot_logs):
+        payload = _json_log_payload(log_entry.line)
+        if not payload or payload.get("event") != "bootup":
+            continue
+        details = _reboot_details_from_payload(payload)
+        lookback_start = log_entry.timestamp - REBOOT_CONTEXT_LOOKBACK
+        nearby_context = (
+            scoped.filter(Log.timestamp >= lookback_start, Log.timestamp <= log_entry.timestamp, Log.id < log_entry.id)
+            .order_by(Log.timestamp.desc(), Log.id.desc())
+            .limit(REBOOT_CONTEXT_MAX_LINES)
+            .all()
+        )
+        details = _merge_reboot_details(details, _reboot_hint_for_boot(list(reversed(nearby_context))))
+        timestamp = log_entry.timestamp
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
+        markers.append(
+            {
+                "timestamp": timestamp.isoformat(),
+                "log_id": log_entry.id,
+                **details,
+            }
+        )
     return markers
 
 
+def _reboot_markers_for_metrics(
+    db: Session,
+    frame: Frame,
+    metrics: list[Metrics],
+    since: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    """Markers for the window the returned ``metrics`` span. With no explicit
+    ``since`` the window starts a little before the oldest returned sample;
+    with no samples at all there is no window and the newest boots are
+    returned (still bounded by REBOOT_MARKERS_MAX)."""
+    until: Optional[datetime] = None
+    if metrics:
+        oldest = min(metric.timestamp for metric in metrics)
+        newest = max(metric.timestamp for metric in metrics)
+        if since is None:
+            since = oldest - REBOOT_MARKERS_WINDOW_LEAD
+        until = newest
+    return _frame_reboot_markers(db, frame, since, until)
+
+
 @api_project.get("/frames/{id:int}/metrics", response_model=FrameMetricsResponse)
-async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
+async def api_frame_metrics(
+    id: int,
+    reboots: bool = Query(True, description="Attach the reboot markers inside the returned samples' window"),
+    db: Session = Depends(get_db),
+):
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
-        metrics = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id).order_by(Metrics.timestamp).all()
-        return {"metrics": [metric.to_dict() for metric in metrics], "reboots": _frame_reboot_markers(db, frame)}
+        # The retained window, newest first, so the bound holds even between
+        # two trims; served oldest first like before.
+        metrics = (
+            db.query(Metrics)
+            .filter_by(project_id=frame.project_id, frame_id=id)
+            .order_by(Metrics.timestamp.desc(), Metrics.id.desc())
+            .limit(METRICS_RETAINED_PER_FRAME)
+            .all()
+        )
+        metrics.reverse()
+        return {
+            "metrics": [metric.to_dict() for metric in metrics],
+            "reboots": _reboot_markers_for_metrics(db, frame, metrics) if reboots else [],
+        }
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -4272,6 +4400,7 @@ async def api_frame_recent_metrics(
     id: int,
     limit: int = Query(1000, ge=1, le=1000),
     since: Optional[datetime] = Query(None),
+    reboots: bool = Query(True, description="Attach the reboot markers inside the returned samples' window"),
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id)
@@ -4280,9 +4409,12 @@ async def api_frame_recent_metrics(
     try:
         query = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id)
         if since is not None:
-            since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
-            query = query.filter(Metrics.timestamp >= since_utc.replace(tzinfo=None))
+            query = query.filter(Metrics.timestamp >= _naive_utc(since))
         metrics = query.order_by(Metrics.timestamp.desc()).limit(limit).all()
-        return {"metrics": [metric.to_dict() for metric in reversed(metrics)], "reboots": _frame_reboot_markers(db, frame, since)}
+        metrics.reverse()
+        return {
+            "metrics": [metric.to_dict() for metric in metrics],
+            "reboots": _reboot_markers_for_metrics(db, frame, metrics, since) if reboots else [],
+        }
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

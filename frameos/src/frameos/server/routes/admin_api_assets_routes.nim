@@ -84,9 +84,43 @@ proc sanitizeUploadId(uploadId: string): string =
 proc uploadChunkTempPath(uploadId: string): string =
   normalizedPath(uploadChunkTempRoot() / (sanitizeUploadId(uploadId) & ".part"))
 
+proc realPathWithin(fullPath, root: string): bool =
+  ## The lexical check above says nothing about symlinks: a link planted
+  ## inside the assets folder (a scene's JS can write there, a Samba share
+  ## can too) pointed the admin routes anywhere on the disk. Resolve the
+  ## deepest ancestor that exists — the target itself may be about to be
+  ## created — and insist the real path is still under the real root. Same
+  ## rule the JS runtime's asset guard applies (js_runtime/app_runtime.nim).
+  when defined(frameosEmbedded) or defined(frameosWasm):
+    true
+  else:
+    if not dirExists(root):
+      return true
+    try:
+      let realRoot = expandFilename(root)
+      var probe = fullPath
+      while not (fileExists(probe) or dirExists(probe) or symlinkExists(probe)):
+        let parent = probe.parentDir()
+        if parent == probe or parent.len < root.len:
+          return true
+        probe = parent
+      let realProbe = expandFilename(probe)
+      realProbe == realRoot or realProbe.startsWith(realRoot & DirSep)
+    except CatchableError:
+      # A dangling link, or a component we cannot stat: not ours to touch.
+      false
+
 proc resolveAssetPath*(path: string, allowRoot = false): string =
   let assetsPath = configuredAssetsPath()
   let stripped = path.strip()
+  # A NUL byte ends the C string every stat/unlink/rmdir underneath sees:
+  # `path=%00` normalised to "<root>/\0", passed the lexical checks below as
+  # a child of the root, and removeDir() then emptied the root itself. No
+  # legitimate asset name carries a control character, so refuse them all
+  # before any path arithmetic.
+  for ch in stripped:
+    if ch < ' ' or ch == '\127':
+      raise newException(ValueError, "Invalid asset path")
   if stripped.len == 0:
     if allowRoot:
       return assetsPath
@@ -103,6 +137,8 @@ proc resolveAssetPath*(path: string, allowRoot = false): string =
     raise newException(ValueError, "Invalid asset path")
   if not allowRoot and fullPath == assetsPath:
     raise newException(ValueError, "Path is required")
+  if not realPathWithin(fullPath, assetsPath):
+    raise newException(ValueError, "Invalid asset path")
   fullPath
 
 proc relativeAssetPath*(path: string): string =
@@ -325,6 +361,10 @@ proc finishChunkedImageUpload*(uploadId: string, filename: string): JsonNode =
 
 proc deleteAssetEntry*(path: string) =
   let targetPath = resolveAssetPath(path)
+  # Belt to the resolver's braces: whatever the resolver decided, the assets
+  # root itself is never a deletable entry.
+  if normalizedPath(targetPath) == configuredAssetsPath():
+    raise newException(ValueError, "Path is required")
   if fileExists(targetPath):
     removeFile(targetPath)
   elif dirExists(targetPath):

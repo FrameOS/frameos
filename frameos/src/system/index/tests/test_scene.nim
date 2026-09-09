@@ -85,7 +85,7 @@ suite "system/index scene":
       check "Time: " in text
       check "Network: " in text
       check "Internet: not checked" in text
-      check "Managed via: self-hosted backend (frameos.local:8989)" in text
+      check "Managed via: self-hosted backend (http://frameos.local:8989)" in text
       check "Frame: http://192.168.1.50:8787" in text
       check "Remote control: disabled" in text
       check "Installed scenes" in text

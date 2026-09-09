@@ -72,7 +72,6 @@ jobs:
       - uses: pnpm/action-setup@v4
         if: steps.cache_assets.outputs.cache-hit != 'true'
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -231,7 +230,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -252,7 +251,6 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -449,7 +447,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -487,7 +485,6 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -627,13 +624,35 @@ jobs:
             default_author: github_actions
 
   python:
+    name: Backend tests (${{ matrix.database }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # SQLite is what every install runs today; Postgres is supported via
+        # DATABASE_URL and only ever broke where nothing exercised it (column
+        # widths SQLite never enforced). The same suite runs on both.
+        database: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: frameos
+          POSTGRES_PASSWORD: frameos
+          POSTGRES_DB: frameos_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -707,7 +726,28 @@ jobs:
           uv venv
           uv pip install -r requirements.txt
 
+      # The suite builds its tables from the models; this runs the alembic
+      # chain end to end on the same database engine. Three data migrations
+      # used to open their own connection and could not see the tables the
+      # chain had just created on Postgres (one transaction per upgrade).
+      - name: Migrations upgrade head
+        env:
+          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://frameos:frameos@127.0.0.1:55433/frameos_migrate' || 'sqlite:///migrations/migrate-check.db' }}
+        run: |
+          if [ "${{ matrix.database }}" = "postgres" ]; then
+            PGPASSWORD=frameos psql -h 127.0.0.1 -p 55433 -U frameos -d frameos_test -c 'CREATE DATABASE frameos_migrate'
+          fi
+          cd backend
+          source .venv/bin/activate
+          rm -f migrations/migrate-check.db
+          TEST=1 PYTHONPATH=. alembic upgrade head
+          TEST=1 PYTHONPATH=. alembic downgrade -1
+          TEST=1 PYTHONPATH=. alembic upgrade head
+
       - name: Run Pytest
+        env:
+          # Empty falls through to TestConfig's sqlite default.
+          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://frameos:frameos@127.0.0.1:55433/frameos_test' || '' }}
         run: |
           cd backend
           source .venv/bin/activate
@@ -716,6 +756,51 @@ jobs:
           mkdir -p ../frontend/dist/img
           mkdir -p ../frontend/dist/static
           TEST=1 pytest
+
+  backend-lint:
+    name: Backend lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # The full requirement set, not just ruff+mypy: mypy's verdicts depend
+      # on which third-party packages it can see, and backend/mypy-baseline.txt
+      # was recorded against all of them.
+      - name: Install python dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade uv
+          uv venv
+          uv pip install -r requirements.txt
+
+      # backend/ruff.toml is the rule set; every violation fails.
+      - name: Ruff
+        run: |
+          cd backend
+          source .venv/bin/activate
+          ruff check --output-format github .
+
+      # Ratchet: mypy errors are compared with backend/mypy-baseline.txt —
+      # new ones fail, fixed ones ask for `python tools/mypy_gate.py --update`.
+      - name: Mypy (no new errors)
+        run: |
+          cd backend
+          source .venv/bin/activate
+          python tools/mypy_gate.py
 
   frameos-setup-script:
     name: Standalone setup script
@@ -729,6 +814,11 @@ jobs:
 
       - name: Check shell syntax
         run: sh -n scripts/frameos-setup.sh
+
+      # Pure-Python pins: the script's fallback release equals versions.json's
+      # `docker` entry, and the release CalVer arithmetic never goes backwards.
+      - name: Release pin and CalVer tests
+        run: python3 -m unittest scripts.tests.test_setup_script_defaults tools.tests.test_update_versions -v
 
       - name: Run setup script container tests
         run: python3 -m unittest scripts.tests.test_frameos_setup -v
@@ -779,13 +869,12 @@ jobs:
       - uses: docker/setup-qemu-action@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -961,11 +1050,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.27.0
           run_install: false
 
       - name: Set up Node
@@ -985,7 +1073,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install pico toolchain
         run: |

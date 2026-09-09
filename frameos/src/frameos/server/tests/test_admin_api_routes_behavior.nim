@@ -318,6 +318,21 @@ suite "admin api route behavior":
     check deleteRenamed.status == 200
     check not dirExists(assetsRoot / "renamed")
 
+    # path=%00: a NUL byte used to slip past the "not the assets root" guard
+    # and removeDir() took the whole tree with it.
+    writeFile(assetsRoot / "survivor.txt", "still here")
+    for body in ["path=%00", "path=%2F", "path=%2F%00", "path=nested%00"]:
+      let nulDelete = httpRequest(
+        server.port,
+        "POST",
+        "/api/admin/frames/1/assets/delete",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/x-www-form-urlencoded")],
+        body = body,
+      )
+      check nulDelete.status == 400
+    check dirExists(assetsRoot)
+    check fileExists(assetsRoot / "survivor.txt")
+
 
   test "authenticated admins can still access frame asset endpoints":
     var config = defaultFrameConfig()

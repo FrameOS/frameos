@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   storeSceneVersionImages,
@@ -188,16 +189,55 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   const body = parsed.body;
   const visibility = parseOptionalString(body.visibility);
-  if (visibility === undefined) {
+  // The share link: "rotate" mints a fresh token (the old link dies),
+  // "disable" clears it (no link works until rotated again). A leaked link
+  // used to be fixable only by deleting the scene or making it public.
+  const share = parseOptionalString(body.share);
+  if (visibility === undefined && share === undefined) {
     return jsonError("nothing_to_update", 400);
   }
-  if (!sceneVisibilities.has(visibility)) {
+  if (visibility !== undefined && !sceneVisibilities.has(visibility)) {
     return jsonError("invalid_visibility", 400);
+  }
+  if (share !== undefined && share !== "rotate" && share !== "disable") {
+    return jsonError("invalid_share", 400);
   }
   // A pulled scene stays hidden regardless; flipping visibility on it is
   // confusing at best, so reject it outright.
   if (scene.status === "pulled") {
     return jsonError("scene_pulled", 403);
+  }
+  if (visibility === undefined) {
+    const [updated] = await db
+      .update(storeScenes)
+      .set({
+        shareToken: share === "rotate" ? randomUUID() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(storeScenes.id, scene.id))
+      .returning();
+    if (!updated) {
+      return jsonError("scene_update_failed", 500);
+    }
+    await recordAuditEvent(db, {
+      accountId: session.accountId,
+      actor: {
+        accountId: session.accountId,
+        providerSubject: session.providerSubject,
+      },
+      eventType: "store.share_link_changed",
+      metadata: { action: share, name: scene.name },
+      target: { sceneId: scene.id },
+    });
+    return NextResponse.json({
+      scene: {
+        ...sceneSummary(updated),
+        share_url: updated.shareToken
+          ? `${getScenesBaseUrl()}/s/${updated.slug}?share=${updated.shareToken}`
+          : null,
+      },
+      status: "updated",
+    });
   }
   // Public scenes are quota-free, so making one private moves its bytes
   // back onto the meter — refuse the flip when it would land the account

@@ -4,6 +4,7 @@ import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { zlibSync } from "fflate";
 import { logWarn } from "./log";
+import { addressIsPrivateSource } from "./ssrf";
 
 // Headless scene rendering on the server: the same frameos-wasm bundle the
 // browser live preview runs (public/frameos-wasm, built with `node` in its
@@ -517,22 +518,13 @@ main().catch((error) => {
 }
 
 // Runs in a child Node per HTTP request: resolves the host first and refuses
-// anything private before a byte leaves the box; caps the body at 10 MB.
+// anything private before a byte leaves the box; caps the body at 10 MB. The
+// address classifier is ssrf.ts's own source, spliced in — one guard.
 const fetchChildScript = String.raw`
 const dns = require("node:dns/promises");
 const { isIP } = require("node:net");
 const chunks = [];
-function addressIsPrivate(address) {
-  const plain = address.split("%")[0] || address;
-  if (isIP(plain) === 4) {
-    const [a = -1, b = -1] = plain.split(".").map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
-  }
-  const lower = plain.toLowerCase();
-  return lower === "::" || lower === "::1" || /^fe[89ab]/.test(lower) || lower.startsWith("fc") ||
-    lower.startsWith("fd") || lower.startsWith("::ffff:");
-}
+${addressIsPrivateSource}
 async function hostIsBlocked(hostname) {
   let addresses;
   if (isIP(hostname)) {

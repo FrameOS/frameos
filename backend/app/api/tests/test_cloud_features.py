@@ -196,7 +196,7 @@ async def test_feature_change_cancel(async_client, db, scope_calls):
 
 @pytest.mark.asyncio
 async def test_logout_returns_cloud_logout_url_for_cloud_users(async_client, db):
-    link = make_connected_link(db)
+    make_connected_link(db)
     from app.models.user import User
 
     user = db.query(User).filter_by(email="test@example.com").first()

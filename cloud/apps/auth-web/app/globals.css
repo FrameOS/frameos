@@ -1334,6 +1334,22 @@ a.tag-pill--active:hover {
 
 .notice__actions {
   margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* A private scene's sharing link with its owner controls (ShareLinkControls). */
+.share-link {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.share-link__url {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 13px;
 }
 
 .copy-field {

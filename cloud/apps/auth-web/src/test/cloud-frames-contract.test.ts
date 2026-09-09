@@ -2,7 +2,9 @@
 // walker of the verb contract. The Linux runtime (test_cloud_contract.nim)
 // and the ESP32 firmware (test_fos_cloud_contract.c) run the same file —
 // three implementations, one verdict per case.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   allContractSettingKeys,
@@ -31,9 +33,39 @@ interface ContractSettingSpec {
   profiles: Record<string, unknown>;
   parity?: { only: string; why: string };
 }
+interface ContractVerbSpec {
+  type: string;
+  scope: string | null;
+  profiles: string[];
+  parity?: { only: string; why: string };
+}
 const contract = JSON.parse(
   readFileSync(new URL("../../../../../docs/cloud-frames-contract.json", import.meta.url), "utf8"),
-) as { profiles: string[]; settings: Record<string, ContractSettingSpec> };
+) as { profiles: string[]; settings: Record<string, ContractSettingSpec>; verbs: ContractVerbSpec[] };
+
+// Every non-test, non-generated source the cloud queues commands from. A
+// verb is "issued" when some code path names it as a command type.
+function providerSources(): string[] {
+  const roots = [
+    new URL("../../app/api/", import.meta.url),
+    new URL("../lib/", import.meta.url),
+    new URL("../../../frame-hub/src/", import.meta.url),
+    new URL("../../../../packages/mcp/src/", import.meta.url),
+  ];
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules" && entry.name !== "test") walk(full);
+      } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$|\.gen\.ts$/.test(entry.name)) {
+        out.push(readFileSync(full, "utf8"));
+      }
+    }
+  };
+  for (const root of roots) walk(fileURLToPath(root));
+  return out;
+}
 
 describe("settings parity between the device planes", () => {
   // docs/convergence-todo.md item 6: a key one plane accepts and the other
@@ -60,6 +92,49 @@ describe("settings parity between the device planes", () => {
     }
     expect(counts.linux ?? 0).toBeLessThanOrEqual(8);
     expect(counts.esp32 ?? 0).toBeLessThanOrEqual(7);
+  });
+});
+
+describe("verb parity between the device planes", () => {
+  // Same rule as the settings keys: a verb one plane refuses with
+  // unsupported_verb must say why, and a both-planes verb must not.
+  it("every verb names its profiles, single-plane ones with a parity reason", () => {
+    const every = new Set(contract.profiles);
+    for (const verb of contract.verbs) {
+      expect(verb.profiles.length, verb.type).toBeGreaterThan(0);
+      for (const profile of verb.profiles) expect(every.has(profile), `${verb.type}: ${profile}`).toBe(true);
+      if (verb.profiles.length !== every.size) {
+        expect(verb.parity, `${verb.type} is single-plane without a parity entry`).toBeDefined();
+        expect(verb.profiles, verb.type).toEqual([verb.parity!.only]);
+        expect(verb.parity!.why.trim().length, verb.type).toBeGreaterThanOrEqual(20);
+      } else {
+        expect(verb.parity, `${verb.type} is both-planes and must not carry parity`).toBeUndefined();
+      }
+    }
+  });
+
+  // The other half of "no dead verbs": every verb the planes implement is
+  // actually issued by some provider code path — either a dedicated one
+  // (`type: "get_state"`) or the generic owner command route's allowlist.
+  // get_state and get_logs sat in the table for weeks with both planes
+  // implementing and testing them and nothing on the cloud ever sending one.
+  it("every contract verb is issued by the cloud", () => {
+    const sources = providerSources();
+    expect(sources.length).toBeGreaterThan(20);
+    // A quoted verb name in provider source: `type: "reboot"`, or the verb
+    // handed to a helper (`runAssetWriteCommand(db, …, "asset_mkdir", …)`).
+    // Backticks are deliberately not quotes here — prose in comments cites
+    // verbs that way, and a comment is not an issuer.
+    const literal = (verb: string) =>
+      sources.some((source) => new RegExp(`["']${verb}["']`).test(source));
+    for (const verb of contract.verbs) {
+      const issued = literal(verb.type) || allowedFrameCommandTypes.has(verb.type);
+      expect(issued, `${verb.type} is implemented by every device plane and sent by nobody`).toBe(true);
+    }
+    // The two the review found dead now have dedicated paths (the /states
+    // route and the Logs panel's ring pull), not just allowlist entries.
+    expect(literal("get_state")).toBe(true);
+    expect(literal("get_logs")).toBe(true);
   });
 });
 

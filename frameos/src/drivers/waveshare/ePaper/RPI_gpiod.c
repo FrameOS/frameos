@@ -38,22 +38,41 @@
 #include <unistd.h>
 #include <gpiod.h>
 
+/* Read /proc/cpuinfo directly instead of popen()-ing a shell: popen() forks
+ * the whole process, which the main ePaper HAL removed for a documented
+ * deadlock (the runtime is multi-threaded by the time a driver initialises).
+ * A missing file reads as "not a Pi 5", the same as the shell path did. */
+static int DEV_File_Contains_N(const char *path, const char *needle, size_t cap)
+{
+    FILE *fp = fopen(path, "r");
+    if (fp == NULL) {
+        return 0;
+    }
+    char *buffer = (char *)malloc(cap);
+    if (buffer == NULL) {
+        fclose(fp);
+        return 0;
+    }
+    size_t total = 0;
+    while (total < cap - 1) {
+        size_t got = fread(buffer + total, 1, cap - 1 - total, fp);
+        if (got == 0) break;
+        total += got;
+    }
+    fclose(fp);
+    buffer[total] = '\0';
+    int found = strstr(buffer, needle) != NULL;
+    free(buffer);
+    return found;
+}
+
 struct gpiod_chip *gpiochip;
 struct gpiod_line *gpioline;
 int ret;
 
 int GPIOD_Export()
-{   
-    char buffer[NUM_MAXBUF];
-    FILE *fp;
-
-    fp = popen("cat /proc/cpuinfo | grep 'Raspberry Pi 5'", "r");
-    if (fp == NULL) {
-        GPIOD_Debug("It is not possible to determine the model of the Raspberry PI\n");
-        return -1;
-    }
-
-    if(fgets(buffer, sizeof(buffer), fp) != NULL)
+{
+    if (DEV_File_Contains_N("/proc/cpuinfo", "Raspberry Pi 5", 64 * 1024))
     {
         gpiochip = gpiod_chip_open("/dev/gpiochip4");
         if (gpiochip == NULL)

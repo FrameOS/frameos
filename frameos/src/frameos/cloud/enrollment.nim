@@ -203,11 +203,45 @@ proc enrollRequest(providerUrl: string, accessToken: string,
     payload = %*{}
   (response.code, payload)
 
+proc deviceLocalOrigin*(frameConfig: FrameConfig): string {.gcsafe.} =
+  ## The origin a browser on the LAN reaches this frame's admin panel at, as
+  ## far as the device itself can tell: its own hostname (`frameHost`, the
+  ## `<hostname>.local` the setup portal writes) and port. Recorded on the
+  ## provider at claim-token enrollment so "Sign in with FrameOS Cloud" has
+  ## a redirect target — the provider pins the login redirect to the linked
+  ## client's `local_origin` and refuses when there is none, which is what
+  ## every claim-token-enrolled frame ran into until this was sent (the
+  ## device flow records the browser's own origin instead, see
+  ## device_flow.nim). "" when the device knows nothing better than the
+  ## "localhost" placeholder.
+  if frameConfig == nil:
+    return ""
+  var host = frameConfig.frameHost.strip().toLowerAscii()
+  if host.len == 0 or host in ["localhost", "127.0.0.1", "::1", "[::1]"]:
+    var hostname = ""
+    {.gcsafe.}:
+      hostname = systemHostname().strip().toLowerAscii()
+    if hostname.len == 0 or hostname == "localhost":
+      return ""
+    host = if hostname.contains('.'): hostname else: hostname & ".local"
+  if host.contains(':') and not host.startsWith("["):
+    host = "[" & host & "]"
+  let port = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
+  let scheme =
+    if frameConfig.httpsProxy != nil and frameConfig.httpsProxy.enable: "https" else: "http"
+  if (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+    scheme & "://" & host
+  else:
+    scheme & "://" & host & ":" & $port
+
 proc enrollManagedFrame*(providerUrl, claimToken, bearerToken, name: string,
-                         frameConfig: FrameConfig): EnrollOutcome {.gcsafe.} =
+                         frameConfig: FrameConfig,
+                         localOrigin = ""): EnrollOutcome {.gcsafe.} =
   ## Enrolls this frame as cloud-managed. Exactly one of claimToken (flow A)
   ## or bearerToken (flow B) must be non-empty. On success the managed link
   ## fields are persisted into cloud_link.json under cloudLinkLock.
+  ## `localOrigin` (flow A) is sent as `local_origin` and remembered in the
+  ## link state — the redirect target of the cloud sign-in handoff.
   {.gcsafe.}:
     let normalizedUrl = normalizeProviderUrl(providerUrl)
     if normalizedUrl.len == 0:
@@ -230,6 +264,8 @@ proc enrollManagedFrame*(providerUrl, claimToken, bearerToken, name: string,
     }
     if claimToken.len > 0:
       body["claim_token"] = %claimToken
+      if localOrigin.len > 0:
+        body["local_origin"] = %localOrigin
     var frameName = name
     if frameName.len == 0:
       frameName = frameDisplayName(frameConfig)
@@ -273,6 +309,8 @@ proc enrollManagedFrame*(providerUrl, claimToken, bearerToken, name: string,
           state["token_reference"] = response["token_reference"]
         if response{"linked_client_id"} != nil:
           state["linked_client_id"] = response["linked_client_id"]
+        if localOrigin.len > 0:
+          state["local_origin"] = %localOrigin
       else:
         # Flow B upgrades the existing device-flow link in place.
         if state{"status"}.getStr("") != "connected":
@@ -300,7 +338,8 @@ proc enrollWithClaimTokenFromBoot*(claimToken, providerUrl, name: string,
   ## ESP32 flasher, setup portal). Same as flow A; exists so callers outside
   ## this module have a stable name to call with the three personalization
   ## values.
-  enrollManagedFrame(providerUrl, claimToken, "", name, frameConfig)
+  enrollManagedFrame(providerUrl, claimToken, "", name, frameConfig,
+                     localOrigin = deviceLocalOrigin(frameConfig))
 
 proc shredFile(path: string) =
   ## Overwrite a secret-bearing file in place. Boot personalization files land

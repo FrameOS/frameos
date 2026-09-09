@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import JSON
 from sqlalchemy import ForeignKey, LargeBinary, Integer, String, Text
 from sqlalchemy.orm import mapped_column
 from app.database import Base

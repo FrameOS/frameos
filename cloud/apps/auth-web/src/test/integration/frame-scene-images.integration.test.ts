@@ -30,8 +30,14 @@ import { validateSceneZip } from "../../lib/store";
 import { readBlob } from "../../lib/blobs";
 import { imageSetForVersion, registerStoreImage } from "../../lib/store-images";
 import { sceneSnapshotAssetPath } from "../../lib/frame-asset-cache";
+import { maxAssetFilesPerFrame, storeFrameAssetFile } from "../../lib/frames";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
-import { resetSceneImageCacheForTests } from "../../lib/scene-images";
+import {
+  maxPendingSceneCoverBytes,
+  maxPendingSceneCoverImageBytes,
+  maxPendingSceneCoverScenes,
+  resetSceneImageCacheForTests,
+} from "../../lib/scene-images";
 import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
 
@@ -873,6 +879,147 @@ describe("POST /api/frames/{id}/scene_images/{sceneId}", () => {
       .from(frameAssetFiles)
       .where(eq(frameAssetFiles.frameId, frame.id));
     expect(rows).toEqual([]);
+  });
+
+  // The upload lands in the same per-frame LRU cache as the device's real
+  // snapshots (64 rows). Covers for scenes no assignment owns are bounded
+  // on their own — otherwise 32 posts under made-up ids, two rows each,
+  // evicted every real snapshot the device had streamed.
+  it("never lets covers for unassigned scenes evict the device's real snapshots", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const store = await createStoreScene(accountId, {
+      name: "Real scene",
+      runtimeSceneIds: ["real-clock"],
+    });
+    await assignScene(frame.id, store.id);
+    // What the device streamed back for its assigned scene.
+    const realPath = sceneSnapshotAssetPath("real-clock");
+    for (const thumb of [false, true]) {
+      await storeFrameAssetFile(db, frame.id, {
+        content: opaquePng(),
+        contentType: "image/png",
+        path: realPath,
+        thumb,
+      });
+    }
+
+    // Twice the cache's row cap worth of junk ids.
+    for (let i = 0; i < maxAssetFilesPerFrame; i++) {
+      const response = await postSceneImage(
+        postBytesRequest(
+          `/api/frames/${frame.id}/scene_images/junk-${i}`,
+          opaquePng(),
+        ),
+        routeParams(frame.id, `junk-${i}`),
+      );
+      expect(response.status).toBe(201);
+    }
+
+    const rows = await db
+      .select({ path: frameAssetFiles.path })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    const paths = new Set(rows.map((row) => row.path));
+    expect(paths.has(realPath)).toBe(true);
+    // The newest pending covers survive, the older ones went first.
+    const pending = [...paths].filter((path) => path !== realPath);
+    expect(pending).toHaveLength(maxPendingSceneCoverScenes);
+    for (let i = maxAssetFilesPerFrame - maxPendingSceneCoverScenes; i < maxAssetFilesPerFrame; i++) {
+      expect(paths.has(sceneSnapshotAssetPath(`junk-${i}`))).toBe(true);
+    }
+    // And the real snapshot still serves.
+    const image = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/real-clock`),
+      routeParams(frame.id, "real-clock"),
+    );
+    expect(image.status).toBe(200);
+  });
+
+  it("bounds pending covers by bytes as well, and refuses one that alone would not fit", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    // A cover just under the per-image bound: two of them fill the budget.
+    const big = Buffer.concat([
+      opaquePng(),
+      Buffer.alloc(maxPendingSceneCoverImageBytes - opaquePng().length),
+    ]);
+    expect(big.length).toBe(maxPendingSceneCoverImageBytes);
+    for (const id of ["first", "second", "third"]) {
+      const response = await postSceneImage(
+        postBytesRequest(`/api/frames/${frame.id}/scene_images/${id}`, big),
+        routeParams(frame.id, id),
+      );
+      expect(response.status).toBe(201);
+    }
+    const rows = await db
+      .select({ path: frameAssetFiles.path, sizeBytes: frameAssetFiles.sizeBytes })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    const total = rows.reduce((sum, row) => sum + row.sizeBytes, 0);
+    expect(total).toBeLessThanOrEqual(maxPendingSceneCoverBytes);
+    const paths = new Set(rows.map((row) => row.path));
+    expect(paths.has(sceneSnapshotAssetPath("first"))).toBe(false);
+    expect(paths.has(sceneSnapshotAssetPath("second"))).toBe(true);
+    expect(paths.has(sceneSnapshotAssetPath("third"))).toBe(true);
+
+    // Over the per-image bound: refused up front, and nothing evicted for it.
+    const tooBig = Buffer.concat([big, Buffer.alloc(1)]);
+    const refused = await postSceneImage(
+      postBytesRequest(`/api/frames/${frame.id}/scene_images/fourth`, tooBig),
+      routeParams(frame.id, "fourth"),
+    );
+    expect(refused.status).toBe(413);
+    expect(await refused.json()).toEqual({
+      error: "image_too_large",
+      max_bytes: maxPendingSceneCoverImageBytes,
+    });
+    const after = await db
+      .select({ path: frameAssetFiles.path })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    expect(new Set(after.map((row) => row.path))).toEqual(paths);
+  });
+
+  it("stores a cover for an assigned scene as a real snapshot, outside the pending bound", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const store = await createStoreScene(accountId, {
+      name: "Assigned scene",
+      runtimeSceneIds: ["assigned-clock"],
+    });
+    await assignScene(frame.id, store.id);
+    // Fill the pending bound first...
+    for (let i = 0; i < maxPendingSceneCoverScenes; i++) {
+      await postSceneImage(
+        postBytesRequest(`/api/frames/${frame.id}/scene_images/pending-${i}`, opaquePng()),
+        routeParams(frame.id, `pending-${i}`),
+      );
+    }
+    // ...then a cover for the assigned scene, by runtime id and by store uuid:
+    // neither evicts a pending cover, and neither is refused for size the
+    // way a pending one would be.
+    const big = Buffer.concat([
+      opaquePng(),
+      Buffer.alloc(maxPendingSceneCoverImageBytes + 1 - opaquePng().length),
+    ]);
+    for (const id of ["assigned-clock", store.id]) {
+      const response = await postSceneImage(
+        postBytesRequest(`/api/frames/${frame.id}/scene_images/${id}`, big),
+        routeParams(frame.id, id),
+      );
+      expect(response.status).toBe(201);
+    }
+    const rows = await db
+      .select({ path: frameAssetFiles.path })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    const paths = new Set(rows.map((row) => row.path));
+    for (let i = 0; i < maxPendingSceneCoverScenes; i++) {
+      expect(paths.has(sceneSnapshotAssetPath(`pending-${i}`))).toBe(true);
+    }
+    expect(paths.has(sceneSnapshotAssetPath("assigned-clock"))).toBe(true);
+    expect(paths.has(sceneSnapshotAssetPath(store.id))).toBe(true);
   });
 
   it("is scoped to the account's own frames", async () => {

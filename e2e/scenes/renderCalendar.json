@@ -1,0 +1,110 @@
+{
+  "id": "a17433d6-f0a1-5824-a4ec-8f9959f6f92d",
+  "name": "Calendar",
+  "settings": {
+    "backgroundColor": "#ffffff",
+    "refreshInterval": 3600
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "e6676a08-3137-5554-8250-051521e75051",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "61541dbe-2cd1-5d62-ac69-3a1f300ece24",
+      "type": "app",
+      "position": {
+        "x": 340,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "2"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "3aa76614-acd3-5171-96bc-5083ff67aacc",
+      "type": "app",
+      "position": {
+        "x": 680,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/calendar",
+        "config": {
+          "events": "[{\"summary\": \"Dentist\", \"startTime\": \"2024-03-05T09:30:00\", \"endTime\": \"2024-03-05T10:00:00\"}, {\"summary\": \"Conference\", \"startTime\": \"2024-03-12\", \"endTime\": \"2024-03-14\", \"allDay\": true}, {\"summary\": \"Lunch with Ada\", \"startTime\": \"2024-03-20T12:00:00\", \"endTime\": \"2024-03-20T13:00:00\"}, {\"summary\": \"Standup\", \"startTime\": \"2024-03-20T09:00:00\", \"endTime\": \"2024-03-20T09:15:00\"}, {\"summary\": \"Birthday\", \"startTime\": \"2024-03-28\"}]",
+          "year": "2024",
+          "month": "3",
+          "theme": "light",
+          "eventColorCount": "2",
+          "scale": "60"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "d476fcf4-f08a-591e-bca6-d95f345a2767",
+      "type": "app",
+      "position": {
+        "x": 1020,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/calendar",
+        "config": {
+          "events": "[{\"summary\": \"Dentist\", \"startTime\": \"2024-03-05T09:30:00\", \"endTime\": \"2024-03-05T10:00:00\"}, {\"summary\": \"Conference\", \"startTime\": \"2024-03-12\", \"endTime\": \"2024-03-14\", \"allDay\": true}, {\"summary\": \"Lunch with Ada\", \"startTime\": \"2024-03-20T12:00:00\", \"endTime\": \"2024-03-20T13:00:00\"}, {\"summary\": \"Standup\", \"startTime\": \"2024-03-20T09:00:00\", \"endTime\": \"2024-03-20T09:15:00\"}, {\"summary\": \"Birthday\", \"startTime\": \"2024-03-28\"}]",
+          "year": "2024",
+          "month": "3",
+          "theme": "dark",
+          "startWeekOnMonday": "false",
+          "monthYearPosition": "bottom",
+          "showEventTimes": "false",
+          "scale": "60"
+        }
+      },
+      "width": 310,
+      "height": 160
+    }
+  ],
+  "edges": [
+    {
+      "id": "bf81b453-b9f5-565d-a84e-cf6c10c841f0",
+      "source": "e6676a08-3137-5554-8250-051521e75051",
+      "sourceHandle": "next",
+      "target": "61541dbe-2cd1-5d62-ac69-3a1f300ece24",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "b8b42a1a-5d1a-5c3b-9eba-c6ecbb1a33a2",
+      "source": "61541dbe-2cd1-5d62-ac69-3a1f300ece24",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "3aa76614-acd3-5171-96bc-5083ff67aacc",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "2968147a-6a13-59c0-a691-43559aeeb74b",
+      "source": "61541dbe-2cd1-5d62-ac69-3a1f300ece24",
+      "sourceHandle": "field/render_functions[2][1]",
+      "target": "d476fcf4-f08a-591e-bca6-d95f345a2767",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ]
+}

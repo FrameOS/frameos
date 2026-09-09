@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.frame import (
-    frame_has_shell_access,
+    frame_has_shell_access,  # noqa: F401 — re-exported for app.api.frames
     Frame,
     compact_timezone_updater,
     delete_frame,
@@ -26,6 +26,7 @@ from app.models.frame import (
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
     record_successful_deploy,
+    server_scheme_for_frame,
     update_frame,
 )
 from app.models.log import new_log
@@ -1345,7 +1346,7 @@ async def _push_frame_sync_metadata(
 # not: the backend just minted the server credentials it is about to write TO
 # the device, and the device's own view of them (empty, or a previous
 # backend's) must not clobber that.
-ADOPT_SKIPPED_SYNC_KEYS = ("server_host", "server_port", "server_send_logs")
+ADOPT_SKIPPED_SYNC_KEYS = ("server_host", "server_port", "server_scheme", "server_send_logs")
 # A Buildroot device that predates reporting its board (< 2026.9.11) is most
 # likely the common 64-bit image; the platform is editable in frame settings.
 ADOPT_DEFAULT_BUILDROOT_PLATFORM = "raspberry-pi-64"
@@ -1401,6 +1402,16 @@ def _adopted_frame_name(remote_frame: dict[str, Any]) -> str:
     if frame_host.endswith(".local"):
         frame_host = frame_host[: -len(".local")]
     return frame_host
+
+
+def _adopt_server_scheme(typed_address: str, requested: str | None) -> str:
+    """A scheme typed into the address wins ("https://backend:8443"), then the
+    form's own scheme field, then plain http — never a guess from the port."""
+    text = (typed_address or "").strip().lower()
+    for scheme in ("https", "http"):
+        if text.startswith(f"{scheme}://"):
+            return scheme
+    return requested if requested in ("http", "https") else "http"
 
 
 def _split_adopt_address(value: str, default_port: int) -> tuple[str, int]:
@@ -1464,6 +1475,7 @@ async def adopt_standalone_frame(
     if not host:
         _bad_request("A frame host is required")
     server_host, server_port = _split_adopt_address(data.server_host, data.server_port)
+    server_scheme = _adopt_server_scheme(data.server_host, data.server_scheme)
     if not server_host:
         _bad_request("A server host is required (the address the frame will reach this backend on)")
     if server_host.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
@@ -1500,7 +1512,7 @@ async def adopt_standalone_frame(
         redis,
         data.name or _adopted_frame_name(remote_frame) or host,
         host,
-        f"{server_host}:{server_port}",
+        f"{server_scheme}://{server_host}:{server_port}",
         device=remote_frame.get("device"),
         interval=remote_frame.get("interval"),
         project_id=project_id,
@@ -1583,6 +1595,7 @@ async def adopt_standalone_frame(
         write_back: dict[str, Any] = {
             "server_host": frame.server_host,
             "server_port": frame.server_port,
+            "server_scheme": server_scheme_for_frame(frame),
             "server_api_key": frame.server_api_key,
             "server_send_logs": True,
         }

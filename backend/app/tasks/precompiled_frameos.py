@@ -15,6 +15,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED
+from app.config import config
 from app.codegen.release_drivers_nim import release_driver_specs
 from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
@@ -342,7 +343,12 @@ def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
         member_path = (path / member.name).resolve()
         if os.path.commonpath([str(root), str(member_path)]) != str(root):
             raise RuntimeError("Tar file attempted to escape target directory")
-    tar.extractall(path=path, filter="data")
+    # The name check above cannot see where a symlink or hardlink member
+    # points; the ``data`` filter refuses those at extraction time.
+    try:
+        tar.extractall(path=path, filter="data")
+    except tarfile.FilterError as exc:
+        raise RuntimeError(f"Tar file attempted to escape target directory: {exc}") from exc
 
 
 def _find_release_artifact_root(extract_dir: Path, target: str, binary_name: str) -> Path | None:

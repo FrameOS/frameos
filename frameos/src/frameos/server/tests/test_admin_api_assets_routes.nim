@@ -177,6 +177,37 @@ suite "Server admin api asset helpers":
     expect ValueError:
       discard saveAssetUploadPayload("../escape", "nope.txt", "bad")
 
+  test "a symlink inside the assets root cannot point the admin routes outside it":
+    let tempRoot = getTempDir() / "frameos-api-asset-symlinks"
+    let outside = getTempDir() / "frameos-api-asset-symlinks-outside"
+    removeDir(tempRoot)
+    removeDir(outside)
+    createDir(tempRoot)
+    createDir(outside)
+    writeFile(outside / "secret.txt", "not yours")
+    globalFrameConfig = baseConfig(tempRoot)
+    createSymlink(outside, tempRoot / "escape")
+    createSymlink(outside / "secret.txt", tempRoot / "leak.txt")
+    createDir(tempRoot / "real")
+    createSymlink(tempRoot / "real", tempRoot / "alias")
+
+    # Lexically inside, really outside: refused whether the target exists
+    # (a read) or is about to be created (a write).
+    expect ValueError:
+      discard resolveAssetPath("escape/secret.txt")
+    expect ValueError:
+      discard resolveAssetPath("escape/new.txt")
+    expect ValueError:
+      discard resolveAssetPath("leak.txt")
+    expect ValueError:
+      discard resolveAssetPath("escape")
+    # A link that stays inside the root is fine, and so is a fresh path.
+    check resolveAssetPath("alias/photo.png") == tempRoot / "alias" / "photo.png"
+    check resolveAssetPath("real/photo.png") == tempRoot / "real" / "photo.png"
+    check resolveAssetPath("brand/new/dir/file.txt") == tempRoot / "brand" / "new" / "dir" / "file.txt"
+    removeDir(tempRoot)
+    removeDir(outside)
+
   test "chunked upload helpers append and finalize within scoped assets root":
     let tempRoot = getTempDir() / "frameos-api-chunked-assets"
     createDir(tempRoot)
@@ -231,3 +262,22 @@ suite "Server admin api asset helpers":
     cleanupStaleAssetUploadChunks(maxAgeSeconds = -60)
     expect OSError:
       discard finishAssetUploadChunks("cloud-up-old", "old.bin")
+
+  test "a NUL byte or a bare slash never resolves to the assets root":
+    let tempRoot = getTempDir() / "frameos-api-asset-nul"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    writeFile(tempRoot / "keep.txt", "still here")
+    globalFrameConfig = baseConfig(tempRoot)
+
+    # "\0" used to normalise to "<root>/\0", pass the lexical checks as a
+    # child of the root, and be seen by rmdir as the root itself.
+    for bad in ["\0", "/\0", "sub\0dir", "a\x01b", "\x7f", "/", "//", "./", " / "]:
+      expect ValueError:
+        discard resolveAssetPath(bad)
+      expect ValueError:
+        deleteAssetEntry(bad)
+      check getAssetPayload(bad, false).status == Http400
+    check dirExists(tempRoot)
+    check fileExists(tempRoot / "keep.txt")
+    removeDir(tempRoot)

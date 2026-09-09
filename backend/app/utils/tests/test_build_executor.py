@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.utils.build_executor import DockerMount, ModalBuildExecutor
+from app.utils.build_executor import ModalBuildExecutor
 from app.utils.modal_sandbox import ModalSandboxConfig
 
 

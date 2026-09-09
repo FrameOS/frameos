@@ -4,6 +4,7 @@ import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-
 import {
   fetchLatestRelease,
   findOtaAsset,
+  otaPlatformMatchesHardware,
   streamablePlatforms,
   devFirmwareOverride,
   streamDevFirmwareResponse,
@@ -53,6 +54,10 @@ export async function GET(
   const platform = request.nextUrl.searchParams.get("platform");
   if (!platform || !streamablePlatforms.has(platform)) {
     return jsonError("invalid_platform", 400);
+  }
+  // The device chooses the image; the frame row says what chip it is.
+  if (!otaPlatformMatchesHardware(platform, auth.frame.hardware)) {
+    return jsonError("platform_mismatch", 409, { platform });
   }
 
   const dev = await devFirmwareOverride(platform);

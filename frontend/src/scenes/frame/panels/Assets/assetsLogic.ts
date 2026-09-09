@@ -249,6 +249,13 @@ async function responseErrorMessage(response: Response, fallback: string): Promi
   }
 }
 
+/** One task toast that fails immediately: the asset panel's error surface. */
+function reportAssetFailure(frameId: FrameId, title: string, detail: string): void {
+  const taskId = `asset-op:${frameId}:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  longRunningTasksModel.actions.startTask({ id: taskId, frameId, kind: 'upload', title, detail })
+  longRunningTasksModel.actions.taskFailed({ taskId, frameId, kind: 'upload', detail })
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
@@ -914,6 +921,9 @@ export const assetsLogic = kea<assetsLogicType>([
       }
       input.click()
     },
+    // Delete, rename and mkdir used to fail completely silently (a
+    // console.error nobody sees) while uploads in this same file toast; now
+    // a failure lands in the same task toasts.
     deleteAsset: async ({ path }) => {
       try {
         const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/delete'), {
@@ -921,11 +931,12 @@ export const assetsLogic = kea<assetsLogicType>([
           body: new URLSearchParams({ path }),
         })
         if (!response.ok) {
-          throw new Error('Failed to delete asset')
+          throw new Error(await responseErrorMessage(response, 'Failed to delete asset'))
         }
         actions.assetDeleted(path, values.frame.assets_path)
       } catch (error) {
         console.error(error)
+        reportAssetFailure(props.frameId, 'Deleting asset', errorMessage(error, 'Failed to delete asset'))
       }
     },
     renameAsset: async ({ oldPath, newPath }) => {
@@ -935,11 +946,12 @@ export const assetsLogic = kea<assetsLogicType>([
           body: new URLSearchParams({ src: oldPath, dst: newPath }),
         })
         if (!response.ok) {
-          throw new Error('Failed to rename asset')
+          throw new Error(await responseErrorMessage(response, 'Failed to rename asset'))
         }
         actions.assetRenamed(oldPath, newPath, values.frame.assets_path)
       } catch (error) {
         console.error(error)
+        reportAssetFailure(props.frameId, 'Renaming asset', errorMessage(error, 'Failed to rename asset'))
       }
     },
     createFolder: async ({ path }) => {
@@ -949,11 +961,12 @@ export const assetsLogic = kea<assetsLogicType>([
           body: new URLSearchParams({ path }),
         })
         if (!response.ok) {
-          throw new Error('Failed to create folder')
+          throw new Error(await responseErrorMessage(response, 'Failed to create folder'))
         }
         actions.loadAssets()
       } catch (error) {
         console.error(error)
+        reportAssetFailure(props.frameId, 'Creating folder', errorMessage(error, 'Failed to create folder'))
       }
     },
   })),

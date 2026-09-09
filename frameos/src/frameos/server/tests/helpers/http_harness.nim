@@ -121,7 +121,7 @@ proc startRouterServer*(port: int): TestServer =
   let adminConnectionsState = initConnectionsState()
   let router = buildRouter(connectionsState, adminConnectionsState)
   result.port = port
-  result.server = newServer(router.toHandler(), workerThreads = 1)
+  result.server = newServer(buildRouterHandler(router), workerThreads = 1)
   createThread(result.thread, serverThread, (result.server, Port(port)))
   sleep(150)
 

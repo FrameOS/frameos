@@ -18,7 +18,7 @@ import { validateScenePayload } from "../../../../src/lib/ai/scene-utils";
 import { captureSceneConversion } from "../../../../src/lib/ai/telemetry";
 import { meterAiUsage, type CredentialSource } from "../../../../src/lib/billing";
 import { csrfResponse } from "../../../../src/lib/csrf";
-import { jsonError } from "../../../../src/lib/device-flow";
+import { jsonError, readBoundedJsonValue } from "../../../../src/lib/device-flow";
 import { hasDatabaseUrl } from "../../../../src/lib/env";
 import { logWarn } from "../../../../src/lib/log";
 import { checkRateLimit, clientKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
@@ -38,6 +38,8 @@ export const maxDuration = 300;
 const maxScenesPerRequest = 20;
 const maxScenesRendered = 3;
 const maxPayloadBytes = 3 * 1024 * 1024;
+// The whole request: the scenes plus the wrapper and an optional key.
+const maxBodyBytes = 4 * 1024 * 1024;
 const renderTimeoutMs = 20_000;
 
 // The Nim → JavaScript scene converter as a public API
@@ -67,8 +69,14 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   const requestId = globalThis.crypto.randomUUID();
 
-  // Not readJsonObject: a bare scenes.json array is a valid body here.
-  const raw: unknown = await request.json().catch(() => undefined);
+  // Not readJsonObject: a bare scenes.json array is a valid body here — but
+  // the same byte bound, read before the parse; the scenes check below is
+  // on the already-parsed value and bounded nothing.
+  const bounded = await readBoundedJsonValue(request, maxBodyBytes);
+  if (bounded.response) {
+    return bounded.response;
+  }
+  const raw: unknown = bounded.value;
   const body = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const input = Array.isArray(raw) ? raw : body.scene !== undefined ? body.scene : body.scenes !== undefined ? { scenes: body.scenes } : body;
   let unwrapped: ReturnType<typeof unwrapScenes>;

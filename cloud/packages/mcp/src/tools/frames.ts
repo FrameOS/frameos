@@ -34,7 +34,7 @@ const settingsGroups = z
   .max(16)
   .optional()
   .describe(
-    "Service-settings groups to GRANT this scene (e.g. [\"unsplash\", \"openAI\"]). Only groups the scene declares take effect. Omit to keep an assigned scene's grant, or to grant a new one nothing.",
+    "Service-settings groups to GRANT this scene (e.g. [\"unsplash\", \"openAI\"]). Only groups the scene declares take effect. Omit to keep an installed scene's grant, or to grant a new one nothing.",
   );
 
 function compactFrame(frame: FrameSummary) {
@@ -76,7 +76,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "List the account's cloud-managed frames with their status (pending/active/revoked), whether they are connected right now, last seen / next wake time, platform, firmware version and whether they hold the assigned scenes (in_sync).",
+        "List the account's cloud-managed frames with their status (pending/active/revoked), whether they are connected right now, last seen / next wake time, platform, firmware version and whether they hold the installed scenes (in_sync).",
       inputSchema: {},
     },
     async () =>
@@ -97,7 +97,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Everything the cloud knows about one frame: settings (interval, rotate, timezone, ESP32 power settings…), schedule, assigned scenes state, hardware, last metrics and last reported state, telemetry/service-settings switches.",
+        "Everything the cloud knows about one frame: settings (interval, rotate, timezone, ESP32 power settings…), schedule, installed scenes and their sync state, hardware, last metrics and last reported state, telemetry/service-settings switches.",
       inputSchema: { frame_id: frameId },
     },
     async ({ frame_id }) =>
@@ -122,7 +122,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: true },
       description:
-        "Permanently delete a frame from the account: revokes its link and removes its logs, metrics, commands and scene assignments. The device itself keeps running whatever it last rendered. Requires confirm=true.",
+        "Permanently delete a frame from the account: revokes its link and removes its logs, metrics, commands and installed-scene list. The device itself keeps running whatever it last rendered. Requires confirm=true.",
       inputSchema: {
         confirm: z.literal(true).describe("Must be true — this cannot be undone."),
         frame_id: frameId,
@@ -150,7 +150,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_confirm",
     {
       description:
-        "Confirm a frame that enrolled with a multi-use claim token and is waiting in `pending` status; makes it active and pushes the provisioning scenes. NOTE: this adopts whatever device booted with the code and lets it pull the account's service keys, so it is a sudo-mode action — it needs a fresh browser sign-in and is refused for API tokens (reauth_required). Ask the owner to confirm at /frames.",
+        "Confirm a frame that enrolled with a multi-use claim token and is waiting in `pending` status; makes it active and installs the provisioning scenes. NOTE: this adopts whatever device booted with the code and lets it pull the account's service keys, so it is a sudo-mode action — it needs a fresh browser sign-in and is refused for API tokens (reauth_required). Ask the owner to confirm at /frames.",
       inputSchema: { confirm: confirmed("adopts a physical device into the account"), frame_id: frameId },
     },
     async ({ frame_id }) =>
@@ -271,7 +271,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_scene_install",
     {
       description:
-        "Add a scene to a frame and deploy it. Requires confirm=true (it changes what the physical frame shows). The scene comes from exactly one of: scene_id (a store scene — public, or one of the account's own — from scenes_list / store_browse), url (a scene page on the store, a scene zip, or a scenes.json), or scenes (raw scene JSON, saved first as a new private scene). Re-installing an already-assigned scene re-pins/re-deploys it. activate=true switches the frame to it right away. settings_groups GRANTS the scene the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS) — a scene's own declaration is only a request, and without a grant it is delivered none of them; the answer's declared_settings_groups / granted_settings_groups say what it asked for and got, so the user can be told what it still needs.",
+        "Install a scene on a frame. Requires confirm=true (it changes what the physical frame shows). The scene comes from exactly one of: scene_id (a store scene — public, or one of the account's own — from scenes_list / store_browse), url (a scene page on the store, a scene zip, or a scenes.json), or scenes (raw scene JSON, saved first as a new private scene). Re-installing an already-installed scene re-pins it and pushes it again. activate=true switches the frame to it right away. settings_groups GRANTS the scene the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS) — a scene's own declaration is only a request, and without a grant it is delivered none of them; the answer's declared_settings_groups / granted_settings_groups say what it asked for and got, so the user can be told what it still needs.",
       inputSchema: {
         activate: z.boolean().optional(),
         confirm: z
@@ -325,8 +325,8 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: true },
       description:
-        "Remove one scene from a frame (reads the current list and re-assigns it without that scene, keeping the other pins and the order). The store scene itself is untouched.",
-      inputSchema: { confirm: confirmed("removes a scene from the frame and redeploys"), frame_id: frameId, scene_id: uuid() },
+        "Remove one scene from a frame (reads the installed list and re-installs it without that scene, keeping the other pins and the order). The store scene itself is untouched.",
+      inputSchema: { confirm: confirmed("removes a scene from the frame and pushes the new list"), frame_id: frameId, scene_id: uuid() },
     },
     async ({ frame_id, scene_id }) =>
       run(async () => {
@@ -335,7 +335,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
         }>("GET", `/api/frames/${frame_id}/scenes`);
         const remaining = current.scenes.filter((scene) => scene.scene_id !== scene_id);
         if (remaining.length === current.scenes.length) {
-          return failure(`Scene ${scene_id} is not assigned to frame ${frame_id}.`);
+          return failure(`Scene ${scene_id} is not installed on frame ${frame_id}.`);
         }
         const result = await api.json("POST", `/api/frames/${frame_id}/scenes`, {
           body: {
@@ -353,7 +353,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_scene_activate",
     {
       description:
-        "Switch the frame to a scene now (store scene id or the runtime scene id from the device's scene list). Optional `state` seeds the scene's public fields (max 16 KiB). If the device is out of sync with its assigned scenes, the whole set is re-pushed with this scene active.",
+        "Switch the frame to a scene now (store scene id or the runtime scene id from the device's scene list). Optional `state` seeds the scene's public fields (max 16 KiB). If the device is out of sync with its installed scenes, the whole set is pushed again with this scene active.",
       inputSchema: {
         confirm: confirmed("changes what the physical frame shows"),
         frame_id: frameId,
@@ -514,7 +514,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "The audit trail for a frame: enrollments, scene deploys, settings pushes, commands, reboots — who did what, when, from where.",
+        "The audit trail for a frame: enrollments, scene installs, settings changes, commands, reboots — who did what, when, from where.",
       inputSchema: {
         before: z.string().optional().describe("Cursor `before` from a previous call."),
         before_id: uuid().optional(),

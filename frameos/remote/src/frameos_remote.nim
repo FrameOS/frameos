@@ -36,6 +36,7 @@ type
     name*: string
     serverHost*: string
     serverPort*: int
+    serverScheme*: string # "http" | "https"; empty on a frame.json from before 2026.9.13
     serverApiKey*: string # shared secret, may be empty
     frameHost*: string
     framePort*: int
@@ -80,6 +81,14 @@ proc validFileWriteChunkSize*(size: int): bool =
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
 # ----------------------------------------------------------------------------
+
+proc backendUsesTls*(serverScheme: string, port: int): bool =
+  ## The configured scheme decides; only a frame.json from before the key
+  ## existed falls back to the old "ends in 443" guess.
+  let cleaned = serverScheme.strip().toLowerAscii()
+  if cleaned == "https": true
+  elif cleaned == "http": false
+  else: port mod 1000 == 443
 
 proc loadConfig*(): FrameConfig =
   var path = getEnv("FRAMEOS_CONFIG")
@@ -586,7 +595,7 @@ proc runRemote(cfg: FrameConfig) {.async.} =
     try:
       # --- Connect ----------------------------------------------------------
       let port = (if cfg.serverPort <= 0: 443 else: cfg.serverPort)
-      let scheme = (if port mod 1000 == 443: "wss" else: "ws")
+      let scheme = (if backendUsesTls(cfg.serverScheme, port): "wss" else: "ws")
       let url = &"{scheme}://{cfg.serverHost}:{port}/ws/remote"
       echo &"🔗 Connecting → {url} …"
 

@@ -219,6 +219,27 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     "MemoryHigh=" & memoryLimits.high & "\n" &
     "MemoryMax=" & memoryLimits.max & "\n" &
     "MemorySwapMax=64M\n" &
+    # Its own /tmp: the browser-snapshot app stages an executable script and
+    # a Chromium profile there, and the runtime's chunked uploads spool
+    # there too. Nothing outside the unit reads them (privileged work goes
+    # through sudo, which shares the namespace), so no other account on the
+    # box gets to pre-plant or read them either.
+    #
+    # ProtectSystem is deliberately absent, and test_setup.nim pins that. This
+    # is the sudo-based install: every privileged step runs as a child of the
+    # unit and inherits its mount namespace, so a read-only /usr, /boot or
+    # /etc here is read-only for them too. The steps write all of these —
+    # /etc/systemd/system and its drop-ins (network, dropbear, watchdog,
+    # resolved), /etc/cron.d, /etc/fstab, /etc/localtime and /etc/timezone,
+    # /etc/NetworkManager/conf.d, /boot/firmware/cmdline.txt — and app apt
+    # packages are installed through `apt-get`, whose dpkg writes /usr. A
+    # ReadWritePaths= wide enough to keep that working would re-open every
+    # path ProtectSystem closes, and a wrong list bricks the fleet on the
+    # next OTA. The hardened Buildroot unit (frameos.service.unprivileged)
+    # runs the runtime as its own user with ProtectSystem=strict and does the
+    # privileged work through the door, in root's own namespace; that is the
+    # path that gets ProtectSystem, not this one.
+    "PrivateTmp=yes\n" &
     "ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf \"serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n\" \"$SERVICE_RESULT\" \"$EXIT_CODE\" \"$EXIT_STATUS\" > /srv/frameos/runtime/frameos-last-exit'\n"
   if framebufferConsole:
     result &= "TTYPath=/dev/tty1\n" &

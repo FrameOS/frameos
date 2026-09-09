@@ -161,13 +161,12 @@ proc ensureParentDir(path: string) =
 
 proc writeTextFileAtomically(path: string, body: string) =
   ## Only frame.json comes through here, and it holds every secret the frame
-  ## has — so the temp file is born 0600 and the rename carries that mode.
+  ## has — so the temp file is born 0600 (mkstemp, an unguessable name) and
+  ## the rename carries that mode. rename(2) replaces the target in one
+  ## step: an unlink-then-rename left a window with no frame.json at all and
+  ## the secrets sitting under a predictable `.tmp` name.
   ensureParentDir(path)
-  let tempPath = path & ".tmp"
-  writePrivateFile(tempPath, body)
-  if fileExists(path):
-    removeFile(path)
-  moveFile(tempPath, path)
+  writePrivateFile(path, body)
 
 const frameAdminEditableSettingsFields = [
   ("frameOS", "apiKey"),
@@ -282,6 +281,7 @@ const frameApiKeyMap* = [
   ("frame_access", "frameAccess"),
   ("server_host", "serverHost"),
   ("server_port", "serverPort"),
+  ("server_scheme", "serverScheme"),
   ("server_api_key", "serverApiKey"),
   ("server_send_logs", "serverSendLogs"),
   ("width", "width"),

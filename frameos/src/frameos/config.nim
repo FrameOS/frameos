@@ -310,6 +310,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   ## frame.json that spells a whole section as `null`.
   if config == nil: newHook(config)
   if config.serverPort == 0: config.serverPort = 8989
+  config.serverScheme = normalizeServerScheme(config.serverScheme, config.serverPort)
   if config.width == 0: config.width = 1920
   if config.height == 0: config.height = 1080
   if config.device == "": config.device = "web_only"

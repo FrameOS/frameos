@@ -1,6 +1,7 @@
 import checksums/sha2
 import json
 import os
+import strformat
 import strutils
 import system
 import times
@@ -10,6 +11,7 @@ import std/httpclient
 import frameos/channels
 import frameos/types
 import frameos/utils/http_client
+import frameos/utils/process
 import lib/tz
 
 const
@@ -25,6 +27,42 @@ type
 
 var timezoneUpdaterThread: Thread[FrameOS]
 var timezoneUpdaterStarted = false
+
+const GunzipTimeoutMs = 60 * 1000
+
+proc boundedGunzip*(compressed: string, maxBytes: int): string =
+  ## Inflates a gzip body without ever holding more than `maxBytes` of
+  ## output. The download URL is config-settable and the archive carries no
+  ## publisher signature, so a 4 MB body that inflates to gigabytes has to
+  ## be cut off DURING inflation, not measured afterwards (zippy's
+  ## uncompress has no cap). Two layers: the gzip trailer's ISIZE first —
+  ## cheap, and what an honest archive says about itself — then the
+  ## inflation itself runs in `gzip -dc` under the process wrapper's output
+  ## cap, so the bytes never enter this process's heap. Where there is no
+  ## gzip binary (a dev box without coreutils is the only case; every image
+  ## has busybox or coreutils gzip) the in-process inflate remains, checked
+  ## after the fact.
+  if compressed.len < 18 or compressed[0] != '\x1f' or compressed[1] != '\x8b':
+    raise newException(IOError, "timezone data is not a gzip archive")
+  let n = compressed.len
+  let declaredSize = int(uint8(compressed[n - 4])) or (int(uint8(compressed[n - 3])) shl 8) or
+    (int(uint8(compressed[n - 2])) shl 16) or (int(uint8(compressed[n - 1])) shl 24)
+  if declaredSize > maxBytes:
+    raise newException(IOError, &"timezone data declares {declaredSize} bytes, more than the {maxBytes} byte limit")
+  if findExe("gzip").len > 0:
+    let res = runProcessPiped("gzip", @["-dc"], input = compressed,
+                              timeoutMs = GunzipTimeoutMs, maxOutputBytes = maxBytes)
+    if res.outputExceeded:
+      raise newException(IOError, &"timezone data inflated past the {maxBytes} byte limit")
+    if res.timedOut:
+      raise newException(IOError, "timezone data took too long to inflate")
+    if res.exitCode != 0:
+      raise newException(IOError, "timezone data could not be inflated (gzip exit " & $res.exitCode & ")")
+    if res.output.len > maxBytes:
+      raise newException(IOError, &"timezone data inflated past the {maxBytes} byte limit")
+    return res.output
+  result = uncompress(compressed, dataFormat = dfGzip)
+  requireHttpResponseWithinLimit(result, maxBytes)
 
 proc sha256Hex*(data: openArray[char]): string =
   var hasher = initSha_256()
@@ -151,9 +189,8 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
     maxSeconds = 45.0,
   )
   let compressedSize = compressed.len
-  var tzData = uncompress(compressed, dataFormat = dfGzip)
+  var tzData = boundedGunzip(compressed, TimeZoneJsonMaxBytes)
   compressed.setLen(0)
-  requireHttpResponseWithinLimit(tzData, TimeZoneJsonMaxBytes)
 
   let actualHash = sha256Hex(tzData)
   if currentHash == actualHash:

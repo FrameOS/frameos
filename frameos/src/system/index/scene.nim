@@ -163,15 +163,17 @@ proc managementLine*(frameConfig: FrameConfig): string =
   let serverHost = frameConfig.serverHost
   if serverHost.len > 0 and serverHost notin ["localhost", "127.0.0.1", "::1"]:
     let serverPort = if frameConfig.serverPort > 0: $frameConfig.serverPort else: "?"
-    return &"Managed via: self-hosted backend ({serverHost}:{serverPort})"
+    let scheme = normalizeServerScheme(frameConfig.serverScheme, frameConfig.serverPort)
+    return &"Managed via: self-hosted backend ({scheme}://{serverHost}:{serverPort})"
   "Managed via: standalone (no server configured)"
 
 proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
   ## Transport truth for the "Remote control" line: over what kind of link
   ## remote commands actually reach this frame. Cloud-managed frames dial the
   ## provider over the enrollment URL (https everywhere outside dev setups);
-  ## backend-managed frames run the frameos-remote agent, which speaks TLS
-  ## exactly when the port says so (443/8443/… — the agent's own dial rule).
+  ## backend-managed frames run the frameos-remote agent, which dials wss://
+  ## exactly when the backend's configured scheme is https (the agent's own
+  ## dial rule; a frame.json without `serverScheme` falls back to the port).
   ## Empty when remote control is off.
   let linkState = loadCloudLinkState()
   if linkState{"mode"}.getStr("") == "managed":
@@ -183,7 +185,7 @@ proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
   if frameConfig.agent != nil and frameConfig.agent.agentEnabled:
     let serverHost = if frameConfig.serverHost.len > 0: frameConfig.serverHost else: "?"
     let port = if frameConfig.serverPort <= 0: 443 else: frameConfig.serverPort
-    if port mod 1000 == 443:
+    if normalizeServerScheme(frameConfig.serverScheme, port) == "https":
       return &"  over an encrypted TLS connection to {serverHost}:{port}"
     return &"  over an UNENCRYPTED connection to {serverHost}:{port} — commands are signed, but traffic is readable on the network"
   ""

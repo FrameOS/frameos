@@ -77,6 +77,7 @@ class FrameBase(BaseModel):
     ssh_keys: Optional[List[str]] = None
     server_host: Optional[str]
     server_port: int
+    server_scheme: Optional[Literal["http", "https"]] = None
     server_api_key: Optional[str]
     server_send_logs: Optional[bool]
     status: str
@@ -126,6 +127,14 @@ class FrameBase(BaseModel):
     # read as "changed since deploy" after a page load.
     secret_fingerprints: Optional[Dict[str, str]] = None
     settings_fingerprints: Optional[Dict[str, str]] = None
+    # The rest of to_dict() the response model used to drop: the SSH host
+    # key pinned on first connect and its fingerprint (the TOFU value the
+    # frame page shows), the project, and the compiled-scene count the
+    # legacy-build banner keys on.
+    project_id: Optional[int] = None
+    ssh_host_key: Optional[str] = None
+    ssh_host_key_fingerprint: Optional[str] = None
+    compiled_scene_count: Optional[int] = None
     active_connections: Optional[int] = None
     active_scene_id: Optional[str] = None
     frame_sync_hint: Optional[FrameSyncHint] = None
@@ -169,6 +178,7 @@ class FrameUpdateRequest(BaseModel):
     ssh_keys: Optional[List[str]] = None
     server_host: Optional[str] = None
     server_port: Optional[int] = None
+    server_scheme: Optional[Literal["http", "https"]] = None
     server_api_key: Optional[str] = None
     server_send_logs: Optional[bool] = None
     archived: Optional[bool] = None
@@ -304,6 +314,7 @@ class FrameAdoptRequest(BaseModel):
     # the browser knows it, the backend behind a proxy may not.
     server_host: str
     server_port: int = 8989
+    server_scheme: Optional[Literal["http", "https"]] = None
     name: Optional[str] = None
 
 

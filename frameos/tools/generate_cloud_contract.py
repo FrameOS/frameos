@@ -46,37 +46,56 @@ def load():
             if profile not in doc["profiles"]:
                 raise SystemExit(f"setting {name!r}: unknown profile {profile!r}")
         validate_rule(spec["rule"], f"settings.{name}")
-        validate_parity(doc, name, spec)
+        validate_parity(doc, f"settings.{name}", spec)
         for profile, pspec in spec["profiles"].items():
             if "rule" in pspec:
                 validate_rule(pspec["rule"], f"settings.{name}.profiles.{profile}")
+    seen = set()
+    for verb in doc["verbs"]:
+        name = verb.get("type")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", name):
+            raise SystemExit(f"verb {name!r}: wire types are snake_case")
+        if name in seen:
+            raise SystemExit(f"verb {name!r} is listed twice")
+        seen.add(name)
+        if verb.get("scope") is not None and not isinstance(verb["scope"], str):
+            raise SystemExit(f"verb {name!r}: scope must be a string or null")
+        profiles = verb.get("profiles")
+        if not isinstance(profiles, list) or not profiles or any(p not in doc["profiles"] for p in profiles):
+            raise SystemExit(f"verb {name!r}: `profiles` must name the device planes that implement it ({doc['profiles']})")
+        validate_parity(doc, f"verbs.{name}", verb)
     return doc
 
 
 def validate_parity(doc, name, spec):
-    """A single-plane key must say why it is single-plane; a both-planes key must not.
+    """A single-plane entry must say why it is single-plane; a both-planes entry must not.
 
     The point (docs/convergence-todo.md item 6): the 8-linux / 7-esp32 split
     is the measured parity gap between the device planes, and no new key may
-    widen it without a contract entry saying so. `parity` is documentation for
-    the generated tables' readers; none of the walkers consumes it.
+    widen it without a contract entry saying so. Verbs carry the same
+    `profiles` + `parity` pair (2026-09-09): a verb one plane implements and
+    the other refuses with `unsupported_verb` is a parity gap too, and one
+    nobody issues is dead weight — the cloud's contract test checks that
+    every verb is actually queued by some provider code path. `parity` is
+    documentation for the generated tables' readers; none of the walkers
+    consumes it. `name` is the entry's path in the file (settings.x / verbs.x).
     """
     present = set(spec["profiles"])
     every = set(doc["profiles"])
     parity = spec.get("parity")
     if present == every:
         if parity is not None:
-            raise SystemExit(f"settings.{name}: accepted by every profile, so it must not carry `parity`")
+            raise SystemExit(f"{name}: accepted by every profile, so it must not carry `parity`")
         return
     if not isinstance(parity, dict) or set(parity) != {"only", "why"}:
         raise SystemExit(
-            f"settings.{name}: accepted by {sorted(present)} only — add "
+            f"{name}: accepted by {sorted(present)} only — add "
             f'`parity: {{"only": "<profile>", "why": "<reason the other plane cannot take it>"}}`'
         )
     if len(present) != 1 or parity["only"] not in present:
-        raise SystemExit(f"settings.{name}: parity.only must name the one profile that accepts the key ({sorted(present)})")
+        raise SystemExit(f"{name}: parity.only must name the one profile that accepts the entry ({sorted(present)})")
     if not isinstance(parity["why"], str) or len(parity["why"].strip()) < 20:
-        raise SystemExit(f"settings.{name}: parity.why must be a sentence, not {parity['why']!r}")
+        raise SystemExit(f"{name}: parity.why must be a sentence, not {parity['why']!r}")
 
 
 def validate_rule(rule, where):
@@ -350,7 +369,8 @@ def gen_ts_cloud(doc):
                 p["rule"] = pspec["rule"]
             entry["profiles"][profile] = p
         settings[name] = entry
-    verbs = [{"type": v["type"], "scope": v["scope"], "content": bool(v.get("content"))} for v in doc["verbs"]]
+    verbs = [{"type": v["type"], "scope": v["scope"], "content": bool(v.get("content")), "profiles": list(v["profiles"])}
+             for v in doc["verbs"]]
     limits = {k: v for k, v in doc["limits"].items() if not k.startswith("$")}
     errors = {k: v for k, v in doc["errors"].items() if not k.startswith("$")}
     body = {"version": doc["version"], "profiles": doc["profiles"], "settings": settings,

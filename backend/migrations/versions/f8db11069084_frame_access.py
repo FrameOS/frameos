@@ -7,6 +7,7 @@ Create Date: 2024-02-06 09:35:11.908314
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.orm import Session
 from app.utils.token import secure_token
 
 
@@ -23,8 +24,7 @@ def upgrade():
         batch_op.add_column(sa.Column('frame_access', sa.String(length=50), nullable=True))
 
     from app.models import Frame
-    from app.database import SessionLocal
-    db = SessionLocal()
+    db = Session(bind=op.get_bind())
 
     frames = db.query(Frame.id).all()
     for (frame_id,) in frames:

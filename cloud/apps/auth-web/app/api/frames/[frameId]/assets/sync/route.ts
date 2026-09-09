@@ -37,6 +37,12 @@ export const runtime = "nodejs";
 // single-frame cap (NotoColorEmoji, 10.7 MB — the one people want when emoji
 // render as blanks) ride asset_put_chunk through uploadAssetBytes, still one
 // chunk in flight at a time.
+//
+// And it stops when the browser does: the request's abort signal (the tab
+// closed, the panel navigated away) is checked before every font and, inside
+// uploadAssetBytes, before every chunk. Without that, a run started and
+// abandoned kept pushing the whole ~53 MB catalogue into frame_commands for
+// nobody — and a second click started another run alongside it.
 
 /** Where fonts live on the device, relative to its assets directory. */
 const fontsDirectory = "fonts";
@@ -115,7 +121,15 @@ export async function POST(
   const present = presentFontSizes(listing?.payload);
 
   const encoder = new TextEncoder();
+  // request.signal fires when the client disconnects; the stream's cancel()
+  // is the other way the runtime reports the same thing. Either stops the
+  // run.
+  let cancelled = false;
+  const abandoned = () => cancelled || request.signal.aborted;
   const stream = new ReadableStream<Uint8Array>({
+    cancel() {
+      cancelled = true;
+    },
     async start(controller) {
       let closed = false;
       const emit = (event: SyncEvent) => {
@@ -164,6 +178,10 @@ export async function POST(
       };
 
       for (const [index, font] of catalogueFonts.entries()) {
+        if (abandoned()) {
+          stopped = "the browser went away";
+          break;
+        }
         if (present.get(font.file) === font.size) {
           skip(font, index, "already on the frame");
           continue;
@@ -207,7 +225,12 @@ export async function POST(
           frame,
           `${fontsDirectory}/${font.file}`,
           data,
+          { signal: request.signal },
         );
+        if (!result.ok && result.error === "aborted") {
+          stopped = "the browser went away";
+          break;
+        }
         if (result.ok) {
           uploaded += 1;
           consecutiveFailures = 0;
@@ -265,7 +288,9 @@ export async function POST(
         ...(stopped ? { stopped } : {}),
       });
       closed = true;
-      controller.close();
+      if (!cancelled) {
+        controller.close();
+      }
     },
   });
 

@@ -46,20 +46,6 @@ export async function POST(request: NextRequest) {
       }
     | undefined;
 
-  // Before any database work: the whole point is to keep automated signups
-  // from reaching the account table and the Postmark quota at all. No-ops
-  // when Turnstile is not configured.
-  const turnstile = await verifyTurnstileToken(
-    typeof body?.turnstile_token === "string" ? body.turnstile_token : undefined,
-    clientKey(request),
-  );
-  if (!turnstile.ok) {
-    return NextResponse.json(
-      { error: "turnstile_failed", turnstile_errors: turnstile.errorCodes },
-      { status: 400 },
-    );
-  }
-
   const email =
     typeof body?.email === "string" ? normalizeEmail(body.email) : "";
   const password = typeof body?.password === "string" ? body.password : "";
@@ -68,6 +54,10 @@ export async function POST(request: NextRequest) {
       ? body.name.trim().slice(0, 120)
       : undefined;
 
+  // The checks that need no database come first, so a form with a typo or a
+  // weak password is refused WITHOUT spending the Turnstile token — a token
+  // is single-use, and burning it on "password too short" meant the
+  // corrected resubmit failed the anti-spam check instead.
   if (!email || email.length > 254 || !emailShape.test(email) || !password) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
@@ -76,6 +66,22 @@ export async function POST(request: NextRequest) {
   if (passwordProblem) {
     return NextResponse.json(
       { error: "weak_password", message: passwordProblem },
+      { status: 400 },
+    );
+  }
+
+  // Before any database work: the whole point is to keep automated signups
+  // from reaching the account table and the Postmark quota at all — and the
+  // "is this address taken" answer stays behind the bot gate too. No-ops
+  // when Turnstile is not configured. (The form re-arms its widget on every
+  // rejection, so an email_taken answer still gets a fresh token next time.)
+  const turnstile = await verifyTurnstileToken(
+    typeof body?.turnstile_token === "string" ? body.turnstile_token : undefined,
+    clientKey(request),
+  );
+  if (!turnstile.ok) {
+    return NextResponse.json(
+      { error: "turnstile_failed", turnstile_errors: turnstile.errorCodes },
       { status: 400 },
     );
   }

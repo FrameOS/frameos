@@ -5,6 +5,7 @@ import {
   accountSettings,
   auditEvents,
   createDb,
+  sessions,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +19,10 @@ import {
 } from "../../lib/account-settings";
 import { mintApiToken } from "../../lib/api-tokens";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import {
+  markSessionReauthenticated,
+  recentApprovalMaxAgeSeconds,
+} from "../../lib/recent-auth";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -287,6 +292,47 @@ describe("account settings API", () => {
       openAI: { apiKey: "" },
       unsplash: { accessKey: "u-1234567890" },
     });
+  });
+
+  it("reveals stored keys only to a session that proved its credentials recently", async () => {
+    const accountId = await signIn();
+    await postSettings(
+      postRequest({ unsplash: { accessKey: "u-1234567890" } }),
+    );
+
+    // Age the session past the approval window: the cookie is still a valid
+    // sign-in, just not a recent proof.
+    const staleAt = new Date(
+      Date.now() - (recentApprovalMaxAgeSeconds + 60) * 1000,
+    );
+    await db
+      .update(sessions)
+      .set({ authenticatedAt: staleAt })
+      .where(eq(sessions.accountId, accountId));
+
+    // The masked read still answers — the settings page and the form that
+    // posts masks back keep working.
+    const masked = await getSettings(getRequest());
+    expect(masked.status).toBe(200);
+    expect(await masked.json()).toEqual({ unsplash: { accessKey: "••••••••7890" } });
+
+    // The keys themselves need sudo mode, and the refusal says how to get it.
+    const refused = await getSettings(getRequest("?reveal=1"));
+    expect(refused.status).toBe(403);
+    const payload = (await refused.json()) as {
+      error: string;
+      reauth: { max_age_seconds: number; path: string };
+    };
+    expect(payload.error).toBe("reauth_required");
+    expect(payload.reauth.path).toBe("/login/reauth");
+    expect(payload.reauth.max_age_seconds).toBe(recentApprovalMaxAgeSeconds);
+
+    // A fresh proof (what /api/auth/reauth* stamps) opens it again.
+    const token = cookieJar.get(sessionCookieName)!;
+    expect(await markSessionReauthenticated(db, token)).toBe(true);
+    const revealed = await getSettings(getRequest("?reveal=1"));
+    expect(revealed.status).toBe(200);
+    expect(await revealed.json()).toEqual({ unsplash: { accessKey: "u-1234567890" } });
   });
 
   it("never reveals a stored key to an API token, whatever it asks for", async () => {

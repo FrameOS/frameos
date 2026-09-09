@@ -146,9 +146,25 @@ confirm/attestation steps are bound to what the start minted (the pending
 secret, the single-use challenge cookie). Every enrollment emails the owner.
 
 **Weakening the account** (removing the authenticator or a passkey,
-regenerating recovery codes, turning 2FA off) re-asks for the password when
-the account has one, otherwise for a current authenticator/recovery code
-(`requireWeakeningProof`, `src/lib/account-security.ts`). Every change is an
+regenerating recovery codes, turning 2FA off) runs behind sudo mode (below)
+AND re-asks for the password when the account has one, otherwise for a
+current authenticator/recovery code (`requireWeakeningProof`,
+`src/lib/account-security.ts`). Because sudo mode on a two-factor account is
+the second factor, turning 2FA off costs the very factor being removed plus
+the password — the password alone never does it.
+
+**Enrolling a factor revokes every personal API token** (`api_tokens_revoked`
+in the confirm/attestation response): a token minted before the factor
+existed would keep bypassing it. The settings page says how many were
+revoked and the enrolment mail carries the same line; the owner re-mints
+under Account → Developer, which is behind 2FA from then on.
+
+**Google accounts and unverified addresses.** A Google identity we have not
+seen whose `email_verified` claim is not `true` gets no account and no
+session (`google_email_unverified`): such an account could never add a
+password (every lookup ignores unverified identities) while a stranger could
+still register a password account on the same address. An identity linked
+earlier keeps signing in; its account was verified when the link was made. Every change is an
 audit event (`account.totp_enabled/disabled`, `account.passkey_added/
 removed/renamed`, `account.recovery_codes_regenerated`,
 `account.two_factor_disabled`), and `account.signed_in` carries
@@ -162,8 +178,18 @@ device therefore re-check the credentials even with a valid session: every
 migration 0036 — set at sign-in, pushed forward by a successful re-check),
 and the routes below refuse with `403 {"error": "reauth_required", "reauth":
 {"methods": …, "path": "/login/reauth", "max_age_seconds": …}}` when that is
-older than the route's window (`src/lib/recent-auth.ts`). Two windows,
-matched to what the action can do:
+older than the route's window (`src/lib/recent-auth.ts`).
+
+**Which proof re-authenticates** (`reauthMethods`): with two-factor OFF, the
+password (or, for a Google-only account, signing in with Google again). With
+two-factor ON — a confirmed authenticator or a passkey — the second factor
+only: an authenticator/recovery code or a passkey. The password is then not
+offered and not accepted (`POST /api/auth/reauth` answers
+`403 second_factor_required`), so the one credential a phishing page or a
+reused password hands an attacker cannot by itself revoke frames, approve
+device links, mint API tokens or turn two-factor off. This is the same
+standard sign-in holds the account to: sudo mode is "prove it again", not
+"prove less". Two windows, matched to what the action can do:
 
 - **15 minutes** (`recentAuthMaxAgeSeconds`) for the destructive pair:
   `POST /api/frames/{id}/revoke` (revoking a cloud-managed frame) and
@@ -183,6 +209,12 @@ matched to what the action can do:
   cookie into a durable token, but a login fresh that afternoon is proof
   enough. The `/device` page sends a stale session through `/login/reauth`
   *before* showing the approve button; the route check is the backstop.
+  The same window guards `GET /api/settings?reveal=1` — every stored
+  third-party key in one response, which the in-browser scene preview needs
+  all through an editing session (fifteen minutes would mean re-proving
+  while building a scene). The masked `GET /api/settings` is not gated; the
+  preview surfaces degrade to "no saved keys" with a link to `/login/reauth`
+  rather than failing.
 
 Routes call `requireRecentAuth(db, accountId)` right after `readSession()`;
 pages call `hasRecentAuth(db)`. The client components behind those buttons

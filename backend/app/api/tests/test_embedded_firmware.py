@@ -1117,6 +1117,27 @@ def test_provisioning_plan_carries_the_conditional_settings_too():
     assert "max_http_response_bytes" not in _provisioned(embedded_provisioning_plan(frame))
 
 
+
+def test_embedded_backend_url_states_its_scheme() -> None:
+    """The provisioning URL reads frame.server_scheme; it never guesses TLS
+    from the port (an HTTPS backend on 8443 used to be provisioned as http://)."""
+    from app.tasks.embedded_firmware import embedded_backend_url_for_frame
+
+    frame = Frame(server_host="backend.example", server_port=8443, server_scheme="https")
+    assert embedded_backend_url_for_frame(frame) == "https://backend.example:8443"
+    frame = Frame(server_host="backend.example", server_port=443, server_scheme="https")
+    assert embedded_backend_url_for_frame(frame) == "https://backend.example"
+    frame = Frame(server_host="backend.example", server_port=443, server_scheme="http")
+    assert embedded_backend_url_for_frame(frame) == "http://backend.example:443"
+    frame = Frame(server_host="backend.example", server_port=80, server_scheme="http")
+    assert embedded_backend_url_for_frame(frame) == "http://backend.example"
+    # A row the migration has not seeded yet: the pre-scheme guess, once.
+    frame = Frame(server_host="backend.example", server_port=443, server_scheme=None)
+    assert embedded_backend_url_for_frame(frame) == "https://backend.example"
+    frame = Frame(server_host="backend.example", server_port=8443, server_scheme=None)
+    assert embedded_backend_url_for_frame(frame) == "http://backend.example:8443"
+
+
 def test_provisioning_plan_warns_about_the_published_images_flash_layout():
     """The XTEINK X4 has 16MB, but the published C3 asset is the 4MB no-OTA
     build — it works, it just leaves the rest of the chip and OTA on the table."""
