@@ -96,9 +96,11 @@ The deploy builds locally and ships a self-contained bundle:
    so pnpm workspace dependencies resolve into the bundle).
 2. The script assembles `.next/standalone` + `.next/static` + `public/`
    (including the editor and wasm assets) + `apps/auth-web/scripts/` +
-   `packages/db/drizzle/` + `scripts/db-migrate.sh` and `db-cleanup.sh`, and
+   `packages/db/drizzle/` + `scripts/db-migrate.sh`, `db-cleanup.sh`,
+   `object-store-sweep.sh` and the `scripts/lib/` helpers they source, and
    streams the tar into `/usr/local/bin/frameos-cloud-update --archive -` on
-   the server.
+   the server. Staging fails if a shipped script sources a path that is not
+   in the bundle.
 3. `frameos-cloud-update` applies the SQL migrations via `psql` from the new
    release (before anything is flipped, so a failed migration leaves the
    running app untouched), then performs the zero-downtime flip below. Each
