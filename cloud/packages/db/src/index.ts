@@ -37,7 +37,18 @@ const cacheHolder = globalThis as typeof globalThis & {
 const clientCache = (cacheHolder.__frameosCloudDbClients ??=
   new Map<string, Database>());
 
-export function createDb(databaseUrl = process.env.DATABASE_URL) {
+export interface CreateDbOptions {
+  // Test seam: called with the text of every statement the pool sends. A
+  // client with an observer is NOT cached — it is the caller's own pool, to
+  // be ended by the caller — so the observer never leaks into the shared
+  // client other modules get for the same URL.
+  onQuery?: (query: string) => void;
+}
+
+export function createDb(
+  databaseUrl = process.env.DATABASE_URL,
+  options: CreateDbOptions = {},
+) {
   if (!databaseUrl) {
     throw new Error(
       "DATABASE_URL is required to create the FrameOS Cloud database client",
@@ -47,7 +58,7 @@ export function createDb(databaseUrl = process.env.DATABASE_URL) {
   // postgres.js holds its pool open until `.end()` is called, so creating a new
   // client per request would leak connections until Postgres refuses new ones.
   // Cache one pooled client per connection string and reuse it.
-  const cached = clientCache.get(databaseUrl);
+  const cached = options.onQuery ? undefined : clientCache.get(databaseUrl);
   if (cached) {
     return cached;
   }
@@ -56,12 +67,18 @@ export function createDb(databaseUrl = process.env.DATABASE_URL) {
   // socket, but any deployment where Postgres is on another host must set
   // DATABASE_SSL=require (or put sslmode=require in DATABASE_URL).
   const ssl = process.env.DATABASE_SSL;
+  const { onQuery } = options;
   const client = postgres(databaseUrl, {
     max: parsePoolMax(process.env.DATABASE_POOL_MAX),
     ...(ssl === "require" || ssl === "true" ? { ssl: "require" as const } : {}),
+    ...(onQuery
+      ? { debug: (_connection: number, query: string) => onQuery(query) }
+      : {}),
   });
   const db = drizzle(client, { schema });
-  clientCache.set(databaseUrl, db);
+  if (!onQuery) {
+    clientCache.set(databaseUrl, db);
+  }
   return db;
 }
 

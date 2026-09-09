@@ -2320,3 +2320,122 @@ describe("deep-sleep forecast", () => {
     device.ws.close();
   });
 });
+
+// The periodic sweep is the fallback for a missed NOTIFY and the only wake
+// for a command that was written but never acked. It does its per-device
+// reads for the whole connected set at once (hub.ts runSweep), so its cost
+// must not grow with the number of connected devices.
+describe("sweep", () => {
+  // A row written without pg_notify: only the sweep can find it.
+  async function insertPendingCommand(frameId: string) {
+    const [row] = await db
+      .insert(frameCommands)
+      .values({
+        expiresAt: new Date(Date.now() + 60_000),
+        frameId,
+        type: "render",
+      })
+      .returning();
+    if (!row) {
+      throw new Error("command insert failed");
+    }
+    return row;
+  }
+
+  async function connectDevice(
+    fixture: { privateKey: KeyObject; token: string },
+    port: number,
+  ) {
+    const device = await openDevice(fixture.token, port);
+    await handshake(device, fixture.privateKey);
+    return device;
+  }
+
+  it("delivers, redelivers and kicks across every connected device in one pass", async () => {
+    const { account, ...first } = await createFrameFixture();
+    const second = await createFrameForAccount(account.id);
+    const third = await createFrameForAccount(account.id);
+    const extra = await startExtraHub({ commandRedeliverAfterMs: 0 });
+    const firstDevice = await connectDevice(first, extra.port);
+    const secondDevice = await connectDevice(second, extra.port);
+    const thirdDevice = await connectDevice(third, extra.port);
+
+    // first: a command nobody NOTIFYed about.
+    const pendingFirst = await insertPendingCommand(first.frame.id);
+    // second: written to the socket, never acked.
+    const sentSecond = await enqueueFrameCommand(db, {
+      frameId: second.frame.id,
+      ttlMs: 60_000,
+      type: "render",
+    });
+    await secondDevice.next((msg) => msg.id === sentSecond?.id, "first delivery");
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.id, String(sentSecond?.id)));
+      return row?.status === "sent" ? row : undefined;
+    }, "command marked sent");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // third: revoked since it connected, without the NOTIFY revokeFrame sends
+    // — the sweep's own re-read has to catch it — and holding a command that
+    // must not go out.
+    await db
+      .update(frames)
+      .set({ status: "revoked" })
+      .where(eq(frames.id, third.frame.id));
+    const pendingThird = await insertPendingCommand(third.frame.id);
+
+    await extra.sweep();
+
+    await firstDevice.next((msg) => msg.id === pendingFirst.id, "sweep delivery");
+    await secondDevice.next(
+      (msg) => msg.id === sentSecond?.id,
+      "redelivery after the sweep",
+    );
+    expect(await thirdDevice.closed).toBe(4401);
+    const [thirdRow] = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.id, pendingThird.id));
+    expect(thirdRow?.status).toBe("pending");
+    firstDevice.ws.close();
+    secondDevice.ws.close();
+  });
+
+  it("costs the same number of statements however many devices are connected", async () => {
+    const { account, ...first } = await createFrameFixture();
+    const statements: string[] = [];
+    const extra = await startExtraHub({
+      onQuery: (query) => statements.push(query),
+    });
+    const devices = [await connectDevice(first, extra.port)];
+    // Let the connect-time tail (update_frame broadcast, audit rows) finish
+    // before counting, then count one full sweep on an idle fleet.
+    async function countIdleSweep() {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await extra.sweep();
+      statements.length = 0;
+      await extra.sweep();
+      return statements.length;
+    }
+    const withOne = await countIdleSweep();
+
+    for (let i = 0; i < 4; i += 1) {
+      devices.push(
+        await connectDevice(await createFrameForAccount(account.id), extra.port),
+      );
+    }
+    expect(extra.connectedFrames()).toBe(5);
+    const withFive = await countIdleSweep();
+
+    expect(withFive).toBe(withOne);
+    // Expiry, the staleness re-read, the three redelivery updates and the
+    // pending check — one statement each for the whole connected set.
+    expect(withOne).toBe(6);
+    expect(extra.skippedSweeps()).toBe(0);
+    for (const device of devices) {
+      device.ws.close();
+    }
+  });
+});
