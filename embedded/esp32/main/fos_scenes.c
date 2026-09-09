@@ -654,7 +654,8 @@ void fos_scenes_wipe_state(void)
     int removed = 0;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        char path[SCENES_SLOT_PATH_LEN + 128];
+        /* d_name is up to 255 bytes; sized so -Wformat-truncation is happy. */
+        char path[sizeof("/state/") + sizeof(entry->d_name)];
         snprintf(path, sizeof(path), "/state/%s", entry->d_name);
         if (unlink(path) == 0) removed++;
     }
