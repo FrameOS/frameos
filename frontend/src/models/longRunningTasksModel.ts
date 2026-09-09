@@ -14,6 +14,9 @@ export type LongRunningTaskKind =
   | 'remoteRestart'
   | 'buildrootImage'
   | 'embeddedOta'
+  | 'stop'
+  | 'restart'
+  | 'reboot'
 export type LongRunningTaskStatus = 'running' | 'success' | 'error'
 
 export interface LongRunningTaskLog {

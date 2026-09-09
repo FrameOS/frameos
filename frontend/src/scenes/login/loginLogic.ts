@@ -93,7 +93,7 @@ export const loginLogic = kea<loginLogicType>([
           formData.append('username', email)
           formData.append('password', password)
           formData.append('scope', 'password')
-          const response = await fetch(`/api/login`, {
+          const response = await fetch(`${getBasePath()}/api/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: formData.toString(),

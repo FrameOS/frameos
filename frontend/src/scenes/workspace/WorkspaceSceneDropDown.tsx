@@ -19,6 +19,7 @@ import { TextInput } from '../../components/TextInput'
 import type { FrameScene, FrameType } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
+import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { findConnectedScenes } from '../frame/panels/Scenes/utils'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
@@ -55,6 +56,7 @@ export function WorkspaceSceneDropDown({
   const { updateSceneFromRepo } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId: frame.id }))
+  const { copySceneJSON } = useActions(scenesLogic({ frameId: frame.id }))
   const { hasDriveScope } = useValues(cloudDriveLogic)
   const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes
   const currentScene = currentScenes.find((candidate) => candidate.id === scene.id) ?? scene
@@ -112,7 +114,7 @@ export function WorkspaceSceneDropDown({
           },
           {
             label: 'Copy scene JSON',
-            onClick: () => navigator.clipboard.writeText(JSON.stringify(currentScene)),
+            onClick: () => copySceneJSON(scene.id),
             icon: <ClipboardDocumentIcon className="h-5 w-5" />,
           },
           // Legacy compiled scenes only: the way off the source-build path —

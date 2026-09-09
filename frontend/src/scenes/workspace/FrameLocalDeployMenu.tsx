@@ -74,6 +74,7 @@ export function FrameLocalDeployMenu({
         {
           label: 'Restart FrameOS',
           title: 'Restart the on-frame FrameOS runtime',
+          confirm: 'Restart the FrameOS runtime on this frame?',
           onClick: () => restartFrame(frameId),
           icon: <PowerIcon className="h-5 w-5" />,
         },

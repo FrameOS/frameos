@@ -23,6 +23,7 @@ import {
 } from '../scenes/frame/panels/Scenes/LivePreviewModal'
 import { StateFieldEdit } from '../scenes/frame/panels/Scenes/StateFieldEdit'
 import type { FrameId } from '../types'
+import { hostMessageTarget, isHostReply } from './embedOrigins'
 
 // The Preview drawer panel of the standalone embedded editor: runs the edited
 // scenes through the frameos-wasm runtime, in the browser — canvas, event
@@ -127,9 +128,10 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     const dataUrl = flattened.toDataURL('image/png')
     setScreenshotStatus('Saving…')
     let settled = false
+    const host = hostMessageTarget()
     const onAck = (event: MessageEvent): void => {
       const message = event.data
-      if (!message || message.type !== 'frameos-editor:screenshot-saved') {
+      if (!isHostReply(event, host) || !message || message.type !== 'frameos-editor:screenshot-saved') {
         return
       }
       settled = true
@@ -141,7 +143,9 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
       }
     }
     window.addEventListener('message', onAck)
-    window.parent?.postMessage({ type: 'frameos-editor:save-screenshot', dataUrl, sceneId }, '*')
+    // Never '*': the data URL goes only to the origin that drives this editor
+    // (EmbeddedEditor's locked parent, or our own window in the direct mount).
+    host.target.postMessage({ type: 'frameos-editor:save-screenshot', dataUrl, sceneId }, host.origin)
     window.setTimeout(() => {
       if (!settled) {
         window.removeEventListener('message', onAck)

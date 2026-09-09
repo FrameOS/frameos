@@ -19,6 +19,7 @@ import { frameLogic } from '../../frameLogic'
 import { editor, MarkerSeverity } from 'monaco-editor'
 import { AppNodeData, FrameId } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
+import { validateNimSource, type SourceError } from '../../../../utils/validateNimSource'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
@@ -46,11 +47,7 @@ export interface EditAppLogicProps {
   nodeId: string
 }
 
-export interface SourceError {
-  line: number
-  column: number
-  error: string
-}
+export type { SourceError } from '../../../../utils/validateNimSource'
 
 const sourceLoadOrder = ['README.md', ...javascriptAppSourceFiles, 'app.nim', 'config.nim']
 const primaryFiles = ['config.json', ...javascriptAppSourceFiles, 'app.nim']
@@ -520,16 +517,14 @@ export const editAppLogic = kea<editAppLogicType>([
       if (!initial) {
         await breakpoint(300)
       }
-      const response = await apiFetch(`/api/apps/validate_source`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file, source }),
-      })
-      const { errors } = await response.json()
+      // `null` = nothing validated this file (no backend on this surface, not
+      // a Nim file, request failed): clear its markers instead of keeping
+      // stale ones.
+      const errors = await validateNimSource(file, source)
       if (!initial) {
         breakpoint()
       }
-      actions.setSourceErrors(file, errors || [])
+      actions.setSourceErrors(file, errors ?? [])
     },
     addFile: () => {
       const fileName = window.prompt('Enter file name (e.g. helper.ts, icons.tsx, data.json)')

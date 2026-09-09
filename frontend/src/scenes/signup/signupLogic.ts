@@ -3,6 +3,7 @@ import { forms } from 'kea-forms'
 import { urls } from '../../urls'
 import { firstUserStatus } from '../../utils/apiFetch'
 import { clearCachedProjectId } from '../../utils/projectApi'
+import { getBasePath } from '../../utils/getBasePath'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 
 export interface SignupForm {
@@ -91,7 +92,7 @@ export const signupLogic = kea<signupLogicType>([
       submit: async (formData) => {
         try {
           const { email, password, password2, newsletter } = formData
-          const response = await fetch(`/api/signup`, {
+          const response = await fetch(`${getBasePath()}/api/signup`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password, password2, newsletter }),

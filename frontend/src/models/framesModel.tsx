@@ -620,6 +620,20 @@ export interface framesModelMeta {
 export type framesModelType = MakeLogicType<framesModelValues, framesModelActions, Record<string, any>> &
   framesModelMeta
 
+/** The server's own reason for a refused frame action, else the fallback. */
+async function frameActionErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await response.clone().json()) as { detail?: unknown; error?: unknown }
+    const detail = typeof payload?.detail === 'string' ? payload.detail : payload?.error
+    if (typeof detail === 'string' && detail) {
+      return `${fallback}: ${detail}`
+    }
+  } catch {
+    // not JSON
+  }
+  return `${fallback} (${response.status})`
+}
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel, longRunningTasksModel] })),
   path(['src', 'models', 'framesModel']),
@@ -827,7 +841,7 @@ export const framesModel = kea<framesModelType>([
               embedded:
                 frame.embedded && state[frame.id]?.embedded?.layout && !frame.embedded.layout
                   ? { ...frame.embedded, layout: state[frame.id]?.embedded?.layout }
-                  : (frame.embedded ?? state[frame.id]?.embedded),
+                  : frame.embedded ?? state[frame.id]?.embedded,
             }),
             state[frame.id]
           ),
@@ -1042,39 +1056,109 @@ export const framesModel = kea<framesModelType>([
         detail: 'Deploy cancelled',
       })
     },
+    // Stop, restart and reboot used to run with no outcome at all: stop
+    // ignored the response and the other two threw out of a listener, which
+    // is an unhandled rejection nobody sees. Each is a task toast now.
     stopFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
+      const taskId = `stop:${id}:${Date.now()}`
+      longRunningTasksModel.actions.startTask({
+        id: taskId,
+        frameId: id,
+        kind: 'stop',
+        title: 'Stopping FrameOS',
+        detail: 'Stop request sent',
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error(await frameActionErrorMessage(response, 'Failed to stop frame'))
+        }
+        longRunningTasksModel.actions.finishTask({ taskId, frameId: id, kind: 'stop', detail: 'FrameOS stopped' })
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          taskId,
+          frameId: id,
+          kind: 'stop',
+          detail: error instanceof Error ? error.message : 'Failed to stop frame',
+        })
+      }
     },
     restartFrame: async ({ id }) => {
+      const taskId = `restart:${id}:${Date.now()}`
+      longRunningTasksModel.actions.startTask({
+        id: taskId,
+        frameId: id,
+        kind: 'restart',
+        title: 'Restarting FrameOS',
+        detail: 'Restart request sent',
+      })
       try {
-        // Canonical on both control planes; the cloud maps it onto the
-        // queued `restart_runtime` verb.
-        const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
-        if (!response.ok) {
-          throw new Error('Failed to restart frame')
+        try {
+          // Canonical on both control planes; the cloud maps it onto the
+          // queued `restart_runtime` verb.
+          const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+          if (!response.ok) {
+            throw new Error(await frameActionErrorMessage(response, 'Failed to restart frame'))
+          }
+        } catch (error) {
+          // An embedded board that never joined Wi-Fi (or joined the wrong
+          // network) has no reachable network path, but a connected USB serial
+          // session can still reboot it.
+          if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
+            throw error
+          }
         }
+        longRunningTasksModel.actions.finishTask({
+          taskId,
+          frameId: id,
+          kind: 'restart',
+          detail: isCloudMode() ? 'Restart queued for the frame' : 'FrameOS restarting',
+        })
       } catch (error) {
-        // An embedded board that never joined Wi-Fi (or joined the wrong
-        // network) has no reachable network path, but a connected USB serial
-        // session can still reboot it.
-        if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
-          throw error
-        }
+        longRunningTasksModel.actions.taskFailed({
+          taskId,
+          frameId: id,
+          kind: 'restart',
+          detail: error instanceof Error ? error.message : 'Failed to restart frame',
+        })
       }
     },
     rebootFrame: async ({ id }) => {
+      const taskId = `reboot:${id}:${Date.now()}`
+      longRunningTasksModel.actions.startTask({
+        id: taskId,
+        frameId: id,
+        kind: 'reboot',
+        title: 'Rebooting device',
+        detail: 'Reboot request sent',
+      })
       try {
-        // Canonical on both control planes; the cloud maps it onto the
-        // queued `reboot` verb.
-        const response = await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
-        if (!response.ok) {
-          throw new Error('Failed to reboot frame')
+        try {
+          // Canonical on both control planes; the cloud maps it onto the
+          // queued `reboot` verb.
+          const response = await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
+          if (!response.ok) {
+            throw new Error(await frameActionErrorMessage(response, 'Failed to reboot frame'))
+          }
+        } catch (error) {
+          // On embedded frames restart and reboot are the same esp_restart().
+          if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
+            throw error
+          }
         }
+        longRunningTasksModel.actions.finishTask({
+          taskId,
+          frameId: id,
+          kind: 'reboot',
+          detail: isCloudMode() ? 'Reboot queued for the frame' : 'Device rebooting',
+        })
       } catch (error) {
-        // On embedded frames restart and reboot are the same esp_restart().
-        if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
-          throw error
-        }
+        longRunningTasksModel.actions.taskFailed({
+          taskId,
+          frameId: id,
+          kind: 'reboot',
+          detail: error instanceof Error ? error.message : 'Failed to reboot frame',
+        })
       }
     },
     deployRemote: async ({ id, recompile, transport }) => {
@@ -1302,13 +1386,28 @@ export const framesModel = kea<framesModelType>([
           return
         }
       }
-      if (router.values.location.pathname.includes('/frames/' + id)) {
+      if (!response.ok) {
+        // Navigating away regardless used to make a refused delete look
+        // like it worked, with the frame still in the list a second later.
+        const detail = (await response.json().catch(() => ({}))) as { detail?: string; error?: string }
+        const taskId = `delete-frame:${id}:${Date.now()}`
+        longRunningTasksModel.actions.startTask({ id: taskId, frameId: id, kind: 'save', title: 'Deleting frame' })
+        longRunningTasksModel.actions.taskFailed({
+          taskId,
+          frameId: id,
+          kind: 'save',
+          detail: detail.detail ?? detail.error ?? `Failed to delete frame (${response.status})`,
+        })
+        return
+      }
+      // Exact segment match: '/frames/1' must not match '/frames/10'.
+      if (new RegExp(`^/frames/${String(id)}(/|$)`).test(router.values.location.pathname)) {
         router.actions.push(urls.frames())
       }
       // The backend announces the deletion over its websocket (the reducer
       // listens for socketLogic.deleteFrame); the cloud has no such event, so
       // re-list to drop the row now instead of on the next 15 s poll.
-      if (response.ok && isCloudMode()) {
+      if (isCloudMode()) {
         actions.loadFrames()
       }
     },

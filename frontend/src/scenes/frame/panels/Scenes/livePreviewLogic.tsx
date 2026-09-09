@@ -576,9 +576,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         scenes: livePreviewLogicValues['scenes']
       ): FrameScene | null =>
         livePreviewSceneId
-          ? ((livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
+          ? (livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
             scenes.find((scene) => scene.id === livePreviewSceneId) ??
-            null)
+            null
           : null,
     ],
     gpioButtons: [
@@ -654,7 +654,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     ],
   }),
   listeners(({ actions, values, cache, props }) => ({
-    openLivePreview: async ({ sceneId, state, scenes }) => {
+    openLivePreview: async ({ sceneId, state, scenes }, breakpoint) => {
       cache.worker?.terminate()
       cache.worker = null
       cache.pendingFrame = null
@@ -720,6 +720,11 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       } catch (error) {
         // fall through with empty settings
       }
+      // A second open while this one awaited the settings fetch or the
+      // consent dialog below already terminated our worker slot; without
+      // this the older call would still assign a second, orphaned runtime
+      // that keeps rendering (and holding revealed keys) until the tab closes.
+      breakpoint()
       // User-entered keys (setPreviewSettings) win over the backend's, merged
       // per settings group.
       for (const [group, groupValues] of Object.entries(values.previewSettings ?? {})) {
@@ -735,6 +740,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         settings,
         Boolean(values.livePreviewSourceTemplate?.template?.sceneId)
       )
+      breakpoint()
       if (gated.settings === null) {
         actions.closeLivePreview()
         return
@@ -771,6 +777,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           // preview still runs; external fetches will fail with CORS as before
         }
       }
+      breakpoint()
 
       let worker: Worker
       try {

@@ -1,5 +1,10 @@
 import clsx from 'clsx'
-import { allowedParentOrigins, replyTargetOrigin, sameOriginPreviewProxyUrl } from './embedOrigins'
+import {
+  allowedParentOrigins,
+  replyTargetOrigin,
+  sameOriginPreviewProxyUrl,
+  setLockedParentOrigin,
+} from './embedOrigins'
 import copy from 'copy-to-clipboard'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { useEffect, useRef, useState } from 'react'
@@ -306,6 +311,7 @@ export function EmbeddedEditor(): JSX.Element {
         }
         if (lockedParentOrigin === null) {
           lockedParentOrigin = event.origin
+          setLockedParentOrigin(event.origin)
           setParentOrigin(event.origin)
         }
       }

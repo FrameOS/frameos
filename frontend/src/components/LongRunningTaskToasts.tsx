@@ -11,6 +11,7 @@ import {
   ExclamationTriangleIcon,
   EyeIcon,
   PlayIcon,
+  PowerIcon,
   RocketLaunchIcon,
   ServerStackIcon,
   XMarkIcon,
@@ -50,6 +51,9 @@ function taskIcon(kind: LongRunningTaskKind): JSX.Element {
   }
   if (kind === 'save') {
     return <DocumentTextIcon className="h-5 w-5" />
+  }
+  if (kind === 'stop' || kind === 'restart' || kind === 'reboot') {
+    return <PowerIcon className="h-5 w-5" />
   }
   return <ServerStackIcon className="h-5 w-5" />
 }

@@ -376,6 +376,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'ssh_keys',
   'server_host',
   'server_port',
+  'server_scheme',
   'server_api_key',
   'server_send_logs',
   'width',
@@ -484,6 +485,7 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED: (keyof FrameType)[] = [
   'server_api_key',
   'server_host',
   'server_port',
+  'server_scheme',
 ]
 
 const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
@@ -501,6 +503,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   ssh_keys: 'SSH keys',
   server_host: 'Server host',
   server_port: 'Server port',
+  server_scheme: 'Server scheme',
   server_api_key: 'Server API key',
   server_send_logs: 'Server Send Logs',
   width: 'Width',
@@ -558,6 +561,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'ssh_keys',
   'server_host',
   'server_port',
+  'server_scheme',
   'server_api_key',
   'server_send_logs',
   'width',
@@ -1923,6 +1927,13 @@ function normalizeSceneAppFieldOptions(apps: Record<string, SceneApp>): Record<s
   )
 }
 
+function trimFieldName<T extends { name?: string }>(field: T): T {
+  if (typeof field.name !== 'string' || field.name === field.name.trim()) {
+    return field
+  }
+  return { ...field, name: field.name.trim() }
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   // AI-generated scenes used to carry the user's prompt here. It was never
   // needed to run the scene and could hold more than the user meant to share
@@ -1958,8 +1969,16 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     nodes: arranged.nodes,
     edges: arranged.edges,
     apps: normalizeSceneAppFieldOptions(normalizeSceneApps(scene.apps)),
-    fields: (scene.fields ?? []).map((field) => normalizeFieldOptions(field)),
-    customEvents: (scene.customEvents ?? []).map((event) => normalizeCustomEvent(event)),
+    // Names are validated after trim() (frameFormSceneErrors); store them the same way.
+    fields: (scene.fields ?? []).map((field) => trimFieldName(normalizeFieldOptions(field))),
+    customEvents: (scene.customEvents ?? []).map((event) => {
+      const normalized = normalizeCustomEvent(event)
+      return {
+        ...normalized,
+        name: typeof normalized.name === 'string' ? normalized.name.trim() : normalized.name,
+        ...(normalized.fields ? { fields: normalized.fields.map((field) => trimFieldName(field)) } : {}),
+      }
+    }),
     settings: {
       ...settings,
       // Always materialized: templates, imports and chat scenes arrive
@@ -3529,14 +3548,40 @@ export const frameLogic = kea<frameLogicType>([
       deleteSceneAndSave: async ({ sceneId }) => {
         const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
         const scenes = frameForm.scenes ?? []
-        if (!scenes.some((scene) => scene.id === sceneId)) {
+        const scene = scenes.find((candidate) => candidate.id === sceneId)
+        if (!scene) {
           return
         }
 
-        const nextScenes = scenes.filter((scene) => scene.id !== sceneId)
+        const nextScenes = scenes.filter((candidate) => candidate.id !== sceneId)
         const nextFrameForm = { ...frameForm, scenes: nextScenes }
         actions.setFrameFormValues({ scenes: nextScenes })
-        await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+        // Used to save with no task, no toast and no try: a failed save left
+        // the scene gone from the UI and present on the server.
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'save',
+          title: `Deleting scene "${scene.name || 'Untitled scene'}"`,
+          detail: null,
+        })
+        try {
+          await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'save',
+            status: 'success',
+            detail: 'Scene deleted',
+          })
+        } catch (error) {
+          console.error(error)
+          // Put the scene back: the server still has it.
+          actions.setFrameFormValues({ scenes })
+          longRunningTasksModel.actions.taskFailed({
+            frameId: props.frameId,
+            kind: 'save',
+            detail: error instanceof Error ? error.message : 'Failed to delete scene',
+          })
+        }
         framesModel.actions.loadFrame(props.frameId)
       },
       sendEvent: async ({ event, payload }) => {

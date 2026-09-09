@@ -5,10 +5,31 @@ import clsx from 'clsx'
 import ReactMarkdown from 'react-markdown'
 
 export interface MarkdownProps {
-  value: string
+  /** Scene-supplied (store zips, imported JSON, AI output): not guaranteed a string. */
+  value: unknown
 }
 
-export function Markdown({ value }: MarkdownProps) {
+/** react-markdown 9 throws on non-string children, which took the whole
+ * diagram down on one `"markdown": {"x": 1}` in an app config. Coerce. */
+function markdownSource(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (value === null || value === undefined) {
+    return ''
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  try {
+    return '```json\n' + JSON.stringify(value, null, 2) + '\n```'
+  } catch {
+    return String(value)
+  }
+}
+
+export function Markdown({ value: rawValue }: MarkdownProps) {
+  const value = markdownSource(rawValue)
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}

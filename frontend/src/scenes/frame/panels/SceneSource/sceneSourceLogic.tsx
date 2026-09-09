@@ -2,7 +2,7 @@ import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path,
 
 import { loaders } from 'kea-loaders'
 import { frameLogic } from '../../frameLogic'
-import { SourceError } from '../EditApp/editAppLogic'
+import { validateNimSource, type SourceError } from '../../../../utils/validateNimSource'
 import { editor, MarkerSeverity } from 'monaco-editor'
 import { apiFetch } from '../../../../utils/apiFetch'
 import type { FrameId } from '../../../../types'
@@ -132,14 +132,11 @@ export const sceneSourceLogic = kea<sceneSourceLogicType>([
       actions.validateSource(source)
     },
     validateSource: async ({ source }, breakpoint) => {
-      const response = await apiFetch(`/api/apps/validate_source`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file: 'scene.nim', source }),
-      })
+      // `null` = nothing validated (no backend on this surface, request
+      // failed): clear the markers instead of keeping stale ones.
+      const errors = await validateNimSource('scene.nim', source)
       breakpoint()
-      const { errors } = await response.json()
-      actions.setSourceErrors(errors || [])
+      actions.setSourceErrors(errors ?? [])
     },
   })),
 ])

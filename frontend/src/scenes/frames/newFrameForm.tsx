@@ -274,7 +274,9 @@ export const newFrameForm = kea<newFrameFormType>([
           wifiSSID: '',
           wifiPassword: '',
         },
-        rememberWifi: true,
+        // Opt-in: ticked by default it POSTed the passphrase into the
+        // project-wide defaults on every SD-card / embedded frame.
+        rememberWifi: false,
         server_host: defaultNewFrameServerHost(),
       } as NewFrameFormType,
       errors: (frame: Partial<NewFrameFormType>) => ({
