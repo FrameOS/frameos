@@ -1,13 +1,13 @@
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import Integer, String
+from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import mapped_column, relationship
 from app.database import Base
 
 class User(Base):
     __tablename__ = 'user'
     id = mapped_column(Integer, primary_key=True)
-    email = mapped_column(String(120), unique=True)
-    password = mapped_column(String(128))
+    email = mapped_column(String(320), unique=True)
+    password = mapped_column(Text)
 
     organization_memberships = relationship("OrganizationMember", back_populates="user", cascade="all, delete-orphan")
 

@@ -54,7 +54,7 @@ class CloudBackendLink(Base):
     # drive setup linking and see the pending user code. Cleared once linked.
     setup_claim = mapped_column(String(64), nullable=True)
     # Encrypted with Fernet keyed off SECRET_KEY; never returned by the API.
-    access_token = mapped_column(String(4096), nullable=True)
+    access_token = mapped_column(Text, nullable=True)
     token_reference = mapped_column(String(256), nullable=True)
     linked_client_id = mapped_column(String(128), nullable=True)
     cloud_account_id = mapped_column(String(128), nullable=True)

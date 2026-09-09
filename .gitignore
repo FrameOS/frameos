@@ -2,6 +2,8 @@
 env
 __pycache__
 *.db
+*.db-wal
+*.db-shm
 /db/
 !.flox/
 !.flox/env/

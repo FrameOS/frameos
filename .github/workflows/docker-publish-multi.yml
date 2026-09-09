@@ -78,8 +78,9 @@ jobs:
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
           # update_versions.py syncs the wasm package to the FrameOS runtime
-          # version and the editor package to its independent frontend hash.
-          git add versions.json frameos/wasm/package.json frameos/editor/package.json
+          # version, the editor package to its independent frontend hash, and
+          # the standalone setup script's fallback release to this release.
+          git add versions.json frameos/wasm/package.json frameos/editor/package.json scripts/frameos-setup.sh
           git commit -m "chore: version ${VERSION}"
           git push origin HEAD:main
 

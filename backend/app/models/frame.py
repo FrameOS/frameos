@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from arq import ArqRedis as Redis
 import time
 from typing import Any, Optional
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import JSON
 from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean, Text
 from sqlalchemy.orm import Session, mapped_column, object_session
 from app.utils.scene_execution import scene_is_interpreted
@@ -319,7 +319,7 @@ class Frame(Base):
     frame_admin_auth = mapped_column(JSON, nullable=True)
     https_proxy = mapped_column(JSON, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
-    ssh_pass = mapped_column(String(50), nullable=True)
+    ssh_pass = mapped_column(Text, nullable=True)
     ssh_port = mapped_column(Integer, default=22)
     ssh_keys = mapped_column(JSON, nullable=True)
     # The server host key recorded on the first SSH connect (OpenSSH
@@ -337,7 +337,7 @@ class Frame(Base):
     # frame metadata
     status = mapped_column(String(15), nullable=False)
     archived = mapped_column(Boolean, nullable=False, default=False)
-    version = mapped_column(String(50), nullable=True)
+    version = mapped_column(String(128), nullable=True)
     width = mapped_column(Integer, nullable=True)
     height = mapped_column(Integer, nullable=True)
     device = mapped_column(String(256), nullable=True)
@@ -351,8 +351,8 @@ class Frame(Base):
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
-    log_to_file = mapped_column(String(256), nullable=True)
-    assets_path = mapped_column(String(256), nullable=True)
+    log_to_file = mapped_column(Text, nullable=True)
+    assets_path = mapped_column(Text, nullable=True)
     save_assets = mapped_column(JSON, nullable=True)
     debug = mapped_column(Boolean, nullable=True)
     upload_fonts = mapped_column(String(10), nullable=True)

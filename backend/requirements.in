@@ -16,6 +16,7 @@ pillow
 pip-tools
 posthog>=7.5.1
 pre-commit
+psycopg[binary]
 pytest
 pytest-asyncio
 python-jose

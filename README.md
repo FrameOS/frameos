@@ -135,6 +135,10 @@ docker run -d -p 8989:8989 \
     frameos
 ```
 
+### Database
+
+The backend stores everything in SQLite (`./db/frameos.db` in the volume above) and needs nothing else. PostgreSQL is supported too: set `DATABASE_URL=postgresql+psycopg://user:password@host:5432/frameos` (the driver ships in the image, and CI runs the backend test suite against both databases).
+
 ### Cross-toolchain build container images
 
 Cross-compilation uses prebuilt toolchain containers from Docker Hub at `frameos/frameos-cross-toolchain` when possible, which avoids rebuilding the toolchain image for every target.
