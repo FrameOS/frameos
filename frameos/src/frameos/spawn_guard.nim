@@ -58,6 +58,10 @@ type
     address*: string   ## the IP the policy check resolved the host to — set
                        ## only while the private-network deny is active; the
                        ## child must then connect to exactly this address
+    denyActive*: bool  ## the private-network deny was on when the URL was
+                       ## checked (a literal address then has no `address`
+                       ## to pin, but the child still has to be held to the
+                       ## checked host set — see chromiumScreenshot)
     pinnedUrl*: string ## `url` with the host replaced by `address` (or `url`
                        ## itself when nothing is pinned)
 
@@ -104,6 +108,7 @@ proc spawnTarget*(url: string, allowedSchemes: openArray[string]): SpawnTarget =
     if pin.refusal.len > 0:
       result.refusal = pin.refusal
       return
+    result.denyActive = pin.address.len > 0
     if pin.address.len > 0 and pin.address != parsed.hostname:
       result.address = pin.address
       var pinned = parsed
@@ -113,3 +118,21 @@ proc spawnTarget*(url: string, allowedSchemes: openArray[string]): SpawnTarget =
 proc spawnTargetRefusal*(url: string, allowedSchemes: openArray[string]): string =
   ## "" when `url` may be handed to a child process, otherwise the reason not.
   spawnTarget(url, allowedSchemes).refusal
+
+proc spawnSubresourcePin*(host: string, port: int): tuple[refusal: string, address: string] =
+  ## The same once-only resolve-and-classify for a host a child process wants
+  ## to reach AFTER its first request (a page's sub-resources): "" refusal
+  ## when `host:port` may be reached under the current policy, and then the
+  ## address the child must be held to — the literal itself for a literal
+  ## host, or the one answer the check was made against for a name. Empty
+  ## address with an empty refusal means the deny is off and there is
+  ## nothing to pin.
+  if host.len == 0:
+    return ("URL has no host", "")
+  when defined(frameosEmbedded) or defined(frameosWasm):
+    ("", "")
+  else:
+    let pin = localNetworkPolicyPin(host, port)
+    if pin.refusal.len > 0:
+      return (pin.refusal, "")
+    ("", pin.address)

@@ -4,17 +4,23 @@ import frameos/types
 import tables, options
 import scenes/scene_black as scene_black
 import scenes/scene_blue as scene_blue
+import scenes/scene_dataClock as scene_dataClock
 import scenes/scene_dataCodeFloat as scene_dataCodeFloat
 import scenes/scene_dataDownloadImage as scene_dataDownloadImage
 import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
 import scenes/scene_dataGradient as scene_dataGradient
+import scenes/scene_dataIcalAgenda as scene_dataIcalAgenda
+import scenes/scene_dataJsonTools as scene_dataJsonTools
 import scenes/scene_dataLocalImage as scene_dataLocalImage
 import scenes/scene_dataNewImage as scene_dataNewImage
 import scenes/scene_dataNewImageNext as scene_dataNewImageNext
 import scenes/scene_dataQR as scene_dataQR
 import scenes/scene_dataResize as scene_dataResize
+import scenes/scene_dataRotate as scene_dataRotate
 import scenes/scene_logicIfElse as scene_logicIfElse
 import scenes/scene_logicSetAsState as scene_logicSetAsState
+import scenes/scene_renderCalendar as scene_renderCalendar
+import scenes/scene_renderChart as scene_renderChart
 import scenes/scene_renderColorFlow as scene_renderColorFlow
 import scenes/scene_renderColorImage as scene_renderColorImage
 import scenes/scene_renderColorSplit as scene_renderColorSplit
@@ -32,6 +38,7 @@ import scenes/scene_renderTextPosition as scene_renderTextPosition
 import scenes/scene_renderTextRich as scene_renderTextRich
 import scenes/scene_renderTextRichOver as scene_renderTextRichOver
 import scenes/scene_renderTextSplit as scene_renderTextSplit
+import scenes/scene_renderZoomPan as scene_renderZoomPan
 import scenes/scene_sceneNodes as scene_sceneNodes
 import scenes/scene_weatherCurrent as scene_weatherCurrent
 import scenes/scene_weatherDaily as scene_weatherDaily
@@ -44,20 +51,26 @@ import scenes/scene_weatherStackedLow as scene_weatherStackedLow
 
 let defaultSceneId* = some("black".SceneId)
 
-const sceneOptions*: array[39, tuple[id: SceneId, name: string]] = [
+const sceneOptions*: array[46, tuple[id: SceneId, name: string]] = [
   ("black".SceneId, "Black"),
   ("blue".SceneId, "Blue"),
+  ("dataClock".SceneId, "Clock"),
   ("dataCodeFloat".SceneId, "Numeric Code Nodes"),
   ("dataDownloadImage".SceneId, "Download Image"),
   ("dataDownloadUrl".SceneId, "Download URL"),
   ("dataGradient".SceneId, "dataGradient"),
+  ("dataIcalAgenda".SceneId, "iCal agenda"),
+  ("dataJsonTools".SceneId, "JSON tools"),
   ("dataLocalImage".SceneId, "Local Image"),
   ("dataNewImage".SceneId, "New Image"),
   ("dataNewImageNext".SceneId, "Data Image Next"),
   ("dataQR".SceneId, "QR"),
   ("dataResize".SceneId, "Resize image"),
+  ("dataRotate".SceneId, "Rotate"),
   ("logicIfElse".SceneId, "If Else"),
   ("logicSetAsState".SceneId, "Set as State"),
+  ("renderCalendar".SceneId, "Calendar"),
+  ("renderChart".SceneId, "Chart"),
   ("renderColorFlow".SceneId, "Color"),
   ("renderColorImage".SceneId, "Color"),
   ("renderColorSplit".SceneId, "Color"),
@@ -75,6 +88,7 @@ const sceneOptions*: array[39, tuple[id: SceneId, name: string]] = [
   ("renderTextRich".SceneId, "Rich text"),
   ("renderTextRichOver".SceneId, "Rich text overflow"),
   ("renderTextSplit".SceneId, "Text Split"),
+  ("renderZoomPan".SceneId, "Zoom & Pan"),
   ("sceneNodes".SceneId, "3"),
   ("weatherCurrent".SceneId, "Weather: current"),
   ("weatherDaily".SceneId, "Weather: daily"),
@@ -90,17 +104,23 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
   result["black".SceneId] = scene_black.exportedScene
   result["blue".SceneId] = scene_blue.exportedScene
+  result["dataClock".SceneId] = scene_dataClock.exportedScene
   result["dataCodeFloat".SceneId] = scene_dataCodeFloat.exportedScene
   result["dataDownloadImage".SceneId] = scene_dataDownloadImage.exportedScene
   result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
   result["dataGradient".SceneId] = scene_dataGradient.exportedScene
+  result["dataIcalAgenda".SceneId] = scene_dataIcalAgenda.exportedScene
+  result["dataJsonTools".SceneId] = scene_dataJsonTools.exportedScene
   result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
   result["dataNewImage".SceneId] = scene_dataNewImage.exportedScene
   result["dataNewImageNext".SceneId] = scene_dataNewImageNext.exportedScene
   result["dataQR".SceneId] = scene_dataQR.exportedScene
   result["dataResize".SceneId] = scene_dataResize.exportedScene
+  result["dataRotate".SceneId] = scene_dataRotate.exportedScene
   result["logicIfElse".SceneId] = scene_logicIfElse.exportedScene
   result["logicSetAsState".SceneId] = scene_logicSetAsState.exportedScene
+  result["renderCalendar".SceneId] = scene_renderCalendar.exportedScene
+  result["renderChart".SceneId] = scene_renderChart.exportedScene
   result["renderColorFlow".SceneId] = scene_renderColorFlow.exportedScene
   result["renderColorImage".SceneId] = scene_renderColorImage.exportedScene
   result["renderColorSplit".SceneId] = scene_renderColorSplit.exportedScene
@@ -118,6 +138,7 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["renderTextRich".SceneId] = scene_renderTextRich.exportedScene
   result["renderTextRichOver".SceneId] = scene_renderTextRichOver.exportedScene
   result["renderTextSplit".SceneId] = scene_renderTextSplit.exportedScene
+  result["renderZoomPan".SceneId] = scene_renderZoomPan.exportedScene
   result["sceneNodes".SceneId] = scene_sceneNodes.exportedScene
   result["weatherCurrent".SceneId] = scene_weatherCurrent.exportedScene
   result["weatherDaily".SceneId] = scene_weatherDaily.exportedScene

@@ -317,7 +317,6 @@ app/tasks/tests/test_deploy_remote.py: Value of type "object" is not indexable  
 app/tasks/tests/test_deploy_remote.py: Value of type "object" is not indexable  [index]
 app/tasks/tests/test_deploy_remote.py: Value of type "object" is not indexable  [index]
 app/tasks/tests/test_deploy_remote.py: Value of type "object" is not indexable  [index]
-app/tasks/tests/test_fast_deploy_frame.py: Module "app.tasks.fast_deploy_frame" has no attribute "tls_settings_changed"  [attr-defined]
 app/tasks/tests/test_frame_deploy_helpers.py: Argument 1 to "upload_binary" has incompatible type "RecordingDeployer"; expected "FrameDeployer"  [arg-type]
 app/tasks/tests/test_frame_deploy_helpers.py: Argument 1 to "upload_directory_tree" has incompatible type "RecordingDeployer"; expected "FrameDeployer"  [arg-type]
 app/tasks/tests/test_frame_deploy_workflow.py: "FrameDeployer" has no attribute "success_commands"  [attr-defined]

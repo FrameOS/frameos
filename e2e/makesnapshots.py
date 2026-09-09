@@ -251,6 +251,9 @@ def main():
     env = os.environ.copy()
     env["FRAMEOS_SCENES_JSON"] = Path('./tmp/scenes.json').resolve().as_posix()
     env["FRAMEOS_CONFIG"] = runtime_config_path.resolve().as_posix()
+    # Pin the wall clock (frameos/utils/frame_time.nim): the clock and
+    # calendar fixtures render 2024-03-12 14:40:00 UTC, whatever day it is.
+    env["FRAMEOS_E2E_FIXED_EPOCH"] = "1710254400"
     print(f"Listening for FrameOS HTTP uploads on {upload_url}")
     # Start the frameos binary in the background
     FRAMEOS_PROCESS_LOG.parent.mkdir(exist_ok=True)

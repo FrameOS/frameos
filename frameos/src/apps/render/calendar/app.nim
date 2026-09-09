@@ -5,6 +5,7 @@ import algorithm
 
 import frameos/apps
 import frameos/types
+import frameos/utils/frame_time
 import frameos/utils/app_images
 import frameos/utils/font
 
@@ -330,7 +331,7 @@ proc sortEventLines*(eventsByDay: var Table[string, seq[EventLine]]) =
 proc render*(self: App, context: ExecutionContext, image: Image) =
   self.setTheme()
   # Current date/time (use LOCAL time zone; FrameOS sets TZ to the user's zone, e.g., Europe/Brussels)
-  let nowLocal = times.now()
+  let nowLocal = frameNow()
   let defaultYear = nowLocal.year
   let defaultMonth = nowLocal.month.ord
   let todayDay = nowLocal.monthday

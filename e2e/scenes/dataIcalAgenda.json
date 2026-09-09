@@ -1,0 +1,174 @@
+{
+  "id": "51c986a9-afe2-5148-97c8-bbc3fe942ccb",
+  "name": "iCal agenda",
+  "settings": {
+    "backgroundColor": "#000000",
+    "refreshInterval": 3600
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "650cad4f-27ad-5e72-828e-acaf9bf8d00e",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "95b9518d-4bf3-500e-b7ff-79585fc9fbb9",
+      "type": "app",
+      "position": {
+        "x": 340,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "2"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "581e4f30-9288-5a98-9fd3-2e25bb638b16",
+      "type": "app",
+      "position": {
+        "x": 680,
+        "y": 100
+      },
+      "data": {
+        "keyword": "data/icalJson",
+        "config": {
+          "ical": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//FrameOS//e2e//EN\r\nBEGIN:VEVENT\r\nUID:e2e-1\r\nDTSTAMP:20240201T000000Z\r\nDTSTART:20240304T083000Z\r\nDTEND:20240304T091500Z\r\nSUMMARY:Standup\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nLOCATION:Room 1\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:e2e-2\r\nDTSTAMP:20240201T000000Z\r\nDTSTART;VALUE=DATE:20240312\r\nDTEND;VALUE=DATE:20240315\r\nSUMMARY:Conference\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:e2e-3\r\nDTSTAMP:20240201T000000Z\r\nDTSTART:20240320T120000Z\r\nDTEND:20240320T130000Z\r\nSUMMARY:Lunch with Ada\r\nURL:https://example.com/lunch\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:e2e-4\r\nDTSTAMP:20240201T000000Z\r\nDTSTART;VALUE=DATE:20240328\r\nSUMMARY:Birthday\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+          "exportFrom": "2024-03-01",
+          "exportUntil": "2024-03-31",
+          "addLocation": "true",
+          "addUrl": "false"
+        },
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "900"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "7c069d47-9cde-5c8a-94e6-6ba4b285688c",
+      "type": "app",
+      "position": {
+        "x": 1020,
+        "y": 100
+      },
+      "data": {
+        "keyword": "data/eventsToAgenda",
+        "config": {
+          "baseFontSize": "14",
+          "titleFontSize": "20",
+          "startWithToday": "false",
+          "timeColor": "#f6ad55"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "f9f8f5f8-b90e-51f0-845b-2b41870f9f1b",
+      "type": "app",
+      "position": {
+        "x": 1360,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "position": "left",
+          "vAlign": "top",
+          "padding": "8",
+          "borderWidth": "0",
+          "richText": "basic-caret"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "88ae44b8-4e9a-5003-920f-2eda2b8eb3da",
+      "type": "app",
+      "position": {
+        "x": 1700,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/calendar",
+        "config": {
+          "year": "2024",
+          "month": "3",
+          "scale": "60",
+          "showEventTimes": "true"
+        }
+      },
+      "width": 310,
+      "height": 160
+    }
+  ],
+  "edges": [
+    {
+      "id": "b0f7f930-f785-5678-9b18-c1bbba90e5d7",
+      "source": "650cad4f-27ad-5e72-828e-acaf9bf8d00e",
+      "sourceHandle": "next",
+      "target": "95b9518d-4bf3-500e-b7ff-79585fc9fbb9",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "4d70fded-0852-5f33-94a5-83da7869d507",
+      "source": "581e4f30-9288-5a98-9fd3-2e25bb638b16",
+      "sourceHandle": "fieldOutput",
+      "target": "7c069d47-9cde-5c8a-94e6-6ba4b285688c",
+      "targetHandle": "fieldInput/events",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "f8a6e2ee-54a6-5a82-9aeb-d0b8ae1cd443",
+      "source": "7c069d47-9cde-5c8a-94e6-6ba4b285688c",
+      "sourceHandle": "fieldOutput",
+      "target": "f9f8f5f8-b90e-51f0-845b-2b41870f9f1b",
+      "targetHandle": "fieldInput/text",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "180f8e9a-1619-5103-a474-53309aa29fed",
+      "source": "95b9518d-4bf3-500e-b7ff-79585fc9fbb9",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "f9f8f5f8-b90e-51f0-845b-2b41870f9f1b",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "1b7d9355-c94a-5dfd-86ec-a1c98bf00c01",
+      "source": "581e4f30-9288-5a98-9fd3-2e25bb638b16",
+      "sourceHandle": "fieldOutput",
+      "target": "88ae44b8-4e9a-5003-920f-2eda2b8eb3da",
+      "targetHandle": "fieldInput/events",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "8c0df001-218a-58fd-ada1-351c14014966",
+      "source": "95b9518d-4bf3-500e-b7ff-79585fc9fbb9",
+      "sourceHandle": "field/render_functions[2][1]",
+      "target": "88ae44b8-4e9a-5003-920f-2eda2b8eb3da",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ]
+}

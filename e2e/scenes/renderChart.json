@@ -1,0 +1,135 @@
+{
+  "id": "c9fb2615-7eb8-5cb0-ab92-5d017d149915",
+  "name": "Chart",
+  "settings": {
+    "backgroundColor": "#ffffff",
+    "refreshInterval": 3600
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "b377116d-cd3a-555d-bcee-38d9b4f8ab39",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "2dc9e924-da0f-5eff-8db7-ad8e7cad59d4",
+      "type": "app",
+      "position": {
+        "x": 340,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "3"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "6502290f-7542-5c47-b462-b344fe8a7603",
+      "type": "app",
+      "position": {
+        "x": 680,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/chart",
+        "config": {
+          "chartType": "line",
+          "title": "Temperature",
+          "data": "{\"labels\": [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\", \"Sun\"], \"series\": [{\"name\": \"in\", \"values\": [19.5, 20.1, 21.4, 20.8, 19.9, 18.2, 18.8]}, {\"name\": \"out\", \"values\": [4.0, 6.5, 9.1, 7.7, 3.2, -1.0, 0.5]}]}",
+          "transparentBackground": "false"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "06dcf768-3b2a-5de9-84e8-d07312a52202",
+      "type": "app",
+      "position": {
+        "x": 1020,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/chart",
+        "config": {
+          "chartType": "bar",
+          "title": "Renders",
+          "color": "#d97706",
+          "data": "[{\"label\": \"Q1\", \"value\": 12}, {\"label\": \"Q2\", \"value\": 30}, {\"label\": \"Q3\", \"value\": 22}, {\"label\": \"Q4\", \"value\": 41}]",
+          "minY": "0",
+          "transparentBackground": "false"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "a23581b2-9c42-5e38-89ee-2fae7479d277",
+      "type": "app",
+      "position": {
+        "x": 1360,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/chart",
+        "config": {
+          "chartType": "area",
+          "color": "#16a34a",
+          "showGrid": "false",
+          "data": "[3, 5, 2, 8, 6, 9, 4, 7]",
+          "lineWidth": "3",
+          "transparentBackground": "false"
+        }
+      },
+      "width": 310,
+      "height": 160
+    }
+  ],
+  "edges": [
+    {
+      "id": "91c6aeb0-b048-574d-8fe4-aad0d45dfec8",
+      "source": "b377116d-cd3a-555d-bcee-38d9b4f8ab39",
+      "sourceHandle": "next",
+      "target": "2dc9e924-da0f-5eff-8db7-ad8e7cad59d4",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "d4f15c49-42d7-5b45-9b6e-18f642b38bad",
+      "source": "2dc9e924-da0f-5eff-8db7-ad8e7cad59d4",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "6502290f-7542-5c47-b462-b344fe8a7603",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "3ed7ff03-e85c-503f-b342-b15886d5dc84",
+      "source": "2dc9e924-da0f-5eff-8db7-ad8e7cad59d4",
+      "sourceHandle": "field/render_functions[2][1]",
+      "target": "06dcf768-3b2a-5de9-84e8-d07312a52202",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "316a0925-7492-5ba4-b66b-61fbb5a20741",
+      "source": "2dc9e924-da0f-5eff-8db7-ad8e7cad59d4",
+      "sourceHandle": "field/render_functions[3][1]",
+      "target": "a23581b2-9c42-5e38-89ee-2fae7479d277",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ]
+}

@@ -1481,8 +1481,29 @@ var exportedScene* = ExportedScene(
             if not required_fields.get(key, False):
                 return ["none(Image)"]
             return ["newImage(1, 1)"]
+        elif type == "json":
+            # The editor stores a json port's value as text (the interpreter
+            # parses it the same way, interpreter.nim); a scene built by hand
+            # may carry the object itself.
+            if value is None:
+                json_text = "null"
+            elif isinstance(value, (dict, list)):
+                json_text = json.dumps(value)
+            else:
+                try:
+                    json.loads(str(value))
+                    json_text = str(value)
+                except ValueError:
+                    json_text = "null"
+            return [f'parseJson("{sanitize_nim_string(json_text)}")']
         else:
-            return [f"\"{'' if value is None else sanitize_nim_string(str(value))}\""]
+            literal = f"\"{'' if value is None else sanitize_nim_string(str(value))}\""
+            if self.byte_iter_fields.get(node_id, {}).get(key, False):
+                # A `byteIter` port is a Spool in the app's AppConfig (see
+                # the run-time assignment above); a value typed into the
+                # editor is a string until it is wrapped.
+                return [f"newMemorySpool({literal})"]
+            return [literal]
 
     def get_sequence_values(
         self,

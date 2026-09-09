@@ -90,7 +90,9 @@ suite "spawn targets":
     check spawnTarget("http://cam.example:8080/x", ["http"]).port == 8080
     # With the deny off nothing is pinned: the child resolves for itself.
     check plain.address == ""
+    check not plain.denyActive
     check plain.pinnedUrl == plain.url
+    check spawnSubresourcePin("192.168.1.1", 80) == ("", "")
 
   test "with the deny on, the target is pinned to the address that was checked":
     # A literal address needs no lookup, so the pin is the literal itself
@@ -99,7 +101,16 @@ suite "spawn targets":
     let literal = spawnTarget("http://93.184.216.34/x", ["http"])
     check literal.refusal == ""
     check literal.address == ""
+    # ...but the child still learns the deny is on, so it holds the page
+    # to the checked host set (chromiumScreenshot gates sub-resources).
+    check literal.denyActive
     check literal.pinnedUrl == "http://93.184.216.34/x"
+    # A sub-resource host goes through the same once-only check: a public
+    # literal pins to itself, a private one is refused.
+    check spawnSubresourcePin("203.0.113.7", 443) == ("", "203.0.113.7")
+    check spawnSubresourcePin("10.0.0.5", 80).refusal.contains("blocked")
+    check spawnSubresourcePin("localhost", 8787).refusal.contains("blocked")
+    check spawnSubresourcePin("", 80).refusal.contains("host")
     check spawnTarget("rtsp://192.168.1.20/live", ["rtsp"]).refusal.contains("blocked")
     check spawnTarget("http://127.0.0.1:8787/", ["http"]).refusal.contains("blocked")
     # A name resolves once; the child then gets that answer, never a second

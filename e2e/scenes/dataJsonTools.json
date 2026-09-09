@@ -1,0 +1,226 @@
+{
+  "id": "5d62c55a-813e-5026-9d80-c9996e59ea8c",
+  "name": "JSON tools",
+  "settings": {
+    "backgroundColor": "#000000",
+    "refreshInterval": 3600
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "a59eef16-1457-5232-977c-acf7b4d9ad4f",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "716a26fb-372c-5697-88c3-20863e1a9211",
+      "type": "app",
+      "position": {
+        "x": 340,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "2"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "ac4d76cf-8e28-5d3f-b2f3-69d914f18154",
+      "type": "app",
+      "position": {
+        "x": 680,
+        "y": 100
+      },
+      "data": {
+        "keyword": "data/parseJson",
+        "config": {
+          "text": "{\"frame\": \"kitchen\", \"pixels\": [1, 2, 3], \"ok\": true, \"nested\": {\"depth\": 2}}"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "0280b54b-8c39-50e3-a40e-a1a53d47ea0a",
+      "type": "app",
+      "position": {
+        "x": 1020,
+        "y": 100
+      },
+      "data": {
+        "keyword": "data/log",
+        "config": {}
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "48d3fd8b-cab0-57e9-b451-5526dafe2777",
+      "type": "app",
+      "position": {
+        "x": 1360,
+        "y": 100
+      },
+      "data": {
+        "keyword": "data/prettyJson",
+        "config": {
+          "ident": "2",
+          "prettify": "true"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "51d5805a-c533-5bc9-a5ea-8e4c6212f41f",
+      "type": "app",
+      "position": {
+        "x": 1700,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "position": "left",
+          "vAlign": "top",
+          "padding": "8",
+          "borderWidth": "0",
+          "fontSize": "18"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "8a6712dd-8184-554d-b644-84882f095da9",
+      "type": "app",
+      "position": {
+        "x": 2040,
+        "y": 100
+      },
+      "data": {
+        "keyword": "data/xmlToJson",
+        "config": {
+          "xml": "<frame name=\"kitchen\"><scene id=\"1\">Clock</scene><scene id=\"2\" default=\"true\"/></frame>"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "9f81e225-ace8-51c8-936c-13f30644bcd0",
+      "type": "app",
+      "position": {
+        "x": 2380,
+        "y": 100
+      },
+      "data": {
+        "keyword": "data/prettyJson",
+        "config": {
+          "prettify": "false"
+        }
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "afdcd562-3a80-5237-ba4f-39f21916989c",
+      "type": "app",
+      "position": {
+        "x": 2720,
+        "y": 100
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "position": "left",
+          "vAlign": "top",
+          "padding": "8",
+          "borderWidth": "0",
+          "fontSize": "14",
+          "fontColor": "#9ae6b4"
+        }
+      },
+      "width": 310,
+      "height": 160
+    }
+  ],
+  "edges": [
+    {
+      "id": "f0422975-48ff-5c4f-b8ec-eab1fcfbe868",
+      "source": "a59eef16-1457-5232-977c-acf7b4d9ad4f",
+      "sourceHandle": "next",
+      "target": "716a26fb-372c-5697-88c3-20863e1a9211",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "7ab99f54-551a-59b2-9445-cb91497e2733",
+      "source": "ac4d76cf-8e28-5d3f-b2f3-69d914f18154",
+      "sourceHandle": "fieldOutput",
+      "target": "0280b54b-8c39-50e3-a40e-a1a53d47ea0a",
+      "targetHandle": "fieldInput/inputJson",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "9820c1dc-1cef-56c6-ab69-b414bcaf15b4",
+      "source": "0280b54b-8c39-50e3-a40e-a1a53d47ea0a",
+      "sourceHandle": "fieldOutput",
+      "target": "48d3fd8b-cab0-57e9-b451-5526dafe2777",
+      "targetHandle": "fieldInput/json",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "bd9fdec1-c2f2-50c7-80de-6083332cf02c",
+      "source": "48d3fd8b-cab0-57e9-b451-5526dafe2777",
+      "sourceHandle": "fieldOutput",
+      "target": "51d5805a-c533-5bc9-a5ea-8e4c6212f41f",
+      "targetHandle": "fieldInput/text",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "2a6a27d8-736d-5e8b-864a-b9fcb0db26f8",
+      "source": "716a26fb-372c-5697-88c3-20863e1a9211",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "51d5805a-c533-5bc9-a5ea-8e4c6212f41f",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "975e5538-cef7-506e-855f-7a93cc273c61",
+      "source": "8a6712dd-8184-554d-b644-84882f095da9",
+      "sourceHandle": "fieldOutput",
+      "target": "9f81e225-ace8-51c8-936c-13f30644bcd0",
+      "targetHandle": "fieldInput/json",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "41ef81cc-0384-54d3-bf02-b5c5e5964ab6",
+      "source": "9f81e225-ace8-51c8-936c-13f30644bcd0",
+      "sourceHandle": "fieldOutput",
+      "target": "afdcd562-3a80-5237-ba4f-39f21916989c",
+      "targetHandle": "fieldInput/text",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "644f13ac-7645-5be3-a5d5-1b92fbf5cb37",
+      "source": "716a26fb-372c-5697-88c3-20863e1a9211",
+      "sourceHandle": "field/render_functions[2][1]",
+      "target": "afdcd562-3a80-5237-ba4f-39f21916989c",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ]
+}
