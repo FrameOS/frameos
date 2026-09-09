@@ -261,7 +261,7 @@ export function resetReleaseCacheForTests() {
 
 // Belt and braces: asset URLs come from the GitHub API, but pin the host
 // anyway so a compromised/unexpected API response cannot redirect us.
-function pinnedAssetUrl(asset: ReleaseAsset): URL | undefined {
+export function pinnedAssetUrl(asset: ReleaseAsset): URL | undefined {
   let assetUrl: URL;
   try {
     assetUrl = new URL(asset.browser_download_url);

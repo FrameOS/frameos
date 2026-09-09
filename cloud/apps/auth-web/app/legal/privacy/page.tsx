@@ -204,10 +204,14 @@ export default function PrivacyPage() {
           <strong>Sessions</strong> — until they expire or you sign out.
         </li>
         <li>
-          <strong>Security audit trail</strong> — kept after account deletion
-          with your account identifier removed, so it no longer identifies you.
-          A security log that could be erased on request would not serve its
-          purpose.
+          <strong>Security audit trail</strong> — kept after account deletion.
+          The rows lose their link to the deleted account, but the events that
+          record who did what to it — sign-ins, refused sign-in attempts,
+          password resets, deletion itself — keep the email address, IP
+          address and browser that performed them, because a security log that
+          forgets who acted cannot show that an account was abused. We keep
+          these entries for up to two years, then remove them. Nothing else
+          about you survives deletion.
         </li>
         <li>
           <strong>Backups</strong> — the off-site backups roll over on a

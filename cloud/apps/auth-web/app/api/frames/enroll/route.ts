@@ -77,6 +77,16 @@ const localHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 // unset, same trap as there); otherwise only a loopback request host gets the
 // :3100 default, because behind a real hostname we never guess.
 //
+// The loopback default is additionally gated off in production, for the same
+// reason the SPA route gates its cloud_ws_origin sniffing: the standalone
+// server does not reconstruct request.url from the forwarded Host header, so
+// behind nginx every request looks like localhost — and an enrolling device
+// would be handed `ws://localhost:3100`, a hub on its own loopback that does
+// not exist. (Masked until now only because the Linux runtime ignores ws_url
+// and the ESP32 refuses a loopback one.) In production the hub is same-origin
+// (nginx proxies ws_path); only an explicit FRAME_HUB_PUBLIC_URL may say
+// otherwise.
+//
 // The returned URL is a full ws:// or wss:// URL. Devices accept it under the
 // same transport rule as cloud_url: wss:// anywhere, plain ws:// only for
 // localhost/.local/private-network hosts (docs/cloud-frames.md).
@@ -88,7 +98,9 @@ function frameWsUrl(request: NextRequest): string | undefined {
   const hostname = new URL(request.url).hostname;
   const hubOrigin =
     configuredHub ||
-    (localHosts.has(hostname) ? `http://${hostname}:3100` : undefined);
+    (process.env.NODE_ENV !== "production" && localHosts.has(hostname)
+      ? `http://${hostname}:3100`
+      : undefined);
   if (!hubOrigin) {
     return undefined;
   }

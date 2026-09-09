@@ -5,11 +5,13 @@ import {
   passwordProviderIssuer,
 } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { recordAuditEvent } from "../../../../src/lib/audit";
 import { safeAuthReturnPath } from "../../../../src/lib/auth-cookies";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { beginEmailVerification } from "../../../../src/lib/email-verification";
 import { assertDatabaseUrlConfigured } from "../../../../src/lib/env";
 import { verifyPasswordWithDummyFallback } from "../../../../src/lib/passwords";
+import { hashSecret } from "../../../../src/lib/secrets";
 import {
   checkRateLimit,
   identityRateLimitResponse,
@@ -68,6 +70,23 @@ export async function POST(request: NextRequest) {
     account?.passwordHash,
   );
   if (!account || !passwordValid) {
+    // Audited either way, so the Activity page can show credential guessing
+    // against an account (the row hangs off the account when the email
+    // resolves) and an admin can see a spray across addresses that do not.
+    // The address itself is never stored for a miss — a digest is enough to
+    // correlate attempts and says nothing about who was targeted.
+    await recordAuditEvent(db, {
+      accountId: account?.id,
+      actor: {
+        ...(account ? { accountId: account.id } : {}),
+        emailDigest: hashSecret(email).slice(0, 16),
+      },
+      eventType: "auth.login_failed",
+      metadata: {
+        method: "password",
+        reason: account ? "wrong_password" : "unknown_email",
+      },
+    });
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 

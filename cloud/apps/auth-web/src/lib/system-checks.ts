@@ -29,6 +29,32 @@ function isSet(name: string) {
   return Boolean(process.env[name]?.trim());
 }
 
+/**
+ * True when the public object-store alias sits under the session cookie's
+ * domain. The `__Secure-` session cookie is scoped to
+ * FRAMEOS_SESSION_COOKIE_DOMAIN so the cloud, account and scenes origins
+ * share one login — and a browser sends a domain cookie to EVERY host under
+ * it, so store images redirected to `cloud-cdn.frameos.net` carry the
+ * session to Cloudflare R2 on every fetch. The CDN belongs on its own
+ * registrable domain (cloud/docs/deployment.md, "Object Storage").
+ */
+export function publicBaseUrlUnderCookieDomain(
+  cookieDomain: string | undefined,
+  publicBaseUrl: string | undefined,
+): boolean {
+  const domain = cookieDomain?.trim().replace(/^\./, "").toLowerCase();
+  if (!domain || !publicBaseUrl?.trim()) {
+    return false;
+  }
+  let host: string;
+  try {
+    host = new URL(publicBaseUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
 export function runSystemChecks(): SystemCheck[] {
   const splitOrigins =
     new Set(
@@ -85,6 +111,16 @@ export function runSystemChecks(): SystemCheck[] {
         "Parent cookie domain that shares login between the cloud, account, and scenes origins.",
       name: "FRAMEOS_SESSION_COOKIE_DOMAIN",
       required: splitOrigins,
+    },
+    {
+      configured: !publicBaseUrlUnderCookieDomain(
+        process.env.FRAMEOS_SESSION_COOKIE_DOMAIN,
+        process.env.R2_CLOUD_PUBLIC_BASE_URL,
+      ),
+      detail:
+        "The public object-store alias must NOT sit under the session cookie domain: browsers send the domain-scoped session cookie to every host beneath it, so store images fetched from the CDN would carry the login to Cloudflare. Serve the CDN from its own registrable domain.",
+      name: "R2_CLOUD_PUBLIC_BASE_URL outside FRAMEOS_SESSION_COOKIE_DOMAIN",
+      required: false,
     },
     {
       configured: isSet("GOOGLE_CLIENT_ID") && isSet("GOOGLE_CLIENT_SECRET"),

@@ -540,6 +540,32 @@ describe("cloud-managed frame enrollment", () => {
     expect(payload.ws_url).toBe("ws://localhost:3100/api/frames/ws");
   });
 
+  it("never hands a production device the loopback dev hub", async () => {
+    // Behind nginx the standalone server sees every request as localhost
+    // (request.url is not rebuilt from the forwarded Host), so the dev
+    // default above would ship `ws://localhost:3100` to real frames. In
+    // production the hub is same-origin; only FRAME_HUB_PUBLIC_URL overrides.
+    await signIn();
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const claimToken = await mintToken();
+      const response = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as Record<string, unknown>;
+      expect(payload.ws_path).toBe("/api/frames/ws");
+      expect("ws_url" in payload).toBe(false);
+
+      process.env.FRAME_HUB_PUBLIC_URL = "https://hub.frameos.net";
+      const second = await enroll(await mintToken(), deviceKeypair().publicKeyBase64);
+      expect(second.status).toBe(200);
+      const explicit = (await second.json()) as Record<string, unknown>;
+      expect(explicit.ws_url).toBe("wss://hub.frameos.net/api/frames/ws");
+    } finally {
+      vi.unstubAllEnvs();
+      delete process.env.FRAME_HUB_PUBLIC_URL;
+    }
+  });
+
   it("omits ws_url for a public host without FRAME_HUB_PUBLIC_URL", async () => {
     // In production nginx proxies ws_path on the same origin, so the default
     // contract needs no override — and we never guess a second port there.

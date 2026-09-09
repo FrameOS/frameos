@@ -24,6 +24,10 @@ import { verifyTurnstileToken } from "../../../../../src/lib/turnstile";
 
 const resetTokenMaxAgeMs = 60 * 60 * 1000;
 
+// Same loose shape the signup route uses: only obvious garbage is refused,
+// the address proves itself by receiving the mail.
+const emailShape = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -43,7 +47,9 @@ export async function POST(request: NextRequest) {
     | undefined;
   const email =
     typeof body?.email === "string" ? normalizeEmail(body.email) : "";
-  if (!email) {
+  // Shape only, and before the Turnstile token is spent: a mistyped address
+  // is refused without costing the single-use token the resubmit needs.
+  if (!email || email.length > 254 || !emailShape.test(email)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 

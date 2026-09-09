@@ -303,8 +303,13 @@ front of it.
   page, re-authenticating first (password, or typing their email for
   Google-only accounts). Everything cascades from `accounts.id`;
   `audit_events.account_id` is `ON DELETE SET NULL`, so the security trail
-  survives de-identified. Superadmins cannot self-delete (the panel must keep
-  a way in) — hand the flag over first.
+  survives — NOT de-identified: sign-in, refused sign-in, reset and deletion
+  rows keep the email, IP and user agent that acted, which is what makes the
+  trail useful after the fact. The privacy policy says so, promises up to
+  two years, and `scripts/db-cleanup.sh` prunes orphaned rows after
+  `FRAMEOS_CLOUD_ORPHAN_AUDIT_RETENTION_DAYS` (default 730). Superadmins
+  cannot self-delete (the panel must keep a way in) — hand the flag over
+  first.
 - **What an operator still has to do**: rectification, restriction, objection,
   and anything the export does not cover. One month to respond (art. 12(3)).
 - **Backups**: deleted data persists in off-site backups for up to 30 days

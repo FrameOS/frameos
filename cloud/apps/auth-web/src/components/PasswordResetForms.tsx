@@ -16,6 +16,9 @@ export function RequestResetForm({
   const [state, setState] = useState<"idle" | "submitting" | "sent">("idle");
   const [error, setError] = useState<string | undefined>();
   const [turnstileToken, setTurnstileToken] = useState<string | undefined>();
+  // The server spends the Turnstile token before answering, so every
+  // rejected submit needs a fresh one for the corrected resubmit.
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -37,12 +40,13 @@ export function RequestResetForm({
         return;
       }
 
+      setTurnstileReset((n) => n + 1);
       const payload = (await response.json().catch(() => undefined)) as
         | { error?: string }
         | undefined;
       setError(
         payload?.error === "turnstile_failed"
-          ? "The anti-spam check did not pass. Reload the page and try again."
+          ? "The anti-spam check did not pass. Try again."
           : response.status === 429
             ? "Too many attempts. Wait a few minutes and try again."
             : "Something went wrong. Try again in a moment.",
@@ -82,7 +86,11 @@ export function RequestResetForm({
         />
       </div>
       {turnstileSiteKey ? (
-        <TurnstileWidget onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+        <TurnstileWidget
+          onToken={setTurnstileToken}
+          resetKey={turnstileReset}
+          siteKey={turnstileSiteKey}
+        />
       ) : null}
       <div className="actions">
         <button

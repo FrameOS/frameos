@@ -5,8 +5,11 @@ cd "$(dirname "$0")/.."
 
 # Prunes rows that only exist for protocol bookkeeping and accumulate without
 # bound: finished/expired device authorization requests, expired login handoff
-# codes, and expired or revoked sessions. Audit and consent events are kept.
-# Run periodically (e.g. daily via cron); see docs/operational-runbooks.md.
+# codes, and expired or revoked sessions. Audit and consent events are kept
+# while their account exists; the security trail of a DELETED account (its
+# account_id went NULL with the deletion) is kept for the period the privacy
+# policy promises and then removed. Run periodically (e.g. daily via cron);
+# see docs/operational-runbooks.md.
 
 # The URL never goes on a command line (ps / /proc show argv to every local
 # account): it becomes libpq's PG* environment and psql runs bare.
@@ -24,12 +27,17 @@ retention_days="${FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS:-7}"
 # raises them here.
 log_retention_days="${FRAMEOS_CLOUD_FRAME_LOG_RETENTION_DAYS:-30}"
 metrics_retention_days="${FRAMEOS_CLOUD_FRAME_METRICS_RETENTION_DAYS:-30}"
+# The audit trail a deleted account leaves behind (apps/auth-web
+# app/legal/privacy/page.tsx, "How long we keep things": up to two years).
+# Rows still attached to a live account are never pruned here.
+orphan_audit_retention_days="${FRAMEOS_CLOUD_ORPHAN_AUDIT_RETENTION_DAYS:-730}"
 
 # A non-positive retention would flip make_interval into the future and delete
 # rows that have not aged out yet.
 for pair in "FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS=$retention_days" \
   "FRAMEOS_CLOUD_FRAME_LOG_RETENTION_DAYS=$log_retention_days" \
-  "FRAMEOS_CLOUD_FRAME_METRICS_RETENTION_DAYS=$metrics_retention_days"; do
+  "FRAMEOS_CLOUD_FRAME_METRICS_RETENTION_DAYS=$metrics_retention_days" \
+  "FRAMEOS_CLOUD_ORPHAN_AUDIT_RETENTION_DAYS=$orphan_audit_retention_days"; do
   value="${pair#*=}"
   if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt 1 ]; then
     echo "${pair%%=*} must be a positive integer, got: ${value}" >&2
@@ -39,7 +47,15 @@ done
 
 psql -v ON_ERROR_STOP=1 -v retention_days="$retention_days" \
   -v log_retention_days="$log_retention_days" \
-  -v metrics_retention_days="$metrics_retention_days" <<'SQL'
+  -v metrics_retention_days="$metrics_retention_days" \
+  -v orphan_audit_retention_days="$orphan_audit_retention_days" <<'SQL'
+-- The security trail of deleted accounts: audit_events.account_id is
+-- ON DELETE SET NULL, so these rows are exactly the ones the privacy policy
+-- says outlive the account for up to two years.
+DELETE FROM audit_events
+WHERE account_id IS NULL
+  AND created_at < now() - make_interval(days => :'orphan_audit_retention_days'::int);
+
 DELETE FROM device_authorization_requests
 WHERE expires_at < now() - make_interval(days => :'retention_days'::int)
   AND status <> 'pending';

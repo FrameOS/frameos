@@ -709,7 +709,22 @@ R2_CLOUD_PUBLIC_BASE_URL=https://cloud-cdn.frameos.net
 ```
 
 Both services, because the hub writes device snapshots through the same code
-path auth-web reads them with. A hub missing these keys is the failure worth
+path auth-web reads them with.
+
+**The public alias must not live under `FRAMEOS_SESSION_COOKIE_DOMAIN`.**
+The `__Secure-` session cookie is scoped to that parent domain so the cloud,
+account and scenes origins share one login — and a browser sends a
+domain-scoped cookie to *every* host beneath it. With the alias at
+`cloud-cdn.frameos.net` under a `frameos.net` cookie, every store image the
+browser is redirected to carries the session cookie to Cloudflare R2, a
+third party that has no business seeing it. Move the alias to its own
+registrable domain (a `frameos-cdn.net`-shaped name, or a bare
+`r2.dev` bucket URL) and set `R2_CLOUD_PUBLIC_BASE_URL` to that. The
+`/admin` system checks flag the overlap
+(`R2_CLOUD_PUBLIC_BASE_URL outside FRAMEOS_SESSION_COOKIE_DOMAIN`) until it
+is fixed. Until then the exposure is bounded — R2 logs are Cloudflare's, the
+cookie is `httpOnly` and never echoed — but it is still a session token
+leaving the first party on every image fetch. A hub missing these keys is the failure worth
 naming: it keeps writing bytes into Postgres while auth-web looks for them in
 R2, and the symptom is preview tiles that go blank only for frames that
 re-rendered since the deploy.
