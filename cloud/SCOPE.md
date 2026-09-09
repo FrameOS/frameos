@@ -1,7 +1,7 @@
-# FrameOS Cloud TODO
+# FrameOS Cloud — scope guardrails
 
-Remaining work is tracked in one place: `docs/todo.md` at the repo root.
-This file keeps only the cloud app's scope guardrails.
+What the cloud app is and is not; open work is tracked in `docs/todo.md`
+at the repo root. (Until 2026-09-09 this file was `cloud/TODO.md`.)
 
 Shipped scope, in brief: first-party auth (login/signup/reset/recovery/
 logout, Google SSO via OIDC + PKCE), FrameOS-owned sessions and identity

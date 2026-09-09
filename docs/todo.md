@@ -39,63 +39,6 @@ Two rules that shape most entries:
 
 ---
 
-## ESP32 memory
-
-- **Weather on the 16 MB-PSRAM 13.3" (SuurESP) — verified 2026-09-05** on
-  2026.9.8 after a cold boot (first scene render after the 32 MB relayout):
-  `render:done` in 85 s (14.4 s render + 18.9 s dither/pack + refresh), no
-  `memory:oomAbort`, no `render:degraded`; idle PSRAM 5.91 MB before the
-  text-heavy render and 5.36 MB after (the ~0.5 MB drop the plan expected,
-  not 1.6 MB); the packed capture shows the sky's 6-colour dither banding
-  and no full-width strip seam (the RGBX canvas draws no strips). Idle PSRAM
-  now sits ~0.5 MB below the old ~6.9 MB baseline — the 24 MB SPIFFS state
-  partition's cache, measured 6.15 MB free at boot with no scene loaded.
-  `memory:oomAbort` and the leak-percent restart were provoked on
-  2026-09-05 (a 300 K-rune text scene): first abort "leaked", second
-  "restarting" under half the baseline, restart — evidence in the bench
-  file. The 8 MB E1004 half was done 2026-09-01 (#428).
-- **4:4:4 JPEGs degraded to half resolution on the 13.3" — fixed in the
-  pixie fork (FrameOS/pixie#8, lock bumped to fe417a0).** Found 2026-09-05
-  on SuurESP: the `koduraam` photos are 4:4:4 exports and every one logged
-  `render:degraded … needs 5160K of decode buffers, over the 4989K memory
-  budget`, rendering 600x800 stretched at 12, 24 and 60 MP alike (4:2:0
-  and 4:2:2 files passed at 60 MP). The JPEG planner's budget clamp shaved
-  the sampling grid until the channel planes fit, then the plan check added
-  the per-component band + accumulator buffers (~180 KB) and refused, and
-  the degrade ladder jumped to the divisor-2 rung instead of the ~1130x1506
-  grid the clamp had computed. The clamp now counts the same three buffers
-  and shaves in 1/64 steps until the exact plan fits (`tests/test_jpeg.nim`
-  pins it; the frameos `test_decode_degrade` suite still passes). Verified
-  on the board: see the bench entry in `docs/manual-testing-todo.md`.
-  Longer term the streamed JPEG decoder holds target-sized channel planes;
-  a banded design would cut the plan to a few MCU rows per component.
-- **A cloud frame whose `/state` was wiped stayed sceneless but "in
-  sync" — fixed on both sides.** Device (`fos_cloud.c` + `fos_scenes_stored()`,
-  2026.9.9): the hello forgets the NVS-cached `cloud_scn_sum` when
-  `/state/scenes.json` (or the split index) is gone and reports the store's
-  own empty etag. Hub (`resyncEmptyStore`): an empty checksum is the one
-  hello mismatch it answers by itself — the assigned set is re-queued ahead
-  of the drain (`frame.scenes_resynced` audit), since the device holds
-  nothing a push could clobber; any other mismatch stays the owner's deploy.
-  Verified on SuurESP: state partition erased, boot, five scenes back
-  without a hand on the workspace.
-- **A scene that OOM-aborts on every render boot-looped the board — fixed
-  (2026.9.9).** Found provoking `memory:oomAbort` on SuurESP with a 300 K-rune
-  text scene: the second abort restarts as designed, but the store's index
-  reactivated the same scene at boot and rendered it before the cloud
-  session was up, so every boot leaked ~1.5 MB again and a cloud switch never
-  won. Now `fos_scenes_mark_oom_restart()` runs right before the restart
-  (NVS `oom_scene`), and `activate_from_index` consumes the mark once: a
-  marked last scene is skipped for the next scene of the payload
-  (`scenes:restore skipped oom-restart`; a lone scene is retried). Verified
-  on the board: abort, abort, restart, "starting on" the birds scene, 6.07 MB
-  free, no third abort.
-- Console: `ota` printed `ota: UNKNOWN ERROR (cloud)` on every outcome
-  because `CONFIG_ESP_ERR_TO_NAME_LOOKUP` is off; it now prints
-  `check requested` / `request failed 0x…`.
-
----
-
 ## ESP32 NVS on the 16 KB layouts
 
 The 4 MB and 8 MB partition tables give NVS 16 KB (4 pages, one always kept
@@ -266,7 +209,7 @@ file's "Current gaps".
 **New cloud services are not being built.** The scope names below are reserved
 in the device-flow allowlist and the designs are sketched, but none of them is
 planned work — as with organizations, projects, memberships, hosted backend
-lifecycle and metered billing (`cloud/TODO.md`). Disposable-email blocking
+lifecycle and metered billing (`cloud/SCOPE.md`). Disposable-email blocking
 belongs on the same list: Turnstile plus the rate limiter covers the automated
 case, so it is skipped until abuse is actually observed.
 

@@ -72,7 +72,7 @@ Response `200`:
 {
   "access_token": "…opaque bearer, hashed at rest provider-side…",
   "token_type": "Bearer",
-  "scope": "frame:managed",
+  "scope": "frame:managed settings:services telemetry:logs telemetry:metrics",
   "frame_id": "…",
   "status": "pending",
   "ws_path": "/api/frames/ws",
@@ -82,12 +82,12 @@ Response `200`:
 
 `ws_url` is optional: a full `ws://` or `wss://` URL the device dials for the
 management WebSocket *instead of* `{cloud_url}{ws_path}`. Providers send it
-only when the socket lives somewhere other than the enrollment origin — in
-practice a development deployment whose frame hub is a second process on its
-own port (cloud.frameos.net's dev setup: the hub from `FRAME_HUB_PUBLIC_URL`,
-or `:3100` on the same host when the enrollment request arrived on a loopback
-host). In production the WS path is proxied on the same origin and the field
-is omitted. Devices hold `ws_url` to the same transport rule as `cloud_url`
+only when the socket lives somewhere other than the enrollment origin: the
+route emits it whenever `FRAME_HUB_PUBLIC_URL` is configured, and otherwise
+only when the enrollment request arrived on a loopback host (the `:3100`
+development default). A production deployment that proxies the WS path on
+the same origin leaves the variable unset and the field off the wire.
+Devices hold `ws_url` to the same transport rule as `cloud_url`
 (`wss://` anywhere; plain `ws://` only for localhost, `.local`/`.localhost`
 and private-network hosts) and ignore a value that fails it, falling back to
 the `ws_path` flow.
@@ -110,8 +110,11 @@ hits the quota can retry the same token once the owner frees a slot.
 Retrying is safe: a repeat of the same `(claim_token, public_key)` pair while
 the frame is still pending is idempotent and returns the same `frame_id` with
 a usable access token, so a response lost in flight does not strand the
-device. The same token presented with a *different* device key is refused —
-`409 public_key_mismatch` — since that is a different device, not a retry.
+device. The same token presented with a *different* device key is refused as
+`400 invalid_claim_token` — indistinguishable from an unknown token on
+purpose, since that is a different device, not a retry. (`409
+public_key_mismatch` is the answer on the *bearer* re-registration path: an
+already-enrolled frame's own token presented with another key.)
 
 The frame stores its access token in a `0600` state file. Whether it needs a
 confirmation click depends on the token's budget:
@@ -149,8 +152,9 @@ POST {provider}/api/frames/claim-tokens
 ```
 
 The response is an ordinary claim token plus the `frame_id` echoed back, and
-the binding forces `max_uses: 1` and a short expiry (cloud.frameos.net: 1 h)
-regardless of what was asked for — redeeming one hands a device the identity
+the binding forces `max_uses: 1` and a one-hour expiry regardless of what
+was asked for (`ttl_days` with `frame_id` is refused, `400 invalid_ttl_days`)
+— redeeming one hands a device the identity
 of an existing frame, which is worth more than an ordinary code. Minting is
 refused for a frame the session account does not own (`404 invalid_frame`), a
 revoked one (`409 frame_revoked`), or any `multi_use`/`max_uses > 1`

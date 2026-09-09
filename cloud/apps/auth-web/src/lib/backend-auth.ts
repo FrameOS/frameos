@@ -64,7 +64,7 @@ export async function authenticateLinkedClient(
 
 // The scopes the user approved on the consent screen, as stored on the linked
 // client at approval time. Feature endpoints must check these before serving
-// a request (CLOUD-TODO principle: scopes are enforced on both sides).
+// a request (docs/cloud-principles.md: scopes are enforced on both sides).
 export function linkedClientScopes(linkedClient: {
   providerClientMetadata: unknown;
 }): string[] {
