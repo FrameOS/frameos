@@ -76,14 +76,31 @@ export const addressIsPrivate = new Function(
   `${addressIsPrivateSource}\nreturn addressIsPrivate;`,
 )(isIP) as (address: string) => boolean;
 
+// Headers that name the caller to ONE host. A redirect that leaves the
+// origin the caller addressed must not carry them along — the same rule
+// the runtime's own HTTP client (frameos/src/frameos/utils/http_client.nim)
+// applies — or an app's API key for host A is handed to whatever host A
+// bounces to.
+const credentialHeaders = ["authorization", "cookie", "proxy-authorization"];
+
+function withoutCredentialHeaders(headers: HeadersInit | undefined): Headers {
+  const stripped = new Headers(headers);
+  for (const name of credentialHeaders) {
+    stripped.delete(name);
+  }
+  return stripped;
+}
+
 // A fetch that applies the guard before every request (redirects included:
-// each hop is checked, so a public URL cannot bounce to an internal one).
+// each hop is checked, so a public URL cannot bounce to an internal one, and
+// credential headers stay behind when a hop changes origin).
 export async function guardedFetch(
   input: string,
   init?: RequestInit,
   maxRedirects = 5,
 ): Promise<Response> {
   let url = new URL(input);
+  let headers: HeadersInit | undefined = init?.headers;
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       throw new Error("invalid_url");
@@ -91,10 +108,18 @@ export async function guardedFetch(
     if (await hostIsBlocked(url.hostname)) {
       throw new Error("host_not_allowed");
     }
-    const response = await fetch(url, { ...init, redirect: "manual" });
+    const response = await fetch(url, {
+      ...init,
+      ...(headers === undefined ? {} : { headers }),
+      redirect: "manual",
+    });
     const location = response.headers.get("location");
     if (response.status >= 300 && response.status < 400 && location) {
-      url = new URL(location, url);
+      const next = new URL(location, url);
+      if (next.origin !== url.origin) {
+        headers = withoutCredentialHeaders(headers);
+      }
+      url = next;
       continue;
     }
     return response;

@@ -81,6 +81,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/scene-json-logic.test.ts",
       "**/src/test/shared-spa/select-options.test.ts",
       "**/src/test/shared-spa/select-missing-value.test.tsx",
+      // The store error-code wording (2026-09 review §2), same reason.
+      "**/src/test/shared-spa/store-scene-errors.test.ts",
     ],
   },
   js.configs.recommended,

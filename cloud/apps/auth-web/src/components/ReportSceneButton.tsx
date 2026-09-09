@@ -2,6 +2,7 @@
 
 import posthog from "posthog-js";
 import { useState } from "react";
+import { ownerActionErrorMessage } from "./ownerActionError";
 
 export function ReportSceneButton({
   sceneId,
@@ -13,6 +14,9 @@ export function ReportSceneButton({
   const [status, setStatus] = useState<
     "idle" | "busy" | "done" | "already" | "error"
   >("idle");
+  // The server's reason — a rate limit, a pulled scene — rather than a bare
+  // "Failed" the reporter can do nothing with.
+  const [error, setError] = useState<string | null>(null);
 
   async function report() {
     if (!signedIn) {
@@ -26,12 +30,15 @@ export function ReportSceneButton({
       return;
     }
     setStatus("busy");
+    setError(null);
     const response = await fetch(`/api/store/scenes/${sceneId}/report`, {
       body: JSON.stringify({ reason: reason.trim() }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
     if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      setError(ownerActionErrorMessage(detail, response.status, "Report failed"));
       setStatus("error");
       return;
     }
@@ -51,14 +58,21 @@ export function ReportSceneButton({
   }
 
   return (
-    <button
-      className="button button--subtle"
-      disabled={status === "busy"}
-      onClick={() => void report()}
-      title="Flag this scene for the moderators"
-      type="button"
-    >
-      {status === "error" ? "Failed — retry" : "Report scene"}
-    </button>
+    <>
+      <button
+        className="button button--subtle"
+        disabled={status === "busy"}
+        onClick={() => void report()}
+        title="Flag this scene for the moderators"
+        type="button"
+      >
+        {status === "error" ? "Retry report" : "Report scene"}
+      </button>
+      {error ? (
+        <span className="pill pill-warning" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </>
   );
 }

@@ -14,11 +14,22 @@
 // only applies what arrives through write_app_files.
 
 import {
+  OpenAiRequestError,
   streamResponse,
   type ResponsesToolDefinition,
   type ResponseUsage,
 } from "./openai";
+import { captureAiGeneration } from "./telemetry";
 import { parseToolArguments } from "./tool-args";
+
+/** Where the call's `$ai_generation` row lands. The scene chat emits one per
+ *  model round from its turn loop; this panel has one round per request, so
+ *  the request IS the turn and the route hands its metering ids down. */
+export interface AppChatTelemetry {
+  accountId: string;
+  chatId: string;
+  turnId: string;
+}
 
 export const maxAppSourceChars = 120_000;
 export const maxAppFiles = 40;
@@ -160,30 +171,78 @@ export async function runAppChat(input: {
   sources: AppChatSources;
   history: { role: "user" | "assistant"; content: string }[];
   signal?: AbortSignal | undefined;
+  telemetry?: AppChatTelemetry | undefined;
 }): Promise<AppChatResult> {
-  const result = await streamResponse({
-    apiKey: input.apiKey,
-    input: [
-      ...input.history.map((message) => ({
-        content: message.content,
-        role: message.role,
-        type: "message",
-      })),
-      {
-        content: `${appContextBlock(input)}\n\n${input.prompt}`,
-        role: "user",
-        type: "message",
-      },
-    ],
-    instructions: buildAppChatInstructions(),
-    model: input.model,
-    onTextDelta: () => {
-      // The panel's contract is a single JSON body, not a stream — it fakes
-      // typing client-side. Deltas are aggregated by streamResponse.
+  const startedAt = Date.now();
+  // The one model round this panel makes, recorded the way the scene chat
+  // records each of its rounds — without this the surface was invisible to
+  // the meter-vs-PostHog reconcile, which compares metered tokens against
+  // $ai_generation rows. Failures are rows too: a 429 or a cut-off is
+  // exactly what the reconcile is for.
+  const record = (
+    outcome: { status: string; usage?: ResponseUsage; toolCalls: string[] } & {
+      error?: string;
+      httpStatus?: number;
     },
-    ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
-    ...(input.signal ? { signal: input.signal } : {}),
-    tools: [writeAppFilesTool],
+  ) => {
+    if (!input.telemetry) {
+      return;
+    }
+    captureAiGeneration({
+      accountId: input.telemetry.accountId,
+      chatId: input.telemetry.chatId,
+      error: outcome.error,
+      httpStatus: outcome.httpStatus,
+      latencyMs: Date.now() - startedAt,
+      model: input.model,
+      reasoningEffort: input.reasoningEffort ?? "",
+      round: 1,
+      status: outcome.status,
+      toolCalls: outcome.toolCalls,
+      turnId: input.telemetry.turnId,
+      usage: outcome.usage,
+    });
+  };
+
+  let result;
+  try {
+    result = await streamResponse({
+      apiKey: input.apiKey,
+      input: [
+        ...input.history.map((message) => ({
+          content: message.content,
+          role: message.role,
+          type: "message",
+        })),
+        {
+          content: `${appContextBlock(input)}\n\n${input.prompt}`,
+          role: "user",
+          type: "message",
+        },
+      ],
+      instructions: buildAppChatInstructions(),
+      model: input.model,
+      onTextDelta: () => {
+        // The panel's contract is a single JSON body, not a stream — it fakes
+        // typing client-side. Deltas are aggregated by streamResponse.
+      },
+      ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      tools: [writeAppFilesTool],
+    });
+  } catch (error) {
+    record({
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof OpenAiRequestError ? { httpStatus: error.status } : {}),
+      status: "failed",
+      toolCalls: [],
+    });
+    throw error;
+  }
+  record({
+    status: result.status,
+    toolCalls: result.functionCalls.map((entry) => entry.name),
+    usage: result.usage,
   });
 
   const usage = result.usage;

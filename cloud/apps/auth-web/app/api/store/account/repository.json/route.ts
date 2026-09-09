@@ -1,6 +1,7 @@
 import { and, desc, eq, gt } from "drizzle-orm";
 import { accounts, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { bearerToken, isApiToken } from "../../../../../src/lib/api-tokens";
 import {
   authenticateLinkedClient,
   linkedClientHasScope,
@@ -23,10 +24,15 @@ import {
 export const runtime = "nodejs";
 
 // "My cloud drive": the authenticated account's own scenes — private and
-// public — in the frameos repository format. Two callers, two credentials:
+// public — in the frameos repository format. Three callers, three
+// credentials:
 //
 //   * a linked frameos backend sends its link token (Authorization header)
 //     and needs the store scope;
+//   * a script or agent sends a personal API token (`fc_api_` /
+//     `fc_apiro_`, same header): that IS the account, so it goes through
+//     readSession() like every other JSON route — handing it to the
+//     linked-client check used to answer 401 invalid_link_token;
 //   * the /frames workspace runs ON the cloud, where the browser session IS
 //     the account — its Add-scene drawer lists these directly, no link
 //     involved.
@@ -50,7 +56,7 @@ async function handleGet(request: NextRequest) {
 
   let accountId: string | undefined;
   const authorization = request.headers.get("authorization");
-  if (authorization) {
+  if (authorization && !isApiToken(bearerToken(authorization))) {
     const linkedClient = await authenticateLinkedClient(db, authorization);
     if (!linkedClient) {
       return jsonError("invalid_link_token", 401);

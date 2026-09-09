@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isIP } from "node:net";
-import { addressIsPrivate, addressIsPrivateSource } from "./ssrf";
+import { addressIsPrivate, addressIsPrivateSource, guardedFetch } from "./ssrf";
 
 describe("addressIsPrivate", () => {
   it("blocks the RFC 1918, loopback, link-local and CGNAT v4 ranges", () => {
@@ -76,6 +76,55 @@ describe("addressIsPrivateSource", () => {
       "fe80::1%eth0",
     ]) {
       expect(spliced(address), address).toBe(addressIsPrivate(address));
+    }
+  });
+});
+
+describe("guardedFetch", () => {
+  // The preview proxy forwards an app's Authorization header to the host the
+  // app named. A redirect off that origin must not carry it along: host A's
+  // key is not host B's to see.
+  it("drops credential headers when a redirect changes origin, keeps them on the same origin", async () => {
+    const calls: { url: string; headers: Headers }[] = [];
+    const fetchMock = vi.fn(async (input: URL | string, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ headers: new Headers(init?.headers), url });
+      if (url === "https://example.com/start") {
+        return new Response(null, {
+          headers: { location: "https://example.com/same-origin" },
+          status: 302,
+        });
+      }
+      if (url === "https://example.com/same-origin") {
+        return new Response(null, {
+          headers: { location: "https://example.org/elsewhere" },
+          status: 302,
+        });
+      }
+      return new Response("done", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await guardedFetch("https://example.com/start", {
+        headers: {
+          authorization: "Bearer app-key",
+          cookie: "session",
+          "x-api-key": "k",
+        },
+      });
+      expect(await response.text()).toBe("done");
+      expect(calls.map((call) => call.url)).toEqual([
+        "https://example.com/start",
+        "https://example.com/same-origin",
+        "https://example.org/elsewhere",
+      ]);
+      expect(calls[1]?.headers.get("authorization")).toBe("Bearer app-key");
+      expect(calls[2]?.headers.get("authorization")).toBeNull();
+      expect(calls[2]?.headers.get("cookie")).toBeNull();
+      // Non-credential headers still travel.
+      expect(calls[2]?.headers.get("x-api-key")).toBe("k");
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

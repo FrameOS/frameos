@@ -3,6 +3,7 @@
 import { Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { applyAiScenes, blankScene, prepareForEditor, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
+import { ownerActionErrorMessage } from "./ownerActionError";
 import {
   clearNewSceneDraft,
   draftIdFromHash,
@@ -76,17 +77,6 @@ declare global {
   }
 }
 
-const createErrors: Record<string, string> = {
-  content_rejected: "Rejected by content moderation",
-  daily_scene_limit_exceeded: "Daily new-scene limit reached",
-  invalid_scenes: "The scene is empty",
-  login_required: "Sign in to save scenes",
-  moderation_unavailable: "Moderation service unavailable — try again later",
-  scene_name_taken: "You already have a scene with this name — rename it in Scene settings",
-  scene_quota_exceeded: "Scene limit reached",
-  storage_quota_exceeded: "Cloud scene storage limit reached",
-  store_banned: "This account cannot publish scenes",
-};
 
 // A full-page editor for a brand-new scene, AI panel open: start from one
 // blank scene, describe what you want, then "Save to my scenes" creates it
@@ -412,8 +402,7 @@ export function NewSceneWithAi({
         scene?: { slug?: string };
       };
       if (!response.ok || !payload.scene?.slug) {
-        const code = payload.error ?? String(response.status);
-        setError(createErrors[code] ?? `Saving failed: ${code}`);
+        setError(ownerActionErrorMessage(payload, response.status, "Saving failed"));
         return;
       }
       // Saved: the browser copy has done its job.

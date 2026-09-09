@@ -3,6 +3,7 @@
 import { ImagePlus, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { ImageLightbox } from "./ImageLightbox";
+import { ownerActionErrorMessage } from "./ownerActionError";
 
 // The scene's images (the Info panel): the version's ordered image set as
 // one grid of equal thumbnails — the first is the cover — each opening the
@@ -62,17 +63,7 @@ export function SceneImageGallery({
       onChange(images.includes(sha) ? images : [...images, sha]);
       return;
     }
-    if (payload.error === "content_rejected") {
-      setError("Rejected by content moderation");
-    } else if (payload.error === "image_too_large") {
-      setError("Image too large (max 4 MB)");
-    } else if (payload.error === "unsupported_image") {
-      setError("Not a supported image (JPEG, PNG, WebP or GIF)");
-    } else if (payload.error === "storage_quota_exceeded") {
-      setError("Storage quota reached for private scenes");
-    } else {
-      setError(`Upload failed: ${payload.error ?? response.status}`);
-    }
+    setError(ownerActionErrorMessage(payload, response.status, "Upload failed"));
   }
 
   function remove(sha: string) {

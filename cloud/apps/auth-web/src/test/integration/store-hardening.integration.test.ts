@@ -2,6 +2,7 @@ import { strToU8, zipSync } from "fflate";
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
+  accountApiTokens,
   accounts,
   auditEvents,
   createDb,
@@ -29,10 +30,14 @@ import { POST as reportScene } from "../../../app/api/store/scenes/[sceneId]/rep
 import { POST as authorizeDevice } from "../../../app/api/device/authorize/route";
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
+import { mintApiToken } from "../../lib/api-tokens";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
+// readSession() reads a personal API token from the request headers when
+// there is no cookie; route handlers get the same header on the NextRequest.
+const requestHeaders = vi.hoisted(() => new Map<string, string>());
 
 vi.mock("next/headers", () => ({
   cookies: async () => ({
@@ -41,6 +46,7 @@ vi.mock("next/headers", () => ({
       return value === undefined ? undefined : { name, value };
     },
   }),
+  headers: async () => new Headers(Object.fromEntries(requestHeaders)),
 }));
 
 const baseUrl = "http://localhost:3000";
@@ -55,6 +61,7 @@ afterAll(async () => {
 beforeEach(async () => {
   resetRateLimitForTests();
   cookieJar.clear();
+  requestHeaders.clear();
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
   );
@@ -559,6 +566,47 @@ describe("my cloud drive", () => {
       }),
     );
     expect(drive.status).toBe(403);
+  });
+
+  // A personal API token is the account itself (readSession resolves it),
+  // not a linked client: the route used to hand every bearer to the link
+  // check and answer 401 invalid_link_token to a script's own token.
+  it("lists the drive for a personal API token, read-only included", async () => {
+    const { accessToken, accountId } = await linkClient(publishScopes);
+    const published = await publish(accessToken);
+    const scene = (await readJson(published)).scene as { id: string };
+    cookieJar.clear();
+
+    for (const access of ["full", "read_only"] as const) {
+      const minted = mintApiToken(access);
+      await db.insert(accountApiTokens).values({
+        access,
+        accountId,
+        name: access,
+        tokenHash: minted.tokenHash,
+        tokenHint: minted.hint,
+      });
+      requestHeaders.set("authorization", `Bearer ${minted.token}`);
+      const drive = await getDriveRepositoryJson(
+        request("/api/store/account/repository.json", "GET", {
+          headers: bearer(minted.token),
+        }),
+      );
+      expect(drive.status, access).toBe(200);
+      const templates = (await readJson(drive)).templates as Record<string, unknown>[];
+      expect(templates.map((template) => template.sceneId)).toEqual([scene.id]);
+    }
+
+    // A token nobody minted resolves to no session: login_required, not the
+    // linked-client error.
+    requestHeaders.set("authorization", "Bearer fc_api_not_a_real_token");
+    const unknown = await getDriveRepositoryJson(
+      request("/api/store/account/repository.json", "GET", {
+        headers: bearer("fc_api_not_a_real_token"),
+      }),
+    );
+    expect(unknown.status).toBe(401);
+    expect((await readJson(unknown)).error).toBe("login_required");
   });
 });
 

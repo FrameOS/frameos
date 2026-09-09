@@ -62,8 +62,14 @@ async function handlePost(request: NextRequest) {
     return jsonError("body_too_large", 413);
   }
 
-  // Forward app-supplied headers minus hop-by-hop / host-scoped ones; our own
-  // cookies never leave (the browser sends them to us, not through us).
+  // Forward app-supplied headers minus hop-by-hop / host-scoped ones, the
+  // app's `Authorization` included: it is the app's own key for the host the
+  // app named (the frameos backend's scene_preview_proxy forwards it the
+  // same way), and an app that authenticates with a bearer used to work on
+  // the frame and silently 401 in the browser preview. Our own cookies never
+  // leave (the browser sends them to us, not through us), and guardedFetch
+  // drops the credential headers before following a redirect to another
+  // origin, as the runtime's own HTTP client does.
   const headers = new Headers();
   if (body.headers && typeof body.headers === "object") {
     for (const [key, value] of Object.entries(
@@ -72,7 +78,6 @@ async function handlePost(request: NextRequest) {
       if (
         typeof value === "string" &&
         ![
-          "authorization",
           "connection",
           "content-length",
           "cookie",

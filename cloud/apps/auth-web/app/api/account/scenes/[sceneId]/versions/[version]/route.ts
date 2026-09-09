@@ -14,6 +14,7 @@ import {
 } from "../../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../../../src/lib/session";
+import { syncLatestVersion } from "../../../../../../../src/lib/store-version-write";
 
 export const runtime = "nodejs";
 
@@ -96,18 +97,29 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
   }
 
-  const [updated] = await db
-    .update(storeSceneVersions)
-    .set({ yankedAt: body.yanked ? new Date() : null })
-    .where(
-      and(
-        eq(storeSceneVersions.sceneId, scene.id),
-        eq(storeSceneVersions.version, versionNumber),
-      ),
-    )
-    .returning({ version: storeSceneVersions.version });
+  // The flip and the `latest_version` move are one transaction: "latest"
+  // follows the newest non-yanked version, so yanking the version the store
+  // index advertised (and whose `?v=N` cover URL the edge caches immutable
+  // for a year) hands the pointer to the one the download route now serves
+  // by default, and unyanking a newer one hands it back.
+  const outcome = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(storeSceneVersions)
+      .set({ yankedAt: body.yanked ? new Date() : null })
+      .where(
+        and(
+          eq(storeSceneVersions.sceneId, scene.id),
+          eq(storeSceneVersions.version, versionNumber),
+        ),
+      )
+      .returning({ version: storeSceneVersions.version });
+    if (!updated) {
+      return undefined;
+    }
+    return { latestVersion: await syncLatestVersion(tx, scene.id) };
+  });
 
-  if (!updated) {
+  if (!outcome) {
     return jsonError("version_not_found", 404);
   }
 
@@ -125,6 +137,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({
+    latest_version: outcome.latestVersion ?? null,
     status: body.yanked ? "yanked" : "unyanked",
     version: versionNumber,
   });

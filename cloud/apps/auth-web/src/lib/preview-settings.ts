@@ -3,10 +3,13 @@
 // Mirrors frameos' settings groups (frontend/src/scenes/frame/panels/
 // secretSettings.ts) and the `settings` lists in the apps' config.json files.
 // Keys TYPED into the preview stay in the browser: they go straight into the
-// wasm runtime and out with its requests, never to our server (except hosts
-// that need the CORS fallback proxy, which forwards headers verbatim). Keys
-// SAVED on the account settings page persist server-side (account_settings)
-// and seed the preview automatically.
+// wasm runtime and out with its requests, never to our server — except for
+// hosts that need the CORS fallback proxy (/api/store/preview-proxy), which
+// forwards the app's request headers, `Authorization` included, to the host
+// the app named and to nowhere else (guardedFetch drops credential headers
+// before following a redirect to another origin; our own cookies are never
+// forwarded). Keys SAVED on the account settings page persist server-side
+// (account_settings) and seed the preview automatically.
 
 export type PreviewSettingsField = {
   label: string;

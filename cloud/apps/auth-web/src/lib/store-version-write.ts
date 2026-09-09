@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, max, ne } from "drizzle-orm";
 import {
   type createDb,
   storeSceneVersionImages,
@@ -154,6 +154,55 @@ export async function writeSceneVersion(
     return { error: "scene_update_failed" };
   }
   return { stored, updated: result };
+}
+
+/** The number the next version of a scene gets: one past the highest ever
+ * published, yanked ones included. `latest_version` is NOT that number — it
+ * follows the newest non-yanked version (syncLatestVersion), so a scene whose
+ * latest was yanked would otherwise re-issue a number it already used and
+ * hit the (scene_id, version) unique key on the next Save. */
+export async function nextSceneVersion(
+  db: Database,
+  sceneId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ highest: max(storeSceneVersions.version) })
+    .from(storeSceneVersions)
+    .where(eq(storeSceneVersions.sceneId, sceneId));
+  return (row?.highest ?? 0) + 1;
+}
+
+/** Points `latest_version` at the newest non-yanked version and returns it.
+ * Run after a yank or an unyank, inside the same transaction: "latest" is
+ * what the store index advertises, what the cover SQL joins on and what the
+ * `?v=N` cover URL — cached immutable at the edge for a year — names, so it
+ * must not keep naming a version the download route no longer serves by
+ * default. Every version yanked (the yank route refuses that) leaves the
+ * column alone. */
+export async function syncLatestVersion(
+  db: Database,
+  sceneId: string,
+): Promise<number | undefined> {
+  const [row] = await db
+    .select({ newest: max(storeSceneVersions.version) })
+    .from(storeSceneVersions)
+    .where(
+      and(
+        eq(storeSceneVersions.sceneId, sceneId),
+        isNull(storeSceneVersions.yankedAt),
+      ),
+    );
+  const newest = row?.newest ?? undefined;
+  if (newest === undefined) {
+    return undefined;
+  }
+  await db
+    .update(storeScenes)
+    .set({ latestVersion: newest })
+    .where(
+      and(eq(storeScenes.id, sceneId), ne(storeScenes.latestVersion, newest)),
+    );
+  return newest;
 }
 
 export { sameImageSet };
