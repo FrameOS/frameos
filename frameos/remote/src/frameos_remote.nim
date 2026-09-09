@@ -1,6 +1,6 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch,
             terminal, times, os, httpclient, osproc, streams, unicode,
-            monotimes]
+            monotimes, tables]
 import checksums/md5
 import json, jsony
 import ws
@@ -157,6 +157,36 @@ proc verifyEnvelope(node: JsonNode; cfg: FrameConfig): bool =
   node["serverApiKey"].getStr == cfg.serverApiKey and
   node["mac"].getStr.toLowerAscii() ==
     sign($node["nonce"].getInt & canonical(node["payload"]), cfg)
+
+# Replay protection. The nonce is the backend's unix time in seconds, so it
+# is a freshness stamp, not a counter: an envelope is accepted only inside a
+# window around the device's clock, and the MAC of every envelope accepted in
+# that window is remembered so the exact same bytes cannot be replayed. A
+# captured `shell` command used to be good forever.
+const EnvelopeFreshnessSeconds = 300
+var seenEnvelopeMacs = initTable[string, int64]()
+
+proc acceptEnvelope(node: JsonNode; cfg: FrameConfig): bool =
+  if not verifyEnvelope(node, cfg):
+    return false
+  let now = getTime().toUnix()
+  let nonce = node["nonce"].getInt.int64
+  if abs(now - nonce) > EnvelopeFreshnessSeconds:
+    echo &"⚠️  stale envelope (nonce {nonce}, now {now}) – dropping"
+    return false
+  # Forget MACs that have aged out of the window before checking this one.
+  var expired: seq[string] = @[]
+  for mac, seenAt in seenEnvelopeMacs:
+    if now - seenAt > EnvelopeFreshnessSeconds:
+      expired.add(mac)
+  for mac in expired:
+    seenEnvelopeMacs.del(mac)
+  let mac = node["mac"].getStr.toLowerAscii()
+  if seenEnvelopeMacs.hasKey(mac):
+    echo "⚠️  replayed envelope – dropping"
+    return false
+  seenEnvelopeMacs[mac] = now
+  true
 
 proc sendResp(ws: WebSocket; cfg: FrameConfig;
               id: string; ok: bool; res: JsonNode) {.async.} =
@@ -382,6 +412,20 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
         copyMem(addr buf[pos], unsafeAddr frame[0], frame.len)
         pos += frame.len
 
+      # The binary frames above are unsigned; the signed command carries the
+      # digest of what they must add up to. Without it (or with a mismatch)
+      # nothing is written: an on-path peer could otherwise swap the bytes of
+      # a deploy after the command they ride behind was authenticated.
+      let expectedDigest = args{"sha256"}.getStr("").toLowerAscii()
+      if expectedDigest.len != 64:
+        await sendResp(ws, cfg, id, false,
+          %*{"error": "file_write_chunk requires the chunk's sha256"})
+        return
+      let actualDigest = ($sha256.digest(buf)).toLowerAscii()
+      if actualDigest != expectedDigest:
+        await sendResp(ws, cfg, id, false,
+          %*{"error": "file_write_chunk payload does not match its signed sha256"})
+        return
       let data =
         if currentUpload.compression == "zlib":
           uncompress(buf) # zippy API
@@ -557,8 +601,8 @@ proc runRemote(cfg: FrameConfig) {.async.} =
         while true:
           let raw = await ws.recvText()
           let node = parseJson(raw)
-          if not verifyEnvelope(node, cfg):
-            echo "⚠️  bad MAC – dropping packet"; continue
+          if not acceptEnvelope(node, cfg):
+            echo "⚠️  bad MAC / stale / replayed – dropping packet"; continue
           let payload = node["payload"]
           case payload{"type"}.getStr("")
           of "cmd":

@@ -1438,6 +1438,7 @@ static int cmd_usb_api(int argc, char **argv)
         usb_api_ok(subcommand);
         fflush(stdout);
         vTaskDelay(pdMS_TO_TICKS(250));
+        fos_scenes_wipe_state();
         fos_config_erase();
         esp_restart();
         return 0;
@@ -1678,8 +1679,12 @@ static int cmd_restart(int argc, char **argv)
 
 static int cmd_factory_reset(int argc, char **argv)
 {
+    /* State first (scenes and their secrets, schedule, cached payloads),
+     * then the NVS config with the device key. README: "erases all cloud
+     * state" — the SD card is the owner's and stays. */
+    fos_scenes_wipe_state();
     fos_config_erase();
-    printf("config erased, restarting...\n");
+    printf("config and /state erased, restarting...\n");
     esp_restart();
     return 0;
 }
@@ -1703,7 +1708,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "scene", .help = "scene <id> — select a loaded scene and render", .func = cmd_scene},
         {.command = "usb_api", .help = "USB API bridge for the browser", .func = cmd_usb_api},
         {.command = "restart", .help = "Reboot", .func = cmd_restart},
-        {.command = "factory-reset", .help = "Erase config and reboot", .func = cmd_factory_reset},
+        {.command = "factory-reset", .help = "Erase config and the /state partition (scenes, schedule, cached payloads), then reboot; the SD card stays", .func = cmd_factory_reset},
     };
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&commands[i]));

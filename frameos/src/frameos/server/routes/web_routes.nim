@@ -206,16 +206,24 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   # Polled by the "Saved!" page from the hotspot origin AND from the frame's
-  # LAN address (hence CORS *): it moves the browser over once the frame is
-  # online. Unauthenticated on purpose — it says no more than the status
-  # screen on the panel does.
+  # LAN address: it moves the browser over once the frame is online.
+  # Unauthenticated on purpose, but not for everyone: cross-origin reads are
+  # allowed only from the setup hotspot's own origin (it used to be `*`, so
+  # any page the owner visited could read the home SSID out of `error`), and
+  # once the hotspot is down the answer carries no error text at all — the
+  # setup window is over and the details belong to the admin log.
   router.get("/setup/status", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
       var headers: mummy.HttpHeaders
       headers["Content-Type"] = "application/json"
       headers["Cache-Control"] = "no-store"
-      headers["Access-Control-Allow-Origin"] = "*"
-      request.respond(Http200, headers, $netportal.setupStatusJson(globalFrameOS))
+      let origin = request.headers["Origin"]
+      if netportal.isSetupHotspotOrigin(origin):
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Vary"] = "Origin"
+      let hotspot = netportal.isHotspotActive(globalFrameOS)
+      request.respond(Http200, headers,
+        $netportal.setupStatusJson(globalFrameOS, includeError = hotspot))
   )
 
   # Captive-portal probes. While the setup hotspot is up, a phone that joined

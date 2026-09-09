@@ -4,6 +4,7 @@ import QRgen/renderer
 import frameos/apps
 import frameos/types
 import frameos/utils/url
+import frameos/utils/image
 
 type
   AppConfig* = object
@@ -37,12 +38,14 @@ proc get*(self: App, context: ExecutionContext): Image =
     of "pixels per dot": self.appConfig.size * (myQR.drawing.size.int + self.appConfig.padding * 2).float
     else: self.appConfig.size
 
+  # A scene-supplied size is bounded like any other requested raster.
+  let boundedWidth = boundedRequestedDimensions(width.int, width.int).width
   result = myQR.renderImg(
     light = self.appConfig.backgroundColor.toHtmlHex,
     dark = self.appConfig.qrCodeColor.toHtmlHex,
     alRad = self.appConfig.alRad,
     moRad = self.appConfig.moRad,
     moSep = self.appConfig.moSep,
-    pixels = width.uint32,
+    pixels = boundedWidth.uint32,
     padding = self.appConfig.padding.uint8
   )

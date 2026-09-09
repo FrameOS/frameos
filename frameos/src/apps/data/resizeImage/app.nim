@@ -13,7 +13,8 @@ type
     appConfig*: AppConfig
 
 proc get*(self: App, context: ExecutionContext): Image =
-  let image = newImage(self.appConfig.width, self.appConfig.height)
+  let (width, height) = boundedRequestedDimensions(self.appConfig.width, self.appConfig.height)
+  let image = newImage(width, height)
   var scalingMode = self.appConfig.scalingMode
   if scalingMode == "contain" and
       self.appConfig.image.width <= self.appConfig.width and

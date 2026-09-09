@@ -2,6 +2,7 @@ import pixie, options
 import frameos/apps
 import frameos/types
 import frameos/utils/text
+import frameos/utils/image
 
 type
   AppConfig* = object
@@ -129,8 +130,8 @@ proc get*(self: App, context: ExecutionContext): Image =
     let br = layoutBounds(lay.textTypeset)
     let tl = layoutBoundsTopLeft(lay.textTypeset)
     let border = self.appConfig.borderWidth
-    let outW = max(1, (br.x - tl.x).int + border)
-    let outH = max(1, (br.y - tl.y).int + border)
+    # Bounded: a huge font size or border is a scene-supplied allocation.
+    let (outW, outH) = boundedRequestedDimensions((br.x - tl.x).int + border, (br.y - tl.y).int + border)
     let output = newImage(outW, outH)
 
     # Offset so that the top-left of the layout sits at ~border/2 inset.

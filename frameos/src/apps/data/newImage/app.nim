@@ -1,6 +1,7 @@
 import pixie
 import frameos/apps
 import frameos/types
+import frameos/utils/image
 
 type
   AppConfig* = object
@@ -26,7 +27,10 @@ proc get*(self: App, context: ExecutionContext): Image =
                   context.image.height
                 else:
                   self.frameConfig.renderHeight()
-  let image = newImage(width, height)
+  # A scene-supplied size is a request, not an allocation: the same ceiling a
+  # decoded image gets (a failed Nim allocation is rawQuit(1), the whole frame).
+  let (boundedWidth, boundedHeight) = boundedRequestedDimensions(width, height)
+  let image = newImage(boundedWidth, boundedHeight)
   if self.appConfig.opacity != 1.0:
     var color = Color(r: self.appConfig.color.r, g: self.appConfig.color.g, b: self.appConfig.color.b,
         a: float32(self.appConfig.opacity))
