@@ -3,6 +3,14 @@ import std/[locks, monotimes, os, osproc, posix, streams, strutils, times]
 const
   DefaultProcessTerminateTimeoutMs* = 1500
   DefaultProcessKillTimeoutMs* = 500
+  ## Every helper below bounds its child unless the caller says otherwise.
+  ## A minute covers the slowest routine child (a driver's Python setup, a
+  ## gzip of a day's log); apt, chromium and the setup scripts pass their own.
+  ## `timeoutMs = -1` still means "wait forever" but has to be asked for.
+  DefaultProcessTimeoutMs* = 60_000
+  ## Captured stdout is capped too: a chatty child used to be able to grow
+  ## the runtime's heap without limit on a 512 MB frame.
+  DefaultProcessMaxOutputBytes* = 4 * 1024 * 1024
   DefaultProcessPollMs = 100
   ProcessExitPollMs = 20
   ProcessPipeChunkSize = 8192
@@ -88,7 +96,7 @@ proc waitBounded(p: Process; timeoutMs: int): ExternalProcessResult =
 
 proc runProcessWithParentStreams*(command: string;
                                   args: seq[string] = @[];
-                                  timeoutMs = -1): ExternalProcessResult =
+                                  timeoutMs = DefaultProcessTimeoutMs): ExternalProcessResult =
   ## Use this for child processes whose output is not consumed by FrameOS.
   ## It avoids deadlocks from full stdout/stderr pipes.
   var p = startProcessSerialized(command, args = args, options = {poUsePath, poParentStreams})
@@ -97,7 +105,8 @@ proc runProcessWithParentStreams*(command: string;
   finally:
     p.close()
 
-proc runShellWithParentStreams*(command: string; timeoutMs = -1): ExternalProcessResult =
+proc runShellWithParentStreams*(command: string;
+                                timeoutMs = DefaultProcessTimeoutMs): ExternalProcessResult =
   ## Bounded replacement for osproc.execCmd/execShellCmd: runs `command`
   ## through /bin/sh -c with the parent's stdout/stderr, kills it after
   ## timeoutMs and gives up waiting if it cannot be killed.
@@ -180,11 +189,14 @@ proc waitForPipedExit(p: Process): int =
 proc runProcessPiped*(command: string;
                       args: seq[string] = @[];
                       input = "";
-                      timeoutMs = -1;
-                      maxOutputBytes = 0;
+                      timeoutMs = DefaultProcessTimeoutMs;
+                      maxOutputBytes = DefaultProcessMaxOutputBytes;
                       maxErrorBytes = 4096): PipedProcessResult =
   ## Runs a child process without blocking on stdin/stdout/stderr pipe ordering.
-  ## stdout is captured and bounded; stderr is drained and lightly captured.
+  ## stdout is captured and bounded (`maxOutputBytes <= 0` lifts the cap);
+  ## stderr is drained and lightly captured. Deadlines are monotonic: setup
+  ## steps the wall clock (NTP after the hotspot, the timezone link) while
+  ## children are running, and an epoch-based deadline jumped with it.
   var p = startProcessSerialized(command, args = args, options = {poUsePath})
   var inputClosed = false
   try:
@@ -195,13 +207,13 @@ proc runProcessPiped*(command: string;
     var inputOffset = 0
     var stdoutEof = false
     var stderrEof = false
-    let startedAt = epochTime()
+    let deadline = getMonoTime() + initDuration(milliseconds = max(0, timeoutMs))
 
     if input.len == 0:
       p.closeInput(inputClosed)
 
     while true:
-      if timeoutMs >= 0 and epochTime() > startedAt + (timeoutMs.float / 1000.0):
+      if timeoutMs >= 0 and getMonoTime() > deadline:
         p.stopProcess()
         result.timedOut = true
         result.exitCode = -1
@@ -271,8 +283,8 @@ proc runProcessPiped*(command: string;
 
 proc runShellCapture*(command: string;
                       input = "";
-                      timeoutMs = -1;
-                      maxOutputBytes = 4 * 1024 * 1024): tuple[output: string, exitCode: int] =
+                      timeoutMs = DefaultProcessTimeoutMs;
+                      maxOutputBytes = DefaultProcessMaxOutputBytes): tuple[output: string, exitCode: int] =
   ## Bounded replacement for osproc.execCmdEx: runs `command` through
   ## /bin/sh -c and captures stdout with stderr appended after it.
   let res = runProcessPiped("/bin/sh", @["-c", command], input = input,
@@ -321,7 +333,7 @@ proc readAvailableLines*(reader: var ProcessOutputReader): seq[string] =
 proc writeInputDrainingOutput*(p: Process;
                                input: openArray[uint8];
                                reader: var ProcessOutputReader;
-                               timeoutMs = -1): tuple[timedOut: bool, inputWritten: bool] =
+                               timeoutMs = DefaultProcessTimeoutMs): tuple[timedOut: bool, inputWritten: bool] =
   ## Streams `input` into p's stdin while draining p's stdout into `reader`,
   ## so neither side can block forever on a full pipe. Closes stdin when the
   ## input has been written or the child stops accepting it. Intended for
@@ -329,10 +341,10 @@ proc writeInputDrainingOutput*(p: Process;
   var inputClosed = false
   p.inputHandle().setNonBlocking()
   var inputOffset = 0
-  let startedAt = epochTime()
+  let deadline = getMonoTime() + initDuration(milliseconds = max(0, timeoutMs))
   try:
     while inputOffset < input.len:
-      if timeoutMs >= 0 and epochTime() > startedAt + (timeoutMs.float / 1000.0):
+      if timeoutMs >= 0 and getMonoTime() > deadline:
         result.timedOut = true
         return
 

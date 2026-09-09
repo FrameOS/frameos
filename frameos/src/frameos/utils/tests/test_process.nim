@@ -55,6 +55,24 @@ sys.stdout.flush()
     check result.exitCode == -1
     check result.outputExceeded
 
+  test "the defaults bound time and output without being asked":
+    # "Wait forever, buffer unbounded" is no longer what a caller gets by
+    # leaving the arguments off: the runtime hosts render and event loops on
+    # the thread that spawns most children.
+    check DefaultProcessTimeoutMs > 0
+    check DefaultProcessTimeoutMs <= 5 * 60_000
+    check DefaultProcessMaxOutputBytes > 0
+    let flood = runProcessPiped(
+      "python3",
+      @["-c", "import sys; sys.stdout.write('x' * (" & $DefaultProcessMaxOutputBytes & " + 4096)); sys.stdout.flush()"]
+    )
+    check flood.outputExceeded
+    check flood.exitCode == -1
+    check flood.output.len <= DefaultProcessMaxOutputBytes
+    let (captured, _) = runShellCapture("python3 -c \"import sys; sys.stdout.write('y' * (" &
+      $DefaultProcessMaxOutputBytes & " + 4096))\"")
+    check captured.len <= DefaultProcessMaxOutputBytes + 65536
+
   test "runShellCapture captures stdout and appends stderr":
     let (output, exitCode) = runShellCapture("echo out; echo err 1>&2; exit 3", timeoutMs = 5000)
     check exitCode == 3

@@ -1,10 +1,11 @@
-import std/[algorithm, httpclient, json, locks, monotimes, strutils, tables, times]
+import std/[algorithm, json, locks, monotimes, strutils, tables, times]
 import mummy
 import mummy/routers
 import httpcore
 import frameos/version
 import frameos/channels
 import frameos/cloud/link_state
+import frameos/utils/http_client
 import ../api
 import ../auth
 import ../embedded_assets
@@ -163,7 +164,7 @@ proc loadSystemRepository(repositorySlug: string): JsonNode {.gcsafe.} =
   result["id"] = %("system-" & repositorySlug)
   result["name"] = %(metadata{"name"}.getStr(repositorySlug))
   result["description"] =
-    if metadata{"description"}.kind == JString: %(metadata{"description"}.getStr()) else: newJNull()
+    if metadata{"description"} != nil and metadata["description"].kind == JString: %(metadata["description"].getStr()) else: newJNull()
   result["url"] = %("/api/repositories/system/" & repositorySlug & "/repository.json")
   result["last_updated_at"] = newJNull()
   result["templates"] = templates
@@ -206,43 +207,65 @@ const
   CloudStoreRepositoryId* = "system-cloud-store"
   CloudStoreScenesRoutePrefix = "/api/repositories/cloud-store/scenes/"
   cloudStoreIndexTtlSeconds = 300
+  ## A provider that is down or answering garbage is not asked again on the
+  ## very next request: with four worker threads and the SPA polling, that
+  ## was a fetch per request, each one waiting out the timeout.
+  cloudStoreFailureTtlSeconds = 30
   cloudStoreFetchTimeoutMs = 10_000
+  cloudStoreFetchMaxSeconds = 15.0
+  ## The index is a catalog (names, ids, image and zip URLs); a scene's
+  ## scenes.json carries app sources and can be far larger.
+  CloudStoreIndexMaxBytes* = 2 * 1024 * 1024
+  CloudStoreScenesMaxBytes* = 8 * 1024 * 1024
 
-type CloudStoreFetchHook* = proc(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.}
+type CloudStoreFetchHook* = proc(url: string, maxBytes: int): tuple[body: string, status: int] {.gcsafe, nimcall.}
 
-proc defaultCloudStoreFetch(url: string): tuple[body: string, status: int] {.gcsafe, nimcall.} =
-  let client = newHttpClient(timeout = cloudStoreFetchTimeoutMs, maxRedirects = 2)
+proc defaultCloudStoreFetch(url: string, maxBytes: int): tuple[body: string, status: int] {.gcsafe, nimcall.} =
+  ## The runtime's own client: connect, TLS and send are bounded, not just
+  ## the read (utils/http_client.nim), the body is capped at maxBytes, and
+  ## redirects are counted. The stdlib client this replaced bounded none of
+  ## those and let the provider size the frame's heap.
   try:
-    let response = client.get(url)
-    let status = try: parseInt(response.status.split(' ')[0]) except ValueError: 0
-    (body: response.body, status: status)
+    let response = boundedRequestWithHeaders(url, timeoutMs = cloudStoreFetchTimeoutMs,
+                                             maxBytes = maxBytes, maxSeconds = cloudStoreFetchMaxSeconds,
+                                             maxRedirects = 2)
+    (body: response.body, status: response.code)
   except CatchableError as e:
     (body: e.msg, status: 0)
-  finally:
-    client.close()
 
 var cloudStoreFetchHook: CloudStoreFetchHook = defaultCloudStoreFetch
 
 proc setCloudStoreFetchHookForTest*(hook: CloudStoreFetchHook) =
   cloudStoreFetchHook = if hook == nil: defaultCloudStoreFetch else: hook
 
-# The cached index is kept as its raw body (a string, copied out under the
-# lock) and parsed per request: a JsonNode shared across the worker threads
-# is what took the admin panel down on 2026-09-06 (server/auth.nim).
+# The index is fetched and shaped ONCE per TTL and kept as the serialized
+# repository entry (a string, copied out under the lock): a JsonNode shared
+# across the worker threads is what took the admin panel down on 2026-09-06
+# (server/auth.nim), and re-parsing the provider's whole index on every
+# request was the other half of the cost. `cloudStoreFetchLock` is the
+# single-flight: the first request past a stale cache holds it while it
+# fetches, the others queue on it and find the fresh entry when they wake.
 var
   cloudStoreCacheLock: Lock
+  cloudStoreFetchLock: Lock
   cloudStoreCacheUrl: string
-  cloudStoreCacheBody: string
+  cloudStoreCacheEntry: string
   cloudStoreCacheAt: MonoTime
   cloudStoreCacheValid: bool
+  cloudStoreFailedUrl: string
+  cloudStoreFailedAt: MonoTime
+  cloudStoreFailedValid: bool
 
 initLock(cloudStoreCacheLock)
+initLock(cloudStoreFetchLock)
 
 proc resetCloudStoreCacheForTest*() =
   withLock cloudStoreCacheLock:
     cloudStoreCacheValid = false
-    cloudStoreCacheBody = ""
+    cloudStoreCacheEntry = ""
     cloudStoreCacheUrl = ""
+    cloudStoreFailedValid = false
+    cloudStoreFailedUrl = ""
 
 proc cloudStoreProviderUrl(): string {.gcsafe.} =
   providerUrlFromState(loadCloudLinkState()).strip(chars = {'/'})
@@ -255,26 +278,6 @@ proc cloudStoreRepositoryUrl*(): string {.gcsafe.} =
   if version.len == 0 or version == "unknown": base & "repository.json"
   else: base & version & "/repository.json"
 
-proc cloudStoreIndexBody(): string {.gcsafe.} =
-  ## The store index as served by the provider, or "" when it cannot be had.
-  let url = cloudStoreRepositoryUrl()
-  {.gcsafe.}:
-    withLock cloudStoreCacheLock:
-      if cloudStoreCacheValid and cloudStoreCacheUrl == url and
-          (getMonoTime() - cloudStoreCacheAt) < initDuration(seconds = cloudStoreIndexTtlSeconds):
-        return cloudStoreCacheBody
-    let fetched = cloudStoreFetchHook(url)
-    if fetched.status != 200:
-      log(%*{"event": "repositories:cloudStore:unavailable", "url": url, "status": fetched.status,
-             "error": (if fetched.status == 0: fetched.body else: "")})
-      return ""
-    withLock cloudStoreCacheLock:
-      cloudStoreCacheUrl = url
-      cloudStoreCacheBody = fetched.body
-      cloudStoreCacheAt = getMonoTime()
-      cloudStoreCacheValid = true
-    fetched.body
-
 proc resolveAgainst(repositoryUrl: string, value: string): string =
   ## "./x" is relative to the index's directory, as the backend and the cloud
   ## SPA both resolve it (backend/app/models/repository.py).
@@ -286,12 +289,9 @@ proc resolveAgainst(repositoryUrl: string, value: string): string =
 proc validStoreSceneId(value: string): bool =
   value.len == 36 and value.allCharsInSet({'0'..'9', 'a'..'f', 'A'..'F', '-'})
 
-proc cloudStoreRepositoryPayload*(): JsonNode {.gcsafe.} =
-  ## The store as one repository entry, or nil when the index is unavailable.
-  let url = cloudStoreRepositoryUrl()
-  let body = cloudStoreIndexBody()
-  if body.len == 0:
-    return nil
+proc shapeCloudStoreRepository(url: string, body: string): JsonNode {.gcsafe.} =
+  ## The provider's index as one repository entry, or nil when the body is
+  ## not an index.
   let data =
     try:
       parseJson(body)
@@ -324,14 +324,71 @@ proc cloudStoreRepositoryPayload*(): JsonNode {.gcsafe.} =
   result["id"] = %CloudStoreRepositoryId
   result["name"] = %(data{"name"}.getStr("FrameOS Cloud store"))
   result["description"] =
-    if data{"description"}.kind == JString: %(data["description"].getStr()) else: newJNull()
+    if data{"description"} != nil and data["description"].kind == JString: %(data["description"].getStr()) else: newJNull()
   result["url"] = %url
   result["last_updated_at"] = newJNull()
   result["templates"] = templates
 
+proc cachedCloudStoreEntry(url: string, now: MonoTime): tuple[hit: bool, entry: string] {.gcsafe.} =
+  ## Under the cache lock: the serialized entry when it is fresh, "" (as a
+  ## hit) inside the failure window, and a miss otherwise.
+  {.gcsafe.}:
+    withLock cloudStoreCacheLock:
+      if cloudStoreCacheValid and cloudStoreCacheUrl == url and
+          (now - cloudStoreCacheAt) < initDuration(seconds = cloudStoreIndexTtlSeconds):
+        return (hit: true, entry: cloudStoreCacheEntry)
+      if cloudStoreFailedValid and cloudStoreFailedUrl == url and
+          (now - cloudStoreFailedAt) < initDuration(seconds = cloudStoreFailureTtlSeconds):
+        return (hit: true, entry: "")
+  (hit: false, entry: "")
+
+proc cloudStoreRepositoryEntry*(): string {.gcsafe.} =
+  ## The store as one serialized repository entry, or "" when the index
+  ## cannot be had. One fetch and one parse per TTL, shared by every worker.
+  let url = cloudStoreRepositoryUrl()
+  let cached = cachedCloudStoreEntry(url, getMonoTime())
+  if cached.hit:
+    return cached.entry
+  result = ""
+  {.gcsafe.}:
+    withLock cloudStoreFetchLock:
+      # Whoever held the lock before us may have filled the cache.
+      let again = cachedCloudStoreEntry(url, getMonoTime())
+      if again.hit:
+        return again.entry
+      let fetched = cloudStoreFetchHook(url, CloudStoreIndexMaxBytes)
+      var shaped: JsonNode = nil
+      if fetched.status != 200:
+        log(%*{"event": "repositories:cloudStore:unavailable", "url": url, "status": fetched.status,
+               "error": (if fetched.status == 0: fetched.body else: "")})
+      else:
+        shaped = shapeCloudStoreRepository(url, fetched.body)
+      let entry = if shaped == nil: "" else: $shaped
+      withLock cloudStoreCacheLock:
+        if shaped == nil:
+          cloudStoreFailedUrl = url
+          cloudStoreFailedAt = getMonoTime()
+          cloudStoreFailedValid = true
+        else:
+          cloudStoreCacheUrl = url
+          cloudStoreCacheEntry = entry
+          cloudStoreCacheAt = getMonoTime()
+          cloudStoreCacheValid = true
+          cloudStoreFailedValid = false
+      result = entry
+
+proc cloudStoreRepositoryPayload*(): JsonNode {.gcsafe.} =
+  ## The store as one repository entry, or nil when the index is unavailable.
+  ## A fresh node per caller — never the cached one.
+  let entry = cloudStoreRepositoryEntry()
+  if entry.len == 0:
+    return nil
+  parseJson(entry)
+
 proc cloudStoreSceneScenesJson(sceneId: string): tuple[body: string, status: int] {.gcsafe.} =
   {.gcsafe.}:
-    cloudStoreFetchHook(cloudStoreProviderUrl() & "/api/store/scenes/" & sceneId & "/scenes.json")
+    cloudStoreFetchHook(cloudStoreProviderUrl() & "/api/store/scenes/" & sceneId & "/scenes.json",
+                        CloudStoreScenesMaxBytes)
 
 proc requireRepositoryReadAccess(request: Request): bool {.gcsafe.} =
   if not hasAdminAccess(request):
@@ -351,11 +408,11 @@ proc addRepositoryApiRoutes*(router: var Router) =
     if not requireRepositoryReadAccess(request):
       return
     {.gcsafe.}:
-      var repositories = newJArray()
-      let cloudStore = cloudStoreRepositoryPayload()
-      if cloudStore != nil:
-        repositories.add(cloudStore)
-      jsonResponse(request, Http200, repositories)
+      # The cached entry is served as-is: no parse per request.
+      let cloudStore = cloudStoreRepositoryEntry()
+      var headers: mummy.HttpHeaders
+      headers["Content-Type"] = "application/json"
+      request.respond(Http200, headers, "[" & cloudStore & "]")
   )
 
   router.get("/api/repositories/cloud-store/scenes/@sceneId/scenes.json", proc(request: Request) {.gcsafe.} =

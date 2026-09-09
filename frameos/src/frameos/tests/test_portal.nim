@@ -912,3 +912,12 @@ suite "portal boot-screen ticks":
     waitBetweenNetworkAttempts(120)
     check slices == @[50, 50, 20]
     resetPortalHooksForTest()
+
+suite "threadpool hand-off":
+  test "a runtime handle reads back the same FrameOS without a counted ref":
+    # spawn copies its arguments; the portal hands the pool the runtime's
+    # address (a plain pointer) and a value form, never a ref.
+    let frameOS = FrameOS(frameConfig: FrameConfig(), network: Network())
+    let handle = runtimeHandle(frameOS)
+    check cast[pointer](frameOS) == pointer(handle)
+    check sizeof(RuntimeHandle) == sizeof(pointer)

@@ -1,4 +1,5 @@
 import unittest
+import strutils
 import times
 import os
 import mummy
@@ -336,3 +337,30 @@ suite "the frame payload round-trips what the device stores":
     let privileged = frameApiPayload(state, exposeSecrets = true)
     check privileged{"network"}{"wifiHotspotPassword"}.getStr() == "hotspot-secret"
     check privileged{"agent"}{"agentSharedSecret"}.getStr() == "agent-secret"
+
+  test "service settings never ride the frame payload, masked or not":
+    # `settings` (OpenAI / Immich / Home Assistant keys) is in frameApiKeyMap
+    # so the SPA form round-trips it on POST, but the GET payload drops it on
+    # BOTH branches: a masked payload that carried it would hand every
+    # service key to whoever holds only the frame access key. /api/settings
+    # is the admin-only reader.
+    let tempRoot = getTempDir() / "frameos-api-settings-off-payload"
+    createDir(tempRoot)
+    writeFile(tempRoot / "frame.json", $(%*{
+      "settings": {"openAI": {"apiKey": "sk-stored-openai"}},
+      "frameApi": {"settings": {"immich": {"apiKey": "immich-echoed"}}},
+    }))
+    putEnv("FRAMEOS_CONFIG", tempRoot / "frame.json")
+    var config = baseConfig(tempRoot)
+    setConfigDefaults(config)
+    config.settings = %*{"openAI": {"apiKey": "sk-live-openai"}, "homeAssistant": {"accessToken": "ha-token"}}
+    globalFrameConfig = config
+    let state = initConnectionsState()
+    for exposeSecrets in [false, true]:
+      let payload = frameApiPayload(state, exposeSecrets = exposeSecrets)
+      check not payload.hasKey("settings")
+      let serialized = $payload
+      check "sk-live-openai" notin serialized
+      check "sk-stored-openai" notin serialized
+      check "immich-echoed" notin serialized
+      check "ha-token" notin serialized
