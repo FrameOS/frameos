@@ -184,7 +184,7 @@ jobs:
               # can be argued about on a laptop (main/tests/*.c carry the same
               # command lines): the assets-path rule behind every asset verb,
               # the provider URL / transport / origin rules, the minisign
-              # parser that gates OTA, the setting parsers, and the schedule's
+              # parser that gates OTA, the setting parsers, and the schedule
               # catch-up window.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 embedded/esp32/main/fos_assets_path.c embedded/esp32/main/tests/test_fos_assets_path.c \
