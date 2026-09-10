@@ -22,6 +22,7 @@ import { isCloudMode } from '../utils/cloudMode'
 import { WorkspaceRouteLoading } from './workspace/WorkspaceRouteLoading'
 import { PersistentTerminalSessions } from './frame/panels/Terminal/PersistentTerminalSessions'
 import { PreviewKeyConsentModal } from './frame/panels/Scenes/PreviewKeyConsentModal'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 interface DisplayedScene {
   scene: SceneKey
@@ -131,6 +132,7 @@ export function LoggedInApp() {
       <SceneRoute scene={scene} params={params} fallback={<WorkspaceRouteLoading scene={scene} />} />
       <LongRunningTaskToasts />
       <PreviewKeyConsentModal />
+      <ConfirmDialog />
     </>
   )
 }

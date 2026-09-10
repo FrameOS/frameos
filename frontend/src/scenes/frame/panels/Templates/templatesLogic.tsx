@@ -24,6 +24,7 @@ import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFav
 import { cloudDriveLogic } from './cloudDriveLogic'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { AppConfig, FrameOSSettings, FrameType } from '../../../../types'
+import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 
 export interface TemplateLogicProps {
   frameId: FrameId
@@ -995,10 +996,14 @@ export const templatesLogic = kea<templatesLogicType>([
         // the scenes themselves are inspected for apps that run shell commands.
         if (
           scenesRunShellCommands(scenes, values.apps) &&
-          !window.confirm(
-            'The scenes at this URL configure apps or custom code that run shell commands on the frame. ' +
-              'Only install them if you trust the source. Install anyway?'
-          )
+          !(await confirmDialog({
+            title: 'These scenes run shell commands',
+            message:
+              'The scenes at this URL configure apps or custom code that run shell commands on the frame. ' +
+              'Only install them if you trust the source.',
+            confirmLabel: 'Install anyway',
+            danger: true,
+          }))
         ) {
           return
         }
@@ -1047,10 +1052,14 @@ export const templatesLogic = kea<templatesLogicType>([
       // catalog flags and inspects the scenes instead, with the same dialog.
       if (
         template.flags?.includes('shell') &&
-        !window.confirm(
-          `"${template.name}" configures apps or custom code that run shell commands on the frame. ` +
-            'Only install it if you trust the publisher. Install anyway?'
-        )
+        !(await confirmDialog({
+          title: 'This scene runs shell commands',
+          message:
+            `"${template.name}" configures apps or custom code that run shell commands on the frame. ` +
+            'Only install it if you trust the publisher.',
+          confirmLabel: 'Install anyway',
+          danger: true,
+        }))
       ) {
         return
       }

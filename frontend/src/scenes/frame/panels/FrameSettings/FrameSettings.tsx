@@ -24,11 +24,14 @@ import {
   DEFAULT_FRAME_ERROR_BEHAVIOR,
   DEFAULT_TIMEZONE_UPDATE_HOUR,
   DEFAULT_TIMEZONE_UPDATE_URL,
+  FRAME_KEYS,
   frameLogic,
   normalizeFrameErrorBehavior,
 } from '../../frameLogic'
 import { frameCompilationModeOptions, normalizeFrameCompilationModeOption } from '../../../../utils/frameBuildOptions'
 import { downloadJson } from '../../../../utils/downloadJson'
+import { parseImportedFrameJson } from '../../../../utils/frameJsonImport'
+import { reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { Field } from '../../../../components/Field'
 import { PartialRefreshSettingsFields } from '../../../../components/PartialRefreshSettingsFields'
 import { PowerSettingsFields, type PowerSettingsValues } from '../../../../components/PowerSettingsFields'
@@ -1207,7 +1210,7 @@ const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset,
 }
 
 const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
-  { value: 'custom', label: 'Custom ESP32 board' },
+  { value: 'custom', label: 'Custom board' },
   ...Object.entries(ESP32_HARDWARE_PRESET_CONFIGS).map(([value, config]) => ({
     value,
     // Boards without PSRAM cannot render on-device; flag them so it is clear
@@ -1814,13 +1817,17 @@ export function FrameSettings({
           : []),
         {
           label: 'Import frame .json',
+          title: 'Load settings from an exported frame .json into this form',
           onClick: () => {
+            // The outcome goes to the task toasts, never the console: the
+            // file holds every password and key the export wrote.
+            const report = (status: 'success' | 'error', fileName: string, detail: string): void =>
+              reportTaskOutcome(status, { frameId: frame.id, kind: 'save', title: `Import ${fileName}`, detail })
             function handleFileSelect(event: Event): void {
               const inputElement = event.target as HTMLInputElement
               const file = inputElement.files?.[0]
 
               if (!file) {
-                console.error('No file selected')
                 return
               }
 
@@ -1828,18 +1835,16 @@ export function FrameSettings({
 
               reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
                 try {
-                  const jsonData = JSON.parse(loadEvent.target?.result as string)
-                  const { id, ...rest } = jsonData
-                  setFrameFormValues(rest)
-                  console.log('Imported frame:', jsonData)
-                  console.log('Press SAVE now to save the imported frame')
+                  const { values } = parseImportedFrameJson(String(loadEvent.target?.result ?? ''), FRAME_KEYS)
+                  setFrameFormValues(values)
+                  report('success', file.name, 'Settings loaded into the form. Review them, then press Save to apply.')
                 } catch (error) {
-                  console.error('Error parsing JSON:', error)
+                  report('error', file.name, error instanceof Error ? error.message : 'Could not read the file.')
                 }
               }
 
               reader.onerror = () => {
-                console.error('Error reading file:', reader.error)
+                report('error', file.name, reader.error?.message ?? 'Could not read the file.')
               }
 
               reader.readAsText(file)
@@ -1856,6 +1861,7 @@ export function FrameSettings({
         },
         {
           label: 'Export frame .json',
+          title: 'Download every setting of this frame, passwords and API keys included',
           onClick: () => {
             downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
           },
@@ -1894,11 +1900,8 @@ export function FrameSettings({
               {
                 label: 'Delete frame',
                 title: frameDeleteCopy(workspaceMode()).title,
-                onClick: () => {
-                  if (confirm(frameDeleteCopy(workspaceMode()).confirm(frame.name || frameHost(frame)))) {
-                    deleteFrame(frame.id)
-                  }
-                },
+                confirm: frameDeleteCopy(workspaceMode()).confirm(frame.name || frameHost(frame)),
+                onClick: () => deleteFrame(frame.id),
                 icon: <TrashIcon className="w-5 h-5" />,
                 loading: false,
               },
@@ -2141,7 +2144,7 @@ export function FrameSettings({
             streamed from a file yet), and text/JSON responses never spill — they need to fit in memory. With no SD card
             and no free <code>/state</code> space, spilling is off and the download fails once PSRAM is exhausted.
           </p>
-          <p className="mt-2">The ESP32 reads this value at boot, so saving a change reboots the frame.</p>
+          <p className="mt-2">The frame reads this value at boot, so saving a change reboots it.</p>
         </>
       }
     >
@@ -2991,7 +2994,7 @@ export function FrameSettings({
                     <Group name="device_config">
                       <Field
                         name="pins"
-                        label="ESP32 GPIO pin layout"
+                        label="GPIO pin layout"
                         tooltip="GPIO numbers for the e-paper SPI wiring. Use -1 for optional pins that are not connected."
                       >
                         {({ value, onChange }) => {
@@ -3064,7 +3067,7 @@ export function FrameSettings({
                       <Field
                         name="sdCardAssets"
                         label="SD card assets"
-                        tooltip="Mount a FAT32 SD card at /srv/assets so local image and font assets work on ESP32 frames."
+                        tooltip="Mount a FAT32 SD card at /srv/assets so local image and font assets work on this frame."
                       >
                         {({ value, onChange }) => {
                           const sdCardAssets = normalizeEsp32SdCardAssets(value as Esp32SdCardAssets | undefined)
@@ -3678,7 +3681,7 @@ export function FrameSettings({
                     <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
                     <p>
                       {isEmbeddedMode
-                        ? 'ESP32 keeps HTTP available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
+                        ? 'Embedded firmware keeps HTTP available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
                         : 'Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure communication.'}
                     </p>
                   </div>
@@ -3835,7 +3838,7 @@ export function FrameSettings({
                 label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
                 tooltip={
                   isEmbeddedMode
-                    ? 'Serve the ESP32 frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. The certificate and key reach the board on its next settings poll; it restarts to apply them.'
+                    ? 'Serve the frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. The certificate and key reach the board on its next settings poll; it restarts to apply them.'
                     : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
                 }
               >
@@ -3862,7 +3865,7 @@ export function FrameSettings({
                       <div className="space-y-2">
                         <p>
                           {isEmbeddedMode
-                            ? 'The port the ESP32 HTTPS server listens on.'
+                            ? "The port the frame's HTTPS server listens on."
                             : 'The port Caddy listens on for HTTPS connections.'}
                         </p>
                         <p>It's best if this ends with *443.</p>
@@ -3905,7 +3908,7 @@ export function FrameSettings({
                     label="HTTPS frame certificate"
                     tooltip={
                       isEmbeddedMode
-                        ? 'PEM certificate baked into the ESP32 firmware for native HTTPS on this frame.'
+                        ? 'PEM certificate baked into the firmware for native HTTPS on this frame.'
                         : 'PEM certificate used by Caddy for HTTPS on this frame.'
                     }
                     secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
@@ -3923,7 +3926,7 @@ export function FrameSettings({
                     label={<div>HTTPS frame private key</div>}
                     tooltip={
                       isEmbeddedMode
-                        ? 'PEM private key baked into the ESP32 firmware for native HTTPS on this frame. Keep this secret.'
+                        ? 'PEM private key baked into the firmware for native HTTPS on this frame. Keep this secret.'
                         : 'PEM private key used by Caddy for HTTPS on this frame. Keep this secret.'
                     }
                     secret={
@@ -4033,11 +4036,20 @@ export function FrameSettings({
                                 />
                               )}
                             </Field>
-                            <Field name="wifiHotspotPassword" label="Wifi Hotspot Password">
+                            <Field
+                              name="wifiHotspotPassword"
+                              label="Wifi Hotspot Password"
+                              secret={
+                                !frameFormTouches['network.wifiHotspotPassword'] &&
+                                !!frameForm.network?.wifiHotspotPassword
+                              }
+                            >
                               {({ onChange, value }) => (
                                 <TextInput
                                   name="wifiHotspotPassword"
+                                  type={frameFormTouches['network.wifiHotspotPassword'] ? 'text' : 'password'}
                                   placeholder="frame1234"
+                                  autoComplete="new-password"
                                   onChange={onChange}
                                   value={value ?? 'frame1234'}
                                 />

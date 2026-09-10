@@ -434,7 +434,7 @@ function rebootTooltipRows(marker: RebootMarker): string[] {
     marker.serviceResult ? `Service result: ${marker.serviceResult}` : '',
     marker.exitCode ? `Exit code: ${marker.exitCode}` : '',
     marker.exitStatus ? `Exit status: ${marker.exitStatus}` : '',
-    marker.previousBootId && marker.bootId ? `Boot: ${marker.previousBootId} -> ${marker.bootId}` : '',
+    marker.previousBootId && marker.bootId ? `Boot: ${marker.previousBootId} → ${marker.bootId}` : '',
   ].filter(Boolean)
 }
 

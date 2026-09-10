@@ -15,6 +15,8 @@ export interface TooltipProps {
   containerClassName?: string
   tooltipColor?: ButtonProps['color']
   noPadding?: boolean
+  /** The trigger button's accessible name. Defaults to "More information" for the bare icon trigger. */
+  label?: string
 }
 
 export function Tooltip({
@@ -25,6 +27,7 @@ export function Tooltip({
   containerClassName,
   tooltipColor,
   noPadding,
+  label,
 }: TooltipProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
@@ -47,12 +50,13 @@ export function Tooltip({
         <>
           <Popover.Button
             ref={setReferenceElement}
+            aria-label={label ?? (children ? undefined : 'More information')}
             className={clsx(
               'frameos-tooltip-button block justify-center rounded-md text-sm font-medium shadow-sm focus:outline-none',
               className
             )}
           >
-            {children ?? <InformationCircleIcon className="w-5 h-5" aria-label="Popover" />}
+            {children ?? <InformationCircleIcon className="w-5 h-5" aria-hidden="true" />}
           </Popover.Button>
           {ReactDOM.createPortal(
             // opacity only: a transform on this wrapper would become the containing

@@ -22,6 +22,7 @@ import { livePreviewLogic, LIVE_PREVIEW_HASH_KEY } from './livePreviewLogic'
 import { LivePreviewModal } from './LivePreviewModal'
 import { SceneActionsButton, SceneActionOption } from './SceneActionsButton'
 import { SceneActionKey } from './sceneActionsLogic'
+import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -177,9 +178,16 @@ export function ExpandedScene({
   }
 
   const handleDelete = () => {
-    if (window.confirm('Are you sure you want to delete this scene?')) {
-      deleteScene(sceneId)
-    }
+    void confirmDialog({
+      title: 'Delete this scene?',
+      message: 'The scene is removed from this frame on the next save. This cannot be undone.',
+      confirmLabel: 'Delete scene',
+      danger: true,
+    }).then((confirmed) => {
+      if (confirmed) {
+        deleteScene(sceneId)
+      }
+    })
   }
 
   const actionOptions: SceneActionOption[] = [

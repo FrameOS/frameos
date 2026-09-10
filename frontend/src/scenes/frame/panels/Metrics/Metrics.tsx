@@ -175,8 +175,13 @@ function MetricCard({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
         <strong className="frame-tool-heading">{metricLabels[category] ?? category}</strong>
         {metricHelp[category] ? (
-          <Tooltip title={metricHelp[category]} className="frame-tool-muted" titleClassName="w-72 text-xs leading-snug">
-            <InformationCircleIcon className="h-4 w-4" aria-label={`About ${metricLabels[category] ?? category}`} />
+          <Tooltip
+            title={metricHelp[category]}
+            className="frame-tool-muted"
+            titleClassName="w-72 text-xs leading-snug"
+            label={`About ${metricLabels[category] ?? category}`}
+          >
+            <InformationCircleIcon className="h-4 w-4" aria-hidden="true" />
           </Tooltip>
         ) : null}
         {latestSummary ? <span className="frame-tool-muted">{latestSummary}</span> : null}

@@ -55,7 +55,8 @@ export function SceneActionsButton({ options, defaultKey, size, className }: Sce
         buttonColor="primary"
         className="!rounded-l-none border-l border-white/30 !px-1"
         buttonTitle="Choose what this button does"
-        buttonContent={<ChevronDownIcon className="h-4 w-4 self-center" aria-label="Choose action" />}
+        buttonAriaLabel="Choose action"
+        buttonContent={<ChevronDownIcon className="h-4 w-4 self-center" aria-hidden="true" />}
         items={options.map((option) => ({
           icon: option.icon,
           label: (

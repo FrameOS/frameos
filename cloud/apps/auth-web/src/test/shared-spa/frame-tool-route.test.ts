@@ -3,6 +3,7 @@ import {
   frameToolNotFoundMessage,
   frameToolPanels,
   isFrameToolPanel,
+  legacyToolQueryTarget,
   resolveFrameToolRoute,
 } from "../../../../../../frontend/src/scenes/workspace/frameToolRoute";
 import { allowedFrameToolPanels } from "../../../../../../frontend/src/scenes/workspace/workspaceSurfaces";
@@ -90,5 +91,31 @@ describe("frameToolNotFoundMessage", () => {
 
   it("says plainly that an unknown segment is no page", () => {
     expect(frameToolNotFoundMessage("nonsense", "backend")).toBe('This frame has no "nonsense" page.');
+  });
+});
+
+// Old links carried the tool as `?tool=`; the router moves it into the path
+// and comes back through the route. It used to move `frameToolFromRoute`'s
+// answer — the overview for anything unknown — so /frames/1?tool=bogus
+// canonicalised to a page the path form 404s on.
+describe("legacyToolQueryTarget", () => {
+  it("moves the query value into the path verbatim, unknown tools included", () => {
+    expect(legacyToolQueryTarget(undefined, "logs")).toBe("logs");
+    expect(legacyToolQueryTarget(null, "bogus")).toBe("bogus");
+    expect(legacyToolQueryTarget("", "terminal")).toBe("terminal");
+    expect(resolveFrameToolRoute(legacyToolQueryTarget(null, "bogus"), "backend")).toEqual({
+      kind: "notFound",
+      segment: "bogus",
+    });
+  });
+
+  it("treats an empty query as the overview", () => {
+    expect(legacyToolQueryTarget(undefined, "")).toBe("overview");
+  });
+
+  it("has nothing to move when the path already names a tool or there is no query", () => {
+    expect(legacyToolQueryTarget("logs", "metrics")).toBeNull();
+    expect(legacyToolQueryTarget("logs", null)).toBeNull();
+    expect(legacyToolQueryTarget(undefined, null)).toBeNull();
   });
 });

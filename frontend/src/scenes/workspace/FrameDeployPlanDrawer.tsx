@@ -1138,6 +1138,7 @@ function DeployTransportToggle({
           <Tooltip
             className="inline-flex h-5 w-5 items-center justify-center rounded-full"
             titleClassName="w-72"
+            label="Connection options help"
             title={
               <div className="space-y-1">
                 <div>
@@ -1159,7 +1160,7 @@ function DeployTransportToggle({
               </div>
             }
           >
-            <ExclamationCircleIcon className="h-4 w-4" aria-label="Connection options help" />
+            <ExclamationCircleIcon className="h-4 w-4" aria-hidden="true" />
           </Tooltip>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -1261,9 +1262,10 @@ function FrameBootstrapHelp(): JSX.Element {
     <Tooltip
       className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
       titleClassName="w-72"
+      label="FrameOS bootstrap help"
       title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install FrameOS and connect FrameOS Remote."
     >
-      <ExclamationCircleIcon className="h-4 w-4" aria-label="FrameOS bootstrap help" />
+      <ExclamationCircleIcon className="h-4 w-4" aria-hidden="true" />
     </Tooltip>
   )
 }

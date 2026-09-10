@@ -16,6 +16,7 @@ import { socketLogic } from '../socketLogic'
 import { forms } from 'kea-forms'
 import { FrameOSSettings, SSHKeyEntry } from '../../types'
 import { apiFetch, logApiError } from '../../utils/apiFetch'
+import { confirmDialog } from '../../utils/confirmDialogLogic'
 import { normalizeSshKeys } from '../../utils/sshKeys'
 import { onSettingsChanged } from '../../utils/settingsInvalidation'
 import { v4 as uuidv4 } from 'uuid'
@@ -636,7 +637,13 @@ export const settingsLogic = kea<settingsLogicType>([
     newBuildHostKey: async () => {
       if (values.savedSettings.buildHost?.sshKey) {
         if (
-          !confirm('Are you sure you want to generate a new key? You might lose access to the existing build host.')
+          !(await confirmDialog({
+            title: 'Generate a new build host key?',
+            message:
+              'The current key is replaced. Unless the new public key is installed on the build host, this backend loses access to it.',
+            confirmLabel: 'Generate new key',
+            danger: true,
+          }))
         ) {
           return
         }

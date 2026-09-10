@@ -262,7 +262,8 @@ const legacyBuildrootPlatforms: Record<string, string> = {
 }
 
 export function normalizeBuildrootPlatform(platform?: string | null): string {
-  return legacyBuildrootPlatforms[platform ?? ''] ?? platform ?? BUILDROOT_RASPBERRY_PI_64
+  // '' is the backend's alias for its default platform too (buildroot_platforms.py).
+  return legacyBuildrootPlatforms[platform ?? ''] ?? (platform || BUILDROOT_RASPBERRY_PI_64)
 }
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
@@ -306,7 +307,7 @@ export const virtualColorModes: Option[] = [
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },
   { value: 'pi.zerow', label: 'Raspberry Pi Zero W' },
-  { value: 'pi.zerow2', label: 'Raspberry Pi Zero W2' },
+  { value: 'pi.zerow2', label: 'Raspberry Pi Zero 2 W' },
   { value: 'pi.5', label: 'Raspberry Pi 5' },
   { value: 'pi.4', label: 'Raspberry Pi 4' },
   { value: 'pi', label: 'Raspberry Pi generic' },
@@ -317,5 +318,5 @@ export const rpiOSPlatforms: Option[] = [
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS' },
   { value: 'buildroot', label: 'Buildroot' },
-  { value: 'embedded', label: 'ESP32 (early beta)' },
+  { value: 'embedded', label: 'Embedded (ESP32, Pico, virtual)' },
 ]

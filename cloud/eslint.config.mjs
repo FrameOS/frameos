@@ -46,6 +46,8 @@ export default tseslint.config(
       // reaches decorators/frame.tsx and the legacy components.
       "**/src/test/shared-spa/frame-status-groups.test.ts",
       "**/src/test/shared-spa/frame-checkin.test.ts",
+      // Same exclusion, same reason: devices.ts reaches components/Select.tsx.
+      "**/src/test/shared-spa/device-catalog-mirror.test.ts",
       // Same exclusion, same reason: importing frameLogic pulls in
       // framesModel and the decorators behind it.
       "**/src/test/shared-spa/cloud-frame-change-details.test.ts",

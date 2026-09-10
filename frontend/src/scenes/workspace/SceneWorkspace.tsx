@@ -57,6 +57,7 @@ import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { sceneUtilityPanelIsAllowed, workspaceMode } from './workspaceSurfaces'
+import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -818,13 +819,16 @@ function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScen
           <button
             type="button"
             onClick={() => {
-              if (
-                window.confirm(
-                  'Update this scene to the latest version from the repository? Any local changes to the scene will be replaced.'
-                )
-              ) {
-                updateSceneFromRepo(scene.id)
-              }
+              void confirmDialog({
+                title: 'Update this scene from the repository?',
+                message: 'The latest published version replaces this copy. Any local changes to the scene are lost.',
+                confirmLabel: 'Update scene',
+                danger: true,
+              }).then((confirmed) => {
+                if (confirmed) {
+                  updateSceneFromRepo(scene.id)
+                }
+              })
             }}
             className="frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >

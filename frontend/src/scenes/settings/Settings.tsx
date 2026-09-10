@@ -1197,7 +1197,7 @@ export function Settings() {
                       </Field>
                       <Field
                         name="accessToken"
-                        label="Access token (Profile -> Long-Lived Access Tokens)"
+                        label="Access token (Profile → Long-Lived Access Tokens)"
                         secret={!!savedSettings?.homeAssistant?.accessToken}
                       >
                         <TextInput />
@@ -1288,7 +1288,7 @@ export function Settings() {
                       </Field>
                       <Field
                         name="apiKey"
-                        label="API key (Account Settings -> API Keys)"
+                        label="API key (Account Settings → API Keys)"
                         secret={!!savedSettings?.immich?.apiKey}
                       >
                         <TextInput />

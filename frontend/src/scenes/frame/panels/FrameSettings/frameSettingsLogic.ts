@@ -2,6 +2,7 @@ import { MakeLogicType, kea, key, path, props } from 'kea'
 
 import { loaders } from 'kea-loaders'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 import { downloadZip } from '../../../../utils/downloadJson'
 import type { FrameId } from '../../../../types'
 
@@ -107,7 +108,13 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
       false,
       {
         clearBuildCache: async () => {
-          if (confirm('Are you sure you want to clear the build cache?')) {
+          if (
+            await confirmDialog({
+              title: 'Clear the build cache?',
+              message: 'The next deploy rebuilds FrameOS from scratch, which takes several minutes longer.',
+              confirmLabel: 'Clear cache',
+            })
+          ) {
             try {
               await apiFetch(`/api/frames/${props.frameId}/clear_build_cache`, { method: 'POST' })
             } catch (error) {

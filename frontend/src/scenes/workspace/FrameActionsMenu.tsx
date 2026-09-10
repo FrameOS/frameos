@@ -98,7 +98,7 @@ export function FrameActionsMenu({
           ? [
               {
                 label: 'Re-render',
-                title: 'Render frame now',
+                title: 'Re-render the current scene',
                 onClick: () => renderFrame(frame.id),
                 icon: <PlayIcon className="h-5 w-5" />,
               },

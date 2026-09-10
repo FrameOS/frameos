@@ -68,6 +68,7 @@ import {
   flatSceneDependencyEntries,
 } from './sceneDependencyGrouping'
 import { sortScenesAlphabetically } from '../../utils/sortScenes'
+import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 const uploadedScenePrefix = 'uploaded/'
 const livePreviewSceneId = '__live_preview__'
@@ -691,14 +692,18 @@ function FrameScenesBlock({
     })
   }
 
-  const deleteSelectedScenes = (): void => {
+  const deleteSelectedScenes = async (): Promise<void> => {
     if (selectedSceneIds.size === 0) {
       return
     }
+    const noun = selectedSceneIds.size === 1 ? 'scene' : 'scenes'
     if (
-      !window.confirm(
-        `Delete ${selectedSceneIds.size} ${selectedSceneIds.size === 1 ? 'scene' : 'scenes'}? This cannot be undone.`
-      )
+      !(await confirmDialog({
+        title: `Delete ${selectedSceneIds.size} ${noun}?`,
+        message: 'The scenes are removed from this frame on the next save. This cannot be undone.',
+        confirmLabel: `Delete ${noun}`,
+        danger: true,
+      }))
     ) {
       return
     }

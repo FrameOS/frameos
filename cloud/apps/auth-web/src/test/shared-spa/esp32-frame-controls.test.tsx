@@ -114,7 +114,7 @@ describe("FrameActionsMenu in cloud mode", () => {
     // The other live entries carry no disabling and their normal tooltips.
     const rerender = menuItem("Re-render");
     expect(rerender?.className).not.toContain("cursor-not-allowed");
-    expect(rerender?.getAttribute("title")).toBe("Render frame now");
+    expect(rerender?.getAttribute("title")).toBe("Re-render the current scene");
   });
 
   it("still offers nothing the cloud protocol itself lacks on esp32", () => {

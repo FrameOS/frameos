@@ -5,6 +5,7 @@ import { PencilSquareIcon } from '@heroicons/react/24/solid'
 
 import { Box } from '../../components/Box'
 import { Button } from '../../components/Button'
+import { confirmDialog } from '../../utils/confirmDialogLogic'
 import { Field } from '../../components/Field'
 import { H6 } from '../../components/H6'
 import { Label } from '../../components/Label'
@@ -139,7 +140,20 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 <Button
                   size="small"
                   color="secondary"
-                  onClick={disconnectCloud}
+                  onClick={() => {
+                    void confirmDialog({
+                      title: 'Disconnect from FrameOS Cloud?',
+                      message:
+                        `This backend stops talking to ${providerHost}: cloud backups pause, cloud-managed frames are no longer reachable from your account, and signing in through the cloud stops working. ` +
+                        'Nothing on the frames themselves changes.\n\nYou can connect again at any time.',
+                      confirmLabel: 'Disconnect',
+                      danger: true,
+                    }).then((confirmed) => {
+                      if (confirmed) {
+                        disconnectCloud()
+                      }
+                    })
+                  }}
                   disabled={isCloudDisconnecting}
                   className="inline-flex items-center gap-2"
                 >

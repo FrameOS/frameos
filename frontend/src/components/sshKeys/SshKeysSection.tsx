@@ -10,6 +10,7 @@ import { Switch } from '../Switch'
 import { Tag } from '../Tag'
 import { AddSshKeyModal } from './AddSshKeyModal'
 import { sshKeysLogic } from './sshKeysLogic'
+import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 export interface SshKeysSectionProps {
   /**
@@ -103,9 +104,16 @@ export function SshKeysSection({
                     aria-label={`Remove ${label}`}
                     title="Remove this key"
                     onClick={() => {
-                      if (window.confirm(`Remove the SSH key "${label}"? Frames it is already installed on keep it.`)) {
-                        removeKey(key.id)
-                      }
+                      void confirmDialog({
+                        title: `Remove the SSH key "${label}"?`,
+                        message: 'Frames it is already installed on keep it.',
+                        confirmLabel: 'Remove key',
+                        danger: true,
+                      }).then((confirmed) => {
+                        if (confirmed) {
+                          removeKey(key.id)
+                        }
+                      })
                     }}
                   >
                     <TrashIcon className="h-4 w-4" />

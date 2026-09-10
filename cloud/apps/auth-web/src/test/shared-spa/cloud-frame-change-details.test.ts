@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildScenesFromTemplate,
   cloudUndeployedChangeDetails,
+  frameFormKeysEqual,
 } from "../../../../../../frontend/src/scenes/frame/frameLogic";
 import type {
   FrameScene,
@@ -140,5 +141,40 @@ describe("buildScenesFromTemplate", () => {
     );
 
     expect(scenes).toEqual([]);
+  });
+});
+
+// frameLogic's `frame` subscription fires on every log line (the log reducer
+// spreads the row to bump last_log_at / active_scene_id) and used to run the
+// scene-deep "does the form still match the previous row?" diff each time.
+// The gate in front of it is a per-key reference check, so a row that only
+// moved a non-form field is settled without touching the scenes.
+describe("frameFormKeysEqual", () => {
+  const scenes = [{ id: "a", name: "A", nodes: [{ id: "n" }], edges: [] }] as unknown as FrameScene[];
+
+  it("is true for a log-line spread of the same row, without deep-comparing the shared scenes", () => {
+    // Any look inside the scene list is the deep compare this gate exists to skip.
+    const untouchable = new Proxy(scenes, {
+      get: (_target, property) => {
+        throw new Error(`scenes deep-compared (read ${String(property)})`);
+      },
+    });
+    const previous = frame({ name: "Kitchen", interval: 60, scenes: untouchable, last_log_at: "2026-09-10T10:00:00Z" });
+    const next = { ...previous, last_log_at: "2026-09-10T10:00:01Z", active_scene_id: "a" };
+    expect(frameFormKeysEqual(previous, next)).toBe(true);
+  });
+
+  it("is false when a form key moved, scenes included", () => {
+    const previous = frame({ name: "Kitchen", interval: 60, scenes });
+    expect(frameFormKeysEqual(previous, { ...previous, name: "Hall" })).toBe(false);
+    expect(frameFormKeysEqual(previous, { ...previous, scenes: [...scenes, { id: "b" } as unknown as FrameScene] })).toBe(
+      false,
+    );
+  });
+
+  it("still sees through a re-serialised row (a fresh object from the server with equal values)", () => {
+    const previous = frame({ name: "Kitchen", interval: 60, scenes });
+    const next = frame({ name: "Kitchen", interval: 60, scenes: JSON.parse(JSON.stringify(scenes)) });
+    expect(frameFormKeysEqual(previous, next)).toBe(true);
   });
 });

@@ -40,6 +40,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function* walk(value: unknown, path: readonly string[], prefix = ''): Generator<Leaf> {
   const [head, ...rest] = path
+  if (head === undefined) {
+    return
+  }
   if (head === '*') {
     if (!Array.isArray(value)) {
       return
@@ -69,8 +72,12 @@ function fingerprintsOf(value: unknown): Record<string, string> {
 function copyTouched(snapshot: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { ...snapshot }
   for (const [container] of SECRET_PATHS) {
-    if (container in result && result[container] !== null && typeof result[container] === 'object') {
-      result[container] = JSON.parse(JSON.stringify(result[container]))
+    if (container === undefined) {
+      continue
+    }
+    const value = result[container]
+    if (value !== null && typeof value === 'object') {
+      result[container] = JSON.parse(JSON.stringify(value))
     }
   }
   return result

@@ -371,6 +371,22 @@ export type longRunningTasksModelType = MakeLogicType<
 > &
   longRunningTasksModelMeta
 
+/**
+ * A one-shot outcome toast: a task that starts and finishes in the same tick.
+ * For the flows that used to `alert()` or `console.log()` their result (an
+ * image scene that failed to upload, an imported frame.json) — same toast
+ * stack as every other task, auto-dismissed like any finished task.
+ */
+export function reportTaskOutcome(
+  status: Exclude<LongRunningTaskStatus, 'running'>,
+  task: Omit<StartTaskPayload, 'id'>
+): void {
+  const id = nextTaskId(task.frameId, task.kind, task.sceneId)
+  const { actions } = longRunningTasksModel
+  actions.startTask({ ...task, id })
+  actions.finishTask({ taskId: id, frameId: task.frameId, kind: task.kind, sceneId: task.sceneId, status })
+}
+
 export const longRunningTasksModel = kea<longRunningTasksModelType>([
   connect(() => ({ logic: [socketLogic] })),
   path(['src', 'models', 'longRunningTasksModel']),

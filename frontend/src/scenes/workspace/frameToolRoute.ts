@@ -78,6 +78,20 @@ export function resolveFrameToolRoute(
   return { kind: 'panel', panel: segment }
 }
 
+/**
+ * Where an old `?tool=<x>` link goes: the same value as a path segment. Null
+ * when there is nothing to move (the path already names a tool, or there is
+ * no query). The value is carried verbatim, so `?tool=bogus` lands on
+ * /frames/<id>/bogus and gets that segment's 404 — it used to canonicalise
+ * to the overview, the one outcome the path form no longer allows.
+ */
+export function legacyToolQueryTarget(routeTool: unknown, queryTool: string | null): string | null {
+  if (isFrameToolPanel(routeTool) || queryTool === null) {
+    return null
+  }
+  return queryTool === '' ? 'overview' : queryTool
+}
+
 const controlPlaneNames: Record<WorkspaceMode, string> = {
   backend: 'this FrameOS backend',
   frameAdmin: "the frame's own admin panel",

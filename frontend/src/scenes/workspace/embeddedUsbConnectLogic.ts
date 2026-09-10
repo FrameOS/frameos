@@ -31,6 +31,7 @@ import {
 } from './usbBoardIdentity'
 import { workspaceLogic } from './workspaceLogic'
 import { isEsp32CloudFrame, workspaceMode, type WorkspaceMode } from './workspaceSurfaces'
+import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 // The state behind the "Connect over USB" card (EmbeddedUsbConnect.tsx): the
 // board's identity as read over the USB API, the plan and release listing
@@ -567,9 +568,12 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
       const identity = values.identity
       if (confirmForeign && identity?.kind === 'other-frame') {
         if (
-          !window.confirm(
-            `This board is currently ${identity.label}. Re-provision it as "${values.frameName}"? It stops being that other frame.`
-          )
+          !(await confirmDialog({
+            title: `Re-provision this board as "${values.frameName}"?`,
+            message: `The board is currently ${identity.label}. It stops being that other frame.`,
+            confirmLabel: 'Re-provision',
+            danger: true,
+          }))
         ) {
           return
         }
@@ -644,11 +648,14 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
       // cloud_fid and the device token all live there. On a cloud-managed
       // frame that is not a reset but an unlink, so say so.
       if (
-        !window.confirm(
-          values.cloudManaged
-            ? `Factory reset "${values.frameName}"? This erases everything the board has stored — Wi-Fi, hardware settings AND its enrollment in this account. It will NOT come back as this frame: re-link it afterwards from "Re-link a wiped board", and this frame row is left behind empty until then. To install new firmware, use "Update firmware, keep settings" instead. This cannot be undone.`
-            : `Factory reset "${values.frameName}"? This erases the device's Wi-Fi, backend and hardware settings and reboots it. This cannot be undone.`
-        )
+        !(await confirmDialog({
+          title: `Factory reset "${values.frameName}"?`,
+          message: values.cloudManaged
+            ? 'This erases everything the board has stored — Wi-Fi, hardware settings AND its enrollment in this account. It will NOT come back as this frame: re-link it afterwards from "Re-link a wiped board", and this frame row is left behind empty until then.\n\nTo install new firmware, use "Update firmware, keep settings" instead. This cannot be undone.'
+            : "This erases the device's Wi-Fi, backend and hardware settings and reboots it. This cannot be undone.",
+          confirmLabel: 'Factory reset',
+          danger: true,
+        }))
       ) {
         return
       }

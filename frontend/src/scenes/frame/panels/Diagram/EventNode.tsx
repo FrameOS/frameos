@@ -150,8 +150,9 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
             <Tooltip
               title="Seconds between automatic re-renders of this scene. Can be a large number (3600 seconds = 1 hour), or a very small number for real-time rendering (0.04s = 25fps)."
               containerClassName="ml-1 inline-block align-sub"
+              label="About the render interval"
             >
-              <InformationCircleIcon className="frameos-node-muted-text h-4 w-4" aria-label="Info" />
+              <InformationCircleIcon className="frameos-node-muted-text h-4 w-4" aria-hidden="true" />
             </Tooltip>
             <NumberTextInput
               theme="node"

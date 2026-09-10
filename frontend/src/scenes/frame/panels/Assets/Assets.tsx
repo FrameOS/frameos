@@ -29,6 +29,7 @@ import {
 } from '@heroicons/react/24/solid'
 import { useState, type DragEvent } from 'react'
 import { Spinner } from '../../../../components/Spinner'
+import { reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
 import { DeferredImage } from '../../../../components/DeferredImage'
 import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
@@ -679,6 +680,15 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     syncAssets()
   }
 
+  const reportImageSceneFailure = (subject: string, error: unknown): void => {
+    reportTaskOutcome('error', {
+      frameId: frame.id,
+      kind: 'save',
+      title: `Create image scene for ${subject}`,
+      detail: error instanceof Error && error.message ? error.message : 'Failed to create the image scene',
+    })
+  }
+
   const createImageScene = async (path: string): Promise<void> => {
     const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
     const normalizedPath = path.replace(/^\.\//, '')
@@ -692,7 +702,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
       await sendEvent('uploadScenes', { scenes: [scene], sceneId })
     } catch (error) {
       console.error(error)
-      alert('Failed to create image scene')
+      reportImageSceneFailure(filename, error)
     }
   }
 
@@ -708,7 +718,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
       await sendEvent('uploadScenes', { scenes: [scene], sceneId })
     } catch (error) {
       console.error(error)
-      alert('Failed to create image scene')
+      reportImageSceneFailure(folderPath || assetsPath, error)
     }
   }
 

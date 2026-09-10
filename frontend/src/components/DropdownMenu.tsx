@@ -6,12 +6,16 @@ import { usePopper } from 'react-popper'
 import clsx from 'clsx'
 import { ButtonProps, buttonColor } from './Button'
 import { Spinner } from './Spinner'
+import { confirmDialog } from '../utils/confirmDialogLogic'
 
 export interface DropdownMenuItem {
   label?: React.ReactNode
   content?: (close: () => void) => React.ReactNode
   icon?: React.ReactNode
+  /** Ask before running onClick. Shown in the app's confirm dialog, not a browser prompt. */
   confirm?: string
+  /** The confirm dialog's button; defaults to the item's label when that is text. */
+  confirmLabel?: string
   title?: string
   keepOpen?: boolean
   onClick?: (e: React.MouseEvent) => void
@@ -27,6 +31,8 @@ export interface DropdownMenuProps {
   buttonAdornment?: React.ReactNode
   buttonContent?: React.ReactNode
   buttonTitle?: string
+  /** The trigger's accessible name. Defaults to buttonTitle, then "Menu" for the icon-only trigger. */
+  buttonAriaLabel?: string
 }
 
 export function DropdownMenu({
@@ -37,6 +43,7 @@ export function DropdownMenu({
   buttonAdornment,
   buttonContent,
   buttonTitle,
+  buttonAriaLabel,
 }: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
@@ -74,6 +81,7 @@ export function DropdownMenu({
             ref={setReferenceElement}
             type="button"
             title={buttonTitle}
+            aria-label={buttonAriaLabel ?? buttonTitle ?? (buttonContent ? undefined : 'Menu')}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             className={clsx(
@@ -87,9 +95,9 @@ export function DropdownMenu({
             ) : isLoading ? (
               <Spinner color="white" className="w-5 h-5" />
             ) : horizontal ? (
-              <EllipsisHorizontalIcon className="w-5 h-5" aria-label="Menu" />
+              <EllipsisHorizontalIcon className="w-5 h-5" aria-hidden="true" />
             ) : (
-              <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
+              <EllipsisVerticalIcon className="w-5 h-5" aria-hidden="true" />
             )}
             {buttonAdornment ? (
               <span className="pointer-events-none absolute -right-1 -top-1">{buttonAdornment}</span>
@@ -146,9 +154,17 @@ export function DropdownMenu({
                                       return
                                     }
                                     if (item.confirm) {
-                                      if (confirm(item.confirm)) {
-                                        item.onClick?.(e)
-                                      }
+                                      const confirmLabel =
+                                        item.confirmLabel ?? (typeof item.label === 'string' ? item.label : undefined)
+                                      void confirmDialog({
+                                        message: item.confirm,
+                                        danger: true,
+                                        ...(confirmLabel ? { confirmLabel } : {}),
+                                      }).then((confirmed) => {
+                                        if (confirmed) {
+                                          item.onClick?.(e)
+                                        }
+                                      })
                                     } else {
                                       item.onClick?.(e)
                                     }
