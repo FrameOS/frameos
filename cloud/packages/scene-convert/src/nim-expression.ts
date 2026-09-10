@@ -457,6 +457,20 @@ class Parser {
     throw new NimConvertError(message, token.pos);
   }
 
+  /** A JS identifier for a Nim binding that no name already in scope uses. */
+  private freshJsName(nimName: string): string {
+    const base = isJsIdent(nimName) ? nimName : `${nimName}_`;
+    const taken = new Set([...this.scope.values()].map((bound) => bound.js));
+    if (!taken.has(base)) {
+      return base;
+    }
+    let suffix = 1;
+    while (taken.has(`${base}_${suffix}`)) {
+      suffix += 1;
+    }
+    return `${base}_${suffix}`;
+  }
+
   /** Entry: `let`/`var` bindings followed by one expression, or one expression. */
   parseProgram(): Emitted {
     const bindings: string[] = [];
@@ -475,7 +489,10 @@ class Parser {
       }
       this.expectOp("=");
       const value = this.parseExpression();
-      const jsName = isJsIdent(nameToken.text) ? nameToken.text : `${nameToken.text}_`;
+      // A binding that shadows an argument or an earlier binding (`let n =
+      // n + 1`) gets a fresh JS name: `const n = n + 1` inside the IIFE
+      // would read the const being declared and throw in the TDZ.
+      const jsName = this.freshJsName(nameToken.text);
       bindings.push(`const ${jsName} = ${value.js};`);
       this.scope.set(nameToken.text, atom(jsName, value.kind, value.ts ? { ts: value.ts } : {}));
       if (this.isOp(";")) {
@@ -694,7 +711,10 @@ class Parser {
     if (token.kind === "op" && token.text === "-") {
       this.next();
       const operand = this.parseUnary();
-      return { js: `-${wrap(operand, PREC_UNARY)}`, kind: "number", prec: PREC_UNARY };
+      const inner = wrap(operand, PREC_UNARY);
+      // `- -x` must not fuse into the decrement operator `--x`.
+      const js = inner.startsWith("-") ? `-(${inner})` : `-${inner}`;
+      return { js, kind: "number", prec: PREC_UNARY };
     }
     if (token.kind === "op" && token.text === "+") {
       this.next();

@@ -62,11 +62,21 @@ export function failure(message: string, extra?: Record<string, unknown>): CallT
   };
 }
 
-const hints: Record<string, string> = {
+// A hint is a sentence, or a function of the error when the same code
+// means different things on different routes (details tell them apart).
+type Hint = string | ((error: CloudApiError) => string);
+
+const hints: Record<string, Hint> = {
+  ai_disabled:
+    "The account has its AI features switched off. The owner turns them back on in the cloud UI under Account → AI usage; no tool can.",
   api_token_not_allowed:
     "This action cannot be performed with an API token; the account owner must do it in the browser.",
   content_rejected:
     "The store's moderation refused this text or image. Reword it and try again.",
+  daily_cap_reached: (error) =>
+    error.details.allowance === "shared"
+      ? "The operator's free AI allowance is used up for today (reset_at says when it returns). To keep going now, set the account's own OpenAI key: account_settings_update with {openAI: {apiKey}}."
+      : "The account's daily AI spend cap is reached (spent_micros of cap_micros; reset_at says when it resets). Wait for the reset, or raise the cap in the cloud UI under Account → AI usage.",
   frame_not_active:
     "The frame is pending or revoked. Pending frames need frame_confirm; revoked ones cannot be used.",
   frame_quota_exceeded:
@@ -77,12 +87,22 @@ const hints: Record<string, string> = {
     "Cloud-rendered frames have a minimum refresh interval on this plan; use a longer interval (min_interval in the error is the floor in seconds).",
   frame_unreachable:
     "The frame did not acknowledge in time. It is offline or asleep — check frame_get for connected/next_wake_at and retry later.",
+  insufficient_scope:
+    "The credential behind this call was never granted the scope the route needs (a linked backend or frame missing a scope, or a token created with less access). Re-link or re-create it with that scope granted; account_info shows what this token may do.",
   image_unavailable:
     "The frame did not deliver a screenshot in time (offline, asleep, or still rendering). Retry in a moment.",
+  invalid_frame:
+    "No frame with that id in this account. frames_list has the valid ids; a deleted frame is gone for good.",
+  invalid_openai_key:
+    "OpenAI refused the key. For the account key, set a working one with account_settings_update ({openAI: {apiKey}}); for a key passed in the call, pass a valid one.",
   invalid_scene:
     "No such scene, or it is private to another account. Use scenes_list / store_browse to find a valid id.",
   login_required:
     "The API token was refused: revoked, expired, or wrong for this server. Create a new one at /account/developer.",
+  model_budget_exhausted:
+    "The free model pass for conversions is out of budget; retry after retry_after seconds, or convert with the account's own OpenAI key (account_settings_update, openAI.apiKey).",
+  model_failed:
+    "The model request failed upstream. Retry; if it keeps failing, check the account's OpenAI key and model with account_settings_get.",
   missing_api_key:
     "The AI needs an OpenAI API key: set openAI.apiKey with account_settings_update, or ask an admin about the shared key.",
   rate_limited: "Rate limited. Wait retry_after seconds and try again.",
@@ -92,6 +112,8 @@ const hints: Record<string, string> = {
     "This action needs a fresh browser sign-in (sudo mode) and is never available to API tokens: do it at the cloud UI.",
   renderer_unavailable:
     "This server has no wasm runtime installed, so it cannot render previews.",
+  scene_pulled:
+    "The store pulled this scene, so it can no longer be rendered, installed or forked. Pick another with store_browse; for the account's own scene, scene_get shows its status.",
   scene_name_taken:
     "The account already has a scene by that name. Pick another name.",
   scene_not_found:
@@ -102,8 +124,10 @@ const hints: Record<string, string> = {
     "The frame's firmware is too old for one of these settings; see min_frameos_version. Update the frame first (frame_firmware_update).",
   storage_quota_exceeded:
     "The account's private scene storage is full. Delete scenes or images, or publish scenes (public scenes are free).",
-  too_many_scenes:
-    "The frame already holds the maximum number of scenes. Remove one first (frame_scene_remove).",
+  too_many_scenes: (error) =>
+    "max_scenes" in error.details
+      ? "The request carries more scenes than the route converts at once (max_scenes). Split it into smaller batches."
+      : "The frame already holds the maximum number of scenes. Remove one first (frame_scene_remove).",
   turn_in_progress:
     "This chat already has a running AI turn. Wait for it with ai_turn_wait or cancel it with ai_turn_cancel.",
   turn_not_found:
@@ -112,7 +136,8 @@ const hints: Record<string, string> = {
 
 export function explainError(error: unknown): CallToolResult {
   if (error instanceof CloudApiError) {
-    const hint = hints[error.code];
+    const entry = hints[error.code];
+    const hint = typeof entry === "function" ? entry(error) : entry;
     const lines = [
       `FrameOS Cloud refused ${error.method} ${error.path}: ${error.status} ${error.code}`,
     ];

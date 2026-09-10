@@ -59,9 +59,12 @@ import {
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
-// The relay stream of one turn; the turn itself has its own ceiling
-// (TURN_MAX_MS) and outlives this response if the client drops.
-export const maxDuration = 600;
+// The relay stream of one turn. The turn itself has its own ceiling
+// (TURN_MAX_MS, 15 min) and outlives this response if the client drops; the
+// relay may stay open for the whole of it, so this is that ceiling in
+// seconds — shorter, and a relay of a long turn was cut and reported as a
+// transport failure while the turn was still fine.
+export const maxDuration = 900;
 
 // AI chat v2: a single streaming agentic loop over the OpenAI Responses API,
 // replacing the old /api/ai/scenes/chat pipeline (router → plan → generate →
@@ -515,6 +518,9 @@ export async function POST(request: NextRequest) {
   reserveTurnSpend(accountId, turnId);
   let turn: ReturnType<typeof startTurn>;
   try {
+    // `self` is this turn, handed in by the runner: the budget check in
+    // onRound aborts through it rather than through the `turn` binding
+    // above, which is only assigned once startTurn has returned.
     turn = startTurn({
     accountId,
     chatId: chat.id,
@@ -568,7 +574,7 @@ export async function POST(request: NextRequest) {
         turnId: finished.id,
       });
     },
-    run: async (emit, signal) => {
+    run: async (emit, signal, self) => {
       turnEmit = emit;
       emit({ chatId: chat.id, turnId, type: "chat" });
       try {
@@ -619,7 +625,7 @@ export async function POST(request: NextRequest) {
                     spentMicros: budget.spentMicros.toString(),
                     turnId,
                   });
-                  turn.controller.abort(
+                  self.controller.abort(
                     new Error(
                       budget.allowance === "shared"
                         ? "This reply used up today's free AI allowance on the shared key. Nothing is billed for it; it resets at midnight UTC."

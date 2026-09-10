@@ -159,7 +159,13 @@ UNION ALL SELECT 'account_identities', count(*) FROM account_identities
 UNION ALL SELECT 'sessions', count(*) FROM sessions
 UNION ALL SELECT 'linked_clients', count(*) FROM linked_clients
 UNION ALL SELECT 'frames', count(*) FROM frames
+UNION ALL SELECT 'frame_scene_assignments', count(*) FROM frame_scene_assignments
+UNION ALL SELECT 'frame_commands', count(*) FROM frame_commands
+UNION ALL SELECT 'frame_enrollment_tokens', count(*) FROM frame_enrollment_tokens
 UNION ALL SELECT 'frame_assets', count(*) FROM frame_assets
+UNION ALL SELECT 'frame_logs', count(*) FROM frame_logs
+UNION ALL SELECT 'frame_metrics', count(*) FROM frame_metrics
+UNION ALL SELECT 'ai_chats', count(*) FROM ai_chats
 UNION ALL SELECT 'store_scenes', count(*) FROM store_scenes
 UNION ALL SELECT 'store_scene_versions', count(*) FROM store_scene_versions
 UNION ALL SELECT 'audit_events', count(*) FROM audit_events
@@ -179,6 +185,10 @@ FROM frame_asset_files;
 
 SELECT max(created_at) AS newest_account FROM accounts;
 SELECT max(created_at) AS newest_audit_event FROM audit_events;
+SELECT max(last_seen_at) AS newest_frame_checkin,
+       count(*) FILTER (WHERE status = 'active') AS active_frames
+FROM frames;
+SELECT max(inserted_at) AS newest_frame_log FROM frame_logs;
 SQL
 
 # Assertions: an empty-but-valid restore is the failure mode a human eyeballing
@@ -205,6 +215,37 @@ FROM (
   -- taken from the wrong (empty/dev) database would not have real history.
   SELECT 'newest account is older than 400 days — is this the right database?'
     WHERE (SELECT max(created_at) FROM accounts) < now() - interval '400 days'
+  UNION ALL
+  -- The device plane. Until 2026-09 nothing below the account tables was
+  -- asserted on, so a dump that carried the accounts and lost the frames
+  -- (a pg_dump table filter, a TOC that stopped early) would have passed.
+  SELECT 'no frames restored' WHERE (SELECT count(*) FROM frames) = 0
+  UNION ALL
+  SELECT 'active frames restored but none of their scene assignments'
+    WHERE (SELECT count(*) FROM frames WHERE status = 'active') > 0
+      AND (SELECT count(*) FROM frame_scene_assignments) = 0
+  UNION ALL
+  -- Every frame is enrolled through a linked client and owned by an
+  -- account; the FKs make pg_restore refuse anything else, so a dump that
+  -- restored at all restored them together — unless it was taken with
+  -- --disable-triggers or the constraints were dropped, which is what
+  -- this catches.
+  SELECT 'frames whose owner account or linked client did not come back'
+    WHERE (SELECT count(*) FROM frames f
+           WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = f.account_id)
+              OR NOT EXISTS (SELECT 1 FROM linked_clients c WHERE c.id = f.linked_client_id)) > 0
+  UNION ALL
+  -- Same shape as the scene-image assertion: the bytes moved to the object
+  -- store, a row must carry the key or the content.
+  SELECT 'frame asset rows with neither content nor an object key'
+    WHERE (SELECT count(*) FROM frame_asset_files
+           WHERE object_key IS NULL AND coalesce(length(content), 0) = 0) > 0
+  UNION ALL
+  -- Frames check in daily; a fleet whose newest check-in is a month old is
+  -- a stale dump or a dev database, like the account-age check above.
+  SELECT 'newest frame check-in is older than 30 days — stale dump or wrong database?'
+    WHERE (SELECT count(*) FROM frames WHERE status = 'active') > 0
+      AND (SELECT max(last_seen_at) FROM frames) < now() - interval '30 days'
 ) AS problems;
 SQL
 )"

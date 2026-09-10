@@ -997,15 +997,34 @@ describe("cloud-managed frame enrollment", () => {
       frame_id: string;
     };
 
+    // Meanwhile the owner switched a scope off. The retry must report the
+    // link's CURRENT grant, not the mint-time one: the device stores the
+    // string it gets here as its local scope list.
+    const [link] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.accountId, accountId));
+    await db
+      .update(linkedClients)
+      .set({
+        providerClientMetadata: {
+          ...(link!.providerClientMetadata as Record<string, unknown>),
+          requestedScopes: ["frame:managed", "telemetry:logs"],
+        },
+      })
+      .where(eq(linkedClients.id, link!.id));
+
     // The device never saw that response and retries the exact same call.
     const retry = await enroll(claimToken, keys.publicKeyBase64);
     expect(retry.status).toBe(200);
     const retryPayload = (await retry.json()) as {
       access_token: string;
       frame_id: string;
+      scope: string;
       status: string;
     };
     expect(retryPayload.frame_id).toBe(firstPayload.frame_id);
+    expect(retryPayload.scope).toBe("frame:managed telemetry:logs");
     // Single-use enrollments are born active; the replay window still hands
     // the same frame back for a lost response.
     expect(retryPayload.status).toBe("active");
@@ -1053,6 +1072,46 @@ describe("cloud-managed frame enrollment", () => {
     expect(((await otherDevice.json()) as { error: string }).error).toBe(
       "invalid_claim_token",
     );
+  });
+
+  it("flow B's first enrollment survives racing itself", async () => {
+    // A device that retries before the first response lands (or two boots
+    // of one card) used to hit frames_linked_client_unique from the second
+    // insert and get a 500 for a frame that does exist.
+    const accountId = await signIn();
+    const keys = deviceKeypair();
+    const token = `fc_link_${"r".repeat(40)}`;
+    await db.insert(linkedClients).values({
+      accountId,
+      clientKind: "frame",
+      providerClientMetadata: {
+        requestedScopes: ["frame:link", "frame:managed"],
+      },
+      publicDisplayName: "Racing frame",
+      tokenReference: hashSecret(token),
+    });
+    const attempt = () =>
+      enrollFrame(
+        postJson(
+          "/api/frames/enroll",
+          { hardware: { platform: "pi-zero2w" }, public_key: keys.publicKeyBase64 },
+          { authorization: `Bearer ${token}` },
+        ),
+      );
+    const responses = await Promise.all([attempt(), attempt(), attempt()]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200]);
+    const frameIds = new Set(
+      await Promise.all(
+        responses.map(
+          async (response) =>
+            ((await response.json()) as { frame_id: string }).frame_id,
+        ),
+      ),
+    );
+    expect(frameIds.size).toBe(1);
+    expect(
+      await db.select().from(frames).where(eq(frames.accountId, accountId)),
+    ).toHaveLength(1);
   });
 
   it("refuses flow B without the frame:managed scope", async () => {
@@ -3117,6 +3176,37 @@ describe("frame management API", () => {
     );
     const fromZeroPayload = (await fromZero.json()) as { logs: unknown[] };
     expect(fromZeroPayload.logs).toHaveLength(3);
+
+    // limit / search / since narrow the page in the database: a caller
+    // after "the newest matching line" gets one row, and has_more says the
+    // window holds more.
+    const limited = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs?limit=2`),
+      routeParams(frame_id),
+    );
+    const limitedPayload = (await limited.json()) as { has_more: boolean; logs: { line: string }[] };
+    expect(limitedPayload.logs.map((entry) => JSON.parse(entry.line).line)).toEqual(["line 1", "line 2"]);
+    expect(limitedPayload.has_more).toBe(true);
+
+    const searched = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs?search=LINE%201`),
+      routeParams(frame_id),
+    );
+    const searchedPayload = (await searched.json()) as { has_more: boolean; logs: { line: string }[] };
+    expect(searchedPayload.logs.map((entry) => JSON.parse(entry.line).line)).toEqual(["line 1"]);
+    expect(searchedPayload.has_more).toBe(false);
+
+    const wildcard = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs?search=line%25`),
+      routeParams(frame_id),
+    );
+    expect(((await wildcard.json()) as { logs: unknown[] }).logs).toHaveLength(0);
+
+    const future = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs?since=${encodeURIComponent(new Date(Date.now() + 60_000).toISOString())}`),
+      routeParams(frame_id),
+    );
+    expect(((await future.json()) as { logs: unknown[] }).logs).toHaveLength(0);
 
     const list = await listFrames(getRequest("/api/frames"));
     expect(list.status).toBe(200);

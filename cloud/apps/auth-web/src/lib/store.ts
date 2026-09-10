@@ -1,6 +1,7 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { randomBytes } from "node:crypto";
-import { strToU8, unzipSync, unzlibSync, zipSync } from "fflate";
+import { strToU8, unzlibSync, zipSync } from "fflate";
+import { unzipBounded } from "./zip-bounded";
 import { normalizeCategory } from "./categories";
 
 // FrameOS store constants and helpers (STORE-TODO). Payloads are the frameos
@@ -9,8 +10,9 @@ import { normalizeCategory } from "./categories";
 export const storePublishScope = "store:publish";
 
 export const maxSceneZipBytes = 8 * 1024 * 1024;
-export const maxSceneZipUncompressedBytes = 32 * 1024 * 1024;
-export const maxSceneZipEntries = 200;
+// The uncompressed-size and entry caps live with the bounded extractor
+// (zip-bounded.ts) that enforces them on the bytes actually inflated.
+export { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./zip-bounded";
 export const maxPreviewImageBytes = 4 * 1024 * 1024;
 export const maxImagesPerScene = 10;
 export const maxScenesPerAccount = 200;
@@ -475,27 +477,14 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
     return { ok: false, error: "zip_too_large" };
   }
 
-  let entryCount = 0;
-  let totalUncompressed = 0;
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipSync(new Uint8Array(content), {
-      filter: (file) => {
-        entryCount += 1;
-        totalUncompressed += file.originalSize ?? 0;
-        if (
-          entryCount > maxSceneZipEntries ||
-          totalUncompressed > maxSceneZipUncompressedBytes
-        ) {
-          throw new Error("zip_bounds_exceeded");
-        }
-        // Inflate only the files we read; other entries still count against
-        // the caps above but are never decompressed.
-        return /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(
-          file.name,
-        );
-      },
-    });
+    // Inflate only the files we read; other entries still count against the
+    // entry and size caps but are never decompressed. The size cap is
+    // enforced on the bytes that actually come out, not the header's claim.
+    files = unzipBounded(new Uint8Array(content), (name) =>
+      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
+    );
   } catch {
     return { ok: false, error: "invalid_zip" };
   }
@@ -591,10 +580,9 @@ export function rebuildZip(
   },
 ): Buffer | undefined {
   try {
-    const files = unzipSync(new Uint8Array(zipBytes), {
-      filter: (file) =>
-        /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(file.name),
-    });
+    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
+      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
+    );
     const manifestPath = Object.keys(files)
       .filter((name) => /(^|\/)template\.json$/.test(name))
       .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];

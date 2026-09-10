@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../src/lib/blobs";
+import {
+  readOnlyTokenError,
+  sessionMayQueueDeviceCommands,
+} from "../../../../../src/lib/device-command-access";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import {
   assetFetchCommandTtlMs,
   cachedAssetFile,
   isServableImageContentType,
+  normalizeAssetPath,
   queueAssetGetIfIdle,
   recentFailedAssetGet,
 } from "../../../../../src/lib/frame-asset-cache";
-import { commandTtlForFrame } from "../../../../../src/lib/frame-sleep";
-import {
-  frameForAccount,
-  maxAssetPathChars,
-} from "../../../../../src/lib/frames";
+import { commandTtlForFrame, frameIsAsleep } from "../../../../../src/lib/frame-sleep";
+import { frameForAccount } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
@@ -30,27 +32,6 @@ const longPollStepMs = 750;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Relative, bounded, no traversal — the device re-validates independently
-// (resolveAssetPath on the Nim side), this just refuses obvious garbage
-// before it costs a queued command.
-function normalizeAssetPath(raw: string): string | undefined {
-  let path = raw.trim();
-  while (path.startsWith("./")) {
-    path = path.slice(2);
-  }
-  while (path.startsWith("/")) {
-    path = path.slice(1);
-  }
-  if (
-    path.length === 0 ||
-    path.length > maxAssetPathChars ||
-    path.split("/").includes("..")
-  ) {
-    return undefined;
-  }
-  return path;
 }
 
 // RFC 6266 without the ceremony: allowlist instead of stripping — anything
@@ -155,7 +136,8 @@ export async function GET(
     !cached ||
     (frame.connected &&
       now - cached.updatedAt.getTime() > cacheStaleAfterMs);
-  if (needsFetch && frame.status === "active") {
+  const mayQueue = sessionMayQueueDeviceCommands(session);
+  if (needsFetch && frame.status === "active" && mayQueue) {
     await queueAssetGetIfIdle(
       db,
       session.accountId,
@@ -172,6 +154,24 @@ export async function GET(
   }
   if (frame.status !== "active") {
     return jsonError("frame_not_active", 409);
+  }
+  if (!mayQueue) {
+    // Nothing cached and only the device could answer: a read-only token
+    // does not get to ask it (sessionMayQueueDeviceCommands).
+    return jsonError(readOnlyTokenError, 403);
+  }
+  // The fetch is queued (with the sleep-aware TTL) for the device's next
+  // session, but nobody should hold the connection open for it now: an
+  // offline or sleeping frame answers in minutes or hours, not within the
+  // poll window, and a panel of thumbnails toward such a frame used to pin
+  // one 25 s request per <img> for nothing. 503 + Retry-After is the honest
+  // answer; the browser shows its placeholder and the next visit finds the
+  // bytes in the cache.
+  if (!frame.connected || frameIsAsleep(frame, now)) {
+    return NextResponse.json(
+      { error: "frame_offline" },
+      { headers: { "retry-after": "60" }, status: 503 },
+    );
   }
 
   const deadline = now + longPollTotalMs;

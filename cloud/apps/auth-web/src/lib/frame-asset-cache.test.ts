@@ -75,6 +75,11 @@ describe("normalizeAssetPath", () => {
     expect(normalizeAssetPath("  ")).toBeUndefined();
   });
 
+  it("refuses backslashes (no client spells a path with one)", () => {
+    expect(normalizeAssetPath("photos\\cat.jpg")).toBeUndefined();
+    expect(normalizeAssetPath("..\\..\\secret")).toBeUndefined();
+  });
+
   it("refuses NUL and other control characters anywhere in the path", () => {
     expect(normalizeAssetPath("photos/cat.jpg\u0000.png")).toBeUndefined();
     expect(normalizeAssetPath("photos/\ncat.jpg")).toBeUndefined();

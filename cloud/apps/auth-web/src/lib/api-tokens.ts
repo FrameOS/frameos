@@ -168,7 +168,10 @@ export async function authenticateJobToken(
   authorization: string | null | undefined,
   access: JobTokenAccess,
 ): Promise<
-  | { accountId: string; token: { access: JobTokenAccess; id: string; name: string } }
+  | {
+      accountId: string;
+      token: { access: JobTokenAccess; expiresAt: Date | null; id: string; name: string };
+    }
   | undefined
 > {
   const token = bearerToken(authorization);
@@ -181,13 +184,21 @@ export async function authenticateJobToken(
   }
   return {
     accountId: authenticated.account.id,
-    token: { access, id: authenticated.token.id, name: authenticated.token.name },
+    token: {
+      access,
+      // Surfaced so the job can see its own credential running out: the
+      // minting script gives every job token a TTL, and a 401 at 04:20 is
+      // the wrong first warning.
+      expiresAt: authenticated.token.expiresAt,
+      id: authenticated.token.id,
+      name: authenticated.token.name,
+    },
   };
 }
 
 type AuthenticatedAnyToken = {
   account: AuthenticatedApiToken["account"];
-  token: { access: AnyApiTokenAccess; id: string; name: string };
+  token: { access: AnyApiTokenAccess; expiresAt: Date | null; id: string; name: string };
 };
 
 async function authenticateAnyToken(
@@ -248,7 +259,7 @@ async function authenticateAnyToken(
       id: row.accountId,
       name: row.accountName,
     },
-    token: { access, id: row.id, name: row.name },
+    token: { access, expiresAt: row.expiresAt, id: row.id, name: row.name },
   };
 }
 

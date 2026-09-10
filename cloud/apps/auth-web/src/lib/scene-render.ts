@@ -23,6 +23,12 @@ import { addressIsPrivateSource } from "./ssrf";
 
 export type SceneRenderOptions = {
   height: number;
+  /**
+   * Who the render is for (an account id, or a client key for anonymous
+   * callers). At most one render per owner runs at a time and only a
+   * couple more may wait, so a single caller cannot hold every global slot.
+   */
+  owner?: string | undefined;
   /** Scene to select; defaults to the runtime's default scene. */
   sceneId?: string | undefined;
   scenes: unknown[];
@@ -54,12 +60,19 @@ export const maxRenderDimension = 4096;
 export const minRenderDimension = 16;
 const maxConcurrentRenders = 2;
 const maxQueuedRenders = 8;
+// Per owner: one in flight, two waiting. The global queue is 8 deep and a
+// render can take 30 s, so without this one account's burst (its own rate
+// limit allows 60 per 15 min) would occupy both slots and the whole queue
+// for minutes while everyone else got renderer_busy.
+export const maxConcurrentRendersPerOwner = 1;
+export const maxQueuedRendersPerOwner = 2;
 const maxCollectedLogs = 200;
 const settleMs = 1_500;
 
 export class SceneRenderError extends Error {
   constructor(
     public readonly code:
+      | "render_concurrency_limit"
       | "render_failed"
       | "render_timeout"
       | "renderer_busy"
@@ -122,20 +135,69 @@ export function isRenderErrorLine(line: string): boolean {
 }
 
 let running = 0;
-const waiting: (() => void)[] = [];
+const runningPerOwner = new Map<string, number>();
+const waiting: { owner: string | undefined; resolve: () => void }[] = [];
 
-async function acquireSlot(): Promise<() => void> {
-  if (running < maxConcurrentRenders) {
-    running += 1;
+function ownerRunning(owner: string | undefined) {
+  return owner === undefined ? 0 : (runningPerOwner.get(owner) ?? 0);
+}
+
+function ownerWaiting(owner: string | undefined) {
+  return owner === undefined
+    ? 0
+    : waiting.filter((entry) => entry.owner === owner).length;
+}
+
+function take(owner: string | undefined) {
+  running += 1;
+  if (owner !== undefined) {
+    runningPerOwner.set(owner, ownerRunning(owner) + 1);
+  }
+}
+
+// Hand a free slot to the first waiter whose owner is under its own cap.
+// A waiter blocked by its owner's in-flight render is picked up when that
+// render releases, so nothing is left waiting on a free slot forever.
+function dispatch() {
+  if (running >= maxConcurrentRenders) {
+    return;
+  }
+  const index = waiting.findIndex(
+    (entry) => ownerRunning(entry.owner) < maxConcurrentRendersPerOwner,
+  );
+  if (index === -1) {
+    return;
+  }
+  const [next] = waiting.splice(index, 1);
+  if (next) {
+    take(next.owner);
+    next.resolve();
+  }
+}
+
+/** Exported for the queue tests; renderScenes is the only real caller. */
+export async function acquireRenderSlot(
+  owner?: string,
+): Promise<() => void> {
+  if (
+    running < maxConcurrentRenders &&
+    ownerRunning(owner) < maxConcurrentRendersPerOwner
+  ) {
+    take(owner);
   } else {
+    if (owner !== undefined && ownerWaiting(owner) >= maxQueuedRendersPerOwner) {
+      throw new SceneRenderError(
+        "render_concurrency_limit",
+        "You already have renders in flight; wait for them to finish.",
+      );
+    }
     if (waiting.length >= maxQueuedRenders) {
       throw new SceneRenderError(
         "renderer_busy",
         "Too many renders in flight; try again in a moment.",
       );
     }
-    await new Promise<void>((resolve) => waiting.push(resolve));
-    running += 1;
+    await new Promise<void>((resolve) => waiting.push({ owner, resolve }));
   }
   let released = false;
   return () => {
@@ -144,7 +206,23 @@ async function acquireSlot(): Promise<() => void> {
     }
     released = true;
     running -= 1;
-    waiting.shift()?.();
+    if (owner !== undefined) {
+      const left = ownerRunning(owner) - 1;
+      if (left > 0) {
+        runningPerOwner.set(owner, left);
+      } else {
+        runningPerOwner.delete(owner);
+      }
+    }
+    dispatch();
+  };
+}
+
+export function renderQueueStateForTests() {
+  return {
+    running,
+    runningPerOwner: Object.fromEntries(runningPerOwner),
+    waiting: waiting.map((entry) => entry.owner),
   };
 }
 
@@ -157,7 +235,7 @@ export async function renderScenes(
       "The wasm runtime is not installed on this server.",
     );
   }
-  const release = await acquireSlot();
+  const release = await acquireRenderSlot(options.owner);
   try {
     return await runWorker(options);
   } finally {

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  acquireRenderSlot,
   encodePng,
   isRenderErrorLine,
+  maxQueuedRendersPerOwner,
   rendererAvailable,
   rendererVersion,
+  renderQueueStateForTests,
   renderScenes,
+  SceneRenderError,
 } from "./scene-render";
 
 // The PNG writer and the error classifier are pure. The end-to-end render
@@ -46,6 +50,84 @@ describe("rendererVersion", () => {
     if (version !== null) {
       expect(version).toMatch(/^\d{4}\.\d{1,2}\.\d+$/);
     }
+  });
+});
+
+describe("render queue", () => {
+  // Resolved-or-not without awaiting: a settled promise runs its `then`
+  // before a later microtask, a pending one does not.
+  async function settled(promise: Promise<unknown>) {
+    let done = false;
+    void promise.then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    return done;
+  }
+
+  it("lets one owner hold only one of the global slots", async () => {
+    const releaseA1 = await acquireRenderSlot("a");
+    const a2 = acquireRenderSlot("a");
+    // The second render for `a` waits even though a global slot is free…
+    expect(await settled(a2)).toBe(false);
+    expect(renderQueueStateForTests()).toMatchObject({ running: 1, waiting: ["a"] });
+    // …while someone else takes that slot at once.
+    const releaseB = await acquireRenderSlot("b");
+    expect(renderQueueStateForTests().running).toBe(2);
+    // When a's first render finishes, its queued one runs.
+    releaseA1();
+    const releaseA2 = await a2;
+    expect(renderQueueStateForTests()).toMatchObject({ running: 2, waiting: [] });
+    releaseA2();
+    releaseB();
+    expect(renderQueueStateForTests()).toEqual({ running: 0, runningPerOwner: {}, waiting: [] });
+  });
+
+  it("refuses an owner's renders beyond its own queue share with its own code", async () => {
+    const release = await acquireRenderSlot("a");
+    const queued: Promise<() => void>[] = [];
+    for (let index = 0; index < maxQueuedRendersPerOwner; index += 1) {
+      queued.push(acquireRenderSlot("a"));
+    }
+    await expect(acquireRenderSlot("a")).rejects.toMatchObject({
+      code: "render_concurrency_limit",
+    } satisfies Partial<SceneRenderError>);
+    // Nobody else is affected by a's backlog.
+    const releaseB = await acquireRenderSlot("b");
+    releaseB();
+    release();
+    for (const next of queued) {
+      (await next)();
+    }
+    expect(renderQueueStateForTests()).toEqual({ running: 0, runningPerOwner: {}, waiting: [] });
+  });
+
+  it("does not hand a freed slot to a waiter whose owner is still rendering", async () => {
+    const releaseA1 = await acquireRenderSlot("a");
+    const a2 = acquireRenderSlot("a");
+    const releaseB = await acquireRenderSlot("b");
+    releaseB();
+    // b's slot is free, but a2 is a's second render and a's first is still
+    // running: the slot stays free rather than going to a2.
+    expect(await settled(a2)).toBe(false);
+    expect(renderQueueStateForTests()).toMatchObject({ running: 1, waiting: ["a"] });
+    releaseA1();
+    (await a2)();
+    expect(renderQueueStateForTests().running).toBe(0);
+  });
+
+  it("keeps the global queue depth for callers without an owner", async () => {
+    const releases = [await acquireRenderSlot(), await acquireRenderSlot()];
+    const waiters = Array.from({ length: 8 }, () => acquireRenderSlot());
+    await expect(acquireRenderSlot()).rejects.toMatchObject({ code: "renderer_busy" });
+    for (const release of releases) {
+      release();
+    }
+    for (const waiter of waiters) {
+      (await waiter)();
+    }
+    expect(renderQueueStateForTests().running).toBe(0);
   });
 });
 

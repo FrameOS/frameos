@@ -49,11 +49,23 @@ const repositoryCache = new WeakMap<
   { fetchedAt: number; templates: RepositoryTemplate[] }
 >();
 
+const repositoryTtlMs = 5 * 60 * 1000;
+
+/**
+ * Drops the cached repository listing. Every tool that adds, renames,
+ * publishes or deletes a scene calls this, so a scene created in this
+ * process resolves by slug on the next call instead of after the TTL.
+ */
+export function forgetStoreRepository(ctx: ToolContext): void {
+  repositoryCache.delete(ctx);
+}
+
 export async function storeRepository(
   ctx: ToolContext,
+  options: { fresh?: boolean | undefined } = {},
 ): Promise<RepositoryTemplate[]> {
   const cached = repositoryCache.get(ctx);
-  if (cached && Date.now() - cached.fetchedAt < 5 * 60 * 1000) {
+  if (!options.fresh && cached && Date.now() - cached.fetchedAt < repositoryTtlMs) {
     return cached.templates;
   }
   const [store, drive] = await Promise.all([
@@ -92,8 +104,17 @@ export async function resolveStoreSceneId(
   } catch {
     // not a URL — treat as a slug
   }
-  const templates = await storeRepository(ctx);
-  return templates.find((template) => template.id === slug)?.sceneId;
+  const cachedBefore = repositoryCache.has(ctx);
+  const lookup = (templates: RepositoryTemplate[]) =>
+    templates.find((template) => template.id === slug)?.sceneId;
+  const found = lookup(await storeRepository(ctx));
+  if (found || !cachedBefore) {
+    return found;
+  }
+  // A miss against a cached listing may be a scene that appeared since it
+  // was fetched (created in another session, or by a tool that bypassed
+  // forgetStoreRepository): one fresh fetch before giving up.
+  return lookup(await storeRepository(ctx, { fresh: true }));
 }
 
 function sceneNameOf(scenes: Record<string, unknown>[]): string | undefined {
@@ -120,6 +141,7 @@ async function createPrivateScene(
       },
     },
   );
+  forgetStoreRepository(ctx);
   return {
     created: true,
     sceneId: String(created.scene.id),
@@ -144,6 +166,7 @@ async function uploadSceneZip(
     "/api/account/scenes/upload",
     { raw: form },
   );
+  forgetStoreRepository(ctx);
   return {
     created: true,
     sceneId: String(created.scene.id),

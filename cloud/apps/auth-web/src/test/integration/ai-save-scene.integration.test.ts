@@ -172,6 +172,9 @@ describe("save_scene", () => {
       name: "Sunrise clock",
     });
     const forker = await account();
+    const imageRowCount = async () =>
+      (await db.select({ count: sql<number>`count(*)::int` }).from(storeImages))[0]?.count;
+    const imageRowsBefore = await imageRowCount();
 
     const result = await saveScene(forker, {
       scenes: scenes.map((scene) => ({ ...scene, nodes: [{ id: "added" }] })),
@@ -191,8 +194,7 @@ describe("save_scene", () => {
     // The image set comes along as links to the same rows — the cover
     // first — and nothing was copied.
     expect((await imageSetForVersion(db, forked!.id, null)).map((image) => image.sha256)).toEqual(images);
-    const [imageRows] = await db.select({ count: sql<number>`count(*)::int` }).from(storeImages);
-    expect(imageRows?.count).toBe(2);
+    expect(await imageRowCount()).toBe(imageRowsBefore);
 
     // The edit the chat made is what got saved, not the source bytes.
     const [version] = await db

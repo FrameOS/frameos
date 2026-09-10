@@ -179,7 +179,12 @@ describe("api tokens", () => {
         await authenticateJobToken(db, `Bearer ${jobToken}`, "billing_nightly"),
       ).toEqual({
         accountId: "acc-1",
-        token: { access: "billing_nightly", id: "tok-1", name: "nightly accounting job" },
+        token: {
+          access: "billing_nightly",
+          expiresAt: null,
+          id: "tok-1",
+          name: "nightly accounting job",
+        },
       });
       expect(updates[0]?.lastUsedAt).toBeInstanceOf(Date);
     });

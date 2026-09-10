@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { clientBackups, createDb, upsertAccountFromIdentity } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,7 @@ import {
 import { POST as authorizeDevice } from "../../../app/api/device/authorize/route";
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
-import { maxBackupBytes } from "../../lib/backups";
+import { maxBackupBytes, maxBackupsPerAccount } from "../../lib/backups";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 
@@ -212,6 +212,42 @@ describe("config backups", () => {
     expect(deleteResponse.status).toBe(200);
     const rows = await db.select().from(clientBackups);
     expect(rows).toHaveLength(0);
+  });
+
+  it("holds the count quota under concurrent saves", async () => {
+    // Read-then-insert let N simultaneous saves each see the same count and
+    // all pass; the save now runs under a per-account lock.
+    const { accessToken, accountId } = await linkClient(backupScopes);
+    await db.insert(clientBackups).values(
+      Array.from({ length: maxBackupsPerAccount - 1 }, (_, index) => ({
+        accountId: accountId!,
+        content: Buffer.from("x"),
+        contentType: "application/octet-stream",
+        itemKey: `seed-${index}`,
+        kind: "frames",
+        sha256: "seed",
+        sizeBytes: 1,
+      })),
+    );
+    const responses = await Promise.all(
+      ["race-a", "race-b", "race-c"].map((itemKey) =>
+        saveBackup(
+          postJson(
+            "/api/backends/backups",
+            { content_base64: contentBase64("{}"), item_key: itemKey, kind: "frames" },
+            bearer(accessToken),
+          ),
+        ),
+      ),
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      200, 403, 403,
+    ]);
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(clientBackups)
+      .where(eq(clientBackups.accountId, accountId!));
+    expect(row?.count).toBe(maxBackupsPerAccount);
   });
 
   it("enforces the backup scopes per kind", async () => {

@@ -1,5 +1,4 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { unzipSync } from "fflate";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
@@ -14,6 +13,7 @@ import {
 } from "../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { extractAppKeywords } from "../../../../../src/lib/store";
+import { unzipBounded } from "../../../../../src/lib/zip-bounded";
 import {
   classifyStoreScene,
   isClassificationConfigured,
@@ -168,9 +168,9 @@ export async function POST(request: NextRequest) {
 
 function appKeywordsFromZip(zipBytes: Buffer): string[] {
   try {
-    const files = unzipSync(new Uint8Array(zipBytes), {
-      filter: (file) => /(^|\/)scenes\.json$/.test(file.name),
-    });
+    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
+      /(^|\/)scenes\.json$/.test(name),
+    );
     const scenesPath = Object.keys(files).sort(
       (a, b) => a.split("/").length - b.split("/").length,
     )[0];

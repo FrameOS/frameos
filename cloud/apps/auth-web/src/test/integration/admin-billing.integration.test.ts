@@ -515,6 +515,42 @@ describe("admin billing routes", () => {
     expect((await postNightly(postNightlyAs(job.token))).status).toBe(401);
   });
 
+  // The minting script gives the job token a TTL. The route reports how long
+  // is left so the script can warn before the night the token stops working,
+  // and a token past its expiry is refused rather than tolerated.
+  it("reports the job token's expiry and refuses an expired one", async () => {
+    const soon = await jobToken();
+    const inTenDays = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+    await db
+      .update(accountApiTokens)
+      .set({ expiresAt: inTenDays })
+      .where(eq(accountApiTokens.accountId, soon.accountId));
+    const response = await postNightly(postNightlyAs(soon.token));
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      token_expires_at: string | null;
+      token_expires_in_days: number | null;
+    };
+    expect(body.token_expires_at).toBe(inTenDays.toISOString());
+    expect(body.token_expires_in_days).toBe(9);
+
+    const expired = await jobToken();
+    await db
+      .update(accountApiTokens)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(accountApiTokens.accountId, expired.accountId));
+    expect((await postNightly(postNightlyAs(expired.token))).status).toBe(401);
+
+    // A token with no expiry (rows minted before TTLs) still works and says so.
+    const forever = await jobToken();
+    const open = await postNightly(postNightlyAs(forever.token));
+    expect(open.status).toBe(200);
+    expect(await open.json()).toMatchObject({
+      token_expires_at: null,
+      token_expires_in_days: null,
+    });
+  });
+
   it("sweeps unposted usage and reports the invariants", async () => {
     const customer = await signIn();
     const job = await jobToken();

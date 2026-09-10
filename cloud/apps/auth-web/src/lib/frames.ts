@@ -19,7 +19,6 @@ import {
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
-import { unzipSync } from "fflate";
 import { linkedClientScopes } from "./backend-auth";
 import {
   deleteBlobIfUnreferenced,
@@ -31,7 +30,8 @@ import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { compiledSceneNames } from "./store";
-import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
+import { maxSceneZipUncompressedBytes } from "./store";
+import { unzipBounded } from "./zip-bounded";
 import { frameosVersionSatisfies } from "./store-versions";
 import {
   allContractSettingKeys,
@@ -1131,30 +1131,16 @@ export function extractScenesJson(
 ): { bytes: number; scenes: unknown[] } | undefined {
   try {
     let best: { path: string; data: Uint8Array } | undefined;
-    let entryCount = 0;
-    let totalUncompressed = 0;
-    const entries = unzipSync(new Uint8Array(zip), {
-      filter: (file) => {
-        entryCount += 1;
-        totalUncompressed += file.originalSize ?? 0;
-        if (
-          entryCount > maxSceneZipEntries ||
-          totalUncompressed > maxSceneZipUncompressedBytes
-        ) {
-          throw new Error("zip_bounds_exceeded");
-        }
-        // Inflate only scenes.json; other entries still count against the
-        // caps above but are never decompressed.
-        return /(^|\/)scenes\.json$/.test(file.name);
-      },
-    });
+    // Inflate only scenes.json; other entries still count against the caps
+    // but are never decompressed.
+    const entries = unzipBounded(new Uint8Array(zip), (name) =>
+      /(^|\/)scenes\.json$/.test(name),
+    );
     for (const [path, data] of Object.entries(entries)) {
       if (!best || path.split("/").length < best.path.split("/").length) {
         best = { data, path };
       }
     }
-    // originalSize is read from the central directory and can be absent, so
-    // re-check the one entry we actually inflated against the same ceiling.
     if (!best || best.data.length > maxSceneZipUncompressedBytes) {
       return undefined;
     }
@@ -1380,6 +1366,18 @@ export async function buildScenesPayloadForFrame(
 
 // Store one batch of shipped logs, enforcing the per-frame retention cap in
 // the same transaction so a chatty device cannot grow unbounded.
+export interface StoredFrameLogRow {
+  id: number;
+  payload: unknown;
+  timestamp: Date;
+}
+
+// Returns the rows of this batch that are still in the table when the
+// transaction commits — inserted, then survived the per-frame cap and the
+// account byte budget. The hub broadcasts exactly these: it used to
+// re-select the newest N rows by count, which after a cull that deleted
+// part of the batch handed back OLDER lines (already broadcast) in their
+// place.
 export async function storeFrameLogs(
   db: FramesDatabase,
   frameId: string,
@@ -1388,7 +1386,7 @@ export async function storeFrameLogs(
   // so older callers/tests keep working; without it only the per-frame row
   // cap applies.
   accountId?: string,
-) {
+): Promise<StoredFrameLogRow[]> {
   const batch = logs.slice(0, maxLogBatch).flatMap((entry) => {
     const serialized = JSON.stringify(entry.payload ?? null);
     if (Buffer.byteLength(serialized, "utf8") > maxLogLineBytes) {
@@ -1404,10 +1402,14 @@ export async function storeFrameLogs(
     ];
   });
   if (batch.length === 0) {
-    return 0;
+    return [];
   }
-  await db.transaction(async (tx) => {
-    await tx.insert(frameLogs).values(batch);
+  return db.transaction(async (tx) => {
+    const inserted = await tx.insert(frameLogs).values(batch).returning({
+      id: frameLogs.id,
+      payload: frameLogs.payload,
+      timestamp: frameLogs.timestamp,
+    });
     // Prune beyond the cap: cheap because frame_logs_frame_idx is
     // (frame_id, id).
     const [cutoff] = await tx
@@ -1438,8 +1440,19 @@ export async function storeFrameLogs(
         await cullFrameLogsOverBudget(tx, accountId);
       }
     }
+    // Which of the batch survived the culls, read inside the same
+    // transaction so nothing can have moved between.
+    const firstId = Math.min(...inserted.map((row) => row.id));
+    const survivors = new Set(
+      (
+        await tx
+          .select({ id: frameLogs.id })
+          .from(frameLogs)
+          .where(and(eq(frameLogs.frameId, frameId), gt(frameLogs.id, firstId - 1)))
+      ).map((row) => row.id),
+    );
+    return inserted.filter((row) => survivors.has(row.id));
   });
-  return batch.length;
 }
 
 // ---------------------------------------------------------------------------

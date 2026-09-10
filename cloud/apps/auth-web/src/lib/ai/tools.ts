@@ -1681,16 +1681,25 @@ export async function executeTool(
       const inSync =
         frame.assignedChecksum !== null &&
         frame.assignedChecksum === frame.scenesChecksum;
-      return truncateResult(
-        JSON.stringify({
-          frame: {
-            ...summary,
-            assigned_scenes: scenes,
-            deploy_in_sync: inSync,
-            last_metrics: frame.lastMetrics,
-            last_state: frame.lastState,
-          },
-        }),
+      // last_state / last_metrics are whatever the device last reported —
+      // scene-authored state included — so they go inside the untrusted
+      // frame like logs and metrics samples do, after the cloud-owned
+      // summary.
+      return (
+        truncateResult(
+          JSON.stringify({
+            frame: {
+              ...summary,
+              assigned_scenes: scenes,
+              deploy_in_sync: inSync,
+            },
+          }),
+        ) +
+        "\n" +
+        untrustedResult(
+          "frame_state",
+          JSON.stringify({ last_metrics: frame.lastMetrics, last_state: frame.lastState }),
+        )
       );
     }
     case "get_frame_logs": {

@@ -79,6 +79,16 @@ fi
 
 echo "$body"
 
+# The job token expires (accounting-service-account.sh, 90 days by default)
+# and the route reports how long it has left. Two weeks of warnings in the
+# journal is the difference between a planned --rotate and a night that
+# fails with 401 — the failure the dead-man ping would report, but only
+# once it is already broken.
+days_left="$(printf '%s' "$body" | sed -n 's/.*"token_expires_in_days":\([0-9-]*\).*/\1/p')"
+if [ -n "$days_left" ] && [ "$days_left" -le 14 ]; then
+  echo "WARNING: the job token expires in ${days_left} day(s) — rotate it: scripts/accounting-service-account.sh --rotate, then update ACCOUNTING_API_TOKEN in /etc/frameos-cloud/accounting.env" >&2
+fi
+
 # `ok` is false when the sweep left failures behind or any invariant broke.
 # No jq on the box, and this is the only field that needs reading.
 if printf '%s' "$body" | grep -q '"ok":true'; then

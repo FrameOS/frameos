@@ -1199,7 +1199,7 @@ describe("store publish and distribution", () => {
       await readJson(await publish(accessToken, { visibility: "public" }))
     ).scene as Record<string, unknown>;
     const sceneId = scene.id as string;
-    await publish(accessToken); // v2
+    await publish(accessToken, { description: "Second take" }); // v2
 
     // Yank v2 → latest served becomes v1; explicit v2 still downloadable.
     const yank = await patchVersion(
@@ -1236,6 +1236,16 @@ describe("store publish and distribution", () => {
       )[0]?.latestVersion;
     expect((await readJson(yank)).latest_version).toBe(1);
     expect(await latestVersionOf()).toBe(1);
+    // The row's listing is the projection of the version now served: v2's
+    // description went with v2, v1's (the manifest's) is back.
+    const descriptionOf = async () =>
+      (
+        await db
+          .select({ description: storeScenes.description })
+          .from(storeScenes)
+          .where(eq(storeScenes.id, sceneId))
+      )[0]?.description;
+    expect(await descriptionOf()).toBe("A calm sunrise clock");
     const repo = await readJson(
       await getRepositoryJson(request("/api/store/repository.json", "GET")),
     );
@@ -1273,6 +1283,7 @@ describe("store publish and distribution", () => {
     );
     expect(yankNewest.status).toBe(200);
     expect(await latestVersionOf()).toBe(2);
+    expect(await descriptionOf()).toBe("Second take");
     // Back to the v2-yanked state the last-version check below expects.
     await patchVersion(
       request(`/api/account/scenes/${sceneId}/versions/3`, "PATCH", {

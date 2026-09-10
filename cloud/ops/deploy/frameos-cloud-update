@@ -30,9 +30,17 @@ set -euo pipefail
 #   /opt/frameos-cloud.instances/<port>        what that instance runs, pinned
 #   /opt/frameos-cloud                         symlink -> active release
 #   /opt/frameos-cloud.previous                symlink -> previous release
+#   /opt/frameos-cloud.history                 the releases that were live, in order
 #
 # The two compatibility symlinks keep every documented path working
 # (`cat /opt/frameos-cloud/RELEASE_REF`, the frame-hub unit, backups).
+#
+# The history file is what makes --rollback a stack rather than a toggle:
+# each activation appends the release that went live, a rollback pops the
+# one being left, and `previous` always points at the entry under the live
+# one. Two rollbacks in a row therefore go two releases back (as far as
+# pruning has kept them), where the symlink pair alone would have flipped
+# straight back to the release just rolled away from.
 #
 # The per-instance symlink is the load-bearing one: systemd's Restart=always
 # must bring a crashed instance back on the SAME release it was running, not
@@ -48,7 +56,7 @@ set -euo pipefail
 #
 # Usage:
 #   frameos-cloud-update --archive -    unpack from stdin and deploy
-#   frameos-cloud-update --rollback     flip back to the previous release
+#   frameos-cloud-update --rollback     go back one release (repeatable: a stack, not a toggle)
 #   frameos-cloud-update --status       what is live, on which port
 #   frameos-cloud-update --release-ref  just the live ref name, one line
 #   frameos-cloud-update --activate <release-dir>
@@ -63,6 +71,7 @@ set -euo pipefail
 
 app_link="/opt/frameos-cloud"
 previous_link="/opt/frameos-cloud.previous"
+history_file="/opt/frameos-cloud.history"
 releases_dir="/opt/frameos-cloud.releases"
 instances_dir="/opt/frameos-cloud.instances"
 env_file="/etc/frameos-cloud/auth-web.env"
@@ -163,6 +172,72 @@ link_target() {
   local link="$1"
   [ -L "$link" ] || [ -e "$link" ] || return 0
   readlink -f "$link" 2>/dev/null || true
+}
+
+# --- the activation history (the rollback stack) ---------------------------
+#
+# One resolved release directory per line, oldest first; the last line is
+# what is live. Entries whose directory has been pruned are dropped whenever
+# the file is read, so the stack is only ever as deep as the releases still
+# on disk. A host from before the file existed is seeded from the symlink
+# pair, which is exactly the one-deep history those encoded.
+
+history_entries() {
+  local entry
+  if [ ! -f "$history_file" ]; then
+    for entry in "$(link_target "$previous_link")" "$(link_target "$app_link")"; do
+      [ -n "$entry" ] && [ -d "$entry" ] && echo "$entry"
+    done
+    return 0
+  fi
+  while IFS= read -r entry; do
+    [ -n "$entry" ] && [ -d "$entry" ] && echo "$entry"
+  done <"$history_file"
+}
+
+# Rewrite the file from stdin, atomically, and point `previous` at the entry
+# under the live one (or remove it when there is none).
+write_history() {
+  local tmp entries previous=""
+  entries="$(cat)"
+  tmp="${history_file}.tmp.$$"
+  printf '%s\n' "$entries" | sed '/^$/d' >"$tmp"
+  mv -f "$tmp" "$history_file"
+  previous="$(printf '%s\n' "$entries" | sed '/^$/d' | tail -n 2 | head -n 1)"
+  if [ -n "$previous" ] && [ "$previous" != "$(printf '%s\n' "$entries" | sed '/^$/d' | tail -n 1)" ]; then
+    link_atomic "$previous" "$previous_link"
+  else
+    rm -f "$previous_link"
+  fi
+}
+
+# `release` just went live: push it (unless it is already on top — a
+# re-activation of what was live is not a new step back).
+history_push() {
+  local release="$1" entries
+  entries="$(history_entries)"
+  if [ "$(printf '%s\n' "$entries" | tail -n 1)" != "$release" ]; then
+    entries="$(printf '%s\n%s\n' "$entries" "$release")"
+  fi
+  printf '%s\n' "$entries" | write_history
+}
+
+# Drop the live entry so the one under it becomes the rollback target.
+history_pop() {
+  history_entries | sed '$d' | write_history
+}
+
+# The stack below the live release, nearest first — what successive
+# --rollback calls would land on. The live release is the top entry; when
+# it is not (someone moved the symlink by hand), the whole history is below.
+history_below_live() {
+  local live entries
+  live="$(link_target "$app_link")"
+  entries="$(history_entries)"
+  if [ -n "$live" ] && [ "$(printf '%s\n' "$entries" | tail -n 1)" = "$live" ]; then
+    entries="$(printf '%s\n' "$entries" | sed '$d')"
+  fi
+  printf '%s\n' "$entries" | sed '/^$/d' | tac
 }
 
 active_port() {
@@ -342,6 +417,9 @@ prune_releases() {
     rm -rf "$release"
   done < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null |
     sort -rn | cut -d' ' -f2-)
+  # Entries for pruned directories fall out of the history on read; rewrite
+  # it so `previous` cannot be left pointing at a directory that is gone.
+  history_entries | write_history
 }
 
 # Turn a pre-blue/green /opt/frameos-cloud (a real directory) into the
@@ -487,13 +565,15 @@ activate_release() {
     return 1
   fi
 
-  # Only now is the new release "the" release, so the compat symlinks and the
-  # hub follow the flip rather than leading it.
-  local previous
-  previous="$(link_target "$app_link")"
-  if [ -n "$previous" ] && [ "$previous" != "$release" ]; then
-    link_atomic "$previous" "$previous_link"
-  fi
+  # Only now is the new release "the" release, so the compat symlinks, the
+  # history and the hub follow the flip rather than leading it. The history
+  # push is what sets `previous`; on a rollback the caller has already popped
+  # the release being left, so the push is a no-op and `previous` lands one
+  # step further back.
+  # Pushed before the compat symlink moves: on a host from before the
+  # history file the push seeds itself from the symlink pair, and that seed
+  # must still see the release being left as the live one.
+  history_push "$release"
   link_atomic "$release" "$app_link"
 
   local hub_ok=true
@@ -513,7 +593,13 @@ activate_release() {
 
   prune_releases
   log "live: $(release_ref_line "$release")"
-  log "serving on port ${to}; rollback: frameos-cloud-update --rollback"
+  local rollback_target
+  rollback_target="$(link_target "$previous_link")"
+  if [ -n "$rollback_target" ]; then
+    log "serving on port ${to}; rollback (to $(basename "$rollback_target")): frameos-cloud-update --rollback"
+  else
+    log "serving on port ${to}; no earlier release is retained to roll back to"
+  fi
 
   # Reported last, and as a failure, but only after the swap is fully tidy:
   # auth-web is serving the new release either way.
@@ -575,14 +661,25 @@ cmd_archive() {
 }
 
 cmd_rollback() {
-  local target
-  target="$(link_target "$previous_link")"
-  [ -n "$target" ] || die "no previous release recorded at $previous_link"
-  [ -d "$target" ] || die "$previous_link points at $target, which no longer exists"
+  local live target
+  live="$(link_target "$app_link")"
+  # The entry under the live one; entries whose directory was pruned are
+  # already gone from history_entries, so this is the nearest release that
+  # can actually be started.
+  target="$(history_below_live | head -n 1)"
+  [ -n "$target" ] || die "no earlier release is retained to roll back to (see $history_file and $releases_dir)"
   log_section "Rollback"
   log "rolling back to $(release_ref_line "$target")"
   log "note: database migrations are not rolled back"
-  activate_release "$target" || die "rollback failed; the current release is still serving"
+  # Pop the release being left BEFORE activating: activate_release pushes the
+  # target, which is then already on top, and `previous` moves one further
+  # back. If the activation fails the pop is undone so a retry sees the same
+  # stack; the failed target stays where it was for a second attempt.
+  history_pop
+  if ! activate_release "$target"; then
+    [ -n "$live" ] && history_push "$live"
+    die "rollback failed; the current release is still serving"
+  fi
 }
 
 cmd_status() {
@@ -592,6 +689,9 @@ cmd_status() {
   echo "active port:      ${port}"
   echo "active release:   ${release:-none}"
   echo "previous release: $(link_target "$previous_link" || true)"
+  local stack
+  stack="$(history_below_live | tr '\n' ' ')"
+  echo "rollback stack:   ${stack:-empty}"
   [ -n "$release" ] && echo "release ref:      $(release_ref_line "$release")"
   local unit_state pinned
   for port in "${ports[@]}"; do

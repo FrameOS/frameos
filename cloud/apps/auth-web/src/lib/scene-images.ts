@@ -12,6 +12,7 @@
 //
 // Kept out of frames.ts on purpose — that file is under concurrent edit.
 
+import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, like } from "drizzle-orm";
 import {
   frameAssetFiles,
@@ -63,13 +64,15 @@ function rememberRuntimeIds(key: string, ids: ReadonlySet<string>) {
 // Legacy rows can hold fully transparent preview bytes (screenshots captured
 // before the live preview painted, uploaded before publish-time rejection
 // existed). The cover resolver skips them; the verdict is cached because the
-// scan inflates the PNG. Keyed by row identity + byte length so a replaced
-// image gets a fresh verdict; bounded FIFO like runtimeIdCache above.
+// scan inflates the PNG. Keyed by row identity + a digest of the bytes, so
+// a replaced snapshot gets a fresh verdict even when the new file happens to
+// be the same length (a frame re-shooting the same scene at the same size
+// often is); bounded FIFO like runtimeIdCache above.
 const transparencyVerdictCache = new Map<string, boolean>();
 const transparencyVerdictCacheMaxEntries = 512;
 
 function isTransparentCover(key: string, content: Buffer): boolean {
-  const cacheKey = `${key}:${content.length}`;
+  const cacheKey = `${key}:${createHash("sha256").update(content).digest("base64url")}`;
   const cached = transparencyVerdictCache.get(cacheKey);
   if (cached !== undefined) {
     return cached;

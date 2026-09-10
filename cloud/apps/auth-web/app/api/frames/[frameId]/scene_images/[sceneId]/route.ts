@@ -24,6 +24,7 @@ import {
   storeSceneCoverImage,
 } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { sessionMayQueueDeviceCommands } from "../../../../../../src/lib/device-command-access";
 import { readSession } from "../../../../../../src/lib/session";
 import { detectImageContentType } from "../../../../../../src/lib/store";
 
@@ -139,7 +140,10 @@ export async function GET(
   const canFetchSnapshot =
     frame.status === "active" &&
     frame.connected &&
-    !frameHardwareIsEsp32(frame);
+    !frameHardwareIsEsp32(frame) &&
+    // A read-only token gets the cached snapshot or the cover, never a
+    // queued fetch (sessionMayQueueDeviceCommands).
+    sessionMayQueueDeviceCommands(session);
   let refused =
     needsFetch && canFetchSnapshot
       ? await recentFailedAssetGet(

@@ -192,20 +192,40 @@ async function readNdjson(
   await onLine(buffer);
 }
 
-export const DEFAULT_RESUME_ATTEMPTS = 5;
-// Backoff between resume attempts (ms), capped at the last entry.
-const resumeDelaysMs = [500, 1500, 3000, 5000, 8000];
+// How long the client keeps re-attaching to a turn it lost the stream of:
+// the server's turn ceiling (turn-runner.ts TURN_MAX_MS, 15 min) plus a
+// margin for the last relay. A failure between here and the server can last
+// minutes (a proxy restart, a laptop moving networks) while the turn keeps
+// running, so the budget is the turn's lifetime, not a few seconds.
+export const DEFAULT_RESUME_BUDGET_MS = 16 * 60 * 1000;
+// Consecutive attempts that reached no relay at all (fetch threw, or a
+// status other than 200/404) before giving up. Resets whenever the server
+// answered 200 — it knew the turn and it was still running — so a relay
+// that drops repeatedly on a long turn is not counted as failing.
+export const DEFAULT_RESUME_ATTEMPTS = 30;
+// Backoff between resume attempts (ms) by consecutive failures, capped at
+// the last entry; a drop right after a successful re-attach retries at once.
+const resumeDelaysMs = [500, 1500, 3000, 5000, 8000, 10000];
+
+export function resumeDelayMs(consecutiveFailures: number): number {
+  return resumeDelaysMs[Math.min(Math.max(consecutiveFailures, 0), resumeDelaysMs.length - 1)]!;
+}
 
 export type StreamAiChatOptions = {
   signal?: AbortSignal | undefined;
   onEvent: (event: AiChatEvent) => void | Promise<void>;
   endpoint?: string;
   resumeEndpoint?: string;
+  /** Consecutive unreachable resumes tolerated (see DEFAULT_RESUME_ATTEMPTS). */
   resumeAttempts?: number;
+  /** Total time after the turn started during which resumes are tried. */
+  resumeBudgetMs?: number;
   /** Called when the stream dropped and a resume is about to be tried. */
   onResume?: ((info: { attempt: number; elapsedMs: number }) => void) | undefined;
   /** Test hook: replaces the backoff sleep. */
   sleep?: (ms: number) => Promise<void>;
+  /** Test hook: the clock the budget is measured on. */
+  now?: () => number;
 };
 
 /**
@@ -224,11 +244,13 @@ export async function streamAiChat(
     endpoint = "/api/ai/chat",
     resumeEndpoint = "/api/ai/chat/turns",
     resumeAttempts = DEFAULT_RESUME_ATTEMPTS,
+    resumeBudgetMs = DEFAULT_RESUME_BUDGET_MS,
     onResume,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now = () => Date.now(),
   }: StreamAiChatOptions,
 ): Promise<void> {
-  const startedAt = Date.now();
+  const startedAt = now();
   let turnId: string | undefined;
   // Events delivered so far (pings excluded) — the resume offset.
   let received = 0;
@@ -291,17 +313,24 @@ export async function streamAiChat(
   }
   // The stream ended without a terminal event: cut by something in between.
   if (!turnId) {
-    throw new AiChatTransportError({ attempts: 0, cause: lastFailure, elapsedMs: Date.now() - startedAt });
+    throw new AiChatTransportError({ attempts: 0, cause: lastFailure, elapsedMs: now() - startedAt });
   }
 
-  for (let attempt = 1; attempt <= resumeAttempts; attempt += 1) {
+  // Re-attach until the turn reports done/error, the server says the turn
+  // is gone (404), the consecutive-failure cap is hit, or the budget runs
+  // out — whichever first. A 200 (even one that dropped again without a
+  // terminal event) means the turn was still there and resets the cap.
+  let attempts = 0;
+  let consecutiveFailures = 0;
+  while (consecutiveFailures < resumeAttempts && now() - startedAt < resumeBudgetMs) {
     if (signal?.aborted) {
       throw lastFailure instanceof Error && lastFailure.name === "AbortError"
         ? lastFailure
         : new DOMException("The turn was stopped.", "AbortError");
     }
-    onResume?.({ attempt, elapsedMs: Date.now() - startedAt });
-    await sleep(resumeDelaysMs[Math.min(attempt, resumeDelaysMs.length) - 1]!);
+    attempts += 1;
+    onResume?.({ attempt: attempts, elapsedMs: now() - startedAt });
+    await sleep(resumeDelayMs(consecutiveFailures));
     let resumed: Response;
     try {
       resumed = await fetch(`${resumeEndpoint}/${encodeURIComponent(turnId)}?after=${received}`, {
@@ -312,6 +341,7 @@ export async function streamAiChat(
         throw error;
       }
       lastFailure = error;
+      consecutiveFailures += 1;
       continue;
     }
     if (resumed.status === 404) {
@@ -320,8 +350,10 @@ export async function streamAiChat(
     }
     if (!resumed.ok || !resumed.body) {
       lastFailure = new Error(`Resume failed with status ${resumed.status}`);
+      consecutiveFailures += 1;
       continue;
     }
+    consecutiveFailures = 0;
     try {
       await readNdjson(resumed.body, handleLine);
     } catch (error) {
@@ -335,9 +367,9 @@ export async function streamAiChat(
     }
   }
   throw new AiChatTransportError({
-    attempts: resumeAttempts,
+    attempts,
     cause: lastFailure,
-    elapsedMs: Date.now() - startedAt,
+    elapsedMs: now() - startedAt,
     turnId,
   });
 }

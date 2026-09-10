@@ -14,6 +14,10 @@ import {
   markFramePreviewWatched,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import {
+  readOnlyTokenError,
+  sessionMayQueueDeviceCommands,
+} from "../../../../../src/lib/device-command-access";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -117,7 +121,8 @@ export async function GET(
   const wantsFresh = tParam !== null && tParam !== "-1";
   const needsFetch =
     !cached || now - cached.updatedAt.getTime() > imageStaleAfterMs;
-  if (needsFetch && frame.status === "active") {
+  const mayQueue = sessionMayQueueDeviceCommands(session);
+  if (needsFetch && frame.status === "active" && mayQueue) {
     await queueImageGetIfIdle(
       db,
       session.accountId,
@@ -133,6 +138,10 @@ export async function GET(
   }
   if (frame.status !== "active") {
     return jsonError("frame_not_active", 409);
+  }
+  if (!mayQueue) {
+    // Only the device could answer, and a read-only token may not ask it.
+    return jsonError(readOnlyTokenError, 403);
   }
 
   // Long-poll for the image_get result: the first image ever, or one newer

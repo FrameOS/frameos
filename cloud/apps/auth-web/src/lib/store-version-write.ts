@@ -178,7 +178,17 @@ export async function nextSceneVersion(
  * `?v=N` cover URL — cached immutable at the edge for a year — names, so it
  * must not keep naming a version the download route no longer serves by
  * default. Every version yanked (the yank route refuses that) leaves the
- * column alone. */
+ * column alone.
+ *
+ * The scene row's listing columns are the projection of the latest
+ * version's listing (writeSceneVersion writes both), so when the pointer
+ * moves the projection moves with it: the description, tags, category,
+ * minimum FrameOS version and risk flags the store page, its search and
+ * the repository index show are those of the version now served, not of
+ * the one just yanked. A version from before listings were recorded per
+ * version (listingRecorded false) has nothing to project and leaves the
+ * row's text alone. A moderator's later recategorize lands on the row
+ * only, so a yank after it re-derives the category from the version. */
 export async function syncLatestVersion(
   db: Database,
   sceneId: string,
@@ -196,9 +206,37 @@ export async function syncLatestVersion(
   if (newest === undefined) {
     return undefined;
   }
+  const [latest] = await db
+    .select({
+      category: storeSceneVersions.category,
+      description: storeSceneVersions.description,
+      frameosVersion: storeSceneVersions.frameosVersion,
+      listingRecorded: storeSceneVersions.listingRecorded,
+      riskFlags: storeSceneVersions.riskFlags,
+      tags: storeSceneVersions.tags,
+    })
+    .from(storeSceneVersions)
+    .where(
+      and(
+        eq(storeSceneVersions.sceneId, sceneId),
+        eq(storeSceneVersions.version, newest),
+      ),
+    )
+    .limit(1);
   await db
     .update(storeScenes)
-    .set({ latestVersion: newest })
+    .set({
+      latestVersion: newest,
+      ...(latest?.listingRecorded
+        ? {
+            category: latest.category,
+            description: latest.description,
+            frameosVersion: latest.frameosVersion,
+            riskFlags: latest.riskFlags,
+            tags: latest.tags,
+          }
+        : {}),
+    })
     .where(
       and(eq(storeScenes.id, sceneId), ne(storeScenes.latestVersion, newest)),
     );

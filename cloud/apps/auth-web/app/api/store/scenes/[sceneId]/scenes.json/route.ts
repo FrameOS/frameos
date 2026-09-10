@@ -1,5 +1,4 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { unzipSync } from "fflate";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../../src/lib/blobs";
@@ -15,6 +14,7 @@ import {
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { withStoreSceneOrigin } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
+import { unzipBounded } from "../../../../../../src/lib/zip-bounded";
 
 export const runtime = "nodejs";
 
@@ -157,9 +157,9 @@ function versionParam(request: NextRequest): number | undefined | null {
 // inflates the one file it returns.
 function extractScenesJson(content: Buffer): unknown[] | undefined {
   try {
-    const files = unzipSync(new Uint8Array(content), {
-      filter: (file) => /(^|\/)scenes\.json$/.test(file.name),
-    });
+    const files = unzipBounded(new Uint8Array(content), (name) =>
+      /(^|\/)scenes\.json$/.test(name),
+    );
     const path = Object.keys(files).sort(
       (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
     )[0];

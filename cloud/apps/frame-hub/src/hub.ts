@@ -17,13 +17,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import postgres from "postgres";
 import { WebSocket, WebSocketServer } from "ws";
 import {
   createDb,
   frameCommands,
-  frameLogs,
   frames,
   linkedClients,
   recordAuditEvent,
@@ -1545,27 +1544,16 @@ export async function startFrameHub(
       return;
     }
     // storeFrameLogs enforces the per-frame retention cap and per-line size
-    // limits in the same transaction as the insert.
-    const stored = await storeFrameLogs(
+    // limits in the same transaction as the insert, and hands back the rows
+    // of THIS batch that survived them — never a re-select by count, which
+    // after a cull filled the gap with older, already-broadcast lines.
+    const rows = await storeFrameLogs(
       db,
       session.frame.id,
       entries,
       session.frame.accountId,
     );
-    if (stored === 0) {
-      return;
-    }
-    const rows = await db
-      .select({
-        id: frameLogs.id,
-        payload: frameLogs.payload,
-        timestamp: frameLogs.timestamp,
-      })
-      .from(frameLogs)
-      .where(eq(frameLogs.frameId, session.frame.id))
-      .orderBy(desc(frameLogs.id))
-      .limit(stored);
-    for (const row of rows.reverse()) {
+    for (const row of rows) {
       broadcastToBrowsers(
         session.frame,
         "new_log",

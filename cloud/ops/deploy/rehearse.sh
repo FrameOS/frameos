@@ -261,6 +261,38 @@ frameos-cloud-update --rollback >/tmp/out6 2>&1 || { cat /tmp/out6; exit 1; }
 check "the previous release is live" "bbbbbbbbbbbb" "$(live_sha)"
 check "it flipped ports to get there" "3001" "$(active_port)"
 check "still one instance" "1" "$(running)"
+# A stack, not a toggle: the second rollback goes one release further back
+# (to the adopted pre-blue/green tree from step 1), not forward to the
+# release just rolled away from.
+check "previous now points one further back" "aaaaaaaaaaaa" "$(cat /opt/frameos-cloud.previous/RELEASE)"
+frameos-cloud-update --status >/tmp/status6 2>&1 || true
+check "--status shows the stack" "yes" \
+  "$(grep -q '^rollback stack: */opt/frameos-cloud.releases/adopted-' /tmp/status6 && echo yes || { cat /tmp/status6; echo no; })"
+frameos-cloud-update --rollback >/tmp/out6b 2>&1 || { cat /tmp/out6b; exit 1; }
+check "the second rollback lands on the release before that" "aaaaaaaaaaaa" "$(live_sha)"
+check "nothing older is left to roll back to" "yes" \
+  "$([ -e /opt/frameos-cloud.previous ] && echo no || echo yes)"
+if frameos-cloud-update --rollback >/tmp/out6c 2>&1; then
+  check "a rollback with an empty stack is refused" "yes" "no"
+else
+  check "a rollback with an empty stack is refused" "yes" "yes"
+fi
+check "the live release stayed" "aaaaaaaaaaaa" "$(live_sha)"
+# Rolling forward again by deploying rebuilds the stack: cccc on top of aaaa.
+deploy cccccccccccc >/tmp/out6d 2>&1 || { cat /tmp/out6d; exit 1; }
+check "a deploy after rollbacks pushes onto the stack" "aaaaaaaaaaaa" "$(cat /opt/frameos-cloud.previous/RELEASE)"
+# A rollback whose target never becomes healthy leaves the stack as it was,
+# so a retry sees the same target rather than skipping past it.
+idle="$([ "$(active_port)" = 3000 ] && echo 3001 || echo 3000)"
+: >"/tmp/fake/sick-$idle"
+if frameos-cloud-update --rollback >/tmp/out6e 2>&1; then
+  check "a rollback to an unhealthy release fails" "yes" "no"
+else
+  check "a rollback to an unhealthy release fails" "yes" "yes"
+fi
+rm -f "/tmp/fake/sick-$idle"
+check "the current release is still live after the failed rollback" "cccccccccccc" "$(live_sha)"
+check "the failed rollback did not consume the stack" "aaaaaaaaaaaa" "$(cat /opt/frameos-cloud.previous/RELEASE)"
 
 # --- 7. pruning -------------------------------------------------------------
 
@@ -279,7 +311,8 @@ check "the previous release survived pruning" "yes" \
 echo "8. install.sh converts a legacy host without moving traffic first"
 # Back to a host that has never seen any of this.
 rm -rf /opt/frameos-cloud /opt/frameos-cloud.releases /opt/frameos-cloud.instances \
-  /opt/frameos-cloud.previous /etc/nginx/conf.d/frameos-cloud-upstream.conf \
+  /opt/frameos-cloud.previous /opt/frameos-cloud.history \
+  /etc/nginx/conf.d/frameos-cloud-upstream.conf \
   /etc/frameos-cloud/active-port /etc/systemd/system/frameos-cloud-auth-web@.service
 rm -f "$state"/units/frameos-cloud-auth-web@*
 mkdir -p /opt/frameos-cloud/cloud/apps/auth-web /etc/nginx/sites-enabled /etc/nginx/snippets

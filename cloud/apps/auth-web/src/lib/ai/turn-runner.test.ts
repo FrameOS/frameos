@@ -6,7 +6,9 @@ import {
   resetTurnsForTests,
   startTurn,
   stopTurn,
+  stopTurnsForChat,
   turnStream,
+  TURN_MAX_MS,
   TurnLimitError,
   TurnStoppedError,
   TurnTimeoutError,
@@ -158,6 +160,48 @@ describe("turn runner", () => {
     expect(getTurn(turn.id)?.finishedAt).not.toBeNull();
   });
 
+  it("hands the registered turn to run, so a callback inside it can abort it", async () => {
+    const outcomes: string[] = [];
+    let seen: string | undefined;
+    const turn = startTurn({
+      accountId: "a1",
+      chatId: "c5b",
+      onFinish: (_turn, outcome) => outcomes.push(outcome),
+      run: async (emit, signal, self) => {
+        seen = self.id;
+        expect(getTurn(self.id)).toBe(self);
+        self.controller.abort(new Error("over budget"));
+        expect(signal.aborted).toBe(true);
+        emit({ detail: "AI chat failed: over budget", type: "error" });
+      },
+    });
+    await readAll(turnStream(turn, 0));
+    expect(seen).toBe(turn.id);
+    expect(outcomes).toEqual(["stopped"]);
+  });
+
+  it("stopTurnsForChat stops the chat's running turn with the given reason", async () => {
+    let reason: unknown;
+    const turn = startTurn({
+      accountId: "a1",
+      chatId: "c5c",
+      run: (emit, signal) =>
+        new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => {
+            reason = signal.reason;
+            emit({ detail: "AI chat failed: stopped", type: "error" });
+            resolve();
+          });
+        }),
+    });
+    expect(stopTurnsForChat("some-other-chat", "x")).toBeUndefined();
+    expect(stopTurnsForChat("c5c", "The chat was deleted.")).toBe(turn);
+    await readAll(turnStream(turn, 0));
+    expect(reason).toBeInstanceOf(TurnStoppedError);
+    expect((reason as Error).message).toBe("The chat was deleted.");
+    expect(activeTurnForChat("c5c")).toBeUndefined();
+  });
+
   it("enforces the whole-turn ceiling", async () => {
     const outcomes: string[] = [];
     let reason: unknown;
@@ -205,5 +249,19 @@ describe("per-account turn cap", () => {
     ).not.toThrow();
     gate.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+});
+
+// The relay routes' `maxDuration` must cover the whole turn: Next reads it
+// as a static literal, so this pins the literal to the ceiling here.
+describe("relay route maxDuration", () => {
+  it("matches TURN_MAX_MS on both relay routes", async () => {
+    const { readFile } = await import("node:fs/promises");
+    for (const route of ["../../../app/api/ai/chat/route.ts", "../../../app/api/ai/chat/turns/[turnId]/route.ts"]) {
+      const source = await readFile(new URL(route, import.meta.url), "utf8");
+      const match = source.match(/^export const maxDuration = (\d+);/m);
+      expect(match, route).not.toBeNull();
+      expect(Number(match![1]), route).toBe(TURN_MAX_MS / 1000);
+    }
   });
 });

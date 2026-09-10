@@ -136,6 +136,25 @@ describe("nimExpressionToJs — the mapping table", () => {
   it("renames a let-bound name that is not a JavaScript identifier", () => {
     expect(nimExpressionToJs("let class = 1\nclass + 1")).toBe("(() => {\n  const class_ = 1;\n  return class_ + 1;\n})()");
   });
+
+  it("gives a let that shadows an argument a fresh name instead of a TDZ read", () => {
+    const js = nimExpressionToJs("let count = count + 1\ncount * 2", { args: [{ name: "count", type: "integer" }] });
+    expect(js).toBe("(() => {\n  const count_1 = count + 1;\n  return count_1 * 2;\n})()");
+    expect(new Function("count", `return ${js}`)(3)).toBe(8);
+  });
+
+  it("keeps a shadowing let apart from every earlier binding", () => {
+    const js = nimExpressionToJs("let x = x + 1\nlet x_1 = x * 2\nx_1", { args: [{ name: "x", type: "integer" }] });
+    expect(js).toBe("(() => {\n  const x_1 = x + 1;\n  const x_1_1 = x_1 * 2;\n  return x_1_1;\n})()");
+    expect(new Function("x", `return ${js}`)(1)).toBe(4);
+  });
+
+  it("never fuses a double negation into the decrement operator", () => {
+    expect(nimExpressionToJs("- -x", { args: [{ name: "x", type: "float" }] })).toBe("-(-x)");
+    expect(nimExpressionToJs("-(-x)", { args: [{ name: "x", type: "float" }] })).toBe("-(-x)");
+    expect(nimExpressionToJs("- - -3")).toBe("-(-(-3))");
+    expect(new Function("x", "return " + nimExpressionToJs("- -x", { args: [{ name: "x", type: "float" }] }))(2)).toBe(2);
+  });
 });
 
 describe("nimExpressionToJs — what falls through to the model", () => {

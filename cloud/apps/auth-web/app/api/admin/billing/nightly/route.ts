@@ -112,6 +112,12 @@ export async function POST(request: NextRequest) {
   const since = new Date(until.getTime() - 24 * 60 * 60 * 1000);
   const summary = await dailySummary(db, { since, until });
 
+  // The job token has a TTL (scripts/accounting-service-account.sh); the
+  // script that called us warns while there is still time to rotate.
+  const tokenExpiresInDays = job.token.expiresAt
+    ? Math.floor((job.token.expiresAt.getTime() - until.getTime()) / (24 * 60 * 60 * 1000))
+    : null;
+
   // The daily line, whether or not anything was wrong: a journal with a
   // number in it every night is how a missing night gets noticed.
   logInfo("billing.nightly", {
@@ -133,6 +139,7 @@ export async function POST(request: NextRequest) {
     subscriptionsRecognized: subscriptionCycle.recognized,
     sweepFailed: sweep.failures.length,
     sweepPosted: sweep.posted,
+    tokenExpiresInDays,
     violations: violations.length,
   });
 
@@ -166,6 +173,8 @@ export async function POST(request: NextRequest) {
       posted: sweep.posted,
       scanned: sweep.scanned,
     },
+    token_expires_at: job.token.expiresAt?.toISOString() ?? null,
+    token_expires_in_days: tokenExpiresInDays,
     violations: violations.map((violation) => ({
       check: violation.check,
       detail: violation.detail,
