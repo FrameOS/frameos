@@ -12,6 +12,7 @@ import ../auth
 import ../api
 import ../state
 import ./common
+import frameos/channels
 
 # mummy buffers whole responses in RAM, and assets can include multi-hundred
 # MB videos: serving one of those would blow straight through MemoryMax and
@@ -50,6 +51,20 @@ proc configuredAssetsPath*(): string =
 
 proc uploadChunkTempRoot(): string =
   normalizedPath(getTempDir() / "frameos-upload-chunks")
+
+# Bounds on the unfinished-upload parts (local chunked uploads and the
+# cloud's offset-addressed ones alike) that sit under uploadChunkTempRoot.
+const
+  # Parts left behind by an upload that never completed (the browser tab was
+  # closed, the provider gave up, the link died mid-file) are swept once older
+  # than this: on every hub session start, and whenever a new upload begins.
+  # Long enough for a slow link to finish a big file; short enough that a dead
+  # upload does not hold disk for a day.
+  CloudUploadPartMaxAgeSeconds* = 6 * 60 * 60
+  UploadPartMaxAgeSeconds* = CloudUploadPartMaxAgeSeconds
+  # All parts together may not exceed this; the temp root is often tmpfs, so
+  # "the disk" is the frame's RAM. Big enough for a video asset in flight.
+  MaxUploadPartsTotalBytes* = 1024 * 1024 * 1024
 
 proc withinBasePath*(path, basePath: string): bool =
   let normalizedTargetPath = normalizedPath(path)
@@ -241,10 +256,59 @@ proc saveUploadedImagePayload*(filename: string, data: string): JsonNode =
 proc createAssetDirectory*(path: string) =
   createDir(resolveAssetPath(path))
 
-proc appendUploadChunk*(uploadId: string, chunkIndex: int, data: string) =
+proc isUploadPartName(fileName: string): bool =
+  fileName.endsWith(".part")
+
+proc cleanupStaleAssetUploadChunks*(maxAgeSeconds = UploadPartMaxAgeSeconds) =
+  ## Delete upload parts nobody has touched for `maxAgeSeconds` — local
+  ## `<id>.part` and cloud `cloud-<id>.part` alike (the sweep used to match
+  ## only the cloud's, so a local upload abandoned mid-way stayed forever).
+  let root = uploadChunkTempRoot()
+  if not dirExists(root):
+    return
+  let cutoff = getTime() - initDuration(seconds = maxAgeSeconds)
+  for kind, filePath in walkDir(root):
+    if kind != pcFile or not isUploadPartName(extractFilename(filePath)):
+      continue
+    try:
+      if getFileInfo(filePath).lastWriteTime < cutoff:
+        removeFile(filePath)
+    except CatchableError:
+      discard
+
+proc uploadPartsTotalBytes(root: string, excluding: string): BiggestInt =
+  ## Bytes held by every part other than `excluding` (whose own size the
+  ## caller accounts for separately: it is about to be rewritten or grown).
+  if not dirExists(root):
+    return 0
+  for kind, filePath in walkDir(root):
+    if kind != pcFile or not isUploadPartName(extractFilename(filePath)):
+      continue
+    if normalizedPath(filePath) == excluding:
+      continue
+    try:
+      result += getFileSize(filePath)
+    except CatchableError:
+      discard
+
+proc reserveUploadPartBytes(partPath: string, partBytesAfterWrite: BiggestInt,
+                            maxTotalBytes = MaxUploadPartsTotalBytes) =
+  ## Refuse a chunk that would push the unfinished uploads past the
+  ## cumulative cap. Sweeps first, so parts a dead upload left behind do not
+  ## count against a live one.
+  cleanupStaleAssetUploadChunks()
+  let others = uploadPartsTotalBytes(parentDir(partPath), partPath)
+  if others + partBytesAfterWrite > maxTotalBytes:
+    raise newException(ValueError, "Upload storage is full: too many unfinished uploads")
+
+proc appendUploadChunk*(uploadId: string, chunkIndex: int, data: string,
+                        maxTotalBytes = MaxUploadPartsTotalBytes) =
   let tempPath = uploadChunkTempPath(uploadId)
   createDir(parentDir(tempPath))
-  var fileHandle = open(tempPath, if chunkIndex <= 0: fmWrite else: fmAppend)
+  let restart = chunkIndex <= 0
+  let existing = if restart or not fileExists(tempPath): 0.BiggestInt else: getFileSize(tempPath)
+  reserveUploadPartBytes(tempPath, existing + data.len.BiggestInt, maxTotalBytes)
+  var fileHandle = open(tempPath, if restart: fmWrite else: fmAppend)
   try:
     fileHandle.write(data)
   finally:
@@ -267,13 +331,6 @@ proc discardUploadChunk*(uploadId: string) =
 # overwrites itself. Same idea as the ESP32's fos_assets_chunk_begin.
 # ---------------------------------------------------------------------------
 
-const
-  # Parts left behind by an upload that never completed (the provider gave up,
-  # the link died mid-file) are swept on the next session start once older
-  # than this. Long enough for a slow link to finish a big file; short enough
-  # that a dead upload does not hold disk for a day.
-  CloudUploadPartMaxAgeSeconds* = 6 * 60 * 60
-
 proc cloudUploadPartPath(uploadId: string): string =
   normalizedPath(uploadChunkTempRoot() / ("cloud-" & sanitizeUploadId(uploadId) & ".part"))
 
@@ -285,10 +342,12 @@ proc writeAssetUploadChunk*(uploadId: string, offset: BiggestInt, data: string):
   createDir(parentDir(partPath))
   if offset <= 0:
     # First (or restarted) chunk: whatever was there is a previous attempt.
+    reserveUploadPartBytes(partPath, data.len.BiggestInt)
     writeFile(partPath, data)
     return data.len.BiggestInt
   if not fileExists(partPath) or getFileSize(partPath) < offset:
     raise newException(ValueError, "chunk_gap")
+  reserveUploadPartBytes(partPath, max(getFileSize(partPath), offset + data.len.BiggestInt))
   var fileHandle = open(partPath, fmReadWriteExisting)
   try:
     fileHandle.setFilePos(offset)
@@ -296,6 +355,28 @@ proc writeAssetUploadChunk*(uploadId: string, offset: BiggestInt, data: string):
   finally:
     fileHandle.close()
   getFileSize(partPath)
+
+proc movePartIntoAssets(partPath: string, subdir: string, filename: string): JsonNode =
+  ## Move a finished part to its place inside the assets directory,
+  ## sanitizing the filename exactly like a single-shot upload. A part whose
+  ## destination is refused is deleted: it can never be finished, so leaving
+  ## it would only wait for the sweep.
+  try:
+    let targetPath = resolveAssetUploadPath(subdir, filename)
+    createDir(parentDir(targetPath))
+    if dirExists(targetPath):
+      raise newException(ValueError, "Invalid asset path")
+    if fileExists(targetPath):
+      removeFile(targetPath)
+    moveFile(partPath, targetPath)
+    assetPayloadForPath(targetPath)
+  except CatchableError:
+    try:
+      if fileExists(partPath):
+        removeFile(partPath)
+    except CatchableError:
+      discard
+    raise
 
 proc finishAssetUploadChunks*(uploadId: string, path: string): JsonNode =
   ## Move the finished part to `path` inside the assets directory, sanitizing
@@ -305,50 +386,18 @@ proc finishAssetUploadChunks*(uploadId: string, path: string): JsonNode =
   if not fileExists(partPath):
     raise newException(OSError, "Upload not found")
   let (dir, name, ext) = splitFile(path)
-  let targetPath = resolveAssetUploadPath(dir, name & ext)
-  createDir(parentDir(targetPath))
-  if dirExists(targetPath):
-    raise newException(ValueError, "Invalid asset path")
-  if fileExists(targetPath):
-    removeFile(targetPath)
-  moveFile(partPath, targetPath)
-  assetPayloadForPath(targetPath)
+  movePartIntoAssets(partPath, dir, name & ext)
 
 proc discardAssetUploadChunks*(uploadId: string) =
   let partPath = cloudUploadPartPath(uploadId)
   if fileExists(partPath):
     removeFile(partPath)
 
-proc cleanupStaleAssetUploadChunks*(maxAgeSeconds = CloudUploadPartMaxAgeSeconds) =
-  ## Delete cloud upload parts nobody has touched for `maxAgeSeconds`.
-  let root = uploadChunkTempRoot()
-  if not dirExists(root):
-    return
-  let cutoff = getTime() - initDuration(seconds = maxAgeSeconds)
-  for kind, filePath in walkDir(root):
-    if kind != pcFile:
-      continue
-    let fileName = extractFilename(filePath)
-    if not (fileName.startsWith("cloud-") and fileName.endsWith(".part")):
-      continue
-    try:
-      if getFileInfo(filePath).lastWriteTime < cutoff:
-        removeFile(filePath)
-    except CatchableError:
-      discard
-
 proc finishChunkedAssetUpload*(uploadId: string, subdir: string, filename: string): JsonNode =
   let tempPath = uploadChunkTempPath(uploadId)
   if not fileExists(tempPath):
     raise newException(OSError, "Upload not found")
-  let targetPath = resolveAssetUploadPath(subdir, filename)
-  createDir(parentDir(targetPath))
-  if dirExists(targetPath):
-    raise newException(ValueError, "Invalid asset path")
-  if fileExists(targetPath):
-    removeFile(targetPath)
-  moveFile(tempPath, targetPath)
-  assetPayloadForPath(targetPath)
+  movePartIntoAssets(tempPath, subdir, filename)
 
 proc finishChunkedImageUpload*(uploadId: string, filename: string): JsonNode =
   let tempPath = uploadChunkTempPath(uploadId)
@@ -467,9 +516,18 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
     setInertAssetHeaders(headers, contentTypeForFilePath(fullPath), fullPath)
     return (Http200, headers, readFile(fullPath))
 
-  let fullMd5 = getMD5(fullPath)
+  # Cache key: the path names the entry, the size and mtime say which
+  # contents it was rendered from. Keyed on the path alone, a replaced image
+  # (same name, new file) served the old thumbnail forever.
+  let pathKey = getMD5(fullPath)
+  let stamp =
+    try:
+      let info = getFileInfo(fullPath)
+      $info.size & "-" & $info.lastWriteTime.toUnix()
+    except CatchableError:
+      "0-0"
   let thumbRoot = assetsPath / ".thumbs"
-  let thumbPath = normalizedPath(thumbRoot / (fullMd5 & ThumbnailFileSuffix))
+  let thumbPath = normalizedPath(thumbRoot / (pathKey & "-" & stamp & ThumbnailFileSuffix))
   if not withinBasePath(thumbPath, thumbRoot):
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"
@@ -478,18 +536,29 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
   try:
     if not fileExists(thumbPath):
       createDir(parentDir(thumbPath))
+      # Thumbnails of earlier contents of this path are dead: evict them so
+      # the cache holds one entry per asset, not one per replacement.
+      for kind, cached in walkDir(thumbRoot):
+        let name = extractFilename(cached)
+        if kind == pcFile and name.startsWith(pathKey & "-") and name.endsWith(ThumbnailFileSuffix):
+          try:
+            removeFile(cached)
+          except CatchableError:
+            discard
       writeThumbnail(fullPath, thumbPath)
     var headers: mummy.HttpHeaders
     setInertAssetHeaders(headers, ThumbnailContentType, thumbPath)
     return (Http200, headers, readFile(thumbPath))
   except PixieError as e:
+    # Pixie's messages describe the image format, never the filesystem.
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"
     return (Http500, headers, $(%*{"detail": "Failed to generate thumbnail", "error": e.msg}))
   except CatchableError as e:
+    log(%*{"event": "assets:thumbnail:error", "path": relPath, "error": e.msg})
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"
-    return (Http500, headers, $(%*{"detail": "Failed to fetch asset", "error": e.msg}))
+    return (Http500, headers, $(%*{"detail": "Failed to fetch asset"}))
 
 proc handleAssetsUpload*(request: Request) {.gcsafe.} =
   if not hasAdminAccess(request):
@@ -534,7 +603,7 @@ proc handleAssetsUpload*(request: Request) {.gcsafe.} =
       except OSError:
         jsonResponse(request, Http404, %*{"detail": "Upload not found"})
       except CatchableError as e:
-        jsonResponse(request, Http500, %*{"detail": e.msg})
+        respondInternalError(request, "assets:upload:error", e, "Failed to store the upload")
 
 proc handleAssetsMkdir*(request: Request) {.gcsafe.} =
   if not hasAdminAccess(request):
@@ -551,7 +620,7 @@ proc handleAssetsMkdir*(request: Request) {.gcsafe.} =
       except ValueError as e:
         jsonResponse(request, Http400, %*{"detail": e.msg})
       except CatchableError as e:
-        jsonResponse(request, Http500, %*{"detail": e.msg})
+        respondInternalError(request, "assets:mkdir:error", e, "Failed to create the directory")
 
 proc handleAssetsDelete*(request: Request) {.gcsafe.} =
   if not hasAdminAccess(request):
@@ -570,7 +639,7 @@ proc handleAssetsDelete*(request: Request) {.gcsafe.} =
       except OSError:
         jsonResponse(request, Http404, %*{"detail": "Asset not found"})
       except CatchableError as e:
-        jsonResponse(request, Http500, %*{"detail": e.msg})
+        respondInternalError(request, "assets:delete:error", e, "Failed to delete the asset")
 
 proc handleAssetsRename*(request: Request) {.gcsafe.} =
   if not hasAdminAccess(request):
@@ -592,7 +661,7 @@ proc handleAssetsRename*(request: Request) {.gcsafe.} =
       except OSError:
         jsonResponse(request, Http404, %*{"detail": "Asset not found"})
       except CatchableError as e:
-        jsonResponse(request, Http500, %*{"detail": e.msg})
+        respondInternalError(request, "assets:rename:error", e, "Failed to rename the asset")
 
 
 proc addAdminApiAssetRoutes*(router: var Router) =
@@ -668,7 +737,7 @@ proc addAdminApiAssetRoutes*(router: var Router) =
         except OSError:
           jsonResponse(request, Http404, %*{"detail": "Upload not found"})
         except CatchableError as e:
-          jsonResponse(request, Http500, %*{"detail": e.msg})
+          respondInternalError(request, "assets:uploadImage:error", e, "Failed to store the upload")
   )
 
   router.post("/api/admin/frames/@id/assets/mkdir", handleAssetsMkdir)

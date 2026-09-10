@@ -4121,7 +4121,11 @@ export function FrameSettings({
                               >
                                 <TextInput name="source" placeholder="//server/share" />
                               </Field>
-                              <Field name="target" label="Mount path">
+                              <Field
+                                name="target"
+                                label="Mount path"
+                                hint="A directory under /mnt, /media or /srv/assets"
+                              >
                                 <TextInput name="target" placeholder="/mnt/share" />
                               </Field>
                               <Field name="enabled" label="Enabled">

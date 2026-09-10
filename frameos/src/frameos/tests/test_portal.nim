@@ -5,6 +5,7 @@ import ../cloud/device_flow
 import ../network/backend
 import ../network_state
 import ../portal
+import ../privileged
 import ../types
 
 type HookMode = enum
@@ -741,6 +742,31 @@ suite "portal setup control mode":
     let options = parseSetupOptions(initTable[string, string](), frame.frameConfig)
     check options.serverHost == ""
     check options.controlMode == "none"
+
+  test "a hostname the privileged door refuses fails the setup with the reason":
+    writeFile(setupDir / "frame.json", $(%*{"name": "FrameOS Setup"}))
+    let frame = makeFrameOS()
+    var seenVerbs: seq[string] = @[]
+    setPrivilegedRequestHookForTest(proc(request: PrivilegedRequest): PrivilegedResult {.gcsafe.} =
+      {.gcsafe.}:
+        seenVerbs.add($request.verb)
+      if request.verb == pvSetHostname:
+        return PrivilegedResult(ok: false, exitCode: 1, error: "hostnamectl: read-only file system")
+      PrivilegedResult(ok: true, exitCode: 0)
+    )
+    defer: resetPrivilegedRequestHookForTest()
+    let options = parseSetupOptions({"ssid": "x", "hostname": "kitchen"}.toTable, frame.frameConfig)
+    check not persistPortalSetup(frame, options)
+    check "set-hostname" in seenVerbs
+    check getLastError().contains("Could not set the hostname")
+    check getLastError().contains("read-only file system")
+    # The config itself was saved before the hostname step; a retry can pick up where it left off.
+    check parseFile(setupDir / "frame.json"){"name"}.getStr() == "kitchen"
+
+    setPrivilegedRequestHookForTest(proc(request: PrivilegedRequest): PrivilegedResult {.gcsafe.} =
+      PrivilegedResult(ok: true, exitCode: 0)
+    )
+    check persistPortalSetup(frame, options)
 
   test "the image's placeholder name gives way to the hostname":
     writeFile(setupDir / "frame.json", $(%*{"name": "FrameOS Setup", "frameHost": "frame.local"}))

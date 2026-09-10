@@ -372,5 +372,5 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       jsonResponse(request, Http200, %*{"status": "ok"})
     except CatchableError as e:
       log(%*{"event": "reload:error", "error": e.msg})
-      jsonResponse(request, Http500, %*{"status": "error", "error": e.msg})
+      jsonResponse(request, Http500, %*{"status": "error", "error": "Failed to reload the configuration"})
   )

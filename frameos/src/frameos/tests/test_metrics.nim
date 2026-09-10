@@ -116,7 +116,7 @@ suite "metrics loop":
       openFileDescriptorsHook = proc(): int {.gcsafe, nimcall.} = 12
     )
 
-    logMetricsNow(FrameConfig(metricsInterval: 0))
+    logMetricsNow()
 
     let (okSample, samplePayload) = logChannel.tryRecv()
     check okSample

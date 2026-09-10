@@ -63,20 +63,43 @@ proc mountpointNeedsCredentials*(mountpoint: MountpointConfig): bool =
 proc credentialFilePath*(credentialsDir: string, index: int): string =
   credentialsDir / ("mount-" & $(index + 1) & ".credentials")
 
+# Where a share may appear on the frame. The mountpoint config is
+# backend-owned, but a typo (or a provider that should not be trusted with
+# it) must still not be able to mount a share over /etc, /srv/frameos, the
+# root, or anything else the runtime reads as its own.
+const sambaMountTargetRoots* = ["/mnt", "/media", "/srv/assets"]
+
+proc sambaMountTargetError*(target: string): string =
+  ## "" when `target` is an acceptable mount path, otherwise the reason it is
+  ## not (without the "Samba mountpoint #n" prefix validateMountpoint adds).
+  let stripped = target.strip()
+  if stripped.len == 0:
+    return "is missing a mount path"
+  if not stripped.startsWith("/"):
+    return "mount path must be absolute"
+  if containsLineBreak(stripped):
+    return "mount path cannot contain line breaks"
+  for segment in stripped.split('/'):
+    if segment == "." or segment == "..":
+      return "mount path cannot contain . or .. segments"
+  let normalized = normalizedPath(stripped)
+  for root in sambaMountTargetRoots:
+    if normalized.startsWith(root & "/") and normalized.len > root.len + 1:
+      return ""
+  "mount path must be a directory under " & sambaMountTargetRoots.join(", ")
+
 proc validateMountpoint(mountpoint: MountpointConfig, index: int) =
   let label = "mountpoint #" & $(index + 1)
   let source = mountpoint.source.strip()
-  let target = mountpoint.target.strip()
   if source.len == 0:
     raise newException(ValueError, "Samba " & label & " is missing a source")
   if not source.startsWith("//"):
     raise newException(ValueError, "Samba " & label & " source must start with //")
-  if target.len == 0:
-    raise newException(ValueError, "Samba " & label & " is missing a mount path")
-  if not target.startsWith("/"):
-    raise newException(ValueError, "Samba " & label & " mount path must be absolute")
-  if containsLineBreak(source) or containsLineBreak(target):
-    raise newException(ValueError, "Samba " & label & " source and mount path cannot contain line breaks")
+  if containsLineBreak(source):
+    raise newException(ValueError, "Samba " & label & " source cannot contain line breaks")
+  let targetError = sambaMountTargetError(mountpoint.target)
+  if targetError.len > 0:
+    raise newException(ValueError, "Samba " & label & " " & targetError)
   if containsLineBreak(mountpoint.username) or containsLineBreak(mountpoint.password) or containsLineBreak(mountpoint.domain):
     raise newException(ValueError, "Samba " & label & " credentials cannot contain line breaks")
 
@@ -217,6 +240,8 @@ proc setupSambaMounts*(mountpoints: MountpointsConfig): SetupResult =
     deleteCredentialFiles(sambaCredentialsDir)
     return setupOk()
 
+  # Validates every mountpoint (raising before anything below touches the
+  # system) and renders the fstab block.
   let fstabBlock = frameosFstabBlock(mountpoints)
   addSetupResult(result, setupAptPackages(@["cifs-utils"]))
 

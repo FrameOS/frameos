@@ -478,6 +478,30 @@ block test_first_boot_service_start_is_non_blocking:
     if fileExists(path):
       removeFile(path)
 
+block test_samba_mount_targets_are_constrained_to_known_roots:
+  doAssert sambaMountTargetError("/mnt/photos") == ""
+  doAssert sambaMountTargetError(" /media/nas/share ") == ""
+  doAssert sambaMountTargetError("/srv/assets/shared") == ""
+  doAssert sambaMountTargetError("/mnt//photos/") == ""
+  for bad in ["", "mnt/photos", "/mnt", "/mnt/", "/media", "/etc", "/srv/frameos", "/srv/assets",
+              "/mnt/../etc", "/mnt/./x", "/mnt/x\n/etc", "/home/pi/photos"]:
+    doAssert sambaMountTargetError(bad).len > 0, "expected rejection of " & bad
+  var raised = false
+  try:
+    discard sambaFstabEntry(MountpointConfig(enabled: true, source: "//nas/p", target: "/srv/frameos/state"), 0)
+  except ValueError as e:
+    raised = true
+    doAssert e.msg.contains("mountpoint #1")
+    doAssert e.msg.contains("/mnt, /media, /srv/assets")
+  doAssert raised
+  # Disabled entries are not validated: an old, now-disabled mountpoint with a
+  # target outside the roots must not block setup.
+  let mixed = MountpointsConfig(enabled: true, items: @[
+    MountpointConfig(enabled: false, source: "//nas/old", target: "/home/pi/old"),
+    MountpointConfig(enabled: true, source: "//nas/new", target: "/mnt/new"),
+  ])
+  doAssert frameosFstabBlock(mixed, "/tmp/frameos-samba").contains("//nas/new /mnt/new cifs")
+
 block test_samba_mounts_fstab_block_uses_credentials_and_options:
   let mountpoints = MountpointsConfig(enabled: true, items: @[
     MountpointConfig(

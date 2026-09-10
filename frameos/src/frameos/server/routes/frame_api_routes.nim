@@ -69,7 +69,7 @@ proc queueRuntimeControl(request: Request, action: string, eventName: string) {.
     jsonResponse(request, Http200, %*{"status": "ok", "action": action})
   except CatchableError as e:
     log(%*{"event": action & ":error", "error": e.msg})
-    jsonResponse(request, Http500, %*{"status": "error", "error": e.msg})
+    jsonResponse(request, Http500, %*{"status": "error", "error": "Failed to queue " & action})
 
 proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) =
   router.get("/api/apps", proc(request: Request) {.gcsafe.} =
@@ -302,7 +302,7 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
           headers["Set-Cookie"] = adminSessionCookieHeader(request, createAdminSession())
         request.respond(Http200, headers, $(%*{"message": "Frame updated successfully", "frame": framePayload}))
       except CatchableError as e:
-        jsonResponse(request, Http500, %*{"detail": e.msg})
+        respondInternalError(request, "frame:update:error", e, "Failed to update the frame")
   )
 
   router.post("/api/frames/@id/reload", proc(request: Request) {.gcsafe.} =

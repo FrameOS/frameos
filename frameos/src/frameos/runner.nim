@@ -649,7 +649,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
           of "turnOff":
             drivers.turnOff()
           of "metrics":
-            logMetricsNow(self.frameConfig)
+            logMetricsNow()
             continue # don't dispatch this event to the scene
           of "mouseMove":
             if self.frameConfig.width > 0 and self.frameConfig.height > 0:
@@ -689,6 +689,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
             try:
               updateFrameConfigFrom(self.frameConfig, loadConfig())
+              # The logger and metrics threads run on copies, not on this ref.
+              applyLoggerSettings(self.frameConfig)
+              applyMetricsSettings(self.frameConfig)
             except Exception as e:
               self.logger.log(%*{"event": "reload:config:error", "error": e.msg, "stacktrace": e.getStackTrace()})
             reloadInterpretedScenes(self.logger)

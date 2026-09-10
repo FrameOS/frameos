@@ -127,6 +127,32 @@ sys.stdout.flush()
     p.stopProcess()
     p.close()
 
+  test "ProcessOutputReader drops overlong lines instead of buffering them":
+    # A child that never ends its line must not grow the reader's buffer
+    # without bound; the runaway line is dropped whole, the next one survives.
+    let script = """
+import sys
+sys.stdout.write("x" * 3000000)
+sys.stdout.flush()
+sys.stdout.write("\nsecond\nthird")
+sys.stdout.flush()
+"""
+    var p = startProcessSerialized("python3", args = @["-c", script],
+                                   options = {poUsePath, poStdErrToStdOut})
+    var reader = initProcessOutputReader(p, maxLineBytes = 64 * 1024)
+    var lines: seq[string] = @[]
+    let deadline = epochTime() + 10.0
+    while epochTime() < deadline:
+      lines.add(reader.readAvailableLines())
+      check reader.bufferedBytes() <= 64 * 1024 + 65536
+      if not p.running() and reader.eof:
+        break
+      sleep(10)
+    lines.add(reader.readAvailableLines())
+    check lines == @["second", "third"]
+    check reader.overlongLines == 1
+    p.close()
+
   test "writeInputDrainingOutput times out when the child stops reading":
     var p = startProcessSerialized("python3", args = @["-c", "import time; time.sleep(10)"],
                                    options = {poUsePath, poStdErrToStdOut})

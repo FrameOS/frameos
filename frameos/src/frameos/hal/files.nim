@@ -16,6 +16,7 @@ when defined(frameosEmbedded):
   proc appendTextLine*(path, line: string) = raise noFs(path)
   proc storedFileExists*(path: string): bool = false
   proc storedFileAgeSeconds*(path: string): float = -1.0
+  proc storedFileSize*(path: string): int64 = 0
   proc removeStoredFile*(path: string) = raise noFs(path)
   proc ensureDir*(path: string) = discard
   proc ensureParentDir*(path: string) = discard
@@ -52,6 +53,13 @@ else:
       (epochTime() - getLastModificationTime(path).toUnixFloat())
     except OSError:
       -1.0
+
+  proc storedFileSize*(path: string): int64 =
+    ## Size of `path` in bytes, 0 when it is missing or cannot be stat'ed.
+    try:
+      if fileExists(path): getFileSize(path) else: 0
+    except OSError:
+      0
 
   proc removeStoredFile*(path: string) {.inline.} =
     removeFile(path)
