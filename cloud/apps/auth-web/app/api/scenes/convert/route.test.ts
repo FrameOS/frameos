@@ -199,14 +199,27 @@ describe("POST /api/scenes/convert", () => {
     expect(rateLimitMock).not.toHaveBeenCalled();
   });
 
-  it("maps an OpenAI rejection of the caller's key to 400", async () => {
+  it("maps an OpenAI rejection of a signed-in caller's key to 400", async () => {
+    sessionMock.mockResolvedValue({ accountId: "acc-1", providerIssuer: "frameos-cloud", providerSubject: "me" });
+    const { ModelRequestError } = await vi.importActual<typeof import("@frameos-cloud/scene-convert")>("@frameos-cloud/scene-convert");
+    portMock.mockReturnValue((async () => {
+      throw new ModelRequestError("OpenAI answered 401: bad key", 401);
+    }) as ModelPort);
+    const response = await POST(request({ openaiApiKey: "sk-mine-0123456789abcdef", scene: vannituba }, { origin: "http://localhost:3000" }));
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_openai_key");
+    expect(telemetryMock).toHaveBeenCalledWith(expect.objectContaining({ error: "openai_401" }));
+  });
+
+  it("tells an anonymous caller nothing about why its key failed", async () => {
     const { ModelRequestError } = await vi.importActual<typeof import("@frameos-cloud/scene-convert")>("@frameos-cloud/scene-convert");
     portMock.mockReturnValue((async () => {
       throw new ModelRequestError("OpenAI answered 401: bad key", 401);
     }) as ModelPort);
     const response = await POST(request({ openaiApiKey: "sk-mine-0123456789abcdef", scene: vannituba }));
-    expect(response.status).toBe(400);
-    expect(((await response.json()) as { error: string }).error).toBe("invalid_openai_key");
+    expect(response.status).toBe(502);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload).toEqual({ error: "model_failed" });
     expect(telemetryMock).toHaveBeenCalledWith(expect.objectContaining({ error: "openai_401" }));
   });
 

@@ -22,6 +22,7 @@ import {
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getFrameAssets } from "../../../app/api/frames/[frameId]/assets/route";
 import { GET as getFrameAsset } from "../../../app/api/frames/[frameId]/asset/route";
+import { POST as sendCommand } from "../../../app/api/frames/[frameId]/command/route";
 import { DELETE as deleteFrame } from "../../../app/api/frames/[frameId]/route";
 import { POST as postFrameEvent } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
 import { POST as uploadFrameAsset } from "../../../app/api/frames/[frameId]/assets/upload/route";
@@ -324,7 +325,13 @@ describe("GET /api/frames/{id}/asset", () => {
 
   it("refuses traversal and absolute paths outright", async () => {
     const { frame } = await activeFrame();
-    for (const path of ["../secrets", "a/../../b", ""]) {
+    for (const path of [
+      "../secrets",
+      "a/../../b",
+      "",
+      "photos\\..\\secrets",
+      "photos/cat\u0000.jpg",
+    ]) {
       const response = await getFrameAsset(
         getRequest(
           `/api/frames/${frame.id}/asset?path=${encodeURIComponent(path)}`,
@@ -334,6 +341,36 @@ describe("GET /api/frames/{id}/asset", () => {
       expect(response.status).toBe(400);
     }
     expect(await commandsOfType(frame.id, "asset_get")).toHaveLength(0);
+  });
+
+  it("answers a cache miss on an offline frame at once, with the fetch queued", async () => {
+    // The long poll only makes sense toward a frame on the socket: an
+    // offline or sleeping one answers in minutes or hours, and a panel of
+    // thumbnails used to pin one 25 s request per <img> for nothing.
+    const { frame } = await activeFrame("active", false);
+    const started = Date.now();
+    const response = await getFrameAsset(
+      getRequest(`/api/frames/${frame.id}/asset?path=photos/cat.jpg`),
+      assetsParams(frame.id),
+    );
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toBe("frame_offline");
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // The device still gets asked on its next session.
+    expect(await commandsOfType(frame.id, "asset_get")).toHaveLength(1);
+
+    // A frame that announced a sleep is offline for the same reason.
+    const { frame: asleep } = await activeFrame("active", true);
+    await db
+      .update(frames)
+      .set({ nextWakeAt: new Date(Date.now() + 60 * 60 * 1000) })
+      .where(eq(frames.id, asleep.id));
+    const sleeping = await getFrameAsset(
+      getRequest(`/api/frames/${asleep.id}/asset?path=photos/cat.jpg`),
+      assetsParams(asleep.id),
+    );
+    expect(sleeping.status).toBe(503);
   });
 
   it("surfaces a device refusal instead of waiting out the poll", async () => {
@@ -535,6 +572,21 @@ describe("POST /api/frames/{id}/event/{event}", () => {
     expect(activate.status).toBe(200);
     const [sceneCommand] = await commandsOfType(frame.id, "set_current_scene");
     expect(sceneCommand!.payload).toEqual({ scene_id: runtimeSceneId });
+
+    // The generic /command route speaks the same translation: a store uuid
+    // forwarded verbatim made the device answer apply-failed while the
+    // queue said delivered.
+    const viaCommand = await sendCommand(
+      postJson(`/api/frames/${frame.id}/command`, {
+        scene_id: scene!.id,
+        type: "set_current_scene",
+      }),
+      assetsParams(frame.id),
+    );
+    expect(viaCommand.status).toBe(200);
+    expect(
+      (await commandsOfType(frame.id, "set_current_scene")).at(-1)!.payload,
+    ).toEqual({ scene_id: runtimeSceneId });
 
     // A runtime id (what "preview on frame" sends) passes through untouched.
     const direct = await postFrameEvent(

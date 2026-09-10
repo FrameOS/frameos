@@ -176,6 +176,9 @@ out of the live release so it follows every deploy. It deletes:
 - Device authorization requests past their expiry plus the retention window.
 - Expired FrameOS login handoff codes.
 - Expired or revoked sessions past the retention window.
+- Spent or expired password-reset and email-verification tokens past the
+  retention window (single-use one-hour links; the rows are only kept at
+  all so a replayed link is refused rather than unknown).
 - Spent or expired claim tokens and finished (`acked`/`failed`/`expired`)
   frame commands past the retention window; live commands whose TTL passed
   are marked expired.
@@ -261,11 +264,21 @@ timer until both are real:
   (`POST /api/admin/billing/nightly`; `cloud/docs/mcp.md`, "Job tokens").
   Not a person's token: that is revoked on their way out and the job dies
   with it, silently — and since 2026-09 a personal `fc_api_` token is
-  refused on the route anyway. Rotate by running the script again
-  (`--rotate`) and replacing the value. **After the deploy that introduced
-  job tokens, rotate once**: the superadmin token the job was installed
-  with on 2026-09-02 no longer works, and the script also clears the
-  service account's superadmin flag.
+  refused on the route anyway. **The token expires** — 90 days from
+  minting (`ACCOUNTING_TOKEN_TTL_DAYS` to change it), because a credential
+  that sits in a file on the ops box for years is the one nobody rotates.
+  The script prints the expiry date when it mints; the nightly response
+  carries `token_expires_at` / `token_expires_in_days` and
+  `accounting-nightly.sh` logs a `WARNING` for the last 14 days (visible in
+  `journalctl -u frameos-cloud-accounting`). Rotate before then: run the
+  script again with `--rotate` (revokes the live token, mints a new one),
+  put the new value in `accounting.env`, and run
+  `systemctl start frameos-cloud-accounting.service` once to prove it.
+  A token that lapsed fails the job with HTTP 401 and the dead-man ping
+  reports it; the fix is the same rotation. **After the deploy that
+  introduced job tokens, rotate once**: the superadmin token the job was
+  installed with on 2026-09-02 no longer works, and the script also clears
+  the service account's superadmin flag.
 - `ACCOUNTING_HEALTHCHECKS_URL`: a healthchecks.io ping, the same dead-man
   pattern the backup and uptime jobs use. **Required**, because the failure
   that matters is a night that never ran, and only something expecting a

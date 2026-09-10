@@ -8,6 +8,7 @@ import {
   supersedePendingCommands,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { sessionMayQueueDeviceCommands } from "../../../../../src/lib/device-command-access";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -90,7 +91,10 @@ export async function GET(
     !outstanding &&
     frame.status === "active" &&
     frame.connected &&
-    (wantRefresh || !listing)
+    (wantRefresh || !listing) &&
+    // A read-only token sees the stored listing and never asks for a new
+    // one (sessionMayQueueDeviceCommands).
+    sessionMayQueueDeviceCommands(session)
   ) {
     // Supersede rather than stack: expired-but-unswept rows of the same type
     // would otherwise pile up under a poller.

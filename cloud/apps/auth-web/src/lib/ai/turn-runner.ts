@@ -118,10 +118,12 @@ function finish(turn: Turn) {
   finishedTimers.get(turn.id)?.unref?.();
 }
 
-// Start a turn. `run` receives an emit and the turn's abort signal and does
-// the whole job (loop, persistence, final done/error event); the runner
-// never throws for it — a rejection is turned into an error event so no
-// turn ends without a terminal event for the client.
+// Start a turn. `run` receives an emit, the turn's abort signal and the Turn
+// itself (registered before `run` starts, so a callback inside it may abort
+// or inspect the turn without closing over the not-yet-returned result of
+// startTurn) and does the whole job (loop, persistence, final done/error
+// event); the runner never throws for it — a rejection is turned into an
+// error event so no turn ends without a terminal event for the client.
 //
 // `maxActivePerAccount` is the account's concurrency cap, checked HERE — in
 // the same synchronous step that registers the turn — rather than by the
@@ -132,7 +134,7 @@ export function startTurn(input: {
   id?: string;
   chatId: string;
   accountId: string;
-  run: (emit: (event: ChatStreamEvent) => void, signal: AbortSignal) => Promise<void>;
+  run: (emit: (event: ChatStreamEvent) => void, signal: AbortSignal, turn: Turn) => Promise<void>;
   onFinish?: (turn: Turn, outcome: "ok" | "error" | "stopped" | "timeout", error?: unknown) => void;
   maxMs?: number;
   maxActivePerAccount?: number;
@@ -174,7 +176,7 @@ export function startTurn(input: {
     let outcome: "ok" | "error" | "stopped" | "timeout" = "ok";
     let failure: unknown;
     try {
-      await input.run(emit, turn.controller.signal);
+      await input.run(emit, turn.controller.signal, turn);
     } catch (error) {
       failure = error;
       emit({
@@ -201,10 +203,22 @@ export function startTurn(input: {
   return turn;
 }
 
-export function stopTurn(turn: Turn) {
+export function stopTurn(turn: Turn, reason: TurnStoppedError = new TurnStoppedError()) {
   if (turn.finishedAt === null && !turn.controller.signal.aborted) {
-    turn.controller.abort(new TurnStoppedError());
+    turn.controller.abort(reason);
   }
+}
+
+// The chat a turn belongs to is going away (deleted by the user, evicted by
+// the per-account cap): stop its turn first so the loop ends as "stopped"
+// instead of running to completion and failing on the foreign key when it
+// persists the reply.
+export function stopTurnsForChat(chatId: string, detail: string) {
+  const turn = activeTurnForChat(chatId);
+  if (turn) {
+    stopTurn(turn, new TurnStoppedError(detail));
+  }
+  return turn;
 }
 
 // NDJSON relay of a turn's events from index `after` onward. Stays open until

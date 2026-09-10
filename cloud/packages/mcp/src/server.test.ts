@@ -358,13 +358,86 @@ describe("frameos-cloud MCP server", () => {
   it("filters and caps frame logs", async () => {
     const client = await connect();
     const result = await client.callTool({
-      arguments: { frame_id: frameId, limit: 5, search: "error" },
+      arguments: { frame_id: frameId, limit: 5, search: "error", since: "2026-09-10T10:00:00Z" },
       name: "frame_logs",
     });
     const payload = JSON.parse(textOf(result)) as { logs: { id: number }[]; matched: number; newest_id: number };
     expect(payload.matched).toBe(1);
     expect(payload.logs.map((entry) => entry.id)).toEqual([2]);
     expect(payload.newest_id).toBe(3);
+    // The narrowing travels to the cloud instead of pulling the whole window.
+    const query = new URL(calls[0]!.url).searchParams;
+    expect(Object.fromEntries(query)).toEqual({ limit: "5", search: "error", since: "2026-09-10T10:00:00Z" });
+  });
+
+  it("re-reads the store repository after a miss and after a scene is created", async () => {
+    const freshId = "cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let listed = false;
+    responders.push((call) => {
+      const path = new URL(call.url).pathname;
+      if (path === "/api/store/account/repository.json") {
+        return json({ templates: listed ? [{ id: "fresh", name: "Fresh", sceneId: freshId }] : [] });
+      }
+      if (path === "/api/account/scenes" && call.method === "POST") {
+        listed = true;
+        return json({ scene: { id: freshId, name: "Fresh" } });
+      }
+      if (path === `/api/store/scenes/${freshId}/scenes.json`) {
+        return json([{ id: "s", name: "Fresh" }]);
+      }
+      return undefined;
+    });
+    const client = await connect();
+    const repositoryFetches = () =>
+      calls.filter((call) => call.url.endsWith("/api/store/account/repository.json")).length;
+
+    // Warm the cache with a listing that has no "fresh": a cold miss is
+    // one fetch, a miss against the cached listing re-fetches once.
+    const cold = await client.callTool({ arguments: { scene: "fresh" }, name: "scene_get_content" });
+    expect(cold.isError).toBe(true);
+    expect(repositoryFetches()).toBe(1);
+    const cached = await client.callTool({ arguments: { scene: "fresh" }, name: "scene_get_content" });
+    expect(cached.isError).toBe(true);
+    expect(repositoryFetches()).toBe(2);
+
+    await client.callTool({ arguments: { scenes: [{ id: "s", name: "Fresh" }] }, name: "scene_create" });
+    const hit = await client.callTool({ arguments: { scene: "fresh" }, name: "scene_get_content" });
+    expect(hit.isError).toBeFalsy();
+    expect(JSON.parse(textOf(hit))).toEqual([{ id: "s", name: "Fresh" }]);
+    // The create dropped the cache: the hit came from one fresh fetch.
+    expect(repositoryFetches()).toBe(3);
+  });
+
+  it("explains the codes tools hit most", async () => {
+    responders.push((call) => {
+      const path = new URL(call.url).pathname;
+      if (path === `/api/frames/${frameId}/logs`) {
+        return json({ error: "invalid_frame" }, 404);
+      }
+      if (path === "/api/scenes/render") {
+        return json({ error: "scene_pulled" }, 410);
+      }
+      if (path === "/api/ai/chat") {
+        return json({ allowance: "shared", error: "daily_cap_reached", reset_at: "soon" }, 402);
+      }
+      if (path === "/api/scenes/convert") {
+        return json({ error: "too_many_scenes", max_scenes: 20 }, 400);
+      }
+      return undefined;
+    });
+    const client = await connect();
+    const frame = await client.callTool({ arguments: { frame_id: frameId }, name: "frame_logs" });
+    expect(textOf(frame)).toContain("404 invalid_frame");
+    expect(textOf(frame)).toContain("frames_list");
+    const pulled = await client.callTool({ arguments: { scene_id: sceneId }, name: "scene_render" });
+    expect(textOf(pulled)).toContain("410 scene_pulled");
+    expect(textOf(pulled)).toContain("store_browse");
+    const capped = await client.callTool({ arguments: { prompt: "a clock" }, name: "ai_scene_chat" });
+    expect(textOf(capped)).toContain("402 daily_cap_reached");
+    expect(textOf(capped)).toContain("account_settings_update");
+    const batch = await client.callTool({ arguments: { scenes: [{ id: "s", name: "S" }] }, name: "scene_convert" });
+    expect(textOf(batch)).toContain("400 too_many_scenes");
+    expect(textOf(batch)).toContain("Split it");
   });
 
   it("masks secrets in settings and offers no way to reveal them", async () => {

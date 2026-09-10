@@ -3,6 +3,7 @@ import { z } from "zod";
 import { confirmed } from "./confirm";
 import { failure, image, run, text, uuid, type ToolContext } from "../result";
 import {
+  forgetStoreRepository,
   resolveSceneSource,
   resolveStoreSceneId,
   sceneSourceSchema,
@@ -140,6 +141,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
               `/api/account/scenes/${storeId}/fork`,
               { body: { scenes } },
             );
+            forgetStoreRepository(ctx);
             return text({ ...forked, forked_from: storeId });
           }
         }
@@ -239,6 +241,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
           `/api/account/scenes/${scene_id}/content`,
           { body: { message: `Renamed to ${name}`, scenes } },
         );
+        forgetStoreRepository(ctx);
         return text({
           listing_renamed: saved.scene.name === name,
           previous_name: detail.scene.name,
@@ -261,6 +264,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
           `/api/account/scenes/${scene_id}`,
           { body: { visibility: makePublic === false ? "private" : "public" } },
         );
+        forgetStoreRepository(ctx);
         return text({ ...result, url: `${ctx.storeOrigin}/s/${result.scene.slug}` });
       }),
   );
@@ -274,7 +278,11 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
       inputSchema: { confirm: z.literal(true), scene_id: sceneId },
     },
     async ({ scene_id }) =>
-      run(async () => text(await api.json("DELETE", `/api/account/scenes/${scene_id}`))),
+      run(async () => {
+        const result = await api.json("DELETE", `/api/account/scenes/${scene_id}`);
+        forgetStoreRepository(ctx);
+        return text(result);
+      }),
   );
 
   server.registerTool(
@@ -291,9 +299,9 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
           return failure(`No store scene matches "${scene}".`);
         }
         const scenes = await fetchContent(id);
-        return text(
-          await api.json("POST", `/api/account/scenes/${id}/fork`, { body: { scenes } }),
-        );
+        const forked = await api.json("POST", `/api/account/scenes/${id}/fork`, { body: { scenes } });
+        forgetStoreRepository(ctx);
+        return text(forked);
       }),
   );
 

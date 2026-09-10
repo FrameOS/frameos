@@ -253,6 +253,15 @@ older "bytes are zero" form, a false alarm from before the move). A green
 drill says the rows and keys are back; whether the blobs behind the keys are
 recoverable is the object store's question, rehearsed separately below.
 
+The device plane is asserted on too (since 2026-09; before that only the
+account tables were, and a dump that lost every frame would have passed):
+frames must be present, active frames must have scene assignments, every
+frame's owner account and linked client must be there, frame asset rows
+must carry an object key or bytes, and the newest frame check-in must be
+under 30 days old — the "is this the right database?" check for the fleet.
+The row-count report lists the frame tables (assignments, commands, claim
+tokens, logs, metrics) and the AI chats next to the account ones.
+
 ### Bucket lock: `store-lock`, prefix `store/`, 30 days (enabled 2026-08-17)
 
 R2 has **no object versioning**. Its equivalent is a *bucket lock*: prefix-

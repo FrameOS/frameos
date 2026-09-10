@@ -22,6 +22,13 @@
 # superadmin `fc_api_` token could read every account, post journal entries
 # and grant superadmin from the ops box.
 #
+# The token EXPIRES (ACCOUNTING_TOKEN_TTL_DAYS, default 90): a credential
+# that sits in a file on the ops box for years is the one nobody remembers
+# to rotate, and api-tokens.ts already refuses an expired row. The nightly
+# job's response carries the expiry and accounting-nightly.sh warns for the
+# last two weeks; rotate with --rotate before then (operational-runbooks.md,
+# "The nightly accounting job").
+#
 # Prints the token ONCE. Put it in /etc/frameos-cloud/accounting.env as
 # ACCOUNTING_API_TOKEN. Uses DATABASE_URL from the environment or .env.local,
 # like grant-superadmin.sh — run it on the production box or over a tunnel.
@@ -44,6 +51,11 @@ fi
 email="${ACCOUNTING_SERVICE_EMAIL:-accounting-job@frameos.net}"
 name="${ACCOUNTING_SERVICE_NAME:-Accounting nightly job}"
 token_name="${ACCOUNTING_TOKEN_NAME:-nightly accounting job}"
+ttl_days="${ACCOUNTING_TOKEN_TTL_DAYS:-90}"
+if ! [[ "$ttl_days" =~ ^[0-9]+$ ]] || [ "$ttl_days" -lt 1 ]; then
+  echo "ACCOUNTING_TOKEN_TTL_DAYS must be a positive integer, got: $ttl_days" >&2
+  exit 1
+fi
 
 if [ -z "${DATABASE_URL:-}" ] && [ -f .env.local ]; then
   DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' .env.local | head -n 1)"
@@ -99,7 +111,7 @@ if [ "$identities" != "0" ]; then
 fi
 
 if [ "$rotate" = true ]; then
-  revoked="$(psql --tuples-only --no-align -v ON_ERROR_STOP=1 \
+  revoked="$(psql --quiet --tuples-only --no-align -v ON_ERROR_STOP=1 \
     --set=id="$account_id" --set=token_name="$token_name" <<'SQL'
 UPDATE account_api_tokens SET revoked_at = now(), updated_at = now()
  WHERE account_id = :'id' AND name = :'token_name' AND revoked_at IS NULL
@@ -109,20 +121,30 @@ SQL
   echo "Revoked: ${revoked:-nothing was live}"
 fi
 
-psql --tuples-only --no-align -v ON_ERROR_STOP=1 \
+expires_at="$(psql --quiet --tuples-only --no-align -v ON_ERROR_STOP=1 \
   --set=id="$account_id" --set=token_name="$token_name" --set=token_access="$token_access" \
-  --set=token_hash="$token_hash" --set=token_hint="$token_hint" >/dev/null <<'SQL'
-INSERT INTO account_api_tokens (account_id, name, access, token_hash, token_hint)
-VALUES (:'id', :'token_name', :'token_access', :'token_hash', :'token_hint');
-INSERT INTO audit_events (account_id, actor, event_type, target, metadata)
-VALUES (:'id', '{"kind":"script","script":"accounting-service-account.sh"}'::jsonb,
-        'api_token.created', json_build_object('accountId', :'id', 'kind', 'account')::jsonb,
-        json_build_object('name', :'token_name', 'tokenHint', :'token_hint')::jsonb);
+  --set=token_hash="$token_hash" --set=token_hint="$token_hint" --set=ttl_days="$ttl_days" <<'SQL'
+WITH minted AS (
+  INSERT INTO account_api_tokens (account_id, name, access, token_hash, token_hint, expires_at)
+  VALUES (:'id', :'token_name', :'token_access', :'token_hash', :'token_hint',
+          now() + make_interval(days => :'ttl_days'::int))
+  RETURNING expires_at
+), audited AS (
+  INSERT INTO audit_events (account_id, actor, event_type, target, metadata)
+  SELECT :'id', '{"kind":"script","script":"accounting-service-account.sh"}'::jsonb,
+         'api_token.created', json_build_object('accountId', :'id', 'kind', 'account')::jsonb,
+         json_build_object('name', :'token_name', 'tokenHint', :'token_hint',
+                           'expiresAt', to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))::jsonb
+  FROM minted
+)
+SELECT to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') FROM minted;
 SQL
+)"
 
 cat <<MSG
 Service account: $email ($account_id), not a superadmin
-Job token, access $token_access (shown once — put it in /etc/frameos-cloud/accounting.env as ACCOUNTING_API_TOKEN):
+Job token, access $token_access, expires $expires_at (${ttl_days} days; rotate before then with --rotate).
+Shown once — put it in /etc/frameos-cloud/accounting.env as ACCOUNTING_API_TOKEN:
 
   $token
 

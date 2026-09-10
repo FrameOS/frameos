@@ -404,7 +404,7 @@ describe("account storage usage and quotas", () => {
       [{ payload: { line: "fresh" }, timestamp: new Date() }],
       accountId,
     );
-    expect(stored).toBe(1);
+    expect(stored).toHaveLength(1);
 
     const remaining = await db
       .select({ payload: frameLogs.payload, sizeBytes: frameLogs.sizeBytes })
@@ -419,6 +419,40 @@ describe("account storage usage and quotas", () => {
     expect(labels).not.toContain("oldest");
     expect(labels).toContain("newest");
     expect(labels).toContain("fresh");
+  });
+
+  it("hands back only the lines of a batch that survived the cull", async () => {
+    // The hub broadcasts what storeFrameLogs returns. It used to re-select
+    // the newest N rows by count, so a batch partly eaten by the cull came
+    // back padded with older, already-broadcast lines.
+    const accountId = await signIn();
+    const quiet = await seedFrame(accountId, "-quiet");
+    const chatty = await seedFrame(accountId, "-chatty");
+    // The quiet frame's history leaves 10 KiB of headroom in the budget.
+    await db.insert(frameLogs).values({
+      frameId: quiet.id,
+      payload: { label: "quiet-history" },
+      sizeBytes: maxFrameLogBytesPerAccount - 10 * 1024,
+      timestamp: new Date(),
+    });
+    // Three ~6 KiB lines: only the newest fits the chatty frame's allowance.
+    const stored = await storeFrameLogs(
+      db,
+      chatty.id,
+      ["first", "second", "third"].map((label) => ({
+        payload: { label, pad: "x".repeat(6000) },
+        timestamp: new Date(),
+      })),
+      accountId,
+    );
+    expect(
+      stored.map((row) => (row.payload as Record<string, unknown>).label),
+    ).toEqual(["third"]);
+    const chattyRows = await db
+      .select({ id: frameLogs.id })
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, chatty.id));
+    expect(chattyRows.map((row) => row.id)).toEqual(stored.map((row) => row.id));
   });
 
   it("culls the overflowing frame's own logs before a quiet frame's history", async () => {

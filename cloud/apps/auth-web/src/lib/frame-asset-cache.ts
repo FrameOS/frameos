@@ -39,7 +39,11 @@ export function normalizeAssetPath(raw: string): string | undefined {
     path.split("/").includes("..") ||
     // NUL and the other control characters have no place in a path: they
     // end C strings early on the device side and smuggle newlines into logs.
-    hasControlCharacter(path)
+    hasControlCharacter(path) ||
+    // No client of this API ever spells a path with a backslash (the SPA and
+    // the MCP both build forward-slash paths from the device's own listing),
+    // so one is either a typo or a `..\` traversal aimed at a FAT card.
+    path.includes("\\")
   ) {
     return undefined;
   }

@@ -189,11 +189,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof ModelRequestError) {
       captureSceneConversion(telemetryRecord({ distinctId, error: `openai_${error.status}`, keySource, requestId, results: [], scenes: scenes.length, startedAt }));
-      if (keySource === "request" && (error.status === 401 || error.status === 403)) {
+      // Only a signed-in caller learns that OpenAI refused the key it
+      // passed. Anonymous callers get the generic failure with no status
+      // in it: the route needs no login, so a per-key verdict would make
+      // it a free oracle for testing whether stolen keys still work.
+      if (keySource === "request" && accountId && (error.status === 401 || error.status === 403)) {
         return jsonError("invalid_openai_key", 400, { detail: error.message });
       }
       logWarn("scenes.convert.model_failed", { requestId, status: error.status });
-      return jsonError("model_failed", 502, { detail: error.message });
+      return jsonError("model_failed", 502, accountId ? { detail: error.message } : undefined);
     }
     throw error;
   }
@@ -216,7 +220,7 @@ export async function POST(request: NextRequest) {
       if (reports[index]?.executionAfter !== "interpreted") {
         continue;
       }
-      render.push(await renderCheck(scene));
+      render.push(await renderCheck(scene, accountId ?? clientKey(request)));
     }
   }
 
@@ -315,10 +319,11 @@ export function GET() {
 
 type RenderCheck = { sceneId: string; ok: boolean; renderMs: number | null; errors: string[]; logs: string[] };
 
-async function renderCheck(scene: Scene): Promise<RenderCheck> {
+async function renderCheck(scene: Scene, owner: string): Promise<RenderCheck> {
   try {
     const result = await renderScenes({
       height: 480,
+      owner,
       scenes: [scene],
       timeoutMs: renderTimeoutMs,
       width: 800,

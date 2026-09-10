@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../src/lib/blobs";
+import { csrfResponse } from "../../../../src/lib/csrf";
 import {
   jsonError,
   readJsonObject,
@@ -39,7 +40,11 @@ const maxScenesPerRender = 20;
 // scene under the store's own access rules — public ones for everyone
 // signed in, private ones for their owner — and `scenes` renders JSON that
 // was never saved. Signed-in only and rate limited per account: a render
-// holds a 64 MB wasm heap for up to `timeout` seconds.
+// holds a 64 MB wasm heap for up to `timeout` seconds. Read-only in effect
+// but a POST, so it runs the same Origin check as every other
+// cookie-authenticated POST (csrfResponse): the session cookie's SameSite
+// alone should not be what keeps another site from spending an account's
+// render budget.
 //
 // Body: { scene_id? | scenes?, version?, scene?, width?, height?, time_zone?,
 //         settings?, states?, format?: "png" | "json" }
@@ -52,6 +57,10 @@ export async function POST(request: NextRequest) {
   });
   if (limited) {
     return limited;
+  }
+  const csrf = csrfResponse(request);
+  if (csrf) {
+    return csrf;
   }
   const session = await readSession();
   if (!session?.accountId) {
@@ -122,6 +131,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await renderScenes({
       height,
+      owner: session.accountId,
       sceneId: selectedScene,
       scenes,
       settings,
@@ -162,15 +172,21 @@ export async function POST(request: NextRequest) {
       const status =
         error.code === "renderer_busy"
           ? 503
-          : error.code === "renderer_unavailable"
-            ? 501
-            : error.code === "render_timeout"
-              ? 504
-              : 422;
-      return jsonError(error.code, status, {
+          : error.code === "render_concurrency_limit"
+            ? 429
+            : error.code === "renderer_unavailable"
+              ? 501
+              : error.code === "render_timeout"
+                ? 504
+                : 422;
+      const response = jsonError(error.code, status, {
         detail: error.message,
         logs: error.logs,
       });
+      if (status === 429 || status === 503) {
+        response.headers.set("retry-after", "5");
+      }
+      return response;
     }
     throw error;
   }

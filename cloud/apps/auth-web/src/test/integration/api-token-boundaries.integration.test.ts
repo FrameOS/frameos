@@ -9,6 +9,9 @@ import {
   accountIdentities,
   accounts,
   createDb,
+  frameCommands,
+  frames,
+  linkedClients,
   passwordProviderIssuer,
   sessions,
 } from "@frameos-cloud/db";
@@ -24,6 +27,9 @@ import { POST as passkeyOptions } from "../../../app/api/account/two-factor/pass
 import { POST as beginTotp } from "../../../app/api/account/two-factor/totp/route";
 import { POST as confirmTotp } from "../../../app/api/account/two-factor/totp/confirm/route";
 import { GET as adminUsers } from "../../../app/api/admin/users/route";
+import { GET as frameAsset } from "../../../app/api/frames/[frameId]/asset/route";
+import { GET as frameAssets } from "../../../app/api/frames/[frameId]/assets/route";
+import { GET as frameImage } from "../../../app/api/frames/[frameId]/image/route";
 import { totpCodeAtStep, totpStepFor } from "../../lib/two-factor";
 import { POST as signup } from "../../../app/api/auth/signup/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -242,6 +248,84 @@ describe("what a personal API token may not do", () => {
     );
     expect(withToken.status).toBe(403);
     expect((await withToken.json()).error).toBe("forbidden");
+  });
+});
+
+describe("a read-only token may look but not ask the device", () => {
+  // Several GETs queue a device command on a cache miss (asset bytes, the
+  // asset listing, the current image). A read-only token gets what the hub
+  // already caches and never puts work on the frame's queue.
+  async function frameFor(accountId: string) {
+    const [client] = await db
+      .insert(linkedClients)
+      .values({
+        accountId,
+        clientKind: "frame",
+        providerClientMetadata: { requestedScopes: ["frame:managed"] },
+        publicDisplayName: "Token frame",
+        tokenReference: hashSecret(`fc_link_token_${accountId}`),
+      })
+      .returning();
+    const [frame] = await db
+      .insert(frames)
+      .values({
+        accountId,
+        connected: true,
+        linkedClientId: client!.id,
+        name: "Token frame",
+        publicKey: Buffer.alloc(32, 7).toString("base64"),
+        status: "active",
+      })
+      .returning();
+    return frame!;
+  }
+  const params = (frameId: string) => ({ params: Promise.resolve({ frameId }) });
+  const queued = async (frameId: string) =>
+    (
+      await db
+        .select({ type: frameCommands.type })
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frameId))
+    ).map((row) => row.type);
+
+  it("never queues a device command from a GET", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const frame = await frameFor(accountId);
+    await establishSession(accountId, email);
+    const minted = await createApiToken(
+      request("/api/account/api-tokens", { access: "read_only", name: "dash" }),
+    );
+    const { token } = (await minted.json()) as { token: string };
+    cookieJar.clear();
+    requestHeaders.set("authorization", `Bearer ${token}`);
+
+    const asset = await frameAsset(
+      request(`/api/frames/${frame.id}/asset?path=photos/cat.jpg`, undefined, "GET"),
+      params(frame.id),
+    );
+    expect(asset.status).toBe(403);
+    expect(await asset.json()).toMatchObject({ error: "read_only_token" });
+    const image = await frameImage(
+      request(`/api/frames/${frame.id}/image?t=${Date.now()}`, undefined, "GET"),
+      params(frame.id),
+    );
+    expect(image.status).toBe(403);
+    const listing = await frameAssets(
+      request(`/api/frames/${frame.id}/assets?refresh=1`, undefined, "GET"),
+      params(frame.id),
+    );
+    expect(listing.status).toBe(200);
+    expect(await listing.json()).toEqual({ assets: [] });
+    expect(await queued(frame.id)).toEqual([]);
+
+    // A full token asks the device like the browser would.
+    await switchToApiToken(accountId, email);
+    const refreshed = await frameAssets(
+      request(`/api/frames/${frame.id}/assets?refresh=1`, undefined, "GET"),
+      params(frame.id),
+    );
+    expect(refreshed.status).toBe(200);
+    expect(await queued(frame.id)).toEqual(["assets_list"]);
   });
 });
 

@@ -5,7 +5,8 @@ cd "$(dirname "$0")/.."
 
 # Prunes rows that only exist for protocol bookkeeping and accumulate without
 # bound: finished/expired device authorization requests, expired login handoff
-# codes, and expired or revoked sessions. Audit and consent events are kept
+# codes, expired or revoked sessions, and spent or expired password-reset and
+# email-verification tokens. Audit and consent events are kept
 # while their account exists; the security trail of a DELETED account (its
 # account_id went NULL with the deletion) is kept for the period the privacy
 # policy promises and then removed. Run periodically (e.g. daily via cron);
@@ -71,6 +72,19 @@ DELETE FROM sessions
 WHERE expires_at < now() - make_interval(days => :'retention_days'::int)
    OR (revoked_at IS NOT NULL
        AND revoked_at < now() - make_interval(days => :'retention_days'::int));
+
+-- Single-use email tokens: a row is spent the moment it is used and worthless
+-- the moment it expires (both are ~1 h links). Until this they only grew —
+-- one row per password reset ever requested and per signup ever made.
+DELETE FROM password_reset_tokens
+WHERE expires_at < now() - make_interval(days => :'retention_days'::int)
+   OR (used_at IS NOT NULL
+       AND used_at < now() - make_interval(days => :'retention_days'::int));
+
+DELETE FROM email_verification_tokens
+WHERE expires_at < now() - make_interval(days => :'retention_days'::int)
+   OR (used_at IS NOT NULL
+       AND used_at < now() - make_interval(days => :'retention_days'::int));
 
 -- Cloud-managed frames: spent/expired claim tokens, finished/expired queue
 -- entries, and aged log retention (the per-frame row cap is enforced at

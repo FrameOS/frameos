@@ -483,7 +483,7 @@ async function replayEnrollment(
     ),
   );
   const [existing] = await db
-    .select({ frame: frames })
+    .select({ frame: frames, linkedClient: linkedClients })
     .from(frames)
     .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
     .where(
@@ -519,7 +519,11 @@ async function replayEnrollment(
   return NextResponse.json({
     access_token: accessToken.token,
     frame_id: existing.frame.id,
-    scope: claimTokenScopeString,
+    // The link's CURRENT scopes, not the mint-time grant: the owner may have
+    // switched a scope off between the original enrollment and this retry
+    // (the frame is replayable for 15 minutes after going active), and the
+    // device stores whatever string it gets here as its local scope list.
+    scope: linkedClientScopes(existing.linkedClient).join(" "),
     status: existing.frame.status,
     token_type: "Bearer",
     ws_path: wsPath,
@@ -710,16 +714,10 @@ async function enrollLinkedFrame(
       );
   }
 
-  const [existing] = await db
-    .select()
-    .from(frames)
-    .where(eq(frames.linkedClientId, linkedClient.id))
-    .limit(1);
-
-  if (existing) {
-    // Re-registering an existing enrollment may refresh metadata, but never
-    // the public key: a stolen bearer token must not be able to swap in an
-    // attacker's key and take over the challenge/response identity.
+  // Re-registering an existing enrollment may refresh metadata, but never
+  // the public key: a stolen bearer token must not be able to swap in an
+  // attacker's key and take over the challenge/response identity.
+  const reregister = async (existing: typeof frames.$inferSelect) => {
     if (existing.publicKey !== input.publicKey) {
       return jsonError("public_key_mismatch", 409);
     }
@@ -741,6 +739,19 @@ async function enrollLinkedFrame(
       ws_path: wsPath,
       ...(wsUrl ? { ws_url: wsUrl } : {}),
     });
+  };
+  const existingFrame = async () => {
+    const [existing] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.linkedClientId, linkedClient.id))
+      .limit(1);
+    return existing;
+  };
+
+  const existing = await existingFrame();
+  if (existing) {
+    return reregister(existing);
   }
 
   const limits = await accountLimits(db, linkedClient.accountId);
@@ -762,6 +773,13 @@ async function enrollLinkedFrame(
   }
 
   // The device-flow consent screen already proved ownership → born active.
+  //
+  // One frame per link (frames_linked_client_unique). A device that retries
+  // its first enrollment before the first response lands — or two boots of
+  // the same card racing each other — used to hit that index from the second
+  // insert and get a 500 for a frame that does exist. The insert yields to
+  // the row that won, and the loser re-registers against it like any later
+  // call would (same key check, same metadata refresh).
   const [frame] = await db
     .insert(frames)
     .values({
@@ -773,9 +791,14 @@ async function enrollLinkedFrame(
       publicKey: input.publicKey,
       status: "active",
     })
+    .onConflictDoNothing({ target: frames.linkedClientId })
     .returning();
   if (!frame) {
-    return jsonError("frame_insert_failed", 500);
+    const raced = await existingFrame();
+    if (!raced) {
+      return jsonError("frame_insert_failed", 500);
+    }
+    return reregister(raced);
   }
 
   await recordAuditEvent(db, {

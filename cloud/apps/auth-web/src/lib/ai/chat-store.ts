@@ -4,6 +4,7 @@
 // is refused, never adopted.
 import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { aiChatMessages, aiChats, createDb } from "@frameos-cloud/db";
+import { stopTurnsForChat } from "./turn-runner";
 
 type Database = ReturnType<typeof createDb>;
 
@@ -48,6 +49,40 @@ export function boundMessageForStorage(message: PersistedMessage): {
   }
   return { content, payload, truncated };
 }
+export const maxChatTitleChars = 60;
+
+// A chat's title is its first user message, cut to one line: what the drawer
+// lists it under. Pure so the rule is unit-testable.
+export function deriveChatTitle(prompt: string): string | null {
+  const line = prompt.replace(/\s+/g, " ").trim();
+  if (!line) {
+    return null;
+  }
+  if (line.length <= maxChatTitleChars) {
+    return line;
+  }
+  const cut = line.slice(0, maxChatTitleChars);
+  if (line[maxChatTitleChars] === " ") {
+    return `${cut}…`;
+  }
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > maxChatTitleChars / 2 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+// postgres.js surfaces SQLSTATE on `code` (drizzle wraps it as `cause`);
+// 23503 = foreign_key_violation, which is what an insert into
+// ai_chat_messages raises once the chat row is gone (deleted or evicted
+// while its turn was still running).
+export function isForeignKeyViolation(error: unknown): boolean {
+  for (let depth = 0; depth < 4 && typeof error === "object" && error !== null; depth += 1) {
+    if ((error as { code?: unknown }).code === "23503") {
+      return true;
+    }
+    error = (error as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 const chatIdPattern = /^[0-9a-f-]{36}$/i;
 
 export function isChatId(value: unknown): value is string {
@@ -121,33 +156,59 @@ export async function ensureChat(
     .offset(maxChatsPerAccount);
   if (stale.length > 0) {
     for (const chat of stale) {
-      await db.delete(aiChats).where(eq(aiChats.id, chat.id));
+      await deleteChat(db, chat.id, "This chat was removed to make room for newer ones.");
     }
   }
   return created;
 }
 
+// Deletes a chat (its messages cascade). A turn still running on it is
+// stopped first, so it ends as "stopped" rather than failing on the foreign
+// key when it tries to persist its reply.
+export async function deleteChat(
+  db: Database,
+  chatId: string,
+  stopDetail = "The chat was deleted.",
+) {
+  stopTurnsForChat(chatId, stopDetail);
+  await db.delete(aiChats).where(eq(aiChats.id, chatId));
+}
+
+// Persists one message. Returns false — and writes nothing — when the chat
+// row no longer exists: a turn whose chat was deleted while it ran must not
+// surface that as a failure of its own.
 export async function appendChatMessage(
   db: Database,
   chatId: string,
   message: PersistedMessage,
-) {
+): Promise<boolean> {
   const bounded = boundMessageForStorage(message);
-  await db.insert(aiChatMessages).values({
-    chatId,
-    content: bounded.content,
-    payload: bounded.payload,
-    role: message.role,
-    tool: message.tool ?? null,
-  });
+  try {
+    await db.insert(aiChatMessages).values({
+      chatId,
+      content: bounded.content,
+      payload: bounded.payload,
+      role: message.role,
+      tool: message.tool ?? null,
+    });
+  } catch (error) {
+    if (isForeignKeyViolation(error)) {
+      return false;
+    }
+    throw error;
+  }
+  // The first user message names the chat; later ones leave the title alone.
+  const title = message.role === "user" ? deriveChatTitle(message.content) : null;
   await db
     .update(aiChats)
     .set({
       messageCount: sql`${aiChats.messageCount} + 1`,
+      ...(title ? { title: sql`coalesce(${aiChats.title}, ${title})` } : {}),
       updatedAt: new Date(),
     })
     .where(eq(aiChats.id, chatId));
-  // Cap messages per chat (keep the newest window).
+  // Cap messages per chat (keep the newest window). message_count follows
+  // what is actually retained, not the number ever written.
   const [cutoff] = await db
     .select({ id: aiChatMessages.id })
     .from(aiChatMessages)
@@ -161,7 +222,14 @@ export async function appendChatMessage(
       .where(
         and(eq(aiChatMessages.chatId, chatId), lt(aiChatMessages.id, cutoff.id + 1)),
       );
+    await db
+      .update(aiChats)
+      .set({
+        messageCount: sql`(select count(*)::int from ${aiChatMessages} where ${aiChatMessages.chatId} = ${aiChats.id})`,
+      })
+      .where(eq(aiChats.id, chatId));
   }
+  return true;
 }
 
 export async function listChats(

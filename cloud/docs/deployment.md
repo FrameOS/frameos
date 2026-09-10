@@ -153,6 +153,7 @@ Releases are directories rather than an in-place swap:
 /opt/frameos-cloud.instances/<port>        symlink: what that instance runs
 /opt/frameos-cloud                         symlink -> active release
 /opt/frameos-cloud.previous                symlink -> previous release
+/opt/frameos-cloud.history                 the releases that were live, in order
 ```
 
 The per-instance symlink is what makes `Restart=always` safe: a crashed
@@ -197,7 +198,7 @@ Useful on the box:
 ```sh
 frameos-cloud-update --status       # active port, release, both instances
 frameos-cloud-update --release-ref  # just the live ref name, one line
-frameos-cloud-update --rollback     # flip back to the previous release
+frameos-cloud-update --rollback     # go back one release; repeatable (a stack)
 ```
 
 Anything that moves traffic (`--archive`, `--rollback`, `--activate`) takes a
@@ -240,8 +241,15 @@ health check requires all three public origins to return a 2xx or 3xx response.
 
 To roll back, run `frameos-cloud-update --rollback` on the host. It takes the
 same path a deploy does — previous release up on the idle port, health gate,
-nginx flip — so a rollback is not an outage either. Database migrations are
-not rolled back. The pre-monorepo pnpm-based release is not
+nginx flip — so a rollback is not an outage either. It is a **stack, not a
+toggle**: `/opt/frameos-cloud.history` records every release that went live,
+in order, and each rollback pops the one being left, so a second `--rollback`
+goes one release further back rather than forward to the one just abandoned
+(`--status` prints the stack under `rollback stack:`). It reaches as far as
+pruning has kept release directories (`FRAMEOS_CLOUD_KEEP_RELEASES`, 5); a
+rollback whose target never becomes healthy leaves the stack as it was, so a
+retry sees the same target. Deploying again pushes onto the stack from
+wherever you are. Database migrations are not rolled back. The pre-monorepo pnpm-based release is not
 startable by the current unit; the cutover-era backups
 (`frameos-cloud-update.pre-monorepo`,
 `frameos-cloud-auth-web.service.pre-monorepo`) would have to be restored to
@@ -437,8 +445,13 @@ One-time host setup — create `/etc/systemd/system/frameos-cloud-frame-hub.serv
 ```ini
 [Unit]
 Description=FrameOS Cloud frame hub
-After=network-online.target
+# Same ordering as frameos-cloud-auth-web@.service: the hub opens its
+# Postgres pool at start-up, and without these a reboot races it against
+# the database (a crash-loop until RestartSec catches up, and every frame
+# reconnecting into it).
+After=network-online.target postgresql.service
 Wants=network-online.target
+Requires=postgresql.service
 
 [Service]
 Type=simple

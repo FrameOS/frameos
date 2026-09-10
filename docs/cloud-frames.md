@@ -123,7 +123,9 @@ hits the quota can retry the same token once the owner frees a slot.
 Retrying is safe: a repeat of the same `(claim_token, public_key)` pair while
 the frame is still pending is idempotent and returns the same `frame_id` with
 a usable access token, so a response lost in flight does not strand the
-device. The same token presented with a *different* device key is refused as
+device. The replay's `scope` is the link's *current* grant (an owner may have
+switched a scope off in between), never the mint-time one. The same token
+presented with a *different* device key is refused as
 `400 invalid_claim_token` — indistinguishable from an unknown token on
 purpose, since that is a different device, not a retry. (`409
 public_key_mismatch` is the answer on the *bearer* re-registration path: an

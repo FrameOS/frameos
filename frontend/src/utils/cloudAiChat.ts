@@ -106,8 +106,23 @@ export class CloudAiChatTransportError extends Error {
   }
 }
 
-const RESUME_ATTEMPTS = 5
-const RESUME_DELAYS_MS = [500, 1500, 3000, 5000, 8000]
+// How long the client keeps re-attaching to a turn it lost the stream of:
+// the cloud's turn ceiling (turn-runner.ts TURN_MAX_MS, 15 min) plus a
+// margin for the last relay. A failure between here and the server can last
+// minutes while the turn keeps running, so the budget is the turn's
+// lifetime, not a few seconds.
+export const RESUME_BUDGET_MS = 16 * 60 * 1000
+// Consecutive attempts that reached no relay at all (fetch threw, or a
+// status other than 200/404) before giving up. Resets whenever the server
+// answered 200 — it knew the turn and it was still running.
+export const RESUME_ATTEMPTS = 30
+// Backoff (ms) by consecutive failures, capped at the last entry; a drop
+// right after a successful re-attach retries at once.
+const RESUME_DELAYS_MS = [500, 1500, 3000, 5000, 8000, 10000]
+
+export function resumeDelayMs(consecutiveFailures: number): number {
+  return RESUME_DELAYS_MS[Math.min(Math.max(consecutiveFailures, 0), RESUME_DELAYS_MS.length - 1)] ?? 10000
+}
 
 async function readNdjson(body: ReadableStream<Uint8Array>, onLine: (line: string) => Promise<void>): Promise<void> {
   const reader = body.getReader()
@@ -132,9 +147,19 @@ async function readNdjson(body: ReadableStream<Uint8Array>, onLine: (line: strin
 export async function streamCloudAiChat(
   request: CloudAiChatRequest,
   onEvent: (event: CloudAiChatEvent) => void | Promise<void>,
-  options: { onResume?: (info: { attempt: number; elapsedMs: number }) => void } = {}
+  options: {
+    onResume?: (info: { attempt: number; elapsedMs: number }) => void
+    resumeAttempts?: number
+    resumeBudgetMs?: number
+    sleep?: (ms: number) => Promise<void>
+    now?: () => number
+  } = {}
 ): Promise<void> {
-  const startedAt = Date.now()
+  const resumeAttempts = options.resumeAttempts ?? RESUME_ATTEMPTS
+  const resumeBudgetMs = options.resumeBudgetMs ?? RESUME_BUDGET_MS
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const now = options.now ?? (() => Date.now())
+  const startedAt = now()
   let turnId: string | undefined
   let received = 0
   let finished = false
@@ -184,25 +209,33 @@ export async function streamCloudAiChat(
     return
   }
   if (!turnId) {
-    throw new CloudAiChatTransportError(Date.now() - startedAt)
+    throw new CloudAiChatTransportError(now() - startedAt)
   }
-  for (let attempt = 1; attempt <= RESUME_ATTEMPTS; attempt += 1) {
-    options.onResume?.({ attempt, elapsedMs: Date.now() - startedAt })
-    await new Promise((resolve) =>
-      setTimeout(resolve, RESUME_DELAYS_MS[Math.min(attempt, RESUME_DELAYS_MS.length) - 1])
-    )
+  // Re-attach until the turn reports done/error, the server says the turn
+  // is gone (404), the consecutive-failure cap is hit, or the budget runs
+  // out — whichever first. A 200 (even one that dropped again without a
+  // terminal event) means the turn was still there and resets the cap.
+  let attempts = 0
+  let consecutiveFailures = 0
+  while (consecutiveFailures < resumeAttempts && now() - startedAt < resumeBudgetMs) {
+    attempts += 1
+    options.onResume?.({ attempt: attempts, elapsedMs: now() - startedAt })
+    await sleep(resumeDelayMs(consecutiveFailures))
     let resumed: Response
     try {
       resumed = await apiFetch(`/api/ai/chat/turns/${encodeURIComponent(turnId)}?after=${received}`)
     } catch {
+      consecutiveFailures += 1
       continue
     }
     if (resumed.status === 404) {
       break
     }
     if (!resumed.ok || !resumed.body) {
+      consecutiveFailures += 1
       continue
     }
+    consecutiveFailures = 0
     try {
       await readNdjson(resumed.body, handleLine)
     } catch {
@@ -212,5 +245,5 @@ export async function streamCloudAiChat(
       return
     }
   }
-  throw new CloudAiChatTransportError(Date.now() - startedAt, turnId)
+  throw new CloudAiChatTransportError(now() - startedAt, turnId)
 }

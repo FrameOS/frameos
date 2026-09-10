@@ -92,7 +92,10 @@ Pass criteria (the script checks each and exits non-zero on any):
   after `/healthz` answers there; consecutive deploys alternate ports.
 - A release that never becomes healthy, a failing migration, and an `nginx
 -t` failure each leave the upstream and the live release untouched.
-- `--rollback` returns to the previous release the same way.
+- `--rollback` returns to the previous release the same way, and a second
+  one goes a release further back (a stack, not a toggle); an empty stack is
+  refused, a rollback to an unhealthy release fails without consuming the
+  stack, and a deploy afterwards pushes onto it.
 - The frame hub is restarted when its bundle changed and left running when it
   did not, so a merge that does not touch `apps/frame-hub` costs the fleet no
   reconnects.

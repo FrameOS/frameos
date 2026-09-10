@@ -6,6 +6,7 @@ import {
   validateAppKeywords,
   validateScenePayload,
 } from "../../../../src/lib/ai/scene-utils";
+import { csrfResponse } from "../../../../src/lib/csrf";
 import { jsonError, readJsonObject } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
@@ -18,7 +19,8 @@ const maxLintBytes = 3 * 1024 * 1024;
 // The AI chat's delivery gate, exposed: the shape validation, the app
 // keyword check against the bundled catalog and the deep structural lint,
 // on any scenes JSON. Read-only — nothing is saved — but signed-in only, so
-// the cost of linting a 3 MB payload has an account behind it. Body:
+// the cost of linting a 3 MB payload has an account behind it, and a POST,
+// so it runs the Origin check every cookie-authenticated POST runs. Body:
 // {"scenes": [...]}; the reply separates hard errors (what publishing and
 // the AI refuse) from warnings (what merely looks off).
 export async function POST(request: NextRequest) {
@@ -28,6 +30,10 @@ export async function POST(request: NextRequest) {
   });
   if (limited) {
     return limited;
+  }
+  const csrf = csrfResponse(request);
+  if (csrf) {
+    return csrf;
   }
   const session = await readSession();
   if (!session?.accountId) {

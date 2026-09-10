@@ -1,9 +1,10 @@
 "use client";
 
-import { Eye, EyeOff, MoreHorizontal, Trash2 } from "lucide-react";
+import { Eye, EyeOff, MoreHorizontal, Trash2, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import posthog from "posthog-js";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ownerActionErrorMessage } from "./ownerActionError";
 
 // env.ts's myScenesPath, repeated here so this client component does not pull
@@ -11,9 +12,9 @@ import { ownerActionErrorMessage } from "./ownerActionError";
 const myScenesPath = "/my-scenes";
 
 // What an owner action came to: the request went through, the owner
-// backed out of the confirm dialog, or the server refused it (with `error`
-// set for display).
-type ActionOutcome = "done" | "cancelled" | "failed";
+// backed out of the confirm dialog, the server refused it (with `error`
+// set for display), or it handed off to a dialog of its own.
+type ActionOutcome = "done" | "cancelled" | "failed" | "pending";
 
 type StoreSceneActionsProps = {
   name: string;
@@ -84,27 +85,153 @@ function useStoreSceneActions({
     return ok ? "done" : "failed";
   }
 
-  async function remove(): Promise<ActionOutcome> {
-    if (
-      !window.confirm(
-        `Delete "${name}" from the store? All published versions disappear for everyone. This cannot be undone.`,
-      )
-    ) {
-      return "cancelled";
-    }
+  // Deleting is the one owner action that is not undoable — versions are
+  // immutable and a broken one is yanked, not deleted — so it gets a real
+  // dialog that spells out what goes and asks for the scene's name, not a
+  // browser confirm the finger clicks through.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  function remove(): Promise<ActionOutcome> {
+    setError(null);
+    setConfirmingDelete(true);
+    return Promise.resolve("pending");
+  }
+
+  async function confirmDelete(): Promise<void> {
     const ok = await call({ method: "DELETE" }, { refresh: false });
     if (ok) {
       posthog.capture("scene_deleted", { scene_id: sceneId });
+      setConfirmingDelete(false);
       if (pathname === myScenesPath) {
         router.refresh();
       } else {
         router.replace(myScenesPath);
       }
     }
-    return ok ? "done" : "failed";
   }
 
-  return { busy, error, remove, toggleVisibility };
+  const deleteDialog = confirmingDelete ? (
+    <DeleteSceneDialog
+      busy={busy}
+      error={error}
+      name={name}
+      onCancel={() => {
+        setConfirmingDelete(false);
+        setError(null);
+      }}
+      onConfirm={() => void confirmDelete()}
+    />
+  ) : null;
+
+  return { busy, deleteDialog, error, remove, toggleVisibility };
+}
+
+type DeleteSceneDialogProps = {
+  busy: boolean;
+  error: string | null;
+  name: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+export function DeleteSceneDialog({
+  busy,
+  error,
+  name,
+  onCancel,
+  onConfirm,
+}: DeleteSceneDialogProps) {
+  const [typed, setTyped] = useState("");
+  const matches = typed.trim() === name.trim();
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancelRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  return createPortal(
+    <div
+      aria-label={`Delete ${name}`}
+      aria-modal
+      className="dialog"
+      onClick={onCancel}
+      role="dialog"
+    >
+      <div className="dialog__panel" onClick={(event) => event.stopPropagation()}>
+        <div className="dialog__head">
+          <h2>Delete {name}?</h2>
+          <button
+            aria-label="Close"
+            className="dialog__close"
+            onClick={onCancel}
+            type="button"
+          >
+            <X aria-hidden size={18} />
+          </button>
+        </div>
+        <form
+          className="stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (matches && !busy) {
+              onConfirm();
+            }
+          }}
+        >
+          <p className="copy">
+            Every published version of this scene disappears from the store
+            for everyone, along with its page, its share links and its version
+            history. Frames that installed it keep the copy they have but stop
+            receiving updates. This cannot be undone — to retire one bad
+            version and keep the rest, yank that version instead.
+          </p>
+          <div className="field">
+            <label htmlFor="delete-scene-name">
+              Type <strong>{name}</strong> to confirm
+            </label>
+            <input
+              autoComplete="off"
+              autoFocus
+              className="input"
+              disabled={busy}
+              id="delete-scene-name"
+              onChange={(event) => setTyped(event.target.value)}
+              placeholder={name}
+              type="text"
+              value={typed}
+            />
+          </div>
+          {error ? <p className="pill pill-warning">{error}</p> : null}
+          <div className="button-row">
+            <button
+              className="button button-danger"
+              disabled={!matches || busy}
+              type="submit"
+            >
+              <Trash2 aria-hidden size={16} />
+              {busy ? "Deleting…" : "Delete scene"}
+            </button>
+            <button
+              className="button button--subtle"
+              disabled={busy}
+              onClick={onCancel}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 // Owner controls for one published scene as a row of buttons (the account
@@ -115,11 +242,12 @@ export function StoreSceneActions({
   status,
   visibility,
 }: StoreSceneActionsProps) {
-  const { busy, error, remove, toggleVisibility } = useStoreSceneActions({
-    name,
-    sceneId,
-    visibility,
-  });
+  const { busy, deleteDialog, error, remove, toggleVisibility } =
+    useStoreSceneActions({
+      name,
+      sceneId,
+      visibility,
+    });
 
   return (
     <div className="inline-actions">
@@ -147,7 +275,10 @@ export function StoreSceneActions({
         <Trash2 aria-hidden size={16} />
         Delete
       </button>
-      {error ? <span className="pill pill-warning">{error}</span> : null}
+      {error && !deleteDialog ? (
+        <span className="pill pill-warning">{error}</span>
+      ) : null}
+      {deleteDialog}
     </div>
   );
 }
@@ -161,11 +292,12 @@ export function StoreSceneMenu({
   status,
   visibility,
 }: StoreSceneActionsProps) {
-  const { busy, error, remove, toggleVisibility } = useStoreSceneActions({
-    name,
-    sceneId,
-    visibility,
-  });
+  const { busy, deleteDialog, error, remove, toggleVisibility } =
+    useStoreSceneActions({
+      name,
+      sceneId,
+      visibility,
+    });
   const [open, setOpen] = useState(false);
   const [panelPosition, setPanelPosition] = useState({ right: 0, top: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -194,7 +326,8 @@ export function StoreSceneMenu({
 
   // The menu stays open while a request runs (its items are disabled) and
   // after a refusal, so the error pill has somewhere to live; it closes when
-  // the action went through or the owner backed out of the confirm.
+  // the action went through, the owner backed out of the confirm, or a
+  // dialog of its own took over (delete).
   async function run(action: () => Promise<ActionOutcome>) {
     if ((await action()) !== "failed") {
       setOpen(false);
@@ -258,6 +391,7 @@ export function StoreSceneMenu({
           ) : null}
         </div>
       ) : null}
+      {deleteDialog}
     </div>
   );
 }

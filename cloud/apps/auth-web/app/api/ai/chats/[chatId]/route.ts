@@ -1,7 +1,5 @@
-import { eq } from "drizzle-orm";
-import { aiChats } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
-import { chatForAccount, chatMessages } from "../../../../../src/lib/ai/chat-store";
+import { chatForAccount, chatMessages, deleteChat } from "../../../../../src/lib/ai/chat-store";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
@@ -75,6 +73,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (!chat) {
     return jsonError("chat_not_found", 404);
   }
-  await db.delete(aiChats).where(eq(aiChats.id, chat.id));
+  // Stops a turn still running on the chat before the row goes.
+  await deleteChat(db, chat.id);
   return NextResponse.json({ deleted: true });
 }

@@ -16,10 +16,12 @@ vi.mock("../../../../src/lib/session", () => ({
 
 const sessionMock = vi.mocked(readSession);
 
-function request(body: unknown) {
+process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.example";
+
+function request(body: unknown, headers: Record<string, string> = { origin: "https://cloud.example" }) {
   return new NextRequest("https://cloud.example/api/scenes/lint", {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     method: "POST",
   });
 }
@@ -44,6 +46,29 @@ describe("POST /api/scenes/lint", () => {
     sessionMock.mockResolvedValueOnce(undefined);
     const response = await POST(request({ scenes: [{}] }));
     expect(response.status).toBe(401);
+  });
+
+  // A POST with a session cookie runs the first-party Origin check like
+  // every other cookie-authenticated POST: SameSite=Lax on the cookie must
+  // not be the only thing between another site and an account's lint quota.
+  it("refuses a cookie POST from another origin or with none, before the session", async () => {
+    sessionMock.mockClear();
+    const foreign = await POST(request({ scenes: [{}] }, { origin: "https://evil.example" }));
+    expect(foreign.status).toBe(403);
+    expect(await foreign.json()).toEqual({ error: "invalid_origin" });
+    const bare = await POST(request({ scenes: [{}] }, {}));
+    expect(bare.status).toBe(403);
+    expect(await bare.json()).toEqual({ error: "missing_origin" });
+    expect(sessionMock).not.toHaveBeenCalled();
+  });
+
+  it("lets an API token in without an Origin", async () => {
+    const response = await POST(
+      request({ scenes: [] }, { authorization: "Bearer fc_api_abcdef" }),
+    );
+    // Past the origin check: the body is what gets refused.
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_scenes" });
   });
 
   it("refuses an empty payload", async () => {

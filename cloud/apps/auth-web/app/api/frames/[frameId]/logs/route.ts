@@ -1,18 +1,21 @@
-import { and, asc, desc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, sql } from "drizzle-orm";
 import { frameLogs } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
+import { logSearchPattern, parseFrameLogQuery } from "../../../../../src/lib/frame-log-query";
 import { frameForAccount, requestDeviceLogRingIfEmpty } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
 
-const maxLogsPerPage = 1000;
-
 // Retained logs for a frame (?after_id= for incremental catch-up — the same
 // contract the shared SPA's logsLogic speaks against the backend). Log rows
 // are the device's shipped payloads; we surface them in LogType shape.
+// ?limit= (1..1000), ?search= (substring of the stored payload, case-
+// insensitive) and ?since= (ISO instant) narrow the page in the database,
+// so a caller after "the last five errors" does not pull the whole window
+// (src/lib/frame-log-query.ts).
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -39,16 +42,9 @@ export async function GET(
     return jsonError("invalid_frame", 404);
   }
 
-  const afterIdRaw = request.nextUrl.searchParams.get("after_id");
-  const parsedAfterId =
-    afterIdRaw === null ? Number.NaN : Number.parseInt(afterIdRaw, 10);
-  // after_id=0 is a real cursor ("everything from the beginning"), not an
-  // absent one — id is a generated identity starting at 1, so a truthiness
-  // check would silently drop the filter.
-  const afterId =
-    Number.isFinite(parsedAfterId) && parsedAfterId >= 0
-      ? parsedAfterId
-      : undefined;
+  const { afterId, limit, search, since } = parseFrameLogQuery(
+    request.nextUrl.searchParams,
+  );
 
   // Opening the panel (no cursor) on a frame the cloud holds no logs for
   // asks the device for its on-device ring — the lines a frame enrolled
@@ -72,12 +68,18 @@ export async function GET(
       and(
         eq(frameLogs.frameId, frame.id),
         ...(afterId === undefined ? [] : [gt(frameLogs.id, afterId)]),
+        ...(since === undefined ? [] : [gte(frameLogs.timestamp, since)]),
+        // The payload is jsonb; its text form is what the SPA shows as the
+        // line, so that is what the substring is matched against.
+        ...(search === undefined
+          ? []
+          : [sql`${frameLogs.payload}::text ILIKE ${logSearchPattern(search)}`]),
       ),
     )
     .orderBy(afterId === undefined ? desc(frameLogs.id) : asc(frameLogs.id))
-    .limit(maxLogsPerPage + 1);
-  const hasMore = rows.length > maxLogsPerPage;
-  const page = hasMore ? rows.slice(0, maxLogsPerPage) : rows;
+    .limit(limit + 1);
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
   if (afterId === undefined) {
     // Chronological for display; the query fetched newest-first.
     page.reverse();

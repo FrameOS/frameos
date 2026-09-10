@@ -146,50 +146,16 @@ export async function POST(request: NextRequest) {
   const name = parseOptionalString(body.name)?.slice(0, 256);
   const contentType = normalizeBackupContentType(body.content_type);
 
-  // Count quota (replacing an existing item never fails it) plus the account
-  // byte quota — replacements only count the size delta, so re-uploading a
-  // same-size backup always succeeds even at the limit.
-  const [countRow] = await db
-    .select({
-      bytes: sql<number>`coalesce(sum(${clientBackups.sizeBytes}), 0)::float8`,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(clientBackups)
-    .where(eq(clientBackups.accountId, linkedClient.accountId));
-  const count = countRow?.count ?? 0;
-  const accountBytes = Number(countRow?.bytes ?? 0);
-  const [existing] = await db
-    .select({ id: clientBackups.id, sizeBytes: clientBackups.sizeBytes })
-    .from(clientBackups)
-    .where(
-      and(
-        eq(clientBackups.accountId, linkedClient.accountId),
-        eq(clientBackups.kind, kind),
-        eq(clientBackups.itemKey, itemKey),
-      ),
-    )
-    .limit(1);
-  if (!existing && count >= maxBackupsPerAccount) {
-    return jsonError("backup_quota_exceeded", 403, {
-      max_backups: maxBackupsPerAccount,
-    });
-  }
-  const bytesAfterSave =
-    accountBytes - (existing?.sizeBytes ?? 0) + content.length;
-  // The plan's account budget, not the free tier's: the number that refuses
-  // has to be the number the account page promises (src/lib/usage.ts).
-  // Distinct from `maxBackupBytes` above, which caps ONE backup.
-  const { backupBytes: maxAccountBackupBytes } = await accountLimits(
-    db,
-    linkedClient.accountId,
-  );
-  if (bytesAfterSave > maxAccountBackupBytes) {
-    return jsonError("backup_storage_quota_exceeded", 403, {
-      max_bytes: maxAccountBackupBytes,
-      used_bytes: Math.round(accountBytes),
-    });
-  }
-
+  // The count quota (replacing an existing item never fails it) and the
+  // account byte quota, checked and spent in ONE transaction under a
+  // per-account advisory lock: N concurrent saves from a backend that
+  // pushes its whole scene list at once used to each read the same count
+  // and all pass, landing the account past the cap. The lock serializes
+  // saves per account only — other accounts never wait on it — and dies
+  // with the transaction.
+  //
+  // Replacements only count the size delta, so re-uploading a same-size
+  // backup always succeeds even at the limit.
   const values = {
     accountId: linkedClient.accountId,
     content,
@@ -201,30 +167,93 @@ export async function POST(request: NextRequest) {
     sha256: sha256Hex(content),
     sizeBytes: content.length,
   };
+  type SavedBackup = Parameters<typeof backupSummary>[0];
+  const outcome = await db.transaction(
+    async (
+      tx,
+    ): Promise<
+      | { refused: NextResponse; saved?: undefined }
+      | { refused?: undefined; saved: SavedBackup | undefined }
+    > => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`client-backups:${linkedClient.accountId}`}))`,
+      );
+      const [countRow] = await tx
+        .select({
+          bytes: sql<number>`coalesce(sum(${clientBackups.sizeBytes}), 0)::float8`,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(clientBackups)
+        .where(eq(clientBackups.accountId, linkedClient.accountId));
+      const count = countRow?.count ?? 0;
+      const accountBytes = Number(countRow?.bytes ?? 0);
+      const [existing] = await tx
+        .select({ id: clientBackups.id, sizeBytes: clientBackups.sizeBytes })
+        .from(clientBackups)
+        .where(
+          and(
+            eq(clientBackups.accountId, linkedClient.accountId),
+            eq(clientBackups.kind, kind),
+            eq(clientBackups.itemKey, itemKey),
+          ),
+        )
+        .limit(1);
+      if (!existing && count >= maxBackupsPerAccount) {
+        return {
+          refused: jsonError("backup_quota_exceeded", 403, {
+            max_backups: maxBackupsPerAccount,
+          }),
+        };
+      }
+      const bytesAfterSave =
+        accountBytes - (existing?.sizeBytes ?? 0) + content.length;
+      // The plan's account budget, not the free tier's: the number that
+      // refuses has to be the number the account page promises
+      // (src/lib/usage.ts). Distinct from `maxBackupBytes` above, which caps
+      // ONE backup.
+      const { backupBytes: maxAccountBackupBytes } = await accountLimits(
+        tx,
+        linkedClient.accountId,
+      );
+      if (bytesAfterSave > maxAccountBackupBytes) {
+        return {
+          refused: jsonError("backup_storage_quota_exceeded", 403, {
+            max_bytes: maxAccountBackupBytes,
+            used_bytes: Math.round(accountBytes),
+          }),
+        };
+      }
 
-  const [saved] = await db
-    .insert(clientBackups)
-    .values(values)
-    .onConflictDoUpdate({
-      set: { ...values, updatedAt: new Date() },
-      target: [
-        clientBackups.accountId,
-        clientBackups.kind,
-        clientBackups.itemKey,
-      ],
-    })
-    .returning({
-      contentType: clientBackups.contentType,
-      createdAt: clientBackups.createdAt,
-      id: clientBackups.id,
-      itemKey: clientBackups.itemKey,
-      kind: clientBackups.kind,
-      linkedClientId: clientBackups.linkedClientId,
-      name: clientBackups.name,
-      sha256: clientBackups.sha256,
-      sizeBytes: clientBackups.sizeBytes,
-      updatedAt: clientBackups.updatedAt,
-    });
+      const [saved] = await tx
+        .insert(clientBackups)
+        .values(values)
+        .onConflictDoUpdate({
+          set: { ...values, updatedAt: new Date() },
+          target: [
+            clientBackups.accountId,
+            clientBackups.kind,
+            clientBackups.itemKey,
+          ],
+        })
+        .returning({
+          contentType: clientBackups.contentType,
+          createdAt: clientBackups.createdAt,
+          id: clientBackups.id,
+          itemKey: clientBackups.itemKey,
+          kind: clientBackups.kind,
+          linkedClientId: clientBackups.linkedClientId,
+          name: clientBackups.name,
+          sha256: clientBackups.sha256,
+          sizeBytes: clientBackups.sizeBytes,
+          updatedAt: clientBackups.updatedAt,
+        });
+      return { saved };
+    },
+  );
+  if (outcome.refused) {
+    return outcome.refused;
+  }
+  const saved = outcome.saved;
 
   if (!saved) {
     return jsonError("backup_save_failed", 500);

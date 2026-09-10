@@ -14,6 +14,7 @@ import {
   supersedePendingCommands,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { deviceSceneIdForFrame } from "../../../../../src/lib/scene-images";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -72,7 +73,11 @@ export async function POST(
     if (!sceneId || sceneId.length > 256) {
       return jsonError("invalid_command", 400);
     }
-    payload = { scene_id: sceneId };
+    // The workspace and the MCP name scenes by store uuid; the device by
+    // the ids in its deployed scenes.json. Same translation as
+    // /event/setCurrentScene — a uuid forwarded verbatim made the device
+    // answer apply-failed while the queue said delivered.
+    payload = { scene_id: await deviceSceneIdForFrame(db, frame.id, sceneId) };
   }
 
   if (type === "notify_update_available") {

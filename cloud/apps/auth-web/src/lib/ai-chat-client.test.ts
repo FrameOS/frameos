@@ -199,6 +199,76 @@ describe("parseAiChatLine", () => {
     expect((failure as AiChatTransportError).attempts).toBe(3);
   });
 
+  it("keeps re-attaching past the attempt cap while the server still relays the turn", async () => {
+    // Each relay answers 200 and drops without a terminal event (a proxy
+    // cutting long idle responses); only the eighth carries the reply.
+    let resumes = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/ai/chat") {
+        return ndjsonResponse(['{"type":"chat","chatId":"c1","turnId":"t1"}\n']);
+      }
+      resumes += 1;
+      if (resumes < 8) {
+        return ndjsonResponse(['{"type":"ping"}\n']);
+      }
+      return ndjsonResponse(['{"type":"done","tool":"reply","reply":"late"}\n']);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const slept: number[] = [];
+    const events: AiChatEvent[] = [];
+    await streamAiChat(
+      { prompt: "hi" },
+      {
+        onEvent: (event) => void events.push(event),
+        resumeAttempts: 3,
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      },
+    );
+    expect(events.map((event) => event.type)).toEqual(["chat", "done"]);
+    expect(resumes).toBe(8);
+    // A drop after a successful re-attach retries at the shortest delay.
+    expect(slept).toEqual(Array(8).fill(500));
+  });
+
+  it("resets the failure count on a successful re-attach and gives up when the budget is spent", async () => {
+    let clock = 0;
+    let resumes = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/ai/chat") {
+        return ndjsonResponse(['{"type":"chat","chatId":"c1","turnId":"t1"}\n']);
+      }
+      resumes += 1;
+      // Two failures, one relay that drops, then failures until the budget ends.
+      if (resumes === 3) {
+        return ndjsonResponse(['{"type":"ping"}\n']);
+      }
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const slept: number[] = [];
+    const failure = await streamAiChat(
+      { prompt: "hi" },
+      {
+        now: () => clock,
+        onEvent: () => {},
+        resumeAttempts: 100,
+        resumeBudgetMs: 60_000,
+        sleep: async (ms) => {
+          slept.push(ms);
+          clock += ms;
+        },
+      },
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AiChatTransportError);
+    expect((failure as AiChatTransportError).elapsedMs).toBeGreaterThanOrEqual(60_000);
+    // Backoff restarted after the 200 (third attempt), then climbed to the cap.
+    expect(slept.slice(0, 5)).toEqual([500, 1500, 3000, 500, 1500]);
+    expect(slept.at(-1)).toBe(10_000);
+    expect((failure as AiChatTransportError).attempts).toBe(slept.length);
+  });
+
   it("does not resume when the stream dropped before a turn id arrived", async () => {
     const encoder = new TextEncoder();
     let pulls = 0;

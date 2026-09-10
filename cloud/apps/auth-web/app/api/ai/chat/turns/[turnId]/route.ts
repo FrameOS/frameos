@@ -7,7 +7,8 @@ import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../../src/lib/session";
 
 export const runtime = "nodejs";
-export const maxDuration = 600;
+// TURN_MAX_MS in seconds: a resumed relay may span the rest of the turn.
+export const maxDuration = 900;
 
 type RouteContext = { params: Promise<{ turnId: string }> };
 

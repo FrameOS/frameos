@@ -1,4 +1,4 @@
-import { unzipSync } from "fflate";
+import { unzipBounded } from "./zip-bounded";
 
 // A store listing's title and the scene title inside its scenes.json are two
 // copies of the same thing. The zip's template.json is what publishing reads
@@ -18,9 +18,9 @@ export const maxSceneNameLength = 128;
  */
 export function extractScenesFromZip(content: Buffer): unknown[] | undefined {
   try {
-    const files = unzipSync(new Uint8Array(content), {
-      filter: (file) => /(^|\/)scenes\.json$/.test(file.name),
-    });
+    const files = unzipBounded(new Uint8Array(content), (name) =>
+      /(^|\/)scenes\.json$/.test(name),
+    );
     // The shallowest scenes.json wins, mirroring validateSceneZip.
     const path = Object.keys(files).sort(
       (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
@@ -64,9 +64,9 @@ export function sceneDisplayName(scenes: unknown): string | undefined {
  */
 export function extractManifestNameFromZip(content: Buffer): string | undefined {
   try {
-    const files = unzipSync(new Uint8Array(content), {
-      filter: (file) => /(^|\/)template\.json$/.test(file.name),
-    });
+    const files = unzipBounded(new Uint8Array(content), (name) =>
+      /(^|\/)template\.json$/.test(name),
+    );
     const path = Object.keys(files).sort(
       (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
     )[0];

@@ -430,25 +430,32 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Recent log lines from a frame (newest last). `limit` caps the lines returned (default 100, max 1000); `search` keeps only lines containing the text; `after_id` pages forward from a previous newest id. Lines are JSON events from the runtime ({event: …}) or plain text.",
+        "Recent log lines from a frame (newest last). `limit` caps the lines returned (default 100, max 1000); `search` keeps only lines containing the text; `since` (ISO instant) drops older lines; `after_id` pages forward from a previous newest id. Lines are JSON events from the runtime ({event: …}) or plain text.",
       inputSchema: {
         after_id: z.number().int().min(0).optional(),
         frame_id: frameId,
         limit: z.number().int().min(1).max(1000).optional(),
         search: z.string().max(200).optional(),
+        since: z.iso.datetime({ offset: true }).optional(),
       },
     },
-    async ({ after_id, frame_id, limit, search }) =>
+    async ({ after_id, frame_id, limit, search, since }) =>
       run(async () => {
+        const pageSize = limit ?? 100;
+        // The cloud narrows the page itself (limit/search/since are query
+        // parameters of GET /logs); the substring is re-applied here only
+        // so a stdio server pointed at an older cloud still filters.
         const payload = await api.json<{
           has_more: boolean;
           logs: { id: number; line: string; timestamp: string; type: string }[];
-        }>("GET", `/api/frames/${frame_id}/logs`, { query: { after_id } });
+        }>("GET", `/api/frames/${frame_id}/logs`, {
+          query: { after_id, limit: pageSize, search, since },
+        });
         const needle = search?.toLowerCase();
         const filtered = needle
           ? payload.logs.filter((entry) => entry.line.toLowerCase().includes(needle))
           : payload.logs;
-        const lines = filtered.slice(-(limit ?? 100));
+        const lines = filtered.slice(-pageSize);
         return text({
           has_more: payload.has_more,
           logs: lines.map((entry) => ({
@@ -560,7 +567,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_command_send",
     {
       description:
-        "Queue a raw device command. Types: render, get_metrics, reboot, restart_runtime, refresh_service_settings, set_schedule (re-push the stored schedule), set_current_scene (needs scene_id = runtime scene id; prefer frame_scene_activate), notify_update_available (start a signed OTA firmware update).",
+        "Queue a raw device command. Types: render, get_metrics, reboot, restart_runtime, refresh_service_settings, set_schedule (re-push the stored schedule), set_current_scene (scene_id may be a store scene id or a runtime scene id; prefer frame_scene_activate), notify_update_available (start a signed OTA firmware update).",
       inputSchema: {
         confirm: confirmed("sends the device a command (including set_current_scene and notify_update_available)"),
         frame_id: frameId,

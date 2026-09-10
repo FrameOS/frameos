@@ -52,6 +52,12 @@ How it plugs in (`src/lib/api-tokens.ts`):
   every mutating route calls first, and it sees method and credential
   together. The database row's `access` is verified again in
   `authenticateApiToken`, so a forged prefix buys nothing.
+- The GETs that queue a device command on a cache miss (`/asset`, `/image`,
+  `/assets?refresh=1`, `/scene_images/{scene}`) check
+  `sessionMayQueueDeviceCommands()` (`src/lib/device-command-access.ts`): a
+  read-only token gets what the hub already caches, and where only the
+  device could answer it gets `403 read_only_token` instead of a queued
+  fetch — "look" never includes waking a battery frame.
 - What tokens cannot do: the sudo-mode routes (`/api/frames/{id}/revoke`,
   `/api/device/revoke`, `/api/device/authorize`) read the session cookie's
   `authenticated_at` and answer `403 reauth_required`; the 2FA routes demand a
@@ -82,7 +88,10 @@ each request in a short-lived child Node with the same SSRF guard as the
 preview proxy (`src/lib/ssrf.ts`), capped at 24 requests and 10 MB per
 render. Two renders run concurrently, eight queue, 30 s timeout, one fresh
 64 MB wasm heap per render — nothing is shared between two accounts' scenes.
-`renderer_unavailable` (501) means the bundle is not on disk. The JSON reply
+Per account, one render runs at a time and two more may wait: a third is
+`render_concurrency_limit` (429, `retry-after: 5`), so one account's burst
+cannot hold both slots for minutes while everyone else gets `renderer_busy`
+(503). `renderer_unavailable` (501) means the bundle is not on disk. The JSON reply
 carries `runtime_version` (the PNG reply an `x-frameos-runtime-version`
 header): the interpreter version the render used, which is the last release's
 and may differ from a frame's firmware.
@@ -146,7 +155,9 @@ a frame's logs must not be able to talk an agent into installing something.
   `settings_groups` grants the scene the account's service keys it declares —
   without it a store scene gets none, and the answer says what it still needs),
   `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
-  `frame_screenshot`, `frame_scene_preview`, `frame_logs` (filter + cap),
+  `frame_screenshot`, `frame_scene_preview`, `frame_logs` (limit, search and
+  since travel as query parameters of `GET /api/frames/{id}/logs`, so the
+  database cuts the page),
   `frame_metrics`, `frame_metrics_request`, `frame_activity`,
   `frame_commands_list`, `frame_command_cancel`, `frame_command_send`,
   `frame_reboot`, `frame_restart`, `frame_schedule_get`, `frame_schedule_set`,

@@ -1,9 +1,6 @@
-import { strToU8, unzipSync, zipSync } from "fflate";
+import { strToU8, zipSync } from "fflate";
 import { getScenesBaseUrl } from "./env";
-import {
-  maxSceneZipEntries,
-  maxSceneZipUncompressedBytes,
-} from "./store";
+import { unzipBounded } from "./zip-bounded";
 
 // Where an installed scene came from — the `origin` field on every scene
 // object that leaves the store. The frameos workspace reads it to say
@@ -75,23 +72,9 @@ export function rebuildZipWithSceneOrigins(
   source: StoreSceneOriginSource,
 ): Buffer | undefined {
   try {
-    let entryCount = 0;
-    let totalUncompressed = 0;
-    const files = unzipSync(new Uint8Array(zipBytes), {
-      filter: (file) => {
-        entryCount += 1;
-        totalUncompressed += file.originalSize ?? 0;
-        if (
-          entryCount > maxSceneZipEntries ||
-          totalUncompressed > maxSceneZipUncompressedBytes
-        ) {
-          throw new Error("zip_bounds_exceeded");
-        }
-        return /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(
-          file.name,
-        );
-      },
-    });
+    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
+      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
+    );
     const manifestPath = Object.keys(files)
       .filter((name) => /(^|\/)template\.json$/.test(name))
       .sort(

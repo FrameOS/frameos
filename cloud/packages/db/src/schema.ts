@@ -12,9 +12,17 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+// Every index and constraint the migrations create must appear here too: a
+// drizzle-kit diff of this file against the database is only trustworthy if
+// the file is the whole truth, and one that lists fewer indexes than exist
+// would "generate" their removal. schema.test.ts checks both directions
+// against drizzle/*.sql. Partial and expression indexes use .where()/sql``
+// exactly as the SQL wrote them.
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType() {
@@ -88,7 +96,8 @@ export const accountIdentities = pgTable(
   },
   (table) => ({
     accountIdx: index("account_identities_account_idx").on(table.accountId),
-    providerSubjectUnique: uniqueIndex(
+    // A table constraint in 0000, not an index (drizzle-kit tells them apart).
+    providerSubjectUnique: unique(
       "account_identities_provider_subject_unique",
     ).on(table.providerIssuer, table.providerSubject),
   }),
@@ -202,8 +211,9 @@ export const deviceAuthorizationRequests = pgTable(
     upgradeLinkedClientIdx: index(
       "device_authorization_requests_upgrade_linked_client_idx",
     ).on(table.upgradeLinkedClientId),
-    deviceCodeUnique: uniqueIndex(
-      "device_authorization_requests_device_code_unique",
+    // Column UNIQUE constraints from 0001, under Postgres' generated names.
+    deviceCodeUnique: unique(
+      "device_authorization_requests_device_code_hash_key",
     ).on(table.deviceCodeHash),
     linkedClientIdx: index(
       "device_authorization_requests_linked_client_idx",
@@ -211,8 +221,8 @@ export const deviceAuthorizationRequests = pgTable(
     statusIdx: index("device_authorization_requests_status_idx").on(
       table.status,
     ),
-    userCodeUnique: uniqueIndex(
-      "device_authorization_requests_user_code_unique",
+    userCodeUnique: unique(
+      "device_authorization_requests_user_code_hash_key",
     ).on(table.userCodeHash),
   }),
 );
@@ -264,6 +274,11 @@ export const auditEvents = pgTable(
   (table) => ({
     accountIdx: index("audit_events_account_idx").on(table.accountId),
     eventTypeIdx: index("audit_events_event_type_idx").on(table.eventType),
+    // The frame activity feed (0035): events about one frame, newest first.
+    targetFrameIdx: index("audit_events_target_frame_idx").on(
+      sql`(${table.target} ->> 'frameId')`,
+      table.createdAt,
+    ),
   }),
 );
 
@@ -556,7 +571,14 @@ export const storeScenes = pgTable(
   (table) => ({
     accountIdx: index("store_scenes_account_idx").on(table.accountId),
     categoryIdx: index("store_scenes_category_idx").on(table.category),
+    linkedClientIdx: index("store_scenes_linked_client_idx")
+      .on(table.linkedClientId)
+      .where(sql`${table.linkedClientId} is not null`),
+    previewObjectKeyIdx: index("store_scenes_preview_object_key_idx").on(
+      table.previewObjectKey,
+    ),
     slugUnique: uniqueIndex("store_scenes_slug_unique").on(table.slug),
+    tagsIdx: index("store_scenes_tags_idx").using("gin", table.tags),
     visibilityStatusIdx: index("store_scenes_visibility_status_idx").on(
       table.visibility,
       table.status,
@@ -615,6 +637,12 @@ export const storeSceneVersions = pgTable(
       .notNull(),
   },
   (table) => ({
+    objectKeyIdx: index("store_scene_versions_object_key_idx").on(table.objectKey),
+    publishedByLinkedClientIdx: index(
+      "store_scene_versions_published_by_linked_client_idx",
+    )
+      .on(table.publishedByLinkedClientId)
+      .where(sql`${table.publishedByLinkedClientId} is not null`),
     sceneIdx: index("store_scene_versions_scene_idx").on(table.sceneId),
     sceneVersionUnique: uniqueIndex("store_scene_versions_scene_version_unique").on(
       table.sceneId,
@@ -643,6 +671,7 @@ export const storeSceneImages = pgTable(
       .notNull(),
   },
   (table) => ({
+    objectKeyIdx: index("store_scene_images_object_key_idx").on(table.objectKey),
     sceneIdx: index("store_scene_images_scene_idx").on(
       table.sceneId,
       table.position,
@@ -656,23 +685,31 @@ export const storeSceneImages = pgTable(
 // screenshot reused across ten versions of a scene — or by a fork — is one
 // object and one row. Nothing here says which scene an image belongs to;
 // the links do, and an image nobody links is what the sweep script removes.
-export const storeImages = pgTable("store_images", {
-  sha256: text("sha256").primaryKey(),
-  objectKey: text("object_key").notNull(),
-  contentType: text("content_type").default("image/jpeg").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
-  width: integer("width"),
-  height: integer("height"),
-  // The uploader (migration 0049): an image no version binds yet is metered
-  // against this account and swept after a week; once bound it belongs to
-  // the versions that link it and this is just history.
-  accountId: uuid("account_id").references(() => accounts.id, {
-    onDelete: "set null",
+export const storeImages = pgTable(
+  "store_images",
+  {
+    sha256: text("sha256").primaryKey(),
+    objectKey: text("object_key").notNull(),
+    contentType: text("content_type").default("image/jpeg").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    // The uploader (migration 0049): an image no version binds yet is metered
+    // against this account and swept after a week; once bound it belongs to
+    // the versions that link it and this is just history.
+    accountId: uuid("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountIdx: index("store_images_account_id_idx")
+      .on(table.accountId)
+      .where(sql`${table.accountId} is not null`),
   }),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+);
 
 // The ordered image set of one version: position 0 is the cover the store
 // shows for it. Immutable with the version — reordering publishes a new one.
@@ -722,6 +759,16 @@ export const storeSceneReports = pgTable(
       .notNull(),
   },
   (table) => ({
+    // One open report per reporter per scene (0012).
+    openUnique: uniqueIndex("store_scene_reports_open_unique")
+      .on(table.sceneId, table.reporterAccountId)
+      .where(sql`${table.status} = 'open'`),
+    reporterAccountIdx: index("store_scene_reports_reporter_account_idx")
+      .on(table.reporterAccountId)
+      .where(sql`${table.reporterAccountId} is not null`),
+    resolvedByAccountIdx: index("store_scene_reports_resolved_by_account_idx")
+      .on(table.resolvedByAccountId)
+      .where(sql`${table.resolvedByAccountId} is not null`),
     sceneIdx: index("store_scene_reports_scene_idx").on(table.sceneId),
     statusIdx: index("store_scene_reports_status_idx").on(table.status),
   }),
@@ -759,6 +806,9 @@ export const frameosLoginCodes = pgTable(
     codeHashUnique: uniqueIndex("frameos_login_codes_code_hash_unique").on(
       table.codeHash,
     ),
+    identityIdx: index("frameos_login_codes_identity_idx")
+      .on(table.identityId)
+      .where(sql`${table.identityId} is not null`),
     linkedClientIdx: index("frameos_login_codes_linked_client_idx").on(
       table.linkedClientId,
     ),
@@ -896,6 +946,9 @@ export const frames = pgTable(
     linkedClientUnique: uniqueIndex("frames_linked_client_unique").on(
       table.linkedClientId,
     ),
+    sceneSourceFrameIdx: index("frames_scene_source_frame_idx")
+      .on(table.sceneSourceFrameId)
+      .where(sql`${table.sceneSourceFrameId} is not null`),
   }),
 );
 
@@ -955,6 +1008,15 @@ export const frameEnrollmentTokens = pgTable(
     accountIdx: index("frame_enrollment_tokens_account_idx").on(
       table.accountId,
     ),
+    boundFrameIdx: index("frame_enrollment_tokens_bound_frame_idx")
+      .on(table.boundFrameId)
+      .where(sql`${table.boundFrameId} is not null`),
+    frameIdx: index("frame_enrollment_tokens_frame_idx")
+      .on(table.frameId)
+      .where(sql`${table.frameId} is not null`),
+    sceneSourceFrameIdx: index("frame_enrollment_tokens_scene_source_frame_idx")
+      .on(table.sceneSourceFrameId)
+      .where(sql`${table.sceneSourceFrameId} is not null`),
   }),
 );
 
@@ -990,6 +1052,9 @@ export const frameSceneAssignments = pgTable(
       table.frameId,
       table.position,
     ),
+    // A store scene's deletion cascades here; scene_id is only the second
+    // column of the unique index above.
+    sceneIdx: index("frame_scene_assignments_scene_idx").on(table.sceneId),
   }),
 );
 
@@ -1029,6 +1094,9 @@ export const frameCommands = pgTable(
     liveExpiresIdx: index("frame_commands_live_expires_idx")
       .on(table.expiresAt)
       .where(sql`${table.status} in ('pending', 'sent') and ${table.expiresAt} is not null`),
+    createdByAccountIdx: index("frame_commands_created_by_account_idx")
+      .on(table.createdByAccountId)
+      .where(sql`${table.createdByAccountId} is not null`),
   }),
 );
 
@@ -1079,6 +1147,7 @@ export const frameAssetFiles = pgTable(
       table.path,
       table.thumb,
     ),
+    objectKeyIdx: index("frame_asset_files_object_key_idx").on(table.objectKey),
   }),
 );
 
@@ -1239,6 +1308,9 @@ export const financialEvents = pgTable(
     idempotencyUnique: uniqueIndex("financial_events_idempotency_unique").on(
       table.idempotencyKey,
     ),
+    pendingIdx: index("financial_events_pending_idx")
+      .on(table.createdAt)
+      .where(sql`${table.processedAt} is null`),
   }),
 );
 
@@ -1323,7 +1395,14 @@ export const ledgerEntries = pgTable(
   },
   (table) => ({
     eventIdx: index("ledger_entries_event_idx").on(table.eventId),
+    externalRefIdx: index("ledger_entries_external_ref_idx")
+      .on(table.externalRef)
+      .where(sql`${table.externalRef} is not null`),
     occurredIdx: index("ledger_entries_occurred_idx").on(table.occurredAt),
+    // An entry is reversed at most once.
+    reversesUnique: uniqueIndex("ledger_entries_reverses_unique")
+      .on(table.reversesEntryId)
+      .where(sql`${table.reversesEntryId} is not null`),
   }),
 );
 
@@ -1494,6 +1573,10 @@ export const aiUsageRecords = pgTable(
       table.occurredAt,
     ),
     turnUnique: uniqueIndex("ai_usage_records_turn_unique").on(table.turnId),
+    // The nightly sweep's worklist: live records whose entries never landed.
+    unpostedIdx: index("ai_usage_records_unposted_idx")
+      .on(table.createdAt)
+      .where(sql`${table.eventId} is null and ${table.meteringMode} = 'live'`),
   }),
 );
 
@@ -1601,5 +1684,11 @@ export const subscriptionPeriods = pgTable(
       table.subscriptionId,
       table.periodStart,
     ),
+    unchargedIdx: index("subscription_periods_uncharged_idx")
+      .on(table.periodStart)
+      .where(sql`${table.chargedAt} is null`),
+    unrecognizedIdx: index("subscription_periods_unrecognized_idx")
+      .on(table.periodEnd)
+      .where(sql`${table.recognizedAt} is null`),
   }),
 );

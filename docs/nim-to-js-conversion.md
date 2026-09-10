@@ -52,7 +52,9 @@ from the released binaries, previewable in the browser.
 
 **Pass 1 — deterministic, no model.** `src/nim-expression.ts` is a small Nim
 expression grammar: state reads, comparisons, arithmetic, `if`/`case`
-expressions, string building, `let` bindings (emitted as an IIFE), a little
+expressions, string building, `let` bindings (emitted as an IIFE; a binding
+that shadows an argument or an earlier binding gets a fresh name — `let n =
+n + 1` becomes `const n_1 = n + 1`, never a read of the const being declared), a little
 time formatting. Anything outside it throws with the position and the node
 goes to pass 2. The structural fixes that need no model run first, on every
 code node: an argument named `state`, `args`, `context`, `console`,
