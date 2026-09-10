@@ -361,7 +361,7 @@ export function cloudUndeployedChangeDetails(
   return details
 }
 
-const FRAME_KEYS: (keyof FrameType)[] = [
+export const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
   'frame_host',
@@ -828,7 +828,7 @@ function remoteUpgradeChangeDetail(frame: Partial<FrameType> | null | undefined)
   }
 
   return {
-    label: `FrameOS Remote ${previousVersion ?? 'unreported'} -> ${currentVersion}`,
+    label: `FrameOS Remote ${previousVersion ?? 'unreported'} → ${currentVersion}`,
     requiresFullDeploy: true,
     remoteVersionChange: {
       previousVersion,
@@ -961,7 +961,7 @@ function computeChangeDetails(
 
   if (includeFrameosVersion && frameosVersionRequiresDeploy(previousFrameosVersion)) {
     details.push({
-      label: `FrameOS ${previousFrameosVersion ?? 'unreported'} -> ${CURRENT_FRAMEOS_VERSION}`,
+      label: `FrameOS ${previousFrameosVersion ?? 'unreported'} → ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
       frameosVersionChange: {
         kind: 'upgrade',
@@ -973,7 +973,7 @@ function computeChangeDetails(
 
   if (shellLessUpdateWaiting) {
     details.push({
-      label: `FrameOS ${shellLessDeviceVersion} -> ${CURRENT_FRAMEOS_VERSION} (the frame installs it itself: Update FrameOS)`,
+      label: `FrameOS ${shellLessDeviceVersion} → ${CURRENT_FRAMEOS_VERSION} (the frame installs it itself: Update FrameOS)`,
       requiresFullDeploy: false,
       frameosVersionChange: {
         kind: 'upgrade',
@@ -1187,6 +1187,11 @@ function normalizeControlCodeForComparison(value: unknown): Record<string, unkno
 
 function frameKeyEqual(key: keyof FrameType, previous: unknown, next: unknown): boolean {
   return equal(normalizeFrameKeyValueForComparison(key, previous), normalizeFrameKeyValueForComparison(key, next))
+}
+
+/** True when no key the settings form edits differs between two frame rows. Same-reference values short-circuit. */
+export function frameFormKeysEqual(previous: Partial<FrameType>, next: Partial<FrameType>): boolean {
+  return frameDiffKeys().every((key) => previous[key] === next[key] || frameKeyEqual(key, previous[key], next[key]))
 }
 
 function summarizeSecret(value: unknown): string {
@@ -3277,12 +3282,20 @@ export const frameLogic = kea<frameLogicType>([
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
-      const previousMode = values.frameForm?.mode || oldFrame?.mode || 'rpios'
-      const frameFormMatchesPrevious = oldFrame
-        ? computeChangeDetails(oldFrame, values.frameForm, previousMode, false).length === 0
-        : false
-      if (frame && (!oldFrame || frameFormMatchesPrevious)) {
-        actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
+      // Every log line touches the frame row (last_log_at, active_scene_id),
+      // so this fires per line. Resetting the form only matters when a form
+      // key moved — and deciding that is a reference check per key for a
+      // row the log reducer spread, so the scene-deep "does the form still
+      // match the previous row?" diff below runs only when it can matter.
+      const formKeysMoved = !frame || !oldFrame || !frameFormKeysEqual(oldFrame, frame)
+      if (formKeysMoved) {
+        const previousMode = values.frameForm?.mode || oldFrame?.mode || 'rpios'
+        const frameFormMatchesPrevious = oldFrame
+          ? computeChangeDetails(oldFrame, values.frameForm, previousMode, false).length === 0
+          : false
+        if (frame && (!oldFrame || frameFormMatchesPrevious)) {
+          actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
+        }
       }
       if (
         !values.frameSyncStatusLoading &&

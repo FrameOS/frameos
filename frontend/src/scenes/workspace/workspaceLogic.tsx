@@ -13,7 +13,7 @@ import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 
 import type { WorkspaceUtilityPanel } from './workspaceSurfaces'
-import { isFrameToolPanel } from './frameToolRoute'
+import { isFrameToolPanel, legacyToolQueryTarget } from './frameToolRoute'
 
 // Re-exported so the SPA's existing `from './workspaceLogic'` imports keep
 // working; the union itself lives with the allow-lists that gate it, and the
@@ -2035,10 +2035,12 @@ export const workspaceLogic = kea<workspaceLogicType>([
       syncSecondarySidebarFromHashForMobile(hash)
       const validFrameId = parseRouteFrameId(typeof id === 'string' || typeof id === 'number' ? String(id) : null)
       const tool = frameToolFromRoute(routeTool, search)
-      // An old `?tool=` link: move the tool into the path and come back
+      // An old `?tool=` link: move the tool into the path — verbatim, so an
+      // unknown tool 404s there like any other segment — and come back
       // through this handler with the canonical URL.
-      if (validFrameId && !isFrameToolPanel(routeTool) && searchValue(search, 'tool') !== null) {
-        router.actions.replace(urls.frame(validFrameId, tool), withoutTool(search), hash)
+      const legacyTarget = legacyToolQueryTarget(routeTool, searchValue(search, 'tool'))
+      if (validFrameId && legacyTarget !== null) {
+        router.actions.replace(urls.frame(validFrameId, legacyTarget), withoutTool(search), hash)
         return
       }
       const skipDeployDrawerPreserve = Boolean(cache.skipNextDeployDrawerPreserve)

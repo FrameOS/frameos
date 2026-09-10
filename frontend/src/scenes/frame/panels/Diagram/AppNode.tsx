@@ -588,8 +588,9 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                               className="frameos-node-muted-text ml-1 inline-flex rounded-full p-0.5 hover:text-white"
                               tooltipColor="gray"
                               noPadding
+                              label="Example output"
                             >
-                              <InformationCircleIcon className="w-4 h-4" aria-label="Example output" />
+                              <InformationCircleIcon className="w-4 h-4" aria-hidden="true" />
                             </Tooltip>
                           )
                         })()

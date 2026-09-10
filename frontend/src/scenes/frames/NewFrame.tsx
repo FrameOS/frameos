@@ -107,6 +107,7 @@ function RemoteControlField({
       <div className="flex min-w-0 items-center gap-1.5">
         <div className="frameos-form-label text-sm font-semibold text-slate-700">FrameOS remote control</div>
         <Tooltip
+          label="FrameOS remote control help"
           className="inline-flex h-5 w-5 items-center justify-center rounded-full"
           titleClassName="w-72"
           title={
@@ -123,7 +124,7 @@ function RemoteControlField({
             </div>
           }
         >
-          <ExclamationCircleIcon className="h-4 w-4" aria-label="FrameOS remote control help" />
+          <ExclamationCircleIcon className="h-4 w-4" aria-hidden="true" />
         </Tooltip>
       </div>
       <div className="frame-tool-panel">
@@ -1413,7 +1414,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               value={embeddedHardwarePreset}
               onChange={(event) => setEmbeddedHardwarePreset(normalizeEmbeddedHardwarePreset(event.target.value))}
             >
-              <option value="custom">Custom ESP32 board</option>
+              <option value="custom">Custom board</option>
               {Object.entries(EMBEDDED_HARDWARE_PRESET_CONFIGS).map(([preset, config]) => (
                 <option key={preset} value={preset}>
                   {isThinClientEmbeddedPlatform(config.platform) ? `${config.label} — Thin client` : config.label}

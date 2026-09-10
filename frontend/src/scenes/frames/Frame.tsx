@@ -170,7 +170,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
             </Tooltip>
           ) : null}
           {hasFrameOSUpdate ? (
-            <Tooltip title={`FrameOS update available (${deployedFrameOSVersion} -> ${CURRENT_FRAMEOS_VERSION})`}>
+            <Tooltip title={`FrameOS update available (${deployedFrameOSVersion} → ${CURRENT_FRAMEOS_VERSION})`}>
               <ArrowUpCircleIcon className="h-4 w-4 text-blue-300" />
             </Tooltip>
           ) : null}

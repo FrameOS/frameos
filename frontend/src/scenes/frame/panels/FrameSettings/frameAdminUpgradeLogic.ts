@@ -2,6 +2,7 @@ import { MakeLogicType, actions, afterMount, beforeUnmount, kea, listeners, path
 import { loaders } from 'kea-loaders'
 
 import { apiFetch } from '../../../../utils/apiFetch'
+import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 
 export type FrameOSUpgradeStatusValue =
   | 'idle'
@@ -314,8 +315,15 @@ export const frameAdminUpgradeLogic = kea<frameAdminUpgradeLogicType>([
     ],
   }),
   listeners(({ actions, values, cache }) => ({
-    confirmStartUpgrade: () => {
-      if (window.confirm('Upgrade FrameOS to the latest stable GitHub release?')) {
+    confirmStartUpgrade: async () => {
+      if (
+        await confirmDialog({
+          title: 'Update FrameOS?',
+          message:
+            'The frame downloads the latest stable release and installs it itself. The display goes blank while it restarts.',
+          confirmLabel: 'Update FrameOS',
+        })
+      ) {
         actions.startUpgrade()
       }
     },

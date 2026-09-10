@@ -466,10 +466,10 @@ const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> 
  * itself the same way.
  */
 const capabilityDisabledReasons: Record<FrameCapability, string> = {
-  schedule: "This ESP32 frame's firmware does not support schedules yet.",
-  settings: "This ESP32 frame's firmware does not accept settings changes from the cloud yet.",
+  schedule: "This frame's firmware does not support schedules yet.",
+  settings: "This frame's firmware does not accept settings changes from the cloud yet.",
   logs: 'This frame does not report logs to the cloud.',
-  metrics: 'This ESP32 frame does not report metrics to the cloud.',
+  metrics: 'This frame does not report metrics to the cloud.',
   updateNotify: 'This frame does not take update notifications.',
 }
 

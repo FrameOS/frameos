@@ -518,7 +518,7 @@ export function buildFullDeployPlanSummary(
       value:
         previousVersion === CURRENT_FRAMEOS_VERSION
           ? CURRENT_FRAMEOS_VERSION
-          : `${previousVersion} -> ${CURRENT_FRAMEOS_VERSION}`,
+          : `${previousVersion} → ${CURRENT_FRAMEOS_VERSION}`,
     },
     ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
     {
@@ -628,7 +628,7 @@ export function buildInferredFullDeployPlanSummary(
       value:
         previousVersion && previousVersion === CURRENT_FRAMEOS_VERSION
           ? CURRENT_FRAMEOS_VERSION
-          : `${previousVersion ?? 'Not deployed'} -> ${CURRENT_FRAMEOS_VERSION}`,
+          : `${previousVersion ?? 'Not deployed'} → ${CURRENT_FRAMEOS_VERSION}`,
     },
     ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
   ]

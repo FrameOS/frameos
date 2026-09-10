@@ -24,6 +24,13 @@ const PreviewKeyConsentModal = lazy(() =>
     default: module.PreviewKeyConsentModal,
   }))
 )
+// And the one confirmation dialog: without a host, confirmDialog() falls
+// back to the blocking window.confirm it replaced.
+const ConfirmDialog = lazy(() =>
+  import('../../../frontend/src/components/ConfirmDialog').then((module) => ({
+    default: module.ConfirmDialog,
+  }))
+)
 
 // Layout contract (see .frameos-cloud-app in src/index.css): the account
 // header is persistent chrome that never scrolls away and never re-mounts per
@@ -50,6 +57,7 @@ export function App(): JSX.Element {
       <Suspense fallback={null}>
         <LongRunningTaskToasts />
         <PreviewKeyConsentModal />
+        <ConfirmDialog />
       </Suspense>
     </div>
   )

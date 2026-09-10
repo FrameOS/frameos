@@ -21,7 +21,7 @@ import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { assignSceneImages } from '../../../../utils/sceneImages'
 import { socketLogic } from '../../../socketLogic'
-import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
 import { embeddedUsbUploadTimeoutMs, scheduleEmbeddedUsbFrameImageRefresh } from '../../../../models/framesModel'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
@@ -1119,7 +1119,12 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.uploadImageSuccess()
       } catch (error) {
         console.error(error)
-        alert('Failed to upload image')
+        reportTaskOutcome('error', {
+          frameId: props.frameId,
+          kind: 'upload',
+          title: 'Upload image',
+          detail: error instanceof Error && error.message ? error.message : 'Failed to upload image',
+        })
         actions.uploadImageFailure()
       }
     },
@@ -1245,7 +1250,12 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.installMissingActiveSceneSuccess()
       } catch (error) {
         console.error('Failed to install uploaded scenes', error)
-        alert('Failed to install the active scene')
+        reportTaskOutcome('error', {
+          frameId: props.frameId,
+          kind: 'save',
+          title: 'Install the active scene',
+          detail: error instanceof Error && error.message ? error.message : 'Failed to install the active scene',
+        })
         actions.installMissingActiveSceneFailure()
       }
     },
