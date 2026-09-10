@@ -209,9 +209,8 @@ type
     frameConfig*: FrameConfig
     lock*: Lock
     when not defined(frameosEmbedded) and not defined(frameosWasm):
-      # The logger thread + channel only exist on OS-threaded builds; the
-      # embedded and wasm builds log synchronously through a host hook.
-      thread*: Thread[FrameConfig]
+      # The logger channel only exists on OS-threaded builds; the embedded
+      # and wasm builds log synchronously through a host hook.
       channel*: Channel[SerializedLog]
     log*: proc (payload: JsonNode)
     enabled*: bool

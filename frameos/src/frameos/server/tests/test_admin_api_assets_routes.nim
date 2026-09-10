@@ -136,6 +136,26 @@ suite "Server admin api asset helpers":
     let cached = getAssetPayload("wide.png", true)
     check decodeImage(cached.body).width == 4
 
+  test "a replaced image gets a new thumbnail and the stale one is evicted":
+    let tempRoot = getTempDir() / "frameos-api-asset-thumbs-replaced"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    writeFile(tempRoot / "photo.png", newImage(800, 400).encodeImage(PngFormat))
+    globalFrameConfig = baseConfig(tempRoot)
+    let first = getAssetPayload("photo.png", true)
+    check decodeImage(first.body).height == 160
+
+    # Same path, different contents (and a different size, so the key changes
+    # even when the filesystem's mtime granularity is one second).
+    writeFile(tempRoot / "photo.png", newImage(400, 800).encodeImage(PngFormat))
+    let second = getAssetPayload("photo.png", true)
+    check decodeImage(second.body).height == ThumbnailMaxEdge
+    check decodeImage(second.body).width == 160
+    var cachedFiles: seq[string] = @[]
+    for file in walkDirRec(tempRoot / ".thumbs"):
+      cachedFiles.add(file)
+    check cachedFiles.len == 1
+
   test "getAssetPayload reports why a thumbnail could not be made":
     let tempRoot = getTempDir() / "frameos-api-asset-thumb-errors"
     removeDir(tempRoot)
@@ -223,6 +243,40 @@ suite "Server admin api asset helpers":
     let uploadedImage = finishChunkedImageUpload("upload-image", "sample.png")
     check uploadedImage{"path"}.getStr().startsWith("uploads/sample.")
     check uploadedImage{"filename"}.getStr().endsWith(".png")
+
+  test "local upload parts are swept, capped in total, and dropped when they cannot finish":
+    let tempRoot = getTempDir() / "frameos-api-chunked-parts"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    globalFrameConfig = baseConfig(tempRoot)
+
+    # The sweep matches local parts too (it used to see only `cloud-*.part`).
+    appendUploadChunk("abandoned", 0, "half a file")
+    cleanupStaleAssetUploadChunks()
+    appendUploadChunk("abandoned", 1, " and more")
+    cleanupStaleAssetUploadChunks(maxAgeSeconds = -60)
+    expect OSError:
+      discard finishChunkedAssetUpload("abandoned", "", "gone.txt")
+
+    # A cumulative cap over every unfinished part, not per upload.
+    appendUploadChunk("cap-a", 0, repeat('a', 600), maxTotalBytes = 1000)
+    expect ValueError:
+      appendUploadChunk("cap-b", 0, repeat('b', 600), maxTotalBytes = 1000)
+    # Restarting the same upload replaces its bytes rather than adding to them.
+    appendUploadChunk("cap-a", 0, repeat('a', 900), maxTotalBytes = 1000)
+    expect ValueError:
+      appendUploadChunk("cap-a", 1, repeat('a', 200), maxTotalBytes = 1000)
+    discardUploadChunk("cap-a")
+    discardUploadChunk("cap-b")
+
+    # A part whose destination is refused (here: a directory already sits at
+    # the target) does not linger as a .part.
+    createDir(tempRoot / "taken.txt")
+    appendUploadChunk("bad-dest", 0, "x")
+    expect ValueError:
+      discard finishChunkedAssetUpload("bad-dest", "", "taken.txt")
+    expect OSError:
+      discard finishChunkedAssetUpload("bad-dest", "", "ok.txt")
 
   test "offset-addressed cloud upload chunks overwrite on retry and refuse holes":
     let tempRoot = getTempDir() / "frameos-api-cloud-chunked-assets"

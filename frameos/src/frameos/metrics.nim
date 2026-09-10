@@ -1,12 +1,15 @@
 import json, os, strutils, sequtils, posix, sets
+import std/atomics
 import frameos/types
 import frameos/channels
 import frameos/runtime_diagnostics
 import frameos/utils/system
 
 type
+  # Holds no FrameConfig: the sampler thread must not read a ref the runner
+  # rewrites in place on every reload (config.nim updateFrameConfigFrom). The
+  # one setting it needs travels through the atomic below instead.
   MetricsLoggerThread = ref object
-    frameConfig: FrameConfig
 
   ReadFileHook = proc(path: string): string {.gcsafe, nimcall.}
   CpuUsageHook = proc(interval: float): float {.gcsafe, nimcall.}
@@ -24,7 +27,15 @@ const noisyDiskFsTypes = [
 ]
 const systemDiskMounts = ["/boot", "/boot/efi", "/boot/firmware", "/efi", "/recovery"]
 
-var thread: Thread[FrameConfig]
+var thread: Thread[void]
+
+# `metricsInterval` in milliseconds, published by applyMetricsSettings at
+# start and on every config reload; 0 means disabled.
+var metricsIntervalMillis: Atomic[int]
+
+proc applyMetricsSettings*(frameConfig: FrameConfig) {.gcsafe.} =
+  let ms = if frameConfig == nil: 0 else: (frameConfig.metricsInterval * 1000).int
+  metricsIntervalMillis.store(max(0, ms), moRelaxed)
 var metricsReadFileHook: ReadFileHook = proc(path: string): string = readFile(path)
 var metricsSleepHook: SleepHook = proc(ms: int) = sleep(ms)
 var metricsOpenFileDescriptorsHook: OpenFileDescriptorsHook = proc(): int =
@@ -299,14 +310,15 @@ proc logMetricsSample(self: MetricsLoggerThread) =
       "error": e.msg,
     })
 
-proc logMetricsNow*(frameConfig: FrameConfig) {.gcsafe.} =
-  MetricsLoggerThread(frameConfig: frameConfig).logMetricsSample()
+proc logMetricsNow*() {.gcsafe.} =
+  MetricsLoggerThread().logMetricsSample()
 
 # How long a disabled sampler dozes between looks at its interval. The
 # interval is re-read every pass (not once at start) so a settings save —
 # local admin or cloud `set_settings` — that turns metrics on, off, or slower
-# takes effect without a runtime restart. `metricsInterval == 0` is the
-# documented "disabled" value; setConfigDefaults leaves it alone on purpose.
+# takes effect without a runtime restart: the runner's reload handler calls
+# applyMetricsSettings. `metricsInterval == 0` is the documented "disabled"
+# value; setConfigDefaults leaves it alone on purpose.
 const MetricsDisabledPollMs = 60_000
 
 proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
@@ -316,7 +328,7 @@ proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
     if maxIterations >= 0 and iterations >= maxIterations:
       break
     inc iterations
-    let ms = (self.frameConfig.metricsInterval * 1000).int
+    let ms = metricsIntervalMillis.load(moRelaxed)
     if ms <= 0:
       if not announcedDisabled:
         log(%*{"event": "metrics", "state": "disabled"})
@@ -330,14 +342,13 @@ proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
 proc start(self: MetricsLoggerThread) {.gcsafe.} =
   self.runMetricsLoop()
 
-proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
-  var metricsLoggerThread = MetricsLoggerThread(
-    frameConfig: frameConfig,
-  )
+proc createThreadRunner() {.thread.} =
+  var metricsLoggerThread = MetricsLoggerThread()
   metricsLoggerThread.start()
 
 proc newMetricsLogger*(frameConfig: FrameConfig): MetricsLogger =
-  createThread(thread, createThreadRunner, frameConfig)
+  applyMetricsSettings(frameConfig)
+  createThread(thread, createThreadRunner)
   result = MetricsLogger(
     frameConfig: frameConfig,
   )
@@ -371,5 +382,6 @@ proc resetMetricsHooksForTest*() =
     fdCount
 
 proc runMetricsLoopForTest*(frameConfig: FrameConfig, iterations: int) =
-  var metricsLoggerThread = MetricsLoggerThread(frameConfig: frameConfig)
+  applyMetricsSettings(frameConfig)
+  var metricsLoggerThread = MetricsLoggerThread()
   metricsLoggerThread.runMetricsLoop(maxIterations = iterations)

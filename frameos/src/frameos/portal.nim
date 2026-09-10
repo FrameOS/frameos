@@ -264,7 +264,11 @@ proc door(verb: PrivilegedVerb, args: JsonNode = nil,
   let res = requestPrivileged(verb, args, timeoutMs)
   pLog("portal:privileged", %*{"verb": $verb, "ok": res.ok, "rc": res.exitCode,
                                "error": res.error, "output": res.output.strip()})
-  (res.output, if res.ok: 0 else: max(res.exitCode, 1))
+  if res.ok or res.error.len == 0:
+    return (res.output, if res.ok: 0 else: max(res.exitCode, 1))
+  # A refused or timed-out request has its reason in `error`, not in the
+  # (usually empty) output; callers that surface the failure need it.
+  (res.error & (if res.output.strip().len > 0: "\n" & res.output else: ""), max(res.exitCode, 1))
 
 proc run(cmd: string, loggedCmd: string = ""): (string, int) {.gcsafe.} =
   ## Execute a shell command (through /bin/sh -c) and log the result.
@@ -945,13 +949,24 @@ proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig)
     if result.partialMaxRefreshesBeforeFull <= 0:
       result.partialMaxRefreshesBeforeFull = defaults.refreshes
 
-proc writeHostnameBestEffort(hostname: string) =
+proc writeHostname(hostname: string): bool =
+  ## Applies the hostname the owner typed. Through the privileged door the
+  ## answer is authoritative, so a refusal fails the setup (and names why)
+  ## instead of leaving a frame that reports success but is not reachable
+  ## under the name it just promised. The legacy sudo path has no such
+  ## answer (passwordless sudo is not a given there) and stays best-effort.
   let base = sanitizeHostnameBase(hostname)
   if base.len == 0:
-    return
+    return true
   if privilegedDoorAvailable():
-    discard door(pvSetHostname, %*{"hostname": base})
-    return
+    let (output, rc) = door(pvSetHostname, %*{"hostname": base})
+    if rc != 0:
+      let message = output.strip()
+      rememberError("Could not set the hostname" & (if message.len > 0: ": " & message else: "."))
+      pLog("portal:setup:hostnameError", %*{"hostname": base, "rc": rc})
+      return false
+    return true
+  result = true
   try:
     writeFile("/etc/hostname", base & "\n")
   except CatchableError:
@@ -1087,7 +1102,8 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     # must leave the old frame.json, not a truncated one the frame cannot
     # boot from — and the file must never sit at 0644.
     writePrivateFile(filename, pretty(data, indent = 4) & "\n")
-    writeHostnameBestEffort(hostnameBase)
+    if not writeHostname(hostnameBase):
+      return false
 
     if not options.controlModeExplicit:
       discard

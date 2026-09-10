@@ -1,4 +1,4 @@
-import zippy, json, os, times, strutils, net
+import zippy, json, os, times, strutils, net, algorithm, locks
 import std/atomics
 
 import frameos/channels
@@ -10,26 +10,94 @@ from frameos/hal/net_client import setSocketSendRecvTimeouts
 const GzipLogTimeoutMs = 10 * 60 * 1000
 
 type
+  LoggerSettings* = object
+    ## Everything the logger thread needs from the frame config, as plain
+    ## values. The thread never holds the FrameConfig ref: that object is
+    ## rewritten in place by the runner on every reload (config.nim
+    ## updateFrameConfigFrom) while four mummy workers read it, and a string
+    ## field replaced under this thread would be a use-after-free (the
+    ## auth-cache incident, server/auth.nim). A reload hands over a fresh
+    ## copy through applyLoggerSettings instead.
+    serverHost*: string
+    serverPort*: int
+    useTls*: bool
+    serverApiKey*: string
+    serverSendLogs*: bool
+    logToFile*: string
+
+  LogFileState* = object
+    ## The log file currently being appended to and how big it is: tracked
+    ## here so the size cap costs no stat per line.
+    path*: string
+    bytes*: int64
+
   LoggerThread = ref object
-    frameConfig: FrameConfig
-    host: string
-    port: int
-    useTls: bool
+    settings: LoggerSettings
+    settingsGeneration: int
     sslContext: SslContext
     logs: seq[SerializedLog]
     lastSendAt: float
     retryBackoff: float
     nextSendAllowedAt: float
-    lastLogFilePath: string
+    logFile: LogFileState
 
 const LOG_FLUSH_SECONDS = 1.0
 const MaxBufferedLogs = 1000
+# Channel entries taken per pass of the logger loop. The channel holds 5000;
+# taking one per wakeup (with a sleep between wakeups) could never catch up
+# with a burst, so the channel overflowed and dropped while the drain idled.
+const MaxDrainPerPass = MaxBufferedLogs
 const LogSendConnectTimeoutMs = 5000
 const LogSendIoTimeoutMs = 10_000
 const LogSendMaxBackoffSeconds = 60.0
 
+# A log path without `{date}` never rotates by date, so it rotates by size:
+# at this many bytes the file is gzipped in place and a fresh one started,
+# keeping the newest LogFileMaxArchives archives.
+const LogFileMaxBytes* = 8 * 1024 * 1024
+const LogFileMaxArchives* = 3
+
 var threadInitDone = false
-var thread: Thread[FrameConfig]
+var thread: Thread[LoggerSettings]
+
+# The settings the thread should be running with. Written by whichever
+# thread saves the config (runner on reload, main at start), read by the
+# logger thread; the generation counter lets the thread skip the lock on
+# every pass where nothing changed.
+var loggerSettingsLock: Lock
+initLock(loggerSettingsLock)
+var pendingLoggerSettings: LoggerSettings
+var loggerSettingsGeneration: Atomic[int]
+
+proc loggerSettingsFrom*(frameConfig: FrameConfig): LoggerSettings =
+  if frameConfig == nil:
+    return LoggerSettings()
+  LoggerSettings(
+    serverHost: frameConfig.serverHost,
+    serverPort: frameConfig.serverPort,
+    useTls: normalizeServerScheme(frameConfig.serverScheme, frameConfig.serverPort) == "https",
+    serverApiKey: frameConfig.serverApiKey,
+    serverSendLogs: frameConfig.serverSendLogs,
+    logToFile: frameConfig.logToFile,
+  )
+
+proc applyLoggerSettings*(frameConfig: FrameConfig) {.gcsafe.} =
+  ## Publish the current config to the logger thread. Called at start and
+  ## after every config reload; the thread picks the copy up on its next pass.
+  let settings = loggerSettingsFrom(frameConfig)
+  {.gcsafe.}:
+    withLock loggerSettingsLock:
+      pendingLoggerSettings = settings
+    atomicInc(loggerSettingsGeneration)
+
+proc refreshSettings(self: LoggerThread) =
+  let generation = loggerSettingsGeneration.load(moAcquire)
+  if generation == self.settingsGeneration:
+    return
+  {.gcsafe.}:
+    withLock loggerSettingsLock:
+      self.settings = pendingLoggerSettings
+  self.settingsGeneration = generation
 
 proc gzipLogFile(path: string) =
   if path.len == 0 or path.endsWith(".gz") or not storedFileExists(path):
@@ -86,21 +154,62 @@ proc cleanupOldRotatedLogs*(filenameTemplate: string, today: DateTime) =
   except CatchableError as e:
     echo "Error cleaning up old log files: " & e.msg
 
-proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, timestamp: float) =
+proc pruneLogArchives*(path: string, keep = LogFileMaxArchives) =
+  ## Keep only the newest `keep` gzip archives of a size-rotated log file
+  ## (`path.gz`, `path.1.gz`, `path.2.gz`, ... as gzipLogFile names them).
+  let dir = parentDir(path)
+  let base = lastPathPart(path)
+  var archives: seq[(float, string)] = @[]
+  try:
+    for kind, candidate in walkDir(if dir.len > 0: dir else: "."):
+      if kind != pcFile:
+        continue
+      let name = lastPathPart(candidate)
+      if not (name.startsWith(base & ".") and name.endsWith(".gz")):
+        continue
+      # What follows "<base>." is either "gz" or "<digits>.gz".
+      let rest = name[base.len + 1 .. ^1]
+      if rest != "gz":
+        let digits = rest[0 ..< rest.len - 3]
+        if digits.len == 0 or not allCharsInSet(digits, {'0' .. '9'}):
+          continue
+      archives.add((getLastModificationTime(candidate).toUnixFloat(), candidate))
+    if archives.len <= keep:
+      return
+    archives.sort(proc(a, b: (float, string)): int = cmp(b[0], a[0]))
+    for index in keep ..< archives.len:
+      removeStoredFile(archives[index][1])
+  except CatchableError as e:
+    echo "Error pruning log archives: " & e.msg
+
+proc logToFile*(filename: string, logLine: string, state: var LogFileState, timestamp: float,
+                maxBytes = LogFileMaxBytes) =
+  ## Append one line to the configured log file. `{date}` paths rotate by
+  ## day (and expire after LogRetentionDays); a path without `{date}` rotates
+  ## by size instead, so neither can grow without bound on SD-backed storage.
   try:
     if filename.len > 0:
       let loggedAt = fromUnix(timestamp.int64).local
-      let file = if "{date}" in filename:
+      let dated = "{date}" in filename
+      let file = if dated:
         filename.replace("{date}", loggedAt.format("yyyyMMdd"))
       else:
         filename
-      if lastLogFilePath.len > 0 and lastLogFilePath != file:
-        gzipLogFile(lastLogFilePath)
-      if lastLogFilePath != file:
+      if state.path.len > 0 and state.path != file:
+        gzipLogFile(state.path)
+      if state.path != file:
         ensureParentDir(file)
-        cleanupOldRotatedLogs(filename, loggedAt)
-      lastLogFilePath = file
-      appendTextLine(file, loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine)
+        if dated:
+          cleanupOldRotatedLogs(filename, loggedAt)
+        state.path = file
+        state.bytes = storedFileSize(file)
+      let line = loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine
+      if not dated and state.bytes > 0 and state.bytes + line.len + 1 > maxBytes:
+        gzipLogFile(file)
+        pruneLogArchives(file)
+        state.bytes = 0
+      appendTextLine(file, line)
+      state.bytes += line.len + 1
   except Exception as e:
     echo "Error writing to log file: " & $e.msg
 
@@ -132,13 +241,13 @@ proc postLogs(self: LoggerThread, body: string): int =
   ## (DNS resolution inside connect() remains bounded only by the resolver.)
   var socket = newSocket()
   try:
-    socket.connect(self.host, Port(self.port), timeout = LogSendConnectTimeoutMs)
+    socket.connect(self.settings.serverHost, Port(self.settings.serverPort), timeout = LogSendConnectTimeoutMs)
     socket.setSocketSendRecvTimeouts(LogSendIoTimeoutMs)
-    if self.useTls:
-      self.getSslContext().wrapConnectedSocket(socket, handshakeAsClient, self.host)
+    if self.settings.useTls:
+      self.getSslContext().wrapConnectedSocket(socket, handshakeAsClient, self.settings.serverHost)
     let request = "POST /api/log HTTP/1.1\r\n" &
-      "Host: " & self.host & ":" & $self.port & "\r\n" &
-      "Authorization: Bearer " & self.frameConfig.serverApiKey & "\r\n" &
+      "Host: " & self.settings.serverHost & ":" & $self.settings.serverPort & "\r\n" &
+      "Authorization: Bearer " & self.settings.serverApiKey & "\r\n" &
       "Content-Type: application/json\r\n" &
       "Content-Encoding: gzip\r\n" &
       "Content-Length: " & $body.len & "\r\n" &
@@ -168,18 +277,21 @@ proc processQueue(self: LoggerThread): int =
   if logCount < MaxBufferedLogs and self.lastSendAt + LOG_FLUSH_SECONDS >= now:
     return 0
 
-  # make a copy, just in case some thread from somewhere adds new entries
-  var newLogs = self.logs
+  var newLogs = move(self.logs)
   self.logs = @[]
 
-  if not self.frameConfig.serverSendLogs:
-    return newLogs.len
-
+  # Report and reset the drop counter whether or not logs leave the device:
+  # with remote logging off the counter used to grow forever, and the one
+  # place the drops were visible (the journal, the log file) never heard.
   let dropped = logsDroppedCounter.exchange(0)
   if dropped > 0:
     let droppedLine = $(%*{"event": "logger:dropped", "count": dropped})
     echo droppedLine
+    logToFile(self.settings.logToFile, droppedLine, self.logFile, now)
     newLogs.add(SerializedLog(timestamp: now, event: "logger:dropped", line: droppedLine))
+
+  if not self.settings.serverSendLogs:
+    return newLogs.len
 
   self.lastSendAt = now
   try:
@@ -197,47 +309,51 @@ proc processQueue(self: LoggerThread): int =
   return newLogs.len
 
 
-proc run(self: LoggerThread) =
-  var run = 2
-  while true:
-    let processedLogs = self.processQueue()
-    if processedLogs == 0:
-      sleep(run)
-      if run < 250:
-        run += 2
+proc drainChannel(self: LoggerThread): int =
+  ## Take everything queued (up to MaxDrainPerPass) in one go: print it,
+  ## file it, and buffer it for the next send.
+  while result < MaxDrainPerPass:
     let (success, payload) = logChannel.tryRecv()
-    if success:
-      echo "(" & $payload.timestamp & ", " & payload.line & ")" # print to stdout / journal
-      self.logs.add(payload)
-      logToFile(self.frameConfig.logToFile, payload.line, self.lastLogFilePath, payload.timestamp)
-      run = 2
-    else:
-      sleep(run)
-      if run < 250:
-        run += 2
+    if not success:
+      break
+    inc result
+    echo "(" & $payload.timestamp & ", " & payload.line & ")" # print to stdout / journal
+    self.logs.add(payload)
+    logToFile(self.settings.logToFile, payload.line, self.logFile, payload.timestamp)
 
-proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
+proc run(self: LoggerThread) =
+  var idleSleepMs = 2
+  while true:
+    self.refreshSettings()
+    let received = self.drainChannel()
+    let processedLogs = self.processQueue()
+    if received == 0 and processedLogs == 0:
+      sleep(idleSleepMs)
+      if idleSleepMs < 250:
+        idleSleepMs += 2
+    else:
+      idleSleepMs = 2
+
+proc createThreadRunner(settings: LoggerSettings) {.thread.} =
   var loggerThread = LoggerThread(
-    frameConfig: frameConfig,
-    host: frameConfig.serverHost,
-    port: frameConfig.serverPort,
-    useTls: normalizeServerScheme(frameConfig.serverScheme, frameConfig.serverPort) == "https",
+    settings: settings,
     logs: @[],
     lastSendAt: 0.0,
-    lastLogFilePath: "",
   )
-  var errorLogFilePath = ""
+  var errorLogFile = LogFileState()
   while true:
     try:
       run(loggerThread)
     except Exception as e:
       echo "Error in logger thread: " & $e.msg
-      logToFile(frameConfig.logToFile, $(%*{"error": "Error in logger thread", "message": $e.msg}), errorLogFilePath, epochTime())
+      logToFile(loggerThread.settings.logToFile, $(%*{"error": "Error in logger thread", "message": $e.msg}),
+                errorLogFile, epochTime())
       sleep(1000)
 
 proc newLogger*(frameConfig: FrameConfig): Logger =
+  applyLoggerSettings(frameConfig)
   if not threadInitDone:
-    createThread(thread, createThreadRunner, frameConfig)
+    createThread(thread, createThreadRunner, loggerSettingsFrom(frameConfig))
     threadInitDone = true
   var logger = Logger(
     frameConfig: frameConfig,

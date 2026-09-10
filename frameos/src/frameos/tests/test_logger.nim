@@ -5,6 +5,7 @@ import ../config
 import ../channels
 import ../types
 import std/json
+import std/atomics
 
 proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 1200, pollMs = 20): bool =
   let deadline = epochTime() + (float(timeoutMs) / 1000.0)
@@ -170,3 +171,59 @@ suite "Logger Tests":
 
   test "cleanupOldRotatedLogs ignores paths without a date placeholder":
     cleanupOldRotatedLogs("/tmp/frameos-static.log", now())
+
+  test "the logger drains a burst in one pass instead of one line per wakeup":
+    testConfig.logToFile = ""
+    let logger = newLogger(testConfig)
+    discard logsDroppedCounter.exchange(0)
+    for i in 0 ..< 3000:
+      logger.log(%*{"event": "burst", "i": i})
+    # 3000 entries into a 5000-slot channel: nothing may be dropped, and the
+    # thread has to empty the channel well inside the old ~250 ms idle sleeps.
+    doAssert waitFor(proc(): bool = logChannel.peek() == 0, timeoutMs = 3000),
+      "Expected the logger thread to drain the burst promptly"
+    check logsDroppedCounter.load() == 0
+
+  test "drops are reported and the counter reset even with remote logging off":
+    testConfig.logToFile = "test-logger.log"
+    testConfig.serverSendLogs = false
+    let logger = newLogger(testConfig)
+    discard logsDroppedCounter.exchange(0)
+    atomicInc(logsDroppedCounter, 7)
+    logger.log(%*{"event": "after-drop"})
+    doAssert waitFor(proc(): bool =
+      fileExists("test-logger.log") and ("logger:dropped" in readFile("test-logger.log"))
+    , timeoutMs = 3000), "Expected the drop report in the log file"
+    check readFile("test-logger.log").contains("\"count\":7")
+    check logsDroppedCounter.load() == 0
+
+  test "an undated log file rotates by size and keeps a bounded archive set":
+    let dir = getTempDir() / "frameos-logger-size-cap-test"
+    if dirExists(dir):
+      removeDir(dir)
+    createDir(dir)
+    let path = dir / "frameos.log"
+    var state = LogFileState()
+    for i in 0 ..< 60:
+      logToFile(path, "line number " & $i & " " & repeat('x', 40), state, 1700000000.0 + i.float, maxBytes = 400)
+    var archives = 0
+    for kind, file in walkDir(dir):
+      if kind == pcFile and file.endsWith(".gz"):
+        inc archives
+    check fileExists(path)
+    check getFileSize(path) <= 400
+    check archives > 0
+    check archives <= LogFileMaxArchives
+    check state.bytes == getFileSize(path)
+    removeDir(dir)
+
+  test "loggerSettingsFrom copies plain values out of the config":
+    let config = FrameConfig(serverHost: "backend.local", serverPort: 443, serverScheme: "https",
+                             serverApiKey: "k", serverSendLogs: true, logToFile: "/tmp/x.log")
+    let settings = loggerSettingsFrom(config)
+    check settings.serverHost == "backend.local"
+    check settings.useTls
+    check settings.serverApiKey == "k"
+    check settings.serverSendLogs
+    check settings.logToFile == "/tmp/x.log"
+    check loggerSettingsFrom(nil) == LoggerSettings()

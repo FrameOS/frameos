@@ -31,6 +31,17 @@ type
     handle: FileHandle
     buffer: string
     eof*: bool
+    maxLineBytes: int
+    # The line being assembled already overflowed maxLineBytes: its bytes are
+    # dropped up to and including the newline that ends it.
+    skippingLine: bool
+    # Lines dropped for being longer than maxLineBytes since init.
+    overlongLines*: int
+
+# A ProcessOutputReader holds at most one unterminated line: a child that
+# writes forever without a newline (a runaway print loop, a binary blob on
+# stdout) used to grow the buffer without bound on the reading thread.
+const DefaultProcessReaderMaxLineBytes* = 256 * 1024
 
 # Writing to a pipe whose reader died must surface as EPIPE, not kill the
 # whole process with SIGPIPE.
@@ -294,12 +305,18 @@ proc runShellCapture*(command: string;
   output.add(res.errorOutput)
   (output, res.exitCode)
 
-proc initProcessOutputReader*(p: Process): ProcessOutputReader =
+proc initProcessOutputReader*(p: Process;
+                              maxLineBytes = DefaultProcessReaderMaxLineBytes): ProcessOutputReader =
   ## Non-blocking line reader over a process's stdout. Combine with
   ## poStdErrToStdOut to also cover stderr; otherwise stderr must be drained
-  ## separately.
+  ## separately. A line longer than `maxLineBytes` is dropped whole (counted
+  ## in `overlongLines`) so the buffer stays bounded whatever the child emits.
   p.outputHandle().setNonBlocking()
-  ProcessOutputReader(handle: p.outputHandle())
+  ProcessOutputReader(handle: p.outputHandle(), maxLineBytes: max(1, maxLineBytes))
+
+proc bufferedBytes*(reader: ProcessOutputReader): int =
+  ## Bytes of the unterminated line currently held (test/diagnostic seam).
+  reader.buffer.len
 
 proc fill(reader: var ProcessOutputReader) =
   if reader.eof:
@@ -313,21 +330,33 @@ proc fill(reader: var ProcessOutputReader) =
 proc readAvailableLines*(reader: var ProcessOutputReader): seq[string] =
   ## Returns the complete lines available right now without blocking.
   ## After EOF the unterminated tail (if any) is returned as a final line.
+  ## The tail of an overlong line is never returned: once a line has passed
+  ## maxLineBytes the whole line is gone, not just its excess.
   reader.fill()
   var start = 0
   while true:
     let idx = reader.buffer.find('\n', start)
     if idx == -1:
       break
-    var line = reader.buffer[start ..< idx]
-    if line.len > 0 and line[^1] == '\r':
-      line.setLen(line.len - 1)
-    result.add(line)
+    if reader.skippingLine:
+      # The rest of a line whose head was already thrown away.
+      reader.skippingLine = false
+    else:
+      var line = reader.buffer[start ..< idx]
+      if line.len > 0 and line[^1] == '\r':
+        line.setLen(line.len - 1)
+      result.add(line)
     start = idx + 1
   if start > 0:
     reader.buffer = reader.buffer[start .. ^1]
+  if reader.buffer.len > reader.maxLineBytes:
+    if not reader.skippingLine:
+      inc reader.overlongLines
+    reader.skippingLine = true
+    reader.buffer = ""
   if reader.eof and reader.buffer.len > 0:
-    result.add(reader.buffer)
+    if not reader.skippingLine:
+      result.add(reader.buffer)
     reader.buffer = ""
 
 proc writeInputDrainingOutput*(p: Process;
