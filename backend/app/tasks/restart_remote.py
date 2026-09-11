@@ -9,7 +9,7 @@ from app.tasks.deploy_remote import (
     legacy_remote_cleanup_script,
     resolve_remote_task_transport,
 )
-from app.tasks.utils import get_fresh_frame
+from app.tasks.utils import get_fresh_frame, record_task_failure
 from app.utils.remote_exec import RemoteTransport, run_commands
 
 async def restart_remote(id: int, redis: Redis, *, transport: RemoteTransport = "auto"):
@@ -50,4 +50,6 @@ async def restart_remote_task(ctx: dict[str, Any], id: int, transport: RemoteTra
         await log(db, redis, id, "stdout", "FrameOS Remote restart command completed")
 
     except Exception as e:
-        await log(db, redis, id, "stderr", str(e))
+        # No frame status to reset: this verb never sets one.
+        await record_task_failure(db, redis, id, e)
+        raise

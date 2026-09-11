@@ -41,7 +41,7 @@ Status legend:
 | Capability | Canonical route | Backend control plane | FrameOS Pi local | FrameOS ESP32 local | Target behavior |
 | --- | --- | --- | --- | --- | --- |
 | Apps catalog | `GET /api/apps` | Full, project-scoped | Full, bundled repo app catalog | Partial, returns empty list today | Same response shape everywhere; ESP32 may return a filtered catalog. |
-| App source helpers | `GET /api/apps/source`, `POST /api/apps/validate_source`, `POST /api/apps/enhance_source` | Full | N/A | N/A | Backend-only authoring helpers unless local code editing is added. |
+| App source helpers | `GET /api/apps/source`, `POST /api/apps/validate_source` | Full | N/A | N/A | Backend-only authoring helpers unless local code editing is added. |
 | Fonts list | `GET /api/fonts` | Full, project-scoped | Full, reads local assets fonts | Full, built-in face + `fonts/` on the SD card, plus `mounted` | The empty `file` is the built-in face everywhere. `mounted: false` means "no card", which is why the list is short — not "no fonts". FrameOS Cloud serves the bundled catalogue (no project uploads to add), so the font picker works there too. |
 | Font file | `GET /api/fonts/:font` | Full | Full, local TTF from assets | Full, streamed off the SD card | Same path; content type may vary by font. On the cloud it redirects to the static copy. |
 | Templates list | `GET /api/templates` | Full | N/A in frame-control mode | N/A | Template gallery remains backend/project data. Local UI should not require it to edit an existing standalone frame. |

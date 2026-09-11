@@ -297,6 +297,171 @@ def test_remote_ws_stores_reported_version_and_clears_missing_version(client: Te
         db.close()
 
 
+def _remote_frame(secret: str = "agent-secret") -> tuple[int, str]:
+    db = SessionLocal()
+    try:
+        frame = asyncio.run(new_frame(db, DummyRedis(), "RemoteFrame", "frame-remote.local", "localhost"))  # type: ignore[arg-type]
+        frame.agent = {"agentEnabled": True, "agentRunCommands": True, "agentSharedSecret": secret}
+        db.add(frame)
+        db.commit()
+        return frame.id, frame.server_api_key
+    finally:
+        db.close()
+
+
+def _handshake(ws, server_api_key: str, secret: str = "agent-secret") -> None:
+    ws.send_json({"action": "hello", "serverApiKey": server_api_key})
+    challenge = ws.receive_json()
+    ws.send_json({"action": "handshake", "mac": hmac_sha256(secret, f"{server_api_key}{challenge['c']}")})
+    assert ws.receive_json() == {"action": "handshake/ok"}
+
+
+def _signed(payload: dict, server_api_key: str, secret: str = "agent-secret") -> dict:
+    from app.ws.remote_ws import make_envelope
+
+    return make_envelope(payload, server_api_key, secret)
+
+
+@pytest.mark.parametrize("hello", ["not json", "[1, 2]", "null", '{"action": ["hello"]}'])
+def test_remote_ws_malformed_hello_closes_with_policy_violation(client: TestClient, hello: str) -> None:
+    with client.websocket_connect("/ws/remote") as ws:
+        ws.send_text(hello)
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.code == 1008
+
+
+def test_remote_ws_hello_with_an_empty_api_key_is_an_unknown_frame(client: TestClient) -> None:
+    for key in ("", None, {"a": 1}):
+        with client.websocket_connect("/ws/remote") as ws:
+            ws.send_json({"action": "hello", "serverApiKey": key})
+            with pytest.raises(WebSocketDisconnect) as exc:
+                ws.receive_text()
+        assert (exc.value.code, exc.value.reason) == (1008, "unknown frame")
+
+
+def test_remote_ws_malformed_handshake_closes_with_policy_violation(client: TestClient) -> None:
+    _, server_api_key = _remote_frame()
+    for handshake in ("garbage", '"handshake"', '{"action": "handshake", "mac": "\u00e9"}'):
+        with client.websocket_connect("/ws/remote") as ws:
+            ws.send_json({"action": "hello", "serverApiKey": server_api_key})
+            ws.receive_json()
+            ws.send_text(handshake)
+            with pytest.raises(WebSocketDisconnect) as exc:
+                ws.receive_text()
+        assert exc.value.code == 1008, handshake
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "not json",
+        "[]",
+        json.dumps({"nonce": "1", "payload": {}, "mac": "x"}),
+        json.dumps({"nonce": 1, "payload": [], "mac": "x"}),
+        json.dumps({"nonce": 1, "payload": {}, "mac": 5}),
+        json.dumps({"nonce": True, "payload": {}, "mac": "x"}),
+    ],
+)
+def test_remote_ws_malformed_envelope_closes_with_policy_violation(client: TestClient, message: str) -> None:
+    _, server_api_key = _remote_frame()
+    with client.websocket_connect("/ws/remote") as ws:
+        _handshake(ws, server_api_key)
+        ws.send_text(message)
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert (exc.value.code, exc.value.reason) == (1008, "bad envelope")
+
+
+def test_remote_ws_signed_reply_without_an_id_closes(client: TestClient) -> None:
+    _, server_api_key = _remote_frame()
+    with client.websocket_connect("/ws/remote") as ws:
+        _handshake(ws, server_api_key)
+        ws.send_json(_signed({"type": "cmd/resp", "ok": True}, server_api_key))
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert (exc.value.code, exc.value.reason) == (1008, "bad envelope")
+
+
+def test_remote_ws_non_ascii_mac_is_a_bad_mac_not_a_crash(client: TestClient) -> None:
+    _, server_api_key = _remote_frame()
+    with client.websocket_connect("/ws/remote") as ws:
+        _handshake(ws, server_api_key)
+        envelope = _signed({"type": "cmd/resp", "id": "x", "ok": True}, server_api_key)
+        envelope["mac"] = "\u00e9" * 64
+        ws.send_json(envelope)
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert (exc.value.code, exc.value.reason) == (1008, "bad mac")
+
+
+def test_remote_ws_drops_a_reply_for_a_command_it_is_not_waiting_on(client: TestClient, monkeypatch) -> None:
+    """A captured reply carries a valid MAC for as long as the key lives (the
+    nonce is a per-second stamp), so the command id is what refuses a replay:
+    a reply for an id this connection did not send is never handed on."""
+    pushed: list[tuple] = []
+
+    async def record_rpush(self, *args, **kwargs):
+        pushed.append(args)
+
+    monkeypatch.setattr(DummyRedis, "rpush", record_rpush)
+    _, server_api_key = _remote_frame()
+    with client.websocket_connect("/ws/remote") as ws:
+        _handshake(ws, server_api_key)
+        ws.send_json(_signed({"type": "cmd/resp", "id": "not-pending", "ok": True, "result": "forged"}, server_api_key))
+        ws.send_json(_signed({"type": "cmd/stream", "id": "not-pending", "stream": "stdout", "data": "x"}, server_api_key))
+        # The connection stays up: a garbage frame afterwards is still answered.
+        ws.send_text("garbage")
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.reason == "bad envelope"
+    assert pushed == []
+
+
+def test_make_envelope_keeps_the_seconds_nonce_shipped_remotes_check() -> None:
+    from app.ws.remote_ws import make_envelope
+
+    first = make_envelope({"type": "cmd", "id": "a"}, "key", "secret")
+    second = make_envelope({"type": "cmd", "id": "b"}, "key", "secret")
+    assert isinstance(first["nonce"], int) and abs(first["nonce"] - int(__import__("time").time())) <= 2
+    # Same second, different commands: the id in the signed payload keeps the
+    # MACs apart, which is what the Remote's replay cache keys on.
+    assert first["mac"] != second["mac"]
+
+
+def test_remote_ws_capacity_is_checked_after_authentication(client: TestClient, monkeypatch) -> None:
+    from app.ws import remote_ws
+
+    monkeypatch.setattr(remote_ws, "MAX_REMOTES", 0)
+    # An unauthenticated caller is not told "server busy": the cap counts
+    # only frames that proved their secret.
+    with client.websocket_connect("/ws/remote") as ws:
+        ws.send_json({"action": "hello", "serverApiKey": "missing"})
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.reason == "unknown frame"
+
+    _, server_api_key = _remote_frame()
+    with client.websocket_connect("/ws/remote") as ws:
+        ws.send_json({"action": "hello", "serverApiKey": server_api_key})
+        challenge = ws.receive_json()
+        ws.send_json({"action": "handshake", "mac": hmac_sha256("agent-secret", f"{server_api_key}{challenge['c']}")})
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert (exc.value.code, exc.value.reason) == (1013, "server busy")
+
+
+def test_remote_ws_bounds_unauthenticated_sockets(client: TestClient, monkeypatch) -> None:
+    from app.ws import remote_ws
+
+    monkeypatch.setattr(remote_ws, "MAX_PENDING_HANDSHAKES", 0)
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws/remote"):
+            pass
+    assert exc.value.code == 1013
+    assert remote_ws.pending_handshakes == set()
+
+
 def test_remote_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(client: TestClient) -> None:
     db = SessionLocal()
     try:

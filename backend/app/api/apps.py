@@ -5,23 +5,17 @@ import tempfile
 import os
 import asyncio
 import contextlib
-import httpx
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
-from app.models.settings import get_settings_dict
-from app.tenancy import current_project_id
-from app.utils.ai_scene import SCENE_MODEL, openai_model
 from app.utils.js_apps import validate_js_source
 from app.schemas.apps import (
  AppsListResponse,
  AppsSourceResponse,
  ValidateSourceRequest,
  ValidateSourceResponse,
- EnhanceSourceRequest,
- EnhanceSourceResponse
 )
 from . import api_project
 
@@ -62,52 +56,6 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
         )
 
     return {"errors": errors}
-
-
-@api_project.post("/apps/enhance_source", response_model=EnhanceSourceResponse)
-async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = Depends(get_db)):
-    source = data.source
-    prompt = data.prompt
-    openai_settings = get_settings_dict(db, project_id=current_project_id()).get("openAI", {})
-    api_key = openai_settings.get("backendApiKey")
-
-    if api_key is None:
-        raise HTTPException(status_code=400, detail="OpenAI backend API key not set")
-
-    ai_context = f"""
-    You are helping a python developer write a FrameOS application. You are editing app.nim, the main file in FrameOS.
-    This controls an e-ink display and runs on a Raspberry Pi. Help the user with their changes.
-
-    This is the current source of app.nim:
-    ```nim
-    {source}
-    ```
-    """
-
-    payload = {
-        "messages": [
-            {"role": "system", "content": ai_context},
-            {"role": "user", "content": prompt}
-        ],
-        "model": openai_model(openai_settings, "appEnhanceModel", SCENE_MODEL),
-    }
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers)
-        result = response.json()
-
-    error = result.get('error')
-    suggestion = result['choices'][0]['message']['content'] if 'choices' in result else None
-
-    if error:
-        raise HTTPException(status_code=500, detail=str(error))
-
-    return {"suggestion": suggestion}
 
 
 def validate_python(source: str):

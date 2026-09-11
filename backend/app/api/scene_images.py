@@ -19,7 +19,6 @@ from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
 from app.models.template import Template
 from . import api_open, api_project
-from app.utils.jwt_tokens import validate_scoped_token
 from app.utils.network import assert_target_allowed, is_safe_host
 from app.utils.upload_limits import read_body_limited
 from app.api.auth import get_current_user_from_request
@@ -110,7 +109,6 @@ async def get_scene_image(
     frame_id: int,
     scene_id: str,
     request: Request,
-    token: str | None = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -121,10 +119,8 @@ async def get_scene_image(
 
     if config.HASSIO_RUN_MODE != 'ingress':
         user = await get_current_user_from_request(request, db)
-        if user is not None and get_user_project(db, user, project_id) is not None:
-            pass
-        else:
-            validate_scoped_token(token, expected_subject=f"project={project_id}:frame={frame_id}")
+        if user is None or get_user_project(db, user, project_id) is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
 
     img_row: SceneImage | None = (

@@ -12,7 +12,7 @@ from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.models.apps import get_app_configs
-from app.models.chat import Chat, ChatMessage
+from app.models.chat import Chat, ChatMessage, find_project_chat, project_chat_id
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.schemas.ai_scenes import (
@@ -541,29 +541,20 @@ async def chat_scene(
         if frame is None:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
         if data.chat_id:
-            chat = db.query(Chat).filter(Chat.project_id == project_id, Chat.id == data.chat_id).first()
+            chat = find_project_chat(db, project_id, data.chat_id)
             if chat and chat.frame_id != data.frame_id:
                 raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat does not belong to frame")
             if chat and chat.context_type not in (None, "scene", "frame"):
                 raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat context does not match scene chat")
         if not chat:
-            if data.chat_id:
-                chat = Chat(
-                    id=data.chat_id,
-                    project_id=project_id,
-                    frame_id=data.frame_id,
-                    scene_id=data.scene_id,
-                    context_type="scene" if data.scene_id else "frame",
-                    context_id=data.scene_id,
-                )
-            else:
-                chat = Chat(
-                    project_id=project_id,
-                    frame_id=data.frame_id,
-                    scene_id=data.scene_id,
-                    context_type="scene" if data.scene_id else "frame",
-                    context_id=data.scene_id,
-                )
+            chat = Chat(
+                **({"id": project_chat_id(project_id, data.chat_id)} if data.chat_id else {}),
+                project_id=project_id,
+                frame_id=data.frame_id,
+                scene_id=data.scene_id,
+                context_type="scene" if data.scene_id else "frame",
+                context_id=data.scene_id,
+            )
             db.add(chat)
             db.commit()
             db.refresh(chat)

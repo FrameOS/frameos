@@ -1,10 +1,12 @@
-from fastapi import Depends, Query
+from http import HTTPStatus
+
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.api.project_scope import project_get_or_404, project_query
 from app.models.frame import Frame
-from app.models.chat import Chat, ChatMessage
+from app.models.chat import Chat, ChatMessage, find_project_chat
 from app.schemas.chats import ChatCreateRequest, ChatDetailResponse, ChatListResponse, ChatSummary
 from app.tenancy import current_project_id
 from . import api_project
@@ -57,10 +59,14 @@ async def list_chats(
 
 @api_project.get("/ai/chats/{chat_id}", response_model=ChatDetailResponse)
 async def get_chat(chat_id: str, db: Session = Depends(get_db)):
-    chat = project_get_or_404(db, Chat, chat_id, detail="Chat not found")
+    # The id the browser named a new chat with resolves to the stored one
+    # (app/models/chat.py project_chat_id).
+    chat = find_project_chat(db, current_project_id(), chat_id)
+    if chat is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Chat not found")
     messages = (
         project_query(db, ChatMessage)
-        .filter(ChatMessage.chat_id == chat_id)
+        .filter(ChatMessage.chat_id == chat.id)
         .order_by(ChatMessage.created_at.asc())
         .all()
     )

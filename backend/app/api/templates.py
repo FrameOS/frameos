@@ -28,7 +28,6 @@ from app.schemas.templates import (
 from app.api import api_project, api_open
 from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
-from app.utils.jwt_tokens import validate_scoped_token
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import assert_url_target_allowed
 from app.utils.upload_limits import (
@@ -391,14 +390,12 @@ async def get_template(template_id: str, db: Session = Depends(get_db)):
     return d
 
 @api_open.get("/projects/{project_id}/templates/{template_id}/image")
-async def get_template_image(project_id: int, template_id: str, request: Request, token: str | None = None, db: Session = Depends(get_db)):
+async def get_template_image(project_id: int, template_id: str, request: Request, db: Session = Depends(get_db)):
     if config.HASSIO_RUN_MODE != 'ingress':
-        # All modes except ingress require a token in the url or authenticated session
+        # All modes except ingress require an authenticated session
         user = await get_current_user_from_request(request, db)
-        if user is not None and get_user_project(db, user, project_id) is not None:
-            pass
-        else:
-            validate_scoped_token(token, expected_subject=f"project={project_id}:template={template_id}")
+        if user is None or get_user_project(db, user, project_id) is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
     template = db.query(Template).filter_by(project_id=project_id, id=template_id).first()
     if not template or not template.image:

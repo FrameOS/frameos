@@ -50,6 +50,9 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, frame: SimpleNamespace):
     monkeypatch.setattr(restart_frame_module, "get_fresh_frame", lambda _db, _id: frame)
     monkeypatch.setattr(restart_frame_module, "update_frame", fake_update_frame)
     monkeypatch.setattr(restart_frame_module, "log", fake_log)
+    # Failures go through the shared record_task_failure.
+    monkeypatch.setattr("app.tasks.utils.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.utils.log", fake_log)
     monkeypatch.setattr(restart_frame_module, "run_commands", fail_run_commands)
     monkeypatch.setattr("app.utils.frame_http._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
     return statuses, logs, http_calls
@@ -92,7 +95,9 @@ async def test_restart_frame_task_embedded_http_failure_marks_uninitialized(monk
 
     monkeypatch.setattr("app.utils.frame_http._fetch_frame_http_bytes", failing_fetch)
 
-    await restart_frame_task({"db": None, "redis": None}, 53)
+    # Re-raised so arq records the job as failed, like every other verb.
+    with pytest.raises(Exception, match="HTTP 502"):
+        await restart_frame_task({"db": None, "redis": None}, 53)
 
     assert statuses == ["restarting", "uninitialized"]
     assert any("HTTP 502" in message for _t, message in logs)
@@ -162,7 +167,8 @@ async def test_restart_frame_task_shell_less_card_reports_a_refused_event(monkey
 
     monkeypatch.setattr("app.utils.frame_http._fetch_frame_http_bytes", refused)
 
-    await restart_frame_task({"db": None, "redis": None}, 14)
+    with pytest.raises(Exception, match="HTTP 401"):
+        await restart_frame_task({"db": None, "redis": None}, 14)
 
     assert http_calls == [("POST", "/event/restart")]
     assert statuses == ["restarting", "uninitialized"]

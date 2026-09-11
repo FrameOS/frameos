@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from arq import ArqRedis as Redis
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, tls_settings_changed  # noqa: F401  (tests import it from here)
-from app.tasks.utils import get_fresh_frame
+from app.tasks.utils import enqueue_unique_job, get_fresh_frame, record_task_failure
 from app.tasks.deploy_frame import clear_active_deploy_job, deploy_task_log_line, register_active_deploy_job
 
 
@@ -17,8 +18,12 @@ async def fast_deploy_frame(id: int, redis: Redis, *, task_id: str | None = None
     if task_id:
         enqueue_kwargs["task_id"] = task_id
         enqueue_kwargs["_job_id"] = task_id
-    await redis.enqueue_job("fast_deploy_frame", **enqueue_kwargs)
+    await enqueue_unique_job(redis, "fast_deploy_frame", **enqueue_kwargs)
     return task_id
+
+
+def _failed_task_line(task_id: str | None):
+    return (lambda message: deploy_task_log_line(task_id, "failed", message)) if task_id else None
 
 
 async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = None) -> None:
@@ -63,11 +68,10 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | No
             await log(db, redis, id, "stdout", "Frame accepted the deploy and reloaded")
             if task_id:
                 await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", "fast"))
-        except Exception as exc:
-            detail = getattr(exc, "detail", None) or str(exc)
-            if task_id:
-                await log(db, redis, id, "stderr", deploy_task_log_line(task_id, "failed", str(detail)))
-            await log(db, redis, id, "stderr", str(detail))
+        except (Exception, asyncio.CancelledError) as exc:
+            await record_task_failure(
+                db, redis, id, exc, frame=get_fresh_frame(db, id), task_line=_failed_task_line(task_id)
+            )
             raise
         finally:
             await clear_active_deploy_job(redis, id, job_id)
@@ -90,12 +94,12 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | No
         await workflow.execute(plan)
         if task_id:
             await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", "fast"))
-    except Exception as exc:
-        if task_id:
-            await log(db, redis, id, "stderr", deploy_task_log_line(task_id, "failed", str(exc)))
-        await log(db, redis, id, "stderr", str(exc))
-        # Re-raise so arq records the job as failed (status already reset to
-        # "uninitialized" by the workflow before it raised).
+    except (Exception, asyncio.CancelledError) as exc:
+        # The workflow resets "deploying" itself for an Exception; a
+        # cancelled job skips that, so the shared path resets it here.
+        await record_task_failure(
+            db, redis, id, exc, frame=get_fresh_frame(db, id), task_line=_failed_task_line(task_id)
+        )
         raise
     finally:
         await clear_active_deploy_job(redis, id, job_id)

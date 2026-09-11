@@ -1856,7 +1856,8 @@ class FrameDeployWorkflow:
 
         reboot_schedule = post_deploy.get("reboot_schedule") or {}
         if reboot_schedule.get("needs_update"):
-            cron_schedule = reboot_schedule.get("crontab", "0 0 * * *")
+            # Normalised again at the write: this string lands in a root cron file.
+            cron_schedule = normalize_reboot_crontab(reboot_schedule.get("crontab", "0 0 * * *"))
             reboot_command = reboot_schedule.get("command", "systemctl restart frameos.service")
             crontab = f"{cron_schedule} root {reboot_command}"
             await self._exec_host_root_command(

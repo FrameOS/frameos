@@ -312,7 +312,8 @@ async def exec_command(
             process.kill()
             stdout_task.cancel()
             stderr_task.cancel()
-            raise Exception(f"Command '{command}' timed out after {timeout}s")
+            # TimeoutError, like the Remote path (remote_exec._exec_via_remote).
+            raise TimeoutError(f"Command '{command}' timed out after {timeout}s")
 
         await asyncio.gather(stdout_task, stderr_task)
         exit_status = response.exit_status or 0

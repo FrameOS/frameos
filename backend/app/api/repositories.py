@@ -24,7 +24,6 @@ from app.schemas.repositories import (
     RepositoriesListResponse,
 )
 from app.config import config
-from app.utils.jwt_tokens import validate_scoped_token
 from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
 from . import api_project, api_user, api_open
@@ -104,10 +103,6 @@ def _schedule_repository_refresh(repository: Repository) -> None:
         _refreshing_repository_ids.discard(repository_id)
 
     task.add_done_callback(_done)
-
-
-def _system_template_subject(repository_slug: str, template_slug: str) -> str:
-    return f"system-template={repository_slug}/{template_slug}"
 
 
 @lru_cache(maxsize=256)
@@ -276,17 +271,11 @@ async def get_system_repository_image(
     repository_slug: str,
     template_slug: str,
     request: Request,
-    token: str | None = None,
     db: Session = Depends(get_db),
 ):
     if config.HASSIO_RUN_MODE != 'ingress':
-        if await get_current_user_from_request(request, db):
-            pass
-        else:
-            validate_scoped_token(
-                token,
-                expected_subject=_system_template_subject(repository_slug, template_slug),
-            )
+        if not await get_current_user_from_request(request, db):
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
     repository_path = SYSTEM_REPOSITORIES_PATH / repository_slug
     if not repository_path.is_dir():

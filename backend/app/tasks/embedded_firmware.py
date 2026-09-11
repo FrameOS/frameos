@@ -1290,7 +1290,9 @@ def embedded_gpio_buttons_for_frame(frame: Frame) -> list[tuple[int, str]]:
         if pin < 0 or pin > 48:
             continue
         label = str(raw_button.get("label") or f"Pin {pin}")
-        label = re.sub(r"[\s:]+", " ", label).strip()
+        # ":" separates pin from label and "," separates buttons in the USB
+        # console's `set gpio_buttons` spec, so neither can be in a label.
+        label = re.sub(r"[\s:,]+", " ", label).strip()
         buttons.append((pin, label[:31] or f"Pin {pin}"))
     return buttons[:8]
 

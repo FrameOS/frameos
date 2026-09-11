@@ -17,7 +17,13 @@ from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.models.log import new_log as log
-from app.ws.remote_ws import number_of_connections_for_frame, file_write_open_on_frame, file_write_chunk_on_frame, file_write_close_on_frame
+from app.ws.remote_ws import (
+    number_of_connections_for_frame,
+    file_write_open_on_frame,
+    file_write_chunk_on_frame,
+    file_write_close_on_frame,
+    shell_command_payload,
+)
 from app.ws.remote_bridge import frame_command_slot
 
 from app.utils.ssh_utils import (
@@ -109,7 +115,7 @@ async def _exec_via_remote(
     """
     async with frame_command_slot(frame.id):
         cmd_id = str(uuid.uuid4())
-        payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
+        payload = shell_command_payload(cmd, timeout)
 
         message = {
             "id": cmd_id,
@@ -171,6 +177,11 @@ def _remote_stream_upload_can_fallback(exc: Exception) -> bool:
     return any(token in message for token in ("unknown", "missing", "timed-out", "timeout"))
 
 
+def _mode_kwargs(mode: int | None) -> dict[str, int]:
+    # Only pass `mode` when set, so the no-mode call keeps its old shape.
+    return {"mode": mode} if mode is not None else {}
+
+
 def _remote_supports_stream_upload(frame: Frame) -> bool:
     agent = frame.agent or {}
     capabilities = agent.get("remoteCapabilities")
@@ -184,6 +195,7 @@ async def _shell_upload_via_remote(
     remote_path: str,
     data: bytes,
     timeout: int,
+    mode: int | None = None,
 ) -> None:
     encoded = base64.b64encode(data).decode("ascii")
     parent = os.path.dirname(remote_path) or "."
@@ -229,16 +241,23 @@ async def _shell_upload_via_remote(
                     f"> shell/base64 upload progress: {print_size(sent)} / {print_size(len(data))}",
                 )
 
+        # With a mode (frame.json: secrets), the file is created under umask
+        # 077 and chmod'ed before the mv, so it is never readable by others —
+        # the same 0600 an scp of the backend's temp file lands at.
+        private_prefix = "umask 077; " if mode is not None else ""
+        chmod_step = f"chmod {mode:o} {quoted_tmp}; " if mode is not None else ""
         await _exec_via_remote(
             redis,
             frame,
             "set -eu; "
+            f"{private_prefix}"
             "if command -v base64 >/dev/null 2>&1; then "
             f"base64 -d {quoted_b64} > {quoted_tmp}; "
             "elif command -v python3 >/dev/null 2>&1; then "
             "python3 -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read()))' "
             f"< {quoted_b64} > {quoted_tmp}; "
             "else echo 'base64 command missing' >&2; exit 127; fi; "
+            f"{chmod_step}"
             f"mv {quoted_tmp} {quoted_remote}; rm -f {quoted_b64}",
             timeout,
         )
@@ -293,7 +312,7 @@ async def run_commands(
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         for cmd in commands:
-            await exec_command(db, redis, frame, ssh, cmd, log_output=log_output)
+            await exec_command(db, redis, frame, ssh, cmd, log_output=log_output, timeout=timeout)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
@@ -377,9 +396,12 @@ async def upload_file(
     *,
     timeout: int = 120,
     transport: RemoteTransport = "auto",
+    mode: int | None = None,
 ) -> None:
     """
-    Write *data* to *remote_path* on the device:
+    Write *data* to *remote_path* on the device. *mode* (e.g. 0o600 for a
+    file holding secrets) is the permission the file must land with on
+    every transport.
     """
     size = len(data)
 
@@ -387,9 +409,14 @@ async def upload_file(
         try:
             await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via remote)")
             if size <= REMOTE_SHELL_UPLOAD_MAX_SIZE and not _remote_supports_stream_upload(frame):
-                await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout)
+                await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout, **_mode_kwargs(mode))
                 return
             await _stream_file_via_remote(db, redis, frame, remote_path, data)
+            if mode is not None:
+                # file_write_open creates the file with the Remote's umask.
+                await _exec_via_remote(
+                    redis, frame, f"chmod {mode:o} {shlex.quote(remote_path)}", min(timeout, 60)
+                )
             return
         except Exception as e:  # noqa: BLE001
             if _remote_stream_upload_can_fallback(e):
@@ -401,7 +428,7 @@ async def upload_file(
                     f"> remote streaming upload unavailable for {remote_path}: {e}",
                 )
                 try:
-                    await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout)
+                    await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout, **_mode_kwargs(mode))
                     return
                 except Exception as fallback_exc:
                     await log(
@@ -424,6 +451,9 @@ async def upload_file(
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp.write(data)
         tmp_path = tmp.name
+    if mode is not None:
+        # scp creates the remote file with the local file's mode.
+        os.chmod(tmp_path, mode)
 
     try:
         last_error: Exception | None = None
@@ -477,7 +507,7 @@ async def delete_path(
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         cmd = f"rm -rf {shlex.quote(remote_path)}"
-        await exec_command(db, redis, frame, ssh, cmd)
+        await exec_command(db, redis, frame, ssh, cmd, timeout=timeout)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
@@ -508,7 +538,7 @@ async def rename_path(
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         cmd = f"mv {shlex.quote(src)} {shlex.quote(dst)}"
-        await exec_command(db, redis, frame, ssh, cmd)
+        await exec_command(db, redis, frame, ssh, cmd, timeout=timeout)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
@@ -540,7 +570,7 @@ async def make_dir(
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         cmd = f"mkdir -p {shlex.quote(remote_path)}"
-        await exec_command(db, redis, frame, ssh, cmd)
+        await exec_command(db, redis, frame, ssh, cmd, timeout=timeout)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
@@ -562,7 +592,7 @@ async def _run_command_remote(
     """
     async with frame_command_slot(frame.id):
         cmd_id = str(uuid.uuid4())
-        payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
+        payload = shell_command_payload(cmd, timeout)
 
         if log_command:
             await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")

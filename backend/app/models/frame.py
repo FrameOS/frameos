@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import re
 from datetime import datetime, timezone
 from arq import ArqRedis as Redis
 import time
@@ -163,12 +164,43 @@ def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
     }
 
 
+REBOOT_CRONTAB_MACROS = frozenset({"@yearly", "@annually", "@monthly", "@weekly", "@daily", "@midnight", "@hourly"})
+_REBOOT_CRONTAB_FIELD = re.compile(r"[0-9A-Za-z*/,\-]+")
+
+
+def reboot_crontab_error(crontab: str) -> str | None:
+    """Why `crontab` cannot be the schedule of /etc/cron.d/frameos-reboot, or
+    None. The deploy writes the line as "<schedule> root <command>", so a
+    sixth field or a newline would put words of the user's choosing into a
+    root cron entry."""
+    cron = crontab.strip()
+    if not cron:
+        return "The reboot schedule is empty"
+    if any(not ch.isprintable() and ch != "\t" for ch in cron):
+        return "The reboot schedule must be a single line of printable characters"
+    if cron == "@reboot":
+        return "@reboot would reboot the frame on every boot"
+    if cron in REBOOT_CRONTAB_MACROS:
+        return None
+    parts = cron.split()
+    if len(parts) != 5:
+        return f"The reboot schedule needs five fields (minute hour day month weekday), got {len(parts)}"
+    for part in parts:
+        if not _REBOOT_CRONTAB_FIELD.fullmatch(part):
+            return f"The reboot schedule field {part!r} has characters cron does not take"
+    return None
+
+
 def normalize_reboot_crontab(crontab: Any, default: str = "0 0 * * *") -> str:
     if not isinstance(crontab, str):
         return default
 
     cron = crontab.strip()
     if not cron:
+        return default
+    # A schedule the cron line cannot carry safely never reaches the device
+    # (the API refuses it on save; this covers rows stored before that).
+    if reboot_crontab_error(cron):
         return default
 
     parts = cron.split()
@@ -799,6 +831,21 @@ def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Opti
     return final_settings
 
 
+def ensure_agent_shared_secret(agent: Any, previous: Any = None) -> dict:
+    """``agent`` with a usable ``agentSharedSecret``: the one it carries, else
+    the ``previous`` stored one, else a fresh one. The update route writes
+    ``agent`` whole, so a caller that posts it without the secret (an API
+    client, or anything built from a redacted list or broadcast copy) used
+    to drop the stored one, and frame.json then carried a value the Remote
+    could never handshake with."""
+    result = dict(agent) if isinstance(agent, dict) else {}
+    if str(result.get("agentSharedSecret") or "").strip():
+        return result
+    stored = previous.get("agentSharedSecret") if isinstance(previous, dict) else None
+    result["agentSharedSecret"] = str(stored or "").strip() or secure_token(32)
+    return result
+
+
 def get_frame_json(db: Session, frame: Frame) -> dict:
     https_proxy = normalize_https_proxy(frame.https_proxy)
     network = frame.network or {}
@@ -889,7 +936,12 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "agent": {
             "agentEnabled": bool(agent.get('agentEnabled', False)),
             "agentRunCommands": bool(agent.get('agentRunCommands', False)),
-            "agentSharedSecret": agent.get('agentSharedSecret', secure_token(32)),
+            # The stored secret or nothing. Minting one here (it used to be
+            # `agent.get(..., secure_token(32))`) handed a frame with no stored
+            # secret a random value the backend never saw, so its Remote could
+            # never pass the handshake; the places that turn Remote on persist
+            # a secret first (ensure_agent_shared_secret).
+            "agentSharedSecret": str(agent.get('agentSharedSecret') or ""),
         },
         "mountpoints": mountpoints,
         "errorBehavior": {
