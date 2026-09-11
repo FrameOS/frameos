@@ -75,7 +75,11 @@ The fix is in `bin/gha-slot.sh` + `bin/gha-guest-trim.sh`:
   each job — use those numbers, not `incus list`, to size caps.
 
 Caps are now a ceiling for the working set, not what a job costs: epyc-4
-12 → 8 G, big 48 → 32 G, mid-a..d 24 → 16 G. The remaining backstop is
+12 → 8 G, big 48 → 32 G, mid-a..d 24 → 16 G. First measurements (51
+epyc-4 jobs — Nim shards, pixie and Playwright shards — and 4 Deploy E2E
+jobs on the day of the change): epyc-4 peaks 1.5–3.3 G used, epyc-8
+2.2–2.4 G; two full PR fan-outs at once (41 busy VMs) left the host at
+138 G available with the swap untouched. The remaining backstop is
 `host/zram-generator.conf`: 64 G of lz4 zram swap, priority above the disk
 swap (`apt install systemd-zram-generator`, copy the file to
 `/etc/systemd/zram-generator.conf`, `systemctl daemon-reload && systemctl

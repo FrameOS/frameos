@@ -147,7 +147,10 @@ jobs:
       # every runner VM, no GitHub cache quota) stays warm across runs. Plain
       # copies: two runs of the same shard overlapping at worst interleave
       # files from two consistent states, and Nim validates each object by
-      # hash anyway.
+      # hash anyway. The save uses rsync, not cp: two overlapping saves made
+      # `cp -a` fail with "cannot create directory: File exists" on the dir
+      # the other run had just created, and a warm-cache miss is never worth
+      # a red job.
       - name: Restore nimcache
         run: |
           src="/mnt/cache/nimcache/frameos-tests/shard-${{ matrix.shard }}"
@@ -175,7 +178,7 @@ jobs:
             mkdir -p "$dest"
             # drop per-test dirs untouched for two weeks (renamed/removed tests)
             find "$dest" -type d -name "*.nim_*" -mtime +14 -prune -exec rm -rf {} + 2>/dev/null || true
-            cp -a frameos/nimcache/. "$dest/"
+            rsync -a frameos/nimcache/ "$dest/" || echo "::warning::nimcache save to $dest failed (rsync exit $?)"
             echo "saved $(du -sh "$dest" | cut -f1) to $dest"
           fi
 
