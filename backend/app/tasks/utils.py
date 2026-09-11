@@ -1,18 +1,78 @@
+import asyncio
 import os
 from packaging import version
 import subprocess
 import platform
 import hashlib
+from typing import Any, Callable
 
+from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.frame import Frame
+from app.models.frame import Frame, update_frame
+from app.models.log import new_log as log
 
 
 def get_fresh_frame(db: Session, id: int) -> Frame | None:
     """Return the latest frame row when reusing a long-lived worker session."""
     db.expire_all()
     return db.get(Frame, id, populate_existing=True)
+
+
+class JobAlreadyQueuedError(RuntimeError):
+    """arq refused an enqueue because a job with the same id is queued,
+    running, or its result is still kept."""
+
+
+async def enqueue_unique_job(redis: Redis, function: str, **kwargs: Any) -> Any:
+    """`redis.enqueue_job` for callers that pass `_job_id`: arq answers a
+    duplicate id with None rather than an error, and a caller that ignores it
+    reports a job that will never run."""
+    job = await redis.enqueue_job(function, **kwargs)
+    if job is None:
+        raise JobAlreadyQueuedError(
+            f"A {function} job with id {kwargs.get('_job_id')!r} is already queued or ran recently"
+        )
+    return job
+
+
+# Statuses a verb sets while it works. A failed verb puts the frame back to
+# "uninitialized" only from one of these, so it never overwrites a status
+# someone else set in the meantime (a finished deploy's "ready", say).
+TRANSIENT_FRAME_STATUSES = frozenset({"deploying", "restarting", "rebooting", "stopping"})
+
+
+def task_failure_message(exc: BaseException) -> str:
+    detail = getattr(exc, "detail", None)
+    if detail:
+        return str(detail)
+    if isinstance(exc, asyncio.CancelledError):
+        return str(exc) or "cancelled"
+    return str(exc) or exc.__class__.__name__
+
+
+async def record_task_failure(
+    db: Session,
+    redis: Redis,
+    frame_id: int,
+    exc: BaseException,
+    *,
+    frame: Any = None,
+    task_line: Callable[[str], str] | None = None,
+) -> str:
+    """The one failure path for frame verbs (deploy, fast deploy, restart,
+    reboot, stop, Remote deploy/restart): log the error, put `frame` back to
+    "uninitialized" if it is still in a verb's transient status, and return
+    the message. Callers re-raise afterwards so arq records the job as
+    failed rather than successful."""
+    message = task_failure_message(exc)
+    if task_line is not None:
+        await log(db, redis, frame_id, "stderr", task_line(message))
+    await log(db, redis, frame_id, "stderr", message)
+    if frame is not None and getattr(frame, "status", None) in TRANSIENT_FRAME_STATUSES:
+        frame.status = "uninitialized"
+        await update_frame(db, redis, frame)
+    return message
 
 
 def get_nim_version(executable_path: str):

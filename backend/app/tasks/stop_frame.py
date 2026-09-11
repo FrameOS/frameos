@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
 from app.models.frame import frame_has_shell_access, update_frame
-from app.tasks.utils import get_fresh_frame
+from app.tasks.utils import get_fresh_frame, record_task_failure
 from app.utils.remote_exec import run_commands
 
 async def stop_frame(id: int, redis: ArqRedis):
@@ -42,7 +42,5 @@ async def stop_frame_task(ctx: dict[str, Any], id: int):
         await update_frame(db, redis, frame)
 
     except Exception as e:
-        await log(db, redis, id, "stderr", str(e))
-        if frame:
-            frame.status = 'uninitialized'
-            await update_frame(db, redis, frame)
+        await record_task_failure(db, redis, id, e, frame=frame)
+        raise

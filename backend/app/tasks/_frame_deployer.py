@@ -266,9 +266,13 @@ class FrameDeployer:
         return [driver_library_filename(driver) for driver in compiled_drivers(drivers)]
 
     async def _upload_frame_json(self, path: str) -> None:
-        """Upload the release-specific `frame.json`."""
+        """Upload the release-specific `frame.json`. It carries the frame's
+        secrets (API keys, the Remote's shared secret), so 0600 on every
+        transport."""
         json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
-        await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
+        await upload_file(
+            self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport, mode=0o600
+        )
 
     async def _upload_scenes_json(self, path: str, gzip: bool = False) -> None:
         """Upload the release-specific `scenes.json`."""

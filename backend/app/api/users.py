@@ -1,6 +1,7 @@
 import datetime
 
 from fastapi import Depends, Header, HTTPException, Request, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app import config as app_config
 from app.api.auth import (
@@ -66,7 +67,14 @@ def api_user_update_email(
             raise HTTPException(status_code=400, detail="Current password is required.")
         if not current_user.check_password(data.current_password):
             raise HTTPException(status_code=400, detail="Current password is incorrect.")
-    if db.query(User).filter(User.email == data.email, User.id != current_user.id).first() is not None:
+    # Login is case-insensitive (find_user_by_login_email), so an address
+    # that differs only in case is the same login name.
+    if (
+        db.query(User)
+        .filter(func.lower(User.email) == data.email.strip().lower(), User.id != current_user.id)
+        .first()
+        is not None
+    ):
         raise HTTPException(status_code=400, detail="Email already in use.")
 
     current_user.email = data.email

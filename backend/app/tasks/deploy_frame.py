@@ -13,7 +13,7 @@ from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, active_deploy_job_key, deploy_lock_key
 
-from .utils import get_fresh_frame
+from .utils import enqueue_unique_job, get_fresh_frame, record_task_failure
 
 
 def deploy_task_log_line(task_id: str, action: str, detail: str = "") -> str:
@@ -90,7 +90,7 @@ async def deploy_frame(id: int, redis: Redis, *, task_id: str | None = None) -> 
     if task_id:
         enqueue_kwargs["task_id"] = task_id
         enqueue_kwargs["_job_id"] = task_id
-    await redis.enqueue_job("deploy_frame", **enqueue_kwargs)
+    await enqueue_unique_job(redis, "deploy_frame", **enqueue_kwargs)
     return task_id
 
 
@@ -147,14 +147,11 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
         # the next deploy then hit the stuck-status branch. Reset the row
         # here (the workflow's own reset only runs for Exception) before
         # re-raising so arq records the outcome.
-        message = str(exc) or ("cancelled" if isinstance(exc, asyncio.CancelledError) else exc.__class__.__name__)
-        if task_id:
-            await log(db, redis, int(frame.id), type="stderr", line=deploy_task_log_line(task_id, "failed", message))
-        await log(db, redis, int(frame.id), type="stderr", line=message)
-        current = get_fresh_frame(db, id)
-        if current is not None and current.status == "deploying":
-            current.status = "uninitialized"
-            await update_frame(db, redis, current)
+        await record_task_failure(
+            db, redis, int(frame.id), exc,
+            frame=get_fresh_frame(db, id),
+            task_line=(lambda message: deploy_task_log_line(task_id, "failed", message)) if task_id else None,
+        )
         raise
     finally:
         await clear_active_deploy_job(redis, id, job_id)

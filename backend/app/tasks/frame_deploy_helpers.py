@@ -30,6 +30,8 @@ icon = "🔷"
 QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
 DEFAULT_QUICKJS_VERSION = "2026-06-04-quickts.1"
 DEFAULT_QUICKJS_SHA256 = "94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f"
+# sha256 of each source tarball the legacy on-device build may fetch.
+QUICKJS_SOURCE_SHA256 = {DEFAULT_QUICKJS_VERSION: DEFAULT_QUICKJS_SHA256}
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 RPIOS_SUDO_SECURITY_UPDATE_URL = "https://www.raspberrypi.com/news/a-security-update-for-raspberry-pi-os/"
@@ -312,6 +314,15 @@ async def ensure_quickjs(
         except Exception as exc:
             await deployer.log("stderr", f"{icon} Failed to unpack QuickJS prebuilt: {exc}")
 
+    # The source build runs `make` on what it downloads, so only a tarball
+    # whose sha256 is pinned here is ever unpacked.
+    version = quickjs_dirname.removeprefix("quickjs-")
+    expected_sha256 = QUICKJS_SOURCE_SHA256.get(version)
+    if not expected_sha256:
+        raise Exception(
+            f"No pinned sha256 for the QuickJS {version} sources; refusing to build from an unchecked tarball"
+        )
+
     await deployer.log("stdout", "- Installing dependencies for QuickJS")
     for package_name in (
         "libunistring-dev",
@@ -329,12 +340,15 @@ async def ensure_quickjs(
     # links it from: /srv/frameos/vendor/quickjs/<dirname>. (This used to
     # extract one level up and look for a `quickjs` directory the tarball
     # never contained; every target has a prebuilt, so it never ran.)
-    version = quickjs_dirname.removeprefix("quickjs-")
     source_archive = f"/tmp/{quickjs_dirname}.tar.xz"
+    checksum_line = shlex.quote(f"{expected_sha256}  {source_archive}")
     await deployer.log("stdout", f"{icon} Downloading QuickJS {version} sources")
     await deployer.exec_command(
         f"mkdir -p /srv/frameos/vendor/quickjs && rm -rf {shlex.quote(quickjs_vendor_dir)} && "
         f"wget -q -O {source_archive} {shlex.quote(QUICKJS_ARCHIVE_URL.format(version=version))} && "
+        f"{{ echo {checksum_line} | sha256sum -c - >/dev/null || "
+        f"{{ echo 'QuickJS {version} sources do not match their pinned sha256; refusing to build them' >&2; "
+        f"rm -f {source_archive}; exit 1; }}; }} && "
         f"tar -xf {source_archive} -C /srv/frameos/vendor/quickjs/ && rm {source_archive}"
     )
     await deployer.log("stdout", "- Building libquickjs.a")

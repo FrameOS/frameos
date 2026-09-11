@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.chat import Chat, ChatMessage
+from app.models.chat import Chat, ChatMessage, find_project_chat, project_chat_id
 from app.models.settings import get_settings_dict
 from app.models.frame import Frame
 from app.schemas.ai_apps import AiAppChatRequest, AiAppChatResponse
@@ -43,27 +43,19 @@ async def chat_app(
         if not frame:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
         if data.chat_id:
-            chat = db.query(Chat).filter(Chat.project_id == project_id, Chat.id == data.chat_id).first()
+            chat = find_project_chat(db, project_id, data.chat_id)
             if chat and chat.frame_id != data.frame_id:
                 raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat does not belong to frame")
             if chat and chat.context_type not in (None, "app"):
                 raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat context does not match app chat")
         if not chat:
-            if data.chat_id:
-                chat = Chat(
-                    id=data.chat_id,
-                    project_id=project_id,
-                    frame_id=data.frame_id,
-                    context_type="app",
-                    context_id=context_id,
-                )
-            else:
-                chat = Chat(
-                    project_id=project_id,
-                    frame_id=data.frame_id,
-                    context_type="app",
-                    context_id=context_id,
-                )
+            chat = Chat(
+                **({"id": project_chat_id(project_id, data.chat_id)} if data.chat_id else {}),
+                project_id=project_id,
+                frame_id=data.frame_id,
+                context_type="app",
+                context_id=context_id,
+            )
             db.add(chat)
             db.commit()
             db.refresh(chat)

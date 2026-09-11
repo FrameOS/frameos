@@ -5,7 +5,7 @@ from arq import ArqRedis as Redis
 from app.models.frame import Frame, frame_has_shell_access
 from app.models.log import new_log as log
 from app.models.frame import update_frame
-from app.tasks.utils import get_fresh_frame
+from app.tasks.utils import get_fresh_frame, record_task_failure
 from app.utils.remote_exec import run_commands
 
 async def restart_frame(id: int, redis: Redis):
@@ -110,9 +110,8 @@ async def _device_http_action(
             frame.status = final_status
             await update_frame(db, redis, frame)
     except Exception as e:
-        await log(db, redis, int(frame.id), "stderr", str(e))
-        frame.status = "uninitialized"
-        await update_frame(db, redis, frame)
+        await record_task_failure(db, redis, int(frame.id), e, frame=frame)
+        raise
 
 
 async def restart_frame_task(ctx: dict[str, Any], id: int):
@@ -166,9 +165,8 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
         await update_frame(db, redis, frame)
 
     except Exception as e:
-        await log(db, redis, id, "stderr", str(e))
-        frame.status = "uninitialized"
-        await update_frame(db, redis, frame)
+        await record_task_failure(db, redis, id, e, frame=frame)
+        raise
 
 async def reboot_frame(id: int, redis: Redis):
     await redis.enqueue_job("reboot_frame", id=id)
@@ -219,6 +217,5 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
         )
 
     except Exception as e:
-        await log(db, redis, id, "stderr", str(e))
-        frame.status = "uninitialized"
-        await update_frame(db, redis, frame)
+        await record_task_failure(db, redis, id, e, frame=frame)
+        raise

@@ -84,7 +84,7 @@ from app.tasks.postboot_log import (
     POSTBOOT_LOG_SERVICE_NAME,
     stage_postboot_log,
 )
-from app.tasks.utils import get_fresh_frame
+from app.tasks.utils import enqueue_unique_job, get_fresh_frame
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.utils.build_environment import BuildEnvironmentProvider, selected_build_environment_provider
 from app.utils.build_host import BuildHostConfig, get_build_executor_config
@@ -1452,7 +1452,8 @@ async def buildroot_sd_image(
     request_id: str | None = None,
     queue_job_id: str | None = None,
 ) -> None:  # noqa: N802
-    await redis.enqueue_job(
+    await enqueue_unique_job(
+        redis,
         "buildroot_sd_image",
         id=id,
         request_id=request_id,

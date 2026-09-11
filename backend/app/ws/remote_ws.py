@@ -29,13 +29,17 @@ from app.ws.remote_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
 
 router = APIRouter()
 
-MAX_REMOTES = 1000        # simple DoS safeguard
+MAX_REMOTES = 1000        # authenticated Remotes per worker (simple DoS safeguard)
+MAX_PENDING_HANDSHAKES = 64  # sockets still in hello/handshake, per worker
 CONN_TTL   = 60           # seconds – Redis key self-expiry
 REMOTE_DISCONNECTED_ERROR = "remote websocket disconnected before command completed"
 
 # frame_id → list[websocket] (only for UI statistics)
 active_sockets_by_frame: dict[int, list[WebSocket]] = {}
 active_sockets: set[WebSocket] = set()
+# Sockets accepted but not yet authenticated. Bounded on their own, so a flood
+# of unauthenticated connections cannot push real frames out of MAX_REMOTES.
+pending_handshakes: set[WebSocket] = set()
 
 
 async def write_log(redis: Redis, frame_id: int, type: str, line: str, ip: str | None = None):
@@ -136,6 +140,11 @@ def canonical_dumps(obj: Any) -> str:
 
 
 def make_envelope(payload: dict, api_key: str, shared_secret: str) -> dict:
+    # The nonce is unix seconds because that is what every shipped Remote
+    # checks it against (frameos_remote.nim acceptEnvelope: an int within 300 s
+    # of the device clock, then a replay cache keyed on the MAC). Two
+    # envelopes in the same second still differ: the signed payload carries
+    # the command's own id (pump_commands), so no two share a MAC.
     nonce = int(time.time())
     body  = canonical_dumps(payload)
     mac   = hmac_sha256(shared_secret, f"{api_key}{nonce}{body}")
@@ -203,9 +212,21 @@ async def assets_list_on_frame(frame_id: int, path: str, timeout: int = 60,
     raise RuntimeError("bad response from remote assets_list")
 
 
+def shell_command_payload(cmd: str, timeout: float) -> dict[str, Any]:
+    """The Remote `shell` command. `timeout` (whole seconds) is the Remote's
+    own deadline for the child; without it the Remote falls back to its
+    1800 s default and keeps running a command the backend stopped waiting
+    for. Remotes older than the argument ignore it."""
+    return {
+        "type": "cmd",
+        "name": "shell",
+        "args": {"cmd": cmd, "timeout": max(1, int(timeout))},
+    }
+
+
 async def exec_shell_on_frame(frame_id: int, cmd: str, timeout: int = 120,
                               redis: Optional[Redis] = None):
-    payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
+    payload = shell_command_payload(cmd, timeout)
     async with _redis_for_command(redis) as command_redis:
         reply = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(reply, dict) and reply.get("exit", 1) == 0:
@@ -419,31 +440,85 @@ async def handle_remote_stream_chunk(
 # Main WebSocket endpoint
 # ────────────────────────────────────────────────────────────────────────────
 
-@router.websocket("/ws/agent")
-@router.websocket("/ws/remote")
-async def ws_remote_endpoint(
-    ws: WebSocket,
-    redis: Redis = Depends(get_redis),
-):
-    # ----- rudimentary DoS guard (per-worker) ------------------------------
-    if len(active_sockets) >= MAX_REMOTES:
-        await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
-        return
+class MalformedRemoteMessage(Exception):
+    """A Remote message that is not a JSON object in a text frame."""
 
-    await ws.accept()
 
+def parse_json_object(text: Any) -> dict[str, Any]:
+    if not isinstance(text, str):
+        raise MalformedRemoteMessage("expected a text frame")
+    try:
+        parsed = json.loads(text)
+    except (ValueError, RecursionError) as exc:
+        raise MalformedRemoteMessage("not JSON") from exc
+    if not isinstance(parsed, dict):
+        raise MalformedRemoteMessage("not a JSON object")
+    return parsed
+
+
+async def receive_json_object(ws: WebSocket, timeout: float) -> dict[str, Any]:
+    """The next message as a JSON object. Raises asyncio.TimeoutError,
+    WebSocketDisconnect or MalformedRemoteMessage — never a parse error, which
+    used to escape the endpoint as an unhandled exception."""
+    message = await asyncio.wait_for(ws.receive(), timeout=timeout)
+    if message.get("type") == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", status.WS_1000_NORMAL_CLOSURE))
+    return parse_json_object(message.get("text"))
+
+
+def parse_envelope(text: Any) -> dict[str, Any] | None:
+    """A signed envelope with every field the MAC check touches of the right
+    type, or None."""
+    try:
+        msg = parse_json_object(text)
+    except MalformedRemoteMessage:
+        return None
+    nonce = msg.get("nonce")
+    if not isinstance(nonce, int) or isinstance(nonce, bool):
+        return None
+    if not isinstance(msg.get("payload"), dict) or not isinstance(msg.get("mac"), str):
+        return None
+    return msg
+
+
+def envelope_payload_valid(payload: dict[str, Any]) -> bool:
+    """The fields the receive loop reads from a reply or a stream chunk."""
+    kind = payload.get("type")
+    if kind not in ("cmd/resp", "cmd/stream"):
+        return True  # ignored below
+    if not isinstance(payload.get("id"), str) or not payload["id"]:
+        return False
+    if kind == "cmd/stream" and not payload.get("raw") and not isinstance(payload.get("data", ""), str):
+        return False
+    return True
+
+
+def mac_matches(expected: str, received: str) -> bool:
+    # compare_digest refuses str with non-ASCII characters (TypeError).
+    return hmac.compare_digest(expected.encode(), received.encode())
+
+
+async def authenticate_remote(ws: WebSocket) -> tuple[Frame, str, str, dict[str, Any]] | None:
+    """hello → challenge → handshake. Returns (frame, api key, shared secret,
+    hello) or None once the socket has been closed with the reason."""
     # STEP 0 – remote → hello
     try:
-        hello_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
+        hello_msg = await receive_json_object(ws, timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="hello timeout")
-        return
+        return None
+    except MalformedRemoteMessage:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="expected hello")
+        return None
 
     if hello_msg.get("action") != "hello":
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="expected hello")
-        return
+        return None
 
-    server_api_key = str(hello_msg.get("serverApiKey", "")) or ""
+    server_api_key = hello_msg.get("serverApiKey")
+    if not isinstance(server_api_key, str) or not server_api_key:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="unknown frame")
+        return None
     db = SessionLocal()
     try:
         frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
@@ -452,12 +527,12 @@ async def ws_remote_endpoint(
 
     if frame is None:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="unknown frame")
-        return
+        return None
 
-    shared_secret = (frame.agent or {}).get("agentSharedSecret", "")
+    shared_secret = str((frame.agent or {}).get("agentSharedSecret") or "")
     if not shared_secret:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="frame missing secret")
-        return
+        return None
 
     # STEP 1 – server → challenge
     challenge = secrets.token_hex(32)
@@ -465,18 +540,53 @@ async def ws_remote_endpoint(
 
     # STEP 2 – remote → handshake
     try:
-        hs_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
+        hs_msg = await receive_json_object(ws, timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="handshake timeout")
-        return
+        return None
+    except MalformedRemoteMessage:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad action")
+        return None
 
     if hs_msg.get("action") != "handshake":
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad action")
-        return
+        return None
 
     expected_mac = hmac_sha256(shared_secret, f"{server_api_key}{challenge}")
-    if not hmac.compare_digest(expected_mac, str(hs_msg.get("mac", ""))):
+    if not mac_matches(expected_mac, str(hs_msg.get("mac", ""))):
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
+        return None
+
+    return frame, server_api_key, shared_secret, hello_msg
+
+
+@router.websocket("/ws/agent")
+@router.websocket("/ws/remote")
+async def ws_remote_endpoint(
+    ws: WebSocket,
+    redis: Redis = Depends(get_redis),
+):
+    # ----- rudimentary DoS guard (per-worker) ------------------------------
+    # Unauthenticated sockets have their own bound; MAX_REMOTES is checked
+    # once the Remote has proved it holds a frame's secret, so it only ever
+    # counts (and turns away) real frames.
+    if len(pending_handshakes) >= MAX_PENDING_HANDSHAKES:
+        await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
+        return
+
+    await ws.accept()
+
+    pending_handshakes.add(ws)
+    try:
+        authenticated = await authenticate_remote(ws)
+    finally:
+        pending_handshakes.discard(ws)
+    if authenticated is None:
+        return
+    frame, server_api_key, shared_secret, hello_msg = authenticated
+
+    if len(active_sockets) >= MAX_REMOTES:
+        await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
         return
 
     await mark_sd_image_booted_if_needed(redis, frame.id)
@@ -489,6 +599,10 @@ async def ws_remote_endpoint(
         remote_version_from_hello(hello_msg),
         remote_capabilities_from_hello(hello_msg),
     )
+    # Present before the first reply can arrive (the pump sets them too, but
+    # it may not have run yet).
+    cmd_buffers: dict[str, bytearray] = ws.scope.setdefault("cmd_buffers", {})
+    ws.scope.setdefault("cmd_log_output", {})
     send_task = asyncio.create_task(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )
@@ -516,39 +630,52 @@ async def ws_remote_endpoint(
     # =======================================================================
     try:
         while True:
-            packet = await asyncio.wait_for(ws.receive(), timeout=300)
+            try:
+                packet = await asyncio.wait_for(ws.receive(), timeout=300)
+            except asyncio.TimeoutError:
+                # Five quiet minutes: drop the link, the Remote reconnects.
+                await ws.close(code=status.WS_1001_GOING_AWAY, reason="idle timeout")
+                break
+
+            if packet.get("type") == "websocket.disconnect":
+                break
+            if packet.get("type") != "websocket.receive":
+                continue
 
             # -- Binary frames (part of file_read / http) --------------------
-            if packet.get("type") == "websocket.receive" and packet.get("bytes") is not None:
+            if packet.get("bytes") is not None:
                 cmd_id = ws.scope.get("current_bin_cmd")        # type: ignore[attr-defined]
                 if cmd_id:
-                    buf = ws.scope["cmd_buffers"].get(cmd_id, None)   # type: ignore[index]
+                    buf = cmd_buffers.get(cmd_id, None)
                     if buf is not None:
                         buf.extend(packet["bytes"])
                 continue
 
             # -- Text frames -------------------------------------------------
-            if packet.get("type") == "websocket.receive" and packet.get("text") is not None:
-                msg = json.loads(packet["text"])
-            else:
-                if packet.get("type") == "websocket.disconnect":
-                    break
-                continue
+            msg = parse_envelope(packet.get("text"))
+            if msg is None:
+                await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad envelope")
+                break
 
             # keep connection key alive
             await redis.expire(conn_key, CONN_TTL)
 
-            # basic envelope check
-            if not {"nonce", "payload", "mac"} <= msg.keys():
-                await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad envelope")
-                break
-
             data_to_check = f"{server_api_key}{msg['nonce']}{canonical_dumps(msg['payload'])}"
-            if not hmac.compare_digest(hmac_sha256(shared_secret, data_to_check), msg["mac"]):
+            if not mac_matches(hmac_sha256(shared_secret, data_to_check), msg["mac"]):
                 await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
                 break
 
             pl = msg["payload"]
+            if not envelope_payload_valid(pl):
+                await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad envelope")
+                break
+
+            # A reply or chunk for a command this connection is not waiting on
+            # is dropped: the nonce is only a per-second stamp, so the MAC of a
+            # captured envelope stays valid and a replay must be refused by the
+            # command it names — each reply is consumed exactly once.
+            if pl.get("type") in ("cmd/resp", "cmd/stream") and pl["id"] not in cmd_buffers:
+                continue
 
             # ① final reply --------------------------------------------------
             if pl.get("type") == "cmd/resp":
@@ -556,7 +683,7 @@ async def ws_remote_endpoint(
                 ok      = pl.get("ok", False)
                 result  = pl.get("result")
 
-                buf = ws.scope["cmd_buffers"].pop(cmd_id, None)    # type: ignore[index]
+                buf = cmd_buffers.pop(cmd_id, None)
                 if buf:
                     try:
                         raw = gzip.decompress(bytes(buf))

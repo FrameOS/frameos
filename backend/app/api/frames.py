@@ -50,6 +50,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
 from app.models.frame import (
+    ensure_agent_shared_secret,
     normalize_frame_admin_auth,
     Frame,
     compact_timezone_updater,
@@ -61,6 +62,7 @@ from app.models.frame import (
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
     record_successful_deploy,
+    reboot_crontab_error,
     remember_device_reported_frameos_version,
     update_frame,
 )
@@ -138,7 +140,7 @@ from app.api.frame_sync import (
     read_frame_sync_hint_headers,
     store_frame_sync_hint_headers,
 )
-from app.tasks.utils import find_nim_v2
+from app.tasks.utils import JobAlreadyQueuedError, find_nim_v2
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 from app.redis import close_redis_connection, create_redis_connection, get_redis
@@ -189,7 +191,6 @@ from app.codegen.drivers_nim import frame_compilation_mode
 from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_button_defaults
 from app.api.project_scope import project_get_or_404
 from app.api.firmware_release import latest_published_provisioning_assets
-from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
 from . import api_project, api_open
 
@@ -227,16 +228,11 @@ async def _public_project_frame(
     frame_id: int,
     request: Request,
     db: Session,
-    token: str | None = None,
     authorization: str | None = None,
 ) -> Frame:
     if config.HASSIO_RUN_MODE != "ingress":
         user = await get_current_user_from_request(request, db, authorization)
-        if user is not None and get_user_project(db, user, project_id) is not None:
-            pass
-        elif token:
-            validate_scoped_token(token, expected_subject=f"project={project_id}:frame={frame_id}")
-        else:
+        if user is None or get_user_project(db, user, project_id) is None:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
 
     frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
@@ -1905,7 +1901,6 @@ async def api_frame_get_asset(
     project_id: int,
     id: int,
     request: Request,
-    token: str | None = None,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -1915,7 +1910,6 @@ async def api_frame_get_asset(
         frame_id=id,
         request=request,
         db=db,
-        token=token,
         authorization=authorization,
     )
 
@@ -2330,7 +2324,6 @@ async def api_frame_get_image(
     project_id: int,
     id: int,
     request: Request,
-    token: str | None = None,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -2339,7 +2332,6 @@ async def api_frame_get_image(
         frame_id=id,
         request=request,
         db=db,
-        token=token,
     )
 
     cache_key = _frame_image_cache_key(frame.id)
@@ -3326,6 +3318,8 @@ async def api_frame_deploy_event(
             await cancel_active_deploy(db, redis, frame)
         await deploy_frame(frame.id, redis, task_id=deploy_task_id)
         return {"message": "Success", "taskId": deploy_task_id}
+    except JobAlreadyQueuedError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -3668,6 +3662,9 @@ async def api_frame_deploy_plan(
         if pending_mode_change and pending_mode_change not in plan.notes:
             plan.notes.append(pending_mode_change)
         return {"plan": plan.to_dict()}
+    except HTTPException:
+        # The unknown-mode 400 is raised inside the try.
+        raise
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -3723,6 +3720,9 @@ async def api_frame_deploy_plan_preview(
             await update_frame(db, redis, frame)
 
         return {"plan": plan.to_dict()}
+    except HTTPException:
+        # The unknown-mode 400 is raised inside the try.
+        raise
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -3745,6 +3745,8 @@ async def api_frame_fast_deploy_event(
             await cancel_active_deploy(db, redis, frame)
         await fast_deploy_frame(id, redis, task_id=deploy_task_id)
         return {"message": "Success", "taskId": deploy_task_id}
+    except JobAlreadyQueuedError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -3867,6 +3869,14 @@ async def api_frame_update_endpoint(
                 detail="The admin login is the only way this backend reaches the frame (no SSH key, "
                 "password or FrameOS Remote on it) — it cannot be disabled or left blank",
             )
+    # The schedule becomes "<schedule> root <command>" in /etc/cron.d on the
+    # next deploy; refuse what cron cannot parse or what would add a line.
+    reboot_update = update_data.get("reboot")
+    if isinstance(reboot_update, dict) and str(reboot_update.get("enabled")).lower() == "true":
+        crontab = reboot_update.get("crontab")
+        crontab_error = reboot_crontab_error(crontab) if isinstance(crontab, str) else "The reboot schedule is not text"
+        if crontab_error:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=crontab_error)
     previous_buildroot_sd_image_fingerprint = (
         buildroot_sd_image_config_fingerprint(frame)
         if (frame.mode or "rpios") == "buildroot"
@@ -3892,8 +3902,11 @@ async def api_frame_update_endpoint(
     old_mode = frame.mode
     old_device = frame.device
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
+    previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
+    if "agent" in update_data:
+        frame.agent = ensure_agent_shared_secret(frame.agent, previous_agent)
 
     if "buildroot" in update_data:
         # buildroot.sdImage is build output owned by the backend (written by the
@@ -4083,10 +4096,10 @@ async def api_frame_new(
             rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
             frame.rpios = rpios_settings
             if data.agent:
-                frame.agent = {
-                    **(frame.agent or {}),
-                    **data.agent,
-                }
+                frame.agent = ensure_agent_shared_secret(
+                    {**(frame.agent or {}), **data.agent},
+                    frame.agent,
+                )
             db.add(frame)
             db.commit()
             db.refresh(frame)

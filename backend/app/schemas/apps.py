@@ -266,12 +266,3 @@ class ValidateError(BaseModel):
 class ValidateSourceResponse(BaseModel):
     errors: List[ValidateError]
 
-
-class EnhanceSourceRequest(BaseModel):
-    source: str
-    prompt: str
-
-
-class EnhanceSourceResponse(BaseModel):
-    suggestion: Optional[str] = None
-    error: Optional[str] = None

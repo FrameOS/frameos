@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from fastapi import Depends, HTTPException, status, Request, Response, WebSocket
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 from app import config as app_config
@@ -51,6 +52,37 @@ LOGIN_IP_WINDOW_SECONDS = 15 * 60
 
 def normalize_login_email(email: str) -> str:
     return (email or "").strip().lower()
+
+
+def find_user_by_login_email(db: Session, email: str) -> User | None:
+    """The login name is case-insensitive, like the lockout keyed on it
+    (`normalize_login_email`): `Me@Example.com` and `me@example.com` are one
+    account. Emails are stored as typed, so the match is on `lower()`; where
+    old rows differ only in case, the exact spelling wins and otherwise the
+    name is ambiguous and matches nobody."""
+    account = normalize_login_email(email)
+    if not account:
+        return None
+    candidates = db.query(User).filter(func.lower(User.email) == account).all()
+    typed = (email or "").strip()
+    for candidate in candidates:
+        if candidate.email == typed:
+            return candidate
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def lock_user_table_for_first_signup(db: Session) -> None:
+    """Hold the user table's write lock until this transaction ends.
+
+    Postgres: a self-conflicting table lock. SQLite has one writer lock for
+    the whole database, and any write statement takes it — even one that
+    touches no rows — so a zero-row DELETE opens the write transaction; a
+    second signup blocks on it (busy timeout) until the first commits."""
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        db.execute(text('LOCK TABLE "user" IN SHARE ROW EXCLUSIVE MODE'))
+    elif dialect == "sqlite":
+        db.execute(text('DELETE FROM "user" WHERE 0'))
 
 
 def login_lockout_seconds(failures: int) -> int:
@@ -297,7 +329,7 @@ async def login(
     if await over_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT):
         raise HTTPException(status_code=429, detail="Too many login attempts")
 
-    user = db.query(User).filter_by(email=email).first()
+    user = find_user_by_login_email(db, email)
     # Cloud-created users (first-run cloud signup) have no local password.
     if user is None or not user.password or not check_password_hash(user.password, password):
         await _record_login_failure(redis, account, ip)
@@ -325,7 +357,11 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
     if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_RUN_MODE")
 
-    # Check if there is already a user registered (one-user system)
+    # Check if there is already a user registered (one-user system). The
+    # check and the insert below are separate statements, so two first
+    # signups (two workers) could both see an empty table; the lock makes the
+    # second wait for the first to commit and then see its user.
+    lock_user_table_for_first_signup(db)
     if db.query(User).first() is not None:
         raise HTTPException(status_code=400, detail="Only one user is allowed. Please login!")
 

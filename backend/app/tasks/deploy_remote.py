@@ -32,7 +32,7 @@ from app.utils.build_host import get_build_executor_config
 from app.utils.build_executor import build_executor_display_name, ensure_build_executor_configured
 from app.utils.cross_compile import CrossCompiler, TargetMetadata, can_cross_compile_target
 from app.utils.versions import current_remote_version, get_versions
-from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
+from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame, record_task_failure
 
 
 PRECOMPILED_REMOTE_ENV = "FRAMEOS_REMOTE_PRECOMPILED"
@@ -177,7 +177,8 @@ async def deploy_remote_task(
             deployer = RemoteDeployer(db, redis, frame, "", tmp, force_source=recompile, transport=resolved_transport)
             await deployer.run()
     except Exception as e:
-        await log(db, redis, id, "stderr", str(e))
+        # No frame status to reset: this verb never sets one.
+        await record_task_failure(db, redis, id, e)
         raise
 
 class RemoteDeployer(FrameDeployer):

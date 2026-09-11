@@ -5,6 +5,7 @@ import hmac
 import json
 import secrets
 import shlex
+import time
 from http import HTTPStatus
 from urllib.parse import urlparse
 
@@ -36,11 +37,23 @@ def _bad_request(message: str) -> None:
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=message)
 
 
-def _frame_bootstrap_token(frame: Frame) -> str:
+# How long a bootstrap URL works. The script it serves carries the frame's
+# whole frame.json (API key, Remote secret, Wi-Fi and service settings), and
+# the command is meant to be pasted into the device right away, so a link
+# that leaks from a chat log or shell history must not stay a bearer for
+# that forever. Asking for the command again mints a fresh link.
+FRAME_BOOTSTRAP_TOKEN_TTL_SECONDS = 24 * 60 * 60
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _frame_bootstrap_signature(frame: Frame, expires_at: int) -> str:
     agent = frame.agent if isinstance(frame.agent, dict) else {}
     remote_secret = str(agent.get("agentSharedSecret") or "")
     server_api_key = str(frame.server_api_key or "")
-    payload = f"{frame.id}:{server_api_key}:{remote_secret}"
+    payload = f"{frame.id}:{server_api_key}:{remote_secret}:{expires_at}"
     return hmac.new(
         str(config.SECRET_KEY).encode("utf-8"),
         payload.encode("utf-8"),
@@ -48,8 +61,24 @@ def _frame_bootstrap_token(frame: Frame) -> str:
     ).hexdigest()
 
 
+def _frame_bootstrap_token(frame: Frame) -> str:
+    """`<expires_at>.<hmac>`: the expiry is signed along with the frame's
+    credentials, so it cannot be stretched, and rotating either credential
+    (`regenerate`) still kills every link handed out before."""
+    expires_at = int(_now()) + FRAME_BOOTSTRAP_TOKEN_TTL_SECONDS
+    return f"{expires_at}.{_frame_bootstrap_signature(frame, expires_at)}"
+
+
 def _frame_bootstrap_token_valid(frame: Frame, token: str) -> bool:
-    return secrets.compare_digest(_frame_bootstrap_token(frame), token)
+    # The pre-expiry form (a bare hmac) has no "." and is refused with the rest.
+    expires_text, separator, signature = token.partition(".")
+    if not separator or not expires_text.isdigit() or not signature:
+        return False
+    expires_at = int(expires_text)
+    now = _now()
+    if expires_at < now or expires_at > now + FRAME_BOOTSTRAP_TOKEN_TTL_SECONDS:
+        return False
+    return secrets.compare_digest(_frame_bootstrap_signature(frame, expires_at), signature)
 
 
 async def _ensure_frame_bootstrap_enabled(

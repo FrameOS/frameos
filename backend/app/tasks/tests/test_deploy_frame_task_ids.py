@@ -11,7 +11,12 @@ class FakeRedis:
         self.jobs = []
 
     async def enqueue_job(self, name: str, **kwargs):
+        # arq answers a job id it already holds with None.
+        job_id = kwargs.get("_job_id")
+        if job_id and any(existing.get("_job_id") == job_id for _name, existing in self.jobs):
+            return None
         self.jobs.append((name, kwargs))
+        return object()
 
 
 @pytest.mark.asyncio

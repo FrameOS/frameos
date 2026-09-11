@@ -1086,7 +1086,6 @@ export interface FrameOSSettings {
     reviewModel?: string
     appChatModel?: string
     appEditModel?: string
-    appEnhanceModel?: string
   }
   posthog?: {
     backendApiKey?: string

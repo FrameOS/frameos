@@ -1153,9 +1153,6 @@ export function Settings() {
                           <Field name="appEditModel" label="App edit chat model">
                             <TextInput name="appEditModel" placeholder="Use shared model" />
                           </Field>
-                          <Field name="appEnhanceModel" label="App source enhance model">
-                            <TextInput name="appEnhanceModel" placeholder="Use shared model" />
-                          </Field>
                         </div>
                       ) : null}
                     </Box>

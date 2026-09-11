@@ -65,6 +65,9 @@ def patch_job_and_logging(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(deploy_frame_module, "Job", FakeJob)
     monkeypatch.setattr(deploy_frame_module, "log", fake_log)
     monkeypatch.setattr(deploy_frame_module, "update_frame", fake_update_frame)
+    # A failed or cancelled task goes through the shared record_task_failure.
+    monkeypatch.setattr("app.tasks.utils.log", fake_log)
+    monkeypatch.setattr("app.tasks.utils.update_frame", fake_update_frame)
     return {"logs": logs, "updates": updates}
 
 

@@ -121,6 +121,80 @@ async def test_login_lockout_is_case_insensitive_on_the_account(no_auth_client, 
 
 
 @pytest.mark.asyncio
+async def test_login_lookup_is_case_insensitive_like_the_lockout(no_auth_client, redis, db):
+    """The lockout keys on the lower-cased address; the lookup used to match
+    the stored spelling exactly, so `Mixed@Example.com` counted failures
+    against the account but could never sign in to it."""
+    user = User(email="Mixed@Example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    for typed in ("mixed@example.com", "MIXED@EXAMPLE.COM", " Mixed@Example.com "):
+        resp = await no_auth_client.post("/api/login", data={"username": typed, "password": "testpassword"})
+        assert resp.status_code == HTTP_200_OK, typed
+
+
+def test_find_user_by_login_email_prefers_the_exact_spelling(db):
+    from app.api.auth import find_user_by_login_email
+
+    for email in ("dup@example.com", "Dup@Example.com", "solo@example.com"):
+        user = User(email=email)
+        user.set_password("testpassword")
+        db.add(user)
+    db.commit()
+
+    assert find_user_by_login_email(db, "Dup@Example.com").email == "Dup@Example.com"
+    assert find_user_by_login_email(db, "dup@example.com").email == "dup@example.com"
+    # Two rows differ only in case and neither is the typed spelling.
+    assert find_user_by_login_email(db, "DUP@EXAMPLE.COM") is None
+    assert find_user_by_login_email(db, "SOLO@example.com").email == "solo@example.com"
+    assert find_user_by_login_email(db, "  ") is None
+
+
+def test_first_signup_lock_serialises_a_second_signup(db):
+    """Two first signups used to both pass the empty-table check. With the
+    lock held, the second blocks until the first commits and then sees its
+    user."""
+    import threading
+    import time
+
+    from app.api.auth import lock_user_table_for_first_signup
+    from app.database import SessionLocal
+
+    db.query(User).delete()
+    db.commit()
+
+    lock_user_table_for_first_signup(db)
+    assert db.query(User).first() is None
+    first = User(email="first@example.com")
+    first.set_password("testpassword")
+    db.add(first)
+    db.flush()
+
+    seen: dict[str, str | None] = {}
+
+    def second_signup() -> None:
+        other = SessionLocal()
+        try:
+            lock_user_table_for_first_signup(other)
+            existing = other.query(User).first()
+            seen["email"] = existing.email if existing else None
+        finally:
+            other.rollback()
+            other.close()
+
+    thread = threading.Thread(target=second_signup)
+    thread.start()
+    time.sleep(0.5)
+    assert thread.is_alive(), "the second signup did not wait for the first"
+    db.commit()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert seen["email"] == "first@example.com"
+
+
+@pytest.mark.asyncio
 async def test_login_per_ip_failure_limit(no_auth_client, redis, db, monkeypatch):
     from app.api import auth as auth_module
 
