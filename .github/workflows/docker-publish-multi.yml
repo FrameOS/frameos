@@ -18,7 +18,7 @@ jobs:
   # release, the push-multiarch orchestrator) are I/O bound and run on free
   # GitHub-hosted runners. The compute-heavy jobs run on the self-hosted
   # EPYC pool ("epyc-32" / "epyc-8" = ephemeral Incus VMs on the monster
-  # host, see /srv/gha-runners/README.md there): Buildroot release image on
+  # host, see tools/gha-runners/README.md): Buildroot release image on
   # the 32-core slot, ESP32 firmware on an 8-core slot. Cross builds split
   # per-arch — amd64/armv6 on epyc-8, arm64+armhf on GitHub's free ARM
   # runners — see backend/bin/cross for the mapping and measurements. Depot

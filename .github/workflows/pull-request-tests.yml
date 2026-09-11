@@ -24,7 +24,7 @@ jobs:
   nim:
     name: FrameOS Nim Tests (shard ${{ matrix.shard }})
     # Self-hosted 4-core slots (ephemeral Incus VMs on the monster host; see
-    # /srv/gha-runners/README.md there): same 4-vcpu shape as ubuntu-latest,
+    # tools/gha-runners/README.md): same 4-vcpu shape as ubuntu-latest,
     # faster cores, and the eight shards skip the account-wide GitHub-hosted
     # queue. Pure compute — no browser rendering. The visual-regression jobs
     # stay on GitHub-hosted runners on purpose: their auto-committed

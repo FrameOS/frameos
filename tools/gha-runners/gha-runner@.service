@@ -1,0 +1,22 @@
+[Unit]
+Description=GitHub Actions ephemeral VM runner slot %i
+After=incusd.service network-online.target
+Requires=incusd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/srv/gha-runners/env/github.env
+EnvironmentFile=/srv/gha-runners/slots/%i.env
+ExecStart=/srv/gha-runners/bin/gha-slot.sh %i
+# On stop, destroy this slot's VM(s) so no orphan keeps a job half-done.
+# Anchored on the VM name shape (gha-<slot>-<5 digits>...): a plain
+# "^gha-%i-" prefix made stopping slot "big" delete big-b..d's VMs as well.
+ExecStopPost=/bin/sh -c 'incus list --format csv -c n | grep -E "^gha-%i-[0-9]{5}" | xargs -r -n1 incus delete -f'
+Restart=always
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

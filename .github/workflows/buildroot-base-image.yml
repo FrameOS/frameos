@@ -123,7 +123,7 @@ jobs:
               runner="${RUNNER_OVERRIDE}"
             else
               # Self-hosted 32-core EPYC slot (ephemeral Incus VMs on the
-              # monster host; /srv/gha-runners/README.md there). A Buildroot
+              # monster host; tools/gha-runners/README.md). A Buildroot
               # build is compile-bound and scales nearly linearly, and the
               # host-side /mnt/cache mount keeps dl + ccache warm with no
               # quota and no save/restore step. There is ONE epyc-32 slot,

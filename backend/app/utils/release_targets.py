@@ -18,8 +18,8 @@ from dataclasses import dataclass
 
 # Runner assignment (post-Depot, 2026-08): amd64 and the armv6
 # cross-toolchain targets build on the self-hosted EPYC pool ("epyc-8" =
-# ephemeral 8-core Incus VMs on the monster host; see the host's
-# /srv/gha-runners/README.md). Both ARM targets build on GitHub's free
+# ephemeral 8-core Incus VMs on the monster host; see
+# tools/gha-runners/README.md). Both ARM targets build on GitHub's free
 # ubuntu-24.04-arm runners (Ampere Altra): arm64 natively, and armhf too —
 # Ampere runs AArch32 at EL0, unlike AWS Graviton (Depot), where armhf fell
 # back to QEMU (measured 773-825s emulated vs 501-516s native across two
