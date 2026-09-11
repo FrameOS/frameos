@@ -103,6 +103,9 @@
     // clipboard, appNodeLogic, sceneJSONLogic against the embed shim, and the
     // shared <Select>, all reaching frontend/src.
     "src/test/shared-spa/diagram-clipboard.test.ts",
+    "src/test/shared-spa/new-node-picker.test.ts",
+    "src/test/shared-spa/markdown-safety.test.tsx",
+    "src/test/shared-spa/monaco-paths.test.ts",
     "src/test/shared-spa/app-node-logic.test.ts",
     "src/test/shared-spa/scene-json-logic.test.ts",
     "src/test/shared-spa/select-options.test.ts",

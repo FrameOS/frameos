@@ -27,6 +27,12 @@ const copyToClipboard = vi.fn();
 vi.mock("../../../../../../frontend/node_modules/copy-to-clipboard/index.js", () => ({
   default: (text: string) => copyToClipboard(text),
 }));
+// A failed paste reports through the one-shot toast.
+const reportTaskOutcome = vi.fn();
+vi.mock("../../../../../../frontend/src/models/longRunningTasksModel", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../../../frontend/src/models/longRunningTasksModel")>();
+  return { ...actual, reportTaskOutcome: (...args: unknown[]) => reportTaskOutcome(...args) };
+});
 
 import { embedFrameLogic } from "../../../../../../frontend/src/embed/embedFrameLogic";
 import { appsModel } from "../../../../../../frontend/src/models/appsModel";
@@ -220,5 +226,117 @@ describe("diagramLogic paste", () => {
     expect(pasted.type).toBe("app");
     expect((pasted.data as { config: Record<string, unknown> }).config).toEqual({ city: "Tallinn" });
     expect(logic.values.rawEdges).toHaveLength(1);
+  });
+});
+
+// Paste used to fail silently (a console line nobody sees) and to take any
+// JSON with a `type` key or a `nodes` array as nodes, spreading every field
+// into reactflow (2026-09 review).
+describe("diagramLogic paste validation", () => {
+  function stubClipboard(text: string): void {
+    const clipboardNavigator = Object.create(window.navigator) as Navigator;
+    Object.defineProperty(clipboardNavigator, "clipboard", {
+      value: { readText: vi.fn().mockResolvedValue(text) },
+    });
+    vi.stubGlobal("navigator", clipboardNavigator);
+  }
+
+  function lastReport(): { status: unknown; kind: unknown; detail: string } {
+    const call = reportTaskOutcome.mock.calls.at(-1)!;
+    return { status: call[0], kind: call[1].kind, detail: call[1].detail };
+  }
+
+  async function paste(text: string) {
+    stubClipboard(text);
+    const logic = diagramLogic({ frameId, sceneId });
+    await logic.asyncActions.pasteFromClipboard();
+    return logic;
+  }
+
+  beforeEach(() => {
+    reportTaskOutcome.mockClear();
+  });
+
+  it("reports text that is not node JSON instead of failing silently", async () => {
+    const logic = await paste("hello there");
+    expect(logic.values.nodes).toHaveLength(2);
+    expect(reportTaskOutcome).toHaveBeenCalledTimes(1);
+    expect(lastReport()).toMatchObject({ status: "error", kind: "paste" });
+    expect(lastReport().detail).toContain("does not hold FrameOS nodes");
+  });
+
+  it("reports an empty clipboard", async () => {
+    await paste("");
+    expect(lastReport().detail).toBe("The clipboard is empty.");
+  });
+
+  it("pastes nothing when one node has no known type", async () => {
+    const logic = await paste(
+      JSON.stringify({
+        nodes: [
+          { id: "a", type: "event", position: { x: 0, y: 0 }, data: { keyword: "render" } },
+          { id: "b", type: "script", position: { x: 0, y: 0 }, data: {} },
+        ],
+        edges: [],
+      })
+    );
+    expect(logic.values.nodes).toHaveLength(2);
+    expect(lastReport().detail).toContain("Pasted node 2 is not a FrameOS node");
+  });
+
+  it("pastes nothing when an app node has no keyword", async () => {
+    const logic = await paste(JSON.stringify({ id: "a", type: "app", position: { x: 0, y: 0 }, data: {} }));
+    expect(logic.values.nodes).toHaveLength(2);
+    expect(lastReport().detail).toContain("Pasted node 1");
+  });
+
+  it("pastes nothing when an edge has no string source", async () => {
+    const logic = await paste(
+      JSON.stringify({
+        nodes: [{ id: "a", type: "event", position: { x: 0, y: 0 }, data: { keyword: "render" } }],
+        edges: [{ id: "e", source: 1, target: "a" }],
+      })
+    );
+    expect(logic.values.nodes).toHaveLength(2);
+    expect(lastReport().detail).toContain("Pasted edge 1");
+  });
+
+  it("refuses more nodes than the paste cap", async () => {
+    const nodes = Array.from({ length: 501 }, (_, i) => ({
+      id: `n${i}`,
+      type: "event",
+      position: { x: 0, y: 0 },
+      data: { keyword: "render" },
+    }));
+    const logic = await paste(JSON.stringify(nodes));
+    expect(logic.values.nodes).toHaveLength(2);
+    expect(lastReport().detail).toContain("at most 500 nodes");
+  });
+
+  it("rebuilds a pasted node from the fields the editor uses", async () => {
+    const logic = await paste(
+      JSON.stringify({
+        nodes: [
+          {
+            id: "a",
+            type: "code",
+            position: { x: 5, y: 6 },
+            data: { codeJS: "return 1", codeArgs: [], codeOutputs: [] },
+            parentNode: "ghost",
+            hidden: true,
+            extent: "parent",
+            style: { width: 320, height: 140, background: "url(https://tracker.example/p.gif)" },
+          },
+        ],
+        edges: [],
+      })
+    );
+    expect(reportTaskOutcome).not.toHaveBeenCalled();
+    const pasted = logic.values.nodes.find((node) => !["render", "weather"].includes(node.id))!;
+    expect(pasted.type).toBe("code");
+    expect(pasted).not.toHaveProperty("parentNode");
+    expect(pasted).not.toHaveProperty("hidden");
+    expect(pasted).not.toHaveProperty("extent");
+    expect(pasted.style).toEqual({ width: 320, height: 140 });
   });
 });

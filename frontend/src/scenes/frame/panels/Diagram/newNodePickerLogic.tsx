@@ -24,6 +24,7 @@ import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { Option } from '../../../../components/Select'
 import { diagramLogic } from './diagramLogic'
+import { refreshNodeInternals } from './nodeInternals'
 import Fuse from 'fuse.js'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
 import {
@@ -869,9 +870,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
 
         actions.setNodes([...values.nodes, newNode])
-        window.setTimeout(() => {
-          props.updateNodeInternals?.(newNode.id)
-        }, 200)
+        refreshNodeInternals(props.updateNodeInternals, [newNode.id])
         actions.setSearchValue('')
         return
       }
@@ -1027,7 +1026,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         } satisfies CodeArg
         // Node and edge in one action = one history entry (a setNodes plus
         // a setEdges 200 ms later recorded two, and one Cmd+Z left a
-        // dangling node). Handles are measured afterwards, as paste does.
+        // dangling node). The new `codeField/<arg>` handle is measured by
+        // CodeNode's own effect; refreshNodeInternals is the backstop.
         actions.setNodesAndEdges(
           [
             ...values.nodes.map((node) =>
@@ -1046,10 +1046,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             },
           ]
         )
-        window.setTimeout(() => {
-          props.updateNodeInternals?.(nodeId)
-          props.updateNodeInternals?.(newNode.id)
-        }, 200)
+        refreshNodeInternals(props.updateNodeInternals, [nodeId, newNode.id])
       } else {
         {
           const edges = values.edges
@@ -1097,10 +1094,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               ) as DiagramEdge[])
             : [...edges, newEdge]
           actions.setNodesAndEdges([...values.nodes, newNode], nextEdges)
-          window.setTimeout(() => {
-            props.updateNodeInternals?.(nodeId)
-            props.updateNodeInternals?.(newNode.id)
-          }, 200)
+          refreshNodeInternals(props.updateNodeInternals, [nodeId, newNode.id])
         }
       }
 

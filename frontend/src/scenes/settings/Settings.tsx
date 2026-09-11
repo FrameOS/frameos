@@ -364,8 +364,8 @@ function DockerDaemonStatus(): JSX.Element {
         {systemInfo?.docker?.daemonAvailable
           ? 'Docker daemon is reachable.'
           : systemInfo?.docker?.cliAvailable
-            ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
-            : 'Docker CLI is not installed.'}
+          ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
+          : 'Docker CLI is not installed.'}
       </p>
       <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
         Recheck
@@ -988,8 +988,14 @@ export function Settings() {
                         {customFonts.map((font) => (
                           <div key={font.id} className="flex items-center gap-2">
                             <div className="flex-1">{font.path.substring(6)}</div>
-                            <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
-                              <TrashIcon className="w-5 h-5" />
+                            <Button
+                              size="tiny"
+                              color="secondary"
+                              onClick={() => deleteCustomFont(font)}
+                              aria-label={`Delete ${font.path.substring(6)}`}
+                              title={`Delete ${font.path.substring(6)}`}
+                            >
+                              <TrashIcon className="w-5 h-5" aria-hidden="true" />
                             </Button>
                           </div>
                         ))}

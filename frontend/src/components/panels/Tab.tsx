@@ -37,8 +37,14 @@ export function Tab({
     >
       <div className="truncate">{children}</div>
       {closable ? (
-        <Button size="tiny" color="none-gray" className="text-sm" onClick={onClose}>
-          <XMarkIcon className="w-4 h-4" />
+        <Button
+          size="tiny"
+          color="none-gray"
+          className="text-sm"
+          onClick={onClose}
+          aria-label={typeof children === 'string' ? `Close ${children}` : 'Close tab'}
+        >
+          <XMarkIcon className="w-4 h-4" aria-hidden="true" />
         </Button>
       ) : null}
     </div>

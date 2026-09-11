@@ -17,6 +17,7 @@ export type LongRunningTaskKind =
   | 'stop'
   | 'restart'
   | 'reboot'
+  | 'paste'
 export type LongRunningTaskStatus = 'running' | 'success' | 'error'
 
 export interface LongRunningTaskLog {
@@ -381,6 +382,12 @@ export function reportTaskOutcome(
   status: Exclude<LongRunningTaskStatus, 'running'>,
   task: Omit<StartTaskPayload, 'id'>
 ): void {
+  // No toast host, no toast: the embedded editor never mounts this model, and
+  // kea throws on an unmounted logic's actions — which would turn the
+  // caller's failure report into a second failure.
+  if (!longRunningTasksModel.isMounted()) {
+    return
+  }
   const id = nextTaskId(task.frameId, task.kind, task.sceneId)
   const { actions } = longRunningTasksModel
   actions.startTask({ ...task, id })

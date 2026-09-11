@@ -35,8 +35,23 @@ export function Markdown({ value: rawValue }: MarkdownProps) {
       remarkPlugins={[remarkGfm]}
       className="space-y-4"
       components={{
+        // The markdown is app- and scene-supplied: new tabs get no opener and
+        // no referrer (the referrer would carry the frame's editor URL).
         a({ node, ...props }) {
-          return <a target="_blank" {...props} className="text-blue-400 hover:underline" />
+          return <a {...props} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline" />
+        },
+        // An <img> would load the moment an app node renders, so any app could
+        // fetch a tracking pixel from any host. Images render as a link to
+        // open by choice instead.
+        img({ node, src, alt }) {
+          const label = alt ? `Image: ${alt}` : 'Image'
+          return src ? (
+            <a href={src} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+              {label}
+            </a>
+          ) : (
+            <span>{label}</span>
+          )
         },
         p({ node, ...props }) {
           return <p {...props} />

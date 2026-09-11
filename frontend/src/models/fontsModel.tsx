@@ -3,6 +3,8 @@ import { MakeLogicType, actions, afterMount, kea, listeners, path, reducers, sel
 import { loaders } from 'kea-loaders'
 import { FontMetadata } from '../types'
 import { apiFetch } from '../utils/apiFetch'
+import { fontFaceCss } from '../utils/fontFaceCss'
+import { monacoFilePath } from '../utils/monacoPaths'
 
 export const categoryLabels: Record<string, any> = {
   render: 'Render',
@@ -154,7 +156,7 @@ export const fontsModel = kea<fontsModelType>([
           await new Promise((resolve) => setTimeout(resolve, 1000 * loadAttempt))
         }
         actions.setFontLoading(font, true)
-        const response = await apiFetch(`/api/fonts/${font.file}`)
+        const response = await apiFetch(`/api/fonts/${monacoFilePath(font.file)}`)
         if (!response.ok) {
           throw new Error('Failed to fetch font')
         }
@@ -167,12 +169,7 @@ export const fontsModel = kea<fontsModelType>([
           reader.readAsDataURL(data)
         })
         const style = document.createElement('style')
-        const css = `@font-face { font-family: ${JSON.stringify(font.name)}; src: local(${JSON.stringify(
-          font.name
-        )}), url(${JSON.stringify(base64)}) format('truetype'); font-weight: ${font.weight || 400}; font-style: ${
-          font.italic ? 'italic' : 'normal'
-        }; }`
-        style.appendChild(document.createTextNode(css))
+        style.appendChild(document.createTextNode(fontFaceCss(font, base64)))
         document.head.appendChild(style)
         actions.setFontLoaded(font, true)
       } catch (error) {

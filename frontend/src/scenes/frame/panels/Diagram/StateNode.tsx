@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { appNodeLogic } from './appNodeLogic'
 import { newNodePickerLogic } from './newNodePickerLogic'
+import { pickerHandleProps } from './handleA11y'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NodeZoomLabel } from './NodeZoomLabel'
@@ -40,6 +41,7 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
             type="source"
             position={Position.Bottom}
             id={`stateOutput`}
+            {...pickerHandleProps(`Output: ${stateFieldTitle ?? data.keyword}`)}
             style={{
               position: 'relative',
               transform: 'none',

@@ -49,6 +49,7 @@ import {
 import { systemAppSourceLogic } from './systemAppSourceLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { isCloudMode } from '../../utils/cloudMode'
+import { inmemoryModelPath } from '../../utils/monacoPaths'
 
 interface AppsWorkspaceProps {
   frameId?: string
@@ -682,11 +683,11 @@ function SystemAppSourceEditor({ keyword }: { keyword: string }): JSX.Element {
     appTypesLibsRef.current = [
       monaco.languages.typescript.typescriptDefaults.addExtraLib(
         appTypeDeclarations,
-        `inmemory://system-app-editor/${keyword}/frameos-app-typescript.d.ts`
+        inmemoryModelPath('system-app-editor', [keyword], 'frameos-app-typescript.d.ts')
       ),
       monaco.languages.typescript.javascriptDefaults.addExtraLib(
         appTypeDeclarations,
-        `inmemory://system-app-editor/${keyword}/frameos-app-javascript.d.ts`
+        inmemoryModelPath('system-app-editor', [keyword], 'frameos-app-javascript.d.ts')
       ),
     ]
 
@@ -715,7 +716,7 @@ function SystemAppSourceEditor({ keyword }: { keyword: string }): JSX.Element {
       <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
         <Editor
           height="100%"
-          path={`inmemory://system-app-editor/${keyword}/${activeFile}`}
+          path={inmemoryModelPath('system-app-editor', [keyword], activeFile)}
           language={editorLanguage}
           value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
           theme={theme === 'dark' ? 'darkframe' : 'lightframe'}

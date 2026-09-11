@@ -48,6 +48,8 @@ import { appsModel } from '../../../../models/appsModel'
 import { arrangeSceneGraph } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { stripSecretNodeConfig } from '../../../../utils/stripSecretFieldValues'
+import { reportTaskOutcome } from '../../../../models/longRunningTasksModel'
+import { refreshNodeInternals } from './nodeInternals'
 import { Option } from '../../../../components/Select'
 import {
   installSceneAppForKeyword,
@@ -452,23 +454,178 @@ const clipboardPayloadForNodes = (
   }
 }
 
-const parseClipboardPayload = (parsed: unknown): ClipboardDiagramPayload | null => {
-  if (!parsed) {
+// What paste accepts: the editor's own copy payloads ({nodes, edges, apps?}
+// or a bare node) and an array of nodes. The clipboard is untrusted text —
+// any page, chat message or other app can put JSON on it — so each node and
+// edge is rebuilt from the fields the editor uses rather than spread: a
+// pasted `parentNode`, `hidden` or `extent` used to reach reactflow as is,
+// and a node with no `data` took the node component down.
+const PASTEABLE_NODE_TYPES = new Set<string>(['app', 'source', 'dispatch', 'scene', 'code', 'event', 'state'])
+const KEYWORD_NODE_TYPES = new Set<string>(['app', 'source', 'dispatch', 'scene', 'event', 'state'])
+const MAX_PASTED_NODES = 500
+const NOT_NODES_MESSAGE = 'The clipboard does not hold FrameOS nodes. Copy nodes in a scene first.'
+
+type ClipboardParseResult = { payload: ClipboardDiagramPayload } | { error: string }
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const finiteNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+
+const pastedNodeFrom = (raw: unknown): DiagramNode | null => {
+  if (!isPlainObject(raw)) {
     return null
   }
+  const { id, type, data, position, style } = raw
+  if (typeof id !== 'string' || !id || typeof type !== 'string' || !PASTEABLE_NODE_TYPES.has(type)) {
+    return null
+  }
+  if (!isPlainObject(data)) {
+    return null
+  }
+  if (KEYWORD_NODE_TYPES.has(type) && (typeof data.keyword !== 'string' || !data.keyword)) {
+    return null
+  }
+  if (data.config !== undefined && !isPlainObject(data.config)) {
+    return null
+  }
+  if (
+    (data.codeArgs !== undefined && !Array.isArray(data.codeArgs)) ||
+    (data.codeOutputs !== undefined && !Array.isArray(data.codeOutputs))
+  ) {
+    return null
+  }
+  const node = {
+    id,
+    type,
+    position: {
+      x: finiteNumber(isPlainObject(position) ? position.x : undefined) ?? 0,
+      y: finiteNumber(isPlainObject(position) ? position.y : undefined) ?? 0,
+    },
+    data,
+  } as DiagramNode
+  // A resized code or app node keeps its box.
+  if (isPlainObject(style)) {
+    const width = finiteNumber(style.width)
+    const height = finiteNumber(style.height)
+    if (width !== undefined || height !== undefined) {
+      node.style = { ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}) }
+    }
+  }
+  return node
+}
+
+const pastedEdgeFrom = (raw: unknown): DiagramEdge | null => {
+  if (!isPlainObject(raw)) {
+    return null
+  }
+  const { id, source, target, sourceHandle, targetHandle } = raw
+  if (typeof source !== 'string' || typeof target !== 'string') {
+    return null
+  }
+  const validHandle = (handle: unknown): boolean =>
+    handle === undefined || handle === null || typeof handle === 'string'
+  if (!validHandle(sourceHandle) || !validHandle(targetHandle)) {
+    return null
+  }
+  return {
+    id: typeof id === 'string' && id ? id : uuidv4(),
+    source,
+    target,
+    ...(typeof sourceHandle === 'string' || sourceHandle === null ? { sourceHandle } : {}),
+    ...(typeof targetHandle === 'string' || targetHandle === null ? { targetHandle } : {}),
+  }
+}
+
+const pastedAppsFrom = (raw: unknown): Record<string, SceneApp> | null => {
+  if (raw === undefined) {
+    return {}
+  }
+  if (!isPlainObject(raw)) {
+    return null
+  }
+  const apps: Record<string, SceneApp> = {}
+  for (const [keyword, app] of Object.entries(raw)) {
+    if (
+      !isPlainObject(app) ||
+      !isPlainObject(app.sources) ||
+      !Object.values(app.sources).every((source) => typeof source === 'string')
+    ) {
+      return null
+    }
+    apps[keyword] = app as unknown as SceneApp
+  }
+  return apps
+}
+
+/** Parse and validate clipboard text; every rejection says why. */
+export const parseClipboardText = (text: string): ClipboardParseResult => {
+  if (!text.trim()) {
+    return { error: 'The clipboard is empty.' }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { error: NOT_NODES_MESSAGE }
+  }
+  let rawNodes: unknown[]
+  let rawEdges: unknown = []
+  let rawApps: unknown = undefined
   if (Array.isArray(parsed)) {
-    return { nodes: parsed as DiagramNode[], edges: [] }
+    rawNodes = parsed
+  } else if (isPlainObject(parsed) && Array.isArray(parsed.nodes)) {
+    rawNodes = parsed.nodes
+    rawEdges = parsed.edges ?? []
+    rawApps = parsed.apps
+  } else if (isPlainObject(parsed) && 'type' in parsed) {
+    rawNodes = [parsed]
+  } else {
+    return { error: NOT_NODES_MESSAGE }
   }
-  if (typeof parsed === 'object') {
-    const payload = parsed as { nodes?: DiagramNode[]; edges?: DiagramEdge[]; apps?: Record<string, SceneApp> }
-    if (Array.isArray(payload.nodes)) {
-      return { nodes: payload.nodes, edges: payload.edges ?? [], apps: payload.apps ?? {} }
-    }
-    if ('type' in (parsed as DiagramNode)) {
-      return { nodes: [parsed as DiagramNode], edges: [] }
-    }
+  if (rawNodes.length === 0) {
+    return { error: 'The clipboard holds no nodes.' }
   }
-  return null
+  if (rawNodes.length > MAX_PASTED_NODES) {
+    return { error: `Paste takes at most ${MAX_PASTED_NODES} nodes at a time; the clipboard holds ${rawNodes.length}.` }
+  }
+  const nodes: DiagramNode[] = []
+  const ids = new Set<string>()
+  for (const [index, rawNode] of rawNodes.entries()) {
+    const node = pastedNodeFrom(rawNode)
+    if (!node) {
+      return {
+        error: `Pasted node ${index + 1} is not a FrameOS node: it needs an id, a known type and a data object.`,
+      }
+    }
+    if (ids.has(node.id)) {
+      return { error: `Two pasted nodes share the id "${node.id}".` }
+    }
+    ids.add(node.id)
+    nodes.push(node)
+  }
+  if (!Array.isArray(rawEdges)) {
+    return { error: 'The pasted edges are not a list.' }
+  }
+  const edges: DiagramEdge[] = []
+  for (const [index, rawEdge] of rawEdges.entries()) {
+    const edge = pastedEdgeFrom(rawEdge)
+    if (!edge) {
+      return { error: `Pasted edge ${index + 1} is not a FrameOS edge: it needs a source and a target.` }
+    }
+    edges.push(edge)
+  }
+  const apps = pastedAppsFrom(rawApps)
+  if (!apps) {
+    return { error: 'The pasted scene apps are not valid: each needs its sources.' }
+  }
+  return { payload: { nodes, edges, apps } }
+}
+
+const reportPasteFailure = (frameId: FrameId, detail: string): void => {
+  console.warn(`Paste: ${detail}`)
+  reportTaskOutcome('error', { frameId, kind: 'paste', title: 'Paste nodes', detail })
 }
 
 const mergePastedSceneApps = (
@@ -1704,9 +1861,7 @@ export const diagramLogic = kea<diagramLogicType>([
       const duplicatedNode = duplicateDiagramNode(node)
       const nextNodes = [...baseNodes, duplicatedNode]
       actions.setNodes(nextNodes)
-      window.setTimeout(() => {
-        props.updateNodeInternals?.(duplicatedNode.id)
-      }, 200)
+      refreshNodeInternals(props.updateNodeInternals, [duplicatedNode.id])
     },
     pasteFromClipboard: async () => {
       let clipboardText: string | null = null
@@ -1721,19 +1876,19 @@ export const diagramLogic = kea<diagramLogicType>([
         clipboardText = lastCopiedPayload
       }
       if (clipboardText === null) {
-        console.warn('Clipboard API not available for pasting nodes')
+        reportPasteFailure(
+          props.frameId,
+          'Nothing to paste: this browser gives the editor no clipboard access, and nothing was copied in this tab.'
+        )
+        return
+      }
+      const parsedClipboard = parseClipboardText(clipboardText)
+      if ('error' in parsedClipboard) {
+        reportPasteFailure(props.frameId, parsedClipboard.error)
         return
       }
       try {
-        const parsed = JSON.parse(clipboardText)
-        const payload = parseClipboardPayload(parsed)
-        if (!payload) {
-          throw new Error('Clipboard does not contain valid node JSON')
-        }
-        const { nodes, edges, apps } = payload
-        if (nodes.length === 0) {
-          return
-        }
+        const { nodes, edges, apps } = parsedClipboard.payload
         const { sceneApps: nextSceneApps, keywordMap } = mergePastedSceneApps(nodes, values.sceneApps, apps)
         const offset = getClipboardOffset(nodes, values.cursorPosition)
         const idMap = new Map<string, string>()
@@ -1783,11 +1938,13 @@ export const diagramLogic = kea<diagramLogicType>([
           actions.setEdges(nextEdges)
         })
         recordHistorySnapshot(cache, actions, snapshotOf(values))
-        window.setTimeout(() => {
-          pastedNodes.forEach((node) => props.updateNodeInternals?.(node.id))
-        }, 200)
+        refreshNodeInternals(
+          props.updateNodeInternals,
+          pastedNodes.map((node) => node.id)
+        )
       } catch (error) {
         console.error('Failed to paste node from clipboard', error)
+        reportPasteFailure(props.frameId, error instanceof Error && error.message ? error.message : 'Paste failed.')
       }
     },
   })),
