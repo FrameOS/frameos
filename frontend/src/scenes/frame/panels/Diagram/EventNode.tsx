@@ -12,6 +12,7 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { newNodePickerLogic } from './newNodePickerLogic'
+import { dragHandleProps, pickerHandleProps } from './handleA11y'
 import { TextInput } from '../../../../components/TextInput'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { ColorInput } from '../../../../components/ColorInput'
@@ -221,6 +222,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
             type="source"
             position={Position.Right}
             id="next"
+            {...pickerHandleProps('Next node')}
             style={{
               position: 'relative',
               transform: 'none',
@@ -273,20 +275,20 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
                           <div className="flex-1" title={field.label}>
                             {field.label ?? field.name}
                           </div>
-                          <ClipboardIcon
-                            className="w-5 h-5 cursor-pointer"
-                            onClick={() =>
-                              copy(
-                                isEventWithStateFields
-                                  ? stateFieldAccess(scene, field, 'state', mode)
-                                  : stateFieldAccess(scene, field, 'context.payload', mode)
-                              )
-                            }
-                          />
+                          <button
+                            type="button"
+                            className="shrink-0"
+                            title={`Copy ${fieldValue}`}
+                            aria-label={`Copy ${fieldValue}`}
+                            onClick={() => copy(fieldValue)}
+                          >
+                            <ClipboardIcon className="w-5 h-5" aria-hidden="true" />
+                          </button>
                           <Handle
                             type="source"
                             position={Position.Right}
                             id={`code/${fieldValue}`}
+                            {...dragHandleProps(`Output: ${field.label ?? field.name}`)}
                             style={{
                               position: 'relative',
                               transform: 'none',

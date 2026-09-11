@@ -346,8 +346,14 @@ test.describe('backend frontend e2e coverage @e2e', () => {
       .filter({ has: page.getByText('Living room frame', { exact: true }) })
       .filter({ has: page.getByRole('button', { name: /^Restore$/ }) })
       .last()
-    page.once('dialog', (dialog) => dialog.accept())
+    // Restore and Delete ask through the app's confirm dialog, not a browser
+    // prompt: nothing happens until the dialog's own button is pressed.
     await frameBackupRow.getByRole('button', { name: /^Restore$/ }).click()
+    const restoreDialog = page.getByRole('dialog')
+    await expect(restoreDialog).toContainText('Restore "Living room frame" as a new frame in this project?')
+    expect(cloudCalls.restores).toHaveLength(0)
+    await restoreDialog.getByRole('button', { name: /^Restore$/ }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
 
     await expect.poll(() => cloudCalls.restores.length).toBe(1)
     expect(cloudCalls.restores[0]).toEqual({
@@ -356,8 +362,10 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     })
     await expect(page.getByText(/Restored as a new frame/)).toBeVisible()
 
-    page.once('dialog', (dialog) => dialog.accept())
     await frameBackupRow.getByRole('button', { name: /^Delete$/ }).click()
+    const deleteDialog = page.getByRole('dialog')
+    await expect(deleteDialog).toContainText('Delete the cloud backup "Living room frame"?')
+    await deleteDialog.getByRole('button', { name: /^Delete backup$/ }).click()
     await expect.poll(() => cloudCalls.deletes).toEqual(['backup-frame-1'])
 
     // The recovery key for the end-to-end encryption reveals on demand.

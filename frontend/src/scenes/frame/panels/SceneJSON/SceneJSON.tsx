@@ -5,6 +5,7 @@ import Editor, { Monaco } from '@monaco-editor/react'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import { Button } from '../../../../components/Button'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import { monacoPathSegment } from '../../../../utils/monacoPaths'
 
 interface SceneJSONProps {
   sceneId: string
@@ -51,7 +52,7 @@ export function SceneJSON({ sceneId }: SceneJSONProps) {
       ) : null}
       <Editor
         height="100%"
-        path={`${frame.id}/scenes/${sceneId}.json`}
+        path={`${monacoPathSegment(frame.id)}/scenes/${monacoPathSegment(sceneId)}.json`}
         language="json"
         value={sceneJSON}
         onChange={(value) => setEditedSceneJSON(value ?? null)}

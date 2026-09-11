@@ -533,6 +533,7 @@ function EmbedUtilityDrawer({
           </div>
           <button
             type="button"
+            aria-label="Close"
             onClick={onClose}
             className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >

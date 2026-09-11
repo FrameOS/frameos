@@ -255,6 +255,7 @@ function WorkspaceChatComingSoonDrawer({
           </div>
           <button
             type="button"
+            aria-label="Close"
             onClick={closeChatDrawer}
             className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
@@ -321,6 +322,7 @@ function WorkspaceChatDrawerContent({
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={closeChatDrawer}
                 className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >

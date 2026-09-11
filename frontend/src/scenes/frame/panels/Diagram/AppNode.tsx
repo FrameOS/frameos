@@ -1,6 +1,6 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { router } from 'kea-router'
-import { NodeProps, Handle, Position, NodeResizer } from 'reactflow'
+import { NodeProps, Handle, Position, NodeResizer, useUpdateNodeInternals } from 'reactflow'
 import { AppNodeData, DispatchNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { RevealDots } from '../../../../components/Reveal'
@@ -8,7 +8,7 @@ import { diagramLogic } from './diagramLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { selectFieldOptions } from '../../../../utils/selectOptions'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { urls } from '../../../../urls'
@@ -25,6 +25,8 @@ import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
+import { pickerHandleProps } from './handleA11y'
+import { booleanFieldValue } from '../../../../utils/booleanField'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FontSelect } from '../../../../components/FontSelect'
@@ -68,6 +70,18 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
+  // Handles follow the app's fields and output (a config.json edit, a scene
+  // app fork): re-measure after the commit that renders a changed set, or an
+  // edge into a new handle has no anchor until something else re-measures.
+  const updateNodeInternals = useUpdateNodeInternals()
+  const handleKey = [
+    showNextPrev ? 'flow' : '',
+    showOutput ? String(output?.length ?? 0) : '',
+    ...(fields ?? []).map((field) => ('name' in field ? `${field.name}:${field.type}` : '')),
+  ].join('|')
+  useEffect(() => {
+    updateNodeInternals(id)
+  }, [updateNodeInternals, id, handleKey])
   const hideReadOnlyNimAppAction = isInFrameAdminMode() && isNimAppInInterpretedScene
   const runtimeErrorTitle = runtimeNodeError ? `${runtimeNodeError.event}: ${runtimeNodeError.message}` : undefined
   const runtimeErrorClassName = runtimeNodeError ? 'border-red-500 shadow-red-500/80 ring-2 ring-red-500/70' : null
@@ -118,6 +132,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
               type="target"
               position={Position.Left}
               id="prev"
+              {...pickerHandleProps('Previous node')}
               style={{
                 position: 'relative',
                 transform: 'none',
@@ -218,6 +233,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
               type="source"
               position={Position.Right}
               id="next"
+              {...pickerHandleProps('Next node')}
               style={{
                 position: 'relative',
                 transform: 'none',
@@ -289,6 +305,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                   type="target"
                                   position={Position.Left}
                                   id={`fieldInput/${field.name}`}
+                                  {...pickerHandleProps(`Input: ${field.label ?? field.name}`)}
                                   style={{
                                     position: 'relative',
                                     transform: 'none',
@@ -371,6 +388,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                       type="source"
                                       position={Position.Right}
                                       id={`field/${field.name}`}
+                                      {...pickerHandleProps(`Next node for ${field.label ?? field.name}`)}
                                       style={{
                                         position: 'relative',
                                         transform: 'none',
@@ -466,11 +484,10 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                 ) : field.type === 'boolean' ? (
                                   <input
                                     type="checkbox"
-                                    checked={
-                                      (data.config && field.name in data.config
-                                        ? data.config[field.name]
-                                        : field.value) == 'true'
-                                    }
+                                    aria-label={field.label ?? field.name}
+                                    checked={booleanFieldValue(
+                                      data.config && field.name in data.config ? data.config[field.name] : field.value
+                                    )}
                                     onChange={(e) =>
                                       updateNodeConfig(id, field.name, e.target.checked ? 'true' : 'false')
                                     }
@@ -532,6 +549,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                       type="source"
                       position={Position.Bottom}
                       id={`fieldOutput`}
+                      {...pickerHandleProps(`Output: ${out.name}`)}
                       style={{
                         position: 'relative',
                         transform: 'none',

@@ -311,8 +311,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 </div>
               </div>
             ) : null}
-            {(frameAdminMode || (!inHassioIngress() && cloudStatus?.identity)) &&
-            link.scopes.includes('auth:login') ? (
+            {(frameAdminMode || (!inHassioIngress() && cloudStatus?.identity)) && link.scopes.includes('auth:login') ? (
               <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
                 <div className="@md:w-1/3 @md:shrink-0">
                   <Label>Local password login</Label>
@@ -389,14 +388,18 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                             size="small"
                             color="secondary"
                             onClick={() => {
-                              if (
-                                window.confirm(
-                                  `Restore "${backup.name ?? backup.item_key}" as a new ` +
-                                    `${backup.kind === 'frames' ? 'frame' : 'scene'} in this project?`
-                                )
-                              ) {
-                                restoreCloudBackup(backup.id)
-                              }
+                              const kind = backup.kind === 'frames' ? 'frame' : 'scene'
+                              void confirmDialog({
+                                title: `Restore this ${kind}?`,
+                                message: `Restore "${
+                                  backup.name ?? backup.item_key
+                                }" as a new ${kind} in this project?`,
+                                confirmLabel: 'Restore',
+                              }).then((confirmed) => {
+                                if (confirmed) {
+                                  restoreCloudBackup(backup.id)
+                                }
+                              })
                             }}
                             disabled={restoringBackupId === backup.id}
                             className="inline-flex items-center gap-2"
@@ -408,9 +411,18 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                             size="small"
                             color="secondary"
                             onClick={() => {
-                              if (window.confirm(`Delete the cloud backup "${backup.name ?? backup.item_key}"?`)) {
-                                deleteCloudBackup(backup.id)
-                              }
+                              void confirmDialog({
+                                title: 'Delete this backup?',
+                                message: `Delete the cloud backup "${
+                                  backup.name ?? backup.item_key
+                                }"?\n\nThis cannot be undone.`,
+                                confirmLabel: 'Delete backup',
+                                danger: true,
+                              }).then((confirmed) => {
+                                if (confirmed) {
+                                  deleteCloudBackup(backup.id)
+                                }
+                              })
                             }}
                             disabled={deletingBackupId === backup.id}
                             className="inline-flex items-center gap-2"
@@ -422,7 +434,9 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                       ))}
                     </div>
                   ) : null}
-                  {backupActionMessage ? <div className="text-green-600 dark:text-green-400">{backupActionMessage}</div> : null}
+                  {backupActionMessage ? (
+                    <div className="text-green-600 dark:text-green-400">{backupActionMessage}</div>
+                  ) : null}
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="frameos-muted">
                       Backup key{cloudStatus?.backup_key_fingerprint ? ` ${cloudStatus.backup_key_fingerprint}` : ''}:
@@ -450,8 +464,8 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                     )}
                   </div>
                   <div className="frameos-muted">
-                    Save the recovery key in your password manager. Backups are encrypted with it before upload —
-                    after reinstalling this backend, paste it below to restore them.
+                    Save the recovery key in your password manager. Backups are encrypted with it before upload — after
+                    reinstalling this backend, paste it below to restore them.
                   </div>
                   <form
                     className="flex flex-wrap items-center gap-2"

@@ -8,6 +8,7 @@ import { activationWasRedeploy, controlLogic } from './controlLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { socketLogic } from '../../../socketLogic'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
+import { booleanFieldValue } from '../../../../utils/booleanField'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { StateField } from '../../../../types'
 import type { TemplateType } from '../../../../types'
@@ -167,7 +168,8 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           for (const field of fields) {
             if (field.name in formValues && field.access === 'public') {
               if (field.type === 'boolean') {
-                state[field.name] = formValues[field.name] === 'true' || field.value
+                // "false" in the form used to fall through to a `true` default.
+                state[field.name] = booleanFieldValue(formValues[field.name] ?? field.value)
               } else if (field.type === 'integer') {
                 state[field.name] = parseInt(formValues[field.name] ?? field.value)
               } else if (field.type === 'float') {

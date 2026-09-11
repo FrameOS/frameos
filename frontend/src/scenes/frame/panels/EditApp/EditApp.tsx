@@ -13,6 +13,7 @@ import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import { inmemoryModelPath } from '../../../../utils/monacoPaths'
 
 interface EditAppProps {
   // When set, keeps editAppLogic mounted until the editor is closed via
@@ -293,7 +294,7 @@ export function EditApp({
         continue
       }
       present.add(file)
-      const uri = monaco.Uri.parse(`inmemory://app-editor/${nodeId}/${file}`)
+      const uri = monaco.Uri.parse(inmemoryModelPath('app-editor', [nodeId], file))
       const existing = monaco.editor.getModel(uri)
       if (!existing) {
         siblingModelsRef.current.set(file, monaco.editor.createModel(content ?? '', appSourceEditorLanguage(file), uri))
@@ -331,11 +332,11 @@ export function EditApp({
     appTypesLibsRef.current = [
       monaco.languages.typescript.typescriptDefaults.addExtraLib(
         appTypeDeclarations,
-        `inmemory://app-editor/${nodeId}/frameos-app-typescript.d.ts`
+        inmemoryModelPath('app-editor', [nodeId], 'frameos-app-typescript.d.ts')
       ),
       monaco.languages.typescript.javascriptDefaults.addExtraLib(
         appTypeDeclarations,
-        `inmemory://app-editor/${nodeId}/frameos-app-javascript.d.ts`
+        inmemoryModelPath('app-editor', [nodeId], 'frameos-app-javascript.d.ts')
       ),
     ]
 
@@ -410,7 +411,7 @@ export function EditApp({
         <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
           <Editor
             height="100%"
-            path={`inmemory://app-editor/${nodeId}/${activeFile}`}
+            path={inmemoryModelPath('app-editor', [nodeId], activeFile)}
             language={editorLanguage}
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme={theme === 'dark' ? 'darkframe' : 'lightframe'}

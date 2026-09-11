@@ -7,6 +7,13 @@ import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
 import { PathInput } from '../Assets/PathInput'
 import { FrameId, StateField } from '../../../../types'
+import { booleanFieldValue } from '../../../../utils/booleanField'
+
+/** The "true"/"false" option for a boolean value in either shape (a real
+ * `true` from the frame's state or a scene default matched no option). */
+function booleanSelectValue(value: unknown): string | undefined {
+  return value === undefined || value === null || value === '' ? undefined : String(booleanFieldValue(value))
+}
 
 interface StateFieldEditProps {
   field: StateField
@@ -43,7 +50,7 @@ export function StateFieldEdit({
     />
   ) : field.type === 'boolean' ? (
     <Select
-      value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
+      value={booleanSelectValue(stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value)}
       onChange={onChange}
       options={['true', 'false'].map((option) => ({ label: option, value: option }))}
     />
