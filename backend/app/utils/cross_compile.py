@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 import shlex
@@ -597,11 +596,19 @@ class CrossCompiler:
         url = self.prebuilt_entry.url_for(component)
         if not url:
             return None
+        if not self.prebuilt_entry.has_verifiable_checksum(component):
+            # Never unpack an archive the manifest cannot vouch for (an R2
+            # multipart ETag is not an MD5 of the file).
+            await self._log(
+                "stderr",
+                f"{icon} No verifiable checksum published for prebuilt {component}; falling back",
+            )
+            return None
         version = self.prebuilt_entry.version_for(component, "unknown") or "unknown"
         safe_version = self._sanitize(version)
         dest_dir = self.prebuilt_dir / f"{component}-{safe_version}"
         marker = dest_dir / ".build-info"
-        expected_marker = f"{component}|{version}|{url}|{self.prebuilt_entry.md5_for(component) or ''}"
+        expected_marker = f"{component}|{version}|{url}|{self.prebuilt_entry.checksum_marker(component)}"
         if marker.exists() and marker.read_text() == expected_marker:
             if self._prebuilt_component_is_valid(component, dest_dir):
                 return dest_dir
@@ -616,7 +623,7 @@ class CrossCompiler:
             shutil.rmtree(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
         try:
-            await self._download_and_extract(url, dest_dir, self.prebuilt_entry.md5_for(component))
+            await self._download_and_extract(url, dest_dir, component)
             self._normalize_component_dir(dest_dir)
             if not self._prebuilt_component_is_valid(component, dest_dir):
                 raise RuntimeError(
@@ -633,7 +640,7 @@ class CrossCompiler:
         marker.write_text(expected_marker)
         return dest_dir
 
-    async def _download_and_extract(self, url: str, dest_dir: Path, expected_md5: str | None) -> None:
+    async def _download_and_extract(self, url: str, dest_dir: Path, component: str) -> None:
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
         os.close(tmp_fd)
         try:
@@ -643,12 +650,8 @@ class CrossCompiler:
                     with open(tmp_path, "wb") as fh:
                         async for chunk in response.aiter_bytes():
                             fh.write(chunk)
-            if expected_md5:
-                actual = self._file_md5sum(Path(tmp_path))
-                if actual != expected_md5:
-                    raise RuntimeError(
-                        f"MD5 mismatch for {url}: expected {expected_md5}, got {actual}"
-                    )
+            assert self.prebuilt_entry is not None
+            self.prebuilt_entry.verify_file(component, Path(tmp_path))
             with tarfile.open(tmp_path, "r:gz") as tar:
                 self._safe_extract(tar, dest_dir)
         finally:
@@ -684,14 +687,6 @@ class CrossCompiler:
         for child in inner.iterdir():
             shutil.move(str(child), dest_dir / child.name)
         shutil.rmtree(inner)
-
-    @staticmethod
-    def _file_md5sum(path: Path) -> str:
-        hasher = hashlib.md5()
-        with path.open("rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
 
     def _prebuilt_component_is_valid(self, component: str, root: Path) -> bool:
         validators = {

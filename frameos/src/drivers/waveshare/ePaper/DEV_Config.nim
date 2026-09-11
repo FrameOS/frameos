@@ -74,6 +74,12 @@ proc installDriverDebugLog*() =
   else:
     DEV_SetDebugLog(nil)
 
+## Per-render busy-wait budget (DEV_Config.h): arm it before a refresh and
+## disarm it after, so a wedged panel fails the render within minutes
+## instead of blocking the render thread past the systemd watchdog.
+proc DEV_Busy_Budget_Begin*() {.importc: "DEV_Busy_Budget_Begin".}
+proc DEV_Busy_Budget_End*() {.importc: "DEV_Busy_Budget_End".}
+
 proc DEV_TakeError(buf: cstring; len: csize_t): cint {.importc: "DEV_TakeError".}
 
 proc raiseIfDriverError*() =

@@ -38,6 +38,12 @@ suite "data/frameOSGallery app":
     check AppConfig(category: "news", categoryOther: "unused").resolvedCategory() == "news"
     check AppConfig(category: "other", categoryOther: "featured").resolvedCategory() == "featured"
 
+  test "galleryUrl encodes a free-text category":
+    check galleryUrl("nature") == "https://gallery.frameos.net/image?category=nature"
+    check galleryUrl("black & white cats") ==
+      "https://gallery.frameos.net/image?category=black+%26+white+cats"
+    check galleryUrl("a=b#c") == "https://gallery.frameos.net/image?category=a%3Db%23c"
+
   test "get logs resolved category and downloads expected gallery URL":
     let logs = LogStore(items: @[])
     galleryHookUrl = ""

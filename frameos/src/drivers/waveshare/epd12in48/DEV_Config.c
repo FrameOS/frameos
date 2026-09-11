@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Read /proc/cpuinfo directly instead of popen()-ing a shell: popen() forks
  * the whole process, which the main ePaper HAL removed for a documented
@@ -205,6 +206,39 @@ void DEV_Delay_us(UWORD xus)
 void DEV_Delay_ms(UDOUBLE xms)
 {
     lguSleep(xms/1000.0);
+}
+
+/* Per-render busy budget (DEV_Config.h). Only the render thread touches it. */
+static int s_busy_budget_armed = 0;
+static UDOUBLE s_busy_budget_start_ms = 0;
+
+static UDOUBLE busy_budget_millis(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (UDOUBLE)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
+
+void DEV_Busy_Budget_Begin(void)
+{
+    s_busy_budget_armed = 1;
+    s_busy_budget_start_ms = busy_budget_millis();
+}
+
+void DEV_Busy_Budget_End(void)
+{
+    s_busy_budget_armed = 0;
+}
+
+int DEV_Busy_Budget_Exhausted(void)
+{
+    return s_busy_budget_armed &&
+           (UDOUBLE)(busy_budget_millis() - s_busy_budget_start_ms) >= (UDOUBLE)EPD_12IN48_BUSY_RENDER_BUDGET_MS;
+}
+
+UDOUBLE DEV_Busy_Timeout_Ms(void)
+{
+    return DEV_Busy_Budget_Exhausted() ? 0 : (UDOUBLE)EPD_12IN48_BUSY_WAIT_CAP_MS;
 }
 
 /******************************************************************************

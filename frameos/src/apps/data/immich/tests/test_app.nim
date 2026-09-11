@@ -169,6 +169,18 @@ suite "data/immich app":
     check assetFileExtension(bare, "fullsize") == ".jpg"
     check assetBaseName(bare) == "img-2"
 
+  test "assetFileExtension only accepts a short alphanumeric suffix":
+    proc ext(name: string): string =
+      assetFileExtension(%*{"id": "x", "originalFileName": name}, "fullsize")
+    check ext("clip.MP4") == ".mp4"
+    check ext("scan.tiff") == ".tiff"
+    check ext("photo.jpg/../../etc") == ".jpg"
+    check ext("photo./evil") == ".jpg"
+    check ext("photo.jp g") == ".jpg"
+    check ext("photo.toolong") == ".jpg"
+    check ext("photo.") == ".jpg"
+    check ext(".hidden") == ".jpg"
+
   test "missing settings returns error image with context dimensions":
     let logs = LogStore(items: @[])
     let scene = FrameScene(state: %*{}, logger: newLogger(logs))

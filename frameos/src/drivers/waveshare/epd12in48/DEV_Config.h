@@ -37,12 +37,6 @@
 #define LFLAGS 0
 #define NUM_MAXBUF  4
 
-// Upper bound on how long to wait for a busy pin to release (matches ePaper/).
-// A wedged 12.48" panel must not hang the render thread forever.
-#ifndef EPD_12IN48_BUSY_TIMEOUT_MS
-#define EPD_12IN48_BUSY_TIMEOUT_MS 120000
-#endif
-
 #include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -54,6 +48,20 @@
 #define UBYTE   uint8_t
 #define UWORD   uint16_t
 #define UDOUBLE uint32_t
+
+/* Busy-pin wait bounds, as in ../ePaper/DEV_Config.h: at most 120 s per
+ * wait, and once the host arms the per-render budget (DEV_Busy_Budget_Begin)
+ * at most 300 s across all of one render's waits. The four sub-panels each
+ * wait per refresh, so the per-wait cap alone allowed 8+ minutes of a
+ * blocked render thread. EPD_12IN48_BUSY_TIMEOUT_MS is re-read on every
+ * poll: the cap, or 0 once the budget is spent. */
+#define EPD_12IN48_BUSY_WAIT_CAP_MS 120000UL
+#define EPD_12IN48_BUSY_RENDER_BUDGET_MS 300000UL
+UDOUBLE DEV_Busy_Timeout_Ms(void);
+void DEV_Busy_Budget_Begin(void);
+void DEV_Busy_Budget_End(void);
+int DEV_Busy_Budget_Exhausted(void);
+#define EPD_12IN48_BUSY_TIMEOUT_MS (DEV_Busy_Timeout_Ms())
 
 /**
  * GPIO config

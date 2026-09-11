@@ -84,6 +84,15 @@ target so the scripts can discover and download the right artifacts
 automatically. Older archives remain in R2 under their versioned object keys,
 but they are not retained as duplicate manifest entries.
 
+Every archive is verified before it is unpacked, against
+`component_sha256sums` in the manifest (the SHA-256 of the tarball, recorded
+at upload and filled in by `upload`/`sync` for anything already in the bucket
+by downloading and hashing it). `component_md5sums` holds the R2 ETags, kept
+for older installers: an ETag is the file's MD5 only for a single-part upload
+(a multipart one looks like `<hex>-<parts>`), so it is used only when there is
+no SHA-256 and it is not multipart. With neither, `install_prebuilt_quickjs.py`
+and the backend deploy refuse the archive and build QuickJS from source.
+
 ### Prerequisites
 
 - Python with `boto3` installed (e.g. `pip install boto3`).

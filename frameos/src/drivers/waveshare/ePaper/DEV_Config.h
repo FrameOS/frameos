@@ -94,10 +94,27 @@ void DEV_Delay_ms(UDOUBLE xms);
 /* Monotonic milliseconds, for busy-wait accounting. */
 UDOUBLE DEV_Millis(void);
 
-// Upper bound for busy-pin waits. A full e-paper refresh takes ~30s;
-// anything past this means a wedged controller, and spinning forever
-// hangs the caller's render thread.
-#define EPD_BUSY_TIMEOUT_MS 120000
+/* Busy-pin waits have two bounds.
+ * - EPD_BUSY_WAIT_CAP_MS caps ONE wait. A full e-paper refresh takes ~30 s;
+ *   anything past this means a wedged controller, and spinning forever
+ *   hangs the caller's render thread.
+ * - EPD_BUSY_RENDER_BUDGET_MS caps ALL waits of one render, once the host
+ *   arms it with DEV_Busy_Budget_Begin() (DEV_Busy_Budget_End() disarms
+ *   it). Most panels wait three or four
+ *   times per refresh, so a wedged panel used to block the render thread
+ *   for 6-8 minutes against systemd's 15-minute WatchdogSec. Once the
+ *   budget is spent every further wait times out at once, so a wedged
+ *   render fails within the budget plus one poll.
+ * EPD_BUSY_TIMEOUT_MS is what the vendor drivers compare their elapsed
+ * wait against on every poll; it is the per-wait cap, or 0 once an armed
+ * budget is spent. */
+#define EPD_BUSY_WAIT_CAP_MS 120000UL
+#define EPD_BUSY_RENDER_BUDGET_MS 300000UL
+UDOUBLE DEV_Busy_Timeout_Ms(void);
+void DEV_Busy_Budget_Begin(void);
+void DEV_Busy_Budget_End(void);
+int DEV_Busy_Budget_Exhausted(void);
+#define EPD_BUSY_TIMEOUT_MS (DEV_Busy_Timeout_Ms())
 
 void DEV_SPI_SendData(UBYTE Reg);
 void DEV_SPI_SendnData(UBYTE *Reg);
@@ -138,7 +155,7 @@ void DEV_Debug_Data(UBYTE data);
 void DEV_Debug_DataBulk(const UBYTE *data, uint32_t len);
 void DEV_Debug_Preview(const UBYTE *image, unsigned long totalBytes);
 /* Poll BUSY until it leaves `busy_level`. Returns 1 if the panel was seen
- * busy and released, 0 if it was never busy, -1 on EPD_BUSY_TIMEOUT_MS
+ * busy and released, 0 if it was never busy, -1 on timeout (EPD_BUSY_TIMEOUT_MS)
  * (already reported through DEV_Error). Logs start/progress/end events. */
 int DEV_Busy_Wait(const char *stage, int busy_level, UDOUBLE poll_ms);
 

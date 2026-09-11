@@ -8,7 +8,8 @@ usage() {
 Usage: tools/run_test_shard.sh <1..${total_shards}> [--print]
 
 Runs one deterministic FrameOS Nim test shard from the frameos/ directory.
-Every test file under \`src/**/tests/\` is assigned to a shard in a
+Every test file under \`src/**/tests/\` and \`remote/tests/\` (the Remote,
+which needs \`nimble setup\` run in remote/ first) is assigned to a shard in a
 deterministic pseudo-random (filename hash) order, so adding or removing test
 files rebalances automatically. Set FRAMEOS_TEST_TOTAL_SHARDS to change the
 shard count (default ${total_shards}).
@@ -47,7 +48,10 @@ frameos_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$frameos_dir"
 
 discover_tests() {
-  find src -type f -name '*.nim' | awk -F/ '$(NF-1) == "tests" && $NF ~ /^test.*\.nim$/ { print }' | sort
+  # remote/ is its own nimble package (frameos_remote) with its own
+  # dependencies; its tests compile from here like the runtime's do, as long
+  # as remote/nimble.paths exists (see the CI setup step).
+  find src remote/tests -type f -name '*.nim' | awk -F/ '$(NF-1) == "tests" && $NF ~ /^test.*\.nim$/ { print }' | sort
 }
 
 declare -a tests=()
