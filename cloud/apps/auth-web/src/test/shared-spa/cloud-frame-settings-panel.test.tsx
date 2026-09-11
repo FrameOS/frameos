@@ -251,6 +251,19 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(2);
   });
 
+  it("offers the account's SSH keys, which go on the SD cards it builds", () => {
+    // Regression: commit 97c8c750 swept this section into the panel's
+    // `!cloudProfile` branch, so it stopped rendering for every cloud frame
+    // while the settings nav kept offering a link to its anchor. Nothing
+    // caught it — the gating was forty nested ternaries deep. The panel's
+    // surfaces are now a table (frameSettingsSurface.ts) checked against that
+    // nav list by frame-settings-surface.test.ts.
+    renderPanel(cloudFrame("raspberry-pi-64"));
+
+    expect(screen.getByText("SSH keys")).toBeTruthy();
+    expect(document.getElementById("frame-settings-ssh")).toBeTruthy();
+  });
+
   it("says who owns everything it is not showing", () => {
     renderPanel(cloudFrame("raspberry-pi-64"));
 
@@ -291,6 +304,12 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     renderPanel(cloudFrame("esp32-s3"));
 
     expect(screen.queryByText("Power")).toBeTruthy();
+  });
+
+  it("offers no SSH keys: an ESP32 is flashed, not imaged", () => {
+    renderPanel(cloudFrame("esp32-s3"));
+
+    expect(screen.queryByText("SSH keys")).toBeNull();
   });
 
   it("keeps its narrower set: no Pi-only batch", () => {
