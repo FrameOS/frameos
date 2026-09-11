@@ -119,7 +119,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nimble/pkgs2
-          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
+          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock', 'frameos/remote/nimble.lock') }}
           restore-keys: |
             ${{ runner.os }}-nimble-
 
@@ -137,6 +137,10 @@ jobs:
           nimble build_quickjs --silent
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 tools/makeapploaders.py
+          # The Remote (remote/) is its own nimble package with deps the
+          # runtime does not have (nimcrypto, ws); its nimble.paths lets the
+          # shard runner compile remote/tests like everything under src/.
+          (cd remote && nimble install -d && nimble setup)
 
       # Every test file is a full compile of most of the tree, and Nim only
       # re-runs gcc for C files whose content hash changed — so a warm nimcache
@@ -181,6 +185,19 @@ jobs:
             rsync -a frameos/nimcache/ "$dest/" || echo "::warning::nimcache save to $dest failed (rsync exit $?)"
             echo "saved $(du -sh "$dest" | cut -f1) to $dest"
           fi
+
+      # Plain `node --test` suites next to FrameOS code that no JS workspace
+      # job runs: the wasm preview's HTTP host library (its request guard)
+      # and the frameos-editor embed helper (its origin filter).
+      - name: Set up Node for FrameOS JS unit tests
+        if: ${{ matrix.shard == 1 }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: FrameOS JS unit tests
+        if: ${{ matrix.shard == 1 }}
+        run: node --test frameos/tools/wasm/frameos_library.test.mjs frameos/editor/embed.test.mjs
 
       - name: FrameOS ESP32 Nim compile
         if: ${{ matrix.shard == 1 }}

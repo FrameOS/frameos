@@ -114,3 +114,9 @@ proc DEV_SPI_WriteByte*(value: UBYTE) {.importc: "DEV_SPI_WriteByte".}
 proc DEV_SPI_ReadByte*(Reg: UBYTE): UBYTE {.importc: "DEV_SPI_ReadByte".}
 proc DEV_ModuleInit*(): UBYTE {.importc: "DEV_ModuleInit".}
 proc DEV_ModuleExit*() {.importc: "DEV_ModuleExit".}
+
+## Per-render busy-wait budget (DEV_Config.h): arm it before a refresh and
+## disarm it after, so a wedged panel fails the render within minutes
+## instead of blocking the render thread past the systemd watchdog.
+proc DEV_Busy_Budget_Begin*() {.importc: "DEV_Busy_Budget_Begin".}
+proc DEV_Busy_Budget_End*() {.importc: "DEV_Busy_Budget_End".}

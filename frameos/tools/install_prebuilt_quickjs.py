@@ -175,6 +175,7 @@ def entries_from_payload(payload: dict, base_url: str) -> dict[str, dict]:
             "versions": entry.get("versions") or {},
             "component_urls": component_urls,
             "component_md5s": entry.get("component_md5sums") or {},
+            "component_sha256s": entry.get("component_sha256sums") or {},
         }
     return entries
 
@@ -205,7 +206,53 @@ def file_md5sum(path: Path) -> str:
     return hasher.hexdigest()
 
 
-def download_file(url: str, dest: Path, *, expected_md5: str | None, timeout: float) -> None:
+def file_sha256sum(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def is_multipart_etag(value: str) -> bool:
+    """An S3/R2 ETag of a multipart upload ("<md5 of part md5s>-<parts>") is
+    not the MD5 of the file, so it cannot verify a download."""
+    return "-" in value
+
+
+def verify_download(
+    url: str, path: Path, *, expected_sha256: str | None, expected_md5: str | None
+) -> None:
+    """Refuse an archive that the manifest cannot vouch for.
+
+    SHA-256 (component_sha256sums) is the checksum of record. The MD5 in
+    component_md5sums is an R2 ETag, which is only a real MD5 for a
+    single-part upload; a multipart one used to skip verification entirely.
+    With neither usable, the archive is not installed at all."""
+    if expected_sha256:
+        actual = file_sha256sum(path)
+        if actual != expected_sha256.strip().lower():
+            raise RuntimeError(f"SHA-256 mismatch for {url}: expected {expected_sha256}, got {actual}")
+        return
+    if expected_md5 and not is_multipart_etag(expected_md5):
+        actual = file_md5sum(path)
+        if actual != expected_md5.strip().lower():
+            raise RuntimeError(f"MD5 mismatch for {url}: expected {expected_md5}, got {actual}")
+        return
+    raise RuntimeError(
+        f"No verifiable checksum published for {url} "
+        f"(sha256: {expected_sha256 or 'none'}, md5: {expected_md5 or 'none'}); refusing to install it"
+    )
+
+
+def download_file(
+    url: str,
+    dest: Path,
+    *,
+    expected_md5: str | None,
+    timeout: float,
+    expected_sha256: str | None = None,
+) -> None:
     request = urllib.request.Request(url, headers=HTTP_HEADERS)
     with urllib.request.urlopen(request, timeout=timeout) as response, dest.open("wb") as output:
         while True:
@@ -214,10 +261,7 @@ def download_file(url: str, dest: Path, *, expected_md5: str | None, timeout: fl
                 break
             output.write(chunk)
 
-    if expected_md5 and "-" not in expected_md5:
-        actual_md5 = file_md5sum(dest)
-        if actual_md5 != expected_md5:
-            raise RuntimeError(f"MD5 mismatch for {url}: expected {expected_md5}, got {actual_md5}")
+    verify_download(url, dest, expected_sha256=expected_sha256, expected_md5=expected_md5)
 
 
 def safe_extract(tar: tarfile.TarFile, path: Path) -> None:
@@ -363,6 +407,7 @@ def install_prebuilt_quickjs(
             url,
             archive_path,
             expected_md5=entry["component_md5s"].get("quickjs"),
+            expected_sha256=entry["component_sha256s"].get("quickjs"),
             timeout=timeout,
         )
         with tarfile.open(archive_path, "r:gz") as tar:

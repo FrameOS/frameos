@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -114,7 +114,11 @@ class ManifestEntry:
     metadata_key: Optional[str] = None
     updated_at: str = ""
     component_keys: Optional[Dict[str, str]] = None
+    # R2 ETags: a real MD5 only for single-part uploads ("<hex>-<parts>"
+    # otherwise). Kept for older installers; component_sha256sums is the
+    # checksum of record.
     component_md5sums: Optional[Dict[str, str]] = None
+    component_sha256sums: Optional[Dict[str, str]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "ManifestEntry":
@@ -126,6 +130,7 @@ class ManifestEntry:
             updated_at=data.get("updated_at", ""),
             component_keys=data.get("component_keys"),
             component_md5sums=data.get("component_md5sums"),
+            component_sha256sums=data.get("component_sha256sums"),
         )
 
     def to_dict(self) -> Dict[str, str]:
@@ -136,6 +141,7 @@ class ManifestEntry:
             "updated_at": self.updated_at,
             "component_keys": self.component_keys,
             "component_md5sums": self.component_md5sums,
+            "component_sha256sums": self.component_sha256sums,
         }
         if self.metadata_key:
             data["metadata_key"] = self.metadata_key
@@ -150,6 +156,7 @@ class UploadPlan:
     component_keys: Dict[str, str]
     component_md5sums: Dict[str, str]
     components_to_upload: List[Tuple[str, Path, str]]
+    component_sha256sums: Dict[str, str] = field(default_factory=dict)
 
 
 def parse_args() -> argparse.Namespace:
@@ -397,6 +404,63 @@ def file_md5sum(path: Path) -> str:
     return digest.hexdigest()
 
 
+def file_sha256sum(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def object_sha256sum(client, bucket: str, key: str) -> Optional[str]:
+    """SHA-256 of an object already in the bucket (downloaded to hash it):
+    R2 exposes no content hash for multipart uploads."""
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+    os.close(tmp_fd)
+    try:
+        try:
+            client.download_file(bucket, key, tmp_path)
+        except ClientError as exc:
+            if exc.response["Error"].get("Code") in {"404", "NoSuchKey"}:
+                return None
+            raise
+        return file_sha256sum(Path(tmp_path))
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def known_sha256sum(manifest: Dict[str, List[ManifestEntry]], key: str) -> Optional[str]:
+    for entry_list in manifest.values():
+        for entry in entry_list:
+            for component, component_key in (entry.component_keys or {}).items():
+                if component_key == key and (entry.component_sha256sums or {}).get(component):
+                    return entry.component_sha256sums[component]
+    return None
+
+
+def ensure_manifest_sha256sums(client, bucket: str, manifest: Dict[str, List[ManifestEntry]]) -> bool:
+    """Fill in component_sha256sums for every published archive, so the
+    installers can always verify what they download."""
+    changed = False
+    cache: Dict[str, str] = {}
+    for entry_list in manifest.values():
+        for entry in entry_list:
+            if not entry.component_keys:
+                continue
+            if entry.component_sha256sums is None:
+                entry.component_sha256sums = {}
+            for component, key in entry.component_keys.items():
+                if entry.component_sha256sums.get(component):
+                    cache.setdefault(key, entry.component_sha256sums[component])
+                    continue
+                sha256 = cache.get(key) or object_sha256sum(client, bucket, key)
+                if sha256:
+                    cache[key] = sha256
+                    entry.component_sha256sums[component] = sha256
+                    changed = True
+    return changed
+
+
 def head_object_md5sum(client, bucket: str, key: str) -> Optional[str]:
     try:
         response = client.head_object(Bucket=bucket, Key=key)
@@ -516,10 +580,12 @@ def upload_target(
     tarballs: List[Path] = []
     try:
         component_md5sums = dict(plan.component_md5sums or {})
+        component_sha256sums = dict(plan.component_sha256sums or {})
         for component, comp_dir, object_key in plan.components_to_upload:
             tarball = make_tarball(comp_dir, identifier, component)
             tarballs.append(tarball)
             component_md5sums[component] = file_md5sum(tarball)
+            component_sha256sums[component] = file_sha256sum(tarball)
             client.upload_file(
                 Filename=str(tarball),
                 Bucket=bucket,
@@ -528,6 +594,14 @@ def upload_target(
             )
             print(f"Uploaded {comp_dir.name} -> s3://{bucket}/{object_key}")
 
+        # Components that were already in the bucket keep their published
+        # bytes: hash those too, so every archive in the entry is verifiable.
+        for component, object_key in plan.component_keys.items():
+            if component not in component_sha256sums:
+                sha256 = known_sha256sum(manifest, object_key) or object_sha256sum(client, bucket, object_key)
+                if sha256:
+                    component_sha256sums[component] = sha256
+
         entry = ManifestEntry(
             target=metadata["target"],
             versions=versions_from_metadata(metadata),
@@ -535,6 +609,7 @@ def upload_target(
             updated_at=datetime.now(timezone.utc).isoformat(),
             component_keys=plan.component_keys,
             component_md5sums=component_md5sums or None,
+            component_sha256sums=component_sha256sums or None,
         )
         manifest[entry.target] = [entry]
     finally:
@@ -563,17 +638,27 @@ def download_component_tarball(
     key: str,
     target_dir: Path,
     expected_md5: Optional[str] = None,
+    expected_sha256: Optional[str] = None,
 ):
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
     os.close(tmp_fd)
     try:
         client.download_file(bucket, key, tmp_path)
-        if expected_md5:
+        if expected_sha256:
+            actual_sha256 = file_sha256sum(Path(tmp_path))
+            if actual_sha256 != expected_sha256:
+                raise RuntimeError(
+                    f"SHA-256 mismatch for {key}: expected {expected_sha256}, got {actual_sha256}"
+                )
+        elif expected_md5 and "-" not in expected_md5:
             actual_md5 = file_md5sum(Path(tmp_path))
             if actual_md5 != expected_md5:
                 raise RuntimeError(
                     f"MD5 mismatch for {key}: expected {expected_md5}, got {actual_md5}"
                 )
+        else:
+            # A multipart ETag ("<hex>-<parts>") is not the file's MD5.
+            raise RuntimeError(f"No verifiable checksum in the manifest for {key}; refusing to unpack it")
         with tarfile.open(tmp_path, "r:gz") as tar:
             safe_extract(tar, target_dir)
     finally:
@@ -598,8 +683,11 @@ def download_entry(
             shutil.rmtree(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
         for component, key in sorted(entry.component_keys.items()):
-            md5sum = (entry.component_md5sums or {}).get(component) if entry.component_md5sums else None
-            download_component_tarball(client, bucket, key, target_dir, expected_md5=md5sum)
+            md5sum = (entry.component_md5sums or {}).get(component)
+            sha256sum = (entry.component_sha256sums or {}).get(component)
+            download_component_tarball(
+                client, bucket, key, target_dir, expected_md5=md5sum, expected_sha256=sha256sum
+            )
         write_local_metadata(entry, target_dir)
         print(f"Downloaded {entry.target} components -> {target_dir}")
         return
@@ -671,6 +759,7 @@ def command_upload(args):
     client = s3_client()
     manifest = load_manifest(client, args.bucket, args.manifest_key)
     ensure_manifest_md5sums(client, args.bucket, manifest)
+    ensure_manifest_sha256sums(client, args.bucket, manifest)
     targets = desired_targets(args.targets)
     plans: List[UploadPlan] = []
     for target_dir in iter_local_targets():
@@ -717,6 +806,7 @@ def command_sync(args):
     client = s3_client()
     manifest = load_manifest(client, args.bucket, args.manifest_key)
     ensure_manifest_md5sums(client, args.bucket, manifest)
+    ensure_manifest_sha256sums(client, args.bucket, manifest)
     latest = latest_entries(manifest)
 
     for target in targets:
@@ -735,6 +825,7 @@ def command_sync(args):
 
     manifest = load_manifest(client, args.bucket, args.manifest_key)
     ensure_manifest_md5sums(client, args.bucket, manifest)
+    ensure_manifest_sha256sums(client, args.bucket, manifest)
     to_upload = set(missing)
     plans: List[UploadPlan] = []
     for target_dir in iter_local_targets() or []:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
-from dataclasses import dataclass
+import shlex
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -32,6 +34,7 @@ class PrebuiltEntry:
     versions: dict[str, str]
     component_urls: dict[str, str]
     component_md5s: dict[str, str]
+    component_sha256s: dict[str, str] = field(default_factory=dict)
 
     def url_for(self, component: str) -> str | None:
         return self.component_urls.get(component)
@@ -41,6 +44,51 @@ class PrebuiltEntry:
 
     def md5_for(self, component: str) -> str | None:
         return self.component_md5s.get(component)
+
+    def sha256_for(self, component: str) -> str | None:
+        return self.component_sha256s.get(component)
+
+    def checksum_marker(self, component: str) -> str:
+        """The checksum an archive is verified against, for cache markers."""
+        return (self.sha256_for(component) or self.md5_for(component) or "").strip().lower()
+
+    def has_verifiable_checksum(self, component: str) -> bool:
+        return self.verify_command(component, "/dev/null") is not None
+
+    def verify_file(self, component: str, path: Path) -> None:
+        """Raise unless the file at `path` is the published archive; the same
+        rules as verify_command, for archives downloaded by the backend."""
+        sha256 = (self.sha256_for(component) or "").strip().lower()
+        md5 = (self.md5_for(component) or "").strip().lower()
+        if sha256:
+            algorithm, expected = "SHA-256", sha256
+            hasher = hashlib.sha256()
+        elif md5 and "-" not in md5:
+            algorithm, expected = "MD5", md5
+            hasher = hashlib.md5()
+        else:
+            raise RuntimeError(f"no verifiable checksum published for prebuilt {component}")
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        actual = hasher.hexdigest()
+        if actual != expected:
+            raise RuntimeError(f"{algorithm} mismatch for prebuilt {component}: expected {expected}, got {actual}")
+
+    def verify_command(self, component: str, path: str) -> str | None:
+        """Shell command that exits non-zero unless the file at `path` is the
+        published archive, or None when the manifest has no usable checksum.
+
+        SHA-256 is the checksum of record; component_md5sums holds R2 ETags,
+        which are only real MD5s for single-part uploads (a multipart ETag
+        looks like "<hex>-<parts>" and matches no file)."""
+        sha256 = (self.sha256_for(component) or "").strip().lower()
+        if sha256:
+            return f"echo {shlex.quote(sha256 + '  ' + path)} | sha256sum -c -"
+        md5 = (self.md5_for(component) or "").strip().lower()
+        if md5 and "-" not in md5:
+            return f"echo {shlex.quote(md5 + '  ' + path)} | md5sum -c -"
+        return None
 
 
 def _manifest_file_override() -> Path | None:
@@ -70,6 +118,7 @@ def _entries_from_payload(payload: dict, base: str) -> dict[str, PrebuiltEntry]:
             versions=entry.get("versions") or {},
             component_urls=component_urls,
             component_md5s=entry.get("component_md5sums") or {},
+            component_sha256s=entry.get("component_sha256sums") or {},
         )
     return entries
 

@@ -169,6 +169,26 @@ async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
 
 
 @pytest.mark.asyncio
+async def test_ensure_prebuilt_component_skips_an_archive_it_cannot_verify(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    # A multipart R2 ETag ("<hex>-<parts>") is not the file's MD5, so with no
+    # SHA-256 published there is nothing to verify the download against.
+    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04-quickts.1")
+    assert compiler.prebuilt_entry is not None
+    compiler.prebuilt_entry.component_md5s["quickjs"] = "8006fcb15aa0c7a23be4d22c3a0db01e-3"
+    downloads = 0
+
+    async def fake_download(_url: str, extract_dir, _component: str) -> None:
+        nonlocal downloads
+        downloads += 1
+        write_component_payload("quickjs", extract_dir, valid=True)
+
+    monkeypatch.setattr(compiler, "_download_and_extract", fake_download)
+
+    assert await compiler._ensure_prebuilt_component("quickjs") is None
+    assert downloads == 0
+
+
+@pytest.mark.asyncio
 async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monkeypatch: pytest.MonkeyPatch):
     compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04-quickts.1")
     dest_dir = compiler.prebuilt_dir / "quickjs-2026-06-04-quickts.1"

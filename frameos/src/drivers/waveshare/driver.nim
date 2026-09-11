@@ -37,6 +37,12 @@ proc start*(self: Driver) =
 proc startPartial*(self: Driver) =
   start(self)
 
+proc beginRender*() =
+  waveshareConfig.DEV_Busy_Budget_Begin()
+
+proc endRender*() =
+  waveshareConfig.DEV_Busy_Budget_End()
+
 proc clear*() =
   waveshareDisplay.EPD_7IN3E_Clear(1.uint8)
   waveshareConfig.raiseIfDriverError()

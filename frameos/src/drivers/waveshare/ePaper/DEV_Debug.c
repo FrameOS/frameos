@@ -129,13 +129,46 @@ void DEV_Debug_Preview(const UBYTE *image, unsigned long totalBytes)
     DEV_Debug_Log("display:dataPreview", buf);
 }
 
+/* Per-render busy budget (DEV_Config.h). Only the render thread touches
+ * it. Not armed: every wait gets EPD_BUSY_WAIT_CAP_MS. Armed and spent:
+ * every wait times out on its first poll. */
+static int s_busy_budget_armed = 0;
+static UDOUBLE s_busy_budget_start_ms = 0;
+
+void DEV_Busy_Budget_Begin(void)
+{
+    s_busy_budget_armed = 1;
+    s_busy_budget_start_ms = DEV_Millis();
+}
+
+void DEV_Busy_Budget_End(void)
+{
+    s_busy_budget_armed = 0;
+}
+
+int DEV_Busy_Budget_Exhausted(void)
+{
+    return s_busy_budget_armed &&
+           (UDOUBLE)(DEV_Millis() - s_busy_budget_start_ms) >= (UDOUBLE)EPD_BUSY_RENDER_BUDGET_MS;
+}
+
+UDOUBLE DEV_Busy_Timeout_Ms(void)
+{
+    return DEV_Busy_Budget_Exhausted() ? 0 : (UDOUBLE)EPD_BUSY_WAIT_CAP_MS;
+}
+
 /* The vendor drivers' Debug() (Debug.h). A busy timeout becomes a driver
  * error whatever the DEBUG gate says; everything else prints only when
  * debugging is compiled in, as before. */
 void DEV_Debug_Vendor(const char *fmt, ...)
 {
     if (fmt != NULL && strcmp(fmt, DEV_DEBUG_BUSY_TIMEOUT_MSG) == 0) {
-        DEV_Error("e-Paper busy timeout after %lu ms (vendor driver)", (unsigned long)EPD_BUSY_TIMEOUT_MS);
+        if (DEV_Busy_Budget_Exhausted()) {
+            DEV_Error("e-Paper busy timeout: the render's %lu ms busy budget is spent (vendor driver)",
+                      (unsigned long)EPD_BUSY_RENDER_BUDGET_MS);
+        } else {
+            DEV_Error("e-Paper busy timeout after %lu ms (vendor driver)", (unsigned long)EPD_BUSY_WAIT_CAP_MS);
+        }
     }
 #if DEBUG
     va_list args;
@@ -204,7 +237,12 @@ int DEV_Busy_Wait(const char *stage, int busy_level, UDOUBLE poll_ms)
         DEV_Debug_Log(timed_out ? "busy:wait:timeout" : "busy:wait:end", buf);
     }
     if (timed_out) {
-        DEV_Error("e-Paper busy timeout during %s after %lu ms", name, (unsigned long)elapsed_ms);
+        if (DEV_Busy_Budget_Exhausted()) {
+            DEV_Error("e-Paper busy timeout during %s after %lu ms: the render's %lu ms busy budget is spent",
+                      name, (unsigned long)elapsed_ms, (unsigned long)EPD_BUSY_RENDER_BUDGET_MS);
+        } else {
+            DEV_Error("e-Paper busy timeout during %s after %lu ms", name, (unsigned long)elapsed_ms);
+        }
         return -1;
     }
     return observed_busy;

@@ -588,6 +588,11 @@ proc render*(self: Driver, image: Image) =
   self.lastImageHash = currentImageHash
   self.lastRenderAt = now
   self.logger.log(%*{"event": "driver:waveshare", "render": "starting", "color": waveshareDriver.colorOption})
+  # One busy-wait budget for the whole refresh (ePaper/DEV_Config.h): a
+  # wedged panel fails this render within minutes instead of holding the
+  # render thread past systemd's WatchdogSec.
+  waveshareDriver.beginRender()
+  defer: waveshareDriver.endRender()
   if self.partialEnabled and waveshareDriver.colorOption == ColorOption.Black:
     self.renderForColor(image)
   elif self.partialEnabled:

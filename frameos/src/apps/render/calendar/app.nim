@@ -188,7 +188,16 @@ proc hashTitle(s: string): uint32 =
   h
 
 proc pickColors*(self: App, title: string): (Color, Color) =
-  let colorIndex = int(hashTitle(title) mod uint32(self.appConfig.eventColorCount))
+  # eventColorCount is a scene-supplied integer (the custom theme's field),
+  # so it can be 0, negative, or larger than the colour lists it indexes.
+  # Clamp it to the colours actually provided: `mod 0` is a DivByZeroDefect
+  # and an index past the list an IndexDefect, and a Defect is fatal on
+  # --panics:on builds.
+  let count = min(self.appConfig.eventColorCount,
+    min(self.appConfig.eventColorBackground.len, self.appConfig.eventColorForeground.len))
+  if count <= 0:
+    return (self.appConfig.backgroundColor, self.appConfig.eventTitleColor)
+  let colorIndex = int(hashTitle(title) mod uint32(count))
   return (
     self.appConfig.eventColorBackground[colorIndex],
     self.appConfig.eventColorForeground[colorIndex],

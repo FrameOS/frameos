@@ -37,7 +37,10 @@ def write_quickjs_archive(archive_path: Path, tmp_path: Path) -> str:
     return installer.file_md5sum(archive_path)
 
 
-def write_manifest(manifest_path: Path, archive_md5: str) -> None:
+def write_manifest(manifest_path: Path, archive_md5: str | None, archive_sha256: str | None = None) -> None:
+    entry_sums = {"component_md5sums": {"quickjs": archive_md5} if archive_md5 else {}}
+    if archive_sha256:
+        entry_sums["component_sha256sums"] = {"quickjs": archive_sha256}
     manifest_path.write_text(
         json.dumps(
             {
@@ -51,7 +54,7 @@ def write_manifest(manifest_path: Path, archive_md5: str) -> None:
                                 "quickjs-2026-06-04-quickts.1.tar.gz"
                             )
                         },
-                        "component_md5sums": {"quickjs": archive_md5},
+                        **entry_sums,
                     }
                 ]
             }
@@ -108,3 +111,84 @@ def test_installs_prebuilt_quickjs_archive_shape(tmp_path):
     assert (dest / "libquickjs.a").read_bytes() == b"!<arch>\n"
     assert (dest / "lib" / "libquickjs.a").exists()
     assert (dest / "VERSION").read_text() == "2026-06-04-quickts.1\n"
+
+
+def run_installer(tmp_path: Path, *, md5: str | None, sha256: str | None, archive_md5_ok: bool = True):
+    installer = load_installer()
+    archive_root = tmp_path / "archive"
+    archive_path = (
+        archive_root
+        / "prebuilt-deps"
+        / "debian-bookworm-amd64"
+        / "quickjs-2026-06-04-quickts.1.tar.gz"
+    )
+    real_md5 = write_quickjs_archive(archive_path, tmp_path)
+    real_sha256 = installer.file_sha256sum(archive_path)
+    manifest_path = tmp_path / "manifest.json"
+    write_manifest(
+        manifest_path,
+        real_md5 if md5 == "real" else md5,
+        real_sha256 if sha256 == "real" else sha256,
+    )
+    dest = tmp_path / "quickjs"
+    result = installer.main(
+        [
+            "--dest",
+            str(dest),
+            "--target",
+            "debian-bookworm-amd64",
+            "--manifest-file",
+            str(manifest_path),
+            "--base-url",
+            f"{archive_root.as_uri()}/",
+        ]
+    )
+    return result, dest
+
+
+def test_sha256_is_verified_and_wins_over_a_multipart_md5(tmp_path):
+    result, dest = run_installer(tmp_path, md5="0123456789abcdef0123456789abcdef-3", sha256="real")
+    assert result == 0
+    assert (dest / "quickjs.h").exists()
+
+
+def test_sha256_mismatch_refuses_even_when_the_md5_matches(tmp_path, capsys):
+    result, dest = run_installer(tmp_path, md5="real", sha256="0" * 64)
+    assert result == 2
+    assert not dest.exists()
+    assert "SHA-256 mismatch" in capsys.readouterr().err
+
+
+def test_multipart_md5_alone_is_not_a_checksum(tmp_path, capsys):
+    # An R2 multipart ETag ("<hex>-<parts>") is not the file's MD5. This used
+    # to install the archive unverified.
+    result, dest = run_installer(tmp_path, md5="0123456789abcdef0123456789abcdef-3", sha256=None)
+    assert result == 2
+    assert not dest.exists()
+    assert "No verifiable checksum" in capsys.readouterr().err
+
+
+def test_no_checksum_at_all_refuses(tmp_path, capsys):
+    result, dest = run_installer(tmp_path, md5=None, sha256=None)
+    assert result == 2
+    assert not dest.exists()
+    assert "No verifiable checksum" in capsys.readouterr().err
+
+
+def test_single_part_md5_still_verifies_older_manifests(tmp_path):
+    result, dest = run_installer(tmp_path, md5="real", sha256=None)
+    assert result == 0
+    assert (dest / "libquickjs.a").exists()
+
+
+def test_committed_manifest_publishes_a_sha256_for_every_archive():
+    manifest = json.loads((REPO_ROOT / "tools" / "prebuilt-deps" / "manifest.json").read_text())
+    for entry in manifest["entries"]:
+        keys = entry.get("component_keys") or {}
+        sha256s = entry.get("component_sha256sums") or {}
+        for component in keys:
+            value = sha256s.get(component) or ""
+            assert len(value) == 64 and all(c in "0123456789abcdef" for c in value), (
+                entry["target"],
+                component,
+            )

@@ -30,8 +30,18 @@ extern int EPD_PWR_PIN;
 extern int EPD_MOSI_PIN;
 extern int EPD_SCLK_PIN;
 
-/* Upper bound for busy-pin waits (see vendor EPD_WaitUntilIdle loops). */
-#define EPD_BUSY_TIMEOUT_MS 120000
+/* Upper bounds for busy-pin waits (see vendor EPD_WaitUntilIdle loops and
+ * the Linux copy of this header, frameos/src/drivers/waveshare/ePaper/
+ * DEV_Config.h, which documents them). DEV_Debug.c is shared: the firmware
+ * never arms the per-render budget, so EPD_BUSY_TIMEOUT_MS stays the 120 s
+ * per-wait cap here. */
+#define EPD_BUSY_WAIT_CAP_MS 120000UL
+#define EPD_BUSY_RENDER_BUDGET_MS 300000UL
+UDOUBLE DEV_Busy_Timeout_Ms(void);
+void DEV_Busy_Budget_Begin(void);
+void DEV_Busy_Budget_End(void);
+int DEV_Busy_Budget_Exhausted(void);
+#define EPD_BUSY_TIMEOUT_MS (DEV_Busy_Timeout_Ms())
 
 /* GPIO remap: call before DEV_Module_Init. -1 leaves a pin unchanged
  * (pwr may be -1 permanently = not wired). */

@@ -118,11 +118,16 @@ proc assetMetadata*(asset: JsonNode): JsonNode =
       result["people"] = %names
 
 proc assetFileExtension*(asset: JsonNode, previewSize: string): string =
+  ## The extension ends up in a path under the assets folder (saveAsset
+  ## appends it verbatim), and originalFileName is whatever the Immich server
+  ## sends. Accept only a short alphanumeric suffix: no separators, no dots.
   if previewSize == "fullsize":
     let name = asset{"originalFileName"}.getStr
     let dotIndex = name.rfind('.')
     if dotIndex > 0 and dotIndex < name.len - 1:
-      return name[dotIndex..^1].toLowerAscii()
+      let ext = name[dotIndex + 1 .. ^1].toLowerAscii()
+      if ext.len <= 5 and ext.allCharsInSet({'a'..'z', '0'..'9'}):
+        return "." & ext
   ".jpg"
 
 proc assetBaseName*(asset: JsonNode): string =

@@ -1,4 +1,4 @@
-import pixie, strformat, json
+import pixie, strformat, json, uri
 import frameos/apps
 import frameos/types
 import frameos/utils/app_images
@@ -27,7 +27,8 @@ proc resolvedCategory*(appConfig: AppConfig): string =
     appConfig.category
 
 proc galleryUrl*(category: string): string =
-  &"{BASE_URL}?category={category}"
+  # categoryOther is free text: a space or `&` must not break the URL.
+  &"{BASE_URL}?category={encodeUrl(category)}"
 
 proc get*(self: App, context: ExecutionContext): Image =
   let category = self.appConfig.resolvedCategory()

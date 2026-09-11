@@ -28,6 +28,29 @@ proc buildError(location: string, message: string): JsonNode =
     "error": message
   }
 
+proc forecastUrl*(appConfig: AppConfig, latitude, longitude: float, timezone, requestedDate: string): string =
+  ## The unit and date fields are selects in the editor but free strings in
+  ## a scene's JSON, so every value is encoded like the location is.
+  var params = @[
+    "latitude=" & $latitude,
+    "longitude=" & $longitude,
+    "current_weather=true",
+    "hourly=temperature_2m,apparent_temperature,precipitation,weathercode,windspeed_10m,winddirection_10m",
+    "daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,sunrise,sunset,windspeed_10m_max",
+    "timezone=" & encodeUrl(timezone),
+    "temperature_unit=" & encodeUrl(appConfig.temperatureUnit),
+    "windspeed_unit=" & encodeUrl(appConfig.windSpeedUnit),
+    "precipitation_unit=" & encodeUrl(appConfig.precipitationUnit)
+  ]
+
+  if appConfig.date.len > 0:
+    params.add("start_date=" & encodeUrl(requestedDate))
+    params.add("end_date=" & encodeUrl(requestedDate))
+  else:
+    params.add("forecast_days=" & $max(1, min(16, appConfig.forecastDays)))
+
+  "https://api.open-meteo.com/v1/forecast?" & params.join("&")
+
 proc get*(self: App, context: ExecutionContext): JsonNode =
   if self.appConfig.location.len == 0:
     return buildError("", "Location is required.")
@@ -57,26 +80,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     else:
       defaultTimezone
 
-    var params = @[
-      "latitude=" & $latitude,
-      "longitude=" & $longitude,
-      "current_weather=true",
-      "hourly=temperature_2m,apparent_temperature,precipitation,weathercode,windspeed_10m,winddirection_10m",
-      "daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,sunrise,sunset,windspeed_10m_max",
-      "timezone=" & encodeUrl(timezone),
-      "temperature_unit=" & self.appConfig.temperatureUnit,
-      "windspeed_unit=" & self.appConfig.windSpeedUnit,
-      "precipitation_unit=" & self.appConfig.precipitationUnit
-    ]
-
-    if self.appConfig.date.len > 0:
-      params.add("start_date=" & requestedDate)
-      params.add("end_date=" & requestedDate)
-    else:
-      params.add("forecast_days=" & $max(1, min(16, self.appConfig.forecastDays)))
-
-    let forecastUrl = "https://api.open-meteo.com/v1/forecast?" & params.join("&")
-    let forecastJson = self.fetchJson(forecastUrl)
+    let forecastJson = self.fetchJson(forecastUrl(self.appConfig, latitude, longitude, timezone, requestedDate))
 
     var locationNode = %*{
       "name": resultNode["name"].getStr,

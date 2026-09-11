@@ -11,14 +11,24 @@ type
     model*: string
     system*: string
     user*: string
-    stateKey*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
 proc error*(self: App, message: string) =
+  # Logged only. This used to also write "Error: ..." into
+  # scene.state[stateKey], but config.json never declared a stateKey field,
+  # so every error landed in the state key "".
   self.logError(message)
-  self.scene.state[self.appConfig.stateKey] = %*(&"Error: {message}")
+
+proc requestLogPayload*(self: App): JsonNode =
+  ## What a request logs. Prompts can carry personal data and logs ship to
+  ## the control plane, so only their sizes are recorded.
+  %*{
+    "model": self.appConfig.model,
+    "systemPromptChars": self.appConfig.system.len,
+    "userPromptChars": self.appConfig.user.len,
+  }
 
 proc get*(self: App, context: ExecutionContext): string =
   if self.appConfig.user == "" and self.appConfig.system == "":
@@ -43,7 +53,7 @@ proc get*(self: App, context: ExecutionContext): string =
       ]
     }
   try:
-    self.log(%*{"user": self.appConfig.user, "system": self.appConfig.system})
+    self.log(self.requestLogPayload())
     let response = boundedRequestWithHeaders(
       "https://api.openai.com/v1/chat/completions",
       httpMethod = "POST",
@@ -66,7 +76,7 @@ proc get*(self: App, context: ExecutionContext): string =
       return
     let json = parseJson(response.body)
     let reply = json{"choices"}{0}{"message"}{"content"}.getStr
-    self.log(%*{"reply": reply})
+    self.log(%*{"replyChars": reply.len})
     result = reply
   except CatchableError as e:
     self.error "OpenAI API error: " & $e.msg

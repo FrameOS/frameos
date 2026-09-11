@@ -92,3 +92,30 @@ block test_grouping_skips_malformed_or_unusable_inputs:
   doAssert grouped.len == 1
   doAssert grouped.hasKey("2026-03-20")
   doAssert grouped["2026-03-20"].len == 1
+
+block test_pick_colors_clamps_the_scene_supplied_color_count:
+  let app = newTestApp(%*[])
+  app.appConfig.backgroundColor = parseHtmlColor("#abcdef")
+  app.appConfig.eventTitleColor = parseHtmlColor("#010203")
+
+  # More colours promised than provided: stays inside the one pair given.
+  app.appConfig.eventColorCount = 7
+  for title in ["a", "b", "Standup", "Lunch with the team"]:
+    doAssert app.pickColors(title) == (parseHtmlColor("#112233"), parseHtmlColor("#ffffff"))
+
+  # Zero or negative: no modulo by zero, the theme's own colours instead.
+  for count in [0, -3]:
+    app.appConfig.eventColorCount = count
+    doAssert app.pickColors("Standup") == (parseHtmlColor("#abcdef"), parseHtmlColor("#010203"))
+
+  # Mismatched lists: the shorter one bounds the index.
+  app.appConfig.eventColorCount = 3
+  app.appConfig.eventColorBackground = @[parseHtmlColor("#000001"), parseHtmlColor("#000002"), parseHtmlColor("#000003")]
+  app.appConfig.eventColorForeground = @[parseHtmlColor("#ffffff")]
+  for title in ["a", "b", "c", "d", "e"]:
+    doAssert app.pickColors(title) == (parseHtmlColor("#000001"), parseHtmlColor("#ffffff"))
+
+  # No colours at all.
+  app.appConfig.eventColorBackground = @[]
+  app.appConfig.eventColorForeground = @[]
+  doAssert app.pickColors("x") == (parseHtmlColor("#abcdef"), parseHtmlColor("#010203"))

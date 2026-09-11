@@ -275,7 +275,15 @@ async def ensure_quickjs(
 
     quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
     quickjs_prebuilt_url = prebuilt_entry.url_for("quickjs") if prebuilt_entry else None
-    quickjs_md5sum = prebuilt_entry.md5_for("quickjs") if prebuilt_entry else None
+    quickjs_archive = f"/tmp/quickjs-prebuilt-{build_id}.tar.gz"
+    quickjs_verify = prebuilt_entry.verify_command("quickjs", quickjs_archive) if prebuilt_entry else None
+    if quickjs_prebuilt_url and not quickjs_verify:
+        # Never unpack an archive the manifest cannot vouch for.
+        await deployer.log(
+            "stderr",
+            f"{icon} No verifiable checksum published for the QuickJS prebuilt; building from source instead",
+        )
+        quickjs_prebuilt_url = None
 
     await deployer.exec_command(
         "if [ ! -d /srv/frameos/ ]; then "
@@ -285,14 +293,12 @@ async def ensure_quickjs(
 
     if quickjs_prebuilt_url:
         await deployer.log("stdout", f"{icon} Downloading QuickJS prebuilt archive ({quickjs_dirname})")
-        quickjs_archive = f"/tmp/quickjs-prebuilt-{build_id}.tar.gz"
         try:
             command = (
                 "mkdir -p /srv/frameos/vendor/quickjs/ && "
                 f"wget -q -O {quickjs_archive} {shlex.quote(quickjs_prebuilt_url)} && "
+                f"{quickjs_verify} && "
             )
-            if quickjs_md5sum:
-                command += f"echo '{quickjs_md5sum}  {quickjs_archive}' | md5sum -c - && "
             command += f"tar -xzf {quickjs_archive} -C /srv/frameos/vendor/quickjs/ && rm {quickjs_archive}"
             await deployer.exec_command(command)
             await deployer.exec_command(
