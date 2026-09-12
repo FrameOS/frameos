@@ -5,6 +5,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene, FrameType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { activationWasRedeploy, controlLogic } from './controlLogic'
+import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { socketLogic } from '../../../socketLogic'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
@@ -156,6 +157,7 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           title: 'Activating scene',
           detail: values.scene?.name || props.sceneId,
         })
+        controlLogic({ frameId: props.frameId }).actions.sceneActivationStarted(props.sceneId)
         const state: Record<string, any> = {}
         // Only submit fields the user can currently see, matching the
         // on-frame control page: hidden fields keep their current values
@@ -199,7 +201,11 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
               ? `${values.scene?.name || props.sceneId} — deployed, the frame shows it as soon as it syncs`
               : values.scene?.name || props.sceneId,
           })
+          if (isCloudMode()) {
+            controlLogic({ frameId: props.frameId }).actions.sceneActivationSettled(props.sceneId)
+          }
         } catch (error) {
+          controlLogic({ frameId: props.frameId }).actions.sceneActivationSettled(props.sceneId)
           longRunningTasksModel.actions.taskFailed({
             frameId: props.frameId,
             kind: 'activate',

@@ -186,3 +186,16 @@ else:
 
   proc sceneImageGenerationValue*(): int {.gcsafe.} =
     sceneImageGeneration.load(moRelaxed)
+
+  # Bumped after every push to the display driver. The admin panel's
+  # `/api/frames/1/image` encodes what the panel shows into a PNG on demand
+  # — a second and more at 1080p on a Pi, nine on a busy one — and caches the
+  # result under this number (server/api.nim), so the two workspace tiles and
+  # the two "render" signals that ask after one render cost one encode.
+  var driverRenderGeneration: Atomic[int]
+
+  proc noteDriverRendered*() {.gcsafe.} =
+    atomicInc(driverRenderGeneration)
+
+  proc driverRenderGenerationValue*(): int {.gcsafe.} =
+    driverRenderGeneration.load(moRelaxed)

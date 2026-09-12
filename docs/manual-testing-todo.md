@@ -5,50 +5,21 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.12, five papercuts fixed on main), after release 2026.9.12.
+empty. Last refreshed 2026-09-12 (HyperPixel 2r native card closed on 2026.9.14; Vannituba migration box closed, nothing to migrate; standalone on-device admin round three opened), after release 2026.9.14.
 
 ## Open
 
 ### Pi / Buildroot bench — cloud-managed frames
 
-- [ ] **Generic image adopts with no Remote on it, and stays that way
-  ("remote lite", `docs/buildroot-privileges.md` §4, `docs/api-triality.md`
-  "Admin-API-only frames"):** release images ship no FrameOS Remote and the
-  backend never installs one on an adopted card — it is the frontend for the
-  card's own admin API, the way the cloud manages a frame. Flash a *generic*
-  Buildroot card, adopt it, and check that the whole surface works over that
-  API and that the unit stays the unprivileged `frameos` one (`User=` before
-  and after a deploy): the Assets panel lists, uploads (a photo over 2 MB,
-  which goes in chunks), renames, deletes and shows thumbnails (rendered by
-  the frame); "Sync fonts" lands the bundled faces in `fonts/`; a store
-  scene that needs a service key renders after "Deploy scenes & settings"
-  (the keys go through the frame's `POST /api/settings`, logged as "Service
-  keys written to the frame"); "Activate" on an edited scene in the scene
-  sidebar switches the panel to it; the scene tiles show the frame's own
-  snapshots right after adoption, before any render reaches the backend;
-  clearing the schedule or the GPIO buttons and saving actually clears them
-  on the frame; regenerating the frame access key keeps "Current image"
-  working. The workspace should look like the cloud's: no Terminal, no Stop
-  / Deploy Remote / Restart Remote, the SSH section reduced to "Frame host",
-  no Remote or Reboot-cron settings sections, no build .zip entries; the
-  API answers 400 to `stop`, `deploy_remote`, `restart_remote`,
-  `clear_build_cache` and `ssh_keys` for such a frame, and a queued full
-  deploy (`next_action: deploy`) lands as the same admin-API push.
+- [ ] **Generic image still adopts with no Remote on it (`docs/buildroot-privileges.md` §4):**
+  release images no longer ship FrameOS Remote at all — flash a *generic*
+  Buildroot card, adopt it into a self-hosted backend, and verify the
+  backend's first deploy installs and enables the remote itself
+  (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
+  and that everything works after. The deploy also flips the frame back to
+  a root `frameos.service`, so check the unit's `User=` before and after.
 
 ### Backend (self-hosted) bench
-
-- [ ] **HyperPixel 2r native card from the HA add-on, second try (needs a
-  release after 2026.9.13):** the 2026-09-12 card (frame 10, generic
-  2026.9.13 image + setup blob) joined Wi-Fi, synced its clock and then
-  logged `FrameOS fatal: cannot open: ./frame.json` every 60 s — blank
-  panel, no backend logs. Cause: first-boot `frameos setup --with-setup`
-  runs the ownership sweep, THEN writes the payload's frame.json as root
-  0600, and the unit it installed runs as `frameos`. Fixed on main
-  (`writeSetupReleasePayload` hands the payload to the installed unit's
-  user). Re-flash from the next add-on and expect the runtime up on the
-  first boot after driver setup's reboot. *(2026-09-12: the card patched
-  by hand — frame.json handed to uid 990 — booted and RENDERS on the panel
-  with the native driver; no Linux boot splash, which is fine.)*
 
 - [ ] **Adopted card, round two (2026-09-08 findings on frame-2c2ea9, all
   fixed on main the same day, needs the next backend release):** *(2026-09-09
@@ -71,19 +42,40 @@ empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.1
   images (they reappear on the first render). The boot-partition SSH key
   file stays first-boot-only, by decision (2026-09-08): re-reading it on
   every boot would be an easy way into a running frame.
+  *(2026-09-12, round three on frame-02f856 / 10.8.0.62 with 2026.9.14: the
+  adoption itself held up — logs flowed, the admin surface worked. What was
+  wrong was the standalone on-device admin page before adoption; every
+  item is fixed on main and listed in the box below.)*
 
-- [ ] **Vannituba (HyperPixel 2r, `pimoroni.hyperpixel2r`) on the next HA
-  image:** since 2026-09-12 there is one HyperPixel driver, the native one
-  (the kernel-overlay "legacy fb" driver and the `_native` device id are
-  gone). Vannituba's next full deploy runs the native driver's setup: it
-  comments out `dtoverlay=vc4-kms-dpi-hyperpixel2r` (and Pimoroni's
-  `dtoverlay=hyperpixel2r` if present), writes the `enable_dpi_lcd` /
-  `dpi_timings` / gpio alt2 block, and reboots once. Expect `FrameOS setup:
-  boot config: updating /boot/config.txt` → reboot → the scene on the panel
-  (verified 2026-09-12 on frame 10, a fresh generic 2026.9.13 card). Then
-  turn the frame off and on from the workspace: the backlight is GPIO 19
-  through lgpio now (no overlay owns it), and the panel sleeps/wakes over
-  the ST7701 command bus.
+- [ ] **Standalone on-device admin, round three (2026-09-12 findings on
+  frame-02f856 / 2026.9.14, all fixed on main the same day, needs the next
+  release on the card):** re-flash or upgrade a generic card and, BEFORE
+  adopting it, walk the on-device page at `http://<frame>:8787/admin`:
+  the setup portal's "Enable admin UI" box starts ticked with the password
+  blank (submitting it blank is refused with a 400, not silently written
+  off); "Add scene" no longer offers "Generate scene" (it opened a
+  "coming soon" panel; see `docs/todo.md` "On-device admin"); a store
+  scene's cover shows on its tile the moment it is installed (the SPA's
+  `POST …/scene_images/{id}/copy` is answered by the device now — before it
+  404ed, toasted "failed to copy", and the tile stayed blank until the
+  first render); "Current image" stops pulsing "loading" — the device
+  encodes the panel PNG once per render and the page asks at most every
+  3 s (on 2026.9.14 one activation cost a 9 s encode, and the animated
+  status screen re-fetched a 1.3 s encode every second); "Activate scene"
+  spins until that scene's `render:done` (matched across the `uploaded/`
+  prefix), settling on a reconnect resync if the socket dropped meanwhile;
+  the scene list starts with a "Status screen" tile (`system/index`, a real
+  picture drawn on request, no menu, cannot be removed) whose drawer
+  activates it; the "…" next to "Save & deploy" is the button's full
+  height. Then adopt the card into a backend and, from a SECOND backend,
+  adopt it again: the first backend's log for the frame must show the
+  `server:changed` line naming the new server (the device delivers it to
+  the old backend before the save lands, then logs it locally too).
+  Watch for: on 2026.9.14 the runtime RESTARTED once ~5 s after an
+  "Activate scene" from the drawer while the animated status screen was on
+  the panel (load 4.4; `boot:guard crashesWithoutRender: 1`, the ring
+  buffer lost the lines before the restart and no backend had the logs).
+  Not reproduced; if it happens again, pull `/srv/frameos/logs/` first.
 
 ### ESP32 bench
 
@@ -416,6 +408,35 @@ empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.1
   evidenced by the release dir, the service restart and the activity feed.)
 
 ### Backend (self-hosted) bench
+
+- [x] **HyperPixel 2r native card from the HA add-on, second try** — PASSED
+  2026-09-12 on frame 10 with release 2026.9.14 (the first release carrying
+  the `writeSetupReleasePayload` ownership fix): a fresh card booted all the
+  way through first-boot setup, the driver setup's `/boot/config.txt`
+  rewrite and its reboot, and came up with the runtime running as
+  `frameos` and reading its frame.json — permissions all good, no
+  `cannot open: ./frame.json`, the scene renders on the panel with the
+  native driver. Display off / on from the workspace behaved as expected
+  (backlight GPIO 19 through lgpio, panel sleep/wake over the ST7701
+  command bus). *(History: the 2026-09-12 first try on the generic
+  2026.9.13 image joined Wi-Fi, synced its clock and then logged `FrameOS
+  fatal: cannot open: ./frame.json` every 60 s — blank panel, no backend
+  logs — because first-boot `frameos setup --with-setup` ran the ownership
+  sweep and THEN wrote the payload's frame.json as root 0600 while the unit
+  it installed runs as `frameos`; patched by hand that day the same card
+  rendered, which pinned the cause before the fix shipped.)*
+
+- [x] **Vannituba (HyperPixel 2r, `pimoroni.hyperpixel2r`) on the next HA
+  image** — CLOSED 2026-09-12, nothing to do: Vannituba is already on a
+  fresh Buildroot card, so there is no overlay-era `/boot/config.txt` to
+  migrate; the native driver's setup path it would have run is the one
+  verified on frame 10 above (2026.9.14: config rewrite → reboot → scene on
+  the panel, off/on from the workspace). *(The box as written: since
+  2026-09-12 there is one HyperPixel driver, the native one — the
+  kernel-overlay "legacy fb" driver and the `_native` device id are gone —
+  and a deploy onto an overlay-era card comments out
+  `dtoverlay=vc4-kms-dpi-hyperpixel2r` / `dtoverlay=hyperpixel2r`, writes
+  the `enable_dpi_lcd` / `dpi_timings` / gpio alt2 block and reboots once.)*
 
 - [x] **"Update FrameOS" on a shell-less card** — PASSED 2026-09-09 on
   frame-2c2ea9 (adopted generic card, 2026.9.11 → 2026.9.12, from the

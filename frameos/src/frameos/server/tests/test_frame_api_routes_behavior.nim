@@ -1,7 +1,11 @@
 import std/[json, os, strutils, unittest]
+import pixie
 import zippy
 
 import ../../channels
+import ../../config
+import ../../scenes
+import ../rate_limit
 import ../state
 import ../routes/repository_api_routes
 import ./helpers/http_harness
@@ -660,6 +664,7 @@ suite "frame api route behavior":
     check saved.status == 201
     check parseJson(saved.body)["size"].getInt() == "scene-image-bytes".len
 
+    # `?thumb=1` on bytes that are not an image falls back to the bytes.
     let found = httpRequest(
       server.port,
       "GET",
@@ -669,6 +674,137 @@ suite "frame api route behavior":
     check found.status == 200
     check found.header("content-type") == "image/png"
     check found.body == "scene-image-bytes"
+
+    # A real snapshot answers `?thumb=1` with a thumbnail, not the panel-size file.
+    let big = newImage(1200, 600)
+    big.fill(rgba(20, 120, 220, 255))
+    let bigPng = big.encodeImage(PngFormat)
+    check httpRequest(
+      server.port, "POST", "/api/frames/1/scene_images/photo-scene?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "image/png")], body = bigPng,
+    ).status == 201
+    let thumb = httpRequest(
+      server.port, "GET", "/api/frames/1/scene_images/photo-scene?thumb=1&k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check thumb.status == 200
+    check thumb.header("content-type") == "image/png"
+    check thumb.body.len < bigPng.len
+    let thumbImage = decodeImage(thumb.body)
+    check thumbImage.width <= 320 and thumbImage.height <= 320
+    let full = httpRequest(
+      server.port, "GET", "/api/frames/1/scene_images/photo-scene?k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check full.body == bigPng
+
+    # Copying another scene's snapshot: the on-device "Duplicate" cover.
+    let copied = httpRequest(
+      server.port, "POST", "/api/frames/1/scene_images/photo-copy/copy?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{"source_scene_id": "photo-scene"}),
+    )
+    check copied.status == 201
+    check parseJson(copied.body)["scene_id"].getStr() == "photo-copy"
+    check httpRequest(
+      server.port, "GET", "/api/frames/1/scene_images/photo-copy?k=test-key",
+      headers = [("Cookie", adminCookie)],
+    ).body == bigPng
+    let noSource = httpRequest(
+      server.port, "POST", "/api/frames/1/scene_images/photo-copy/copy?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{"source_scene_id": "never-rendered"}),
+    )
+    check noSource.status == 404
+    check noSource.body.contains("Source scene has no image")
+    # Saved templates live on the backend; the frame keeps none.
+    check httpRequest(
+      server.port, "POST", "/api/frames/1/scene_images/photo-copy/copy?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{"template_id": "abc"}),
+    ).status == 404
+    # Only http(s) URLs and the embedded system templates' covers are fetched.
+    let badUrl = httpRequest(
+      server.port, "POST", "/api/frames/1/scene_images/photo-copy/copy?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{"url": "file:///etc/passwd"}),
+    )
+    check badUrl.status == 400
+    check httpRequest(
+      server.port, "POST", "/api/frames/1/scene_images/photo-copy/copy?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{}),
+    ).status == 400
+    # Anyone but an admin gets nothing.
+    check httpRequest(
+      server.port, "POST", "/api/frames/1/scene_images/photo-copy/copy?k=test-key",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"source_scene_id": "photo-scene"}),
+    ).status == 401
+
+  test "the status screen has a picture like any other scene, drawn on request":
+    # Every test here logs in once; the device allows ten logins per five
+    # minutes per address, and this suite is past that now.
+    resetRateLimits()
+    var config = defaultFrameConfig()
+    # The status screen reads the whole config (HTTPS port, agent, …): give
+    # the hand-built test config the defaults a loaded one has.
+    setConfigDefaults(config)
+    config.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    config.width = 400
+    config.height = 300
+    let assetsRoot = getTempDir() / "frameos-frame-api-status-screen"
+    removeDir(assetsRoot)
+    createDir(assetsRoot)
+    config.assetsPath = assetsRoot
+    configureServerState(config)
+    let login = httpRequest(
+      server.port, "POST", "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+
+    check httpRequest(server.port, "GET", "/api/frames/1/scene_images/system/index?k=test-key").status == 401
+    let drawn = httpRequest(
+      server.port, "GET", "/api/frames/1/scene_images/system/index?k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check drawn.status == 200
+    check drawn.header("content-type") == "image/png"
+    let image = decodeImage(drawn.body)
+    check image.width == 400
+    check image.height == 300
+    # Saved where the runner keeps every scene's snapshot, so the next
+    # request (and the tile's thumbnail) come off disk.
+    check fileExists(sceneImagePath(assetsRoot, "system/index"))
+    let thumb = httpRequest(
+      server.port, "GET", "/api/frames/1/scene_images/system/index?thumb=1&k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check thumb.status == 200
+    check decodeImage(thumb.body).width <= 320
+
+  test "HEAD /image carries the GET's headers and no body":
+    resetRateLimits()
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    configureServerState(config)
+    let login = httpRequest(
+      server.port, "POST", "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+    check httpRequest(server.port, "HEAD", "/api/frames/1/image?k=test-key").status == 401
+    let head = httpRequest(
+      server.port, "HEAD", "/api/frames/1/image?k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check head.status == 200
+    check head.header("content-type") == "image/png"
+    check head.header("x-frameos-sync-changed") in ["0", "1"]
+    check head.body.len == 0
 
   test "authenticated admins can still access frame asset endpoints":
     var config = defaultFrameConfig()

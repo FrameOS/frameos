@@ -1145,6 +1145,11 @@ export const scenesLogic = kea<scenesLogicType>([
         title: values.isFrameAdminMode ? 'Activating scene' : 'Previewing scene',
         detail: scene.name || scene.id,
       })
+      if (values.isFrameAdminMode) {
+        // On the device "preview" IS activate (uploadScenes with this scene
+        // as the active one): spin the button until the render comes back.
+        controlLogic({ frameId: props.frameId }).actions.sceneActivationStarted(scene.id)
+      }
       try {
         const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
         const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, resolvedState)
@@ -1191,6 +1196,9 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.previewSceneSuccess()
       } catch (error) {
         console.error(error)
+        if (values.isFrameAdminMode) {
+          controlLogic({ frameId: props.frameId }).actions.sceneActivationSettled(scene.id)
+        }
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,
           kind: taskKind,

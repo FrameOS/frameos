@@ -6,6 +6,7 @@ import { projectApiPathFromCache } from '../utils/projectApi'
 import { apiFetch } from '../utils/apiFetch'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
 import { isCloudMode } from '../utils/cloudMode'
+import { planFrameImageRefresh } from '../utils/frameImageRefresh'
 import type { FrameType } from '../types'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -136,13 +137,33 @@ export const entityImagesModel = kea<entityImagesModelType>([
   }),
   listeners(({ actions, values, cache }) => ({
     updateEntityImage: async ({ entity, subentity, force }) => {
-      if (!entity) {
+      if (!entity || !force) {
         return
       }
 
-      if (force) {
-        actions.updateEntityImageTimestamp(entity, subentity)
+      if (isInFrameAdminMode() && subentity === 'image') {
+        // On the device every refresh is a fresh PNG encode of the panel
+        // (utils/frameImageRefresh.ts): one at a time, the rest collapse
+        // into a single trailing refresh.
+        const key = entity
+        const now = Date.now()
+        const lastRefreshAt: Record<string, number> = cache.frameImageRefreshedAt ?? (cache.frameImageRefreshedAt = {})
+        const pending: Record<string, ReturnType<typeof setTimeout>> = cache.frameImageRefreshTimers ??
+        (cache.frameImageRefreshTimers = {})
+        const plan = planFrameImageRefresh(lastRefreshAt[key], now)
+        if (!plan.refreshNow) {
+          if (!pending[key]) {
+            pending[key] = setTimeout(() => {
+              delete pending[key]
+              actions.updateEntityImage(entity, subentity, true)
+            }, plan.delayMs)
+          }
+          return
+        }
+        lastRefreshAt[key] = now
       }
+
+      actions.updateEntityImageTimestamp(entity, subentity)
     },
     refreshEntityImageMetadata: async ({ entity, subentity, imageUrl }) => {
       if (!entity || subentity !== 'image') {
@@ -207,9 +228,12 @@ export const entityImagesModel = kea<entityImagesModelType>([
         actions.updateEntityImage(`frames/${frameId}`, 'image')
       }
     },
-    [socketLogic.actionTypes.frameRendered]: ({ frameId }) => {
+    [socketLogic.actionTypes.frameRendered]: async ({ frameId }, breakpoint) => {
       actions.updateEntityImage(`frames/${frameId}`, 'image')
       if (isInFrameAdminMode()) {
+        // One /state round-trip per burst of renders, not one per render:
+        // the animated status screen renders every second.
+        await breakpoint(500)
         void (async () => {
           try {
             const response = await apiFetch(`/api/frames/${frameId}/state`)

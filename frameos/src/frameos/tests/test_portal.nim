@@ -254,6 +254,47 @@ suite "portal network orchestration":
     check parseSetupOptions({"ssid": "x", "timeZone": "../../etc/shadow"}.toTable, frame.frameConfig).timeZone == "UTC"
     check parseSetupOptions({"ssid": "x"}.toTable, frame.frameConfig).timeZone == "UTC"
 
+  test "the admin UI box starts ticked on a frame with no admin password, off once someone turned it off":
+    # First boot: nothing configured, the panel is recommended — ticked, and
+    # the form then asks for a password (client `required`, server check).
+    let fresh = makeFrameOS()
+    fresh.frameConfig.frameAdminAuth = nil
+    check adminUiPreselected(fresh.frameConfig)
+    check setupHtml(fresh).contains("""name="adminEnabled" value="1" checked>""")
+    # The shipped image's explicit "off with no password" is still "never set".
+    let shipped = makeFrameOS()
+    shipped.frameConfig.frameAdminAuth = %*{"enabled": false, "user": "", "pass": ""}
+    check adminUiPreselected(shipped.frameConfig)
+    # Configured and on: ticked, obviously.
+    let enabled = makeFrameOS()
+    enabled.frameConfig.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    check adminUiPreselected(enabled.frameConfig)
+    # Someone set a password and then switched the panel off: respected.
+    let disabled = makeFrameOS()
+    disabled.frameConfig.frameAdminAuth = %*{"enabled": false, "user": "admin", "pass": "secret"}
+    check not adminUiPreselected(disabled.frameConfig)
+    check not setupHtml(disabled).contains("""name="adminEnabled" value="1" checked>""")
+
+  test "a setup that enables the admin UI without a password is refused, not silently written off":
+    let fresh = makeFrameOS()
+    fresh.frameConfig.frameAdminAuth = nil
+    let noPass = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": "admin"}.toTable, fresh.frameConfig)
+    check setupOptionsProblem(noPass, fresh.frameConfig).contains("password")
+    let noUser = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": " ", "adminPass": "pw"}.toTable,
+      fresh.frameConfig)
+    check setupOptionsProblem(noUser, fresh.frameConfig).contains("user")
+    let complete = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": "admin", "adminPass": "pw"}.toTable,
+      fresh.frameConfig)
+    check setupOptionsProblem(complete, fresh.frameConfig) == ""
+    # Blank password with one already stored keeps the stored one: fine.
+    let stored = makeFrameOS()
+    stored.frameConfig.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    let keep = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": "admin"}.toTable, stored.frameConfig)
+    check setupOptionsProblem(keep, stored.frameConfig) == ""
+    # Not enabling it needs nothing.
+    let off = parseSetupOptions({"ssid": "x"}.toTable, fresh.frameConfig)
+    check setupOptionsProblem(off, fresh.frameConfig) == ""
+
   test "setupHtml offers a show-password toggle for both password fields":
     let html = setupHtml(makeFrameOS())
     check html.contains("""<input type="checkbox" data-reveal="wifi-password">Show password""")

@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 
 import { Button, ButtonProps } from '../../../../components/Button'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { Spinner } from '../../../../components/Spinner'
 import { SceneActionKey, sceneActionsLogic } from './sceneActionsLogic'
 
 export interface SceneActionOption {
@@ -12,6 +13,8 @@ export interface SceneActionOption {
   description?: string
   icon?: JSX.Element
   disabled?: boolean
+  /** The action is under way: the button shows a spinner and does not fire again. */
+  loading?: boolean
   title?: string
   onRun: () => void
 }
@@ -45,10 +48,11 @@ export function SceneActionsButton({ options, defaultKey, size, className }: Sce
         color="primary"
         className="flex items-center gap-2 !rounded-r-none"
         onClick={selected.onRun}
-        disabled={selected.disabled}
+        disabled={selected.disabled || selected.loading}
+        aria-busy={selected.loading || undefined}
         title={selected.title}
       >
-        {selected.icon}
+        {selected.loading ? <Spinner color="white" className="shrink-0" /> : selected.icon}
         {selected.label}
       </Button>
       <DropdownMenu

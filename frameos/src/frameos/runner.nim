@@ -402,6 +402,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         setNextRenderSeconds(nextRenderSeconds)
         # TODO: render the driver part in another thread
         drivers.render(lastRotatedImage)
+        noteDriverRendered()
         # The framebuffer's late probe (Pi 5 KMS) reports the real panel
         # size through the driver context; persist it the first time it
         # differs from the file, so scenes, the cloud and the next boot agree.
@@ -519,6 +520,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           try:
             setNextRenderSeconds(remainingSleepMs / 1000)
             drivers.render(driverRetryImage)
+            noteDriverRendered()
             # This retry is exactly where a late framebuffer probe lands.
             if detectedDisplayChanged(self.frameConfig):
               discard persistDetectedDisplaySize(self.frameConfig, self.logger)

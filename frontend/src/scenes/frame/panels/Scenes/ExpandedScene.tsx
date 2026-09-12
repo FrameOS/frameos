@@ -6,6 +6,7 @@ import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
+import { sceneIsActivating } from '../../../../utils/sceneActivation'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import { FrameScene, FrameId } from '../../../../types'
@@ -42,7 +43,7 @@ export function ExpandedScene({
   isUndeployed,
 }: ExpandedSceneProps) {
   const { stateChanges, visibleFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
-  const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
+  const { states, sceneId: currentSceneId, activatingSceneId } = useValues(controlLogic({ frameId }))
   const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
   const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
@@ -68,16 +69,20 @@ export function ExpandedScene({
   const sceneIsUnsaved = isUnsaved ?? changedScenes.has(sceneId)
   const sceneHasChanges = sceneIsUnsaved || sceneIsUndeployed
   const canPreviewUnsavedChanges = sceneHasChanges && !frameAdminMode
-  const activateLabel =
-    frameAdminMode && sceneHasChanges
-      ? 'Save & activate scene'
-      : sceneIsUndeployed && sceneId !== currentSceneId
-      ? sceneIsUnsaved
-        ? 'Save, deploy & activate'
-        : 'Deploy & activate'
-      : sceneId === currentSceneId
-      ? 'Apply to active scene'
-      : 'Activate scene'
+  // Spins from the click until the frame logs this scene's render:done —
+  // the request being accepted says nothing about the panel yet.
+  const activating = sceneIsActivating(activatingSceneId, sceneId)
+  const activateLabel = activating
+    ? 'Activating…'
+    : frameAdminMode && sceneHasChanges
+    ? 'Save & activate scene'
+    : sceneIsUndeployed && sceneId !== currentSceneId
+    ? sceneIsUnsaved
+      ? 'Save, deploy & activate'
+      : 'Deploy & activate'
+    : sceneId === currentSceneId
+    ? 'Apply to active scene'
+    : 'Activate scene'
 
   const buildNextState = (): Record<string, any> => {
     const desiredState = { ...currentState, ...stateChanges }
@@ -200,6 +205,7 @@ export function ExpandedScene({
         ? 'Save your changes, deploy them and make this the active scene'
         : 'Make this the active scene on the frame',
       icon: <PlayIcon className="h-4 w-4 shrink-0" />,
+      loading: activating,
       onRun: () => void handleActivate(),
     },
     {
