@@ -38,6 +38,9 @@ export default tseslint.config(
       // the tsconfig exclude for the same strict-compiler reason.
       "**/src/test/shared-spa/usb-board-identity.test.ts",
       "**/src/test/shared-spa/scene-execution-fixtures.test.ts",
+      // Same exclusion, same reason: imports frameLogic, whose graph reaches
+      // the legacy workspace components.
+      "**/src/test/shared-spa/frame-change-value.test.ts",
       // Same exclusion, same reason: builds every logic the embedded editor
       // mounts; workspaceLogic reaches the legacy workspace components.
       "**/src/test/shared-spa/embedded-editor-logics.test.ts",

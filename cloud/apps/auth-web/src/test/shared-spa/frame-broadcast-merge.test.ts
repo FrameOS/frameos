@@ -8,7 +8,11 @@ import { mergeBroadcastFrame } from "../../../../../../frontend/src/utils/frameS
 // after a Remote upgrade — "FrameOS Remote 2026.9.3 -> 2026.9.13" stayed in
 // the deploy drawer until a page reload (2026-09-12).
 describe("mergeBroadcastFrame", () => {
-  const existing = {
+  // Typed loosely on purpose: the broadcast is a partial row whose blocks
+  // arrive with leaves missing, which is exactly what a strict FrameType
+  // would refuse to spell.
+  type Row = Record<string, unknown>;
+  const existing: Row = {
     id: 4,
     name: "Hall",
     status: "deploying",
@@ -35,7 +39,7 @@ describe("mergeBroadcastFrame", () => {
     expect(merged.network).toBe(existing.network);
     expect(merged.ssh_pass).toBe("raspberry");
     // The browser's own block objects are never mutated.
-    expect(existing.agent.agentVersion).toBe("2026.9.3");
+    expect((existing["agent"] as { agentVersion: string }).agentVersion).toBe("2026.9.3");
   });
 
   it("walks lists and nested blocks", () => {
@@ -44,7 +48,7 @@ describe("mergeBroadcastFrame", () => {
       network: { wifiSSID: "cabin" },
       frame_admin_auth: { enabled: true, user: "owner" },
     });
-    expect(merged.mountpoints.items).toEqual([
+    expect((merged["mountpoints"] as { items: unknown[] }).items).toEqual([
       { source: "//nas", target: "/mnt", password: "p1" },
       { source: "//nas2" },
     ]);
