@@ -648,12 +648,12 @@ describe("the other two control planes are unchanged", () => {
 });
 
 describe("the Add scene drawer's action stack", () => {
-  // "Generate scene" opens the AI chat, which the device cannot run: on the
-  // on-device panel it led to a "coming soon" dead end. Off there until the
-  // frame can reach an AI (docs/todo.md); everything else stays.
-  it("offers no AI generation on the on-device panel", () => {
-    expect(addSceneActionIsAllowed("frameAdmin", "generate")).toBe(false);
-    expect(allowedAddSceneActions.frameAdmin).not.toContain("generate");
+  // "Generate scene" opens the AI chat, which the device cannot run. It is
+  // offered on the on-device panel anyway and answers with where the
+  // generator lives (GenerateElsewhereModal): a button the other two
+  // surfaces have is easier to explain than one that is missing.
+  it("offers every add-scene action on the on-device panel", () => {
+    expect(addSceneActionIsAllowed("frameAdmin", "generate")).toBe(true);
     for (const action of ["blank", "splitScreen", "upload", "starred"] as const) {
       expect(addSceneActionIsAllowed("frameAdmin", action)).toBe(true);
     }
