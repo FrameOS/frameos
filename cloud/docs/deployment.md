@@ -646,6 +646,12 @@ and the two install-script paths on the legacy account host). So there is one
 line to change and the installer looks in `snippets/` as well as
 `sites-enabled/` and `conf.d/`.
 
+The production server blocks set `client_max_body_size 10m`. Every route
+that reads a body bounds itself below that (4 MB for scene convert, 1 MB
+for the store preview proxy, the multipart caps on asset uploads), so nginx
+is the outer fence, not the one a route relies on; raise it here and in
+`sites-available/frameos-cloud.conf` together if a route ever needs more.
+
 Per-client rate limits (firmware downloads, login attempts, hub upgrades)
 and the IP stamped on audit events key on the client IP that
 `RATE_LIMIT_TRUSTED_PROXY_COUNT` picks out of the `X-Forwarded-For` chain,

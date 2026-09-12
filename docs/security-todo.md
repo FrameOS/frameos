@@ -141,6 +141,13 @@ batch after the third one; residue is in the medium / low list).
   `--hash` lines; the OpenAI service-account key and R2 keys sit in
   plaintext `.env*` files on the dev laptop (rotate / scope).
 
+- **`ACTIONS_WRITE_TOKEN` scope is unverified.** The release workflow's
+  `update-addon-repo` job checks out `frameos/frameos-home-assistant-addon`
+  with it. If it is a classic PAT its blast radius is the whole account, not
+  the add-on repo; confirm on the GitHub secrets page and swap it for a
+  fine-grained token limited to that one repository (open question left
+  from the 2026-09-09 full-repo review, 2026-09-12).
+
 ## Accepted — the deprecated source-build path (not a priority)
 
 Compiled scenes are deprecated and not recommended, and the path is not
