@@ -23,6 +23,17 @@ export interface FrameOSUpgradeRelease {
   html_url?: string
 }
 
+/** The OS the device runs, from /etc/os-release plus `uname -m`. Distinct
+ * from `target`, which names the release tarball the device installs: a
+ * Buildroot image downloads the Debian bookworm build, so its target reads
+ * `debian-bookworm-<arch>` while the host is not Debian at all. */
+export interface FrameOSUpgradeHost {
+  id?: string
+  name?: string
+  version?: string
+  arch?: string
+}
+
 export interface FrameOSUpgradeStatus {
   status?: FrameOSUpgradeStatusValue | string
   message?: string
@@ -30,6 +41,7 @@ export interface FrameOSUpgradeStatus {
   compiled_version?: string
   target?: string
   target_error?: string
+  host?: FrameOSUpgradeHost
   latest_version?: string
   latest_error?: string
   latest_release?: FrameOSUpgradeRelease

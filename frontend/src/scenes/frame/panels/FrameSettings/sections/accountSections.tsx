@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useActions, useValues } from 'kea'
 import equal from 'fast-deep-equal'
-import { ArrowDownTrayIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { ArrowDownTrayIcon, ArrowPathIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 import { Button } from '../../../../../components/Button'
 import { Field } from '../../../../../components/Field'
 import { H6 } from '../../../../../components/H6'
@@ -11,6 +11,7 @@ import { Spinner } from '../../../../../components/Spinner'
 import { Switch } from '../../../../../components/Switch'
 import { Tag } from '../../../../../components/Tag'
 import { TextInput } from '../../../../../components/TextInput'
+import { Tooltip } from '../../../../../components/Tooltip'
 import { appsModel } from '../../../../../models/appsModel'
 import { framesModel } from '../../../../../models/framesModel'
 import { settingsLogic } from '../../../../settings/settingsLogic'
@@ -29,6 +30,8 @@ import {
   hasSettingsFieldValue,
   latestUpgradeVersion,
   settingsInputValue,
+  upgradeBuildLabel,
+  upgradeHostLabel,
   upgradeStatusColor,
   upgradeStatusLabel,
 } from '../frameSettingsHelpers'
@@ -457,6 +460,8 @@ export function FrameAdminUpgradeSection(): JSX.Element {
   const checkingOrPolling = upgradeStatusLoading || isUpgradePolling || upgradeStatusIsActive
   const upgradeDisabled = checkingOrPolling || !updateAvailable
   const releaseUrl = upgradeStatus?.latest_release?.html_url
+  const build = upgradeBuildLabel(upgradeStatus)
+  const hostLabel = upgradeHostLabel(upgradeStatus)
 
   return (
     <>
@@ -470,9 +475,22 @@ export function FrameAdminUpgradeSection(): JSX.Element {
               <div className="frameos-muted">Running version</div>
               <div className="frameos-strong font-semibold">{displayVersion(upgradeStatus?.current_version)}</div>
             </div>
+            {hostLabel ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="frameos-muted">Operating system</div>
+                <div className="frameos-strong text-right">{hostLabel}</div>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between gap-3">
-              <div className="frameos-muted">Release target</div>
-              <div className="frameos-strong font-mono text-xs">{upgradeStatus?.target || 'Unknown'}</div>
+              <div className="frameos-muted">Release build</div>
+              <div className="frameos-strong font-mono text-xs inline-flex items-center gap-1">
+                {build.label}
+                {build.hint ? (
+                  <Tooltip title={build.hint} label="About this release build">
+                    <InformationCircleIcon className="w-4 h-4" aria-hidden="true" />
+                  </Tooltip>
+                ) : null}
+              </div>
             </div>
             <div className="flex items-center justify-between gap-3">
               <div className="frameos-muted">Latest release</div>

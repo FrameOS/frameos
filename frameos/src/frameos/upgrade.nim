@@ -305,6 +305,28 @@ proc normalizeDistroRelease*(values: Table[string, string]): tuple[distro, relea
       elif result.release.startsWith("26.04"):
         result.release = "26.04"
 
+proc hostOsPayload*(values: Table[string, string], arch: string): JsonNode =
+  ## What the device actually runs, as opposed to the release slug it
+  ## downloads. On a Buildroot image the slug reads `debian-bookworm-<arch>`
+  ## because that is the tarball the image installs, so the admin panel shows
+  ## this host identity as the headline and the slug only as a hint.
+  let id = values.getOrDefault("ID", "").strip().toLowerAscii()
+  let name = values.getOrDefault("PRETTY_NAME", values.getOrDefault("NAME", "")).strip()
+  let version = values.getOrDefault("VERSION_ID", "").strip()
+  result = %*{"id": id, "name": name, "version": version, "arch": arch}
+  if id == "buildroot":
+    # Buildroot's PRETTY_NAME is "Buildroot 2025.02", which reads as a distro
+    # a person could apt into. It is a FrameOS system image.
+    result["name"] = %"FrameOS system image (Buildroot)"
+
+proc detectHostOs*(): JsonNode =
+  let arch =
+    try:
+      detectArch()
+    except CatchableError:
+      ""
+  hostOsPayload(parseOsRelease(), arch)
+
 proc detectUpgradeTarget*(): string =
   let overrideTarget = getEnv("FRAMEOS_TARGET").strip()
   if overrideTarget.len > 0:
@@ -486,6 +508,7 @@ proc frameOSUpgradeStatusPayload*(checkLatest = false): JsonNode =
   result["current_version"] = %installedFrameOSVersion()
   result["compiled_version"] = %compiledFrameOSVersion()
   result["target"] = %target
+  result["host"] = detectHostOs()
   if targetError.len > 0:
     result["target_error"] = %targetError
   if checkLatest and target.len > 0:
