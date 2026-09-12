@@ -19,6 +19,7 @@ import frameos/utils/local_time
 import frameos/utils/status_screen
 import frameos/render_stats
 import frameos/network_state
+import frameos/input_sources
 import frameos/version
 import scenes/scenes as compiledScenes
 import system/options as sceneOptions
@@ -43,10 +44,40 @@ const
   cheapRedrawDevices = ["framebuffer", "inkyHyperPixel2r"]
   markCycleSeconds = 6.0
   staticRefreshSeconds = 300.0
+  # How long this screen may keep the facts it has to leave the process to
+  # learn. It redraws about once a second for as long as it is up (the
+  # animated HDMI screen), and these rows change on the order of days.
+  envFactsSeconds = 10.0
+  # The installed-scene list costs an inflate plus a full JSON parse of every
+  # scene's nodes and edges, so it is keyed on the file's size and mtime and
+  # rebuilt the moment a deploy rewrites it. This is only the backstop for a
+  # rewrite that lands in the same second at the same size.
+  sceneListSeconds = 60.0
 
-type Scene* = ref object of FrameScene
-  linkQr: Image      ## The pending link code's QR, kept while the payload is unchanged.
-  linkQrKey: string
+type
+  EnvFacts = object
+    ## What this screen has to go outside the process to learn.
+    ipAddress: string
+    networkInterface: string
+    mdnsHost: string
+    linkState: JsonNode
+
+  Scene* = ref object of FrameScene
+    linkQr: Image      ## The pending link code's QR, kept while the payload is unchanged.
+    linkQrKey: string
+    # Every frame used to re-read all of it: a gunzip and full JSON parse of
+    # scenes.json, three reads and parses of cloud_link.json, one of
+    # /etc/hostname, one of /proc/net/route, and a UDP socket for the local
+    # address. About seven descriptors a second, forever, for rows that change
+    # maybe once a day. None of them leaked, but enough were in flight at any
+    # moment to show up in the frame's open-file-descriptor metric, which is
+    # what sent us looking. They are cosmetic facts, so a few seconds stale
+    # costs nothing.
+    envFactsCache: EnvFacts
+    envFactsAt: float
+    sceneListCache: seq[(string, string)]
+    sceneListKey: string
+    sceneListAt: float
 
 proc loadInterpretedSceneOptions(): seq[(SceneId, string)] =
   var data = ""
@@ -83,7 +114,27 @@ proc loadInterpretedSceneOptions(): seq[(SceneId, string)] =
   except JsonParsingError, CatchableError:
     discard
 
-proc buildSceneList*(self: Scene): seq[(string, string)] =
+proc interpretedScenesKey(): string =
+  ## Cheap identity of whatever `loadInterpretedSceneOptions` would read: each
+  ## candidate path's size and mtime, from stat alone — no open, no read, no
+  ## inflate. Changes the moment a deploy rewrites the file.
+  var candidates: seq[string] = @[]
+  let envPath = getEnv("FRAMEOS_SCENES_JSON")
+  if envPath.len > 0:
+    candidates.add(envPath)
+  candidates.add("./scenes.json.gz")
+  candidates.add("./scenes.json")
+  var parts: seq[string] = @[]
+  for path in candidates:
+    try:
+      if fileExists(path):
+        parts.add(path & ":" & $getFileSize(path) & ":" &
+          $getLastModificationTime(path).toUnix())
+    except CatchableError:
+      parts.add(path & ":?")
+  parts.join("|")
+
+proc rebuildSceneList(): seq[(string, string)] =
   var entries = initOrderedTable[string, string]()
   for (sceneId, sceneName) in compiledScenes.sceneOptions:
     entries[sceneId.string] = sceneName
@@ -99,6 +150,18 @@ proc buildSceneList*(self: Scene): seq[(string, string)] =
     ordered.add((key, value))
   ordered.sort(proc(a, b: (string, string)): int = cmpIgnoreCase(a[1], b[1]))
   return ordered
+
+proc buildSceneList*(self: Scene, epoch = epochTime()): seq[(string, string)] =
+  ## The installed scenes, rebuilt when the scenes file changes and otherwise
+  ## served from the cache.
+  let key = interpretedScenesKey()
+  if self.sceneListAt > 0 and key == self.sceneListKey and
+      epoch >= self.sceneListAt and epoch - self.sceneListAt < sceneListSeconds:
+    return self.sceneListCache
+  self.sceneListCache = rebuildSceneList()
+  self.sceneListKey = key
+  self.sceneListAt = epoch
+  self.sceneListCache
 
 proc defaultRouteInterface*(): string =
   ## The interface carrying the default route ("wlan0", "eth0"), from
@@ -150,24 +213,65 @@ proc cloudProviderHostname(state: JsonNode): string =
     discard
   providerUrl
 
-proc managementLine*(frameConfig: FrameConfig): string =
+proc backendManaged*(frameConfig: FrameConfig): bool =
+  ## A self-hosted backend is configured for this frame. `localhost` is the
+  ## generic image default rather than somebody's backend.
+  frameConfig.serverHost.len > 0 and
+    frameConfig.serverHost notin ["localhost", "127.0.0.1", "::1"]
+
+proc adminApiOnlyControl*(frameConfig: FrameConfig): bool =
+  ## A Buildroot card a backend adopted over the frame's own admin API. There
+  ## is no FrameOS Remote agent on it, so nothing of ours can run a command
+  ## here: the backend drives this frame exactly the way a browser does, and
+  ## deploys by asking it to upgrade itself. Buildroot only — an rpios frame
+  ## is SSH-managed by definition (backend app/models/frame.py,
+  ## `frame_has_shell_access`). Callers check the cloud link first, which
+  ## takes precedence over both.
+  not (frameConfig.agent != nil and frameConfig.agent.agentEnabled) and
+    backendManaged(frameConfig) and
+    frameConfig.mode == "buildroot"
+
+proc inputsLine*(frameConfig: FrameConfig, sources: seq[string]): string =
+  ## What can drive this frame from the room it stands in. The pins come from
+  ## frame.json rather than from the driver, because the config is what
+  ## whoever wired the frame up needs to check their wiring against; the rest
+  ## is whatever input drivers this build actually carries
+  ## (frameos/input_sources, registered once the drivers are up).
+  var parts: seq[string] = @[]
+  var pins: seq[string] = @[]
+  for button in frameConfig.gpioButtons:
+    if button.isNil or button.pin < 0:
+      continue
+    pins.add(if button.label.len > 0: &"{button.pin} ({button.label})" else: $button.pin)
+  if pins.len > 0:
+    parts.add("GPIO " & pins.join(", "))
+  elif "gpioButton" in sources:
+    parts.add("GPIO buttons (none configured)")
+  if "evdev" in sources:
+    parts.add("evdev (keyboard, mouse, touch)")
+  for source in sources:
+    if source notin ["gpioButton", "evdev"]:
+      parts.add(source)
+  if parts.len == 0: "none" else: parts.join(" · ")
+
+proc managementLine*(frameConfig: FrameConfig, state: JsonNode = nil): string =
   ## Who controls this frame: FrameOS Cloud (managed enrollment), a
   ## self-hosted backend, or nobody (standalone). The old "Server:
   ## not configured:8989" line lied on cloud-managed frames, whose
   ## server_host is deliberately empty.
-  let linkState = loadCloudLinkState()
+  let linkState = if state != nil: state else: loadCloudLinkState()
   if linkState{"mode"}.getStr("") == "managed":
     let host = cloudProviderHostname(linkState)
     let status = linkState{"status"}.getStr("disconnected")
     return &"Managed via: FrameOS Cloud ({host}, {status})"
   let serverHost = frameConfig.serverHost
-  if serverHost.len > 0 and serverHost notin ["localhost", "127.0.0.1", "::1"]:
+  if backendManaged(frameConfig):
     let serverPort = if frameConfig.serverPort > 0: $frameConfig.serverPort else: "?"
     let scheme = normalizeServerScheme(frameConfig.serverScheme, frameConfig.serverPort)
     return &"Managed via: self-hosted backend ({scheme}://{serverHost}:{serverPort})"
   "Managed via: standalone (no server configured)"
 
-proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
+proc remoteControlSecurityLine*(frameConfig: FrameConfig, state: JsonNode = nil): string =
   ## Transport truth for the "Remote control" line: over what kind of link
   ## remote commands actually reach this frame. Cloud-managed frames dial the
   ## provider over the enrollment URL (https everywhere outside dev setups);
@@ -175,7 +279,7 @@ proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
   ## exactly when the backend's configured scheme is https (the agent's own
   ## dial rule; a frame.json without `serverScheme` falls back to the port).
   ## Empty when remote control is off.
-  let linkState = loadCloudLinkState()
+  let linkState = if state != nil: state else: loadCloudLinkState()
   if linkState{"mode"}.getStr("") == "managed":
     let providerUrl = providerUrlFromState(linkState)
     let host = cloudProviderHostname(linkState)
@@ -188,6 +292,11 @@ proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
     if normalizeServerScheme(frameConfig.serverScheme, port) == "https":
       return &"  over an encrypted TLS connection to {serverHost}:{port}"
     return &"  over an UNENCRYPTED connection to {serverHost}:{port} — commands are signed, but traffic is readable on the network"
+  if adminApiOnlyControl(frameConfig):
+    let port = publicPort(frameConfig)
+    if publicScheme(frameConfig) == "https":
+      return &"  the backend drives this frame over its own API, on an encrypted HTTPS connection to port {port}"
+    return &"  the backend drives this frame over its own API, on an UNENCRYPTED http connection to port {port} — fine on a trusted local network, not beyond it"
   ""
 
 proc animatesMark*(frameConfig: FrameConfig): bool =
@@ -229,10 +338,28 @@ proc lastButtonLine*(self: Scene): string =
   let pressedAt = if at > 0: " at " & frameLocalTime(self.frameConfig.timeZone, at).format("HH:mm:ss") else: ""
   &"Last button: {what}{pressedAt}"
 
+proc envFacts(self: Scene, epoch: float): EnvFacts =
+  ## The out-of-process facts, refreshed at most every `envFactsSeconds`.
+  ## An `epoch` behind the stamp means the clock stepped rather than ran —
+  ## NTP settling just after boot is exactly when this screen is up — so that
+  ## counts as expired too.
+  if self.envFactsAt > 0 and epoch >= self.envFactsAt and
+      epoch - self.envFactsAt < envFactsSeconds:
+    return self.envFactsCache
+  self.envFactsCache = EnvFacts(
+    ipAddress: primaryIpAddress(),
+    networkInterface: defaultRouteInterface(),
+    mdnsHost: mdnsHostname(),
+    linkState: loadCloudLinkState(),
+  )
+  self.envFactsAt = epoch
+  self.envFactsCache
+
 proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
   ## The facts on the panel, as rows for frameos/utils/status_screen — the
   ## same screen the Pi boot sequence and the ESP32 fallback scene draw.
-  let entries = self.buildSceneList()
+  let facts = self.envFacts(epoch)
+  let entries = self.buildSceneList(epoch)
   let frameConfig = self.frameConfig
   let animating = animatesMark(frameConfig)
   let deviceName = if frameConfig.name.len > 0: frameConfig.name else: "Unnamed frame"
@@ -240,8 +367,8 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
   var deviceLine = &"{deviceType} · {frameConfig.width}×{frameConfig.height}"
   if frameConfig.rotate != 0:
     deviceLine.add(&" · rotated {frameConfig.rotate}°")
-  let ipAddress = primaryIpAddress()
-  let networkInterface = defaultRouteInterface()
+  let ipAddress = facts.ipAddress
+  let networkInterface = facts.networkInterface
   let networkLine =
     if ipAddress.len > 0 and networkInterface.len > 0:
       &"{ipAddress} ({networkInterface})"
@@ -256,7 +383,7 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
   # `uus2w.local`, and two cards on one network cannot both be frame.local):
   # advertise the name the network really resolves.
   let configuredFrameHost = if frameConfig.frameHost.len > 0: frameConfig.frameHost else: "0.0.0.0"
-  let mdnsHost = mdnsHostname()
+  let mdnsHost = facts.mdnsHost
   let frameHost =
     if configuredFrameHost == "0.0.0.0" and ipAddress.len > 0: ipAddress
     elif configuredFrameHost in ["0.0.0.0", "frame.local"] and mdnsHost.len > 0: mdnsHost
@@ -289,15 +416,18 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
     else: frameUrl & accessQuery
   # Cloud-managed frames take remote commands over the provider link even
   # when the self-hosted agent flag is off — "disabled" would be a lie there.
-  let linkState = loadCloudLinkState()
+  let linkState = facts.linkState
   let cloudManaged = linkState{"mode"}.getStr("") == "managed"
   let cloudConnected = cloudManaged and linkState{"status"}.getStr("") == "connected"
   let remoteControl =
     if cloudManaged or (frameConfig.agent != nil and frameConfig.agent.agentEnabled): "enabled"
+    # An adopted card takes commands, just not a shell: "disabled" was the
+    # same kind of lie the old "Server: not configured" line told.
+    elif adminApiOnlyControl(frameConfig): "limited (no shell access)"
     else: "disabled"
-  let remoteSecurity = remoteControlSecurityLine(frameConfig).strip()
+  let remoteSecurity = remoteControlSecurityLine(frameConfig, facts.linkState).strip()
   let remoteLine = if remoteSecurity.len > 0: remoteControl & " — " & remoteSecurity else: remoteControl
-  let management = managementLine(frameConfig)
+  let management = managementLine(frameConfig, facts.linkState)
   let managedVia = management[("Managed via: ".len) .. ^1]
 
   result.dark = true
@@ -336,6 +466,7 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
   result.rows = @[
     ("Name", deviceName),
     ("Device", deviceLine),
+    ("Inputs", inputsLine(frameConfig, inputSourceNames())),
     # Seconds only where the screen is redrawn often enough for them to be
     # true (the animated HDMI screen); a minute clock elsewhere.
     ("Time", clockLine(frameConfig, epoch, withSeconds = animating)),

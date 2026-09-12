@@ -608,7 +608,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
             ) : null}
             <div className="frameos-muted text-sm">
               Connect this backend to a cloud account to optionally enable a few extra features: cloud login, offsite
-              backups of your frames and templates, etc. Soon also remote access and more.
+              backups of your frames and scenes, etc. Soon also remote access and more.
             </div>
           </>
         )}

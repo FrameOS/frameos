@@ -44,6 +44,7 @@ import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLog
 import { registeredAddFramePanel } from './addFramePanelRegistry'
 import { frameToolDefinitionsForMode } from './frameToolDefinitions'
 import { addFrameFlows, addSceneActionIsAllowed, workspaceMode } from './workspaceSurfaces'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -681,11 +682,65 @@ function NewBlankSceneModal({
   )
 }
 
+/**
+ * What "Generate scene" does on the device. The frame has no AI to ask and no
+ * account to bill one to, so the button says where the generator lives and how
+ * a scene made there gets back here, rather than being missing entirely.
+ */
+function GenerateElsewhereModal({ onClose, onOpenCloudSettings }: {
+  onClose: () => void
+  onOpenCloudSettings: () => void
+}): JSX.Element {
+  return (
+    <Modal open onClose={onClose} title="Generate a scene with AI">
+      <div className="space-y-4 p-5 text-sm">
+        <div className="frameos-muted">
+          Not from here. This panel is the frame itself, and the frame has no AI to ask.
+        </div>
+        <div className="frameos-muted">
+          Generate one at{' '}
+          <a
+            href="https://scenes.frameos.net"
+            target="_blank"
+            rel="noreferrer"
+            className="frameos-link font-medium hover:underline"
+          >
+            scenes.frameos.net
+          </a>
+          , download it, and bring it back with <span className="frameos-strong font-semibold">Upload scene</span>.
+        </div>
+        <div className="frameos-muted">
+          Or connect this frame to FrameOS Cloud and scenes move both ways without the download.
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onOpenCloudSettings}
+            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Connect to cloud
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankScene } = useActions(frameLogic({ frameId: frame.id }))
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
+  const [generateElsewhereOpen, setGenerateElsewhereOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
+  const { openFrameTool, closeTemplateDrawer } = useActions(workspaceLogic)
+  const generatesElsewhere = isInFrameAdminMode()
   const { applyFavouriteTemplatesToFrame, uploadSceneFile } = useActions(templatesLogic({ frameId: frame.id }))
   const { favouriteTemplates, installableFavouriteTemplates } = useValues(templatesLogic({ frameId: frame.id }))
   const uploadSceneInputRef = useRef<HTMLInputElement>(null)
@@ -732,6 +787,10 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
         <button
           type="button"
           onClick={() => {
+            if (generatesElsewhere) {
+              setGenerateElsewhereOpen(true)
+              return
+            }
             const searchParams: Record<string, unknown> = {
               ...router.values.searchParams,
               drawer: 'chat',
@@ -749,7 +808,9 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           </span>
           <span className="min-w-0 flex-1">
             <span className="frameos-strong block truncate text-sm font-semibold">Generate scene</span>
-            <span className="frameos-muted block truncate text-xs">Open AI chat for this frame</span>
+            <span className="frameos-muted block truncate text-xs">
+              {generatesElsewhere ? 'Build one with AI at scenes.frameos.net' : 'Open AI chat for this frame'}
+            </span>
           </span>
         </button>
       ) : null}
@@ -814,6 +875,17 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           onCreate={(name) => {
             setNewBlankSceneModalOpen(false)
             createBlankScene(name, false, true)
+          }}
+        />
+      ) : null}
+      {generateElsewhereOpen ? (
+        <GenerateElsewhereModal
+          onClose={() => setGenerateElsewhereOpen(false)}
+          onOpenCloudSettings={() => {
+            setGenerateElsewhereOpen(false)
+            closeTemplateDrawer()
+            // The on-device settings page opens with the FrameOS Cloud box.
+            openFrameTool(frame.id, 'settings')
           }}
         />
       ) : null}

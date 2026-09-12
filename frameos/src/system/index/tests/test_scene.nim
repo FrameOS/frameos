@@ -3,6 +3,7 @@ import pixie
 import lib/tz
 import ../../../frameos/types
 import ../../../frameos/network_state
+from ../../../frameos/utils/system import setSystemHostnameForTest
 import ../scene as index_scene
 
 proc testConfig(): FrameConfig =
@@ -218,6 +219,115 @@ suite "system/index scene":
       index_scene.runEvent(scene, ExecutionContext(scene: scene, event: "button",
         payload: %*{"pin": 27}, hasImage: false, loopIndex: 0, loopKey: "."))
       check scene.lastButtonLine().startsWith("Last button: button (GPIO 27) at ")
+
+  test "the scene list is rebuilt when the scenes file changes, not on every frame":
+    initTimeZone()
+    withScenesJson("""[{"id": "one", "name": "Scene One"}]""") do (path: string):
+      let scene = makeIndexScene(testConfig())
+      check scene.buildSceneList(100.0).anyIt(it[1] == "Scene One")
+      # Rewritten to the same size and stamped back to the same mtime: the
+      # cache cannot see it, and that is the point — a screen redrawing once
+      # a second does not inflate and parse this file once a second.
+      let stamp = getLastModificationTime(path)
+      writeFile(path, """[{"id": "two", "name": "Scene Two"}]""")
+      setLastModificationTime(path, stamp)
+      check scene.buildSceneList(100.5).anyIt(it[1] == "Scene One")
+      check not scene.buildSceneList(100.5).anyIt(it[1] == "Scene Two")
+      # A real deploy moves the mtime, and the very next frame shows the list.
+      setLastModificationTime(path, stamp + initDuration(seconds = 5))
+      check scene.buildSceneList(100.6).anyIt(it[1] == "Scene Two")
+
+  test "the network and cloud rows are re-read on a timer, not on every frame":
+    initTimeZone()
+    withScenesJson("[]") do (_: string):
+      var config = testConfig()
+      # `frame.local` is the image default, so the row shows the name the
+      # system actually carries — which is what we can steer from a test.
+      config.frameHost = "frame.local"
+      let scene = makeIndexScene(config)
+      setSystemHostnameForTest("alpha")
+      check scene.buildStatusScreen(1000.0).rows.anyIt(
+        it[0] == "Frame" and "alpha.local" in it[1])
+      # Within the window the screen keeps what it has: no socket, no
+      # /etc/hostname, no /proc/net/route, no cloud_link.json for this frame.
+      setSystemHostnameForTest("beta")
+      check scene.buildStatusScreen(1005.0).rows.anyIt(
+        it[0] == "Frame" and "alpha.local" in it[1])
+      # Past it, the facts are read again.
+      check scene.buildStatusScreen(1020.0).rows.anyIt(
+        it[0] == "Frame" and "beta.local" in it[1])
+      # A clock that steps backwards (NTP settling after boot) also expires it.
+      setSystemHostnameForTest("gamma")
+      check scene.buildStatusScreen(900.0).rows.anyIt(
+        it[0] == "Frame" and "gamma.local" in it[1])
+      setSystemHostnameForTest("")
+
+  test "the inputs row lists configured GPIO pins and the input drivers in the build":
+    var config = testConfig()
+    # Nothing wired, no input driver in the build.
+    check index_scene.inputsLine(config, @[]) == "none"
+    # The driver is there but frame.json declares no pins: say so, rather
+    # than leave the row looking like the board has no buttons at all.
+    check index_scene.inputsLine(config, @["gpioButton"]) ==
+      "GPIO buttons (none configured)"
+    check index_scene.inputsLine(config, @["evdev"]) == "evdev (keyboard, mouse, touch)"
+    config.gpioButtons = @[
+      GPIOButton(pin: 5, label: "Next"),
+      GPIOButton(pin: 6, label: ""),
+    ]
+    # Labelled or not, the pin number is what someone checking their wiring
+    # needs; the gpioButton driver adds nothing the pins have not said.
+    check index_scene.inputsLine(config, @["gpioButton"]) == "GPIO 5 (Next), 6"
+    check index_scene.inputsLine(config, @["gpioButton", "evdev"]) ==
+      "GPIO 5 (Next), 6 · evdev (keyboard, mouse, touch)"
+    # An input driver we have no wording for is still named, never dropped.
+    check index_scene.inputsLine(config, @["evdev", "someNewInput"]) ==
+      "GPIO 5 (Next), 6 · evdev (keyboard, mouse, touch) · someNewInput"
+
+  test "the inputs row reaches the screen":
+    initTimeZone()
+    withScenesJson("[]") do (_: string):
+      var config = testConfig()
+      config.gpioButtons = @[GPIOButton(pin: 16, label: "Menu")]
+      let screen = makeIndexScene(config).buildStatusScreen()
+      check screen.rows.anyIt(it[0] == "Inputs" and it[1] == "GPIO 16 (Menu)")
+
+  test "an adopted shell-less frame reports limited remote control, not disabled":
+    initTimeZone()
+    withScenesJson("[]") do (_: string):
+      var config = testConfig()
+      # A Buildroot card a backend adopted over the frame's own admin API:
+      # no agent, so nothing of ours can run a command on it.
+      config.mode = "buildroot"
+      config.agent = AgentConfig(agentEnabled: false)
+      check index_scene.adminApiOnlyControl(config)
+      let row = makeIndexScene(config).buildStatusScreen().rows
+      check row.anyIt(it[0] == "Remote control" and it[1].startsWith("limited (no shell access)"))
+      check "the backend drives this frame over its own API" in
+        index_scene.remoteControlSecurityLine(config)
+      # The frame's own listener is what the backend dials, so its scheme is
+      # the one the row must be honest about.
+      check "UNENCRYPTED http" in index_scene.remoteControlSecurityLine(config)
+
+      # An agent turns it back into ordinary remote control.
+      config.agent = AgentConfig(agentEnabled: true)
+      check not index_scene.adminApiOnlyControl(config)
+      check makeIndexScene(config).buildStatusScreen().rows.anyIt(
+        it[0] == "Remote control" and it[1].startsWith("enabled"))
+
+      # An rpios frame is SSH-managed by definition: leave it alone.
+      config.mode = "rpios"
+      config.agent = AgentConfig(agentEnabled: false)
+      check not index_scene.adminApiOnlyControl(config)
+      check makeIndexScene(config).buildStatusScreen().rows.anyIt(
+        it[0] == "Remote control" and it[1] == "disabled")
+
+      # No backend at all is still plain "disabled".
+      config.mode = "buildroot"
+      config.serverHost = ""
+      check not index_scene.adminApiOnlyControl(config)
+      check makeIndexScene(config).buildStatusScreen().rows.anyIt(
+        it[0] == "Remote control" and it[1] == "disabled")
 
   test "the refresh cadence follows the device: paced animation, minute clock, or 5 minutes":
     withScenesJson("[]") do (_: string):

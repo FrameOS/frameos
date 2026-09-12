@@ -165,13 +165,11 @@ export function StoreSceneServiceSettingsSection(): JSX.Element | null {
       {/* First child of the frame form on the on-device panel, where the
           form's own vertical rhythm gives it nothing above: carry the gap. */}
       <H6 id="frame-settings-store-scene-services" className="mt-4">
-        Service keys for store scenes
+        Secrets shared with scenes
       </H6>
       <div className="pl-2 @md:pl-8 space-y-2">
         <div className="frameos-muted text-xs">
-          Scenes you wrote get the service keys their apps declare. A scene installed from the scene store is someone
-          else&apos;s code: installing it granted what it asked for, and this is where you take a key away again (or
-          give one back). Saved with the frame; the change reaches the device on the next deploy.
+          Store scenes are someone else&apos;s code. Untick a key to take it away. Applied on the next deploy.
         </div>
         {storeScenes.map((scene) => {
           const declared = collectSecretSettingsFromScenes([scene], apps)
