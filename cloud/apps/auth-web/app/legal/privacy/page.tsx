@@ -13,7 +13,7 @@ export const metadata = { title: "Privacy Policy" };
 // actually requires ("concise, transparent, intelligible... clear and plain
 // language", art. 12(1)) — the dense version is not the compliant one.
 
-const lastUpdated = "15 August 2026";
+const lastUpdated = "12 September 2026";
 
 export default function PrivacyPage() {
   const entity = getLegalEntity();
@@ -112,9 +112,22 @@ export default function PrivacyPage() {
         all. Those reports contain the error and the operation that failed, not
         your content.
       </p>
+      <p className="copy">
+        The documentation site at <strong>frameos.net</strong> is different,
+        because there is no account there and nothing to store: it puts nothing
+        on your device at all — no cookies, no local storage — and so it does
+        not ask. Page views are counted by the same PostHog in the EU, in
+        cookieless mode: the visitor identifier is a one-way hash computed on
+        PostHog&rsquo;s servers from the IP address, the browser and that
+        day&rsquo;s salt, and the salt is deleted once the day is processed. It
+        cannot be reversed into an IP address or followed from one day to the
+        next, so what we are left holding is an anonymous count. Collecting it
+        rests on our <strong>legitimate interest</strong> (art. 6(1)(f)) in
+        knowing which pages are worth writing.
+      </p>
 
       <h2>Cookies and similar storage</h2>
-      <p className="copy">We use the following:</p>
+      <p className="copy">On FrameOS Cloud we use the following:</p>
       <ul className="copy">
         <li>
           <strong>Session cookie</strong> — proves you are signed in. Strictly
