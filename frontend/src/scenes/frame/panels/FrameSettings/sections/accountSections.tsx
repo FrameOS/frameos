@@ -159,7 +159,9 @@ export function StoreSceneServiceSettingsSection(): JSX.Element | null {
   const setGranted = (next: string[]): void => setFrameFormValues({ service_setting_groups: next })
   return (
     <>
-      <H6 id="frame-settings-store-scene-services" className="mt-2">
+      {/* First child of the frame form on the on-device panel, where the
+          form's own vertical rhythm gives it nothing above: carry the gap. */}
+      <H6 id="frame-settings-store-scene-services" className="mt-4">
         Service keys for store scenes
       </H6>
       <div className="pl-2 @md:pl-8 space-y-2">

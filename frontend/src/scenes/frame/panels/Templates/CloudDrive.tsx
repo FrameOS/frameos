@@ -131,7 +131,7 @@ export function CloudDrive({ openInstalledSceneDrawer = false }: CloudDriveProps
             {templates.length === 0 && !driveTemplatesLoading ? (
               <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">
                 {search === ''
-                  ? 'No scenes in your cloud yet. Use "Save to private cloud" on any scene to add one.'
+                  ? 'No scenes in your cloud yet. Use "Save to cloud (private)" on any scene to add one.'
                   : `No private cloud scenes match "${search}"`}
               </div>
             ) : null}

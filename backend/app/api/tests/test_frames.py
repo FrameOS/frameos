@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from app.api import frame_sync, frames as frames_api
 from app.utils.embedded_assets import AssetListing
 from app.models import new_frame
-from app.models.frame import Frame
+from app.models.frame import Frame, frame_has_shell_access
 from app.models.log import Log
 from app.models.metrics import Metrics
 from app.models.scene_image import SceneImage
@@ -3987,6 +3987,64 @@ async def test_api_frame_bootstrap_script_only_accepts_released_distros(async_cl
     assert 'FrameOS releases are built for debian bookworm/trixie, ubuntu 24.04/26.04' in script
     syntax_check = subprocess.run(['sh', '-n'], input=script, capture_output=True, text=True)
     assert syntax_check.returncode == 0, syntax_check.stderr
+
+
+@pytest.mark.asyncio
+async def test_api_frame_bootstrap_command_for_an_adopted_card_keeps_the_admin_api_path(async_client, no_auth_client, db, redis):
+    """Moving a shell-less Buildroot frame to another device: the command is
+    handed out (it used to 400 as "only Raspberry Pi OS"), the script's
+    frame.json says rpios for the runtime on the new host, and the row keeps
+    reaching the card on the wall over its admin API — the Remote flags flip
+    only when the new device's Remote connects (ws/remote_ws.py)."""
+    payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        if method == 'POST':
+            return 200, b'{"message":"ok"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': payload}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        adopted = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+        assert adopted.status_code == 200, adopted.text
+        frame_id = adopted.json()['frame']['id']
+
+    command_response = await async_client.post(f'/api/frames/{frame_id}/frame_bootstrap')
+    assert command_response.status_code == 200, command_response.text
+    command_payload = command_response.json()
+    assert command_payload['command'].startswith('curl -fsSL ')
+
+    db.expire_all()
+    frame = db.get(Frame, frame_id)
+    assert frame.mode == 'buildroot'
+    assert frame.agent['agentSharedSecret']
+    assert frame.agent.get('agentEnabled') is not True
+    assert frame.agent.get('agentRunCommands') is not True
+    assert frame.agent.get('deployWithAgent') is not True
+    assert frame_has_shell_access(frame) is False
+
+    script_response = await no_auth_client.get(urlparse(command_payload['script_url']).path)
+    assert script_response.status_code == 200, script_response.text
+    assert '"mode": "rpios"' in script_response.text
+    assert '"mode": "buildroot"' not in script_response.text
+
+    # An rpios frame still gets its Remote switched on when the command is made.
+    plain = await new_frame(db, redis, 'PlainBootstrapFrame', 'frame.local', 'backend.local')
+    plain_response = await async_client.post(f'/api/frames/{plain.id}/frame_bootstrap')
+    assert plain_response.status_code == 200, plain_response.text
+    db.refresh(plain)
+    assert plain.agent['agentEnabled'] is True
+    assert frame_has_shell_access(plain) is True
+
+    # An embedded frame cannot run a shell installer.
+    embedded = await new_frame(db, redis, 'EmbeddedBootstrapFrame', 'frame.local', 'backend.local')
+    embedded.mode = 'embedded'
+    db.add(embedded)
+    db.commit()
+    refused = await async_client.post(f'/api/frames/{embedded.id}/frame_bootstrap')
+    assert refused.status_code == 400
+    assert 'embedded' in refused.json()['detail']
 
 
 @pytest.mark.asyncio

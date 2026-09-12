@@ -12,7 +12,7 @@ import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 
-import type { WorkspaceUtilityPanel } from './workspaceSurfaces'
+import { frameChangeDrawerKind, type WorkspaceUtilityPanel } from './workspaceSurfaces'
 import { isFrameToolPanel, legacyToolQueryTarget } from './frameToolRoute'
 
 // Re-exported so the SPA's existing `from './workspaceLogic'` imports keep
@@ -1964,7 +1964,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
       } else if (drawer === 'chat') {
         actions.openChatDrawer(frameId, sceneId, nodeId)
       } else if (drawer === 'unsavedChanges') {
-        actions.openFrameChangeDrawer(frameId, 'unsaved')
+        // Older links; where the deploy dialog exists it is the one that
+        // lists unsaved changes now.
+        actions.openFrameChangeDrawer(frameId, frameChangeDrawerKind(framesModel.values.frames[frameId], true))
       } else if (drawer === 'deployPlan') {
         actions.openFrameChangeDrawer(frameId, 'deploy', deployDrawerViewFromSearch(search))
       } else {

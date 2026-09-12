@@ -16,14 +16,26 @@ interface FrameLocalDeployMenuProps {
   buttonClassName?: string
   buttonContent?: ReactNode
   buttonTitle?: string
+  /**
+   * Whether Save is one of the entries. The scene sidebar puts "Save &
+   * deploy" right next to this menu, so there it is left out.
+   */
+  includeSave?: boolean
 }
 
+/**
+ * The on-device admin panel's "…" menu: what a standalone frame can do to
+ * itself beyond saving (re-render, reload the runtime, restart FrameOS).
+ * Save is what deploys there — the device applies a save as it lands — so
+ * this is a plain actions menu, not a second deploy button.
+ */
 export function FrameLocalDeployMenu({
   frameId,
   buttonColor = 'none',
   buttonClassName,
   buttonContent,
   buttonTitle = 'Frame actions',
+  includeSave = true,
 }: FrameLocalDeployMenuProps): JSX.Element {
   const { saveFrame } = useActions(frameLogic({ frameId }))
   const { loadFrame, renderFrame, restartFrame } = useActions(framesModel)
@@ -39,26 +51,22 @@ export function FrameLocalDeployMenu({
     <DropdownMenu
       buttonColor={buttonColor}
       buttonTitle={buttonTitle}
-      buttonContent={
-        buttonContent ?? (
-          <>
-            <ArrowPathIcon className="h-4 w-4 shrink-0" />
-            <span>Reload</span>
-            <EllipsisHorizontalIcon className="h-4 w-4 shrink-0 opacity-70" />
-          </>
-        )
-      }
+      buttonContent={buttonContent ?? <EllipsisHorizontalIcon className="h-5 w-5 shrink-0" />}
       className={clsx(
         'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         buttonClassName
       )}
       items={[
-        {
-          label: 'Save',
-          title: 'Save frame settings and scenes',
-          onClick: () => saveFrame(),
-          icon: <CloudArrowUpIcon className="h-5 w-5" />,
-        },
+        ...(includeSave
+          ? [
+              {
+                label: 'Save',
+                title: 'Save frame settings and scenes',
+                onClick: () => saveFrame(),
+                icon: <CloudArrowUpIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
         {
           label: 'Re-render',
           title: 'Re-render the current scene',

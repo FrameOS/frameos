@@ -158,6 +158,10 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
  */
 export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string[]> = {
   backend: [
+    // Renders above Info, and only while a store scene is installed — the
+    // per-frame gate (storeSceneOnlyFrameSettingsSections) hides the link
+    // otherwise, so it never scrolls nowhere.
+    'frame-settings-store-scene-services',
     'frame-settings-info',
     // ESP32 frames only; the per-frame gate (esp32OnlyFrameSettingsSections)
     // refuses it for every other device. Backend-managed ESP32s render the
@@ -185,7 +189,14 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   // agent section lives inside it. No Reboot section either: its cron line
   // is written by a backend full deploy, nothing on the device applies it.
   frameAdmin: [
+    // In render order: the on-device panel opens with the FrameOS Cloud
+    // link box and (with a store scene installed) the service-key grants,
+    // both above Info; the nav lists them so the first two boxes on the
+    // page are not the only ones it cannot jump to.
+    'frame-settings-cloud',
+    'frame-settings-store-scene-services',
     'frame-settings-info',
+    'frame-settings-upgrade',
     'frame-settings-device',
     'frame-settings-backend',
     'frame-http-api-section',
@@ -317,6 +328,12 @@ export type FrameCapability = 'schedule' | 'settings' | 'logs' | 'metrics' | 'up
 export interface FrameCapabilityInput {
   hardware?: { platform?: string | null } | null
   embedded?: { platform?: string | null } | null
+  scenes?: readonly { origin?: { storeSceneId?: unknown } | null }[] | null
+}
+
+/** Whether any installed scene came from the public scene store. */
+export function frameHasStoreScene(frame?: FrameCapabilityInput | null): boolean {
+  return (frame?.scenes ?? []).some((scene) => typeof scene?.origin?.storeSceneId === 'string')
 }
 
 const allFrameCapabilities: readonly FrameCapability[] = ['schedule', 'settings', 'logs', 'metrics', 'updateNotify']
@@ -351,10 +368,7 @@ export function isEsp32CloudFrame(frame?: FrameCapabilityInput | null, mode: Wor
  * the control plane want this — how much a microcontroller can be asked to
  * do at once does not depend on who is asking.
  */
-export function isEsp32Frame(
-  frame?: FrameCapabilityInput | null,
-  mode: WorkspaceMode = workspaceMode()
-): boolean {
+export function isEsp32Frame(frame?: FrameCapabilityInput | null, mode: WorkspaceMode = workspaceMode()): boolean {
   return isEsp32CloudFrame(frame, mode) || isEsp32Platform(frame?.embedded?.platform)
 }
 
@@ -604,6 +618,13 @@ const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-powe
 const esp32OnlyFrameSettingsSections: readonly string[] = ['frame-settings-power']
 
 /**
+ * Sections FrameSettings.tsx renders only while a scene from the public store
+ * is installed (StoreSceneServiceSettingsSection returns null otherwise), so
+ * the nav offers the link on exactly those frames.
+ */
+const storeSceneOnlyFrameSettingsSections: readonly string[] = ['frame-settings-store-scene-services']
+
+/**
  * Sections FrameSettings.tsx renders only for a full host OS (its
  * `isEmbeddedMode` gate): a microcontroller has no mountpoints to mount, no
  * host log files to rotate, no reboot-behaviour knobs, and no configurable
@@ -643,5 +664,26 @@ export function frameSettingsSectionIsAllowed(
   ) {
     return false
   }
+  if (storeSceneOnlyFrameSettingsSections.includes(sectionId) && !frameHasStoreScene(frame)) {
+    return false
+  }
   return allowedFrameSettingsSections[mode].includes(sectionId)
+}
+
+/**
+ * Which drawer a frame's change indicator opens.
+ *
+ * Wherever the deploy dialog exists (backend, cloud) it is the one dialog for
+ * every pending change: unsaved changes are listed at its top and saved along
+ * with the deploy, so the indicator never has to guess between two drawers
+ * for one button. Only a plane with no deploy dialog at all — the on-device
+ * admin panel, which deploys through its own Save — keeps the standalone
+ * unsaved-changes drawer.
+ */
+export function frameChangeDrawerKind(
+  frame: FrameCapabilityInput | null | undefined,
+  unsavedChanges: boolean,
+  mode: WorkspaceMode = workspaceMode()
+): 'unsaved' | 'deploy' {
+  return unsavedChanges && !frameMenuActionIsAllowed(mode, 'deploy', frame) ? 'unsaved' : 'deploy'
 }

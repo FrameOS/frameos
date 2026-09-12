@@ -70,7 +70,7 @@ class CloudBackupKeyImportRequest(BaseModel):
 class CloudStorePublishRequest(BaseModel):
     # Either an existing template...
     template_id: str | None = None
-    # ...or inline scenes straight off a frame ("Save to private cloud").
+    # ...or inline scenes straight off a frame ("Save to cloud (private)").
     name: str | None = None
     description: str | None = None
     scenes: list[dict] | None = None

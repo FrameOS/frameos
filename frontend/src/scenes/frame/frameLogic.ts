@@ -87,6 +87,7 @@ import {
   deployedFrameosVersion,
   deployPlanPreviousFrameosVersion,
   isFrameosVersionBefore,
+  normalizeFrameosVersion,
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage, getResponseDetail } from './frameDeployErrors'
 import { urls } from '../../urls'
@@ -983,7 +984,7 @@ function computeChangeDetails(
 
   if (shellLessUpdateWaiting) {
     details.push({
-      label: `FrameOS ${shellLessDeviceVersion} → ${CURRENT_FRAMEOS_VERSION} (the frame installs it itself: Update FrameOS)`,
+      label: `FrameOS ${shellLessDeviceVersion} → ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: false,
       frameosVersionChange: {
         kind: 'upgrade',
@@ -2995,12 +2996,19 @@ export const frameLogic = kea<frameLogicType>([
         // Still downloading / verifying / installing: keep watching.
         await breakpoint(5000)
         actions.loadDeviceUpgradeStatus(false)
-      } else if (wasInFlight) {
-        // The upgrade just finished: the backend recorded the version the
-        // frame now reports, so the row and the deploy plan (its "FrameOS
-        // a -> b" line, the change indicator) must be re-read.
+      } else if (wasInFlight || check) {
+        // The upgrade just finished, or this was an explicit check: the
+        // backend recorded the version the frame now reports, so the row
+        // must be re-read, and the deploy plan (its "FrameOS a -> b" line,
+        // the change indicator) whenever that version moved. Before this a
+        // frame that had upgraded itself kept showing its old version in
+        // the deploy drawer until something else reloaded the plan.
+        const reported = normalizeFrameosVersion((payload as DeviceUpgradeStatus).current_version)
+        const baseline = deployedFrameosVersion(values.lastDeploy)
         framesModel.actions.loadFrame(values.frameId)
-        actions.loadDeployPlans()
+        if (wasInFlight || (reported && reported !== baseline)) {
+          actions.loadDeployPlans()
+        }
       }
     },
     startDeviceUpgrade: async (_, breakpoint) => {

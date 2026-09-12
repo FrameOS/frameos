@@ -85,8 +85,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'FrameOS Cloud',
     anchor: 'frame-settings-cloud',
     surfaces: ['frameAdmin'],
-    nav: [],
-    navNote: 'Its own <form>, rendered above the frame form; the on-device nav does not link it.',
+    conditions: 'Its own <form>, rendered above the frame form.',
   },
   {
     key: 'cloud-base',
@@ -173,8 +172,8 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'Service keys for store scenes',
     anchor: 'frame-settings-store-scene-services',
     surfaces: ['backend', 'frameAdmin'],
-    nav: [],
-    navNote: 'Renders only when a store scene is installed, so a permanent nav entry would often scroll nowhere.',
+    conditions:
+      'Renders only when a store scene is installed; the nav link is gated the same way (storeSceneOnlyFrameSettingsSections).',
   },
   {
     key: 'cloud-telemetry',
@@ -196,8 +195,6 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'FrameOS upgrade',
     anchor: 'frame-settings-upgrade',
     surfaces: ['frameAdmin'],
-    nav: [],
-    navNote: 'On-device only; the nav list for frameAdmin predates it.',
   },
   {
     key: 'service-secrets',

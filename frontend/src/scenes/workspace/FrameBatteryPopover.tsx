@@ -11,6 +11,7 @@ import type { FrameType } from '../../types'
 import {
   analyzeBattery,
   batteryForecast,
+  CADENCE_WINDOW_WAKES,
   forecastCycleOptions,
   formatCycle,
   formatRemaining,
@@ -309,8 +310,10 @@ function BatteryFacts({
         value={cadence.cycleSeconds !== null ? `every ${formatCycle(cadence.cycleSeconds)}` : placeholder}
         title={
           configuredInterval
-            ? `Measured from the check-ins. The frame's render interval is set to ${formatCycle(configuredInterval)}.`
-            : 'Measured from the check-ins.'
+            ? `Measured from the last ${CADENCE_WINDOW_WAKES} wakes. The frame's render interval is set to ${formatCycle(
+                configuredInterval
+              )}.`
+            : `Measured from the last ${CADENCE_WINDOW_WAKES} wakes.`
         }
       />
       <Fact

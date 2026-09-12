@@ -377,7 +377,7 @@ export function TemplateRow({
                   ...(canPublishToCloud
                     ? [
                         {
-                          label: 'Save to private cloud',
+                          label: 'Save to cloud (private)',
                           onClick: () => void publishToCloud(),
                           icon: <CloudArrowUpIcon className="w-5 h-5" />,
                         },

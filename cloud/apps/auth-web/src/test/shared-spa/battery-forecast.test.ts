@@ -8,6 +8,8 @@ import {
   batteryCadence,
   batteryForecast,
   batterySamplesFromMetrics,
+  batteryWakes,
+  CADENCE_WINDOW_WAKES,
   dischargeSegments,
   forecastCycleOptions,
   formatCycle,
@@ -137,6 +139,76 @@ describe("dischargeSegments", () => {
   });
 });
 
+/** One metrics sample sent `uptimeSeconds` into a wake that began at `bootAt`. */
+function atUptime(
+  bootAt: number,
+  uptimeSeconds: number,
+  percent: number,
+  extra: Record<string, unknown> = {},
+): MetricsType {
+  return {
+    id: `${bootAt}-${uptimeSeconds}`,
+    frame_id: frameId,
+    timestamp: new Date(bootAt + uptimeSeconds * 1000).toISOString(),
+    metrics: {
+      batteryPercent: percent,
+      batteryMillivolts: 3300 + percent * 9,
+      onBattery: true,
+      uptimeSeconds,
+      renders: 1,
+      wakeCause: "timer",
+      ...extra,
+    },
+  };
+}
+
+/** `count` wakes `cycleSeconds` apart, each sending a sample at 21 s and 44 s of uptime. */
+function wakingEvery(
+  count: number,
+  cycleSeconds: number,
+  startAt: number,
+  percent: number,
+): MetricsType[] {
+  return Array.from({ length: count }, (_, index) => {
+    const bootAt = startAt + index * cycleSeconds * 1000;
+    return [atUptime(bootAt, 21, percent), atUptime(bootAt, 44, percent)];
+  }).flat();
+}
+
+describe("batteryWakes", () => {
+  it("groups the samples a frame sent while it was up into one wake", () => {
+    const { samples } = batterySamplesFromMetrics(wakingEvery(5, 3600, start, 80));
+    const wakes = batteryWakes(samples);
+    expect(wakes).toHaveLength(5);
+    expect(wakes.every((wake) => wake.samples.length === 2)).toBe(true);
+    expect(wakes[0]!.startedAt).toBe(start);
+    expect(wakes[0]!.awakeSeconds).toBe(44);
+    expect(wakes[1]!.startedAt - wakes[0]!.startedAt).toBe(3600_000);
+  });
+
+  it("starts a new wake when the uptime resets, however close the samples are", () => {
+    const metrics = [
+      atUptime(start, 21, 80),
+      atUptime(start, 44, 80),
+      // The frame crashed and came back 30 s later: a new wake, not the same one.
+      atUptime(start + 74_000, 8, 80),
+    ];
+    const wakes = batteryWakes(batterySamplesFromMetrics(metrics).samples);
+    expect(wakes).toHaveLength(2);
+    expect(wakes[1]!.startedAt).toBe(start + 74_000);
+  });
+
+  it("takes a sample without an uptime as a wake of its own", () => {
+    const metrics = [
+      atUptime(start, 21, 80),
+      { ...atUptime(start, 44, 80), metrics: { batteryPercent: 80, onBattery: true } },
+    ];
+    const wakes = batteryWakes(batterySamplesFromMetrics(metrics).samples);
+    expect(wakes).toHaveLength(2);
+    expect(wakes[1]!.awakeSeconds).toBeNull();
+  });
+});
+
 describe("batteryCadence", () => {
   it("reads the wake period and the awake time off the samples", () => {
     const { samples } = batterySamplesFromMetrics(discharge(10, 900, 90, 4));
@@ -153,6 +225,31 @@ describe("batteryCadence", () => {
       })),
     ];
     expect(batteryCadence(batterySamplesFromMetrics(metrics).samples).cycleSeconds).toBe(900);
+  });
+
+  it("counts wakes, not samples: two readings per wake is still one cycle", () => {
+    const { samples } = batterySamplesFromMetrics(wakingEvery(20, 3600, start, 80));
+    expect(batteryCadence(samples)).toEqual({ cycleSeconds: 3600, awakeSeconds: 44 });
+  });
+
+  it("reads the cadence the frame is on now, not one it has been taken off", () => {
+    // Three days every five minutes, then a week at an hour: the old era
+    // still outnumbers the new one, and used to win the median outright.
+    const fiveMinutes = wakingEvery(864, 300, start, 90);
+    const hourly = wakingEvery(168, 3600, start + 864 * 300_000, 80);
+    const { samples } = batterySamplesFromMetrics([...fiveMinutes, ...hourly]);
+    expect(samples.length).toBeGreaterThan(2 * CADENCE_WINDOW_WAKES);
+    expect(batteryCadence(samples).cycleSeconds).toBe(3600);
+  });
+
+  it("falls back to the check-in spacing for a frame that never sleeps", () => {
+    // One boot, uptime climbing with the clock: no wakes to measure.
+    const metrics = Array.from({ length: 20 }, (_, index) =>
+      atUptime(start, 300 * (index + 1), 90 - index),
+    );
+    const { samples } = batterySamplesFromMetrics(metrics);
+    expect(batteryWakes(samples)).toHaveLength(1);
+    expect(batteryCadence(samples).cycleSeconds).toBe(300);
   });
 
   it("has nothing to say about one sample", () => {

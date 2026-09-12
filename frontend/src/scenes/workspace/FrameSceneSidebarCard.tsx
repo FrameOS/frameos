@@ -78,8 +78,36 @@ export function FrameSceneSidebarCard({
     startUsbLogStream(frame.id)
   }
 
+  if (canLocalDeploy && inFrameAdminMode) {
+    // The on-device panel: a save IS the deploy (the device applies it as it
+    // lands), so one wide button says so, and the frame's other actions sit
+    // behind a small "…" at the end of the row instead of a "Reload…" button
+    // that was really a menu.
+    return (
+      <div className={clsx('flex items-stretch gap-2', className)}>
+        <button
+          type="button"
+          onClick={saveFrame}
+          title="Save the settings and scenes to this frame; it applies them right away"
+          className={clsx(
+            'min-w-0 flex-1 rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            unsavedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
+          )}
+        >
+          Save &amp; deploy
+        </button>
+        <FrameLocalDeployMenu
+          frameId={frame.id}
+          buttonTitle="Frame actions"
+          includeSave={false}
+          buttonClassName="frameos-secondary-button flex h-full w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0"
+        />
+      </div>
+    )
+  }
+
   return (
-    <div className={clsx('grid gap-2', canDeploy || canLocalDeploy ? 'grid-cols-2' : 'grid-cols-1', className)}>
+    <div className={clsx('grid gap-2', canDeploy ? 'grid-cols-2' : 'grid-cols-1', className)}>
       {showUsbButton ? (
         <button
           type="button"
@@ -105,13 +133,7 @@ export function FrameSceneSidebarCard({
         </button>
       ) : null}
       <SaveFrameButton onSave={saveFrame} unsavedChanges={unsavedChanges} />
-      {canLocalDeploy && inFrameAdminMode ? (
-        <FrameLocalDeployMenu
-          frameId={frame.id}
-          buttonTitle="Frame actions"
-          buttonClassName={unsavedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'}
-        />
-      ) : !canDeploy ? null : (
+      {!canDeploy ? null : (
         <button
           type="button"
           onClick={() => openDeployPlan()}

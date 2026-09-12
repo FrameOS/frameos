@@ -5,8 +5,8 @@ import { withoutBatteryMisreads } from './batteryMisreads'
  * What a frame's battery has been doing and how long it will last.
  *
  * A battery frame (an ESP32 board with a cell on an ADC pin) wakes on a
- * timer, renders, talks to the hub — sending one metrics sample per wake —
- * and goes back to deep sleep. Almost all of the energy goes in those few
+ * timer, renders, talks to the hub — sending a metrics sample or two while
+ * it is up — and goes back to deep sleep. Almost all of the energy goes in those few
  * awake seconds: the radio, the panel refresh, the render. Deep sleep costs
  * a few hundred times less per second. So the drain per day is, to a good
  * approximation, proportional to how often the frame wakes, and the way to
@@ -36,6 +36,19 @@ export const SLEEP_RATIO = 1 / 200
 const CHARGE_JUMP_PERCENT = 3
 /** A silence this long ends a segment: the frame was off, or away. */
 const SEGMENT_GAP_MS = 48 * 60 * 60 * 1000
+/**
+ * How many recent wakes the cadence is read from. A frame that ran every
+ * five minutes last week and hourly since must report what it does now:
+ * a median over the whole retained history would answer "five minutes"
+ * for as long as the old era outnumbers the new one.
+ */
+export const CADENCE_WINDOW_WAKES = 12
+/**
+ * Two samples belong to the same wake when their uptime advances exactly
+ * as fast as the wall clock does, within this many seconds of jitter —
+ * that is, when they agree on when the frame booted.
+ */
+const SAME_WAKE_TOLERANCE_SECONDS = 10
 /** Below this many samples or hours a fit says nothing useful. */
 const MIN_FIT_SAMPLES = 6
 const MIN_FIT_HOURS = 3
@@ -75,10 +88,18 @@ export interface DischargeSegment {
 }
 
 export interface BatteryCadence {
-  /** Seconds between wakes, from the sample spacing. */
+  /** Seconds between wakes, from the recent wakes' boot times. */
   cycleSeconds: number | null
-  /** Seconds awake per wake, from the samples' uptime. */
+  /** Seconds awake per wake, from the last uptime each recent wake reported. */
   awakeSeconds: number | null
+}
+
+export interface BatteryWake {
+  /** Epoch ms the frame booted: a sample's time less its uptime. */
+  startedAt: number
+  /** Seconds awake, from the last sample of the wake; null when it never said. */
+  awakeSeconds: number | null
+  samples: BatterySample[]
 }
 
 export interface BatteryForecast {
@@ -231,22 +252,67 @@ export function dischargeSegments(samples: BatterySample[]): DischargeSegment[] 
   return segments
 }
 
-/** How often the frame wakes and for how long, read off the samples. */
+/**
+ * The samples grouped into the wakes they were sent from, oldest first.
+ *
+ * A frame sends more than one metrics sample per wake (one after the
+ * render, one before it sleeps), so the spacing between *samples* is not
+ * the wake cadence. Every sample carries its uptime, so `t - uptime` is
+ * when the frame booted: samples that agree on that came from one wake.
+ * A sample without an uptime can only be taken as a wake of its own.
+ */
+export function batteryWakes(samples: BatterySample[]): BatteryWake[] {
+  const wakes: BatteryWake[] = []
+  for (const sample of samples) {
+    const current = wakes[wakes.length - 1]
+    const previous = current?.samples[current.samples.length - 1]
+    if (previous && previous.uptimeSeconds !== null && sample.uptimeSeconds !== null) {
+      const uptimeAdvance = sample.uptimeSeconds - previous.uptimeSeconds
+      const clockAdvance = (sample.t - previous.t) / 1000
+      if (uptimeAdvance >= 0 && Math.abs(uptimeAdvance - clockAdvance) <= SAME_WAKE_TOLERANCE_SECONDS) {
+        current.samples.push(sample)
+        current.awakeSeconds = sample.uptimeSeconds
+        continue
+      }
+    }
+    wakes.push({
+      startedAt: sample.t - (sample.uptimeSeconds ?? 0) * 1000,
+      awakeSeconds: sample.uptimeSeconds,
+      samples: [sample],
+    })
+  }
+  return wakes
+}
+
+/**
+ * How often the frame wakes and for how long, read off the last
+ * `CADENCE_WINDOW_WAKES` wakes — not off the whole history, which would
+ * keep quoting an interval the frame has since been taken off.
+ *
+ * A frame that never sleeps is one long wake; there the spacing of its
+ * check-ins is the only cadence there is, so fall back to that.
+ */
 export function batteryCadence(samples: BatterySample[]): BatteryCadence {
+  const wakes = batteryWakes(samples)
+  const recent = wakes.slice(-(CADENCE_WINDOW_WAKES + 1))
+  const starts =
+    recent.length > 1
+      ? recent.map((wake) => wake.startedAt)
+      : samples.slice(-(CADENCE_WINDOW_WAKES + 1)).map((sample) => sample.t)
   const gaps: number[] = []
-  for (let i = 1; i < samples.length; i++) {
-    const current = samples[i]
-    const previous = samples[i - 1]
-    if (!current || !previous) {
+  for (let i = 1; i < starts.length; i++) {
+    const current = starts[i]
+    const previous = starts[i - 1]
+    if (current === undefined || previous === undefined) {
       continue
     }
-    const gap = (current.t - previous.t) / 1000
+    const gap = (current - previous) / 1000
     if (gap > 0 && gap < SEGMENT_GAP_MS / 1000) {
       gaps.push(gap)
     }
   }
-  const uptimes = samples
-    .map((sample) => sample.uptimeSeconds)
+  const uptimes = recent
+    .map((wake) => wake.awakeSeconds)
     .filter((value): value is number => value !== null && value > 0)
   return { cycleSeconds: median(gaps), awakeSeconds: median(uptimes) }
 }

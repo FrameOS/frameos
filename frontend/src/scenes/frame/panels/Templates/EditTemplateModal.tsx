@@ -22,13 +22,13 @@ import { FrameImage } from '../../../../components/FrameImage'
 const MODAL_TITLES: Record<string, string> = {
   localTemplate: 'Save to "My scenes"',
   zip: 'Download as .zip',
-  cloud: 'Save to private cloud',
+  cloud: 'Save to cloud (private)',
 }
 
 const SUBMIT_LABELS: Record<string, string> = {
   localTemplate: 'Save to "My scenes"',
   zip: 'Download .zip',
-  cloud: 'Save to private cloud',
+  cloud: 'Save to cloud (private)',
 }
 
 const VISIBILITY_OPTIONS = [
