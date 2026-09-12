@@ -100,7 +100,7 @@ proc localOrigin*(request: Request): string =
   ## redirect target of a later sign-in — see /api/cloud/login/start.
   let forwardedProto = requestHeader(request, "x-forwarded-proto")
     .split(",", 1)[0].strip().toLowerAscii()
-  let scheme = if forwardedProto == "https": "https" else: "http"
+  let scheme = if request.secure or forwardedProto == "https": "https" else: "http"
   var host = requestHeader(request, "host")
   if host.len == 0:
     host = "localhost"

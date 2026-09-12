@@ -13,7 +13,9 @@ import ./state
 import ./auth
 import ./routes
 import ./workers
+import ./listeners
 export workers.httpWorkerThreads
+export listeners
 
 proc shouldLogHttpRequest*(path: string): bool =
   if path == "/ws" or path == "/ws/admin":
@@ -27,6 +29,23 @@ proc shouldLogHttpRequest*(path: string): bool =
   if path.startsWith("/api/frames/") and "/scene_images/" in path:
     return false
   true
+
+proc mummyLogHandler(level: LogLevel, args: varargs[string]) {.gcsafe.} =
+  ## mummy's own log lines (a handler exception, a dropped connection, a TLS
+  ## handshake) go through the frame logger instead of stdout. Its debug
+  ## level is per-connection noise, kept for frames with `debug` on.
+  var message = ""
+  for arg in args:
+    message.add(arg)
+  case level:
+  of ErrorLevel:
+    log(%*{"event": "http:error", "message": message})
+  of InfoLevel:
+    log(%*{"event": "http:info", "message": message})
+  of DebugLevel:
+    {.gcsafe.}:
+      if globalFrameConfig != nil and globalFrameConfig.debug:
+        log(%*{"event": "http:debug", "message": message})
 
 proc makeWebsocketHandler(publicState: ConnectionsState, adminState: ConnectionsState): WebSocketHandler =
   result = proc(websocket: WebSocket, event: WebSocketEvent, message: Message) {.closure, gcsafe.} =
@@ -101,6 +120,7 @@ proc newServer*(frameOS: FrameOS): types.Server =
   let mummyServer = mummy.newServer(
     loggingHandler,
     makeWebsocketHandler(connectionsState, adminConnectionsState),
+    logHandler = mummyLogHandler,
     workerThreads = workerThreads,
     maxBodyLen = MAX_HTTP_BODY_LEN
   )
@@ -113,27 +133,70 @@ proc newServer*(frameOS: FrameOS): types.Server =
     connectionsState: connectionsState,
   )
 
-proc serverPort*(frameConfig: FrameConfig): int =
-  if frameConfig.framePort == 0: 8787 else: frameConfig.framePort
-
-proc serverBindAddress*(frameConfig: FrameConfig): string =
-  if frameConfig.bindHost.len > 0:
-    frameConfig.bindHost
-  elif frameConfig.httpsProxy.enable and frameConfig.httpsProxy.exposeOnlyPort:
-    "127.0.0.1"
+proc addTlsListener(self: types.Server, spec: ListenerSpec): bool =
+  ## The HTTPS listener is best effort: a certificate the runtime cannot
+  ## load or a port it cannot bind is logged and the frame stays reachable
+  ## over plain HTTP, exactly as when the Caddy proxy failed to start.
+  when defined(ssl):
+    var tls: TlsConfig
+    try:
+      tls = newTlsConfig(self.frameConfig.httpsProxy.serverCert, self.frameConfig.httpsProxy.serverKey)
+    except MummyError as e:
+      log(%*{
+        "event": "tls:config_error",
+        "message": "Could not load the frame's TLS certificate or key, HTTPS stays off",
+        "error": e.msg,
+      })
+      return false
+    try:
+      discard self.mummy.addListener(Port(spec.port), spec.address, tls)
+    except MummyError as e:
+      log(%*{
+        "event": "tls:start_error",
+        "message": "Could not open the HTTPS listener",
+        "error": e.msg,
+        "port": spec.port,
+        "address": spec.address,
+      })
+      return false
+    log(%*{
+      "event": "tls:start",
+      "message": "Serving HTTPS",
+      "port": spec.port,
+      "address": spec.address,
+    })
+    true
   else:
-    "0.0.0.0"
+    log(%*{
+      "event": "tls:start_error",
+      "message": "This build has no OpenSSL support, HTTPS stays off",
+      "port": spec.port,
+    })
+    false
 
 proc startServer*(self: types.Server) =
+  let specs = planListeners(self.frameConfig)
   log(%*{
     "event": "http:start",
     "message": "Starting web server",
     "workerThreads": self.httpWorkerThreads,
+    "listeners": %*(specs),
   })
   # mummy.serve blocks this thread, so run render notifications in a background thread.
   createThread(renderThread, listenForRenderThread, (self.connectionsState, globalAdminConnectionsState))
   createThread(logThread, listenForLogThread, globalAdminConnectionsState)
 
-  let port = serverPort(self.frameConfig).Port
-  let bindAddr = serverBindAddress(self.frameConfig)
-  self.mummy.serve(port = port, address = bindAddr)
+  if httpsEnabled(self.frameConfig) and not hasTlsMaterial(self.frameConfig):
+    log(%*{
+      "event": "tls:default_cert",
+      "message": "No TLS certificate provided, can't enable HTTPS",
+    })
+
+  for spec in specs:
+    if spec.tls:
+      discard self.addTlsListener(spec)
+    else:
+      # The plain listener is not optional: failing to bind it is fatal, as
+      # it always was, and systemd restarts the runtime.
+      discard self.mummy.addListener(Port(spec.port), spec.address)
+  self.mummy.serve()

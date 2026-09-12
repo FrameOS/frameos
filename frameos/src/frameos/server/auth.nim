@@ -377,6 +377,10 @@ proc adminSessionCookieValue*(): string {.gcsafe.} =
   createAdminSession()
 
 proc shouldUseSecureCookie*(request: Request): bool {.gcsafe.} =
+  # Served by the runtime's own HTTPS listener, or by a reverse proxy that
+  # says so.
+  if request.secure:
+    return true
   let forwardedProto = getHeaderValue(request, "x-forwarded-proto").split(",", 1)[0].strip().toLowerAscii()
   if forwardedProto == "https":
     return true

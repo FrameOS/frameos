@@ -497,7 +497,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   frame_access_key: 'Frame access key',
   frame_access: 'Frame access',
   frame_admin_auth: 'Frame admin auth',
-  https_proxy: 'HTTPS proxy',
+  https_proxy: 'HTTPS',
   ssh_user: 'SSH user',
   ssh_pass: 'SSH password',
   ssh_port: 'SSH port',

@@ -6,8 +6,9 @@
 ## send none. So a state-changing request (anything but GET/HEAD/OPTIONS) or
 ## a WebSocket upgrade that carries an Origin must name the host the request
 ## was addressed to: the page that issued it was served by this frame,
-## directly or through the setup TLS proxy (caddy forwards `Host` unchanged
-## and adds `X-Forwarded-Host`). A page on another site that POSTs at the
+## directly (plain or its own HTTPS listener) or through a reverse proxy of
+## the owner's (which forwards `Host` unchanged and adds `X-Forwarded-Host`).
+## A page on another site that POSTs at the
 ## frame's LAN address is refused with 403 — classic CSRF, which
 ## `SameSite=Lax` only covers for cookie-holding sessions, not a `public` or
 ## `protected` frame that needs no cookie.
@@ -99,10 +100,12 @@ proc sameOriginAllowed*(request: Request): bool =
   ## route's own authentication.
   if not needsSameOrigin(request) or not request.headers.contains("Origin"):
     return true
+  # `request.secure` is the runtime's own HTTPS listener; the forwarded
+  # header keeps working for a reverse proxy in front of the frame.
   let forwardedProto = request.headers["X-Forwarded-Proto"].split(',', 1)[0].strip().toLowerAscii()
   originMatchesHost(
     request.headers["Origin"],
     request.headers["Host"],
     forwardedHost = request.headers["X-Forwarded-Host"],
-    requestIsHttps = forwardedProto == "https",
+    requestIsHttps = request.secure or forwardedProto == "https",
   )

@@ -182,7 +182,7 @@ FrameOS genuinely needs privilege — for narrow, enumerable things:
 | `reboot` | `device_setup.nim` | rare |
 | NetworkManager / wpa_supplicant profiles, hotspot | `network/` | setup, portal |
 | SPI/I²C/GPIO, framebuffer, `/dev/fb0`, evdev | drivers | every render |
-| Bind :80/:443 | only with `https_proxy.enable` (off on Buildroot) | boot |
+| Bind :80/:443 | only when the frame port or HTTPS port is set below 1024 (defaults 8787/8443 need nothing) | boot |
 
 Everything else — rendering, QuickJS, HTTP, the cloud client, assets, logs — is
 ordinary userspace work on `/srv`.
@@ -249,7 +249,9 @@ user (uid/gid 990, fixed, `/bin/false`). The unit is rendered from
 `ProtectControlGroups`, `RestrictSUIDSGID`, `RestrictRealtime`,
 `RestrictNamespaces`, `LockPersonality`, `SystemCallArchitectures=native`,
 `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK`, and a bounding
-set of exactly `CAP_SYS_TTY_CONFIG` (the framebuffer driver's `KDSETMODE`).
+set of exactly `CAP_SYS_TTY_CONFIG` (the framebuffer driver's `KDSETMODE`) and
+`CAP_NET_BIND_SERVICE` (the runtime's own HTTP/HTTPS listeners on a port below
+1024, when a frame is configured that way; the 8787/8443 defaults need it not).
 `SupplementaryGroups=video input` covers the nodes udev already groups;
 an `ExecStartPre=+` step (root) hands `/dev/spidev*`, `/dev/gpiochip*`,
 `/dev/i2c-*`, `/dev/vchiq`, `/dev/fb*`, `/dev/gpiomem`, `/dev/tty0-1` and the

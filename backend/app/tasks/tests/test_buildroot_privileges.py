@@ -40,7 +40,10 @@ def test_unprivileged_unit_carries_the_hardening_block():
     assert "NoNewPrivileges=yes\n" in service
     assert "ProtectSystem=strict\n" in service
     assert "ReadWritePaths=/srv/frameos /srv/assets\n" in service
-    assert "CapabilityBoundingSet=CAP_SYS_TTY_CONFIG\n" in service
+    # KDSETMODE for the framebuffer driver, and ports below 1024 for the
+    # runtime's own HTTP/HTTPS listeners when a frame is configured that way.
+    assert "CapabilityBoundingSet=CAP_SYS_TTY_CONFIG CAP_NET_BIND_SERVICE\n" in service
+    assert "AmbientCapabilities=CAP_SYS_TTY_CONFIG CAP_NET_BIND_SERVICE\n" in service
     assert "ExecStartPre=+/bin/sh -c 'for n in /dev/gpiochip*" in service
     assert "chgrp frameos" in service
     assert "Wants=NetworkManager.service\nAfter=network.target NetworkManager.service\n" in service

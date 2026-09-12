@@ -1202,10 +1202,6 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
     if not getattr(frame, "log_to_file", None):
         frame.log_to_file = "/srv/frameos/logs/frameos-{date}.log"
 
-    https_proxy = dict(frame.https_proxy or {})
-    https_proxy["enable"] = False
-    frame.https_proxy = https_proxy
-
     # Only the shared secret is guaranteed here. Whether FrameOS Remote is
     # enabled at all is the user's call, made when the frame is added (see
     # buildroot_agent_defaults) and editable afterwards in frame settings —

@@ -30,6 +30,8 @@ LockPersonality=yes
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 # KDSETMODE on the framebuffer console (drivers/frameBuffer) is the one ioctl
-# that still needs a capability without a controlling tty.
-CapabilityBoundingSet=CAP_SYS_TTY_CONFIG
-AmbientCapabilities=CAP_SYS_TTY_CONFIG
+# that still needs a capability without a controlling tty. CAP_NET_BIND_SERVICE
+# lets the runtime's own HTTP/HTTPS listeners take a port below 1024 (:443)
+# when the frame is configured that way; the defaults (8787/8443) need nothing.
+CapabilityBoundingSet=CAP_SYS_TTY_CONFIG CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_SYS_TTY_CONFIG CAP_NET_BIND_SERVICE

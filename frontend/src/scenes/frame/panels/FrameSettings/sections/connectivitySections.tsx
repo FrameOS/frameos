@@ -398,7 +398,7 @@ export function HttpApiSection(): JSX.Element {
               <p>
                 {isEmbeddedMode
                   ? 'Embedded firmware keeps HTTP available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
-                  : 'Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure communication.'}
+                  : 'Traffic on this port is UNSECURED! Enable the HTTPS API below for secure communication.'}
               </p>
             </div>
           }
@@ -564,13 +564,18 @@ export function FrameAdminPanelSection(): JSX.Element {
   )
 }
 
-/** TLS: Caddy in front of the API on a Pi, native HTTPS on an ESP32. */
+/**
+ * TLS: the frame serves HTTPS itself on every platform — OpenSSL inside the
+ * runtime's HTTP server on a Pi (Raspberry Pi OS and Buildroot alike),
+ * mbedTLS on an ESP32 — from the per-frame certificate the backend mints.
+ * The `https_proxy` key is the API's name for the setting, kept from the
+ * days a Caddy proxy did the job.
+ */
 export function HttpsProxySection(): JSX.Element {
   const {
     frame,
     frameForm,
     frameFormTouches,
-    isBuildrootMode,
     isEmbeddedMode,
     tlsEnabled,
     generateTlsCertificates,
@@ -579,34 +584,23 @@ export function HttpsProxySection(): JSX.Element {
   return (
     <>
       <SectionHeading id="frame-http-proxy-section">
-        {isEmbeddedMode ? 'HTTPS on frame' : 'HTTPS proxy'}{' '}
-        <span className="text-gray-500">(backend &#8594; frame)</span>
+        HTTPS <span className="text-gray-500">(backend &#8594; frame)</span>
       </SectionHeading>
       <SectionBody>
         <Field
           name="https_proxy.enable"
-          label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
+          label="HTTPS API"
           tooltip={
             isEmbeddedMode
               ? 'Serve the frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. The certificate and key reach the board on its next settings poll; it restarts to apply them.'
-              : isBuildrootMode
-              ? 'The Buildroot images ship no Caddy, so the backend reaches a Buildroot frame over plain HTTP. Every save turns this off again.'
-              : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
+              : 'Serve the frame API and admin page over HTTPS from the frame itself, with the per-frame certificate below. The frame restarts to apply a certificate change.'
           }
-          // Without this the switch flipped on, the save posted enable=true,
-          // and ensure_buildroot_frame_defaults on the backend put it back
-          // off — a toggle that never stuck (2026-09-12, HA add-on).
-          hint={isBuildrootMode ? 'Not available on Buildroot frames: the image has no Caddy.' : undefined}
         >
           {({ value, onChange }) => (
             <Switch
               name="https_proxy.enable"
               value={value}
-              disabled={isBuildrootMode}
               onChange={(enableTls) => {
-                if (isBuildrootMode) {
-                  return
-                }
                 if (enableTls) {
                   verifyTlsCertificates()
                 }
@@ -623,11 +617,7 @@ export function HttpsProxySection(): JSX.Element {
               label="HTTPS port"
               tooltip={
                 <div className="space-y-2">
-                  <p>
-                    {isEmbeddedMode
-                      ? "The port the frame's HTTPS server listens on."
-                      : 'The port Caddy listens on for HTTPS connections.'}
-                  </p>
+                  <p>The port the frame&apos;s HTTPS server listens on.</p>
                   <p>It&apos;s best if this ends with *443.</p>
                 </div>
               }
@@ -638,7 +628,7 @@ export function HttpsProxySection(): JSX.Element {
               <Field
                 name="https_proxy.expose_only_port"
                 label="Expose only HTTPS port"
-                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+                tooltip="Bind the plain HTTP port to 127.0.0.1 so only the HTTPS port is reachable from the network. The setup hotspot keeps its own plain listener while it is up."
               >
                 <Switch name="https_proxy.expose_only_port" fullWidth />
               </Field>
@@ -664,11 +654,7 @@ export function HttpsProxySection(): JSX.Element {
             <Field
               name="https_proxy.certs.server"
               label="HTTPS frame certificate"
-              tooltip={
-                isEmbeddedMode
-                  ? 'PEM certificate baked into the firmware for native HTTPS on this frame.'
-                  : 'PEM certificate used by Caddy for HTTPS on this frame.'
-              }
+              tooltip="PEM certificate the frame serves for HTTPS."
               secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
               hint={getCertificateHint(
                 'Server certificate',
@@ -681,11 +667,7 @@ export function HttpsProxySection(): JSX.Element {
             <Field
               name="https_proxy.certs.server_key"
               label={<div>HTTPS frame private key</div>}
-              tooltip={
-                isEmbeddedMode
-                  ? 'PEM private key baked into the firmware for native HTTPS on this frame. Keep this secret.'
-                  : 'PEM private key used by Caddy for HTTPS on this frame. Keep this secret.'
-              }
+              tooltip="PEM private key for the certificate above. It stays in the frame's config and is never written to a separate file. Keep this secret."
               secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
             >
               <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN EC PRIVATE KEY-----" />
