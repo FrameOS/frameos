@@ -969,6 +969,17 @@ proc scheduleSetupRebootIfRequired*(setupResult: SetupResult, reason = "FrameOS 
   scheduleSystemReboot(delaySeconds)
   true
 
+proc setupPayloadHandoffUser*(mode, installedUser: string): string =
+  ## Who the files `writeSetupReleasePayload` writes belong to afterwards:
+  ## the unprivileged Buildroot runtime the unit was installed for, or
+  ## nobody ("" — root keeps them) everywhere else. Only Buildroot separates
+  ## the runtime from root under /srv/frameos (docs/buildroot-privileges.md);
+  ## an rpios frame's `User=pi` must not trigger the Buildroot layout sweep.
+  if mode == "buildroot" and installedUser.len > 0 and installedUser != "root":
+    installedUser
+  else:
+    ""
+
 proc writeSetupReleasePayload*(
   configPath: string,
   frameosCurrentDir = "/srv/frameos/current",
@@ -988,3 +999,14 @@ proc writeSetupReleasePayload*(
   let allScenes = if payload{"scenes"} != nil and payload{"scenes"}.kind == JArray: payload{"scenes"} else: newJArray()
   writeFile(frameosCurrentDir / "all_scenes.json.gz", compress(pretty(allScenes, indent = 4) & "\n", dataFormat = dfGzip))
   writeFile(frameosCurrentDir / "scenes.json.gz", compress(pretty(setupExportScenes(payload), indent = 4) & "\n", dataFormat = dfGzip))
+
+  # This runs as root AFTER setupFrameOS's "privilege separation ownership"
+  # step, so the frame.json it just replaced is root's, 0600 — and a
+  # Buildroot runtime installed as `frameos` could not open it: a card
+  # personalised from a setup blob booted into "FrameOS fatal: cannot open:
+  # ./frame.json" on every boot, blank panel, no logs (HyperPixel 2r native
+  # first-boot bench, 2026-09-12). Hand the payload to the user the unit was
+  # just installed for; the sweep is idempotent and touches nothing else.
+  let handoffUser = setupPayloadHandoffUser(payload{"mode"}.getStr(""), installedServiceUser())
+  if handoffUser.len > 0:
+    applyBuildrootOwnership(handoffUser, parentDir(frameosCurrentDir))

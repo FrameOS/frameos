@@ -943,3 +943,13 @@ block test_network_service_guard_skips_without_the_unit:
   finally:
     resetSetupCommandRunnerForTest()
     removeDir(dropinDir)
+
+block:
+  # The first-boot payload is written by root after the ownership sweep; a
+  # Buildroot unit installed for `frameos` gets the files handed over,
+  # anything else (root, an rpios `User=pi`, no unit yet) leaves them alone.
+  doAssert setupPayloadHandoffUser("buildroot", "frameos") == "frameos"
+  doAssert setupPayloadHandoffUser("buildroot", "root") == ""
+  doAssert setupPayloadHandoffUser("buildroot", "") == ""
+  doAssert setupPayloadHandoffUser("rpios", "pi") == ""
+  doAssert setupPayloadHandoffUser("", "frameos") == ""
