@@ -40,8 +40,18 @@ HTTPS natively (`httpd_ssl_start`); Linux frames now match.
 - **Ports below 1024 as uid 990**: `frameos.service.unprivileged` carries
   `CAP_NET_BIND_SERVICE` next to `CAP_SYS_TTY_CONFIG`. The defaults
   (8787/8443) need nothing.
-- **Certificate changes** keep today's behaviour: `tls_settings_changed`
-  makes the deploy restart the runtime; no hot reload.
+- **Certificate changes** through a backend deploy keep today's behaviour:
+  `tls_settings_changed` makes the deploy restart the runtime.
+- **Changes saved on the device** (the frame's own settings page, or a
+  backend push to a shell-less card over `POST /api/frames/1`) are applied
+  without a restart: `server/listener_control.nim` binds the listeners the
+  new config wants before frame.json is written — a port that cannot be
+  bound or a certificate that cannot be loaded refuses the save with a 409
+  and leaves the old sockets and config alone — then removes the ones no
+  longer wanted (accepted connections are unaffected; the response to that
+  very save still goes out). The response's `apply.listeners` is what the
+  admin page follows to the new port or scheme (docs/api-triality.md,
+  "On-device save side effects").
 - Nothing changes for `frameosEmbedded` / `frameosWasm` (mummy is not
   compiled there).
 
@@ -116,6 +126,13 @@ HTTPS natively (`httpd_ssl_start`); Linux frames now match.
   `http://10.42.0.1:<port>`.
 - Cloud-W (`raspberry-pi-32`, ARMv6, root): same, plus handshake time in
   the log with `debug` on (expect tens of ms with P-256).
+- From the frame's own settings page (standalone, `http://<ip>:8787/frames/1/settings`):
+  turn HTTPS on with a generated certificate → the page moves itself to
+  `https://<ip>:8443` (browser interstitial once); change the port → it
+  follows; tick "expose only the HTTPS port" → plain HTTP is loopback-only
+  and the page lands on HTTPS; turn HTTPS off from the https page → back
+  on `http://<ip>:8787`, login again (the Secure cookie does not cross).
+  A port already in use must be refused with the reason and nothing saved.
 - One Raspbian Pi upgraded from 2026.9.13: deploy, confirm the plan disables
   `caddy.service`, that Caddy is neither installed fresh nor running, and
   HTTPS still works. Deploy again: no Caddy probe in the plan.

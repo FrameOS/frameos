@@ -10,6 +10,7 @@ from scenes/scenes import sceneOptions
 type
   TestServer* = object
     server*: mummy.Server
+    listener*: Listener
     port*: int
     thread*: Thread[tuple[server: mummy.Server, port: Port]]
   TestResponse* = object
@@ -22,7 +23,9 @@ let missingConfigPath = getTempDir() / ("frameos-server-tests-missing-frame-" & 
 
 proc serverThread(args: tuple[server: mummy.Server, port: Port]) {.thread.} =
   try:
-    args.server.serve(args.port, "127.0.0.1")
+    # The listener was added by startRouterServer, so its handle is known to
+    # the tests (listener_control rebinds by handle).
+    args.server.serve()
   except CatchableError:
     discard
 
@@ -122,6 +125,7 @@ proc startRouterServer*(port: int): TestServer =
   let router = buildRouter(connectionsState, adminConnectionsState)
   result.port = port
   result.server = newServer(buildRouterHandler(router), workerThreads = 1)
+  result.listener = result.server.addListener(Port(port), "127.0.0.1")
   createThread(result.thread, serverThread, (result.server, Port(port)))
   sleep(150)
 

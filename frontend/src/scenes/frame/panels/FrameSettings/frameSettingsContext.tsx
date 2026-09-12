@@ -543,7 +543,11 @@ export function FrameSettingsProvider({
     virtualImageUrl: `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`,
     virtualPageUrl: `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`,
 
-    showWifiCredentials: isBuildrootMode || isEmbeddedMode,
+    // A Buildroot frame's Wi-Fi credentials are baked into its SD card /
+    // first-boot payload by the backend; the runtime never reads them from
+    // frame.json (it joins networks through the setup portal). On the
+    // device itself the fields would save a password that does nothing.
+    showWifiCredentials: isEmbeddedMode || (isBuildrootMode && !inFrameAdminMode),
     maxHttpResponsePlaceholder: String(
       isEmbeddedMode || esp32CloudProfile ? EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES : DEFAULT_MAX_HTTP_RESPONSE_BYTES
     ),

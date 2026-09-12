@@ -261,6 +261,56 @@ suite "no-op settings pushes are detectable":
     check runtimeVisible(configPath){"rotate"}.getInt(0) == 270
     check not frameApiUpdateChangesConfig(changed)
 
+suite "a settings change is classified by what it takes to apply":
+  # The route reads these flags (frame_api_routes.nim POST /api/frames/@id):
+  # listeners are rebound before the write, restart keys restart instead of
+  # reload, and the system steps go to settings_apply.nim's worker.
+  test "nothing changed":
+    let stored = %*{"name": "Kitchen", "framePort": 8787, "frameApi": {"frame_sync_current_revision": "rev-1"}}
+    let change = classifyFrameConfigChange(stored, %*{"name": "Kitchen", "framePort": 8787,
+      "frameApi": {"frame_sync_current_revision": "rev-2"}})
+    check not change.any
+    check not change.listeners
+    check not change.restart
+
+  test "a reload-only key":
+    let change = classifyFrameConfigChange(%*{"name": "Kitchen", "rotate": 0}, %*{"name": "Hallway", "rotate": 0})
+    check change.any
+    check not change.listeners
+    check not change.restart
+    check not change.device
+    check not change.timezone
+    check not change.mounts
+
+  test "port, bind address and every HTTPS field are listener changes":
+    check classifyFrameConfigChange(%*{"framePort": 8787}, %*{"framePort": 8080}).listeners
+    check classifyFrameConfigChange(%*{}, %*{"bindHost": "127.0.0.1"}).listeners
+    check classifyFrameConfigChange(%*{"httpsProxy": {"enable": false}}, %*{"httpsProxy": {"enable": true}}).listeners
+    check classifyFrameConfigChange(%*{"httpsProxy": {"enable": true, "port": 8443}},
+      %*{"httpsProxy": {"enable": true, "port": 9443}}).listeners
+    check classifyFrameConfigChange(%*{"httpsProxy": {"enable": true, "exposeOnlyPort": false}},
+      %*{"httpsProxy": {"enable": true, "exposeOnlyPort": true}}).listeners
+    check classifyFrameConfigChange(%*{"httpsProxy": {"serverCert": "a", "serverKey": "b"}},
+      %*{"httpsProxy": {"serverCert": "c", "serverKey": "b"}}).listeners
+    check not classifyFrameConfigChange(%*{"httpsProxy": {"enable": true}}, %*{"httpsProxy": {"enable": true}}).listeners
+
+  test "driver-init keys and the network block need a restart":
+    for key in ["device", "deviceConfig", "gpioButtons", "palette", "width", "height", "network"]:
+      let change = classifyFrameConfigChange(%*{key: "before"}, %*{key: "after"})
+      check change.restart
+      check change.device == (key == "device")
+    check not classifyFrameConfigChange(%*{"rotate": 0}, %*{"rotate": 90}).restart
+
+  test "time zone and mountpoints are system steps":
+    let tz = classifyFrameConfigChange(%*{"timeZone": "UTC"}, %*{"timeZone": "Europe/Tallinn"})
+    check tz.timezone
+    check not tz.mounts
+    check not tz.restart
+    let mounts = classifyFrameConfigChange(%*{"mountpoints": {"enabled": false}},
+      %*{"mountpoints": {"enabled": true, "items": []}})
+    check mounts.mounts
+    check not mounts.timezone
+
 suite "the frame payload round-trips what the device stores":
   test "device_config is patched, never replaced, and read back verbatim":
     let tempRoot = getTempDir() / "frameos-api-device-config"

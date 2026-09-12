@@ -491,8 +491,8 @@ export function FrameAdminPanelSection(): JSX.Element {
           </>
         ) : (
           <>
-            Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still in
-            beta: you can&apos;t save any changes.{' '}
+            Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. Saving there
+            applies the change on the frame right away.{' '}
           </>
         )}
       </p>

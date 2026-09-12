@@ -182,7 +182,8 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-reboot',
   ],
   // The on-device panel hides the whole SSH block, and the FrameOS Remote
-  // agent section lives inside it.
+  // agent section lives inside it. No Reboot section either: its cron line
+  // is written by a backend full deploy, nothing on the device applies it.
   frameAdmin: [
     'frame-settings-info',
     'frame-settings-device',
@@ -199,7 +200,6 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-assets',
     'frame-settings-gpio',
     'frame-settings-logs',
-    'frame-settings-reboot',
   ],
   // A cloud-managed frame renders only what the cloud can actually save: the
   // declarative `set_settings` keys, plus Power on an ESP32. Everything else
