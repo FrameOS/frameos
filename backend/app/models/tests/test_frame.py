@@ -560,7 +560,10 @@ def test_compiled_scene_count_counts_only_the_legacy_path():
 async def test_update_frame_broadcast_carries_no_secrets(mock_publish, db, redis):
     frame = await new_frame(db, redis, "Frame", "pi:raspberry@localhost", "server_host", "dev")
     frame.frame_admin_auth = {"enabled": True, "user": "admin", "pass": "hunter2"}
-    frame.mountpoints = {"enabled": True, "items": [{"source": "//nas/p", "target": "/mnt/p", "password": "p1"}]}
+    # A long, unmistakable secret: the broadcast now carries the TLS
+    # certificates (public halves), whose base64 once happened to contain
+    # a two-letter "p1" and failed this test in CI.
+    frame.mountpoints = {"enabled": True, "items": [{"source": "//nas/p", "target": "/mnt/p", "password": "nas-mount-secret-p1"}]}
     await update_frame(db, redis, frame)
 
     event, payload = mock_publish.await_args.args[1], mock_publish.await_args.args[2]
@@ -574,7 +577,7 @@ async def test_update_frame_broadcast_carries_no_secrets(mock_publish, db, redis
     assert "server_key" not in payload["https_proxy"]["certs"]
     assert "agentSharedSecret" not in payload["agent"]
     serialized = json.dumps(payload)
-    for secret in ("raspberry", "hunter2", "p1", frame.server_api_key, frame.frame_access_key, frame.agent["agentSharedSecret"]):
+    for secret in ("raspberry", "hunter2", "nas-mount-secret-p1", frame.server_api_key, frame.frame_access_key, frame.agent["agentSharedSecret"]):
         assert secret not in serialized
     # The authenticated per-frame GET still has everything.
     assert frame.to_dict()["ssh_pass"] == "raspberry"

@@ -48,6 +48,10 @@
     // them out.
     "src/test/shared-spa/usb-board-identity.test.ts",
     "src/test/shared-spa/scene-execution-fixtures.test.ts",
+    // Same story: imports frameLogic, whose graph reaches the legacy
+    // workspace (FrameConnectionDot's bare JSX namespace). Vitest still
+    // runs it; only tsc leaves it out.
+    "src/test/shared-spa/frame-change-value.test.ts",
     // Same story: builds every logic the embedded editor mounts, and
     // workspaceLogic's import graph reaches the legacy workspace components
     // (FrameConnectionDot's bare JSX namespace). Vitest still runs it; only
