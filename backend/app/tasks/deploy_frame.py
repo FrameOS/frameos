@@ -118,6 +118,18 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
             await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "completed"))
         return
 
+    # A frame this backend reaches only over its admin API has no full
+    # deploy: FrameOS on it changes through its own signed upgrade, and
+    # everything else is the same push the fast deploy makes. Every enqueue
+    # path (the deploy button, next_action, set_next_scene) lands here.
+    from app.models.frame import frame_has_shell_access
+
+    if not frame_has_shell_access(frame):
+        from app.tasks.fast_deploy_frame import deploy_over_admin_api
+
+        await deploy_over_admin_api(db, redis, id, job_id=job_id, task_id=task_id, task_label="full")
+        return
+
     await register_active_deploy_job(redis, id, job_id)
     try:
         with tempfile.TemporaryDirectory() as temp_dir:

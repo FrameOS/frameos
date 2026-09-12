@@ -329,6 +329,13 @@ export interface FrameCapabilityInput {
   hardware?: { platform?: string | null } | null
   embedded?: { platform?: string | null } | null
   scenes?: readonly { origin?: { storeSceneId?: unknown } | null }[] | null
+  // The inputs of isAdminApiOnlyFrame — how (whether) this backend gets a
+  // shell on the frame.
+  mode?: string | null
+  agent?: { agentEnabled?: boolean | null; agentRunCommands?: boolean | null } | null
+  ssh_pass?: string | null
+  ssh_keys?: readonly unknown[] | null
+  buildroot?: { adopted?: boolean | null } | null
 }
 
 /** Whether any installed scene came from the public scene store. */
@@ -438,6 +445,59 @@ const embeddedHardwareHiddenMenuActions: readonly FrameMenuAction[] = [
 ]
 
 /**
+ * A Linux frame this backend reaches only over the frame's own admin HTTP
+ * API: an adopted generic Buildroot card, which ships no FrameOS Remote and
+ * on which this backend holds neither an SSH key nor a password. Mirrors
+ * `frame_has_shell_access()` (backend/app/models/frame.py), inverted — keep
+ * the two in step. Such a frame is managed the way the cloud manages one:
+ * scenes, settings, service keys, assets and fonts go over its API, FrameOS
+ * itself changes through the frame's own signed upgrade, and nothing here
+ * ever installs a shell on it.
+ */
+export function isAdminApiOnlyFrame(frame?: FrameCapabilityInput | null): boolean {
+  if (!frame || (frame.mode ?? 'rpios') !== 'buildroot') {
+    return false
+  }
+  if (frame.agent?.agentEnabled && frame.agent?.agentRunCommands) {
+    return false
+  }
+  if ((frame.ssh_pass ?? '').trim()) {
+    return false
+  }
+  if (frame.ssh_keys && frame.ssh_keys.length > 0) {
+    return false
+  }
+  // A card this backend wrote carries its default key even when the row
+  // lists none; an adopted card carries nothing of ours.
+  return Boolean(frame.buildroot?.adopted)
+}
+
+/**
+ * What an admin-API-only frame HIDES, the cloud way: the surfaces whose
+ * transport is a shell. Ping stays (ICMP and HTTP from the backend host),
+ * and so do reboot and restart (the runtime's own control verbs), the SD
+ * card builder (a new card is how such a frame ever gets a shell again) and
+ * the deploy dialog (its admin-API shape).
+ */
+const adminApiOnlyHiddenPanels: readonly WorkspaceUtilityPanel[] = ['terminal']
+
+const adminApiOnlyHiddenMenuActions: readonly FrameMenuAction[] = ['deployRemote', 'restartRemote', 'stop']
+
+/**
+ * Settings sections nothing can apply on such a frame: FrameOS Remote is
+ * never installed on it, and the reboot cron line is written by a full
+ * deploy over SSH (the Schedule panel's reboot event is the device-side
+ * equivalent). The SSH section stays for its Frame host field, rendered as
+ * that alone (SshSection).
+ */
+const adminApiOnlyHiddenFrameSettingsSections: readonly string[] = ['frame-settings-agent', 'frame-settings-reboot']
+
+/** The admin-API-only gating applies on the backend control plane alone. */
+function hidesForAdminApiOnly(mode: WorkspaceMode, frame?: FrameCapabilityInput | null): boolean {
+  return mode === 'backend' && isAdminApiOnlyFrame(frame)
+}
+
+/**
  * The management verbs this frame's device profile supports. Only the cloud
  * control plane carries the profile distinction: backend- and admin-managed
  * ESP32 frames get their logs, schedule and settings through channels of
@@ -520,6 +580,9 @@ export function frameToolPanelIsAllowed(
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
     return false
   }
+  if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenPanels.includes(panel)) {
+    return false
+  }
   return allows(allowedFrameToolPanels, mode, panel)
 }
 
@@ -541,6 +604,9 @@ export function sceneToolPanelIsAllowed(
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
+    return false
+  }
+  if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenPanels.includes(panel)) {
     return false
   }
   return allows(allowedSceneToolPanels, mode, panel)
@@ -567,6 +633,9 @@ export function frameMenuActionIsAllowed(
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenMenuActions.includes(action)) {
+    return false
+  }
+  if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenMenuActions.includes(action)) {
     return false
   }
   return allows(allowedFrameMenuActions, mode, action)
@@ -665,6 +734,9 @@ export function frameSettingsSectionIsAllowed(
     return false
   }
   if (storeSceneOnlyFrameSettingsSections.includes(sectionId) && !frameHasStoreScene(frame)) {
+    return false
+  }
+  if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenFrameSettingsSections.includes(sectionId)) {
     return false
   }
   return allowedFrameSettingsSections[mode].includes(sectionId)

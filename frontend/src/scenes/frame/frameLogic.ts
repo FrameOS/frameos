@@ -3344,6 +3344,12 @@ export const frameLogic = kea<frameLogicType>([
     deployTransportToggleVisible: [
       (s) => [s.frameForm, s.frame],
       (frameForm: frameLogicValues['frameForm'], frame: frameLogicValues['frame']): boolean => {
+        // No Remote ever runs on a frame this backend reaches only over its
+        // admin API, whatever the row's agent flags say (an adopted card can
+        // carry a secret it never handshakes with).
+        if (frameAdminLoginIsOnlyAccess(frame)) {
+          return false
+        }
         const agent = frameForm?.agent ?? frame?.agent
         return isRemoteDeployConfigured(agent)
       },

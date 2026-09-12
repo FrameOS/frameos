@@ -104,7 +104,11 @@ its PTY verbs everywhere. Left:
   `set_scenes` / `set_settings` / `notify_update_available`, those images
   use the same unprivileged unit and door as generic ones and the Remote
   retires. Meanwhile a frame with no shell at all (an adopted generic card)
-  already deploys that way from the drawer (2026-09-07).
+  already deploys that way from the drawer (2026-09-07), and since
+  2026-09-12 gets its assets, fonts, service keys, scene activation and
+  scene snapshots over the same admin API — "remote lite",
+  `docs/api-triality.md` "Admin-API-only frames" — with the shell-only
+  verbs refused and hidden. Nothing ever installs a Remote on such a card.
 - **Tighten the unit further once hardware says the groups work:**
   `DevicePolicy=closed` with an explicit `DeviceAllow` list, and
   `ProtectKernelTunables` with the two sysfs knobs re-exposed.

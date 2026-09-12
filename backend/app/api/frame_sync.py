@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import copy
 import hashlib
@@ -18,6 +19,7 @@ from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.frame import (
     frame_has_shell_access,  # noqa: F401 — re-exported for app.api.frames
     Frame,
+    cached_app_configs,
     compact_timezone_updater,
     delete_frame,
     new_frame,
@@ -27,9 +29,11 @@ from app.models.frame import (
     refresh_tls_certificate_validity_dates,
     record_successful_deploy,
     server_scheme_for_frame,
+    shipped_frame_settings,
     update_frame,
 )
 from app.models.log import new_log
+from app.models.settings import get_settings_dict
 from app.schemas.frames import FrameAdoptRequest, FrameSyncApplyRequest, FrameUpdateRequest
 from app.tasks.buildroot_image import (
     buildroot_sd_image_config_fingerprint,
@@ -945,20 +949,24 @@ async def _frame_admin_request(
     *,
     path: str,
     method: str = "GET",
-    body: str | None = None,
+    body: bytes | str | None = None,
     headers: dict[str, str] | None = None,
+    timeout: Any = None,
 ) -> tuple[int, bytes, dict[str, str]]:
     """One request against the frame's admin API with the cached session; a
-    401/403 drops the cached cookie, logs in again and retries once."""
+    401/403 drops the cached cookie, logs in again and retries once.
+    `timeout` (an httpx.Timeout) is passed on only when given, so a fetch
+    that takes no such argument — the test doubles — keeps working."""
+    extra: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
     auth_headers = await _frame_admin_session_headers(frame, redis, fetch_frame_http_bytes)
     status, response_body, response_headers = await fetch_frame_http_bytes(
-        frame, redis, path=path, method=method, body=body, headers={**(headers or {}), **auth_headers}
+        frame, redis, path=path, method=method, body=body, headers={**(headers or {}), **auth_headers}, **extra
     )
     if status in (401, 403):
         await _forget_frame_admin_session(frame, redis)
         auth_headers = await _frame_admin_session_headers(frame, redis, fetch_frame_http_bytes, fresh=True)
         status, response_body, response_headers = await fetch_frame_http_bytes(
-            frame, redis, path=path, method=method, body=body, headers={**(headers or {}), **auth_headers}
+            frame, redis, path=path, method=method, body=body, headers={**(headers or {}), **auth_headers}, **extra
         )
     return status, response_body, response_headers
 
@@ -1306,7 +1314,10 @@ async def _push_frame_sync_payload(
     fetch_frame_http_bytes: FrameFetch,
     *,
     reload_runtime: bool,
-) -> None:
+) -> dict[str, Any]:
+    """POST the payload to the frame's canonical config API. Returns the
+    device's answer (its `apply` block says whether the runtime reloads,
+    restarts, or neither)."""
     body = json.dumps(
         {
             **payload,
@@ -1327,6 +1338,11 @@ async def _push_frame_sync_payload(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=f"Frame sync write failed: {status} {_decode_bytes(response_body)}",
         )
+    try:
+        answer = json.loads(response_body) if response_body else {}
+    except ValueError:
+        answer = {}
+    return answer if isinstance(answer, dict) else {}
 
 
 async def _push_frame_sync_metadata(
@@ -1357,20 +1373,116 @@ ADOPT_DEFAULT_BUILDROOT_PLATFORM = "raspberry-pi-64"
 logger = logging.getLogger(__name__)
 
 
-async def push_backend_state_to_device(
+# Keys the sync DIFF leaves alone (they are how the backend reaches the frame,
+# or host-side settings the SSH deploy writes into frame.json wholesale) but
+# the admin-API deploy must still carry, because for such a frame this push
+# is the only way any of them ever reach the device: the viewer access mode
+# and key (the backend's image fetch uses the key), the server API key (the
+# device's log shipper and the backend's control verbs share it), the log
+# file path and the timezone updater (both applied by the runtime itself).
+FRAME_PUSH_EXTRA_KEYS = ("frame_access", "frame_access_key", "server_api_key", "log_to_file", "timezone_updater")
+
+
+def _sync_frame_push_off_value(key: str, value: Any) -> Any:
+    """The explicit "off" form of a key whose sync serializer collapses to
+    None. The serializers exist for the DIFF, where "nothing set" on both
+    sides must compare equal; on a push, leaving the key out tells the device
+    "keep what you have", so clearing the schedule, the GPIO buttons, the
+    reboot cron or the control code never landed. These forms are what the
+    on-device admin page's Save sends for the same edits."""
+    if key == "schedule":
+        return {"events": []}
+    if key == "gpio_buttons":
+        return []
+    if key in ("reboot", "control_code", "mountpoints"):
+        return {"enabled": False}
+    if key == "error_behavior":
+        return normalize_error_behavior(value)
+    if key == "palette":
+        return {}
+    return None
+
+
+# The service-key fields the runtime's POST /api/settings accepts (api.nim
+# frameAdminEditableSettingsFields). Anything else in a settings group has
+# no admin route and can only reach a device through an SSH frame.json write.
+FRAME_ADMIN_EDITABLE_SETTINGS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("frameOS", "apiKey"),
+    ("openAI", "apiKey"),
+    ("homeAssistant", "url"),
+    ("homeAssistant", "accessToken"),
+    ("github", "api_key"),
+    ("immich", "url"),
+    ("immich", "apiKey"),
+    ("unsplash", "accessKey"),
+)
+
+
+def service_settings_push_payload(frame: Frame, db: Session) -> dict[str, dict[str, Any]]:
+    """What `POST /api/settings` on the device should receive so its service
+    keys match what an SSH deploy would have written into frame.json: every
+    editable field of a group the frame's scenes are granted
+    (`shipped_frame_settings`), and a blank for each field of a group the
+    last deploy shipped but this one does not — the owner revoked the grant,
+    or the scene that declared it is gone — so the key leaves the device.
+    Groups the device may hold that this backend never shipped are left
+    alone; the device merges field by field."""
+    shipped = shipped_frame_settings(frame, get_settings_dict(db, project_id=frame.project_id), cached_app_configs())
+    baseline = frame.last_successful_deploy
+    previous: dict[str, Any] = baseline if isinstance(baseline, dict) else {}
+    fingerprints = previous.get("settings_fingerprints")
+    previously_shipped = set(fingerprints.keys()) if isinstance(fingerprints, dict) else set()
+    payload: dict[str, dict[str, Any]] = {}
+    for section, field in FRAME_ADMIN_EDITABLE_SETTINGS_FIELDS:
+        group = shipped.get(section)
+        if isinstance(group, dict) and group.get(field) not in (None, ""):
+            payload.setdefault(section, {})[field] = group[field]
+        elif section in previously_shipped and not (isinstance(group, dict) and group):
+            payload.setdefault(section, {})[field] = ""
+    return payload
+
+
+async def push_service_settings_to_device(
     frame: Frame, db: Session, redis: Redis, fetch_frame_http_bytes: FrameFetch
-) -> dict[str, Any]:
-    """The fast deploy for a frame the backend only reaches over its admin
-    API: everything the device accepts from the backend's record (the sync
-    keys, the scenes, the admin login) in one POST /api/frames/1 with a
-    runtime reload, then the deploy baseline so the drawer reads clean.
-    The device applies it exactly as the local admin page's Save would.
-    Returns the payload that was pushed."""
+) -> dict[str, dict[str, Any]]:
+    """Write the frame's service keys through the device's settings route.
+    Returns what was sent (empty when there was nothing to send)."""
+    payload = service_settings_push_payload(frame, db)
+    if not payload:
+        return payload
+    status, response_body, _headers = await _frame_admin_request(
+        frame,
+        redis,
+        fetch_frame_http_bytes,
+        path="/api/settings",
+        method="POST",
+        body=json.dumps(payload),
+        headers={"Content-Type": "application/json"},
+    )
+    if status != 200:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Frame settings write failed: {status} {_decode_bytes(response_body)}",
+        )
+    return payload
+
+
+def backend_state_push_payload(frame: Frame) -> dict[str, Any]:
+    """The body of the admin-API deploy's `POST /api/frames/1`: the sync keys
+    (explicit "off" forms included), the extra keys only this transport
+    carries, the scenes and the admin login."""
     backend_frame = frame.to_dict()
     payload: dict[str, Any] = {}
     for key in FRAME_SYNC_FRAME_KEYS:
-        value = _sync_frame_value(key, backend_frame.get(key))
-        if value not in (None, "", [], {}):
+        raw = backend_frame.get(key)
+        value = _sync_frame_value(key, raw)
+        if value in (None, "", [], {}):
+            value = _sync_frame_push_off_value(key, raw)
+        if value is not None:
+            payload[key] = value
+    for key in FRAME_PUSH_EXTRA_KEYS:
+        value = _jsonable(backend_frame.get(key))
+        if value not in (None, ""):
             payload[key] = value
     scenes = copy.deepcopy(frame.scenes) if isinstance(frame.scenes, list) else []
     normalize_scenes_execution(scenes)
@@ -1378,11 +1490,113 @@ async def push_backend_state_to_device(
     auth = normalize_frame_admin_auth(frame.frame_admin_auth)
     if auth["enabled"] and auth["user"] and auth["pass"]:
         payload["frame_admin_auth"] = auth
-    await _push_frame_sync_payload(frame, redis, payload, fetch_frame_http_bytes, reload_runtime=True)
+    return payload
+
+
+RUNTIME_RETURN_POLL_SECONDS = 2.0
+RUNTIME_RETURN_TIMEOUT_SECONDS = 60.0
+
+
+async def wait_for_runtime_over_admin_api(
+    frame: Frame,
+    redis: Redis,
+    fetch_frame_http_bytes: FrameFetch,
+    *,
+    timeout: float | None = None,
+    poll: float | None = None,
+) -> bool:
+    """Wait for the runtime to answer its admin ping again after a save that
+    restarted it. Returns whether it came back within `timeout`."""
+    timeout = RUNTIME_RETURN_TIMEOUT_SECONDS if timeout is None else timeout
+    poll = RUNTIME_RETURN_POLL_SECONDS if poll is None else poll
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        try:
+            status, _body, _headers = await _frame_admin_request(
+                frame, redis, fetch_frame_http_bytes, path="/api/frames/1/ping"
+            )
+            if status == 200:
+                return True
+        except Exception:  # noqa: BLE001 - connection refused while it restarts
+            pass
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(poll)
+
+
+async def activate_scene_over_admin_api(
+    frame: Frame,
+    redis: Redis,
+    fetch_frame_http_bytes: FrameFetch,
+    scene_id: str,
+    state: dict[str, Any] | None,
+) -> None:
+    """`setCurrentScene` through the admin event route. Queued behind the
+    save's `reload` in the runner's event queue, so the scenes the push just
+    persisted are what it switches to."""
+    body: dict[str, Any] = {"sceneId": scene_id}
+    if isinstance(state, dict) and state:
+        body["state"] = state
+    status, response_body, _headers = await _frame_admin_request(
+        frame,
+        redis,
+        fetch_frame_http_bytes,
+        path="/api/frames/1/event/setCurrentScene",
+        method="POST",
+        body=json.dumps(body),
+        headers={"Content-Type": "application/json"},
+    )
+    if status != 200:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Frame refused the scene activation: {status} {_decode_bytes(response_body)}",
+        )
+
+
+async def push_backend_state_to_device(
+    frame: Frame,
+    db: Session,
+    redis: Redis,
+    fetch_frame_http_bytes: FrameFetch,
+    *,
+    activate_scene: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The deploy for a frame the backend only reaches over its admin API:
+    the service keys through `POST /api/settings`, then everything else the
+    device accepts from the backend's record (the sync keys, the scenes, the
+    admin login) in one `POST /api/frames/1` with a runtime reload, then the
+    deploy baseline so the drawer reads clean. The device applies it exactly
+    as the local admin page's Save would. With `activate_scene`
+    (`{"sceneId", "state"}`) the scene is switched to once the save has
+    landed — after the runtime is back, when the save restarted it.
+    Returns the payload that was pushed."""
+    settings_payload = await push_service_settings_to_device(frame, db, redis, fetch_frame_http_bytes)
+    payload = backend_state_push_payload(frame)
+    answer = await _push_frame_sync_payload(frame, redis, payload, fetch_frame_http_bytes, reload_runtime=True)
+    apply_block = answer.get("apply")
+    apply: dict[str, Any] = apply_block if isinstance(apply_block, dict) else {}
     _mark_frame_sync_baseline(frame)
     frame.status = "ready"
     await update_frame(db, redis, frame)
     db.refresh(frame)
+    if settings_payload:
+        await new_log(
+            db, redis, frame.id, "stdout",
+            "Service keys written to the frame: " + ", ".join(sorted(settings_payload.keys())),
+        )
+    if activate_scene and activate_scene.get("sceneId"):
+        scene_id = str(activate_scene["sceneId"])
+        if apply.get("runtime") == "restart":
+            await new_log(db, redis, frame.id, "stdout", "The save restarts the runtime; waiting for it before activating the scene")
+            if not await wait_for_runtime_over_admin_api(frame, redis, fetch_frame_http_bytes):
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_GATEWAY,
+                    detail="The runtime did not come back in time; activate the scene once the frame is up",
+                )
+        await activate_scene_over_admin_api(
+            frame, redis, fetch_frame_http_bytes, scene_id, activate_scene.get("state")
+        )
+        await new_log(db, redis, frame.id, "stdout", f"Activated scene {scene_id} on the frame")
     try:
         await _push_frame_sync_metadata(frame, redis, fetch_frame_http_bytes)
     except Exception:  # noqa: BLE001 - best effort, the deploy itself landed

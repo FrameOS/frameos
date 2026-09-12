@@ -237,14 +237,16 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'SSH (backend → frame)',
     anchor: 'frame-settings-ssh',
     surfaces: ['backend'],
-    conditions: 'Embedded frames show only the Frame host field — there is no sshd on a microcontroller.',
+    conditions:
+      'Embedded frames and frames the backend reaches only over their admin API (isAdminApiOnlyFrame) show only the Frame host field — there is no sshd on a microcontroller, and no SSH is ever set up on an adopted card from here.',
   },
   {
     key: 'remote-agent',
     title: 'Remote control',
     anchor: 'frame-settings-agent',
     surfaces: ['backend'],
-    conditions: 'Not on embedded frames.',
+    conditions:
+      'Not on embedded frames, nor on frames the backend reaches only over their admin API (no shell to install the Remote with; the nav link is gated the same way).',
   },
   {
     key: 'backend-access',
@@ -329,7 +331,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-reboot',
     surfaces: ['backend'],
     conditions:
-      'A full host OS only. The cron line is written by a backend full deploy (/etc/cron.d/frameos-reboot); the runtime never reads it, so the on-device page has nothing to apply it with — a scheduled restart/reboot event on the Schedule panel is the device-side equivalent.',
+      'A full host OS only, and not a frame the backend reaches only over its admin API (no full deploy ever writes the cron line there; the nav link is gated the same way). The cron line is written by a backend full deploy (/etc/cron.d/frameos-reboot); the runtime never reads it, so the on-device page has nothing to apply it with — a scheduled restart/reboot event on the Schedule panel is the device-side equivalent.',
   },
   {
     key: 'gpio',

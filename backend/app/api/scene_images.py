@@ -7,6 +7,7 @@ from http import HTTPStatus
 from urllib.parse import urlparse
 
 import httpx
+from arq import ArqRedis as Redis
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
@@ -14,9 +15,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.config import config
 from app.database import get_db
+from app.redis import get_redis
 from app.models.repository import Repository
 from app.models.scene_image import SceneImage            # created earlier
-from app.models.frame import Frame
+from app.models.frame import Frame, frame_has_shell_access
 from app.models.template import Template
 from . import api_open, api_project
 from app.utils.network import assert_target_allowed, is_safe_host
@@ -110,6 +112,7 @@ async def get_scene_image(
     scene_id: str,
     request: Request,
     db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """
     Fetch the latest stored SceneImage.
@@ -159,6 +162,15 @@ async def get_scene_image(
     frame: Frame | None = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found")
+
+    # A frame the backend reaches only over its admin API (an adopted card)
+    # keeps its own scene snapshots on disk; until the frame's next render
+    # posts one here, the stored copy is the only picture there is.
+    pulled = await _pull_scene_image_from_device(db, redis, frame, scene_id)
+    if pulled is not None:
+        if wants_thumb:
+            return StreamingResponse(io.BytesIO(pulled.thumb_image), media_type="image/jpeg", headers=SCENE_IMAGE_CACHE_HEADERS)
+        return StreamingResponse(io.BytesIO(pulled.image), media_type="image/png", headers=SCENE_IMAGE_CACHE_HEADERS)
 
     if frame.width is None or frame.height is None:
         new_width, new_height = 320, 240
@@ -232,6 +244,52 @@ async def _store_scene_image(db: Session, project_id: int, frame_id: int, scene_
     db.commit()
     db.refresh(img_row)
     return img_row
+
+
+# How long a miss on the device is remembered, so a fleet page full of tiles
+# does not ask the frame for the same absent snapshot on every render.
+SCENE_IMAGE_DEVICE_MISS_TTL_SECONDS = 300
+
+
+async def _pull_scene_image_from_device(
+    db: Session, redis: Redis, frame: Frame, scene_id: str
+) -> SceneImage | None:
+    """The snapshot a frame keeps for `scene_id` on its own disk
+    (`GET /api/frames/1/scene_images/{id}` on the runtime), stored here as if
+    the frame had posted it. Only for a frame the backend reaches through its
+    admin API alone — an adopted card, whose earlier renders never reached
+    this backend; a frame the backend deploys to posts every snapshot itself.
+    Best effort: any failure means "no picture yet"."""
+    if frame_has_shell_access(frame) or (frame.mode or "rpios") == "embedded":
+        return None
+    from app.api.frame_sync import _frame_admin_request
+    from app.utils.frame_http import _fetch_frame_http_bytes
+
+    miss_key = f"frame:{frame.id}:scene_image_miss:{scene_id}"
+    try:
+        if await redis.get(miss_key):
+            return None
+    except Exception:  # noqa: BLE001 - the cache is an optimisation
+        pass
+    try:
+        status, body, _headers = await _frame_admin_request(
+            frame,
+            redis,
+            _fetch_frame_http_bytes,
+            path=f"/api/frames/1/scene_images/{scene_id}",
+        )
+    except Exception:  # noqa: BLE001 - unreachable frame, no admin login: no picture
+        status, body = 0, b""
+    if status != 200 or not body:
+        try:
+            await redis.set(miss_key, "1", ex=SCENE_IMAGE_DEVICE_MISS_TTL_SECONDS)
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    try:
+        return await _store_scene_image(db, int(frame.project_id), int(frame.id), scene_id, body)
+    except HTTPException:
+        return None
 
 
 def _frame_or_404(db: Session, project_id: int, frame_id: int) -> Frame:
