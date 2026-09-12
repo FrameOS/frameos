@@ -43,6 +43,12 @@ type Driver* = ref object of frameBuffer.Driver
   mode*: string
   gpioHandle: cint
   panelInitialized: bool
+  # Set by turnOff, cleared by turnOn. While it holds, render still writes
+  # every frame into /dev/fb0 (so turnOn shows the current image, like the
+  # framebuffer driver after fb0/blank) but never wakes the panel: the first
+  # native driver cleared panelInitialized on turnOff instead, and the next
+  # render re-ran the init table, which ends in display-on and backlight high.
+  displayOff: bool
 
 proc log(self: Driver; payload: JsonNode) =
   if not self.isNil and not self.logger.isNil and not self.logger.log.isNil:
@@ -225,7 +231,7 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
   result = setupBootConfig(HyperPixelBootConfigLines)
 
 proc render*(self: Driver, image: Image) =
-  if not self.panelInitialized:
+  if not self.panelInitialized and not self.displayOff:
     try:
       self.initializePanel()
     except Exception as e:
@@ -233,24 +239,31 @@ proc render*(self: Driver, image: Image) =
   frameBuffer.render(self, image)
 
 proc turnOn*(self: Driver) =
+  self.displayOff = false
   try:
+    if not self.panelInitialized:
+      # Never came up (init failed at boot): the sleep-out below would wake
+      # an unconfigured ST7701. Run the whole table instead.
+      self.initializePanel()
+      return
     self.ensureGpio()
     self.sendCommand(0x11'u8)
     delayMs(120)
     self.sendCommand(0x29'u8)
     delayMs(20)
     self.writePin(GpioBacklight, LG_HIGH)
-    self.panelInitialized = true
   except Exception as e:
     self.log(%*{"event": "driver:inkyHyperPixel2r", "error": "Failed to turn display on", "exception": e.msg})
 
 proc turnOff*(self: Driver) =
+  self.displayOff = true
   try:
     self.ensureGpio()
     self.sendCommand(0x28'u8)
     delayMs(20)
     self.sendCommand(0x10'u8)
     self.writePin(GpioBacklight, LG_LOW)
-    self.panelInitialized = false
+    # panelInitialized stays true: sleep-in keeps the ST7701's registers, so
+    # turnOn only needs sleep-out + display-on, and render must not re-init.
   except Exception as e:
     self.log(%*{"event": "driver:inkyHyperPixel2r", "error": "Failed to turn display off", "exception": e.msg})
