@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { extname, join, normalize } from 'path'
 import { expect, test, type Page } from '@playwright/test'
-import { attachFrontendErrorCollector, connectedCloudStatus } from './visual-helpers'
+import { attachFrontendErrorCollector, connectedCloudStatus, connectedFrameCloudStatus } from './visual-helpers'
 
 /**
  * Browser tests for the ON-FRAME admin UI — the web app the frame device
@@ -58,6 +58,7 @@ const frameFixture = {
   scaling_mode: 'contain',
   rotate: 0,
   debug: false,
+  frame_admin_auth: { enabled: true },
   scenes: [
     {
       id: 'scene-dashboard',
@@ -258,6 +259,54 @@ test.describe('on-frame admin UI @e2e', () => {
     await expect(page.getByRole('button', { name: /^Show backups$/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^Restore$/ })).toHaveCount(0)
     await expect(page.getByText('Enabled features')).toHaveCount(0)
+
+    expectNoFrameAdminErrors(readErrors)
+  })
+
+  test('a linked frame says it is not cloud-managed, and offers both switches', async ({ page }) => {
+    const readErrors = attachFrontendErrorCollector(page)
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await serveFrameAdmin(page, { cloudStatus: connectedFrameCloudStatus() })
+
+    await page.goto(`${FRAME_ORIGIN}/admin?tool=settings`, { waitUntil: 'domcontentloaded' })
+
+    // The question the box used to leave unanswered: the link is live, but
+    // nothing on the cloud drives this frame yet.
+    await expect(page.getByText('Linked, not managed')).toBeVisible()
+    await expect(page.getByText(/Nothing on cloud\.frameos\.net can change what this frame shows/)).toBeVisible()
+
+    // Both features are switches, so neither can turn itself on unannounced.
+    await expect(page.getByRole('switch', { name: 'Manage this frame from FrameOS Cloud' })).toBeVisible()
+    await expect(page.getByRole('switch', { name: 'Sign in here with FrameOS Cloud' })).toBeVisible()
+    // The password switch belongs under cloud sign-in, not on its own.
+    await expect(page.getByRole('switch', { name: 'Keep the admin password working' })).toBeVisible()
+    await expect(page.getByText('Local password login')).toHaveCount(0)
+
+    expectNoFrameAdminErrors(readErrors)
+  })
+
+  test('an enrolled frame says the cloud drives it', async ({ page }) => {
+    const readErrors = attachFrontendErrorCollector(page)
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await serveFrameAdmin(page, { cloudStatus: connectedFrameCloudStatus({ managed: true }) })
+
+    await page.goto(`${FRAME_ORIGIN}/admin?tool=settings`, { waitUntil: 'domcontentloaded' })
+    await expect(page.getByText('Managed from the cloud')).toBeVisible()
+    await expect(page.getByText(/This frame answers to cloud\.frameos\.net/)).toBeVisible()
+
+    expectNoFrameAdminErrors(readErrors)
+  })
+
+  test('the settings page carries log out and the frame menu at the top right', async ({ page }) => {
+    const readErrors = attachFrontendErrorCollector(page)
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await serveFrameAdmin(page, { cloudStatus: connectedFrameCloudStatus() })
+
+    await page.goto(`${FRAME_ORIGIN}/admin?tool=settings`, { waitUntil: 'domcontentloaded' })
+    // Next to the first heading the panel draws, not buried in Frame info.
+    const heading = page.locator('.frame-settings-panel').getByText('FrameOS Cloud').first()
+    await expect(heading).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Log out$/ })).toBeVisible()
 
     expectNoFrameAdminErrors(readErrors)
   })

@@ -1207,6 +1207,17 @@ export interface CloudStatus {
   /** Frame admin only: a self-hosted backend controls this frame, so
    * cloud-managed enrollment is unavailable until serverHost is cleared. */
   backend_managed?: boolean
+  /** Frame admin only: the link carries `frame:managed` and no self-hosted
+   * backend is in the way, so the "manage from the cloud" switch can be used. */
+  managed_available?: boolean
+  /** Frame admin only: why the last hand-over to cloud management failed. */
+  managed_enroll_error?: string | null
+  /** Frame admin only: the link carries `auth:login`, so the cloud sign-in
+   * switch can be used. */
+  cloud_login_available?: boolean
+  /** Frame admin only: whether this frame's login page offers the cloud
+   * button right now. Purely local — the grant stays either way. */
+  cloud_login_enabled?: boolean
 }
 
 /** Mirrors GET /api/cloud/login/options (open endpoint for the login/setup screens) */

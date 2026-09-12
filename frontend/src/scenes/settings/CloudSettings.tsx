@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { Form } from 'kea-forms'
 import { PencilSquareIcon } from '@heroicons/react/24/solid'
+import type { ReactNode } from 'react'
 
 import { Box } from '../../components/Box'
 import { Button } from '../../components/Button'
@@ -10,11 +11,13 @@ import { Field } from '../../components/Field'
 import { H6 } from '../../components/H6'
 import { Label } from '../../components/Label'
 import { Spinner } from '../../components/Spinner'
+import { Switch } from '../../components/Switch'
 import { Tag } from '../../components/Tag'
 import { TextInput } from '../../components/TextInput'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { availableCloudFeatures, cloudLogic } from './cloudLogic'
+import type { CloudStatus } from '../../types'
 
 function pollErrorMessage(pollError: string): string {
   switch (pollError) {
@@ -54,10 +57,101 @@ function expiresInLabel(expiresAt: string | null): string | null {
   return `expires in ${Math.ceil(secondsLeft / 60)} min`
 }
 
+/**
+ * What the link actually means, in a sentence, on the frame's own admin page.
+ *
+ * A frame can be linked to a cloud account without being driven by it, and the
+ * box used to say only "Connected" — so approving a link on the phone and then
+ * finding the frame unchanged on cloud.frameos.net looked like a failure. This
+ * row names the two states apart and says what each one gives you.
+ */
+function FrameCloudStatusRow({
+  cloudStatus,
+  providerHost,
+}: {
+  cloudStatus: CloudStatus | null
+  providerHost: string
+}): JSX.Element {
+  const managed = cloudStatus?.mode === 'managed'
+  return (
+    <div className="space-y-1 @md:flex @md:items-start @md:gap-2">
+      <div className="@md:w-1/3 @md:shrink-0">
+        <Label>Cloud status</Label>
+      </div>
+      <div className="w-full space-y-1 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag color={managed ? 'teal' : 'gray'}>{managed ? 'Managed from the cloud' : 'Linked, not managed'}</Tag>
+        </div>
+        <div className="frameos-muted">
+          {managed
+            ? `This frame answers to ${providerHost}: scenes, settings and reboots can come from there, and your cloud scene library is available on this page.`
+            : `Nothing on ${providerHost} can change what this frame shows. The link signs you in and gives this page your cloud scene library; the frame is still driven from here.`}
+        </div>
+        {cloudStatus?.managed_enroll_error ? (
+          <div className="text-red-500">
+            The last attempt to hand this frame to FrameOS Cloud failed: {cloudStatus.managed_enroll_error}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One on/off feature of a live link, with the sentence that says what it does.
+ *
+ * `unavailableReason` replaces the description when the grant behind the
+ * switch is missing: the switch is shown disabled rather than hidden, because
+ * "where did cloud login go" is the question the old box kept raising.
+ */
+function CloudFeatureSwitch({
+  label,
+  description,
+  value,
+  onChange,
+  disabled,
+  busy,
+  nested,
+  unavailableReason,
+  children,
+}: {
+  label: string
+  description: string
+  value: boolean
+  onChange: (value: boolean) => void
+  disabled?: boolean
+  busy?: boolean
+  nested?: boolean
+  unavailableReason?: string
+  children?: ReactNode
+}): JSX.Element {
+  return (
+    <div className={clsx('space-y-1', nested && 'border-l border-slate-500/20 pl-3')}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Switch value={value} onChange={onChange} disabled={disabled || !!unavailableReason} label={label} />
+        {busy ? <Spinner /> : null}
+      </div>
+      <div className={clsx('frameos-muted', unavailableReason && 'text-amber-600 dark:text-amber-400')}>
+        {unavailableReason ?? description}
+      </div>
+      {children && value && !unavailableReason ? <div className="pt-2">{children}</div> : null}
+    </div>
+  )
+}
+
 /** "FrameOS Cloud" settings section. Shared between the backend's global
  * settings page and the on-device frame admin — both servers implement the
  * same /api/cloud/* endpoints (see docs/cloud-link.md). */
-export function CloudSettingsSection({ headingId = 'settings-cloud' }: { headingId?: string }): JSX.Element | null {
+export function CloudSettingsSection({
+  headingId = 'settings-cloud',
+  action,
+}: {
+  headingId?: string
+  /** Rendered at the right of the "FrameOS Cloud" heading. The frame's own
+   * admin panel puts its page actions (log out, the frame menu) there, since
+   * this is the first heading it draws. */
+  action?: ReactNode
+}): JSX.Element | null {
   const {
     cloudStatus,
     cloudStatusLoading,
@@ -80,6 +174,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     backupKeyVisible,
     hasBackupScope,
     anyBackupEnabled,
+    pendingCloudSwitch,
   } = useValues(cloudLogic)
   const {
     connectCloud,
@@ -92,6 +187,8 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     linkCloudIdentity,
     unlinkCloudIdentity,
     setLocalFallback,
+    setCloudManaged,
+    setCloudLoginEnabled,
     setBackupFeature,
     loadCloudBackups,
     backupAllToCloud,
@@ -121,9 +218,12 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 pt-4">
-        <H6 id={headingId}>FrameOS Cloud</H6>
-        {status === 'connected' ? <Tag color="teal">Connected</Tag> : null}
+      <div className="flex flex-wrap items-center gap-3 pt-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <H6 id={headingId}>FrameOS Cloud</H6>
+          {status === 'connected' ? <Tag color="teal">Connected</Tag> : null}
+        </div>
+        {action ? <div className="ml-auto flex shrink-0 items-center gap-2">{action}</div> : null}
       </div>
       <Box className="settings-account-card space-y-4">
         {cloudStatusLoading && !cloudStatus ? (
@@ -143,9 +243,11 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                   onClick={() => {
                     void confirmDialog({
                       title: 'Disconnect from FrameOS Cloud?',
-                      message:
-                        `This backend stops talking to ${providerHost}: cloud backups pause, cloud-managed frames are no longer reachable from your account, and signing in through the cloud stops working. ` +
-                        'Nothing on the frames themselves changes.\n\nYou can connect again at any time.',
+                      message: frameAdminMode
+                        ? `This frame stops talking to ${providerHost}: it drops out of cloud management, your cloud scene library is no longer available here, and signing in with your cloud account stops working. ` +
+                          'The admin password comes back, and the scenes already on the frame keep running.\n\nYou can connect again at any time.'
+                        : `This backend stops talking to ${providerHost}: cloud backups pause, cloud-managed frames are no longer reachable from your account, and signing in through the cloud stops working. ` +
+                          'Nothing on the frames themselves changes.\n\nYou can connect again at any time.',
                       confirmLabel: 'Disconnect',
                       danger: true,
                     }).then((confirmed) => {
@@ -311,7 +413,58 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 </div>
               </div>
             ) : null}
-            {(frameAdminMode || (!inHassioIngress() && cloudStatus?.identity)) && link.scopes.includes('auth:login') ? (
+            {frameAdminMode ? <FrameCloudStatusRow cloudStatus={cloudStatus} providerHost={providerHost} /> : null}
+            {frameAdminMode ? (
+              <div className="space-y-1 @md:flex @md:items-start @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Cloud features</Label>
+                </div>
+                <div className="w-full space-y-4 text-sm">
+                  <CloudFeatureSwitch
+                    label="Manage this frame from FrameOS Cloud"
+                    value={cloudStatus?.mode === 'managed'}
+                    onChange={setCloudManaged}
+                    busy={pendingCloudSwitch === 'managed'}
+                    disabled={pendingCloudSwitch !== null || !cloudStatus?.managed_available}
+                    description={
+                      cloudStatus?.mode === 'managed'
+                        ? `Scenes, settings and reboots can be driven from ${providerHost}, wherever you are. Turn this off and the frame keeps its place in your account but stops taking orders.`
+                        : `Let ${providerHost} set this frame's scenes and settings from anywhere. Without it the frame is yours to drive from this page only.`
+                    }
+                    unavailableReason={
+                      cloudStatus?.managed_available
+                        ? undefined
+                        : cloudStatus?.backend_managed
+                        ? 'A self-hosted FrameOS backend already manages this frame. Clear serverHost in frame.json first.'
+                        : 'This link was never approved for it. Disconnect and connect again to ask for the permission.'
+                    }
+                  />
+                  <CloudFeatureSwitch
+                    label="Sign in here with FrameOS Cloud"
+                    value={cloudStatus?.cloud_login_enabled !== false}
+                    onChange={setCloudLoginEnabled}
+                    busy={pendingCloudSwitch === 'login'}
+                    disabled={pendingCloudSwitch !== null || !cloudStatus?.cloud_login_available}
+                    description={`Put a "Sign in with FrameOS Cloud" button on this frame's login page, for the account that owns the link.`}
+                    unavailableReason={
+                      cloudStatus?.cloud_login_available
+                        ? undefined
+                        : 'This link was never approved for it. Disconnect and connect again to ask for the permission.'
+                    }
+                  >
+                    <CloudFeatureSwitch
+                      nested
+                      label="Keep the admin password working"
+                      value={cloudStatus?.local_fallback_enabled !== false}
+                      onChange={setLocalFallback}
+                      disabled={pendingCloudSwitch !== null}
+                      description="Off means the cloud button is the only way in. The password comes back by itself if the link ever goes away, so this cannot lock you out."
+                    />
+                  </CloudFeatureSwitch>
+                </div>
+              </div>
+            ) : null}
+            {!frameAdminMode && !inHassioIngress() && cloudStatus?.identity && link.scopes.includes('auth:login') ? (
               <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
                 <div className="@md:w-1/3 @md:shrink-0">
                   <Label>Local password login</Label>
@@ -331,9 +484,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                         Disable local passwords
                       </Button>
                       <span className="frameos-muted">
-                        {frameAdminMode
-                          ? 'The cloud link is checked first, and the password comes back by itself if the link ever goes away.'
-                          : 'Requires a verified cloud login by the account that owns this install.'}
+                        Requires a verified cloud login by the account that owns this install.
                       </span>
                     </>
                   )}
@@ -607,8 +758,9 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
               <div className="text-sm text-red-500">{pollErrorMessage(cloudStatus.poll_error)}</div>
             ) : null}
             <div className="frameos-muted text-sm">
-              Connect this backend to a cloud account to optionally enable a few extra features: cloud login, offsite
-              backups of your frames and scenes, etc. Soon also remote access and more.
+              {frameAdminMode
+                ? 'Approving the link hands this frame to your cloud account: it can then be driven from the cloud, and you can sign in here with your cloud account instead of the admin password. Both become switches on this page, so you can turn either one off again without disconnecting.'
+                : 'Connect this backend to a cloud account to optionally enable a few extra features: cloud login, offsite backups of your frames and scenes, etc. Soon also remote access and more.'}
             </div>
           </>
         )}
