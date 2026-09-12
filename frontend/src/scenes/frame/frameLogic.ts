@@ -19,6 +19,7 @@ import { subscriptions } from '../../utils/keaSubscriptions'
 import { restoreDeployedSecrets } from '../../utils/frameSecrets'
 import {
   AppNodeData,
+  NodeData,
   DiagramEdge,
   DiagramNode,
   FrameErrorBehavior,
@@ -2033,7 +2034,7 @@ export interface frameLogicValues {
   frameFormTouched: boolean
   frameFormTouches: Record<string, boolean>
   frameFormValidationErrors: DeepPartialMap<FrameType, ValidationErrorType>
-  frameId: any
+  frameId: FrameId
   frameSyncApplyMode: 'commit' | null
   frameSyncApplying: boolean
   frameSyncChoices: FrameSyncChoices
@@ -2294,9 +2295,9 @@ export interface frameLogicActions {
   updateNodeData: (
     sceneId: string,
     nodeId: string,
-    nodeData: Record<string, any>
+    nodeData: Partial<NodeData>
   ) => {
-    nodeData: Record<string, any>
+    nodeData: Partial<NodeData>
     nodeId: string
     sceneId: string
   }
@@ -2316,8 +2317,8 @@ export interface frameLogicActions {
 export interface frameLogicMeta {
   key: FrameId
   __keaTypeGenInternalSelectorTypes: {
-    frameId: (arg: any) => any
-    frame: (frames: Record<FrameId, FrameType>, frameId: any) => FrameType
+    frameId: (arg: any) => FrameId
+    frame: (frames: Record<FrameId, FrameType>, frameId: FrameId) => FrameType
     mode: (frame: FrameType, frameForm: Partial<FrameType>) => 'buildroot' | 'embedded' | 'rpios'
     scenes: (frame: FrameType, frameForm: Partial<FrameType>) => FrameScene[]
     sortedScenes: (scenes: FrameScene[]) => FrameScene[]
@@ -2412,7 +2413,7 @@ export const frameLogic = kea<frameLogicType>([
     // the scene; the result replaces it in the form (utils/sceneConvert.ts).
     convertSceneToInterpreted: (sceneId: string) => ({ sceneId }),
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
-    updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
+    updateNodeData: (sceneId: string, nodeId: string, nodeData: Partial<NodeData>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
     saveAndDeployFrame: true,
     saveAndFastDeployFrame: true,
@@ -3035,8 +3036,11 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   selectors(() => ({
-    frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
-    frame: [(s) => [s.frames, s.frameId], (frames: frameLogicValues['frames'], frameId) => frames[frameId] || null],
+    frameId: [() => [(_, props) => props.frameId], (frameId: FrameId): FrameId => frameId],
+    frame: [
+      (s) => [s.frames, s.frameId],
+      (frames: frameLogicValues['frames'], frameId: frameLogicValues['frameId']) => frames[frameId] || null,
+    ],
     mode: [
       (s) => [s.frame, s.frameForm],
       (frame: frameLogicValues['frame'], frameForm: frameLogicValues['frameForm']) =>

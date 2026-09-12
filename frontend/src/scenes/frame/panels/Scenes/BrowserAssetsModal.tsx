@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useObjectUrl } from '../../../../utils/objectUrl'
 import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
@@ -79,33 +80,28 @@ function imageMimeType(path: string): string {
   return 'image/jpeg'
 }
 
-// A thumbnail read out of the worker's folder on demand; the blob URL is
-// revoked when the row goes away (or the file changes).
+// A thumbnail read out of the worker's folder on demand; the blob URL lives
+// as long as the row shows that file (useObjectUrl revokes it on change).
 function AssetThumbnail({ frameId, entry }: { frameId: FrameId; entry: PreviewAssetEntry }): JSX.Element {
-  const [url, setUrl] = useState<string | null>(null)
+  const [blob, setBlob] = useState<Blob | null>(null)
   useEffect(() => {
-    let objectUrl: string | null = null
     let cancelled = false
     readPreviewAsset(frameId, entry.path)
       .then((buffer) => {
-        if (cancelled) {
-          return
+        if (!cancelled) {
+          setBlob(new Blob([buffer], { type: imageMimeType(entry.path) }))
         }
-        objectUrl = URL.createObjectURL(new Blob([buffer], { type: imageMimeType(entry.path) }))
-        setUrl(objectUrl)
       })
       .catch(() => {
         if (!cancelled) {
-          setUrl(null)
+          setBlob(null)
         }
       })
     return () => {
       cancelled = true
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl)
-      }
     }
   }, [frameId, entry.path, entry.mtime, entry.size])
+  const url = useObjectUrl(blob)
   return url ? (
     <img src={url} alt="" className="h-12 w-16 shrink-0 rounded-md object-cover" />
   ) : (

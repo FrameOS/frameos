@@ -85,21 +85,47 @@ function isSameLabeledOption(option: unknown, value: string, label: string): boo
   return entry.value === value && entry.label === label && Object.keys(entry).length === 2
 }
 
-/** The options textarea in the field editor: one option per line, `value | Label` when labeled. */
+/**
+ * The options textarea in the field editor: one option per line, `value | Label` when
+ * labeled. A literal `|` in a value or label is written `\|` (and a literal backslash
+ * `\\`), so every option survives the round trip through the textarea.
+ */
 export function selectOptionsToText(options: unknown): string {
   return selectFieldOptions(options)
-    .map(({ value, label }) => (label === value ? value : `${value} | ${label}`))
+    .map(({ value, label }) =>
+      label === value ? escapeOptionText(value) : `${escapeOptionText(value)} | ${escapeOptionText(label)}`
+    )
     .join('\n')
 }
 
 export function selectOptionsFromText(text: string): SelectFieldOption[] {
   return text.split('\n').map((line) => {
-    const separator = line.indexOf('|')
-    if (separator === -1) {
-      return line
+    const [rawValue, rawLabel] = splitOptionLine(line)
+    if (rawLabel === null) {
+      return unescapeOptionText(rawValue)
     }
-    const value = line.slice(0, separator).trim()
-    const label = line.slice(separator + 1).trim()
+    const value = unescapeOptionText(rawValue.trim())
+    const label = unescapeOptionText(rawLabel.trim())
     return label && label !== value ? { value, label } : value
   })
+}
+
+function escapeOptionText(text: string): string {
+  return text.replace(/[\\|]/g, (char) => `\\${char}`)
+}
+
+function unescapeOptionText(text: string): string {
+  return text.replace(/\\([\\|])/g, '$1')
+}
+
+/** Split a textarea line at its first unescaped `|`; the label is null when there is none. */
+function splitOptionLine(line: string): [string, string | null] {
+  for (let index = 0; index < line.length; index++) {
+    if (line[index] === '\\') {
+      index++
+    } else if (line[index] === '|') {
+      return [line.slice(0, index), line.slice(index + 1)]
+    }
+  }
+  return [line, null]
 }

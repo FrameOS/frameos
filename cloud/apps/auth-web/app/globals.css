@@ -2072,9 +2072,20 @@ a.tag-pill:hover {
 }
 
 .live-preview__status {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   min-height: 1.2em;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* The runtime version sits at the right end of the status row, out of the
+   memory-limit controls whose width drags the panel out. */
+.live-preview__runtime {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .live-preview__status--error {

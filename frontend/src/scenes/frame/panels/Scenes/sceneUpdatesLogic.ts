@@ -11,6 +11,7 @@ import {
   sceneUpdateVersion,
 } from '../../../../utils/sceneOrigin'
 import { remapSceneIds } from '../../../../utils/duplicateScenes'
+import { mergeInstalledFieldValues } from '../../../../utils/sceneUpdateFields'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import type { FrameType, RepositoryType } from '../../../../types'
 
@@ -140,12 +141,14 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
         if (!installedId) {
           return
         }
-        // Replace the scene's content but keep its id, name and default flag.
+        // Replace the scene's content but keep its id, name, default flag and
+        // the field values the user set on this copy.
+        const installed = installedScenes.find((s) => s.id === installedId)
         actions.updateScene(installedId, {
           nodes: nextScene.nodes,
           edges: nextScene.edges,
           apps: nextScene.apps,
-          fields: nextScene.fields,
+          fields: mergeInstalledFieldValues(installed?.fields, nextScene.fields),
           customEvents: nextScene.customEvents,
           settings: nextScene.settings,
           origin: sceneOriginForTemplate(repository, template, templateSceneId),

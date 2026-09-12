@@ -3,6 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { sceneSourceLogic } from './sceneSourceLogic'
 import { Spinner } from '../../../../components/Spinner'
 import Editor, { Monaco } from '@monaco-editor/react'
+import type { editor as importedEditor } from 'monaco-editor'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { useEffect, useState } from 'react'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
@@ -30,7 +31,9 @@ export function SceneSource() {
       colors: { 'editor.background': '#f8fafc' },
     })
   }
-  const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, any | null]>([null, null])
+  const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
+    [null, null]
+  )
 
   useEffect(() => {
     if (monaco && editor) {

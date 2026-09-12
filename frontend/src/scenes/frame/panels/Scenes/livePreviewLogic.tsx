@@ -294,9 +294,6 @@ export interface livePreviewLogicActions {
   previewErrored: (message: string) => {
     message: string
   }
-  storedKeysUnavailable: (message: string) => {
-    message: string
-  }
   previewFrame: (
     width: number,
     height: number,
@@ -330,6 +327,9 @@ export interface livePreviewLogicActions {
   }
   setPreviewState: (state: Record<string, any>) => {
     state: Record<string, any>
+  }
+  storedKeysUnavailable: (message: string) => {
+    message: string
   }
   uploadPreviewAssets: (
     folder: string,

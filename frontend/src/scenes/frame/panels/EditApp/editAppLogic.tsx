@@ -38,6 +38,7 @@ import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 import type { FrameScene } from '../../../../types'
 import type { AppConfig, FrameType } from '../../../../types'
 import type { SceneApp } from '../../../../types'
+import type { NodeData } from '../../../../types'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -72,7 +73,7 @@ export interface editAppLogicValues {
   appTypeDeclarations: string
   appUsageCount: number
   changedFiles: Record<string, boolean>
-  configJson: Record<string, any> | null
+  configJson: Partial<AppConfig> | null
   filenames: string[]
   hasChanges: boolean
   hasMultipleAppUsages: boolean
@@ -95,9 +96,9 @@ export interface editAppLogicActions {
   updateNodeData: (
     sceneId: string,
     nodeId: string,
-    nodeData: Record<string, any>
+    nodeData: Partial<NodeData>
   ) => {
-    nodeData: Record<string, any>
+    nodeData: Partial<NodeData>
     nodeId: string
     sceneId: string
   } // frameLogic
@@ -195,14 +196,14 @@ export interface editAppLogicMeta {
       initialSources: Record<string, string>
     ) => boolean
     changedFiles: (sources: Record<string, string>, initialSources: Record<string, string>) => Record<string, boolean>
-    configJson: (sources: Record<string, string>) => Record<string, any> | null
-    appTypeDeclarations: (configJson: Record<string, any> | null) => string
+    configJson: (sources: Record<string, string>) => Partial<AppConfig> | null
+    appTypeDeclarations: (configJson: Partial<AppConfig> | null) => string
     title: (
       savedKeyword: string | null,
       nodeId: string,
       apps: Record<string, AppConfig>,
       sceneApp: SceneApp | null,
-      configJson: Record<string, any> | null
+      configJson: Partial<AppConfig> | null
     ) => string
     modelMarkers: (sourceErrors: Record<string, SourceError[]>) => Record<string, ModelMarker[]>
     filenames: (sources: Record<string, string>) => string[]
@@ -380,9 +381,10 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
     configJson: [
       (s) => [s.sources],
-      (sources: editAppLogicValues['sources']): Record<string, any> | null => {
+      (sources: editAppLogicValues['sources']): Partial<AppConfig> | null => {
         try {
-          return JSON.parse(sources['config.json'])
+          const config: unknown = JSON.parse(sources['config.json'])
+          return config && typeof config === 'object' && !Array.isArray(config) ? (config as Partial<AppConfig>) : null
         } catch (e) {
           return null
         }
@@ -527,11 +529,16 @@ export const editAppLogic = kea<editAppLogicType>([
       actions.setSourceErrors(file, errors ?? [])
     },
     addFile: () => {
-      const fileName = window.prompt('Enter file name (e.g. helper.ts, icons.tsx, data.json)')
-      if (fileName) {
-        actions.updateFile(fileName, '')
-        actions.setActiveFile(fileName)
+      const fileName = window.prompt('Enter file name (e.g. helper.ts, icons.tsx, data.json)')?.trim()
+      if (!fileName) {
+        return
       }
+      // A name that is already taken opens that file instead of replacing
+      // its contents with an empty string.
+      if (!(fileName in values.sources)) {
+        actions.updateFile(fileName, '')
+      }
+      actions.setActiveFile(fileName)
     },
   })),
   afterMount(({ actions, values }) => {

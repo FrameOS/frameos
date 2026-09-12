@@ -5,6 +5,7 @@ import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
 import { apiFetch } from '../../../../utils/apiFetch'
+import { downloadBlob } from '../../../../utils/objectUrl'
 import { embeddedUsbLogsModel } from '../../../../models/embeddedUsbLogsModel'
 
 export interface LogsLogicProps {
@@ -38,17 +39,6 @@ function mergeLogsById(logs: LogType[], extraLogs: LogType[]): LogType[] {
     }
   }
   return merged.slice(-MAX_LOG_LINES)
-}
-
-function downloadBlob(blob: Blob, fileName: string): void {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = fileName
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
 }
 
 function downloadTextFile(content: string, fileName: string): void {

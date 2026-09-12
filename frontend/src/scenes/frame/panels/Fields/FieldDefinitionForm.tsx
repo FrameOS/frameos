@@ -73,7 +73,10 @@ export function FieldDefinitionForm<T extends AppConfigField>({
         <Select options={appConfigFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))} />
       </Field>
       {field.type === 'select' ? (
-        <Field name="options" label='Options (one per line, "value | Label" to show a different label)'>
+        <Field
+          name="options"
+          label='Options (one per line, "value | Label" to show a different label, "\|" for a literal "|")'
+        >
           <TextArea
             value={selectOptionsToText(field.options)}
             rows={3}

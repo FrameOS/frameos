@@ -1,5 +1,5 @@
 import { useActions, useValues } from 'kea'
-import { AppConfigField, AppNodeData, CacheConfig, CodeNodeData, fieldTypes } from '../../../../types'
+import { AppConfigField, AppNodeData, CacheConfig, CodeNodeData, fieldTypes, toFieldType } from '../../../../types'
 import { Select } from '../../../../components/Select'
 import { Label } from '../../../../components/Label'
 import { TextInput } from '../../../../components/TextInput'
@@ -21,14 +21,19 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
     return <div />
   }
   const data = (node.data ?? {}) as CodeNodeData | AppNodeData
-  const setValue = (name: string, value: any): void =>
-    updateNodeData(node.id, { cache: { ...((node.data as AppNodeData).cache ?? {}), [name]: value } })
-  const getValue = (name: string): any =>
-    name in (data.cache || {})
-      ? (data.cache as any)[name]
+  const cache: CacheConfig = data.cache ?? {}
+  const setValue = <K extends keyof CacheConfig>(name: K, value: CacheConfig[K]): void =>
+    updateNodeData(node.id, { cache: { ...cache, [name]: value } })
+  // An app's config.json may carry a default for a cache setting under the
+  // same name; it applies until the node sets its own.
+  const getValue = <K extends keyof CacheConfig>(name: K): CacheConfig[K] | undefined =>
+    name in cache
+      ? cache[name]
       : node.type === 'app'
-      ? configJson?.fields?.filter((c): c is AppConfigField => 'name' in c).find((c) => c.name === name)?.value
-      : null
+      ? (configJson?.fields?.filter((c): c is AppConfigField => 'name' in c).find((c) => c.name === name)?.value as
+          | CacheConfig[K]
+          | undefined)
+      : undefined
 
   return (
     <Tooltip
@@ -97,9 +102,7 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
                       value={getValue('expression')}
                       onChange={(value) => setValue('expression', value.replaceAll('\n', ''))}
                       placeholder={
-                        codeNodeLanguage === 'js'
-                          ? `e.g. new Date().toDateString()`
-                          : `e.g. now().format("yyyy-MM-dd")`
+                        codeNodeLanguage === 'js' ? `e.g. new Date().toDateString()` : `e.g. now().format("yyyy-MM-dd")`
                       }
                       rows={3}
                       className="font-mono"
@@ -109,7 +112,7 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
                     <Label>Return type of expression</Label>
                     <Select
                       value={getValue('expressionType')}
-                      onChange={(value) => setValue('expressionType', value)}
+                      onChange={(value) => setValue('expressionType', toFieldType(value))}
                       options={fieldTypes.map((type) => ({ value: type, label: type }))}
                     />
                   </div>

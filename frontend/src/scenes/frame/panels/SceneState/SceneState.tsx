@@ -47,7 +47,7 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
   const persistedFieldCount = stateFields.filter((field) => field.persist === 'disk').length
   const isInterpreted = sceneExecutionForFrame(scene, frameForm?.mode) === 'interpreted'
 
-  const onDragStart = (event: any, type: 'state', keyword: string, index: number) => {
+  const onDragStart = (event: ReactDragEvent, type: 'state', keyword: string, index: number) => {
     setDraggedField(index)
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
     event.dataTransfer.effectAllowed = 'move'

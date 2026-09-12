@@ -105,10 +105,36 @@ describe("options textarea round-trip", () => {
     expect(selectOptionsFromText("b | b\n c |  Sea ")).toEqual(["b", { value: "c", label: "Sea" }]);
   });
 
-  it("cannot express a label containing `|` (known limitation, 2026-09 review)", () => {
-    // The first `|` is the separator, so the rest of the line is the label:
-    // a label that itself holds a `|` survives a round-trip but a value never can.
+  it("splits at the first unescaped `|` and writes the label's own `|` escaped", () => {
+    // The first `|` is the separator, so the rest of the line is the label;
+    // the canonical text form escapes the `|` the label holds.
     expect(selectOptionsFromText("x | y | z")).toEqual([{ value: "x", label: "y | z" }]);
-    expect(selectOptionsToText(selectOptionsFromText("x | y | z"))).toBe("x | y | z");
+    expect(selectOptionsToText(selectOptionsFromText("x | y | z"))).toBe("x | y \\| z");
+  });
+});
+
+describe("selectOptionsToText / selectOptionsFromText escaping", () => {
+  // The textarea's separator is `|`, so a value or label holding one had no
+  // spelling: "a|b" came back as value "a", label "b" (2026-09 review).
+  it("round-trips a literal | in values and labels", () => {
+    const options = ["a|b", { value: "c", label: "Cee | Dee" }, { value: "x|y", label: "Ex" }];
+    const text = selectOptionsToText(options);
+    expect(text).toBe("a\\|b\nc | Cee \\| Dee\nx\\|y | Ex");
+    expect(selectOptionsFromText(text)).toEqual(options);
+  });
+
+  it("round-trips backslashes, which are the escape character", () => {
+    const options = ["C:\\path", { value: "back\\|slash", label: "Back" }];
+    const text = selectOptionsToText(options);
+    expect(text).toBe("C:\\\\path\nback\\\\\\|slash | Back");
+    expect(selectOptionsFromText(text)).toEqual(options);
+  });
+
+  it("keeps reading the unescaped form people type by hand", () => {
+    expect(selectOptionsFromText("one\ntwo | Two\n\\| alone")).toEqual([
+      "one",
+      { value: "two", label: "Two" },
+      "| alone",
+    ]);
   });
 });

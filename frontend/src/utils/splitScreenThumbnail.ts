@@ -1,6 +1,7 @@
 import type { FrameType, FrameId } from '../types'
 import { getBasePath } from './getBasePath'
 import { projectApiPath } from './projectApi'
+import { withObjectUrl } from './objectUrl'
 import {
   defaultSplitScreenBackground,
   splitLayoutLeafBorderEdges,
@@ -42,14 +43,13 @@ async function fetchSceneImage(frameId: FrameId, sceneId: string): Promise<HTMLI
   }
 
   const blob = await response.blob()
-  const objectUrl = URL.createObjectURL(blob)
-  const image = new Image()
-  return await new Promise<HTMLImageElement | null>((resolve) => {
-    image.onload = () => resolve(image)
-    image.onerror = () => resolve(null)
-    image.src = objectUrl
-  }).finally(() => {
-    URL.revokeObjectURL(objectUrl)
+  return await withObjectUrl(blob, (objectUrl) => {
+    const image = new Image()
+    return new Promise<HTMLImageElement | null>((resolve) => {
+      image.onload = () => resolve(image)
+      image.onerror = () => resolve(null)
+      image.src = objectUrl
+    })
   })
 }
 

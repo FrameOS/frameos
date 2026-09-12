@@ -2,6 +2,7 @@ import { MakeLogicType, actions, connect, kea, key, listeners, path, props, redu
 import { v4 as uuidv4 } from 'uuid'
 
 import equal from 'fast-deep-equal'
+import type { Placement } from '@popperjs/core'
 import {
   AppConfig,
   AppNodeData,
@@ -152,15 +153,15 @@ export interface newNodePickerLogicValues {
   frameForm: Partial<FrameType> // frameLogic
   scenes: FrameScene[] // frameLogic
   allNewNodeOptions: OptionWithType[]
-  frameId: any
+  frameId: FrameId
   fuse: LocalFuse
   newNodeHandleDataType: FieldType | null
   newNodeOptions: OptionWithType[]
   newNodePicker: NewNodePicker | null
   newNodePickerIndex: number
   node: DiagramNode | null
-  placement: string
-  sceneId: any
+  placement: Placement
+  sceneId: string
   searchPlaceholder: string
   searchValue: string
   sortedNewNodeOptions: OptionWithType[]
@@ -249,8 +250,8 @@ export interface newNodePickerLogicActions {
 export interface newNodePickerLogicMeta {
   key: string
   __keaTypeGenInternalSelectorTypes: {
-    frameId: (arg: any) => any
-    sceneId: (arg: any) => any
+    frameId: (arg: any) => FrameId
+    sceneId: (arg: any) => string
     node: (newNodePicker: NewNodePicker | null, nodesById: Record<string, DiagramNode>) => DiagramNode | null
     newNodeHandleDataType: (
       newNodePicker: NewNodePicker | null,
@@ -276,7 +277,7 @@ export interface newNodePickerLogicMeta {
       targetFieldName: string | null,
       newNodeHandleDataType: FieldType | null
     ) => string
-    placement: (newNodePicker: NewNodePicker | null) => string
+    placement: (newNodePicker: NewNodePicker | null) => Placement
   }
 }
 
@@ -372,8 +373,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     ],
   }),
   selectors({
-    frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
-    sceneId: [() => [(_, props) => props.sceneId], (sceneId) => sceneId],
+    frameId: [() => [(_, props) => props.frameId], (frameId: FrameId): FrameId => frameId],
+    sceneId: [() => [(_, props) => props.sceneId], (sceneId: string): string => sceneId],
     node: [
       (s) => [s.newNodePicker, s.nodesById],
       (
@@ -783,9 +784,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     ],
     placement: [
       (s) => [s.newNodePicker],
-      (newNodePicker: newNodePickerLogicValues['newNodePicker']): string => {
+      (newNodePicker: newNodePickerLogicValues['newNodePicker']): Placement => {
         if (!newNodePicker) {
-          return 'New node'
+          return 'bottom-start'
         }
         const { handleId, handleType } = newNodePicker
         if (handleType === 'source') {
@@ -830,7 +831,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         const newNode: DiagramNode = {
           id: uuidv4(),
           position: { x: diagramX, y: diagramY },
-          data: {} as any,
+          data: {},
         }
 
         if (value === 'code') {
@@ -878,7 +879,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       const newNode: DiagramNode = {
         id: uuidv4(),
         position: { x: diagramX, y: diagramY },
-        data: {} as any,
+        data: {},
       }
       let newNodeOutputHandle = 'fieldOutput'
 
@@ -1106,12 +1107,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         let value = ''
         if (node?.type === 'app') {
           const app = values.effectiveApps[(node.data as AppNodeData).keyword]
-          const field: any = app?.fields?.find((f) => 'name' in f && f.name === keyword && 'label' in f)
+          const field = app?.fields?.find((f): f is AppConfigField => 'name' in f && f.name === keyword && 'label' in f)
           if (field?.label) {
-            label = field?.label
+            label = field.label
           }
           if (field?.value) {
-            value = field?.value
+            value = String(field.value)
           }
         }
 
