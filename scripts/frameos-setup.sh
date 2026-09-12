@@ -9,7 +9,7 @@ set -eu
 # wins; the pin is only the fallback for running this script straight from
 # the repo. Keep the marker comment: the route refuses to serve the script
 # without it.
-FRAMEOS_RELEASE_VERSION_DEFAULT="2026.9.12" # __FRAMEOS_RELEASE_VERSION_DEFAULT__
+FRAMEOS_RELEASE_VERSION_DEFAULT="2026.9.13" # __FRAMEOS_RELEASE_VERSION_DEFAULT__
 FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-$FRAMEOS_RELEASE_VERSION_DEFAULT}"
 FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS/frameos/releases/download/}"
 # The FrameOS release signing key (minisign Ed25519, as an RFC 8410 SPKI so
