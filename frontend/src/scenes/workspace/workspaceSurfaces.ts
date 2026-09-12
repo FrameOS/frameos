@@ -335,7 +335,9 @@ export interface FrameCapabilityInput {
   agent?: { agentEnabled?: boolean | null; agentRunCommands?: boolean | null } | null
   ssh_pass?: string | null
   ssh_keys?: readonly unknown[] | null
-  buildroot?: { adopted?: boolean | null } | null
+  // `platform` is listed so a card the backend wrote (platform, no
+  // `adopted`) types as this shape too, not only an adopted one.
+  buildroot?: { adopted?: boolean | null; platform?: string | null } | null
 }
 
 /** Whether any installed scene came from the public scene store. */
