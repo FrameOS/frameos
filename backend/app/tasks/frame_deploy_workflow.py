@@ -236,7 +236,9 @@ def frame_may_still_run_caddy(previous_frameos_version: str | None) -> bool:
     previous = version_tuple(previous_frameos_version)
     if previous is None:
         return True
-    return previous <= version_tuple(LAST_CADDY_FRAMEOS_VERSION)
+    last_caddy = version_tuple(LAST_CADDY_FRAMEOS_VERSION)
+    assert last_caddy is not None
+    return previous <= last_caddy
 
 
 def _is_buildroot_frame(frame: Frame) -> bool:
