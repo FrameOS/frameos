@@ -964,7 +964,7 @@ function ShellLessFrameSection({
       <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
           This backend reaches the frame only through its admin login — the card has no FrameOS Remote and no SSH key or
-          password. Fast deploy pushes scenes and settings over that API and reloads the runtime; there is no full
+          password. Fast deploy sends scenes and settings over that API and reloads the runtime; there is no full
           deploy. FrameOS updates itself: the frame downloads the latest release for its board, verifies the signature
           and installs it through its privileged door.
         </div>
@@ -2415,8 +2415,8 @@ function CloudDeployStatus({
           frame.last_seen_at
             ? `Last seen ${formatSyncTimestamp(
                 frame.last_seen_at
-              )}. Pushes queue on the account and apply when it reconnects.`
-            : 'Pushes queue on the account and apply when it reconnects.'
+              )}. Deploys queue on the account and apply when it reconnects.`
+            : 'Deploys queue on the account and apply when it reconnects.'
         }
         tone="warn"
       />
@@ -2587,10 +2587,10 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
       <DrawerHeading>Scenes &amp; settings</DrawerHeading>
       <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Saves this frame's settings and scenes to your cloud account, then pushes the scene list to the device.{' '}
+          Saves this frame's settings and scenes to your cloud account, then deploys the scene list to the device.{' '}
           {offline
             ? checkin?.kind === 'sleeping'
-              ? `The frame is asleep — the push is queued and applied when it wakes ${formatFrameRelativeFuture(
+              ? `The frame is asleep — the deploy is queued and applied when it wakes ${formatFrameRelativeFuture(
                   checkin.wakeAt,
                   Date.now(),
                   checkin.announced ? '' : '~'
@@ -2598,14 +2598,14 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
               : checkin?.kind === 'overdue'
               ? `The frame is overdue (expected back ${formatFrameRelativeTime(
                   checkin.wakeAt
-                )}) — the push is queued until it reconnects.`
-              : 'The frame is offline right now — the push is queued and applied when it reconnects.'
+                )}) — the deploy is queued until it reconnects.`
+              : 'The frame is offline right now — the deploy is queued and applied when it reconnects.'
             : 'The frame applies them as soon as it syncs.'}
         </div>
         <SummaryRows
           items={[
             {
-              label: 'This push sends',
+              label: 'This deploy sends',
               value:
                 unsavedChangeDetails.length === 0
                   ? 'No unsaved changes — this re-sends the current scenes'
@@ -2615,7 +2615,7 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
         />
         <button
           type="button"
-          title="Save this frame's settings and push its scenes to the device"
+          title="Save this frame's settings and deploy its scenes to the device"
           onClick={() => {
             saveAndDeployFrame()
             onPushed()
@@ -2626,7 +2626,7 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
           )}
         >
           <CloudArrowUpIcon className="h-4 w-4" />
-          Push scenes &amp; settings
+          Deploy scenes &amp; settings
         </button>
       </div>
     </section>
@@ -2721,7 +2721,7 @@ function CloudOtaDeployView({
                 {/* Constant label: the checkbox below says whether scenes ride
                     along, so a button that renamed itself to "Update
                     everything" only made the two disagree about what it does. */}
-                Upgrade firmware
+                Update firmware
               </button>
               {/* Nothing to resend when the device already acked everything:
                   a tick that sends nothing only invites the question of why
@@ -2801,28 +2801,28 @@ function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
 
   return (
     <section className="space-y-2">
-      <DrawerHeading>Push scenes &amp; settings</DrawerHeading>
+      <DrawerHeading>Scenes over USB</DrawerHeading>
       <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
           Copies the workspace's current scenes onto the board over the cable, so it can render them with no network at
-          all. Settings stay cloud-delivered: the frame picks them up — and confirms the scene push — the next time it
+          all. Settings stay cloud-delivered: the frame picks them up — and confirms the scenes — the next time it
           connects.
         </div>
         {!usbConnected ? (
           <div className="flex flex-wrap items-center gap-3">
             <EmbeddedUsbConnectionButton frame={frame} />
-            <span className="frame-tool-muted text-xs leading-4">Connect the board over USB to push scenes.</span>
+            <span className="frame-tool-muted text-xs leading-4">Connect the board over USB to deploy scenes.</span>
           </div>
         ) : (
           <button
             type="button"
             onClick={pushScenes}
             disabled={busy || scenes.length === 0}
-            title={scenes.length === 0 ? 'This frame has no scenes to push' : 'Send the current scenes over USB'}
+            title={scenes.length === 0 ? 'This frame has no scenes to deploy' : 'Send the current scenes over USB'}
             className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >
             {busy ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
-            {busy ? 'Pushing scenes' : 'Push scenes over USB'}
+            {busy ? 'Deploying scenes' : 'Deploy scenes over USB'}
           </button>
         )}
         {message ? <div className="text-xs font-semibold text-green-600">{message}</div> : null}
@@ -3153,7 +3153,7 @@ function CloudPiUpdateCard({
         >
           <CloudArrowDownIcon className="h-4 w-4" />
           {/* Constant label — the checkbox above owns "and the scenes too". */}
-          Upgrade FrameOS
+          Update FrameOS
         </button>
       </div>
     </section>
@@ -3243,13 +3243,13 @@ function CloudDeploySection({
           <CloudDeployChoiceButton
             icon={<CloudArrowUpIcon className="h-6 w-6" />}
             title="Over the air"
-            description="Use the frame's own cloud connection: push scenes and settings, or start a firmware update. Nothing to plug in."
+            description="Use the frame's own cloud connection: deploy scenes and settings, or update the firmware. Nothing to plug in."
             onClick={() => onSelectView('cloudOta')}
           />
           <CloudDeployChoiceButton
             icon={<CpuChipIcon className="h-6 w-6" />}
             title="Over USB"
-            description="For a board plugged into this computer: update its firmware, push scenes over the cable, or fix Wi-Fi credentials. Works with no network."
+            description="For a board plugged into this computer: update its firmware, deploy scenes over the cable, or fix Wi-Fi credentials. Works with no network."
             onClick={() => onSelectView('cloudUsb')}
           />
         </section>
@@ -3724,7 +3724,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 type="button"
                 title={
                   frameAdminLoginIsOnlyAccess(frame)
-                    ? "Pushes scenes and settings over the frame's admin API and reloads the runtime"
+                    ? "Sends scenes and settings over the frame's admin API and reloads the runtime"
                     : undefined
                 }
                 onClick={() => closeAndRun(saveAndFastDeployFrame)}
@@ -3738,11 +3738,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {(!isEmbeddedFrame || embeddedFullDeploySupported) && !frameAdminLoginIsOnlyAccess(frame) ? (
                 <button
                   type="button"
-                  title={
-                    isEmbeddedFrame
-                      ? 'Install the latest FrameOS release over the air (OTA), then push the scenes'
-                      : undefined
-                  }
+                  title={isEmbeddedFrame ? 'Update FrameOS over the air (OTA), then deploy the scenes' : undefined}
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
                   className={clsx(
                     'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',

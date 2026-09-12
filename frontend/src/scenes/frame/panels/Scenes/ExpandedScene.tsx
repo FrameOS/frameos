@@ -72,9 +72,11 @@ export function ExpandedScene({
     frameAdminMode && sceneHasChanges
       ? 'Save & activate scene'
       : sceneIsUndeployed && sceneId !== currentSceneId
-      ? 'Save changes & redeploy'
+      ? sceneIsUnsaved
+        ? 'Save, deploy & activate'
+        : 'Deploy & activate'
       : sceneId === currentSceneId
-      ? 'Update active scene'
+      ? 'Apply to active scene'
       : 'Activate scene'
 
   const buildNextState = (): Record<string, any> => {

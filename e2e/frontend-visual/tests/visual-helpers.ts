@@ -631,3 +631,49 @@ export async function addTemporaryWeatherNode(
     await page.request.post(framePath, { data: { scenes: originalScenes } })
   }
 }
+
+/** A POST /api/frames/{id}/deploy_plan body for a Raspberry Pi OS frame that
+ * can take either a fast or a full deploy: what the deploy drawer needs to
+ * show both buttons. */
+export function backendDeployPlan(frameId: number): Record<string, unknown> {
+  return {
+    mode: 'combined',
+    frame_id: frameId,
+    frame_name: `E2E frame ${frameId}`,
+    build_id: `e2e-${frameId}`,
+    previous_frameos_version: null,
+    notes: [],
+    fast_deploy: {
+      reload_supported: true,
+      tls_settings_changed: false,
+      action: 'reload',
+    },
+    full_deploy: {
+      target: {
+        arch: 'aarch64',
+        distro: 'Raspberry Pi OS',
+        version: '12',
+        total_memory_mb: 1024,
+      },
+      low_memory: false,
+      drivers: ['web_only'],
+      binary: {
+        requested_compilation_mode: 'precompiled',
+        compilation_mode: 'static',
+        will_attempt_cross_compile: false,
+        will_attempt_precompiled: true,
+        cross_compile_supported: true,
+        build_host_configured: false,
+        prebuilt_target: 'linux-arm64',
+        has_prebuilt_entry: true,
+        precompiled_release_url: null,
+        precompiled_skip_reason: null,
+      },
+      packages: [],
+      package_alternatives: [],
+      quickjs: { required_if_remote_build: false, dirname: null, installed: true },
+      ssh_keys_need_install: false,
+      post_deploy: { final_action: 'restart_frameos' },
+    },
+  }
+}
