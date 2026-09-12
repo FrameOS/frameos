@@ -535,10 +535,68 @@ proc persistFrameApiUpdate*(payload: JsonNode) =
       persistScenesPayload(payload["scenes"])
     writeTextFileAtomically(configPath, pretty(nextConfig, indent = 4) & "\n")
 
+type
+  FrameConfigChange* = object
+    ## What a settings save changes about the runtime-visible config, decided
+    ## by comparing frame.json before and after the SAME merge the persist
+    ## runs — never by a hand-kept key list that drifts the moment the merge
+    ## learns a new field. Each flag names something the save has to do
+    ## beyond writing the file; the route and settings_apply.nim act on them.
+    any*: bool       ## anything differs: the runtime reloads its config
+    listeners*: bool ## framePort / bindHost / httpsProxy: the sockets change
+    restart*: bool   ## a value a driver copies at init: the process must come back up
+    device*: bool    ## the display driver itself: driver setup first
+    timezone*: bool  ## timeZone: /etc/localtime has to follow
+    mounts*: bool    ## mountpoints: /etc/fstab and mount -a
+
+# framePort and bindHost decide the plain listener; httpsProxy (enable, port,
+# exposeOnlyPort, the certificate and key) the TLS one — server/listeners.nim.
+const frameConfigListenerKeys = ["framePort", "bindHost", "httpsProxy"]
+# The display drivers copy these into their own context at init
+# (drivers/drivers.nim) and the boot sequence reads the network block once
+# (network check, hotspot mode, Wi-Fi country): a reload cannot apply them.
+# Same rule the cloud's set_settings uses (CLOUD_SETTINGS_RESTART_KEYS),
+# extended to the keys the cloud cannot push at all.
+const frameConfigRestartKeys = ["device", "deviceConfig", "gpioButtons", "palette", "width", "height", "network"]
+
+proc runtimeVisibleConfig(node: JsonNode): JsonNode =
+  ## frameApi is sync BOOKKEEPING, not runtime config: an echo of the last
+  ## payload plus a frame_sync revision the merge freshly stamps on every
+  ## call. Comparing it would make every redelivery read as a change.
+  result = if node != nil and node.kind == JObject: copy(node) else: %*{}
+  if result.hasKey("frameApi"):
+    result.delete("frameApi")
+
+proc classifyFrameConfigChange*(existing, next: JsonNode): FrameConfigChange =
+  let before = runtimeVisibleConfig(existing)
+  let after = runtimeVisibleConfig(next)
+  result.any = before != after
+  if not result.any:
+    return
+  proc differs(key: string): bool =
+    before{key} != after{key}
+  for key in frameConfigListenerKeys:
+    if differs(key):
+      result.listeners = true
+  for key in frameConfigRestartKeys:
+    if differs(key):
+      result.restart = true
+  result.device = differs("device")
+  result.timezone = differs("timeZone")
+  result.mounts = differs("mountpoints")
+
+proc previewFrameApiUpdate*(payload: JsonNode): tuple[existing: JsonNode, next: JsonNode, change: FrameConfigChange] =
+  ## What persistFrameApiUpdate would write, and how it differs from what is
+  ## stored — without writing. The route binds new listeners from `next`
+  ## before it persists, so a value the frame cannot serve on never lands
+  ## in frame.json.
+  withLock frameConfigWriteLock:
+    let existing = loadConfigJson()
+    let next = frontendFramePayloadToRuntimeConfig(payload, existing)
+    result = (existing, next, classifyFrameConfigChange(existing, next))
+
 proc frameApiUpdateChangesConfig*(payload: JsonNode): bool =
-  ## Would persistFrameApiUpdate write anything different? Decided by running
-  ## the SAME merge it runs and comparing — never by a hand-kept key mapping
-  ## that would drift the moment the merge learns a new field.
+  ## Would persistFrameApiUpdate write anything different?
   ##
   ## The cloud client uses this to skip the reload on an idempotent
   ## `set_settings`: every "Upgrade FrameOS / push scenes" click delivers the
@@ -551,23 +609,7 @@ proc frameApiUpdateChangesConfig*(payload: JsonNode): bool =
   # Scenes ride their own persistence and are never a no-op to skip here.
   if payload.hasKey("scenes"):
     return true
-  withLock frameConfigWriteLock:
-    let existing = loadConfigJson()
-    let next = frontendFramePayloadToRuntimeConfig(payload, existing)
-    # frameApi is sync BOOKKEEPING, not runtime config: an echo of the last
-    # payload plus a frame_sync revision the merge freshly stamps on every
-    # call. Comparing it would make every redelivery read as a change and
-    # this probe could never answer "no" — so the runtime-visible config is
-    # what gets compared, and a difference confined to the bookkeeping is
-    # not a reason to reload the runtime.
-    var comparableNext = copy(next)
-    if comparableNext.kind == JObject and comparableNext.hasKey("frameApi"):
-      comparableNext.delete("frameApi")
-    var comparableExisting =
-      if existing != nil and existing.kind == JObject: copy(existing) else: %*{}
-    if comparableExisting.hasKey("frameApi"):
-      comparableExisting.delete("frameApi")
-    result = comparableNext != comparableExisting
+  previewFrameApiUpdate(payload).change.any
 
 proc localNetworkAccessPayload*(): JsonNode =
   let enabled = globalFrameConfig != nil and globalFrameConfig.network != nil and

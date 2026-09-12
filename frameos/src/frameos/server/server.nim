@@ -14,6 +14,7 @@ import ./auth
 import ./routes
 import ./workers
 import ./listeners
+import ./listener_control
 export workers.httpWorkerThreads
 export listeners
 
@@ -133,10 +134,12 @@ proc newServer*(frameOS: FrameOS): types.Server =
     connectionsState: connectionsState,
   )
 
-proc addTlsListener(self: types.Server, spec: ListenerSpec): bool =
-  ## The HTTPS listener is best effort: a certificate the runtime cannot
-  ## load or a port it cannot bind is logged and the frame stays reachable
-  ## over plain HTTP, exactly as when the Caddy proxy failed to start.
+proc addTlsListener(self: types.Server, spec: ListenerSpec): Listener =
+  ## The HTTPS listener is best effort at start-up: a certificate the runtime
+  ## cannot load or a port it cannot bind is logged and the frame stays
+  ## reachable over plain HTTP, exactly as when the Caddy proxy failed to
+  ## start. (A settings save is stricter — listener_control.nim refuses the
+  ## save instead.) Returns the listener, nil when HTTPS stayed off.
   when defined(ssl):
     var tls: TlsConfig
     try:
@@ -147,9 +150,9 @@ proc addTlsListener(self: types.Server, spec: ListenerSpec): bool =
         "message": "Could not load the frame's TLS certificate or key, HTTPS stays off",
         "error": e.msg,
       })
-      return false
+      return nil
     try:
-      discard self.mummy.addListener(Port(spec.port), spec.address, tls)
+      result = self.mummy.addListener(Port(spec.port), spec.address, tls)
     except MummyError as e:
       log(%*{
         "event": "tls:start_error",
@@ -158,21 +161,20 @@ proc addTlsListener(self: types.Server, spec: ListenerSpec): bool =
         "port": spec.port,
         "address": spec.address,
       })
-      return false
+      return nil
     log(%*{
       "event": "tls:start",
       "message": "Serving HTTPS",
       "port": spec.port,
       "address": spec.address,
     })
-    true
   else:
     log(%*{
       "event": "tls:start_error",
       "message": "This build has no OpenSSL support, HTTPS stays off",
       "port": spec.port,
     })
-    false
+    nil
 
 proc startServer*(self: types.Server) =
   let specs = planListeners(self.frameConfig)
@@ -192,11 +194,17 @@ proc startServer*(self: types.Server) =
       "message": "No TLS certificate provided, can't enable HTTPS",
     })
 
+  # A settings save may rebind these later (listener_control.nim); it needs
+  # the handles to know what is already open.
+  registerControlledServer(self.mummy)
   for spec in specs:
     if spec.tls:
-      discard self.addTlsListener(spec)
+      let listener = self.addTlsListener(spec)
+      if listener != nil:
+        registerActiveListener(spec, listener,
+          self.frameConfig.httpsProxy.serverCert, self.frameConfig.httpsProxy.serverKey)
     else:
       # The plain listener is not optional: failing to bind it is fatal, as
       # it always was, and systemd restarts the runtime.
-      discard self.mummy.addListener(Port(spec.port), spec.address)
+      registerActiveListener(spec, self.mummy.addListener(Port(spec.port), spec.address))
   self.mummy.serve()

@@ -38,6 +38,7 @@ import {
 } from './workspaceLogic'
 import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
+import { isFollowingFrameOrigin } from '../frame/frameAdminApply'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { terminalLogic } from '../frame/panels/Terminal/terminalLogic'
 import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsLogic'
@@ -1385,6 +1386,11 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
       return
     }
     const warn = (event: BeforeUnloadEvent): string => {
+      // A save that moved the frame to a new port or scheme unloads the
+      // page on purpose, before the reloaded frame has caught the form up.
+      if (isFollowingFrameOrigin()) {
+        return ''
+      }
       event.preventDefault()
       event.returnValue = ''
       return ''

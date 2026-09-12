@@ -176,12 +176,17 @@ export function MountpointsSection(): JSX.Element | null {
     frameForm,
     frameFormTouches,
     isEmbeddedMode,
+    isBuildrootMode,
     mountpointItems,
     addMountpoint,
     removeMountpoint,
     touchFrameFormField,
   } = useFrameSettings()
-  if (isEmbeddedMode) {
+  // Samba mounts are a `frameos setup` step that needs apt (cifs-utils) and
+  // a writable /etc/fstab: Raspberry Pi OS only. The Buildroot images have
+  // neither and setup skips the step there, so the form would save
+  // mountpoints that never mount.
+  if (isEmbeddedMode || isBuildrootMode) {
     return null
   }
   return (

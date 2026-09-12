@@ -60,6 +60,13 @@ import { longRunningTasksModel } from '../../models/longRunningTasksModel'
 import { assignSceneImages, reportSceneImageFailure, type SceneImageSource } from '../../utils/sceneImages'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import {
+  describeFrameSaveApply,
+  followFrameOrigin,
+  frameOriginAfterApply,
+  parseFrameSaveApply,
+  type FrameSaveApply,
+} from './frameAdminApply'
 import { secureToken } from '../../utils/secureToken'
 import { generateFrameTlsMaterial } from '../../utils/tlsCertificates'
 import { normalizeSceneApps } from '../../utils/sceneApps'
@@ -1911,7 +1918,11 @@ function cloudScenePersistOptions(frameId: FrameId, fallbackFrame: Partial<Frame
   }
 }
 
-async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAction: FrameNextAction): Promise<void> {
+async function saveFrameForm(
+  frame: Partial<FrameType>,
+  frameId: FrameId,
+  nextAction: FrameNextAction
+): Promise<FrameSaveApply | null> {
   const normalizedFrame = normalizeFrameForSubmit(frame)
   if (isCloudMode()) {
     // Cloud frames have no POST /api/frames/{id} — the control plane only
@@ -1948,21 +1959,35 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAc
     } else if (!settingsPushed && !schedulePushed) {
       throw new Error('Nothing in these settings can be pushed to a cloud-managed frame')
     }
-    return
+    return null
   }
   const json = buildDeployPlanRequestBody(normalizedFrame, frameSubmitKeys(normalizedFrame))
   if (nextAction) {
     json['next_action'] = nextAction
-  } else if (isInFrameAdminMode()) {
-    json['skip_runtime_reload'] = true
   }
+  // On the device, Save is the deploy: the frame rebinds its listeners,
+  // reloads or restarts, and queues the system steps (frameAdminApply.ts).
+  // It used to send `skip_runtime_reload`, which left every setting in
+  // frame.json until someone clicked "Reload runtime" — and a port or HTTPS
+  // change had no effect at all.
   const response = await apiFetch(`/api/frames/${frameId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(json),
   })
   if (!response.ok) {
-    throw new Error('Failed to update frame')
+    let detail = ''
+    try {
+      detail = String((await response.json())?.detail ?? '')
+    } catch {
+      detail = ''
+    }
+    throw new Error(detail || 'Failed to update frame')
+  }
+  try {
+    return parseFrameSaveApply(await response.json())
+  } catch {
+    return null
   }
 }
 
@@ -2537,7 +2562,7 @@ export const frameLogic = kea<frameLogicType>([
     applyFrameSyncSuccess: (sync: FrameSyncStatus | null) => ({ sync }),
     applyFrameSyncFailure: (error: string) => ({ error }),
   }),
-  forms(({ values }) => ({
+  forms(({ values, cache }) => ({
     frameForm: {
       options: {
         showErrorsOnTouch: true,
@@ -2586,13 +2611,24 @@ export const frameLogic = kea<frameLogicType>([
         // A throw is left to submitFrameFormFailure below, which fails this
         // very task with the reason — it is the one place that knows how to
         // word it.
-        await saveFrameForm(frame, values.frameId, values.nextAction)
+        const apply = await saveFrameForm(frame, values.frameId, values.nextAction)
+        // The on-device page may have just moved the frame from under
+        // itself (new port, HTTPS on or off): follow it, path and all. The
+        // device already bound the new socket, so there is nothing to probe.
+        const movingTo =
+          apply && apply.listeners_changed && isInFrameAdminMode()
+            ? frameOriginAfterApply(window.location, apply.listeners)
+            : null
+        cache.frameSaveApply = apply
         longRunningTasksModel.actions.finishTask({
           frameId: values.frameId,
           kind: 'save',
           status: 'success',
-          detail: 'Saved',
+          detail: describeFrameSaveApply(apply, movingTo),
         })
+        if (movingTo) {
+          followFrameOrigin(movingTo)
+        }
       },
     },
   })),
@@ -3363,7 +3399,7 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
   })),
-  listeners(({ asyncActions, actions, values, props }) => {
+  listeners(({ asyncActions, actions, values, props, cache }) => {
     // Adds the templates' scenes to the frame form without saving; the user
     // reviews and saves/deploys the change through the normal flow.
     const appendTemplates = async (
@@ -3495,6 +3531,13 @@ export const frameLogic = kea<frameLogicType>([
     return {
       saveFrame: () => actions.submitFrameForm(),
       submitFrameFormSuccess: () => {
+        const apply: FrameSaveApply | null = cache.frameSaveApply ?? null
+        cache.frameSaveApply = null
+        // A restarting runtime answers nothing for a few seconds; the socket
+        // reconnect reloads every frame once it is back (framesModel).
+        if (apply?.runtime === 'restart' && isInFrameAdminMode()) {
+          return
+        }
         framesModel.actions.loadFrame(props.frameId)
       },
       submitFrameFormFailure: ({ error }) => {

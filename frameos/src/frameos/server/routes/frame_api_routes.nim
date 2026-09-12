@@ -12,6 +12,8 @@ import frameos/scenes
 import ../state
 import ../auth
 import ../api
+import ../listener_control
+import ../settings_apply
 import ./admin_api_assets_routes
 import ./common
 
@@ -288,19 +290,58 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
           jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
           return
       try:
+        # A save applies, it does not just write frame.json: the sockets are
+        # rebound first (and a port or certificate the frame cannot serve on
+        # refuses the whole save), then the file is written, then the
+        # runtime reloads — or restarts, for values a driver only reads at
+        # init — and the system steps `frameos setup` would run (time zone,
+        # Samba mounts, driver setup) are queued on their own thread. The
+        # response says what happened under `apply`, which is how the admin
+        # page knows to follow the frame to a new port or scheme.
+        let preview = previewFrameApiUpdate(payload)
+        var listenerResult = ListenerApplyResult(ok: true, listeners: activeListenerSpecs())
+        if preview.change.listeners:
+          listenerResult = applyListenerPlan(parseFrameConfig($preview.next))
+          if not listenerResult.ok:
+            log(%*{"event": "frame:update:listeners:error", "error": listenerResult.error})
+            jsonResponse(request, Http409, %*{"detail": listenerResult.error,
+              "apply": {"listeners": listenerSpecsJson(listenerResult.listeners)}})
+            return
         persistFrameApiUpdate(payload)
         let skipRuntimeReload = payload{"skip_runtime_reload"}.getBool(false)
-        if not skipRuntimeReload:
+        let jobs = settingsJobsFor(preview.change, preview.next{"mode"}.getStr(""))
+        var runtimeAction = "none"
+        if payload.hasKey("scenes") or preview.change.any:
+          if preview.change.restart:
+            runtimeAction = "restart"
+          elif not skipRuntimeReload:
+            runtimeAction = "reload"
+        if runtimeAction == "restart":
+          # Driver setup restarts the runtime itself once it is done (it may
+          # even reboot); a restart queued here would race it.
+          if sjDriverSetup notin jobs:
+            sendEvent("restart", %*{})
+        elif runtimeAction == "reload":
           sendEvent("reload", %*{})
+        queueSettingsJobs(jobs, $preview.next)
         let nextAction = payload{"next_action"}.getStr("")
-        if nextAction == "render":
+        if nextAction == "render" and runtimeAction != "restart":
           sendEvent("render", %*{})
         let framePayload = frameApiPayload(connectionsState, exposeSecrets = canAccessFrameSecrets(request))
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = "application/json"
         if adminPanelEnabled():
           headers["Set-Cookie"] = adminSessionCookieHeader(request, createAdminSession())
-        request.respond(Http200, headers, $(%*{"message": "Frame updated successfully", "frame": framePayload}))
+        request.respond(Http200, headers, $(%*{
+          "message": "Frame updated successfully",
+          "frame": framePayload,
+          "apply": {
+            "runtime": runtimeAction,
+            "listeners": listenerSpecsJson(listenerResult.listeners),
+            "listeners_changed": listenerResult.changed,
+            "system": settingsJobNames(jobs),
+          },
+        }))
       except CatchableError as e:
         respondInternalError(request, "frame:update:error", e, "Failed to update the frame")
   )

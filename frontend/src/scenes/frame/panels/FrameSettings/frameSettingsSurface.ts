@@ -284,7 +284,8 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'Mountpoints',
     anchor: 'frame-settings-mountpoints',
     surfaces: ['backend', 'frameAdmin'],
-    conditions: 'A full host OS only: a microcontroller has nothing to mount.',
+    conditions:
+      'Raspberry Pi OS only: a microcontroller has nothing to mount, and the Buildroot images ship no cifs-utils and no writable /etc/fstab (`frameos setup` skips the step there too).',
   },
   {
     key: 'defaults',
@@ -329,8 +330,9 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     key: 'reboot',
     title: 'Reboot',
     anchor: 'frame-settings-reboot',
-    surfaces: ['backend', 'frameAdmin'],
-    conditions: 'A full host OS only.',
+    surfaces: ['backend'],
+    conditions:
+      'A full host OS only. The cron line is written by a backend full deploy (/etc/cron.d/frameos-reboot); the runtime never reads it, so the on-device page has nothing to apply it with — a scheduled restart/reboot event on the Schedule panel is the device-side equivalent.',
   },
   {
     key: 'gpio',
