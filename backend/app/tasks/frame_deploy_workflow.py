@@ -860,14 +860,6 @@ class FrameDeployWorkflow:
                     await self._plan_package("python3-venv", "inkyPython vendor setup"),
                 ]
             )
-        if not is_buildroot and drivers.get("inkyHyperPixel2rLegacyFb"):
-            package_plans.extend(
-                [
-                    await self._plan_package("python3-dev", "inkyHyperPixel2r legacy vendor setup"),
-                    await self._plan_package("python3-pip", "inkyHyperPixel2r legacy vendor setup"),
-                    await self._plan_package("python3-venv", "inkyHyperPixel2r legacy vendor setup"),
-                ]
-            )
 
         vendor_sync_plans: list[VendorSyncPlan] = []
         if inky_python := drivers.get("inkyPython"):
@@ -876,15 +868,6 @@ class FrameDeployWorkflow:
                     key="inkyPython",
                     vendor_folder=inky_python.vendor_folder or "",
                     label="inkyPython vendor files",
-                    preserve_remote_paths=("env", "requirements.txt.sha256sum"),
-                )
-            )
-        if inky_hyperpixel := drivers.get("inkyHyperPixel2rLegacyFb"):
-            vendor_sync_plans.append(
-                VendorSyncPlan(
-                    key="inkyHyperPixel2rLegacyFb",
-                    vendor_folder=inky_hyperpixel.vendor_folder or "",
-                    label="inkyHyperPixel2r legacy vendor files",
                     preserve_remote_paths=("env", "requirements.txt.sha256sum"),
                 )
             )

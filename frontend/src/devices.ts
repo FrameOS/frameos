@@ -47,7 +47,6 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'pimoroni.inky_impression', label: 'Pimoroni Inky Impression - all others (Python driver)' },
       { value: 'pimoroni.inky_python', label: 'Pimoroni Inky other (Python driver)' },
       { value: 'pimoroni.hyperpixel2r', label: 'Pimoroni HyperPixel 2.1" Round' },
-      { value: 'pimoroni.hyperpixel2r_native', label: 'Pimoroni HyperPixel 2.1" Round (native)' },
     ],
   },
   {

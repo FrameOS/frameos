@@ -178,12 +178,6 @@ export const piDeviceGroups: DeviceGroup[] = [
         "label": "Pimoroni HyperPixel 2.1\" Round",
         "width": 480,
         "height": 480
-      },
-      {
-        "value": "pimoroni.hyperpixel2r_native",
-        "label": "Pimoroni HyperPixel 2.1\" Round (native)",
-        "width": 480,
-        "height": 480
       }
     ]
   },
@@ -391,6 +385,12 @@ export const piDeviceGroups: DeviceGroup[] = [
       {
         "value": "waveshare.EPD_2in9_V2",
         "label": "Waveshare 2.9\" (V2) 296x128 4 Grayscale",
+        "width": 128,
+        "height": 296
+      },
+      {
+        "value": "waveshare.EPD_2in9_V3",
+        "label": "Waveshare 2.9\" (V3) 296x128 4 Grayscale",
         "width": 128,
         "height": 296
       },
@@ -737,6 +737,17 @@ export const piDeviceGroups: DeviceGroup[] = [
         "height": 1600
       }
     ]
+  },
+  {
+    "label": "OLED",
+    "options": [
+      {
+        "value": "oled.ssd1306_72x40",
+        "label": "SSD1306 0.42\" OLED 72x40 (ESP32 I2C)",
+        "width": 72,
+        "height": 40
+      }
+    ]
   }
 ]
 
@@ -877,6 +888,10 @@ export const esp32Panels: { key: string; label: string }[] = [
   {
     "key": "EPD_2in9_V2",
     "label": "Waveshare 2.9\" (V2) 296x128 4 Grayscale"
+  },
+  {
+    "key": "EPD_2in9_V3",
+    "label": "Waveshare 2.9\" (V3) 296x128 4 Grayscale"
   },
   {
     "key": "EPD_2in9b",

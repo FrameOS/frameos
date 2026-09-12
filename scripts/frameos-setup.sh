@@ -519,7 +519,6 @@ import sys
 device = sys.argv[1]
 raw = """
 pimoroni.hyperpixel2r:480x480
-pimoroni.hyperpixel2r_native:480x480
 pimoroni.inky_impression_13:1600x1200
 pimoroni.inky_impression_13_2025:1600x1200
 pimoroni.inky_impression_4:600x400
@@ -682,7 +681,6 @@ print_pimoroni_devices() {
   pimoroni.inky_what_yellow
   pimoroni.inky_what_4
   pimoroni.hyperpixel2r
-  pimoroni.hyperpixel2r_native
 EOF
 }
 

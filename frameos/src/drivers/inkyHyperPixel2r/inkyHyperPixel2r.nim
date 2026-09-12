@@ -15,8 +15,13 @@ const
   PanelWidth = 480
   PanelHeight = 480
   # Pixels are carried by Raspberry Pi DPI into /dev/fb0; native GPIO owns the
-  # ST7701 sideband init bus and backlight GPIOs.
+  # ST7701 sideband init bus and backlight GPIOs. The first three lines
+  # remove what the panel's previous drivers left in config.txt: Pimoroni's
+  # installer overlay (`hyperpixel2r`), the kernel's (`vc4-kms-dpi-…`, which
+  # the 2026-09-07..12 "legacy fb" driver wrote) and the KMS/FKMS display
+  # drivers, all of which claim the DPI pins or GPIO 19 ahead of us.
   HyperPixelBootConfigLines* = @[
+    "#dtoverlay=hyperpixel2r",
     "#dtoverlay=vc4-kms-dpi-hyperpixel2r",
     "#dtoverlay=vc4-kms-v3d",
     "#dtoverlay=vc4-fkms-v3d",

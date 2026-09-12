@@ -239,8 +239,6 @@ function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
       drivers.add('bootconfig')
     }
   } else if (device === 'pimoroni.hyperpixel2r') {
-    drivers.add('inkyHyperPixel2rLegacyFb')
-  } else if (device === 'pimoroni.hyperpixel2r_native') {
     drivers.add('inkyHyperPixel2r')
   } else if (device === 'framebuffer') {
     drivers.add('frameBuffer')

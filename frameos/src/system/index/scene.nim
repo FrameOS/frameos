@@ -40,7 +40,7 @@ const
   # Plain framebuffer / LCD writes: cheap enough to redraw once a minute for
   # the clock. Everything else (e-ink) keeps the 5-minute refresh and shows
   # the time without seconds — a panel flash a minute is not worth a clock.
-  cheapRedrawDevices = ["framebuffer", "inkyHyperPixel2r", "inkyHyperPixel2rLegacyFb"]
+  cheapRedrawDevices = ["framebuffer", "inkyHyperPixel2r"]
   markCycleSeconds = 6.0
   staticRefreshSeconds = 300.0
 

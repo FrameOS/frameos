@@ -154,7 +154,6 @@ NATIVE_DEVICE_DIMENSIONS = {
     "pimoroni.inky_what_ssd1683_red": (400, 300),
     "pimoroni.inky_what_ssd1683_yellow": (400, 300),
     "pimoroni.hyperpixel2r": (480, 480),
-    "pimoroni.hyperpixel2r_native": (480, 480),
 }
 
 
@@ -288,8 +287,6 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         if device in INKY_BUTTON_DEVICES:
             device_drivers["gpioButton"] = DRIVERS["gpioButton"]
     elif device == "pimoroni.hyperpixel2r":
-        device_drivers = {"inkyHyperPixel2rLegacyFb": DRIVERS["inkyHyperPixel2rLegacyFb"]}
-    elif device == "pimoroni.hyperpixel2r_native":
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
     elif device == "framebuffer":
         device_drivers = {"frameBuffer": DRIVERS["frameBuffer"]}

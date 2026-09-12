@@ -30,9 +30,9 @@ empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.1
   0600, and the unit it installed runs as `frameos`. Fixed on main
   (`writeSetupReleasePayload` hands the payload to the installed unit's
   user). Re-flash from the next add-on and expect the runtime up on the
-  first boot after driver setup's reboot; then the panel question proper —
-  the native driver's DPI config.txt block was written correctly
-  (`enable_dpi_lcd=1`, `dpi_timings=480 … 19200000 6`, gpio alt2 lines).
+  first boot after driver setup's reboot. *(2026-09-12: the card patched
+  by hand — frame.json handed to uid 990 — booted and RENDERS on the panel
+  with the native driver; no Linux boot splash, which is fine.)*
 
 - [ ] **Adopted card, round two (2026-09-08 findings on frame-2c2ea9, all
   fixed on main the same day, needs the next backend release):** *(2026-09-09
@@ -57,18 +57,17 @@ empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.1
   every boot would be an easy way into a running frame.
 
 - [ ] **Vannituba (HyperPixel 2r, `pimoroni.hyperpixel2r`) on the next HA
-  image:** the legacy driver's `setup` now writes
-  `dtoverlay=vc4-kms-dpi-hyperpixel2r` into config.txt when no HyperPixel
-  overlay is there (a composed Buildroot image had none, so the panel had no
-  DPI output at all — the missing vendor tree was a symptom) and reboots
-  once. Expect `FrameOS setup: boot config: updating /boot/config.txt` →
-  reboot → `/dev/fb0` at 480×480 and the scene on the panel. Then turn the
-  frame off and on from the workspace: the backlight goes through
-  `/sys/class/backlight/*/bl_power` first (both overlays give GPIO 19 to the
-  kernel's gpio-backlight, so a gpiochip claim is "GPIO busy"), else the
-  register poke RPi.GPIO used to do through `/dev/gpiomem`. Note which path
-  the panel actually answered to — the old vendor README says the sysfs knob
-  did nothing back then, and only RPi.GPIO worked.
+  image:** since 2026-09-12 there is one HyperPixel driver, the native one
+  (the kernel-overlay "legacy fb" driver and the `_native` device id are
+  gone). Vannituba's next full deploy runs the native driver's setup: it
+  comments out `dtoverlay=vc4-kms-dpi-hyperpixel2r` (and Pimoroni's
+  `dtoverlay=hyperpixel2r` if present), writes the `enable_dpi_lcd` /
+  `dpi_timings` / gpio alt2 block, and reboots once. Expect `FrameOS setup:
+  boot config: updating /boot/config.txt` → reboot → the scene on the panel
+  (verified 2026-09-12 on frame 10, a fresh generic 2026.9.13 card). Then
+  turn the frame off and on from the workspace: the backlight is GPIO 19
+  through lgpio now (no overlay owns it), and the panel sleeps/wakes over
+  the ST7701 command bus.
 
 ### ESP32 bench
 

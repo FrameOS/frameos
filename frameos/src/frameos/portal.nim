@@ -476,8 +476,6 @@ proc driverNameForDevice(device: string): string =
   if device == "http.upload":
     return "httpUpload"
   if device == "pimoroni.hyperpixel2r":
-    return "inkyHyperPixel2rLegacyFb"
-  if device == "pimoroni.hyperpixel2r_native":
     return "inkyHyperPixel2r"
   if device in ["pimoroni.inky_impression", "pimoroni.inky_python"]:
     return "inkyPython"
@@ -597,9 +595,7 @@ proc setupStepsForDevice(device: string): seq[string] =
   if device == "http.upload":
     return @["Upload rendered PNG images to an HTTP endpoint."]
   if device == "pimoroni.hyperpixel2r":
-    return @["Use the HyperPixel 2.1 Round framebuffer driver."]
-  if device == "pimoroni.hyperpixel2r_native":
-    return @["Use the native HyperPixel 2.1 Round driver."]
+    return @["Write the DPI display block into boot config.", "Use the native HyperPixel 2.1 Round driver."]
   if isNativeInkyDevice(device):
     result = @["Enable SPI.", "Add dtoverlay=spi0-0cs to boot config.", "Use the native Pimoroni Inky driver."]
     if isInkyButtonDevice(device):
@@ -653,7 +649,7 @@ proc nativeDeviceDimensions(device: string): tuple[width: int, height: int] =
       "pimoroni.inky_what_ssd1683", "pimoroni.inky_what_ssd1683_black",
       "pimoroni.inky_what_ssd1683_red", "pimoroni.inky_what_ssd1683_yellow":
     (width: 400, height: 300)
-  of "pimoroni.hyperpixel2r", "pimoroni.hyperpixel2r_native":
+  of "pimoroni.hyperpixel2r":
     (width: 480, height: 480)
   of "waveshare.rpi_zero_photopainter_7in3e":
     (width: 800, height: 480)
@@ -672,8 +668,6 @@ proc labelForDevice(device: string): string =
     "Pimoroni Inky other (Python driver)"
   of "pimoroni.hyperpixel2r":
     "Pimoroni HyperPixel 2.1 Round"
-  of "pimoroni.hyperpixel2r_native":
-    "Pimoroni HyperPixel 2.1 Round (native)"
   of "waveshare.rpi_zero_photopainter_7in3e":
     "Waveshare RPi Zero PhotoPainter - 7.3\""
   else:
@@ -718,10 +712,8 @@ proc setupDisplayOptions*(frameOS: FrameOS): seq[SetupDisplayOption] =
   if "httpUpload" in drivers:
     result.addDisplayOption(makeDisplayOption("http.upload", "httpUpload"))
 
-  if "inkyHyperPixel2rLegacyFb" in drivers:
-    result.addDisplayOption(makeDisplayOption("pimoroni.hyperpixel2r", "inkyHyperPixel2rLegacyFb"))
   if "inkyHyperPixel2r" in drivers:
-    result.addDisplayOption(makeDisplayOption("pimoroni.hyperpixel2r_native", "inkyHyperPixel2r"))
+    result.addDisplayOption(makeDisplayOption("pimoroni.hyperpixel2r", "inkyHyperPixel2r"))
 
   if "inkyPython" in drivers:
     for device in ["pimoroni.inky_impression", "pimoroni.inky_python"]:

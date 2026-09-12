@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.drivers.drivers import DRIVERS
 from app.drivers.devices import (
     WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
     WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS,
@@ -35,24 +36,18 @@ def test_framebuffer_frame_uses_evdev_for_local_input():
     assert "evdev" in drivers
 
 
-def test_hyperpixel_round_keeps_legacy_fb_driver_for_existing_configs():
+def test_hyperpixel_round_uses_the_native_gpio_driver():
+    """One driver for the panel since 2026-09-12: DPI block in config.txt,
+    ST7701 init and backlight over GPIO. Nothing to vendor or link."""
     drivers = drivers_for_frame(frame("pimoroni.hyperpixel2r"))
 
-    assert "inkyHyperPixel2rLegacyFb" in drivers
-    assert "inkyHyperPixel2r" not in drivers
-    assert "evdev" in drivers
-    # The backlight is driven through lgpio; nothing to vendor or set up.
-    assert drivers["inkyHyperPixel2rLegacyFb"].vendor_folder is None
-
-
-def test_hyperpixel_round_native_uses_native_gpio_driver():
-    drivers = drivers_for_frame(frame("pimoroni.hyperpixel2r_native"))
-
     assert "inkyHyperPixel2r" in drivers
-    assert "inkyHyperPixel2rLegacyFb" not in drivers
     assert "evdev" in drivers
     assert drivers["inkyHyperPixel2r"].vendor_folder is None
     assert drivers["inkyHyperPixel2r"].link_flags == ()
+    # The retired "(native)" id and the legacy fb driver are gone, not aliased.
+    assert "inkyHyperPixel2r" not in drivers_for_frame(frame("pimoroni.hyperpixel2r_native"))
+    assert not any("LegacyFb" in name for name in DRIVERS)
 
 
 def test_waveshare_epd10in3_uses_boot_config_without_generic_spi_setup():

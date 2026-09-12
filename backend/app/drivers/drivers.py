@@ -48,23 +48,17 @@ DRIVERS = {
         can_png=True,
         can_turn_on_off=True,
     ),
+    # The HyperPixel 2.1" Round: firmware DPI into /dev/fb0 (setup writes the
+    # dpi_* block into config.txt), the ST7701 init and the backlight over
+    # GPIO — no overlay, vendor tree or Python. The one driver for the panel
+    # since 2026-09-12; the kernel-overlay "legacy fb" driver it replaced
+    # migrates on the next full deploy, whose setup rewrites config.txt.
     "inkyHyperPixel2r": Driver(
         name="inkyHyperPixel2r",
         import_path="inkyHyperPixel2r/inkyHyperPixel2r",
         setup_import_path="inkyHyperPixel2r/inkyHyperPixel2r",
         can_render=True,
         can_turn_on_off=True,
-    ),
-    # Framebuffer rendering on the kernel's DPI overlay (setup adds
-    # vc4-kms-dpi-hyperpixel2r when config.txt has no HyperPixel overlay) plus
-    # the backlight through the kernel backlight class, then GPIO — no vendor
-    # tree or Python since 2026-09-07.
-    "inkyHyperPixel2rLegacyFb": Driver(
-        name="inkyHyperPixel2rLegacyFb",
-        import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
-        setup_import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
-        can_render=True,
-        can_turn_on_off=True
     ),
     "httpUpload": Driver(
         name="httpUpload",
