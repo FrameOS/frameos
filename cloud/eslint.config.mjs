@@ -93,6 +93,9 @@ export default tseslint.config(
       "**/src/test/shared-spa/store-scene-errors.test.ts",
       "**/src/test/shared-spa/shell-less-deploy-dialog.test.tsx",
       "**/src/test/shared-spa/long-running-task-toast.test.tsx",
+      // Imports frameSettingsHelpers.tsx, which types React returns with the
+      // bare `JSX` namespace; out of the tsconfig for the same reason.
+      "**/src/test/shared-spa/frame-upgrade-card-labels.test.ts",
     ],
   },
   js.configs.recommended,

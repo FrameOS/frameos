@@ -27,6 +27,30 @@ suite "FrameOS upgrade helpers":
       "VERSION_CODENAME": "noble",
     }.toTable) == (distro: "ubuntu", release: "24.04")
 
+  test "the host identity names a Buildroot image as FrameOS, not Debian":
+    let buildroot = hostOsPayload({
+      "ID": "buildroot",
+      "NAME": "Buildroot",
+      "PRETTY_NAME": "Buildroot 2025.02.13",
+      "VERSION_ID": "2025.02.13",
+    }.toTable, "arm64")
+    check buildroot{"id"}.getStr() == "buildroot"
+    check buildroot{"name"}.getStr() == "FrameOS system image (Buildroot)"
+    check buildroot{"version"}.getStr() == "2025.02.13"
+    check buildroot{"arch"}.getStr() == "arm64"
+
+    let raspios = hostOsPayload({
+      "ID": "debian",
+      "PRETTY_NAME": "Debian GNU/Linux 12 (bookworm)",
+      "VERSION_ID": "12",
+    }.toTable, "armhf")
+    check raspios{"name"}.getStr() == "Debian GNU/Linux 12 (bookworm)"
+    check raspios{"arch"}.getStr() == "armhf"
+
+    let unknown = hostOsPayload(initTable[string, string](), "")
+    check unknown{"id"}.getStr() == ""
+    check unknown{"name"}.getStr() == ""
+
   test "uname arch mapping keeps armv6 separate from armhf":
     check archForUname("aarch64") == "arm64"
     check archForUname("armv7l") == "armhf"

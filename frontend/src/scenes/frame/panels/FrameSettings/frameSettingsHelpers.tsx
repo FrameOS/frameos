@@ -142,6 +142,41 @@ export function latestUpgradeVersion(status: FrameOSUpgradeStatus | null): strin
   return status?.latest_version || status?.latest_release?.version
 }
 
+/** The "Release build" row of the upgrade card. Debian and Ubuntu hosts see
+ * the distro release because it decides which precompiled binary they get
+ * (bookworm vs trixie, and bullseye gets none). A Buildroot image is not
+ * Debian and has no apt, so it sees only the architecture; the slug it
+ * downloads moves into the hint so it stops reading as the OS. */
+export function upgradeBuildLabel(status: FrameOSUpgradeStatus | null): { label: string; hint?: string } {
+  const target = status?.target?.trim()
+  if (!target) {
+    return { label: 'Unknown' }
+  }
+  const host = status?.host
+  if (host?.id === 'buildroot') {
+    const arch = host.arch?.trim() || target.split('-').pop() || target
+    return {
+      label: arch,
+      hint: `This FrameOS system image installs the ${target} release build. It is not a Debian system and has no package manager.`,
+    }
+  }
+  return { label: target }
+}
+
+/** The "Operating system" row: PRETTY_NAME from the device's os-release, or
+ * nothing on releases that predate the `host` field. */
+export function upgradeHostLabel(status: FrameOSUpgradeStatus | null): string | undefined {
+  const host = status?.host
+  if (!host) {
+    return undefined
+  }
+  const name = host.name?.trim()
+  if (!name) {
+    return undefined
+  }
+  return host.id === 'buildroot' && host.version?.trim() ? `${name} ${host.version.trim()}` : name
+}
+
 export function upgradeStatusColor(status: string | undefined) {
   return status === 'failed'
     ? 'red'
