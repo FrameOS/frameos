@@ -121,6 +121,11 @@
     // reach the legacy workspace components. Vitest still runs them; only
     // tsc leaves them out.
     "src/test/shared-spa/shell-less-deploy-dialog.test.tsx",
-    "src/test/shared-spa/long-running-task-toast.test.tsx"
+    "src/test/shared-spa/long-running-task-toast.test.tsx",
+    // Imports frameSettingsHelpers.tsx from the legacy workspace, which
+    // types its React returns with the bare `JSX` namespace that this
+    // package's React types no longer provide. Vitest still runs it; only
+    // tsc leaves it out.
+    "src/test/shared-spa/frame-upgrade-card-labels.test.ts"
   ]
 }
