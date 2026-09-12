@@ -58,9 +58,17 @@ from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
-from app.utils.versions import current_frameos_version, current_remote_version
+from app.utils.versions import current_frameos_version, current_remote_version, version_tuple
 
 REMOTE_RUNTIME_APT_PACKAGES = ("hostapd",)
+# The last FrameOS release whose runtime ran Caddy as its HTTPS proxy. Newer
+# runtimes terminate TLS themselves (docs/native-https.md) and the `caddy`
+# apt package is no longer installed. A Pi that ran Caddy can still have the
+# package's own caddy.service enabled next to the runtime, so the first full
+# deploy that takes such a frame past this version disables it; a frame
+# whose deploy baseline already says it runs something newer is never probed
+# again.
+LAST_CADDY_FRAMEOS_VERSION = "2026.9.13"
 REMOTE_BUILD_APT_PACKAGES = ("build-essential",)
 
 HELPER_ENSURE_NTP = "ensure_ntp"
@@ -218,6 +226,17 @@ def _mountpoints_enabled(frame: Frame) -> bool:
         if str(item.get("source") or "").strip() and str(item.get("target") or "").strip():
             return True
     return False
+
+
+def frame_may_still_run_caddy(previous_frameos_version: str | None) -> bool:
+    """Whether the frame's last known FrameOS version is one that shipped
+    with Caddy. Unknown or unparseable versions count as "may": the probe is
+    one `systemctl is-enabled`, a stray Caddy on :8443 is a frame that
+    silently serves the wrong thing."""
+    previous = version_tuple(previous_frameos_version)
+    if previous is None:
+        return True
+    return previous <= version_tuple(LAST_CADDY_FRAMEOS_VERSION)
 
 
 def _is_buildroot_frame(frame: Frame) -> bool:
@@ -838,15 +857,6 @@ class FrameDeployWorkflow:
                 remote_build_fallback_package_plans.append(
                     await self._plan_package("libssl-dev", "OpenSSL headers if cross-compilation falls back to an on-device build")
                 )
-        if not is_buildroot:
-            package_plans.append(
-                await self._plan_package(
-                    "caddy",
-                    "FrameOS TLS proxy support",
-                    run_after_install="sudo -n systemctl disable --now caddy.service",
-                )
-            )
-
         if not is_buildroot and _mountpoints_enabled(self.frame):
             package_plans.append(await self._plan_package("cifs-utils", "Samba/CIFS mountpoint support"))
 
@@ -928,7 +938,9 @@ class FrameDeployWorkflow:
                 "will be deployed before the FrameOS full deploy."
             )
 
-        post_deploy = await self._plan_post_deploy_cleanup(drivers=drivers, low_memory=low_memory)
+        post_deploy = await self._plan_post_deploy_cleanup(
+            drivers=drivers, low_memory=low_memory, previous_frameos_version=previous_frameos_version
+        )
 
         return FrameDeployPlan(
             mode="full",
@@ -1876,7 +1888,10 @@ class FrameDeployWorkflow:
             await self.deployer.exec_command("sudo -n systemctl disable userconfig || true")
 
         if post_deploy.get("disable_caddy_service"):
-            await self.deployer.log("stdout", f"{icon} Disabling system-managed Caddy service (managed by FrameOS tls_proxy)")
+            await self.deployer.log(
+                "stdout",
+                f"{icon} Disabling the caddy.service an older FrameOS installed (HTTPS is served by the runtime now)",
+            )
             await self.deployer.exec_command("sudo -n systemctl disable --now caddy.service", raise_on_error=False)
 
         setup_json_reset_path = setup_json_reset_file_path(self.frame)
@@ -1948,7 +1963,9 @@ class FrameDeployWorkflow:
             raise_on_error=False,
         )
 
-    async def _plan_post_deploy_cleanup(self, *, drivers: dict[str, Any], low_memory: bool) -> dict[str, Any]:
+    async def _plan_post_deploy_cleanup(
+        self, *, drivers: dict[str, Any], low_memory: bool, previous_frameos_version: str | None = None
+    ) -> dict[str, Any]:
         boot_config = "/boot/config.txt"
         if await self._command_succeeds(
             "test -f /boot/config.txt && grep -Eq '^(kernel=Image|start_file=|fixup_file=)' /boot/config.txt"
@@ -2017,7 +2034,10 @@ class FrameDeployWorkflow:
         disable_userconfig = last_successful_deploy_at is None and await self._command_succeeds(
             "systemctl is-enabled userconfig >/dev/null 2>&1"
         )
-        disable_caddy_service = await self._command_succeeds(
+        # Only a frame coming from a Caddy-era FrameOS (or one of unknown
+        # version) is probed for a leftover caddy.service; see
+        # LAST_CADDY_FRAMEOS_VERSION.
+        disable_caddy_service = frame_may_still_run_caddy(previous_frameos_version) and await self._command_succeeds(
             "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1"
         )
         must_reboot = (

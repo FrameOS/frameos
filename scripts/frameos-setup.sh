@@ -985,7 +985,9 @@ need_cmd python3
 install_packages ca-certificates hostapd openssl
 need_cmd openssl
 need_cmd base64
-install_optional_packages caddy
+# HTTPS is served by the runtime itself. A Pi set up before 2026.9.14 got the
+# caddy apt package, whose own caddy.service must not sit on :8443; drop this
+# line once every frame has been through a newer release.
 systemctl disable --now caddy.service >/dev/null 2>&1 || true
 
 existing_config=""

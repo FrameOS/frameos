@@ -2,9 +2,9 @@ import strformat
 import strutils
 import frameos/types
 when not defined(frameosEmbedded) and not defined(frameosWasm):
-  # setup_proxy pulls std/net + OpenSSL; the embedded firmware and the wasm
-  # bundle have no hotspot setup proxy.
-  import frameos/setup_proxy
+  # The hotspot listener lives on the mummy server, which the embedded
+  # firmware and the wasm bundle do not compile.
+  import frameos/server/hotspot_listener
 import frameos/utils/http_client
 
 proc publicScheme*(config: FrameConfig): string =
@@ -20,11 +20,12 @@ proc publicHost*(config: FrameConfig): string =
   if config.frameHost.len > 0: config.frameHost else: "localhost"
 
 proc hotspotSetupPort*(config: FrameConfig): int =
+  ## The port the hotspot scene and captive portal send the phone to: the
+  ## hotspot's own listener while one is up, the frame port otherwise.
   when not defined(frameosEmbedded) and not defined(frameosWasm):
-    if config.httpsProxy != nil and config.httpsProxy.enable and config.httpsProxy.exposeOnlyPort:
-      let port = setupProxyPort()
-      if port > 0:
-        return port
+    let port = hotspotListenerPort()
+    if port > 0:
+      return port
   if config.framePort > 0: config.framePort else: 8787
 
 proc publicBaseUrl*(config: FrameConfig): string =

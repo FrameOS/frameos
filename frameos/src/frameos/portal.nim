@@ -4,7 +4,7 @@ import frameos/config
 import frameos/types
 import frameos/scenes
 import frameos/channels
-import frameos/setup_proxy
+import frameos/server/hotspot_listener
 import frameos/utils/process
 import frameos/utils/system
 import frameos/network/backend as netbackend
@@ -1320,15 +1320,17 @@ proc stopAp*(frameOS: FrameOS) {.gcsafe.} =
     discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
     discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
   frameOS.network.hotspotStatus = HotspotStatus.disabled
-  stopSetupProxy()
+  if frameOS.server != nil:
+    stopHotspotListener(frameOS.server.mummy)
   pLog("portal:stopAp:done")
 
 proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
   ## Shared by both backends: once the AP is up the rest of the portal
-  ## (setup proxy, hotspot scene, auto-timeout) behaves identically.
+  ## (hotspot listener, hotspot scene, auto-timeout) behaves identically.
   frameOS.network.hotspotStatus = HotspotStatus.enabled
-  startSetupProxy(frameOS.frameConfig)
-  pLog("portal:startAp:setupProxy", %*{"port": setupProxyPort()})
+  if frameOS.server != nil:
+    let (port, address) = startHotspotListener(frameOS.server.mummy, frameOS.frameConfig)
+    pLog("portal:startAp:listener", %*{"port": port, "address": address})
   let hotspotStarted = getMonoTime()
   frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")

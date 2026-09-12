@@ -201,8 +201,8 @@ Unprovisioned devices start a captive portal: join the `FrameOS-XXXX` Wi-Fi netw
 and any page redirects to the setup form (Wi-Fi, backend URL, frame ID/API key,
 panel, render mode). A board flashed from a FrameOS backend or the cloud is
 provisioned over the USB console instead (below) and never sees the portal;
-the frame's HTTPS certificate — the same per-frame material Raspberry Pi
-Caddy proxies use — arrives with its first `/embedded/settings` pull.
+the frame's HTTPS certificate — the same per-frame material the Linux
+runtime serves with OpenSSL — arrives with its first `/embedded/settings` pull.
 
 The serial console (115200) is always available and quicker for development.
 It answers on whichever USB port the board brings out: the chip's own

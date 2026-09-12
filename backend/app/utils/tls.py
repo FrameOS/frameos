@@ -65,9 +65,10 @@ def generate_frame_tls_material(frame_host: str) -> dict[str, str]:
     # PEM, and on the 4 MB / 8 MB flash layouts NVS is 16 KB (~378 usable
     # 32-byte entries). An RSA-2048 cert + key is ~2.9 KB of PEM (~100
     # entries); a P-256 pair is ~1 KB (~35), which is what left the Wi-Fi
-    # driver room to store its own state on a bare C3 (2026-09-05). Caddy on
-    # the Pi and mbedTLS on the ESP32 (ECDSA + secp256r1 are on in every
-    # ESP-IDF build) both serve EC keys. The CA stays RSA: it never leaves the
+    # driver room to store its own state on a bare C3 (2026-09-05). OpenSSL
+    # in the Linux runtime and mbedTLS on the ESP32 (ECDSA + secp256r1 are on
+    # in every ESP-IDF build) both serve EC keys, and a P-256 handshake is
+    # cheap on a Pi Zero's ARM1176. The CA stays RSA: it never leaves the
     # backend, and browsers/curl trust it as a plain self-signed root either
     # way. Frames issued before this keep their RSA pair until the owner
     # regenerates it; the cert and key always travel together (frame
@@ -112,7 +113,8 @@ def generate_frame_tls_material(frame_host: str) -> dict[str, str]:
 
     return {
         # TraditionalOpenSSL gives "BEGIN EC PRIVATE KEY" (SEC 1), the form
-        # mbedtls_pk_parse_key and Caddy read without a PKCS#8 wrapper.
+        # mbedtls_pk_parse_key and PEM_read_bio_PrivateKey read without a
+        # PKCS#8 wrapper.
         "server_key": server_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.TraditionalOpenSSL,

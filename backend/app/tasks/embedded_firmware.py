@@ -1523,8 +1523,8 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
         frame.frame_port = 80
 
     # No SSH or agent on a microcontroller. HTTPS uses the same frame
-    # certificate model as Pi frames, but is served natively by ESP-IDF instead
-    # of through Caddy.
+    # certificate model as Pi frames, served natively by ESP-IDF (the Linux
+    # runtime serves it natively too, with OpenSSL).
     frame.https_proxy = normalize_https_proxy(frame.https_proxy)
     agent = dict(frame.agent or {})
     agent["agentEnabled"] = False

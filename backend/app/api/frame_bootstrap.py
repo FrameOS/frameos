@@ -447,7 +447,9 @@ fi
 artifact_root="${{frameos_binary%/*}}"
 
 install_packages hostapd
-install_optional_packages caddy
+# HTTPS is served by the runtime itself. A Pi set up before 2026.9.14 got the
+# caddy apt package, whose own caddy.service must not sit on :8443; drop this
+# line once every frame has been through a newer release.
 systemctl disable --now caddy.service >/dev/null 2>&1 || true
 
 install -m 0755 "$frameos_binary" "$frameos_release_dir/frameos"

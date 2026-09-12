@@ -201,7 +201,7 @@ FRAME_SYNC_LABELS = {
     "frame_json": "frame.json",
     "scenes_json": "scenes.json",
     "frame_admin_auth": "Frame admin auth",
-    "https_proxy": "HTTPS proxy",
+    "https_proxy": "HTTPS",
     "server_send_logs": "Send logs to backend",
     "device_config": "Device config",
     "timezone_updater": "Timezone updater",

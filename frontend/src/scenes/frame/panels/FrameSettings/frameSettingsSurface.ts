@@ -269,10 +269,9 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
   },
   {
     key: 'https-proxy',
-    title: 'HTTPS proxy',
+    title: 'HTTPS',
     anchor: 'frame-http-proxy-section',
     surfaces: ['backend', 'frameAdmin'],
-    conditions: 'Buildroot: the switch renders disabled, the image ships no Caddy.',
   },
   {
     key: 'network',

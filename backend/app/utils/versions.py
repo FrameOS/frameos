@@ -24,6 +24,25 @@ def current_frameos_version() -> str | None:
     return version.split("+")[0]
 
 
+def version_tuple(version: str | None) -> tuple[int, ...] | None:
+    """``"2026.9.13"`` (also ``"v2026.9.13+<sha>"``) as ``(2026, 9, 13)`` for
+    comparisons; ``None`` for anything that is not dotted numbers."""
+    if not isinstance(version, str):
+        return None
+    cleaned = version.strip()
+    if cleaned.startswith("v"):
+        cleaned = cleaned[1:]
+    cleaned = cleaned.split("+", 1)[0]
+    if not cleaned:
+        return None
+    parts: list[int] = []
+    for part in cleaned.split("."):
+        if not part.isdigit():
+            return None
+        parts.append(int(part))
+    return tuple(parts)
+
+
 def current_remote_version() -> str | None:
     version = get_versions().get("remote") or get_versions().get("agent")
     if not isinstance(version, str):

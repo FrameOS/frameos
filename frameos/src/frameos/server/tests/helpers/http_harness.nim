@@ -126,6 +126,13 @@ proc startRouterServer*(port: int): TestServer =
   sleep(150)
 
 proc stopServer*(testServer: var TestServer) =
+  # The router handler is a closure built on this thread; mummy frees it on
+  # its serving thread when the server is destroyed. ORC's cycle-candidate
+  # roots are per thread, so a closure environment still registered as a
+  # root here crashes that thread in unregisterCycle. A collection now
+  # clears this thread's registrations (it did so by luck in tests with
+  # enough allocation churn; the TLS listener test had too little).
+  GC_fullCollect()
   testServer.server.close()
   joinThread(testServer.thread)
 

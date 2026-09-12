@@ -1328,10 +1328,11 @@ async def test_api_frame_update_name(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_api_frame_update_buildroot_rejects_https_proxy(async_client, db, redis):
-    # The Buildroot images ship no Caddy. The save used to accept enable=true
-    # and ensure_buildroot_frame_defaults put it back off, so the settings
-    # switch flipped on and immediately off again.
+async def test_api_frame_update_buildroot_keeps_https_proxy(async_client, db, redis):
+    # HTTPS is served by the runtime itself (OpenSSL is in every Buildroot
+    # image), so a Buildroot frame keeps the setting it is given. Until
+    # 2026-09-12 ensure_buildroot_frame_defaults forced it off on every save
+    # because the images shipped no Caddy.
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
     frame.buildroot = {'platform': 'raspberry-pi-64', 'compilationMode': 'precompiled'}
@@ -1342,24 +1343,22 @@ async def test_api_frame_update_buildroot_rejects_https_proxy(async_client, db, 
     proxy = dict(frame.https_proxy or {})
 
     resp = await async_client.post(f'/api/frames/{frame.id}', json={"https_proxy": {**proxy, "enable": True}})
-    assert resp.status_code == 400
-    assert "Buildroot" in resp.json()["detail"]
+    assert resp.status_code == 200
+    db.expire_all()
+    stored = db.get(Frame, frame.id)
+    assert stored.mode == "buildroot"
+    assert stored.https_proxy["enable"] is True
+
+    # A later save that touches something else does not turn it off again.
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"name": "Still Buildroot"})
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).https_proxy["enable"] is True
 
     resp = await async_client.post(f'/api/frames/{frame.id}', json={"https_proxy": {**proxy, "enable": False}})
     assert resp.status_code == 200
     db.expire_all()
     assert db.get(Frame, frame.id).https_proxy["enable"] is False
-
-    # Leaving Buildroot in the same save is not asking for the proxy on a
-    # Buildroot card: the mode switch goes through.
-    resp = await async_client.post(
-        f'/api/frames/{frame.id}', json={"mode": "rpios", "https_proxy": {**proxy, "enable": True}}
-    )
-    assert resp.status_code == 200
-    db.expire_all()
-    updated = db.get(Frame, frame.id)
-    assert updated.mode == "rpios"
-    assert updated.https_proxy["enable"] is True
 
 
 @pytest.mark.asyncio
@@ -2186,7 +2185,10 @@ async def test_api_frame_new_buildroot_defaults(async_client):
     assert frame['frame_host'] == f"frame{frame['id']}.local"
     assert frame['ssh_user'] == 'root'
     assert frame['assets_path'] == '/srv/assets'
-    assert frame['https_proxy']['enable'] is False
+    # HTTPS is on by default like on every other frame: the runtime serves
+    # it itself, OpenSSL is in every Buildroot image.
+    assert frame['https_proxy']['enable'] is True
+    assert frame['https_proxy']['certs']['server']
     assert frame['buildroot']['platform'] == 'raspberry-pi-64'
     assert frame['timezone'] == 'Europe/Brussels'
     assert frame['network']['wifiSSID'] == 'Test WiFi'

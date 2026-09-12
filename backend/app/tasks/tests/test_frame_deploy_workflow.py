@@ -11,6 +11,7 @@ from app.tasks.frame_deploy_workflow import (
     EmbeddedFullDeployPlan,
     FrameDeployPlan,
     FrameDeployWorkflow,
+    frame_may_still_run_caddy,
     FullDeployPlan,
     HelperActionPlan,
     PackagePlan,
@@ -823,7 +824,9 @@ async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypat
     ]
     assert plan.full_deploy is not None
     assert plan.full_deploy.target["distro"] == "ubuntu"
-    assert {pkg.name for pkg in plan.full_deploy.package_plans} >= {"hostapd", "build-essential", "caddy"}
+    assert {pkg.name for pkg in plan.full_deploy.package_plans} >= {"hostapd", "build-essential"}
+    # HTTPS is served by the runtime; the caddy package is no longer planned.
+    assert "caddy" not in {pkg.name for pkg in plan.full_deploy.package_plans}
     assert deployer.logs == [("stdinfo", "🔷 Detected ubuntu; updating frame deployment mode from buildroot to rpios")]
 
 
@@ -980,7 +983,7 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert "libatomic-ops-dev" not in package_map
     assert "libicu-dev" not in package_map
     assert "zlib1g-dev" not in package_map
-    assert package_map["caddy"].installed is False
+    assert "caddy" not in package_map
     assert package_map["python3-pip"].installed is True
     assert plan.full_deploy.package_alternatives[0].installed_package == "ntp"
     assert plan.full_deploy.dependency_helper_plans == []
@@ -1225,6 +1228,56 @@ async def test_post_deploy_plan_prefers_buildroot_active_boot_config():
     post_deploy = await workflow._plan_post_deploy_cleanup(drivers={}, low_memory=False)
 
     assert post_deploy["boot_config_path"] == "/boot/config.txt"
+
+
+CADDY_PROBE = "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1"
+
+
+@pytest.mark.parametrize(
+    "previous_version, expected",
+    [
+        (None, True),
+        ("", True),
+        ("unknown", True),
+        ("2026.9.10", True),
+        ("2026.9.13", True),
+        ("v2026.9.13+abcdef", True),
+        ("2026.9.14", False),
+        ("2026.10.1", False),
+        ("2027.1.1", False),
+    ],
+)
+def test_frame_may_still_run_caddy(previous_version, expected):
+    assert frame_may_still_run_caddy(previous_version) is expected
+
+
+@pytest.mark.asyncio
+async def test_post_deploy_plan_probes_caddy_only_for_caddy_era_frames():
+    # A frame upgraded from a release that ran Caddy gets its leftover
+    # caddy.service disabled once; a frame already past that release is not
+    # asked about Caddy on every deploy.
+    async def plan_for(previous_version: str | None):
+        frame = SimpleNamespace(id=9, name="CaddyFrame", reboot=None, last_successful_deploy_at=None)
+        deployer = RecordingDeployer()  # answers every probe with success and records it
+        workflow = FrameDeployWorkflow(
+            db=None, redis=None, frame=frame, deployer=deployer, temp_dir="", binary_builder=FakeBinaryBuilder()
+        )
+        post_deploy = await workflow._plan_post_deploy_cleanup(
+            drivers={}, low_memory=False, previous_frameos_version=previous_version
+        )
+        return post_deploy, deployer
+
+    post_deploy, deployer = await plan_for("2026.9.13")
+    assert post_deploy["disable_caddy_service"] is True
+    assert CADDY_PROBE in deployer.commands
+
+    post_deploy, deployer = await plan_for(None)
+    assert post_deploy["disable_caddy_service"] is True
+    assert CADDY_PROBE in deployer.commands
+
+    post_deploy, deployer = await plan_for("2026.9.14")
+    assert post_deploy["disable_caddy_service"] is False
+    assert CADDY_PROBE not in deployer.commands
 
 
 @pytest.mark.asyncio

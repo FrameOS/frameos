@@ -19,8 +19,6 @@ import frameos/utils/memory
 import frameos/portal as netportal
 from frameos/upgrade import reconcileInterruptedUpgradeStatus, installedFrameOSVersion
 import frameos/cloud/hub_client
-import frameos/tls_proxy
-import frameos/setup_proxy
 import frameos/boot_guard
 import frameos/utils/image
 import frameos/utils/status_screen
@@ -377,14 +375,9 @@ proc start*(self: FrameOS) {.async.} =
   # frame is standalone or backend-managed.
   startCloudManagement(self.frameConfig)
 
-  startTlsProxy(self.frameConfig, self.logger)
-
-  try:
-    ## This call never returns
-    self.server.startServer()
-  finally:
-    stopSetupProxy()
-    stopTlsProxy(self.logger)
+  ## This call never returns. HTTPS is one more listener on the same server
+  ## (server/listeners.nim); there is no proxy process to babysit.
+  self.server.startServer()
 
 proc startFrameOS*() {.async.} =
   # Tell systemd (Type=notify) we are up before any slow driver or scene
