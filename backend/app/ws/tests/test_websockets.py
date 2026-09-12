@@ -128,6 +128,62 @@ def test_ws_accepts_the_same_origin(client: TestClient) -> None:
         assert json.loads(ws.receive_text())["event"] == "pong"
 
 
+def test_ws_accepts_the_origin_a_trusted_proxy_forwards(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A proxy that rewrites `Host` to the upstream (nginx without
+    # `proxy_set_header Host $host`, the vite dev proxy) still says where the
+    # browser dialled in X-Forwarded-Host; that counts from a trusted peer.
+    from app import config as app_config
+
+    create_user()
+    login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
+    assert login_resp.status_code == 200
+    monkeypatch.setattr(app_config.config, "FRAMEOS_TRUSTED_PROXIES", "testclient")
+    headers = {"origin": "https://frameos.example", "x-forwarded-host": "frameos.example"}
+    with client.websocket_connect("/ws", headers=headers) as ws:
+        ws.send_text("ping")
+        assert json.loads(ws.receive_text())["event"] == "pong"
+
+
+def test_ws_ignores_a_forwarded_host_from_an_untrusted_peer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import config as app_config
+
+    create_user()
+    login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
+    assert login_resp.status_code == 200
+    monkeypatch.setattr(app_config.config, "FRAMEOS_TRUSTED_PROXIES", "203.0.113.1")
+    headers = {"origin": "https://frameos.example", "x-forwarded-host": "frameos.example"}
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws", headers=headers):
+            pass
+    assert exc.value.reason == "Origin not allowed"
+
+
+def test_ws_accepts_the_configured_public_url_as_origin(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import config as app_config
+
+    create_user()
+    login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
+    assert login_resp.status_code == 200
+    monkeypatch.setattr(app_config.config, "FRAMEOS_PUBLIC_URL", "https://frameos.example")
+    with client.websocket_connect("/ws", headers={"origin": "https://frameos.example"}) as ws:
+        ws.send_text("ping")
+        assert json.loads(ws.receive_text())["event"] == "pong"
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws", headers={"origin": "https://evil.example"}):
+            pass
+    assert exc.value.reason == "Origin not allowed"
+
+
+def test_websocket_origin_default_ports_match() -> None:
+    from app.api.auth import _hosts_match
+
+    assert _hosts_match("frameos.example", "frameos.example:443")
+    assert _hosts_match("frameos.example:443", "frameos.example")
+    assert _hosts_match("FrameOS.example", "frameos.example:80")
+    assert not _hosts_match("frameos.example:8443", "frameos.example")
+    assert not _hosts_match("frameos.example", "")
+
+
 def test_terminal_ws_refuses_a_cross_site_origin(client: TestClient) -> None:
     project_id = create_user()
     login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})

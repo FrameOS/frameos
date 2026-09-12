@@ -129,19 +129,20 @@ FRAMEOS_VERSION_KEYS = ("frameosVersion", "frameos_version", "frameos")
 def local_pixie_override_path() -> Path | None:
     """Pixie checkout to compile against instead of the nimble.lock revision.
 
-    FRAMEOS_PIXIE_PATH wins when set; otherwise a checkout next to the repo
-    (../pixie) is picked up automatically so local pixie changes deploy
-    without editing the lock file.
+    Opt-in only: set FRAMEOS_PIXIE_PATH to a pixie checkout. A checkout that
+    merely sits next to the repo (../pixie) is ignored, so a routine deploy
+    always builds against the locked revision (same rule as
+    embedded/esp32/build_nim.sh).
     """
     configured = os.environ.get("FRAMEOS_PIXIE_PATH")
-    candidate = (
-        Path(configured)
-        if configured
-        else Path(__file__).resolve().parents[4] / "pixie"
-    )
-    if (candidate / "src" / "pixie").is_dir():
-        return candidate.resolve()
-    return None
+    if not configured:
+        return None
+    candidate = Path(configured)
+    if not (candidate / "src" / "pixie").is_dir():
+        raise ValueError(
+            f"FRAMEOS_PIXIE_PATH must point to a pixie checkout with src/pixie/ (got {configured})"
+        )
+    return candidate.resolve()
 
 
 def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:

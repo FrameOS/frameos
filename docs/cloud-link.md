@@ -35,7 +35,7 @@ Environment variables on the backend (`backend/app/config.py`):
 | an `http://` origin | only for localhost, RFC1918 and `.local` hosts — everything the link carries (the token, grants, identity claims) is forgeable by an on-path attacker over plain HTTP |
 | `disabled` | hide the cloud link feature entirely |
 
-Behind a reverse proxy, also set:
+Behind a reverse proxy, also set the two variables below. Every WebSocket handshake (the live log stream, the Terminal panel) is refused unless the browser's `Origin` matches the host the backend sees, so a proxy that rewrites `Host` to the upstream must either pass it through (`proxy_set_header Host $host` in nginx) or send `X-Forwarded-Host` from an address listed in `FRAMEOS_TRUSTED_PROXIES`; a `FRAMEOS_PUBLIC_URL` origin is always accepted.
 
 | Variable | Meaning |
 |---|---|

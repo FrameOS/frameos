@@ -193,11 +193,25 @@ def test_copy_waveshare_build_files_12in48_has_no_dev_debug(tmp_path: Path):
 
 
 @pytest.fixture(autouse=True)
-def _no_local_pixie_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # A pixie checkout next to the repo would trigger the override log call,
-    # which needs a real db session; point the override somewhere empty so
-    # these tests behave the same on dev machines and CI.
+def _no_local_pixie_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The override log call needs a real db session; make sure a developer's
+    # shell environment does not switch it on for these tests.
+    monkeypatch.delenv("FRAMEOS_PIXIE_PATH", raising=False)
+
+
+def test_local_pixie_override_is_opt_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A ../pixie checkout next to the repo is never picked up on its own.
+    monkeypatch.delenv("FRAMEOS_PIXIE_PATH", raising=False)
+    assert frame_deployer_module.local_pixie_override_path() is None
+
+    checkout = tmp_path / "pixie"
+    (checkout / "src" / "pixie").mkdir(parents=True)
+    monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(checkout))
+    assert frame_deployer_module.local_pixie_override_path() == checkout.resolve()
+
     monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(tmp_path / "no-pixie"))
+    with pytest.raises(ValueError, match="FRAMEOS_PIXIE_PATH"):
+        frame_deployer_module.local_pixie_override_path()
 
 
 async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, list[str]]:

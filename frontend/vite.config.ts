@@ -15,7 +15,10 @@ export default defineConfig({
       },
       '/ws': {
         target: backendTarget,
-        changeOrigin: true,
+        // Keep `Host` as the browser dialled it (localhost:8616): the backend
+        // refuses a WebSocket handshake whose Origin does not match it
+        // (websocket_origin_allowed in backend/app/api/auth.py).
+        changeOrigin: false,
         ws: true,
       },
     },
