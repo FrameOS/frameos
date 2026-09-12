@@ -5,7 +5,8 @@ import { CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { Button, ButtonProps } from '../../../../components/Button'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Spinner } from '../../../../components/Spinner'
-import { SceneActionKey, sceneActionsLogic } from './sceneActionsLogic'
+import { SceneActionKey } from '../../../../utils/sceneActions'
+import { sceneActionsLogic } from './sceneActionsLogic'
 
 export interface SceneActionOption {
   key: SceneActionKey

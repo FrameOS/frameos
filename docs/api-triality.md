@@ -106,6 +106,7 @@ Status legend:
 | Legacy reload | `POST /reload` | N/A | Alias | Alias | Keep as compatibility route. Prefer `/api/frames/:id/event/reload`. |
 | Legacy state/image | `GET /state`, `/states`, `/image` | N/A | Alias | Alias | Keep for lightweight viewers and old clients. Prefer canonical frame routes. |
 | Web admin shell | `/admin`, `/login`, `/ws/admin` | N/A | Full | Planned/separate portal | Pi serves the shared admin shell. ESP32 currently has a simpler portal/UI. |
+| Browser preview runtime | `GET /frameos-wasm/*` (`preview-worker.js`, `frameos.js`, `frameos.wasm`, `version.json`) | Full, `/frameos-wasm` StaticFiles mount over `frontend/dist/frameos-wasm` | Full when the build carries it: served from the embedded `frame_web` table (`GET /frameos-wasm/@asset`, same access rules and gzip passthrough as `/static/@asset`, plus `HEAD` for the SPA's availability probe); 404 on a build made without the bundle | N/A | Must be same-origin: the scene editor starts a module worker and instantiates the wasm from next to it. Releases and the Docker image build the runtime into `frontend/public/frameos-wasm` before the frame assets are baked, so a frame previews with exactly the runtime version it runs; PR builds stay wasm-less and the button is disabled there. FrameOS Cloud serves the same four files under `/frames-app/frameos-wasm/`. |
 
 ## The fourth plane: FrameOS Cloud
 

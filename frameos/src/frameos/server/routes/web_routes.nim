@@ -57,9 +57,15 @@ proc respondAdminWebApp(request: Request) {.gcsafe.} =
   else:
     request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
 
-proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
+proc respondFrameWebAsset(request: Request, assetPath: string, headOnly = false) {.gcsafe.} =
+  ## One file out of the compiled frame_web table. `headOnly` answers a HEAD:
+  ## same status and headers, no body. mummy routes HEAD to its own handler
+  ## and never strips a body itself, so the handler has to.
   if not allowUnauthenticatedStaticAssets() and not hasAccess(request, Read):
-    request.respond(Http401, body = "Unauthorized")
+    if headOnly:
+      request.respond(Http401)
+    else:
+      request.respond(Http401, body = "Unauthorized")
     return
   try:
     var headers: mummy.HttpHeaders
@@ -71,9 +77,30 @@ proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
         getCompressedFrameWebAsset(assetPath)
       else:
         getFrameWebAsset(assetPath)
-    request.respond(Http200, headers, asset)
+    if headOnly:
+      headers["Content-Length"] = $asset.len
+      request.respond(Http200, headers)
+    else:
+      request.respond(Http200, headers, asset)
   except KeyError:
-    request.respond(Http404, body = "Not found!")
+    if headOnly:
+      request.respond(Http404)
+    else:
+      request.respond(Http404, body = "Not found!")
+
+proc respondFrameWebDirAsset(request: Request, directory: string, headOnly = false) {.gcsafe.} =
+  ## `@asset` under one embedded directory. mummy splits the path on `/`, so
+  ## the parameter is a single segment by construction; the guard is here
+  ## because the table key is built by concatenation. An unusable name gets
+  ## the empty key, which is in no table: the request 404s after the same
+  ## access check every other embedded asset goes through.
+  let asset = request.pathParams["asset"]
+  let assetPath =
+    if asset.len == 0 or '/' in asset or '\\' in asset or ".." in asset:
+      ""
+    else:
+      directory & asset
+  respondFrameWebAsset(request, assetPath, headOnly = headOnly)
 
 const captiveProbePaths* = [
   "/generate_204", "/gen_204",                       # Android, Chrome
@@ -178,8 +205,26 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
 
   router.get("/static/@asset", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
-      let assetPath = "assets/compiled/frame_web/static/" & request.pathParams["asset"]
-      respondFrameWebAsset(request, assetPath)
+      respondFrameWebDirAsset(request, "assets/compiled/frame_web/static/")
+  )
+
+  # The browser (wasm) preview runtime, served same-origin out of the same
+  # embedded table as everything else the admin SPA loads: the SPA starts
+  # `new Worker("/frameos-wasm/preview-worker.js", {type: "module"})`, which
+  # imports frameos.js and fetches frameos.wasm and version.json next to it.
+  # Present only in builds whose frontend/public/frameos-wasm was populated
+  # before the assets were baked (the release chain and the Docker image do
+  # that; PR builds stay wasm-less on purpose), so a 404 here means "this
+  # FrameOS build has no browser preview runtime" — which is exactly what the
+  # SPA probes for with a HEAD before it offers the button.
+  router.get("/frameos-wasm/@asset", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      respondFrameWebDirAsset(request, "assets/compiled/frame_web/frameos-wasm/")
+  )
+
+  router.head("/frameos-wasm/@asset", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      respondFrameWebDirAsset(request, "assets/compiled/frame_web/frameos-wasm/", headOnly = true)
   )
 
   router.get("/img/**", proc(request: Request) {.gcsafe.} =

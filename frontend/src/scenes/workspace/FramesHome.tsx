@@ -51,7 +51,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
-import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
+import { ScenePreviewBody, ScenePreviewFooter, ScenePreviewSurface } from '../frame/panels/Scenes/ScenePreviewPanel'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
@@ -1088,7 +1088,6 @@ function SceneControlPanelContent({
     )
   }
 
-  const selectedSceneIsActive = sceneIsActive(scene, currentSceneId)
   const sceneIsEditable = Boolean(editingFrame.scenes?.some((candidate) => candidate.id === sceneId))
   const sceneIsUnsaved = sceneIsEditable && (!saved || unsavedSceneIds.has(sceneId))
   const sceneIsUndeployed = sceneIsEditable && (!saved || undeployedSceneIds.has(sceneId))
@@ -1125,39 +1124,22 @@ function SceneControlPanelContent({
                 <XMarkIcon className="h-6 w-6" />
               </button>
             </div>
+            <div className="shrink-0 px-5 pt-4">
+              <ScenePreviewSurface frameId={frame.id} sceneId={sceneId} scene={scene} />
+            </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              <div
-                className="frameos-card-media frameos-skeleton-surface relative mb-4 flex w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100"
-                style={{ aspectRatio: '16 / 9' }}
-              >
-                <FrameImage
-                  frameId={frame.id}
-                  sceneId={scene.id}
-                  thumb
-                  refreshable={false}
-                  objectFit="contain"
-                  hideWhileLoading
-                  loadFullSizeAfterThumb
-                  className="h-full w-full"
-                  imageClassName="h-full w-full rounded-md object-contain"
-                  wasmFallback={{ sceneId: scene.id }}
-                />
-                {selectedSceneIsActive ? <FrameImageOverlayControls frame={frame} sceneId={scene.id} /> : null}
-                {sceneIsCompiledForFrame(scene, frame.mode) ? (
-                  <div className="absolute left-2 top-10 z-10">
-                    <CompiledSceneTag
-                      frameId={frame.id}
-                      sceneId={scene.id}
-                      className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm"
-                    />
-                  </div>
-                ) : null}
-                {!saved ? (
-                  <div className="absolute left-2 top-2 z-10 rounded-full bg-orange-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
-                    Not saved
-                  </div>
-                ) : null}
-              </div>
+              {sceneIsCompiledForFrame(scene, frame.mode) || !saved ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  {!saved ? (
+                    <span className="rounded-full bg-orange-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+                      Not saved
+                    </span>
+                  ) : null}
+                  {sceneIsCompiledForFrame(scene, frame.mode) ? (
+                    <CompiledSceneTag frameId={frame.id} sceneId={scene.id} />
+                  ) : null}
+                </div>
+              ) : null}
               {saved || sceneIsEditable ? (
                 // `saved || sceneIsEditable`, not `saved` alone: a scene that
                 // only exists in the frame form (a fresh blank scene — and on
@@ -1201,14 +1183,10 @@ function SceneControlPanelContent({
                 onDeploy={saveAndDeployFrame}
                 onSave={saveFrame}
               />
-              <ExpandedScene
-                frameId={frame.id}
-                sceneId={sceneId}
-                scene={scene}
-                showEditButton={false}
-                isUndeployed={sceneIsUndeployed}
-                isUnsaved={sceneIsUnsaved}
-              />
+              <ScenePreviewBody frameId={frame.id} sceneId={sceneId} scene={scene} />
+            </div>
+            <div className="frameos-divider shrink-0 border-t border-slate-200/80 px-5 py-4">
+              <ScenePreviewFooter frameId={frame.id} sceneId={sceneId} scene={scene} />
             </div>
           </div>
         </BindLogic>

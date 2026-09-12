@@ -1,6 +1,7 @@
 import {
   MakeLogicType,
   actions,
+  afterMount,
   beforeUnmount,
   connect,
   kea,
@@ -167,8 +168,44 @@ export interface WasmUnsupportedApp {
   reason: string
 }
 
+/**
+ * Whether this deployment serves the browser preview runtime.
+ * 'unknown' until probed; only the on-device admin can come up 'missing'
+ * (a FrameOS build made before the device served /frameos-wasm/*).
+ */
+export type LivePreviewAvailability = 'unknown' | 'available' | 'missing'
+
+/** Shown on the disabled "Preview in browser" button when the device has no runtime. */
+export const LIVE_PREVIEW_MISSING_RUNTIME =
+  'This FrameOS build has no browser preview runtime. Update FrameOS to use it.'
+
+/**
+ * Why the button is disabled. A frame either ships the runtime or it does
+ * not; anywhere else it means the checkout was built without the bundle,
+ * which is a developer's problem with a developer's fix.
+ */
+export function livePreviewUnavailableMessage(): string {
+  return isFrameControlMode()
+    ? LIVE_PREVIEW_MISSING_RUNTIME
+    : 'No browser preview runtime here. Build it with frameos/tools/build_wasm.sh (the "wasm" mprocs pane) and reload.'
+}
+
+/**
+ * The worker failed to start. On the device there is no build script to run
+ * — the runtime ships with FrameOS — so it gets its own sentence.
+ */
+export function livePreviewWorkerErrorMessage(detail?: string | null): string {
+  if (detail) {
+    return detail
+  }
+  return isFrameControlMode()
+    ? 'Could not start the browser preview. ' + LIVE_PREVIEW_MISSING_RUNTIME
+    : 'Could not start the live preview worker. Is the wasm bundle built? ' +
+        'Run frameos/tools/build_wasm.sh (or the "wasm" mprocs pane) and reload.'
+}
+
 // Hash param that keeps the in-browser preview open across reloads.
-// ExpandedScene re-opens the preview on mount when it matches its scene.
+// SceneWorkspace re-opens the preview on mount when it matches its scene.
 export const LIVE_PREVIEW_HASH_KEY = 'livePreview'
 
 function setLivePreviewHash(sceneId: string | null): void {
@@ -199,6 +236,7 @@ export interface livePreviewLogicValues {
   fastRenderRequest: FastRenderRequest | null
   gpioButtons: GPIOButton[]
   lastRenderMs: number | null
+  livePreviewAvailability: LivePreviewAvailability
   livePreviewScene: FrameScene | null
   livePreviewSceneId: string | null
   livePreviewScenes: FrameScene[] | null
@@ -220,6 +258,7 @@ export interface livePreviewLogicValues {
   previewState: Record<string, any>
   previewStatus: 'error' | 'loading' | 'running'
   renderCount: number
+  runtimeVersion: string | null
   storedKeysNotice: string | null
   wasmUnsupportedApps: WasmUnsupportedApp[]
 }
@@ -307,7 +346,10 @@ export interface livePreviewLogicActions {
     renderMs: number
     width: number
   }
-  previewReady: () => {
+  previewReady: (runtimeVersion?: string | null) => {
+    runtimeVersion: string | null
+  }
+  probeLivePreviewAvailability: () => {
     value: true
   }
   registerCanvas: (canvas: HTMLCanvasElement | null) => {
@@ -321,6 +363,9 @@ export interface livePreviewLogicActions {
   }
   setFastMode: (enabled: boolean) => {
     enabled: boolean
+  }
+  setLivePreviewAvailability: (availability: LivePreviewAvailability) => {
+    availability: LivePreviewAvailability
   }
   setPreviewSettings: (settings: Record<string, Record<string, any>>) => {
     settings: Record<string, Record<string, any>>
@@ -391,7 +436,14 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     }),
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
-    previewReady: true,
+    // The worker reports which FrameOS runtime the wasm bundle was built
+    // from; the status row shows it, so the device and the browser can be
+    // told apart at a glance.
+    previewReady: (runtimeVersion?: string | null) => ({ runtimeVersion: runtimeVersion ?? null }),
+    // Does this deployment serve a browser preview runtime at all? Only the
+    // on-device admin can be without one (see D9 / web_routes.nim).
+    probeLivePreviewAvailability: true,
+    setLivePreviewAvailability: (availability: LivePreviewAvailability) => ({ availability }),
     // `count` frames arrived since the last report (the page coalesces);
     // `fps` is the measured rate over the last few frames.
     previewFrame: (width: number, height: number, renderMs: number, count: number = 1, fps: number | null = null) => ({
@@ -443,6 +495,22 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         openLivePreview: () => 'loading',
         previewFrame: () => 'running',
         previewErrored: () => 'error',
+      },
+    ],
+    livePreviewAvailability: [
+      'unknown' as LivePreviewAvailability,
+      {
+        setLivePreviewAvailability: (_, { availability }) => availability,
+        // A worker that actually started proves the runtime is there.
+        previewReady: () => 'available',
+      },
+    ],
+    // Reported by the worker's `ready` message: which FrameOS build the wasm
+    // bundle came from. Null until a preview has started at least once.
+    runtimeVersion: [
+      null as string | null,
+      {
+        previewReady: (state, { runtimeVersion }) => runtimeVersion ?? state,
       },
     ],
     previewError: [
@@ -739,6 +807,19 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
               )
             }
           }
+        } else if (isFrameControlMode()) {
+          // The device has no /scene_preview_settings route; its admin API
+          // answers GET /api/settings with the same {group: {field: value}}
+          // object the backend assembles per frame (frameAdminEditableSettings
+          // Payload in frameos/src/frameos/server/api.nim), unwrapped — no
+          // `settings` envelope. The admin session is what authorises it.
+          const response = await apiFetch(`/api/settings`)
+          if (response.ok) {
+            const data = await response.json()
+            if (data && typeof data === 'object' && !Array.isArray(data)) {
+              settings = data
+            }
+          }
         } else {
           const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
           if (response.ok) {
@@ -812,10 +893,8 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       try {
         worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
       } catch (error) {
-        actions.previewErrored(
-          'Could not start the live preview worker. Is the wasm bundle built? ' +
-            'Run frameos/tools/build_wasm.sh (or the "wasm" mprocs pane) and reload.'
-        )
+        actions.setLivePreviewAvailability('missing')
+        actions.previewErrored(livePreviewWorkerErrorMessage())
         return
       }
       cache.worker = worker
@@ -823,17 +902,13 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.assetRequester = assetRequester
       cache.assetRequest = assetRequester.request
       worker.onerror = (event) => {
-        actions.previewErrored(
-          event.message ||
-            'Live preview worker failed to load. Is the wasm bundle built? ' +
-              'Run frameos/tools/build_wasm.sh (or the "wasm" mprocs pane) and reload.'
-        )
+        actions.previewErrored(livePreviewWorkerErrorMessage(event.message))
       }
       worker.onmessage = (event: MessageEvent) => {
         const msg = event.data || {}
         switch (msg.type) {
           case 'ready':
-            actions.previewReady()
+            actions.previewReady(typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null)
             break
           case 'frame': {
             // Paint at once; report to the store in batches (see UI_FLUSH_INTERVAL_MS).
@@ -1034,7 +1109,38 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         actions.openLivePreview(values.livePreviewSceneId, values.previewState, values.livePreviewScenes)
       }
     },
+    probeLivePreviewAvailability: async () => {
+      if (values.livePreviewAvailability !== 'unknown') {
+        return
+      }
+      if (!isFrameControlMode()) {
+        // The backend and the cloud always serve the bundle (a dev checkout
+        // without it fails loudly when the worker starts); no request needed.
+        actions.setLivePreviewAvailability('available')
+        return
+      }
+      try {
+        const response = await fetch(assetUrl('/frameos-wasm/preview-worker.js'), {
+          method: 'HEAD',
+          credentials: 'include',
+        })
+        if (response.ok) {
+          actions.setLivePreviewAvailability('available')
+        } else if (response.status === 404) {
+          // Only a 404 says the build does not carry the runtime. A 401 is a
+          // stale admin session and a 5xx is a bad moment — neither is a
+          // reason to tell the user their FrameOS is too old, so the button
+          // stays enabled and the worker's own error speaks if it fails.
+          actions.setLivePreviewAvailability('missing')
+        }
+      } catch (error) {
+        // Offline or blocked: same reasoning, leave it unknown.
+      }
+    },
   })),
+  afterMount(({ actions }) => {
+    actions.probeLivePreviewAvailability()
+  }),
   beforeUnmount(({ cache }) => {
     cache.worker?.terminate()
     cache.worker = null

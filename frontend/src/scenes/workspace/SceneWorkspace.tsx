@@ -1,4 +1,5 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
+import { router } from 'kea-router'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
@@ -29,7 +30,6 @@ import { parseRouteFrameId } from '../../utils/frameId'
 import { FrameosShell } from './FrameosShell'
 import { TemplateDrawer } from './FramesHome'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
-import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
@@ -47,7 +47,8 @@ import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { SceneSettings } from '../frame/panels/Scenes/SceneSettings'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
-import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
+import { ScenePreviewBody, ScenePreviewFooter, ScenePreviewSurface } from '../frame/panels/Scenes/ScenePreviewPanel'
+import { LIVE_PREVIEW_HASH_KEY, livePreviewLogic } from '../frame/panels/Scenes/livePreviewLogic'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
@@ -207,48 +208,43 @@ function SceneSelector({
 
   return (
     <div className="@container space-y-2">
-      <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
-        <FrameSidebarPreview
-          frame={frame}
-          className="order-3 @xs:order-1 @xs:h-full"
-          mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
-        />
-        <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          {!inFrameAdminMode ? (
-            <div>
-              <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
-              <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
-                <div className="relative min-w-0 flex-1">
-                  <select
-                    value={frame.id}
-                    onChange={(event) => navigateToSceneFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
-                    className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-                  >
-                    {frameGroups.map((group) => (
-                      <optgroup key={group.key} label={group.label}>
-                        {group.frames.map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>
-                            {candidate.name || frameHost(candidate)}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <FrameMetricAlertIndicator
-                    frame={frame}
-                    containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
-                  />
-                </div>
-                <FrameBatteryIndicator frame={frame} className="shrink-0" />
-                <FrameActionsMenu
+      {/* No frame picture here: the scene's own preview lives in the Preview
+          drawer on the right, and two pictures of the same frame competed. */}
+      <div className="min-w-0 space-y-2">
+        {!inFrameAdminMode ? (
+          <div>
+            <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
+            <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
+              <div className="relative min-w-0 flex-1">
+                <select
+                  value={frame.id}
+                  onChange={(event) => navigateToSceneFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
+                  className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+                >
+                  {frameGroups.map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.frames.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name || frameHost(candidate)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <FrameMetricAlertIndicator
                   frame={frame}
-                  className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
                 />
               </div>
+              <FrameBatteryIndicator frame={frame} className="shrink-0" />
+              <FrameActionsMenu
+                frame={frame}
+                className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              />
             </div>
-          ) : null}
-          {sidebarActions}
-        </div>
+          </div>
+        ) : null}
+        {sidebarActions}
       </div>
       <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -705,9 +701,6 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
           ))}
         </div>
       </div>
-      <div className="frameos-skeleton-surface h-32 overflow-hidden rounded-2xl">
-        <div className="frameos-skeleton-media h-full animate-pulse" />
-      </div>
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scenes</div>
@@ -743,10 +736,6 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
       </div>
     </div>
   )
-}
-
-function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
-  return <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
 }
 
 function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
@@ -877,12 +866,17 @@ function UtilityDrawer({
     return null
   }
 
+  // The preview panel pins its picture above the scroll area and its buttons
+  // below it, so those two live outside renderPanel().
+  const top = utilityPanel === 'state' && scene ? <ScenePreviewSurface frameId={frameId} sceneId={scene.id} /> : null
+  const footer = utilityPanel === 'state' && scene ? <ScenePreviewFooter frameId={frameId} sceneId={scene.id} /> : null
+
   const renderPanel = () => {
     if (utilityPanel === 'info') {
       return scene ? <SceneInfoPanel frameId={frameId} scene={scene} /> : <div>Select a scene first.</div>
     }
     if (utilityPanel === 'state') {
-      return scene ? <ScenePreviewPanel frameId={frameId} scene={scene} /> : <div>Select a scene first.</div>
+      return scene ? <ScenePreviewBody frameId={frameId} sceneId={scene.id} /> : <div>Select a scene first.</div>
     }
     if (utilityPanel === 'stateVariables') {
       return scene ? <SceneState sceneId={scene.id} /> : <div>Select a scene first.</div>
@@ -915,7 +909,11 @@ function UtilityDrawer({
             <XMarkIcon className="h-6 w-6" />
           </button>
         </div>
+        {top ? <div className="shrink-0 px-5 pt-4">{top}</div> : null}
         <div className="min-h-0 flex-1 overflow-y-auto p-5">{renderPanel()}</div>
+        {footer ? (
+          <div className="frameos-divider shrink-0 border-t border-slate-200/80 px-5 py-4">{footer}</div>
+        ) : null}
       </div>
     </div>
   )
@@ -991,10 +989,33 @@ function SceneCanvas({
       onDropCapture={handleSceneDrop}
     >
       <SceneSelectedNodeSync frameId={frameId} sceneId={selectedSceneId} />
+      <ScenePreviewHashSync frameId={frameId} sceneId={selectedSceneId} />
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
       <SceneDiagramOverlay frameId={frameId} frameMode={frameMode} scene={selectedScene} sceneId={selectedSceneId} />
     </div>
   )
+}
+
+/**
+ * Reopen the in-browser preview after a reload: openLivePreview stores the
+ * scene id in the URL hash, and by the time this renders the frame's scenes
+ * are loaded. Mounted with the canvas, so it also opens the Preview drawer
+ * the canvas now lives in.
+ */
+function ScenePreviewHashSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
+  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
+  const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
+  const { openUtilityPanel } = useActions(workspaceLogic)
+
+  useEffect(() => {
+    if (router.values.hashParams[LIVE_PREVIEW_HASH_KEY] === sceneId && livePreviewSceneId !== sceneId) {
+      openUtilityPanel('state')
+      openLivePreview(sceneId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return null
 }
 
 function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {

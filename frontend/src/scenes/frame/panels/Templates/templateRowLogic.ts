@@ -164,7 +164,7 @@ export const templateRowLogic = kea<templateRowLogicType>([
         return
       }
       // Open the in-browser WASM preview directly with the scene's default
-      // public state; the preview modal itself offers "Preview on frame".
+      // public state; the preview modal itself offers "Install on frame".
       // The scenes aren't installed on the frame, so pass them explicitly.
       const { mainScene, payloadScenes } = values.trySceneConfig
       const state: Record<string, any> = {}
