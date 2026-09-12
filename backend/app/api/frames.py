@@ -3868,6 +3868,23 @@ async def api_frame_update_endpoint(
                 detail="The admin login is the only way this backend reaches the frame (no SSH key, "
                 "password or FrameOS Remote on it) — it cannot be disabled or left blank",
             )
+    # The Buildroot images ship no Caddy, so ensure_buildroot_frame_defaults
+    # turns the HTTPS proxy off on every save of a Buildroot frame. The form
+    # disables the switch and says why; a caller asking for it anyway is told
+    # rather than silently overruled (the toggle "never stuck", 2026-09-12).
+    # A frame changing mode in this save keeps the quiet reset: the proxy it
+    # had as rpios simply does not exist on the card it becomes.
+    https_proxy_update = update_data.get("https_proxy")
+    if (
+        isinstance(https_proxy_update, dict)
+        and https_proxy_update.get("enable")
+        and (frame.mode or "rpios") == "buildroot"
+        and update_data.get("mode", "buildroot") == "buildroot"
+    ):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="The HTTPS proxy is not available on Buildroot frames: the image ships no Caddy",
+        )
     # The schedule becomes "<schedule> root <command>" in /etc/cron.d on the
     # next deploy; refuse what cron cannot parse or what would add a line.
     reboot_update = update_data.get("reboot")

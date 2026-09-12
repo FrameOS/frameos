@@ -1328,6 +1328,41 @@ async def test_api_frame_update_name(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_buildroot_rejects_https_proxy(async_client, db, redis):
+    # The Buildroot images ship no Caddy. The save used to accept enable=true
+    # and ensure_buildroot_frame_defaults put it back off, so the settings
+    # switch flipped on and immediately off again.
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-64', 'compilationMode': 'precompiled'}
+    frame.scenes = []
+    ensure_buildroot_frame_defaults(frame)
+    db.add(frame)
+    db.commit()
+    proxy = dict(frame.https_proxy or {})
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"https_proxy": {**proxy, "enable": True}})
+    assert resp.status_code == 400
+    assert "Buildroot" in resp.json()["detail"]
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"https_proxy": {**proxy, "enable": False}})
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).https_proxy["enable"] is False
+
+    # Leaving Buildroot in the same save is not asking for the proxy on a
+    # Buildroot card: the mode switch goes through.
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}', json={"mode": "rpios", "https_proxy": {**proxy, "enable": True}}
+    )
+    assert resp.status_code == 200
+    db.expire_all()
+    updated = db.get(Frame, frame.id)
+    assert updated.mode == "rpios"
+    assert updated.https_proxy["enable"] is True
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_keeps_server_side_sd_image_record(async_client, db, redis):
     # The SD image record is build output owned by the backend. Clients echo
     # back the buildroot dict they loaded with the form, so a save made after

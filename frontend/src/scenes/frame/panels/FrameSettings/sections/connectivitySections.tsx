@@ -570,6 +570,7 @@ export function HttpsProxySection(): JSX.Element {
     frame,
     frameForm,
     frameFormTouches,
+    isBuildrootMode,
     isEmbeddedMode,
     tlsEnabled,
     generateTlsCertificates,
@@ -588,14 +589,24 @@ export function HttpsProxySection(): JSX.Element {
           tooltip={
             isEmbeddedMode
               ? 'Serve the frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. The certificate and key reach the board on its next settings poll; it restarts to apply them.'
+              : isBuildrootMode
+              ? 'The Buildroot images ship no Caddy, so the backend reaches a Buildroot frame over plain HTTP. Every save turns this off again.'
               : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
           }
+          // Without this the switch flipped on, the save posted enable=true,
+          // and ensure_buildroot_frame_defaults on the backend put it back
+          // off — a toggle that never stuck (2026-09-12, HA add-on).
+          hint={isBuildrootMode ? 'Not available on Buildroot frames: the image has no Caddy.' : undefined}
         >
           {({ value, onChange }) => (
             <Switch
               name="https_proxy.enable"
               value={value}
+              disabled={isBuildrootMode}
               onChange={(enableTls) => {
+                if (isBuildrootMode) {
+                  return
+                }
                 if (enableTls) {
                   verifyTlsCertificates()
                 }
