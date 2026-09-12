@@ -1,15 +1,19 @@
-import { MakeLogicType, connect, kea, key, path, props, selectors } from 'kea'
+import { MakeLogicType, actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
 
 import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene, FrameType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { activationWasRedeploy, controlLogic } from './controlLogic'
+import { scenesLogic } from './scenesLogic'
 import { isCloudMode } from '../../../../utils/cloudMode'
+import { deployCloudFrameScenes } from '../../../../utils/cloudFrameApi'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { socketLogic } from '../../../socketLogic'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { booleanFieldValue } from '../../../../utils/booleanField'
+import { chooseSceneDeployPath } from '../../../../utils/scenePreviewDeploy'
+import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { StateField } from '../../../../types'
 import type { TemplateType } from '../../../../types'
@@ -24,13 +28,23 @@ export interface ExpandedSceneLogicProps {
 export interface expandedSceneLogicValues {
   loading: boolean | string // controlLogic
   states: Record<string, Record<string, any>> // controlLogic
+  changedScenes: Set<string> // frameLogic
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  linkedActiveSceneId: string | null // scenesLogic
+  undeployedSceneIds: Set<string> // scenesLogic
+  currentState: Record<string, any>
+  deployDescription: string
   fields: StateField[]
   hasStateChanges: boolean
+  isActiveScene: boolean
   isStateChangesSubmitting: boolean
   isStateChangesValid: boolean
+  nextState: Record<string, any>
   scene: FrameScene | null
+  sceneHasChanges: boolean
+  sceneIsUndeployed: boolean
+  sceneIsUnsaved: boolean
   scenes: FrameScene[] | undefined
   scenesAsOptions: {
     label: string
@@ -60,6 +74,9 @@ export interface expandedSceneLogicActions {
     preserveSceneIds: boolean
     template: Partial<TemplateType>
   } // frameLogic
+  saveFrame: () => {
+    value: true
+  } // frameLogic
   updateScene: (
     sceneId: string,
     scene: Partial<FrameScene>
@@ -67,6 +84,21 @@ export interface expandedSceneLogicActions {
     scene: Partial<FrameScene>
     sceneId: string
   } // frameLogic
+  previewScene: (
+    sceneId: string,
+    state?: Record<string, any> | null | undefined,
+    scenes?: FrameScene[] | null | undefined
+  ) => {
+    sceneId: string
+    scenes: FrameScene[] | null
+    state: Record<string, any> | null | undefined
+  } // scenesLogic
+  deployToFrame: () => {
+    value: true
+  }
+  deployToFrameFailure: () => {
+    value: true
+  }
   resetStateChanges: (values?: Record<string, any>) => {
     values?: Record<string, any>
   }
@@ -127,6 +159,17 @@ export interface expandedSceneLogicMeta {
       states: Record<string, Record<string, any>>,
       arg: any
     ) => boolean
+    currentState: (states: Record<string, Record<string, any>>, arg: any) => Record<string, any>
+    nextState: (
+      currentState: Record<string, any>,
+      stateChanges: Record<string, any>,
+      visibleFields: StateField[]
+    ) => Record<string, any>
+    sceneIsUnsaved: (changedScenes: Set<string>, arg: any) => boolean
+    sceneIsUndeployed: (undeployedSceneIds: Set<string>, arg: any) => boolean
+    sceneHasChanges: (sceneIsUnsaved: boolean, sceneIsUndeployed: boolean) => boolean
+    isActiveScene: (linkedActiveSceneId: string | null, arg: any) => boolean
+    deployDescription: (sceneHasChanges: boolean, isActiveScene: boolean) => string
   }
 }
 
@@ -143,9 +186,27 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
   key((props) => `${props.frameId}${props.sceneId}`),
   connect(({ frameId }: ExpandedSceneLogicProps) => ({
     logic: [longRunningTasksModel],
-    values: [frameLogic({ frameId }), ['frame', 'frameForm'], controlLogic({ frameId }), ['states', 'loading']],
-    actions: [frameLogic({ frameId }), ['updateScene', 'applyTemplate']],
+    values: [
+      frameLogic({ frameId }),
+      ['frame', 'frameForm', 'changedScenes'],
+      controlLogic({ frameId }),
+      ['states', 'loading'],
+      scenesLogic({ frameId }),
+      ['undeployedSceneIds', 'linkedActiveSceneId'],
+    ],
+    actions: [
+      frameLogic({ frameId }),
+      ['updateScene', 'applyTemplate', 'saveFrame'],
+      scenesLogic({ frameId }),
+      ['previewScene'],
+    ],
   })),
+  actions({
+    // "Deploy to frame": one button, five paths (utils/scenePreviewDeploy.ts).
+    deployToFrame: true,
+    /** The frame never got it — the drawer stops waiting for a render. */
+    deployToFrameFailure: true,
+  }),
   forms(({ values, props }) => ({
     stateChanges: {
       defaults: {} as Record<string, any>,
@@ -264,5 +325,133 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
         return Object.keys(stateChanges).some((key) => stateChanges[key] !== currentState[key])
       },
     ],
+    // What the frame currently reports for this scene.
+    currentState: [
+      (s) => [s.states, (_, props) => props.sceneId],
+      (states: expandedSceneLogicValues['states'], sceneId): Record<string, any> => states[sceneId] ?? {},
+    ],
+    // The state to send with the scene: the frame's current values with the
+    // form's edits on top, narrowed to the fields the user can see.
+    nextState: [
+      (s) => [s.currentState, s.stateChanges, s.visibleFields],
+      (
+        currentState: expandedSceneLogicValues['currentState'],
+        stateChanges: expandedSceneLogicValues['stateChanges'],
+        visibleFields: expandedSceneLogicValues['visibleFields']
+      ): Record<string, any> => {
+        const desiredState = { ...currentState, ...stateChanges }
+        const state: Record<string, any> = {}
+        for (const field of visibleFields) {
+          if (!field.name) {
+            continue
+          }
+          const value = desiredState[field.name] ?? field.value
+          if (value !== undefined && value !== null) {
+            state[field.name] = String(value)
+          }
+        }
+        return state
+      },
+    ],
+    sceneIsUnsaved: [
+      (s) => [s.changedScenes, (_, props) => props.sceneId],
+      (changedScenes: expandedSceneLogicValues['changedScenes'], sceneId): boolean => changedScenes.has(sceneId),
+    ],
+    sceneIsUndeployed: [
+      (s) => [s.undeployedSceneIds, (_, props) => props.sceneId],
+      (undeployedSceneIds: expandedSceneLogicValues['undeployedSceneIds'], sceneId): boolean =>
+        undeployedSceneIds.has(sceneId),
+    ],
+    sceneHasChanges: [
+      (s) => [s.sceneIsUnsaved, s.sceneIsUndeployed],
+      (
+        sceneIsUnsaved: expandedSceneLogicValues['sceneIsUnsaved'],
+        sceneIsUndeployed: expandedSceneLogicValues['sceneIsUndeployed']
+      ): boolean => sceneIsUnsaved || sceneIsUndeployed,
+    ],
+    isActiveScene: [
+      (s) => [s.linkedActiveSceneId, (_, props) => props.sceneId],
+      (linkedActiveSceneId: expandedSceneLogicValues['linkedActiveSceneId'], sceneId): boolean =>
+        linkedActiveSceneId === sceneId,
+    ],
+    /** The "Deploy to frame" tooltip: what this click will actually do. */
+    deployDescription: [
+      (s) => [s.sceneHasChanges, s.isActiveScene],
+      (
+        sceneHasChanges: expandedSceneLogicValues['sceneHasChanges'],
+        isActiveScene: expandedSceneLogicValues['isActiveScene']
+      ): string => chooseSceneDeployPath({ mode: workspaceMode(), sceneHasChanges, isActiveScene }).description,
+    ],
   }),
+  listeners(({ actions, props, values }) => ({
+    deployToFrame: async () => {
+      const { path: deployPath } = chooseSceneDeployPath({
+        mode: workspaceMode(),
+        sceneHasChanges: values.sceneHasChanges,
+        isActiveScene: values.isActiveScene,
+      })
+      if (deployPath === 'saveThenUploadScenes') {
+        // On the device the scene lives on the frame: save it, then send it
+        // (uploadScenes there IS activate, see scenesLogic.previewScene).
+        if (values.sceneIsUnsaved) {
+          try {
+            await frameLogic({ frameId: props.frameId }).asyncActions.saveFrame()
+          } catch (error) {
+            // saveFrame toasts its own failure; the drawer just stops waiting.
+            actions.deployToFrameFailure()
+            return
+          }
+        }
+        actions.previewScene(props.sceneId, values.nextState)
+        return
+      }
+      if (deployPath === 'uploadScenes') {
+        // Send the whole edited scene, no save and no deploy: what the editor
+        // shows is what the frame shows. Save/Deploy live in the scene header.
+        actions.previewScene(props.sceneId, values.nextState)
+        return
+      }
+      if (deployPath === 'cloudDeployScenes') {
+        // One durable set_scenes push, this scene active. It carries the
+        // frame's whole scene list because the push REPLACES what the frame
+        // holds — an ad-hoc subset would silently drop the other scenes.
+        const sceneName = values.scene?.name || props.sceneId
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'deploy',
+          sceneId: props.sceneId,
+          title: 'Deploying scene changes',
+          detail: sceneName,
+        })
+        try {
+          const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []
+          if (!scenes.length) {
+            throw new Error('This frame has no scenes to deploy')
+          }
+          await deployCloudFrameScenes(props.frameId, scenes, {
+            sceneId: props.sceneId,
+            state: values.nextState,
+          })
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'deploy',
+            sceneId: props.sceneId,
+            status: 'success',
+            detail: 'Deployed — the frame activates the scene as soon as it syncs',
+          })
+        } catch (error) {
+          longRunningTasksModel.actions.taskFailed({
+            frameId: props.frameId,
+            kind: 'deploy',
+            sceneId: props.sceneId,
+            detail: error instanceof Error ? error.message : 'Failed to deploy scene changes',
+          })
+          actions.deployToFrameFailure()
+        }
+        return
+      }
+      // Nothing edited: activate by id, carrying the state fields.
+      actions.submitStateChanges()
+    },
+  })),
 ])

@@ -4,12 +4,31 @@ import zippy
 
 import ../../[channels, types]
 import ./helpers/http_harness
-import ../[auth, state]
+import ../[auth, embedded_assets, state]
 
 var server = startRouterServer(19331)
 
 const stableStaticAssetPath = "/static/main.js"
 const stableImageAssetPath = "/img/logo-2/logo-white-colors.svg"
+const wasmWorkerPath = "/frameos-wasm/preview-worker.js"
+const wasmBinaryPath = "/frameos-wasm/frameos.wasm"
+const wasmVersionPath = "/frameos-wasm/version.json"
+
+proc frameWebAssetEmbedded(path: string): bool =
+  try:
+    discard getCompressedFrameWebAsset(path)
+    true
+  except KeyError:
+    false
+
+# The browser preview runtime is baked into frame_web only when
+# frontend/public/frameos-wasm was populated before the assets were
+# generated: releases and the Docker image do that, PR builds deliberately do
+# not (no emscripten there). The route has to behave in both worlds, so the
+# assertions that need the bytes are skipped when they are absent.
+let wasmRuntimeEmbedded =
+  frameWebAssetEmbedded("assets/compiled/frame_web/frameos-wasm/preview-worker.js") and
+  frameWebAssetEmbedded("assets/compiled/frame_web/frameos-wasm/frameos.wasm")
 
 suite "web route behavior":
   setup:
@@ -337,6 +356,103 @@ suite "web route behavior":
       headers = [("Cookie", ACCESS_COOKIE & "=test-key")],
     )
     check authedPrivateLogo.status == 200
+
+  test "the wasm preview runtime follows the static asset access rules":
+    # Same gate as /static/@asset: with the admin panel on, the login page's
+    # assets load without a frame credential; a private frame without the
+    # admin panel needs the frame access key.
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+    check httpRequest(server.port, "GET", wasmWorkerPath).status ==
+      (if wasmRuntimeEmbedded: 200 else: 404)
+
+    let privateConfig = defaultFrameConfig()
+    configureServerState(privateConfig)
+    check httpRequest(server.port, "GET", wasmWorkerPath).status == 401
+    check httpRequest(server.port, "HEAD", wasmWorkerPath).status == 401
+    check httpRequest(
+      server.port,
+      "GET",
+      wasmWorkerPath,
+      headers = [("Cookie", ACCESS_COOKIE & "=test-key")],
+    ).status == (if wasmRuntimeEmbedded: 200 else: 404)
+
+  test "the wasm preview route 404s for anything the build does not carry":
+    var config = defaultFrameConfig()
+    config.frameAccess = "public"
+    configureServerState(config)
+
+    check httpRequest(server.port, "GET", "/frameos-wasm/no-such-file.js").status == 404
+    check httpRequest(server.port, "HEAD", "/frameos-wasm/no-such-file.js").status == 404
+    # The table key is built by concatenation; a traversal-looking segment
+    # names nothing.
+    check httpRequest(server.port, "GET", "/frameos-wasm/..").status == 404
+    check httpRequest(server.port, "GET", "/frameos-wasm/..%2F..%2Findex.html").status == 404
+    # A sub-path is not this route at all (the parameter is one segment).
+    check httpRequest(server.port, "GET", "/frameos-wasm/nested/frameos.wasm").status == 404
+
+  test "the wasm preview runtime is served with its own types, gzip passthrough and HEAD":
+    var config = defaultFrameConfig()
+    config.frameAccess = "public"
+    configureServerState(config)
+
+    if not wasmRuntimeEmbedded:
+      # This build carries no browser preview runtime; the 404 path above is
+      # the whole contract here.
+      skip()
+    else:
+      let worker = httpRequest(server.port, "GET", wasmWorkerPath)
+      check worker.status == 200
+      # A module worker refuses a script served as anything else.
+      check worker.header("content-type") == "text/javascript"
+      check worker.header("content-encoding") == ""
+
+      let gzipWorker = httpRequest(
+        server.port,
+        "GET",
+        wasmWorkerPath,
+        headers = [("Accept-Encoding", "br, gzip;q=1.0")],
+      )
+      check gzipWorker.status == 200
+      check gzipWorker.header("content-encoding") == "gzip"
+      check gzipWorker.header("vary") == "Accept-Encoding"
+      check uncompress(gzipWorker.body, dataFormat = dfGzip) == worker.body
+
+      # 4.6 MB of wasm: ask for the gzip the table already holds.
+      let binary = httpRequest(
+        server.port,
+        "GET",
+        wasmBinaryPath,
+        headers = [("Accept-Encoding", "gzip")],
+      )
+      check binary.status == 200
+      # WebAssembly.instantiateStreaming refuses any other type.
+      check binary.header("content-type") == "application/wasm"
+      check binary.header("content-encoding") == "gzip"
+      check binary.body.len > 0
+
+      let version = httpRequest(
+        server.port,
+        "GET",
+        wasmVersionPath,
+        headers = [("Accept-Encoding", "gzip")],
+      )
+      check version.status == 200
+      check version.header("content-type") == "application/json"
+      check parseJson(uncompress(version.body, dataFormat = dfGzip)).kind == JObject
+
+      # The admin SPA probes with HEAD before it offers the preview button;
+      # mummy routes HEAD separately and never strips a body itself.
+      let head = httpRequest(server.port, "HEAD", wasmWorkerPath)
+      check head.status == 200
+      check head.header("content-type") == "text/javascript"
+      check head.header("content-length") == $worker.body.len
+      check head.body.len == 0
 
   test "unauthorized gated routes return 401":
     let config = defaultFrameConfig()

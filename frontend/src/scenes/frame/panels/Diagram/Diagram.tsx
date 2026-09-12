@@ -34,14 +34,8 @@ import { EventNode } from './EventNode'
 import { StateNode } from './StateNode'
 import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
-import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import {
-  ArrowUturnLeftIcon,
-  ArrowUturnRightIcon,
-  ArrowsPointingInIcon,
-  EyeIcon,
-  WindowIcon,
-} from '@heroicons/react/24/outline'
+import { NodeType, EdgeType, CodeNodeData, FrameId } from '../../../../types'
+import { ArrowUturnLeftIcon, ArrowUturnRightIcon, ArrowsPointingInIcon, WindowIcon } from '@heroicons/react/24/outline'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
@@ -51,11 +45,11 @@ import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePi
 import { scenesLogic } from '../Scenes/scenesLogic'
 import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
 import { controlLogic } from '../Scenes/controlLogic'
+import { expandedSceneLogic } from '../Scenes/expandedSceneLogic'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
-import { LivePreviewModal } from '../Scenes/LivePreviewModal'
+import { sceneIsActivating } from '../../../../utils/sceneActivation'
 import { SceneActionsButton, SceneActionOption } from '../Scenes/SceneActionsButton'
-import { SceneActionKey } from '../Scenes/sceneActionsLogic'
-import { PlayIcon } from '@heroicons/react/24/solid'
+import { RocketLaunchIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import clsx from 'clsx'
@@ -142,6 +136,76 @@ function FloatingDiagramButton({
   )
 }
 
+/**
+ * The scene actions: "Deploy to frame" and "Preview in browser", the same two
+ * the Preview drawer offers. Its own component on purpose — the embedded
+ * editor renders the toolbar with `showSceneAction={false}` and must never
+ * mount expandedSceneLogic (it connects to frameLogic values the embed's shim
+ * does not have).
+ */
+function DiagramSceneActions({
+  frameId,
+  sceneId,
+  floating,
+}: {
+  frameId: FrameId
+  sceneId: string
+  floating: boolean
+}): JSX.Element {
+  const expandedSceneLogicProps = { frameId, sceneId }
+  const { deployDescription, nextState } = useValues(expandedSceneLogic(expandedSceneLogicProps))
+  const { deployToFrame } = useActions(expandedSceneLogic(expandedSceneLogicProps))
+  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
+  const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
+  const { openUtilityPanel } = useActions(workspaceLogic)
+  const { previewingSceneId } = useValues(scenesLogic({ frameId }))
+  const { activatingSceneId } = useValues(controlLogic({ frameId }))
+  // Either half of "Deploy to frame" can be the one in flight: the scene
+  // upload, or the activation that waits for the frame's render:done.
+  const deploying = previewingSceneId === sceneId || sceneIsActivating(activatingSceneId, sceneId)
+
+  const showInDrawer = (): void => {
+    // The canvas lives in the Preview drawer now: open it, then start it.
+    openUtilityPanel('state')
+    if (livePreviewSceneId !== sceneId) {
+      openLivePreview(sceneId, nextState)
+    }
+  }
+
+  if (floating) {
+    return (
+      <FloatingDiagramButton onClick={() => deployToFrame()} title={deployDescription} disabled={deploying}>
+        {deploying ? (
+          <Spinner color="white" className="flex h-5 w-5 items-center justify-center" />
+        ) : (
+          <RocketLaunchIcon className="h-5 w-5" />
+        )}
+      </FloatingDiagramButton>
+    )
+  }
+
+  const actionOptions: SceneActionOption[] = [
+    {
+      key: 'deploy',
+      label: 'Deploy to frame',
+      description: deployDescription,
+      icon: <RocketLaunchIcon className="h-4 w-4 shrink-0" />,
+      loading: deploying,
+      title: deployDescription,
+      onRun: () => deployToFrame(),
+    },
+    {
+      key: 'preview-browser',
+      label: 'Preview in browser',
+      description: 'Run this scene in your browser via WebAssembly',
+      icon: <WindowIcon className="h-4 w-4 shrink-0" />,
+      onRun: showInDrawer,
+    },
+  ]
+
+  return <SceneActionsButton size="tiny" options={actionOptions} defaultKey="deploy" />
+}
+
 export function DiagramToolbar({
   sceneId,
   showSceneAction = true,
@@ -157,87 +221,11 @@ export function DiagramToolbar({
     diagramLogic(diagramLogicProps)
   )
   const { canUndo, canRedo } = useValues(diagramLogic(diagramLogicProps))
-  const { previewScene } = useActions(scenesLogic({ frameId }))
-  const { setCurrentScene } = useActions(controlLogic({ frameId }))
-  const { sceneChanging } = useValues(controlLogic({ frameId }))
-  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(
-    scenesLogic({ frameId })
-  )
-  const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
-  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
-  const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
-  const isPreviewing = previewingSceneId === sceneId
-  const isActiveScene = linkedActiveSceneId === sceneId
-  const isActivatingScene = sceneChanging === sceneId
-  const previewTitle = isPreviewing
-    ? 'Previewing scene on the frame'
-    : sceneHasChanges
-    ? 'Preview unsaved changes on the frame'
-    : 'No unsaved changes to preview'
   const floating = variant === 'floating'
-
-  const actionOptions: SceneActionOption[] = [
-    {
-      key: 'activate',
-      label: isActivatingScene ? 'Activating…' : 'Activate scene',
-      description: 'Make this the active scene on the frame',
-      icon: isActivatingScene ? <Spinner className="h-4 w-4 shrink-0" /> : <PlayIcon className="h-4 w-4 shrink-0" />,
-      disabled: isActiveScene || isActivatingScene,
-      title: isActiveScene ? 'This scene is already active' : undefined,
-      onRun: () => setCurrentScene(sceneId),
-    },
-    {
-      key: 'preview-frame',
-      label: 'Preview on frame',
-      description: 'Temporarily show this scene on the frame, without saving or deploying',
-      icon: <EyeIcon className="h-4 w-4 shrink-0" />,
-      disabled: isPreviewing,
-      title: previewTitle,
-      onRun: () => previewScene(sceneId),
-    },
-    {
-      key: 'preview-browser',
-      label: 'Preview in browser',
-      description: 'Run this scene in your browser via WebAssembly',
-      icon: <WindowIcon className="h-4 w-4 shrink-0" />,
-      onRun: () => openLivePreview(sceneId),
-    },
-  ]
-  // Matches the old standalone buttons: preview while there are changes,
-  // activate otherwise.
-  const defaultActionKey: SceneActionKey = sceneHasChanges ? 'preview-frame' : 'activate'
 
   return (
     <div className={clsx('flex items-center gap-2', floating && 'scene-diagram-floating-toolbar pointer-events-none')}>
-      {showSceneAction ? (
-        floating ? (
-          sceneHasChanges ? (
-            <FloatingDiagramButton
-              onClick={() => previewScene(sceneId)}
-              title={previewTitle}
-              disabled={isPreviewing}
-              active={isPreviewing}
-            >
-              <EyeIcon className="h-5 w-5" />
-            </FloatingDiagramButton>
-          ) : (
-            <FloatingDiagramButton
-              onClick={() => setCurrentScene(sceneId)}
-              title={isActiveScene ? 'This scene is already active' : 'Activate'}
-              disabled={isActiveScene || isActivatingScene}
-              active={isActiveScene || isActivatingScene}
-            >
-              {isActivatingScene ? (
-                <Spinner color="white" className="flex h-5 w-5 items-center justify-center" />
-              ) : (
-                <PlayIcon className="h-5 w-5" />
-              )}
-            </FloatingDiagramButton>
-          )
-        ) : (
-          <SceneActionsButton size="tiny" options={actionOptions} defaultKey={defaultActionKey} />
-        )
-      ) : null}
+      {showSceneAction ? <DiagramSceneActions frameId={frameId} sceneId={sceneId} floating={floating} /> : null}
       {floating ? (
         <>
           <FloatingDiagramButton onClick={requestUndo} disabled={!canUndo} title="Undo (⌘Z / Ctrl+Z)">
@@ -276,7 +264,6 @@ export function DiagramToolbar({
           <SceneDropDown sceneId={sceneId} context="editDiagram" />
         </>
       )}
-      {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
     </div>
   )
 }

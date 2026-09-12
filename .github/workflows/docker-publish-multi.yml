@@ -164,7 +164,11 @@ jobs:
 
   build-prebuilt-cross:
     name: Build Prebuilt Cross (${{ matrix.slug }})
-    needs: [update-versions, determine-release-targets]
+    # build-wasm-runtime too: its signed bundle is unpacked into
+    # frontend/public/frameos-wasm below, before the frame assets are baked,
+    # so every released Pi binary carries the browser preview runtime the
+    # on-device admin panel serves at /frameos-wasm/*.
+    needs: [update-versions, determine-release-targets, build-wasm-runtime]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -245,6 +249,43 @@ jobs:
           echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
           nim --version
+
+      # `make release-<slug>` bakes the frame's embedded frame_web table out
+      # of THIS checkout: backend/bin/cross copies frontend/public into the
+      # build tree and runs `nimble assets -y` there, and that table is where
+      # the on-device admin panel loads the browser preview from
+      # (web_routes.nim serves GET /frameos-wasm/@asset straight out of it).
+      # So the runtime has to be in frontend/public/frameos-wasm before the
+      # build starts — and the frame then previews with exactly the runtime
+      # version it runs. There is no emscripten on this runner (nor in the PR
+      # test jobs, which stay wasm-less on purpose), so the bundle comes from
+      # build-wasm-runtime, which already signed it with the release key.
+      # It is verified against the committed public half the same way
+      # npm-publish.yml verifies the bundle it publishes — an artifact is a
+      # writable surface, and this one ends up inside every Pi binary.
+      # Downloaded outside release-assets/ so the "Package release artifacts"
+      # step below does not sweep the wasm tarball into this target's archive.
+      - name: Download the release's wasm runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-wasm
+          path: wasm-runtime
+
+      - name: Verify and unpack the wasm runtime into the frame assets
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+        run: |
+          set -euo pipefail
+          tarball="wasm-runtime/frameos-${DOCKER_VERSION}-wasm.tar.gz"
+          [ -f "$tarball" ] || { echo "::error::$tarball missing from the artifact"; exit 1; }
+          [ -f "$tarball.minisig" ] || { echo "::error::$tarball is unsigned"; exit 1; }
+          python3 -m pip install --quiet --require-hashes --break-system-packages \
+              -r tools/requirements-signing.txt \
+            || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
+          python3 tools/sign_firmware.py verify --public release-assets/firmware-signing.pub "$tarball"
+          mkdir -p frontend/public/frameos-wasm
+          tar -xzf "$tarball" -C frontend/public/frameos-wasm
+          ls -la frontend/public/frameos-wasm
 
       - name: Build release artifacts for ${{ matrix.slug }}
         run: |

@@ -260,6 +260,39 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     expectNoFrontendErrors(readErrors)
   })
 
+  test('scene preview drawer has two actions and no split menu', async ({ page }) => {
+    // The Preview drawer's footer is pinned and holds exactly "Preview in
+    // browser", "Deploy to frame" and Reset (the dashboard scene has public
+    // fields). "Deploy to frame" decides on its own whether to send the whole
+    // scene or activate by id, so the old three-option split button — with
+    // "Preview on frame" and "Save, deploy & activate" — is gone everywhere.
+    const readErrors = await prepareAuthenticatedPage(page)
+    await page.goto('/scenes/1/scene-dashboard', { waitUntil: 'domcontentloaded' })
+    await settleForScreenshot(page)
+
+    await openSceneWorkspaceUtilityDrawer(page, 'Preview')
+
+    const drawer = page
+      .locator('.workspace-drawer')
+      .filter({ has: page.getByRole('heading', { name: 'Preview', exact: true }) })
+    await expect(drawer).toBeVisible()
+
+    await expect(drawer.getByTestId('scene-preview-browser')).toHaveText('Preview in browser')
+    await expect(drawer.getByTestId('scene-deploy-frame')).toHaveText('Deploy to frame')
+    await expect(drawer.getByTestId('scene-reset-fields')).toHaveText('Reset')
+
+    // The innermost div around the deploy button is the footer row: those
+    // three buttons and nothing else — in particular no split-button chevron.
+    const footer = drawer.locator('div').filter({ has: page.getByTestId('scene-deploy-frame') }).last()
+    await expect(footer.getByRole('button')).toHaveCount(3)
+    await expect(drawer.getByRole('button', { name: 'Choose action' })).toHaveCount(0)
+    await expect(page.locator('body')).not.toContainText(/Preview on frame|Save, deploy & activate/)
+
+    // The live wasm canvas is deliberately not started here: it is not part of
+    // any snapshot, and starting it would download the runtime bundle.
+    expectNoFrontendErrors(readErrors)
+  })
+
   test('apps workspace AI chat opens app context', async ({ page }) => {
     const readErrors = await prepareAuthenticatedPage(page)
     await page.goto(

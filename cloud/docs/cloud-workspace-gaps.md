@@ -76,8 +76,11 @@ win). Works on the cloud AND the self-hosted backend — settings and proxy
 resolve per mode exactly like livePreviewLogic (`/api/settings` +
 `/api/store/preview-proxy` on cloud, `scene_preview_settings` +
 `scene_preview_proxy` per frame on a backend); frame-control mode is out.
-Wired into the fleet tiles, preview panels, sidebar preview, and the
-scene-control drawer. Renders ONLY on the tile's explicit
+Wired into the fleet tiles, the scene tiles and the frame workspace's
+sidebar preview. NOT into the scene editor's Preview drawer: that surface
+shows the scene's stored snapshot and starts the real in-browser preview
+in place when asked, so a one-shot bitmap behind it would be a third
+meaning for the same box. Renders ONLY on the tile's explicit
 "Preview in browser" click, never automatically — a scene render runs data
 apps with the account's real settings and can hit paid APIs (OpenAI image
 nodes), so bulk auto-rendering would spend the owner's money. The Assets panel is read-write on cloud

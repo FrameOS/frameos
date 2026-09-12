@@ -1,121 +1,42 @@
 import { useActions, useValues } from 'kea'
-import clsx from 'clsx'
-import { memo, useEffect, useRef, useState } from 'react'
-import {
-  BoltIcon,
-  CheckIcon,
-  CursorArrowRaysIcon,
-  EyeIcon,
-  FolderOpenIcon,
-  FolderPlusIcon,
-  PencilSquareIcon,
-} from '@heroicons/react/24/outline'
+import { useEffect, useRef, useState } from 'react'
+import { CheckIcon, FolderPlusIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 
 import { Button } from '../../../../components/Button'
 import { Checkbox } from '../../../../components/Checkbox'
 import { Label } from '../../../../components/Label'
 import { Modal } from '../../../../components/Modal'
 import { Spinner } from '../../../../components/Spinner'
-import { insertBreaks } from '../../../../utils/insertBreaks'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { frameLogic } from '../../frameLogic'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { BrowserAssetsModal } from './BrowserAssetsModal'
-import { livePreviewLogic, type LivePreviewLogLine } from './livePreviewLogic'
-import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
-import { previewSkipsNimMessage } from '../../../../utils/sceneExecution'
+import { livePreviewLogic } from './livePreviewLogic'
+import {
+  FastRenderPrompt,
+  LivePreviewLogs,
+  LivePreviewNotices,
+  LivePreviewToolbar,
+  openCanvasImageInNewTab,
+} from './LivePreviewParts'
 import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import type { FrameId } from '../../../../types'
-import { openBlobInNewTab } from '../../../../utils/objectUrl'
 
-// Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
-// The preview's runtime lines are raw strings, so classify them by content.
-export function logLineColor(line: string): string {
-  if (/error|failed|exception/i.test(line)) {
-    return 'text-red-300'
-  }
-  if (line.startsWith('event:')) {
-    return 'text-blue-300'
-  }
-  return 'text-slate-100'
-}
-
-// Same timestamp format as the real logs panel (Logs.tsx formatTimestamp).
-export function formatTimestamp(isoTimestamp: string): string {
-  const date = new Date(isoTimestamp)
-  return `${date.getFullYear()}-${date.getMonth() + 1 < 10 ? '0' : ''}${date.getMonth() + 1}-${
-    date.getDate() < 10 ? '0' : ''
-  }${date.getDate()} ${date.getHours() < 10 ? '0' : ''}${date.getHours()}:${
-    date.getMinutes() < 10 ? '0' : ''
-  }${date.getMinutes()}:${date.getSeconds() < 10 ? '0' : ''}${date.getSeconds()}`
-}
-
-// Open the current canvas image in a new tab. The window is opened
-// synchronously so popup blockers count it as user-initiated; the blob URL is
-// filled in once the canvas has been encoded.
-export function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
-  const win = window.open('', '_blank')
-  canvas.toBlob((blob) => {
-    if (!blob) {
-      win?.close()
-      return
-    }
-    openBlobInNewTab(blob, win)
-  }, 'image/png')
-}
-
-// Runtime log lines are mostly JSON like {"event":"debug","message":"..."}.
-// Render them the way the real logs panel renders webhook lines: the event
-// name highlighted, the remaining keys as key=value pairs.
-export function renderLogLine(line: string): JSX.Element | string {
-  if (line.startsWith('{')) {
-    try {
-      const { event, timestamp: _timestamp, ...rest } = JSON.parse(line)
-      if (event !== undefined) {
-        return (
-          <>
-            <span className="mr-2 text-yellow-600">{String(event)}</span>
-            {Object.entries(rest).map(([key, value]) => (
-              <span key={key} className="mr-2">
-                <span className="text-gray-400">{key}=</span>
-                <span>{insertBreaks(typeof value === 'string' ? value : JSON.stringify(value))}</span>
-              </span>
-            ))}
-          </>
-        )
-      }
-    } catch (e) {
-      // fall through to the raw line
-    }
-  }
-  return line
-}
-
-/** "every 42 ms (about 24 times a second)" for the fast-render prompt. */
-export function describeRenderRate(intervalMs: number): string {
-  const ms = Math.max(1, Math.round(intervalMs))
-  return `every ${ms} ms (about ${formatFps(1000 / ms)} times a second)`
-}
-
-/** "24" / "7.5": whole numbers from 10 up, one decimal below. */
-export function formatFps(fps: number): string {
-  return fps >= 10 ? Math.round(fps).toString() : fps.toFixed(1).replace(/\.0$/, '')
-}
-
-// One runtime log line. Memoized with a stable key: a scene rendering at
-// full speed appends lines many times a second, and only the new rows
-// should cost anything.
-const LogRow = memo(function LogRow({ log }: { log: LivePreviewLogLine }): JSX.Element {
-  return (
-    <div className="flex gap-3">
-      <div className="shrink-0 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
-      <div className={clsx('min-w-0 flex-1 break-words', logLineColor(log.line))} style={{ wordBreak: 'break-word' }}>
-        {renderLogLine(log.line)}
-      </div>
-    </div>
-  )
-})
+// The modal is now only the template-preview host (Templates/Template.tsx):
+// the scene editor previews inline in its Preview drawer (ScenePreviewPanel).
+// Its pieces live in LivePreviewParts.tsx, shared by both.
+//
+// Re-exported so the npm embed's own preview (src/embed/EmbedScenePreview.tsx)
+// and anything else that imported them from here keeps working.
+export {
+  describeRenderRate,
+  formatFps,
+  formatTimestamp,
+  logLineColor,
+  openCanvasImageInNewTab,
+  renderLogLine,
+} from './LivePreviewParts'
 
 // The preview can be hosted from several components (scene card, diagram
 // toolbar, template row) that may be mounted at the same time. Only ONE of
@@ -158,34 +79,13 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
   const {
     livePreviewSceneId,
     livePreviewScene,
-    livePreviewScenes,
     livePreviewSourceTemplate,
     previewStatus,
-    previewError,
-    previewLogs,
     previewState,
-    previewSceneEvents,
     previewDimensions,
-    gpioButtons,
-    wasmUnsupportedApps,
-    storedKeysNotice,
-    lastRenderMs,
-    renderCount,
-    fastMode,
-    fastRenderRequest,
-    measuredFps,
   } = useValues(livePreviewLogic({ frameId }))
-  const {
-    closeLivePreview,
-    registerCanvas,
-    dispatchPreviewEvent,
-    forcePreviewRender,
-    setFastMode,
-    dismissFastRenderRequest,
-    openPreviewAssets,
-  } = useActions(livePreviewLogic({ frameId }))
-  const { scenes: frameScenes, previewingSceneId } = useValues(scenesLogic({ frameId }))
-  const { previewScene } = useActions(scenesLogic({ frameId }))
+  const { closeLivePreview, registerCanvas, dispatchPreviewEvent } = useActions(livePreviewLogic({ frameId }))
+  const { scenes: frameScenes } = useValues(scenesLogic({ frameId }))
   const { applyTemplate } = useActions(frameLogic({ frameId }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId }))
 
@@ -194,33 +94,9 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
   // Non-null while the "edit state" modal is open; holds the edited values.
   const [editStateValues, setEditStateValues] = useState<Record<string, any> | null>(null)
 
-  // Stick the runtime log to the bottom as new lines arrive, like the real
-  // logs — but only while the user hasn't scrolled up to read older lines.
-  const logRef = useRef<HTMLDivElement>(null)
-  const stickToBottomRef = useRef(true)
-  useEffect(() => {
-    const el = logRef.current
-    if (el && stickToBottomRef.current) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [previewLogs])
-
   if (!livePreviewSceneId || !isModalOwner) {
     return null
   }
-
-  // GPIO buttons get their own dedicated buttons below. Hide "button"
-  // scene-event entries: the configured GPIO buttons cover them, and an
-  // unlabeled "button" entry sends an event no handler can distinguish.
-  const sceneEventButtons = previewSceneEvents.filter((event) => {
-    if (event.keyword !== 'button') {
-      return true
-    }
-    if (gpioButtons.length > 0) {
-      return false
-    }
-    return Boolean(event.label)
-  })
 
   const publicFields = (livePreviewScene?.fields ?? []).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
@@ -236,38 +112,6 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
     }
     setEditStateValues(values)
   }
-
-  // "Preview on frame": send the scene to the frame with the preview's
-  // current public state. Template previews aren't installed on the frame,
-  // so their scenes are passed to previewScene explicitly.
-  const isFrameScene = frameScenes.some((scene) => scene.id === livePreviewSceneId)
-  const isPreviewingOnFrame = previewingSceneId === livePreviewSceneId
-  const buildPublicState = (): Record<string, any> => {
-    const state: Record<string, any> = {}
-    for (const field of publicFields) {
-      const value = previewState[field.name] ?? field.value
-      if (value !== undefined && value !== null) {
-        state[field.name] = String(value)
-      }
-    }
-    return state
-  }
-  const previewOnFrameButton =
-    isFrameScene || livePreviewScenes?.length ? (
-      <Button
-        size="tiny"
-        color="secondary"
-        className="!px-2 flex items-center gap-1"
-        onClick={() =>
-          previewScene(livePreviewSceneId, buildPublicState(), isFrameScene ? undefined : livePreviewScenes)
-        }
-        disabled={isPreviewingOnFrame}
-        title="Temporarily show this scene on the frame, without saving or deploying"
-      >
-        <EyeIcon className="h-4 w-4" />
-        {isPreviewingOnFrame ? 'Sending…' : 'Preview on frame'}
-      </Button>
-    ) : null
 
   // "Install on frame": offered when the preview was opened from a template row.
   // Installed templates are matched by scene name, same as the template list.
@@ -346,131 +190,9 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
             ) : null}
           </div>
 
-          {previewStatus === 'error' && previewError ? (
-            <div className="shrink-0 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-              {previewError}
-            </div>
-          ) : null}
-
-          {livePreviewScene && sceneRequiresCompilation(livePreviewScene) ? (
-            <div
-              className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700"
-              data-testid="preview-skips-nim"
-            >
-              {previewSkipsNimMessage}
-            </div>
-          ) : null}
-          {wasmUnsupportedApps.length > 0 ? (
-            <div className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700">
-              This scene uses {wasmUnsupportedApps.length === 1 ? 'an app' : 'apps'} not available in the browser
-              preview:{' '}
-              {wasmUnsupportedApps.map((app, index) => (
-                <span key={app.keyword}>
-                  {index > 0 ? ', ' : ''}
-                  <span className="font-semibold">{app.keyword}</span> ({app.reason})
-                </span>
-              ))}
-              . {wasmUnsupportedApps.length === 1 ? 'That node' : 'Those nodes'} will fail here but{' '}
-              {wasmUnsupportedApps.length === 1 ? 'works' : 'work'} on the frame.
-            </div>
-          ) : null}
-          {storedKeysNotice ? (
-            <div className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700">
-              {storedKeysNotice}{' '}
-              <a
-                className="font-semibold underline"
-                href={`/login/reauth?return_to=${encodeURIComponent(window.location.href)}`}
-              >
-                Confirm it is you
-              </a>
-            </div>
-          ) : null}
-
-          {fastRenderRequest && !fastRenderRequest.answered ? (
-            <div
-              className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm"
-              data-testid="fast-render-request"
-            >
-              <BoltIcon className="h-5 w-5 shrink-0 text-amber-600" />
-              <span className="min-w-0 flex-1">
-                This scene wants to render {describeRenderRate(fastRenderRequest.intervalMs)}. The preview is holding it
-                to one render per second — let it go at full speed? It will keep your browser busy while this dialog is
-                open.
-              </span>
-              <Button size="small" color="primary" onClick={() => setFastMode(true)}>
-                Run at full speed
-              </Button>
-              <Button size="small" color="secondary" onClick={dismissFastRenderRequest}>
-                Keep 1 fps
-              </Button>
-            </div>
-          ) : null}
-
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button size="small" color="secondary" onClick={forcePreviewRender}>
-              Re-render
-            </Button>
-            <Button
-              size="small"
-              color="secondary"
-              className="flex items-center gap-1"
-              onClick={openPreviewAssets}
-              title="Manage the browser-only asset folder the preview mounts at /srv/assets"
-            >
-              <FolderOpenIcon className="h-4 w-4" />
-              Browser assets
-            </Button>
-            {fastRenderRequest?.answered ? (
-              <Checkbox
-                value={fastMode}
-                onChange={(checked) => setFastMode(checked)}
-                label={
-                  fastMode && measuredFps !== null
-                    ? `Real-time rendering · ${formatFps(measuredFps)} fps`
-                    : `Real-time rendering (the scene asks for ~${formatFps(
-                        1000 / Math.max(1, fastRenderRequest.intervalMs)
-                      )} fps)`
-                }
-                title="Let the scene render as often as it asks instead of once per second"
-              />
-            ) : null}
-            {sceneEventButtons.map((event) => (
-              <Button
-                key={`${event.keyword}:${event.label ?? ''}`}
-                size="small"
-                color="secondary"
-                onClick={() => dispatchPreviewEvent(event.keyword, event.label ? { label: event.label } : {})}
-              >
-                {event.keyword}
-                {event.label ? `: ${event.label}` : ''}
-              </Button>
-            ))}
-            {gpioButtons.map((button) => (
-              <Button
-                key={`gpio:${button.pin}`}
-                size="small"
-                color="secondary"
-                className="flex items-center gap-1"
-                title={`GPIO pin ${button.pin}`}
-                onClick={() =>
-                  // Same event the device's GPIO driver sends on a button
-                  // press (level 0 = falling edge).
-                  dispatchPreviewEvent('button', { pin: button.pin, label: button.label, level: 0 })
-                }
-              >
-                <CursorArrowRaysIcon className="h-4 w-4" />
-                {button.label || `GPIO ${button.pin}`}
-              </Button>
-            ))}
-            <span className="frameos-muted ml-auto text-xs">
-              {renderCount > 0 ? (
-                <>
-                  {renderCount} render{renderCount === 1 ? '' : 's'}
-                  {lastRenderMs !== null ? `, last ${lastRenderMs} ms` : ''}
-                </>
-              ) : null}
-            </span>
-          </div>
+          <LivePreviewNotices frameId={frameId} />
+          <FastRenderPrompt frameId={frameId} />
+          <LivePreviewToolbar frameId={frameId} />
 
           <div className="shrink-0 space-y-1">
             <div className="flex flex-wrap items-center gap-4">
@@ -501,7 +223,6 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
                   Edit
                 </Button>
               ) : null}
-              {previewOnFrameButton}
               {addToFrameButton}
             </div>
             {stateEntries.length > 0 ? (
@@ -523,23 +244,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
             ) : null}
           </div>
 
-          <div className="flex min-h-[8rem] flex-1 flex-col gap-1">
-            <div className="frameos-muted shrink-0 text-xs font-semibold uppercase">Runtime log</div>
-            <div
-              ref={logRef}
-              onScroll={(event) => {
-                const el = event.currentTarget
-                stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-              }}
-              className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-sm leading-5"
-            >
-              {previewLogs.length > 0 ? (
-                previewLogs.map((log) => <LogRow key={log.id} log={log} />)
-              ) : (
-                <div className="flex h-full items-center justify-center text-slate-500">No logs yet</div>
-              )}
-            </div>
-          </div>
+          <LivePreviewLogs frameId={frameId} className="flex-1" />
 
           <div className="frameos-muted shrink-0 text-xs">
             Runs the scene with the FrameOS interpreter compiled to WebAssembly, in your browser. Apps that fetch

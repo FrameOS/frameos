@@ -261,12 +261,23 @@ COPY frameos frameos
 COPY versions.json ./
 
 WORKDIR /app/frameos
-RUN nimble assets -y
 
-# Interpreted-scene runtime compiled to WebAssembly for the frontend's live
-# preview modal; lands in frontend/public/frameos-wasm so the frontend build
-# below copies it into dist.
+# Interpreted-scene runtime compiled to WebAssembly for the browser preview;
+# lands in frontend/public/frameos-wasm. TWO later steps read that directory,
+# which is why it is built here and not after the assets:
+#   * `pnpm run build` below copies frontend/public into the backend's dist,
+#   * `nimble assets -y` bakes the same tree into the frame's embedded
+#     frame_web table, and that is what lets the ON-DEVICE admin panel run
+#     the preview from the frame itself — web_routes.nim serves
+#     GET /frameos-wasm/@asset straight out of that table. Built after the
+#     assets (as this used to be), every frame shipped without the runtime.
+# build_wasm.sh runs makeapploaders.py and prepare_assets.py itself; that
+# first pass is the wasm-less one. The `nimble assets -y` below re-runs
+# prepare_assets.py, which hashes frontend/public among its inputs and so
+# regenerates src/assets/frame_web.nim now that the runtime is in there.
 RUN bash -c 'source /opt/emsdk/emsdk_env.sh && bash /app/frameos/tools/build_wasm.sh'
+
+RUN nimble assets -y
 
 WORKDIR /app/frontend
 RUN pnpm run build

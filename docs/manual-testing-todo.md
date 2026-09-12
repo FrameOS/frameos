@@ -5,7 +5,7 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-12 (HyperPixel 2r native card closed on 2026.9.14; Vannituba migration box closed, nothing to migrate; standalone on-device admin round three opened), after release 2026.9.14.
+empty. Last refreshed 2026-09-13 (scene editor Preview drawer opened; before that, on 2026-09-12: HyperPixel 2r native card closed on 2026.9.14, Vannituba migration box closed with nothing to migrate, standalone on-device admin round three opened), after release 2026.9.14.
 
 ## Open
 
@@ -76,6 +76,26 @@ empty. Last refreshed 2026-09-12 (HyperPixel 2r native card closed on 2026.9.14;
   the panel (load 4.4; `boot:guard crashesWithoutRender: 1`, the ring
   buffer lost the lines before the restart and no backend had the logs).
   Not reproduced; if it happens again, pull `/srv/frameos/logs/` first.
+
+- [ ] **The scene editor's Preview drawer, on all three control planes:** the
+  drawer (`/scenes/<frame>/<scene>`, and the dashboard's scene control
+  drawer) now pins the picture above the scroll area and the two buttons
+  below it. Check on a self-hosted frame, a cloud frame and the on-device
+  admin panel: the drawer opens showing the scene's stored snapshot (or "No
+  snapshot yet" when the frame has never rendered it, e.g. a freshly
+  installed store scene); "Preview in browser" swaps it for the live wasm
+  canvas in place, its state fields re-render the preview as you type, and
+  "Stop preview" gives the snapshot back; "Deploy to frame" spins until the
+  frame reports the render and then shows the frame's own picture, with
+  edits pending (sends the scene) and without (activates by id). Cloud: a
+  deploy from the drawer must leave the frame's OTHER scenes installed —
+  check the scene list after, since the push replaces the device's list.
+  On-device: the preview needs a release built after this change (the
+  runtime is served from the frame at `/frameos-wasm/*`); on an older build
+  the button is disabled and says so, and the status row's "runtime
+  <version>" must match the frame's own version, not the workspace's.
+  Also check the left sidebar on the scene page no longer carries a frame
+  picture, and that the frame dashboard and preview tool still do.
 
 ### ESP32 bench
 

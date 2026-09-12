@@ -63,6 +63,10 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
    * the frameos-wasm worker and show the captured bitmap instead of an empty
    * box. Click-to-render only; frame-control mode never shows it. */
   wasmFallback?: { sceneId: string } | undefined
+  /** Called with `true` when the image endpoint has nothing to serve (no
+   * snapshot yet) and with `false` once a later URL loads, so a host can put
+   * its own placeholder in the empty box. */
+  onMissing?: (missing: boolean) => void
 }
 
 /**
@@ -210,6 +214,7 @@ export function FrameImage({
   hideWhileLoading = false,
   loadFullSizeAfterThumb = false,
   wasmFallback,
+  onMissing,
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
@@ -260,6 +265,14 @@ export function FrameImage({
   useEffect(() => {
     setFailedImageUrl(null)
   }, [imageSrc])
+
+  // Report "nothing to show" without re-rendering on every parent update: the
+  // callback is read from a ref so a fresh inline function is not a change.
+  const onMissingRef = useRef(onMissing)
+  onMissingRef.current = onMissing
+  useEffect(() => {
+    onMissingRef.current?.(baseImageFailed)
+  }, [baseImageFailed])
 
   const handleRefreshClick =
     onClick ||

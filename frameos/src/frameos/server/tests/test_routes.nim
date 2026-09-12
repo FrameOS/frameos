@@ -45,6 +45,11 @@ suite "Server routes composition":
     # surfaces should all be present without freezing the exact route count.
     check routes.hasRoute("GET", ["ping"])
     check routes.hasRoute("GET", ["img", "**"])
+    # The browser preview runtime the on-device admin loads, same-origin out
+    # of the embedded frame_web table. HEAD as well as GET: the SPA probes
+    # for it before offering the button, and mummy routes HEAD separately.
+    check routes.hasRoute("GET", ["frameos-wasm", "@asset"])
+    check routes.hasRoute("HEAD", ["frameos-wasm", "@asset"])
     check routes.hasRoute("GET", ["ws", "admin"])
     check routes.hasRoute("POST", ["setup"])
     check routes.hasRoute("POST", ["event", "@name"])
@@ -70,3 +75,7 @@ suite "Server routes composition":
   test "not found logging suppresses stale frontend asset paths":
     check not shouldLogRouteNotFound("/img/logo-2/logo-white-colors.svg")
     check shouldLogRouteNotFound("/missing")
+    # A build without the browser preview runtime SHOULD say so in the log:
+    # one line per admin SPA probe, and it is the answer to "why is the
+    # preview button disabled on this frame".
+    check shouldLogRouteNotFound("/frameos-wasm/preview-worker.js")

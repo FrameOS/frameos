@@ -34,7 +34,16 @@ proc contentTypeForAsset*(path: string): string =
   if path.endsWith(".css"):
     "text/css"
   elif path.endsWith(".js"):
-    "application/javascript"
+    # text/javascript, not application/javascript: a module worker refuses
+    # anything the fetch spec does not call a JavaScript MIME type, and this
+    # is the type the on-device admin's /frameos-wasm/preview-worker.js goes
+    # out with. Both spellings stay "active" (isActiveContentType below).
+    "text/javascript"
+  elif path.endsWith(".wasm"):
+    # WebAssembly.instantiateStreaming refuses any other type outright.
+    "application/wasm"
+  elif path.endsWith(".json"):
+    "application/json"
   elif path.endsWith(".svg"):
     "image/svg+xml"
   elif path.endsWith(".png"):

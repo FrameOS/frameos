@@ -37,8 +37,23 @@ proc baseConfig(assetsPath = ""): FrameConfig =
 suite "Server admin api asset helpers":
   test "content type for compiled web assets":
     check contentTypeForAsset("bundle.css") == "text/css"
-    check contentTypeForAsset("bundle.js") == "application/javascript"
+    # The browser preview runtime is served from this table: a module worker
+    # refuses a script that is not a JavaScript MIME type, and
+    # WebAssembly.instantiateStreaming refuses anything but application/wasm.
+    check contentTypeForAsset("bundle.js") == "text/javascript"
+    check contentTypeForAsset("preview-worker.js") == "text/javascript"
+    check contentTypeForAsset("frameos.wasm") == "application/wasm"
+    check contentTypeForAsset("version.json") == "application/json"
     check contentTypeForAsset("font.woff2") == "font/woff2"
+    check contentTypeForAsset("main.js.map") == "application/octet-stream"
+
+  test "the new compiled-asset types stay inert as scene-writable downloads":
+    # contentTypeForFilePath falls through to contentTypeForAsset, and /srv
+    # assets are scene-writable: a .wasm or .json under the assets root must
+    # not become something a browser executes from the admin origin.
+    check not isActiveContentType(contentTypeForAsset("frameos.wasm"))
+    check not isActiveContentType(contentTypeForAsset("version.json"))
+    check isActiveContentType(contentTypeForAsset("evil.js"))
 
   test "scene-writable assets go out inert: nosniff, sandboxed, active types as downloads":
     for active in ["image/svg+xml", "application/javascript", "text/css", "text/html; charset=utf-8"]:
