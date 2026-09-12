@@ -17,7 +17,14 @@ from sqlalchemy.orm import Session
 from app.config import config, normalize_ingress_path
 from app.api.project_scope import project_get_or_404
 from app.database import get_db
-from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json, server_scheme_for_frame, update_frame
+from app.models.frame import (
+    Frame,
+    frame_has_shell_access,
+    get_frame_json,
+    get_interpreted_scenes_json,
+    server_scheme_for_frame,
+    update_frame,
+)
 from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.deploy_remote import legacy_remote_cleanup_script
@@ -100,14 +107,21 @@ async def _ensure_frame_bootstrap_enabled(
         agent["agentSharedSecret"] = secure_token(32)
         changed = True
 
-    for key in ("agentEnabled", "agentRunCommands"):
-        if agent.get(key) is not True:
-            agent[key] = True
-            changed = True
+    # A frame this backend reaches only over its admin API (an adopted
+    # Buildroot card: no Remote, no SSH) keeps that path until the script has
+    # actually run somewhere. Its Remote flags are set when the new device's
+    # Remote first proves it holds the secret (ws/remote_ws.py), not when the
+    # command is handed out — opening the install view must not cut the card
+    # that is still on the wall off from the deploy drawer.
+    if frame_has_shell_access(frame):
+        for key in ("agentEnabled", "agentRunCommands"):
+            if agent.get(key) is not True:
+                agent[key] = True
+                changed = True
 
-    if select_remote and agent.get("deployWithAgent") is not True:
-        agent["deployWithAgent"] = True
-        changed = True
+        if select_remote and agent.get("deployWithAgent") is not True:
+            agent["deployWithAgent"] = True
+            changed = True
 
     if changed:
         frame.agent = agent
@@ -164,6 +178,10 @@ def _frame_bootstrap_script_url(request: Request, frame: Frame) -> str:
 
 def _frame_bootstrap_config_json(db: Session, frame: Frame) -> str:
     payload = get_frame_json(db, frame)
+    # The script installs a Debian/Ubuntu host whatever the row says: a
+    # Buildroot frame being moved to a Pi must not tell the runtime there
+    # (setup.nim, the privileged worker) that it is on a Buildroot card.
+    payload["mode"] = "rpios"
     agent = dict(payload.get("agent") or {})
     frame_remote = frame.agent if isinstance(frame.agent, dict) else {}
     payload["agent"] = {
@@ -594,6 +612,15 @@ echo "FrameOS and FrameOS Remote are installed and started"
 """
 
 
+def _refuse_bootstrap_for_embedded(frame: Frame | None) -> None:
+    """The script installs a Debian/Ubuntu host: an ESP32 or virtual frame
+    cannot run it. A Buildroot frame can be handed the command — running it
+    on another device is how the frame moves there (the next deploy detects
+    the distro and sets the mode)."""
+    if frame is not None and (frame.mode or "rpios") == "embedded":
+        _bad_request("FrameOS bootstrap is not available for embedded frames")
+
+
 @api_project.post("/frames/{id:int}/frame_bootstrap", response_model=FrameBootstrapResponse)
 async def api_frame_bootstrap_command(
     id: int,
@@ -605,8 +632,7 @@ async def api_frame_bootstrap_command(
     redis: Redis = Depends(get_redis),
 ):
     frame = project_get_or_404(db, Frame, id, detail="Frame not found")
-    if (frame.mode or "rpios") != "rpios":
-        _bad_request("FrameOS bootstrap is only supported for Raspberry Pi OS frames")
+    _refuse_bootstrap_for_embedded(frame)
 
     selected_remote = select_remote if select_remote is not None else (select_agent if select_agent is not None else True)
     await _ensure_frame_bootstrap_enabled(db, redis, frame, select_remote=selected_remote, regenerate=regenerate)
@@ -640,8 +666,7 @@ async def api_frame_bootstrap_script(
     frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
     if not frame or not _frame_bootstrap_token_valid(frame, token):
         _not_found()
-    if (frame.mode or "rpios") != "rpios":
-        _bad_request("FrameOS bootstrap is only supported for Raspberry Pi OS frames")
+    _refuse_bootstrap_for_embedded(frame)
 
     script = _frame_bootstrap_script(db, frame)
     return Response(script, media_type="text/x-shellscript")

@@ -449,6 +449,39 @@ function renderTaskLogLine(log: LongRunningTaskLog, formattedLine: string, theme
   return insertBreaks(formattedLine)
 }
 
+/**
+ * One log line the way the Logs panel draws it: tone dot, timestamp, the
+ * line in its type's colour. The collapsed toast shows the latest line this
+ * way on a single row (`truncate`); the expanded list wraps.
+ */
+function TaskLogLine({
+  log,
+  theme,
+  truncate = false,
+}: {
+  log: LongRunningTaskLog
+  theme: WorkspaceTheme
+  truncate?: boolean
+}): JSX.Element {
+  const formattedLine = formatTaskLogLine(log)
+  const tone = taskLogTone(log, formattedLine, theme)
+  return (
+    <div className="flex gap-2">
+      <span className={clsx('mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full', tone.dot)} />
+      <span className={clsx('shrink-0', tone.timestamp)}>{formatTaskLogTimestamp(log.timestamp)}</span>
+      <span
+        className={clsx(
+          'min-w-0',
+          truncate ? 'truncate' : 'break-words',
+          taskLogLineClassName(log, formattedLine, theme)
+        )}
+      >
+        {renderTaskLogLine(log, formattedLine, theme)}
+      </span>
+    </div>
+  )
+}
+
 function formatTaskLogTimestamp(timestamp: string): string {
   const date = new Date(timestamp)
   if (!Number.isFinite(date.getTime())) {
@@ -517,10 +550,15 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
   const logShouldStickToBottomRef = useRef(true)
   const logScrollFrameRef = useRef<number | null>(null)
   const latestLogKey = latestLog ? `${latestLog.id}:${latestLog.timestamp}:${latestLog.type}:${latestLog.line}` : ''
-  const currentDetail =
+  // What the collapsed strip shows: the latest log line while running; once
+  // finished, the task's own verdict (a status line stamped with the finish
+  // time) so it reads like the log it concludes.
+  const currentLog: LongRunningTaskLog | null =
     task.status === 'running' && latestLog
-      ? formatTaskLogLine(latestLog)
-      : task.detail || (latestLog ? formatTaskLogLine(latestLog) : 'Waiting for frame signal')
+      ? latestLog
+      : task.detail
+      ? { id: 'detail', timestamp: task.completedAt ?? task.startedAt, type: 'status', line: task.detail }
+      : latestLog ?? null
   const hasProgress =
     typeof task.progressCurrent === 'number' && typeof task.progressTotal === 'number' && task.progressTotal > 0
   const progressPercent = hasProgress
@@ -622,6 +660,11 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
     })
   }, [task.expanded])
 
+  const logStripClass = clsx(
+    'border-t px-3 py-2 font-mono text-xs leading-5',
+    theme === 'dark' ? 'border-white/10 bg-slate-950/95 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-900'
+  )
+
   return (
     <div
       className={clsx(
@@ -646,38 +689,6 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
           <div className={clsx('mt-0.5 truncate text-xs', theme === 'dark' ? 'text-slate-400' : 'text-slate-500')}>
             {frameName}
           </div>
-          <div
-            className={clsx(
-              'mt-1 truncate text-xs font-medium',
-              theme === 'dark' ? 'text-slate-300' : 'text-slate-600'
-            )}
-          >
-            {currentDetail}
-          </div>
-          {hasProgress ? (
-            <div className="mt-2">
-              <div
-                className={clsx(
-                  'h-1.5 overflow-hidden rounded-full',
-                  theme === 'dark' ? 'bg-white/10' : 'bg-slate-200'
-                )}
-              >
-                <div
-                  className={clsx('h-full rounded-full', theme === 'dark' ? 'bg-blue-400' : 'bg-blue-500')}
-                  style={{ width: `${progressPercent ?? 0}%` }}
-                />
-              </div>
-              <div
-                className={clsx(
-                  'mt-1 truncate text-[11px] font-semibold',
-                  theme === 'dark' ? 'text-slate-400' : 'text-slate-500'
-                )}
-              >
-                {formatTaskBytes(task.progressCurrent ?? 0)} / {formatTaskBytes(task.progressTotal ?? 0)}
-                {progressPercent !== null ? ` (${progressPercent}%)` : ''}
-              </div>
-            </div>
-          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <A
@@ -725,45 +736,61 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
           </button>
         </div>
       </div>
+      {hasProgress ? (
+        // Full width, like the log strip under it: the bar used to sit in
+        // the text column and stop short of the buttons.
+        <div className="px-3 pb-2">
+          <div
+            className={clsx('h-1.5 overflow-hidden rounded-full', theme === 'dark' ? 'bg-white/10' : 'bg-slate-200')}
+          >
+            <div
+              className={clsx('h-full rounded-full', theme === 'dark' ? 'bg-blue-400' : 'bg-blue-500')}
+              style={{ width: `${progressPercent ?? 0}%` }}
+            />
+          </div>
+          <div
+            className={clsx(
+              'mt-1 truncate text-[11px] font-semibold',
+              theme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+            )}
+          >
+            {formatTaskBytes(task.progressCurrent ?? 0)} / {formatTaskBytes(task.progressTotal ?? 0)}
+            {progressPercent !== null ? ` (${progressPercent}%)` : ''}
+          </div>
+        </div>
+      ) : null}
+      {/* The log strip spans the whole toast: collapsed it is the latest
+          line, expanded the scrolling list — same background, same colours
+          as the Logs panel either way. */}
       {task.expanded ? (
-        <div
-          className={clsx(
-            'border-t px-3 py-2',
-            theme === 'dark'
-              ? 'border-white/10 bg-slate-950/95 text-slate-100'
-              : 'border-slate-200 bg-slate-50 text-slate-900'
-          )}
-        >
+        <div className={logStripClass}>
           <div
             ref={logScrollRef}
             data-task-log-scroll
             onScroll={handleLogScroll}
-            className="max-h-72 overflow-y-auto font-mono text-xs leading-5"
+            className="max-h-72 overflow-y-auto"
             style={{ overflowAnchor: 'none' }}
           >
             <div ref={logContentRef}>
               {task.logs.length === 0 ? (
                 <div className="py-6 text-center text-slate-500">Waiting for logs...</div>
               ) : (
-                task.logs.map((log) => {
-                  const formattedLine = formatTaskLogLine(log)
-                  const tone = taskLogTone(log, formattedLine, theme)
-
-                  return (
-                    <div key={`${task.id}-${log.id}-${log.timestamp}`} className="flex gap-2">
-                      <span className={clsx('mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full', tone.dot)} />
-                      <span className={clsx('shrink-0', tone.timestamp)}>{formatTaskLogTimestamp(log.timestamp)}</span>
-                      <span className={clsx('min-w-0 break-words', taskLogLineClassName(log, formattedLine, theme))}>
-                        {renderTaskLogLine(log, formattedLine, theme)}
-                      </span>
-                    </div>
-                  )
-                })
+                task.logs.map((log) => (
+                  <TaskLogLine key={`${task.id}-${log.id}-${log.timestamp}`} log={log} theme={theme} />
+                ))
               )}
             </div>
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className={logStripClass}>
+          {currentLog ? (
+            <TaskLogLine log={currentLog} theme={theme} truncate />
+          ) : (
+            <div className="truncate text-slate-500">Waiting for frame signal</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

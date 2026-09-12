@@ -21,7 +21,7 @@ from arq import ArqRedis as Redis
 from app.database import SessionLocal
 from app.redis import close_redis_connection, get_redis, create_redis_connection
 from app.websockets import publish_message
-from app.models.frame import Frame
+from app.models.frame import Frame, frame_has_shell_access, update_frame
 from app.utils.frame_secrets import websocket_frame_payload
 from app.models.log import new_log as log
 from app.utils.request_ip import client_ip_for_request
@@ -561,6 +561,35 @@ async def authenticate_remote(ws: WebSocket) -> tuple[Frame, str, str, dict[str,
     return frame, server_api_key, shared_secret, hello_msg
 
 
+async def enable_remote_for_shell_less_frame(redis: Redis, frame: Frame) -> None:
+    """A Remote proving it holds the secret of a frame this backend could only
+    reach over its admin API (an adopted Buildroot card: no SSH, no Remote)
+    means the install script (api/frame_bootstrap) has run on a new device.
+    The command is handed out without touching the row so the card still on
+    the wall stays deployable until this moment; from here the frame is
+    managed over the Remote, and the next deploy detects the distro and sets
+    the mode. Only such a frame is touched: a Remote that keeps connecting
+    after its owner switched the row to SSH must not flip it back."""
+    if frame_has_shell_access(frame):
+        return
+    db = SessionLocal()
+    try:
+        row = db.get(Frame, frame.id)
+        if row is None or frame_has_shell_access(row):
+            return
+        agent = dict(row.agent or {})
+        agent.update({"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True})
+        row.agent = agent
+        await update_frame(db, redis, row)
+        frame.agent = agent
+    finally:
+        db.close()
+    await write_log(
+        redis, frame.id, "remote",
+        "FrameOS Remote connected for the first time: deploys now go over the Remote instead of the admin API",
+    )
+
+
 @router.websocket("/ws/agent")
 @router.websocket("/ws/remote")
 async def ws_remote_endpoint(
@@ -591,6 +620,7 @@ async def ws_remote_endpoint(
         return
 
     await mark_sd_image_booted_if_needed(redis, frame.id)
+    await enable_remote_for_shell_less_frame(redis, frame)
 
     # STEP 3 – server → handshake/ok  +  start pump
     await ws.send_json({"action": "handshake/ok"})

@@ -12,7 +12,7 @@ from app.fastapi import app
 from app.database import SessionLocal
 from app.codegen.drivers_nim import frame_compilation_mode
 from app.models import new_frame
-from app.models.frame import Frame
+from app.models.frame import Frame, frame_has_shell_access
 from app.models.user import User
 from app.redis import get_redis
 from app.tenancy import ensure_default_project_for_user
@@ -575,6 +575,67 @@ def test_remote_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(clie
         assert updated.last_successful_deploy["width"] == 200
         assert updated.last_successful_deploy["height"] == 300
         assert updated.status == "starting"
+    finally:
+        db.close()
+
+
+def _shell_less_card(secret: str = "agent-secret", **overrides) -> tuple[int, str]:
+    """An adopted generic Buildroot card: admin login only, no Remote flags,
+    the bootstrap secret already minted (api/frame_bootstrap)."""
+    db = SessionLocal()
+    try:
+        frame = asyncio.run(new_frame(db, DummyRedis(), "AdoptedCard", "frame-card.local", "localhost"))  # type: ignore[arg-type]
+        frame.mode = "buildroot"
+        frame.buildroot = {"platform": SUPPORTED_BUILDROOT_PLATFORM, "adopted": True}
+        frame.agent = {"agentSharedSecret": secret}
+        for key, value in overrides.items():
+            setattr(frame, key, value)
+        db.add(frame)
+        db.commit()
+        return frame.id, frame.server_api_key
+    finally:
+        db.close()
+
+
+def test_remote_ws_first_connection_of_a_shell_less_card_switches_the_frame_to_the_remote(client: TestClient) -> None:
+    # The install script ran on a new device (frame_bootstrap hands the
+    # command out without touching the row): the Remote calling home is what
+    # moves the frame off the admin-API path.
+    frame_id, server_api_key = _shell_less_card()
+    db = SessionLocal()
+    try:
+        assert frame_has_shell_access(db.get(Frame, frame_id)) is False
+    finally:
+        db.close()
+
+    with client.websocket_connect("/ws/remote") as ws:
+        _handshake(ws, server_api_key)
+
+    db = SessionLocal()
+    try:
+        updated = db.get(Frame, frame_id)
+        assert updated.agent["agentEnabled"] is True
+        assert updated.agent["agentRunCommands"] is True
+        assert updated.agent["deployWithAgent"] is True
+        assert updated.agent["agentSharedSecret"] == "agent-secret"
+        assert frame_has_shell_access(updated) is True
+        # The mode is the next deploy's to detect, not the handshake's to guess.
+        assert updated.mode == "buildroot"
+    finally:
+        db.close()
+
+
+def test_remote_ws_leaves_the_remote_flags_of_a_frame_with_shell_access_alone(client: TestClient) -> None:
+    # An owner who switched a card to SSH (password set, Remote off) keeps
+    # that choice even though the device's Remote still connects.
+    frame_id, server_api_key = _shell_less_card(ssh_pass="hunter2")
+    with client.websocket_connect("/ws/remote") as ws:
+        _handshake(ws, server_api_key)
+
+    db = SessionLocal()
+    try:
+        updated = db.get(Frame, frame_id)
+        assert updated.agent == {"agentSharedSecret": "agent-secret"}
     finally:
         db.close()
 

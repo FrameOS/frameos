@@ -77,13 +77,14 @@ import {
   deviceUpgradeInFlight,
 } from '../frame/frameLogic'
 import {
+  CURRENT_FRAMEOS_VERSION,
   buildRemoteUpgradeNotice,
+  deployedFrameosVersion,
   frameAdminLoginIsOnlyAccess,
   frameosGitHubReleaseUrl,
+  isFrameosVersionBefore,
   type RemoteUpgradeNotice,
 } from '../frame/frameDeployUtils'
-import { isFrameConnectionError } from '../frame/frameDeployErrors'
-import type { DeviceUpgradeStatus } from '../frame/frameLogic'
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
@@ -930,96 +931,237 @@ function FrameSettingsLink({ frameId }: { frameId: FrameId }): JSX.Element {
 }
 
 /**
- * A frame the backend only reaches over its admin API (an adopted generic
- * Buildroot card: no Remote, no SSH). The SSH/Remote deploy cannot connect;
- * what works is the sync path for scenes and settings, and the frame's own
- * signed-release upgrade, nudged and watched from here.
+ * The deploy dialog for a frame the backend reaches only over its admin API
+ * (an adopted generic Buildroot card: no FrameOS Remote, no SSH key, no
+ * password). Shaped like the cloud's dialog — what is on the frame, then the
+ * two things that change it — because that is what such a frame is: a device
+ * the backend can talk to but not shell into. Scenes and settings go over the
+ * admin API and the runtime reloads; FrameOS itself is the frame's own
+ * signed-release upgrade (frameos/upgrade.nim), nudged and watched from here.
+ * No build host, no transport choice, no full deploy, no build options.
+ *
+ * Opening it asks the frame for its version and the latest release
+ * (`GET /device/upgrade?check=1`): the backend records what the frame
+ * answers, so the version here is the frame's own, never a stale deploy
+ * baseline. Refresh does the same again.
  */
-function ShellLessFrameSection({
-  status,
-  loading,
-  error,
-  onCheck,
-  onUpgrade,
+function ShellLessDeploySection({
+  frame,
+  onDeploy,
+  onSelectView,
 }: {
-  status: DeviceUpgradeStatus | null
-  loading: boolean
-  error: string | null
-  onCheck: () => void
-  onUpgrade: () => void
+  frame: FrameType
+  onDeploy: () => void
+  onSelectView: (view: DeployDrawerView) => void
 }): JSX.Element {
+  const logic = frameLogic({ frameId: frame.id })
+  const {
+    deployChangeDetails,
+    deployPlansError,
+    deployPlansLoading,
+    deviceUpgradeError,
+    deviceUpgradeLoading,
+    deviceUpgradeStatus,
+    frameForm,
+    lastDeploy,
+  } = useValues(logic)
+  const { loadDeployPlans, loadDeviceUpgradeStatus, startDeviceUpgrade } = useActions(logic)
+  useEffect(() => {
+    loadDeviceUpgradeStatus(true)
+  }, [frame.id])
+
+  const status = deviceUpgradeStatus
   const inFlight = deviceUpgradeInFlight(status)
-  const updateAvailable = status?.update_available === true
-  // upgrade-status.json on the device is the record of its LAST upgrade run
-  // and stays there for good, so a finished run is history, not the answer
-  // to "Check for updates": it is shown dated, below the current
-  // up-to-date / update-available line, and an "up_to_date" record from a
-  // past check is dropped once a newer release exists (the two would
-  // contradict each other on one screen).
-  const finishedRun =
-    status &&
-    !inFlight &&
-    status.status &&
-    status.status !== 'idle' &&
-    !(status.status === 'up_to_date' && updateAvailable)
-      ? status
-      : null
-  const finishedAt = finishedRun ? String(finishedRun.finished_at ?? finishedRun.updated_at ?? '') : ''
+  const deviceVersion = normalizedFirmwareVersion(status?.current_version) ?? deployedFrameosVersion(lastDeploy)
+  const latestVersion = normalizedFirmwareVersion(status?.latest_version) ?? CURRENT_FRAMEOS_VERSION
+  // The frame's own answer wins; before it arrives the backend's release is
+  // the best guess at "latest".
+  const updateAvailable = status
+    ? status.update_available === true
+    : Boolean(deviceVersion && isFrameosVersionBefore(deviceVersion, latestVersion))
+  const refreshing = deviceUpgradeLoading || deployPlansLoading
+  // upgrade-status.json is the record of the frame's LAST run and stays
+  // there for good; only a failure is worth a line once the run is over.
+  const lastRunFailed = status && !inFlight && status.status === 'failed' ? status : null
+  const versionProblems = [
+    lastRunFailed ? `Last update failed${lastRunFailed.message ? `: ${lastRunFailed.message}` : ''}` : null,
+    status?.latest_error ? String(status.latest_error) : null,
+    status?.target_error ? String(status.target_error) : null,
+  ].filter((line): line is string => Boolean(line))
+  const problemLines = versionProblems.length ? (
+    <>
+      {versionProblems.map((line) => (
+        <div key={line} className="text-amber-600">
+          {line}
+        </div>
+      ))}
+    </>
+  ) : null
+
+  let versionRow: JSX.Element
+  if (inFlight) {
+    versionRow = (
+      <CloudStatusRow
+        label="FrameOS"
+        value={`${deviceVersion ?? '?'} → ${latestVersion}`}
+        detail={`Updating: ${status?.status}${status?.message ? ` — ${status.message}` : ''}`}
+        tone="warn"
+      />
+    )
+  } else if (deviceVersion && updateAvailable) {
+    versionRow = (
+      <CloudStatusRow
+        label="FrameOS"
+        value={`${deviceVersion} → ${latestVersion}`}
+        detail={
+          <>
+            A newer release is published; the frame installs it itself.
+            {problemLines}
+          </>
+        }
+        tone="warn"
+      />
+    )
+  } else if (deviceVersion) {
+    versionRow = (
+      <CloudStatusRow
+        label="FrameOS"
+        value={deviceVersion}
+        detail={
+          <>
+            {status
+              ? 'Up to date with the latest release.'
+              : deviceUpgradeLoading
+              ? 'Asking the frame for its version…'
+              : deviceUpgradeError ?? 'As last reported by the frame.'}
+            {problemLines}
+          </>
+        }
+        tone={status ? 'ok' : 'muted'}
+      />
+    )
+  } else {
+    versionRow = (
+      <CloudStatusRow
+        label="FrameOS"
+        value="Not reported yet"
+        detail={
+          deviceUpgradeLoading ? 'Asking the frame for its version…' : deviceUpgradeError ?? 'Refresh to ask the frame.'
+        }
+        tone="muted"
+      />
+    )
+  }
+
+  // The version row above owns the release; the scenes row lists everything
+  // else waiting on a deploy.
+  const pendingChanges = deployChangeDetails.filter((change) => !change.frameosVersionChange)
+  const scenes = frameForm?.scenes ?? frame.scenes ?? []
+  const scenesValue = `${scenes.length} scene${scenes.length === 1 ? '' : 's'}`
+  const scenesRow =
+    pendingChanges.length > 0 ? (
+      <CloudStatusRow
+        label="Scenes & settings"
+        value={`${scenesValue} · ${pendingChanges.length} pending change${pendingChanges.length === 1 ? '' : 's'}`}
+        detail={pendingChanges.map((change) => change.label).join(', ')}
+        tone="warn"
+      />
+    ) : frame.last_successful_deploy_at ? (
+      <CloudStatusRow
+        label="Scenes & settings"
+        value={scenesValue}
+        detail={`In sync with the last deploy (${formatSyncTimestamp(frame.last_successful_deploy_at)}).`}
+        tone="ok"
+      />
+    ) : (
+      <CloudStatusRow
+        label="Scenes & settings"
+        value={scenesValue}
+        detail="Nothing deployed from here yet."
+        tone="muted"
+      />
+    )
+
   const buttonClass =
-    'frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+    'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+
   return (
-    <section className="space-y-2">
-      <DrawerHeading>No shell on this frame</DrawerHeading>
-      <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-        <div className="frame-tool-muted text-sm leading-5">
-          This backend reaches the frame only through its admin login — the card has no FrameOS Remote and no SSH key or
-          password. Fast deploy sends scenes and settings over that API and reloads the runtime; there is no full
-          deploy. FrameOS updates itself: the frame downloads the latest release for its board, verifies the signature
-          and installs it through its privileged door.
+    <div className="space-y-5">
+      <section className="space-y-2">
+        <DrawerHeading
+          action={
+            <button
+              type="button"
+              onClick={() => loadDeviceUpgradeStatus(true)}
+              disabled={refreshing}
+              className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          }
+        >
+          What's on the frame
+        </DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          {versionRow}
+          {scenesRow}
         </div>
-        {status ? (
-          <div className="text-sm">
-            <span className="font-semibold">FrameOS {status.current_version ?? '?'}</span>
-            {status.latest_version ? (
-              <span className="frame-tool-muted">
-                {' '}
-                · latest {status.latest_version}
-                {updateAvailable ? ' — update available' : inFlight ? '' : ' — up to date'}
-              </span>
-            ) : null}
-            {inFlight ? (
-              <div className="frame-tool-muted mt-1">
-                {status.status}
-                {status.message ? `: ${status.message}` : ''}
-              </div>
-            ) : finishedRun ? (
-              <div className="frame-tool-muted mt-1">
-                Last upgrade{finishedAt ? ` (${finishedAt.replace('T', ' ').replace(/Z$/, ' UTC')})` : ''}:{' '}
-                {finishedRun.status}
-                {finishedRun.message ? ` — ${finishedRun.message}` : ''}
-              </div>
-            ) : null}
-            {status.latest_error ? <div className="mt-1 text-amber-600">{status.latest_error}</div> : null}
-            {status.target_error ? <div className="mt-1 text-amber-600">{status.target_error}</div> : null}
+      </section>
+      <section className="space-y-2">
+        <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Deploy</DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => startDeviceUpgrade()}
+              disabled={deviceUpgradeLoading || inFlight || !updateAvailable}
+              title={
+                inFlight
+                  ? 'The frame is installing the update'
+                  : updateAvailable
+                  ? 'The frame downloads the latest release, verifies its signature and installs it'
+                  : 'The frame already runs the latest release'
+              }
+              className={clsx(
+                updateAvailable && !inFlight ? 'frameos-primary-action' : 'frameos-secondary-button',
+                buttonClass
+              )}
+            >
+              <CloudArrowDownIcon className="h-4 w-4" />
+              {inFlight ? 'Updating…' : 'Update FrameOS'}
+            </button>
+            <button
+              type="button"
+              onClick={onDeploy}
+              title="Sends this frame's scenes and settings over its admin API and reloads the runtime"
+              className={clsx(
+                pendingChanges.length > 0 || !updateAvailable ? 'frameos-primary-action' : 'frameos-secondary-button',
+                buttonClass
+              )}
+            >
+              <CloudArrowUpIcon className="h-4 w-4" />
+              Deploy scenes &amp; settings
+            </button>
           </div>
-        ) : null}
-        {error ? <div className="text-sm font-semibold text-red-500">{error}</div> : null}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={onCheck} disabled={loading} className={buttonClass}>
-            {loading && !inFlight ? 'Checking…' : 'Check for updates'}
-          </button>
-          <button
-            type="button"
-            onClick={onUpgrade}
-            disabled={loading || inFlight || !updateAvailable}
-            className={buttonClass}
-            title={updateAvailable ? undefined : 'Check for updates first'}
-          >
-            {inFlight ? 'Updating…' : 'Update FrameOS'}
-          </button>
+          {deviceUpgradeError ? <div className="text-sm font-semibold text-red-500">{deviceUpgradeError}</div> : null}
+          {deployPlansError ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-600">
+              <span>{deployPlansError}</span>
+              <button
+                type="button"
+                onClick={() => loadDeployPlans()}
+                className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
         </div>
-      </div>
-    </section>
+      </section>
+      {/* Last: writing a card or moving the frame to a Debian host is what
+          you do when the device, not the deploy, is the problem. */}
+      <AlternativesSection onSelect={onSelectView} />
+    </div>
   )
 }
 
@@ -1930,6 +2072,12 @@ interface FrameBootstrapApiResponse {
 
 function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () => void }): JSX.Element {
   const { loadFrame } = useActions(framesModel)
+  // A Buildroot frame is being MOVED to a Debian host. Its command is made
+  // on request rather than on opening this view: making it mints the Remote
+  // secret the new device will call home with, and (for a card the backend
+  // only reaches over its admin API) that call is what switches the frame
+  // over — see api/frame_bootstrap.py and ws/remote_ws.py.
+  const movingFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const [command, setCommand] = useState('')
   const [transportWarning, setTransportWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -1964,7 +2112,9 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
   }
 
   useEffect(() => {
-    loadCommand()
+    if (!movingFrame) {
+      loadCommand()
+    }
   }, [frame.id])
 
   const copyCommand = (): void => {
@@ -1974,6 +2124,9 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
     copy(command)
     setCopied(true)
   }
+
+  const primaryButtonClass =
+    'frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
 
   return (
     <section className="mb-5 space-y-2">
@@ -1985,9 +2138,9 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       </DrawerHeading>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Run this command on the device as a user with sudo access. It installs FrameOS, starts FrameOS Remote, and
-          connects back to this backend. The installer supports most major Debian and Ubuntu releases, including
-          Raspberry Pi OS releases based on Debian.
+          {movingFrame
+            ? "Moves this frame to a Debian or Ubuntu device (Raspberry Pi OS included). Run the command there as a user with sudo: it installs the signed FrameOS release with this frame's scenes and settings, starts FrameOS Remote and connects back here. From then on the frame is managed on that device."
+            : 'Run this on the device as a user with sudo (Debian, Ubuntu or Raspberry Pi OS). It installs the signed FrameOS release, starts FrameOS Remote and connects back to this backend.'}
         </div>
         {loading ? (
           <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">
@@ -1996,36 +2149,37 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
           </div>
         ) : error ? (
           <div className="text-sm font-semibold text-red-500">{error}</div>
-        ) : (
+        ) : command ? (
           <pre className="frameos-inset max-h-44 whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
             <code>{command}</code>
           </pre>
-        )}
+        ) : null}
         {transportWarning ? (
           <div className="frameos-warning-button rounded-xl border px-3 py-2 text-xs leading-5">{transportWarning}</div>
         ) : null}
-        <div className="frame-tool-muted text-xs leading-4">
-          The installer downloads the signed FrameOS release and verifies its signature against the FrameOS release key
-          on the device before anything from it runs.
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={copyCommand}
-            disabled={!command}
-            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            <ClipboardDocumentIcon className="h-4 w-4" />
-            {copied ? 'Copied' : 'Copy command'}
-          </button>
-          <button
-            type="button"
-            onClick={() => loadCommand(true)}
-            disabled={loading}
-            className="frameos-secondary-button rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            Regenerate
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {command ? (
+            <button type="button" onClick={copyCommand} className={primaryButtonClass}>
+              <ClipboardDocumentIcon className="h-4 w-4" />
+              {copied ? 'Copied' : 'Copy command'}
+            </button>
+          ) : (
+            <button type="button" onClick={() => loadCommand()} disabled={loading} className={primaryButtonClass}>
+              <CommandLineIcon className="h-4 w-4" />
+              {error ? 'Try again' : 'Generate command'}
+            </button>
+          )}
+          {command ? (
+            <button
+              type="button"
+              onClick={() => loadCommand(true)}
+              disabled={loading}
+              title="Make a new command with a fresh secret; commands made earlier stop working"
+              className="frameos-secondary-button rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+            >
+              Regenerate
+            </button>
+          ) : null}
         </div>
       </div>
     </section>
@@ -3277,9 +3431,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployPlansError,
     deployPlansLoading,
     deployPlansLoadingStartedAt,
-    deviceUpgradeStatus,
-    deviceUpgradeLoading,
-    deviceUpgradeError,
     deployRecommendation,
     deployDrawerView,
     deployTransportToggleVisible,
@@ -3300,10 +3451,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployRemote,
     ignoreFrameSyncChanges,
     loadDeployPlans,
-    loadDeviceUpgradeStatus,
     loadFrameSyncStatus,
     restartRemote,
-    startDeviceUpgrade,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
     setFrameSyncItemChoice,
@@ -3321,6 +3470,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   // takes its own branch in both the body and the footer and reads none of
   // it. See CloudDeploySection.
   const isCloud = workspaceMode() === 'cloud'
+  // Reached over its admin login only (an adopted Buildroot card): the
+  // SSH/Remote machinery below cannot connect to it, so its main view is
+  // the cloud-shaped ShellLessDeploySection and its footer only closes.
+  const shellLess = !isCloud && frameAdminLoginIsOnlyAccess(frame)
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
@@ -3360,6 +3513,17 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     hideDeployPlanModal()
     closeFrameChangeDrawer()
   }
+  const cancelStuckDeployButton =
+    frame.status === 'deploying' ? (
+      <button
+        type="button"
+        title="Abort the running deploy and clear the deploy lock, so a new deploy can start"
+        onClick={() => cancelDeploy(frame.id)}
+        className="rounded-lg px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+      >
+        Cancel stuck deploy
+      </button>
+    ) : null
   const showDeployDrawerView = (view: DeployDrawerView): void => {
     openFrameChangeDrawer(frame.id, 'deploy', view)
   }
@@ -3460,7 +3624,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   this is normally empty. The exception is an ESP32 OTA
                   request recorded while its firmware is still building. */}
               <PendingActionsSection frame={frame} className="mb-4" />
-              {!isEmbeddedFrame ? <AlternativesSection onSelect={showDeployDrawerView} /> : null}
+              {!isEmbeddedFrame && !shellLess ? <AlternativesSection onSelect={showDeployDrawerView} /> : null}
               {canBootstrapFrameOS ? (
                 <div className="mb-4">
                   <FrameBootstrapAction frame={frame} />
@@ -3519,21 +3683,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     ) : null}
                   </div>
                 </section>
+              ) : shellLess ? (
+                <ShellLessDeploySection
+                  frame={frame}
+                  onDeploy={() => closeAndRun(saveAndFastDeployFrame)}
+                  onSelectView={showDeployDrawerView}
+                />
               ) : deployPlansLoading ? (
                 <DeployPlanProgress logs={deployPlanLogs} planReady={false} />
               ) : deployPlansError ? (
                 <div className="space-y-3">
                   <DeployPlanProgress error={deployPlansError} logs={deployPlanLogs} planReady={false} />
                   <div className="text-sm font-semibold text-red-500">{deployPlansError}</div>
-                  {isFrameConnectionError(deployPlansError) && frameAdminLoginIsOnlyAccess(frame) ? (
-                    <ShellLessFrameSection
-                      status={deviceUpgradeStatus}
-                      loading={deviceUpgradeLoading}
-                      error={deviceUpgradeError}
-                      onCheck={() => loadDeviceUpgradeStatus(true)}
-                      onUpgrade={() => startDeviceUpgrade()}
-                    />
-                  ) : null}
                   <button
                     type="button"
                     onClick={() => loadDeployPlans()}
@@ -3544,15 +3705,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {frameAdminLoginIsOnlyAccess(frame) ? (
-                    <ShellLessFrameSection
-                      status={deviceUpgradeStatus}
-                      loading={deviceUpgradeLoading}
-                      error={deviceUpgradeError}
-                      onCheck={() => loadDeviceUpgradeStatus(true)}
-                      onUpgrade={() => startDeviceUpgrade()}
-                    />
-                  ) : null}
                   {frameSyncError ? (
                     <section className="space-y-2">
                       <DrawerHeading
@@ -3702,18 +3854,22 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   : 'Choose changes'}
               </button>
             </>
+          ) : shellLess ? (
+            // Like the cloud: the deploy actions sit in the body next to
+            // what they change; the footer only closes.
+            <>
+              {cancelStuckDeployButton}
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Close
+              </button>
+            </>
           ) : (
             <>
-              {frame.status === 'deploying' ? (
-                <button
-                  type="button"
-                  title="Abort the running deploy and clear the deploy lock, so a new deploy can start"
-                  onClick={() => cancelDeploy(frame.id)}
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
-                >
-                  Cancel stuck deploy
-                </button>
-              ) : null}
+              {cancelStuckDeployButton}
               <button
                 type="button"
                 onClick={closeDrawer}
@@ -3723,11 +3879,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               </button>
               <button
                 type="button"
-                title={
-                  frameAdminLoginIsOnlyAccess(frame)
-                    ? "Sends scenes and settings over the frame's admin API and reloads the runtime"
-                    : undefined
-                }
                 onClick={() => closeAndRun(saveAndFastDeployFrame)}
                 className={clsx(
                   'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -3736,7 +3887,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Fast deploy
               </button>
-              {(!isEmbeddedFrame || embeddedFullDeploySupported) && !frameAdminLoginIsOnlyAccess(frame) ? (
+              {!isEmbeddedFrame || embeddedFullDeploySupported ? (
                 <button
                   type="button"
                   title={isEmbeddedFrame ? 'Update FrameOS over the air (OTA), then deploy the scenes' : undefined}

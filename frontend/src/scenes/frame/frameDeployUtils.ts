@@ -666,12 +666,13 @@ export function buildDeployRecommendation(
 
   if (frameAdminLoginIsOnlyAccess(frame)) {
     // Nothing here reinstalls FrameOS: the admin API carries scenes and
-    // settings, the frame upgrades itself.
+    // settings, the frame upgrades itself. The deploy drawer shows this
+    // frame its own cloud-shaped dialog (ShellLessDeploySection) rather than
+    // this recommendation; the mode still picks the deploy the footer runs.
     return {
       mode: 'fast',
-      title: 'Suggested: fast deploy',
-      description:
-        "No shell on this frame: scenes and settings go over its admin API and the runtime reloads. FrameOS itself updates through the frame's own signed upgrade.",
+      title: 'Deploy scenes & settings',
+      description: 'Scenes and settings go to the frame over its admin API; the frame updates FrameOS itself.',
     }
   }
 
