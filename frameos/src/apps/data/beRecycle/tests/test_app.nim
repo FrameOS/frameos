@@ -106,4 +106,4 @@ suite "data/beRecycle app":
     let collections = collectionsUrl("zip 1", "street/2", 12, "2026-01-05", "2026-01-07")
     validateHttpRequestUrl(collections)
     check collections.contains("zipcodeId=zip%201&streetId=street%2F2&houseNumber=12" &
-      "&fromDate=2026-01-05&untilDate=2026-01-07&size=200")
+      "&fromDate=2026-01-05&untilDate=2026-01-07&size=100")
