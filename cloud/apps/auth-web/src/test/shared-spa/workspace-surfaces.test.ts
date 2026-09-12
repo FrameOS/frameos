@@ -9,6 +9,8 @@ import {
   allowedSceneToolPanels,
   allowedSceneUtilityPanels,
   frameCapabilities,
+  frameChangeDrawerKind,
+  frameHasStoreScene,
   isEsp32Frame,
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
@@ -456,12 +458,31 @@ describe("embedded-hardware frames on the backend control plane", () => {
       expect(frameSettingsSectionIsAllowed("backend", "frame-http-api-section", frame)).toBe(true);
     }
     // A Pi on the same control plane keeps all of them — except Power,
-    // which only the esp32 cloud profile renders.
+    // which only the esp32 cloud profile renders, and the store-scene
+    // service keys, which the panel draws only while a store scene is
+    // installed.
     for (const section of allowedFrameSettingsSections.backend) {
       expect(frameSettingsSectionIsAllowed("backend", section, {})).toBe(
-        section !== "frame-settings-power",
+        section !== "frame-settings-power" && section !== "frame-settings-store-scene-services",
       );
     }
+    const withStoreScene = { scenes: [{ origin: { storeSceneId: "abc" } }] };
+    expect(frameHasStoreScene(withStoreScene)).toBe(true);
+    expect(frameHasStoreScene({ scenes: [{ origin: null }] })).toBe(false);
+    for (const mode of ["backend", "frameAdmin"] as const) {
+      expect(frameSettingsSectionIsAllowed(mode, "frame-settings-store-scene-services", withStoreScene)).toBe(true);
+    }
+  });
+
+  it("opens the deploy drawer for unsaved changes wherever that drawer exists", () => {
+    // One dialog per indicator: the deploy drawer lists the unsaved changes
+    // itself, so only the on-device panel (no deploy dialog) keeps the
+    // standalone unsaved-changes drawer.
+    expect(frameChangeDrawerKind({}, true, "backend")).toBe("deploy");
+    expect(frameChangeDrawerKind({}, true, "cloud")).toBe("deploy");
+    expect(frameChangeDrawerKind({}, false, "backend")).toBe("deploy");
+    expect(frameChangeDrawerKind({}, true, "frameAdmin")).toBe("unsaved");
+    expect(frameChangeDrawerKind({}, false, "frameAdmin")).toBe("deploy");
   });
 
   it("hides the Terminal and Ping panels (no shell, no SSH)", () => {
@@ -542,18 +563,23 @@ describe("allow-list hygiene", () => {
     // audit ledger, which the self-hosted backend does not keep. Anything
     // else cloud-only must be argued for here, not slipped in.
     const cloudOnlyFrameTools = ["activity"];
+    // The other deliberate exceptions, on the device's own panel: the
+    // frame's FrameOS Cloud link box and its self-upgrade, which exist only
+    // where the frame itself is the server.
+    const frameAdminOnlySettingsSections = ["frame-settings-cloud", "frame-settings-upgrade"];
     const lists = [
-      [allowedFrameToolPanels, "frame tools", cloudOnlyFrameTools],
-      [allowedSceneToolPanels, "scene tools", []],
-      [allowedSceneUtilityPanels, "scene utilities", []],
-      [allowedFrameSettingsSections, "settings sections", []],
+      [allowedFrameToolPanels, "frame tools", cloudOnlyFrameTools, []],
+      [allowedSceneToolPanels, "scene tools", [], []],
+      [allowedSceneUtilityPanels, "scene utilities", [], []],
+      [allowedFrameSettingsSections, "settings sections", [], frameAdminOnlySettingsSections],
     ] as const;
-    for (const [list, label, cloudOnly] of lists) {
+    for (const [list, label, cloudOnly, frameAdminOnly] of lists) {
       for (const mode of ["cloud", "frameAdmin"] as const) {
         const extra = (list[mode] as readonly string[]).filter(
           (entry) =>
             !(list.backend as readonly string[]).includes(entry) &&
-            !(mode === "cloud" && (cloudOnly as readonly string[]).includes(entry)),
+            !(mode === "cloud" && (cloudOnly as readonly string[]).includes(entry)) &&
+            !(mode === "frameAdmin" && (frameAdminOnly as readonly string[]).includes(entry)),
         );
         expect(extra, `${label} allowed in ${mode} but not backend`).toEqual(
           [],

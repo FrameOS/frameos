@@ -5,7 +5,7 @@ import { ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outli
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
-import { frameMenuActionIsAllowed, workspaceMode } from './workspaceSurfaces'
+import { frameChangeDrawerKind, frameMenuActionIsAllowed, workspaceMode } from './workspaceSurfaces'
 import type { FrameId } from '../../types'
 
 export function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
@@ -59,7 +59,7 @@ export function FrameChangeStatusIcon({
     : undeployedChanges
     ? 'Undeployed'
     : null
-  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const drawerKind = frameChangeDrawerKind(frame, unsavedChanges)
   // Name what is pending rather than just its category: "Undeployed changes"
   // gave no hint that the thing waiting was a FrameOS release, which is the
   // one pending change you might want to act on days later.
@@ -70,10 +70,11 @@ export function FrameChangeStatusIcon({
   // The deploy drawer is the 'deploy' menu action's dialog, so this icon may
   // only open it where that action exists — the same predicate the "…" menu,
   // the dashboard tile and the scene sidebar use, so every deploy affordance
-  // appears and disappears together. (The on-device admin panel deploys
-  // through its own FrameLocalDeployMenu and has no drawer; it keeps the
-  // change indicator, just not as a button into a dialog it cannot serve.)
-  // The 'unsaved' drawer is a different dialog and is never gated here.
+  // appears and disappears together. Unsaved changes open that same drawer
+  // (listed at its top, saved with the deploy); only the on-device admin
+  // panel, which has no deploy dialog, keeps the standalone unsaved drawer,
+  // and it keeps the change indicator, just not as a button into a dialog it
+  // cannot serve.
   const canOpenDeployDrawer = drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : hasFrameSyncChanges ? ArrowsRightLeftIcon : DeployToFrameIcon
@@ -159,11 +160,13 @@ export function FrameChangeStatusIcon({
       title={statusTitle}
       aria-label={
         drawerIsOpen
-          ? unsavedChanges
+          ? drawerKind === 'unsaved'
             ? 'Close unsaved changes'
             : 'Close deploy'
-          : unsavedChanges
+          : drawerKind === 'unsaved'
           ? 'Open unsaved changes'
+          : unsavedChanges
+          ? 'Open deploy for unsaved changes'
           : hasFrameSyncChanges
           ? 'Open sync'
           : 'Open deploy for undeployed changes'

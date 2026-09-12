@@ -57,6 +57,7 @@ import {
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import {
+  frameChangeDrawerKind,
   frameMenuActionIsAllowed,
   sceneToolPanelDisabledReason,
   sceneToolPanelIsAllowed,
@@ -391,8 +392,9 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   const frameIsUpToDate = !unsavedChanges && !undeployedChanges
   // Same predicate as the deploy tile above and the "…" menu: this link is
   // one more way into the deploy dialog, so it exists exactly where that
-  // dialog does. Unsaved changes open their own drawer and are never gated.
-  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  // dialog does. Unsaved changes open that dialog too (listed at its top);
+  // only a plane without it falls back to the standalone unsaved drawer.
+  const drawerKind = frameChangeDrawerKind(frame, unsavedChanges)
   const canOpenDrawer = drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
 
   return (

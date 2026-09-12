@@ -68,6 +68,7 @@ import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import {
+  frameChangeDrawerKind,
   frameSettingsSectionIsAllowed,
   frameToolPanelIsAllowed,
   workspaceMode,
@@ -278,7 +279,12 @@ function FrameToolDisabled({
 }
 
 const allFrameSettingsSections = [
+  // Render order of FrameSettings.tsx: the on-device cloud link box and the
+  // store-scene service keys sit above Info.
+  { id: 'frame-settings-cloud', label: 'Cloud' },
+  { id: 'frame-settings-store-scene-services', label: 'Service keys' },
   { id: 'frame-settings-info', label: 'Info' },
+  { id: 'frame-settings-upgrade', label: 'Update' },
   { id: 'frame-settings-power', label: 'Power' },
   { id: 'frame-settings-device', label: 'Device' },
   { id: 'frame-settings-ssh', label: 'SSH' },
@@ -346,8 +352,11 @@ function FrameSelector({
   const { navigateToFrame } = useActions(workspaceLogic)
   const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const frameGroups = groupFramesByStatus(frames)
+  // The deploy drawer lists unsaved changes at its top wherever it exists;
+  // only the on-device panel has the standalone unsaved-changes drawer.
+  const unsavedDrawerKind = frameChangeDrawerKind(frame, true)
   const unsavedDrawerIsOpen =
-    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'unsaved'
+    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === unsavedDrawerKind
 
   const openUnsavedChanges = (): void => {
     closeChatDrawer()
@@ -356,7 +365,7 @@ function FrameSelector({
       closeFrameChangeDrawer()
       return
     }
-    openFrameChangeDrawer(frame.id, 'unsaved')
+    openFrameChangeDrawer(frame.id, unsavedDrawerKind)
   }
 
   return (

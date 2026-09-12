@@ -19,6 +19,7 @@ vi.mock("../../../../../../frontend/src/utils/apiFetch", async (importOriginal) 
 });
 
 import { initKea } from "../../../../../../frontend/src/initKea";
+import { frameLogic } from "../../../../../../frontend/src/scenes/frame/frameLogic";
 import { FrameDeployPlanDrawer } from "../../../../../../frontend/src/scenes/workspace/FrameDeployPlanDrawer";
 import type { FrameType } from "../../../../../../frontend/src/types";
 
@@ -126,7 +127,7 @@ beforeEach(() => {
     if (/\/logs/.test(url)) {
       return Response.json({ logs: [] });
     }
-    return Response.json({ frames: [] });
+    return Response.json({ frames: [adoptedCard()] });
   });
   initKea();
 });
@@ -207,6 +208,32 @@ describe("the deploy dialog for a frame with admin-API access only", () => {
       expect(screen.getByRole("button", { name: /Updating…/ })).toBeTruthy();
     });
     expect(screen.getByText(/Updating: starting — queued/)).toBeTruthy();
+  });
+
+  it("lists unsaved changes at the top and saves them on their own", async () => {
+    const logic = frameLogic({ frameId: 14 as unknown as FrameType["id"] });
+    logic.mount();
+    render(<FrameDeployPlanDrawer frame={adoptedCard()} />);
+    await waitFor(() => {
+      expect(screen.getByText("2026.9.13 → 2026.9.14")).toBeTruthy();
+    });
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+
+    logic.actions.setFrameFormValues({ name: "Hallway card" });
+    await waitFor(() => {
+      expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    });
+    expect(screen.getByText("Saved along with the deploy below.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Save only/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeTruthy();
+    // The deploy list below is computed from the same unsaved form.
+    expect(screen.getByText(/1 pending change/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Unsaved changes")).toBeNull();
+    });
+    logic.unmount();
   });
 
   it("hands a Buildroot frame the install script only on request", () => {

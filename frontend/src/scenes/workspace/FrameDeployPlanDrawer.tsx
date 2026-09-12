@@ -785,6 +785,61 @@ function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | nul
   )
 }
 
+/**
+ * Unsaved changes, at the top of the deploy drawer. There used to be a
+ * separate "Unsaved changes" drawer that the same indicator opened instead of
+ * this one whenever the form was dirty — two dialogs behind one button, and
+ * the deploy one never mentioned what the save would carry. Every deploy
+ * below saves first (saveAndFastDeployFrame & co.), and the plan's change
+ * list is already computed from the unsaved form, so this only has to say
+ * so and offer the save (or discard) on its own.
+ */
+function UnsavedChangesSection({ frame }: { frame: FrameType }): JSX.Element | null {
+  const logic = frameLogic({ frameId: frame.id })
+  const { isFrameFormSubmitting, unsavedChangeDetails } = useValues(logic)
+  const { resetUnsavedChanges, saveFrame } = useActions(logic)
+  if (unsavedChangeDetails.length === 0) {
+    return null
+  }
+  const buttonClass =
+    'frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+  return (
+    <section className="mb-5 space-y-2" data-testid="deploy-unsaved-changes">
+      <DrawerHeading
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isFrameFormSubmitting}
+              onClick={() => resetUnsavedChanges()}
+              title="Throw these edits away and keep what is saved"
+              className={buttonClass}
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              disabled={isFrameFormSubmitting}
+              onClick={() => saveFrame()}
+              title="Save these changes now without deploying"
+              className={buttonClass}
+            >
+              {isFrameFormSubmitting ? <Spinner /> : null}
+              {isFrameFormSubmitting ? 'Saving…' : 'Save only'}
+            </button>
+          </div>
+        }
+      >
+        Unsaved changes
+      </DrawerHeading>
+      <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-xs leading-5">Saved along with the deploy below.</div>
+        <ChangeRows changes={unsavedChangeDetails} />
+      </div>
+    </section>
+  )
+}
+
 function DrawerHeading({ action, children }: { action?: JSX.Element; children: ReactNode }): JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -3595,6 +3650,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {/* Not on the SD-card / script / USB views: those install a card
+              or a board, and the form's edits are not what they carry. */}
+          {isCloud ? (
+            deployDrawerView !== 'cloudUsb'
+          ) : activeDeployDrawerView === 'main' ? (
+            <UnsavedChangesSection frame={frame} />
+          ) : null}
           {isCloud ? (
             <CloudDeploySection
               frame={frame}

@@ -43,6 +43,7 @@ import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
+import { frameChangeDrawerKind } from './workspaceSurfaces'
 import { FrameRenameModal } from './FrameActionsMenu'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
@@ -340,12 +341,12 @@ function WorkspaceChatDrawerContent({
 }
 
 function FrameStatusHeaderButton({ frameId }: { frameId: FrameId }): JSX.Element | null {
-  const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
+  const { frame, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
-  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const drawerKind = frameChangeDrawerKind(frame, unsavedChanges)
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
 
@@ -357,7 +358,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: FrameId }): JSX.Element
     <button
       type="button"
       title={`${statusLabel} changes`}
-      aria-label={drawerIsOpen ? 'Close changes' : unsavedChanges ? 'Open unsaved changes' : 'Open deploy'}
+      aria-label={drawerIsOpen ? 'Close changes' : drawerKind === 'unsaved' ? 'Open unsaved changes' : 'Open deploy'}
       onClick={() => {
         if (drawerIsOpen) {
           hideDeployPlanModal()
@@ -434,9 +435,13 @@ export function FrameosShell({
   // from the frame that was selected when it mounted. Without the key the
   // heading followed the new frame while the form underneath kept offering to
   // write the previous frame's card — same claim code, wrong panel.
+  // A stored 'unsaved' selection (an old ?drawer=unsavedChanges link) on a
+  // plane with a deploy dialog still gets that dialog — it carries the
+  // unsaved list itself.
   const frameChangeDrawer =
     frameChangeDrawerSelection && frameChangeDrawerFrame ? (
-      frameChangeDrawerSelection.kind === 'unsaved' ? (
+      frameChangeDrawerSelection.kind === 'unsaved' &&
+      frameChangeDrawerKind(frameChangeDrawerFrame, true) === 'unsaved' ? (
         <FrameUnsavedChangesDrawer key={frameChangeDrawerFrame.id} frame={frameChangeDrawerFrame} />
       ) : (
         <FrameDeployPlanDrawer key={frameChangeDrawerFrame.id} frame={frameChangeDrawerFrame} />
