@@ -565,7 +565,7 @@ export function buildFullDeployPlanSummary(
   if (fullPlan.remote_upgrade) {
     items.push({
       label: 'FrameOS Remote',
-      value: `Upgrade ${fullPlan.remote_upgrade.previous_version ?? 'unreported'} -> ${
+      value: `Update ${fullPlan.remote_upgrade.previous_version ?? 'unreported'} → ${
         fullPlan.remote_upgrade.current_version
       } before full deploy`,
     })

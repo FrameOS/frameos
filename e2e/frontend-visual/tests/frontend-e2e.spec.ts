@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import {
   attachFrontendErrorCollector,
+  backendDeployPlan,
   login,
   mockCloudBackupsApi,
   prepareStablePage,
@@ -229,6 +230,32 @@ test.describe('backend frontend e2e coverage @e2e', () => {
         await openSceneWorkspaceUtilityDrawer(page, drawer)
       })
     }
+
+    expectNoFrontendErrors(readErrors)
+  })
+
+  test('frame workspace deploy vocabulary: sidebar Deploy opens a drawer that only deploys', async ({ page }) => {
+    // docs/ui-vocabulary.md: "deploy" is the one verb for sending scenes and
+    // settings to the device; "push" and "upgrade" never reach a label.
+    const readErrors = await prepareAuthenticatedPage(page)
+    await page.route(projectApiPathPattern('/frames/1/deploy_plan*'), (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ plan: backendDeployPlan(1) }),
+      })
+    )
+    await page.goto('/frames/1', { waitUntil: 'domcontentloaded' })
+    await settleForScreenshot(page)
+
+    const sidebar = page.locator('.workspace-sidebar').first()
+    await sidebar.getByRole('button', { name: 'Deploy', exact: true }).click()
+
+    const drawer = page.locator('.workspace-drawer').filter({ has: page.getByRole('heading', { name: 'Deploy' }) })
+    await expect(drawer).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Fast deploy' })).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Full deploy' })).toBeVisible()
+    await expect(drawer).not.toContainText(/\b(Push|Pushes|Pushing|Upgrade|Upgrades)\b/)
 
     expectNoFrontendErrors(readErrors)
   })

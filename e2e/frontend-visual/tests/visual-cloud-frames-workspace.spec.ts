@@ -3,6 +3,7 @@ import { attachFrontendErrorCollector, settleForScreenshot } from './visual-help
 import {
   addFramePathTitles,
   bundleAvailable,
+  cloudFrames,
   CLOUD_ORIGIN,
   expectNoCloudFrontendErrors,
   firmwareListingWithoutGenericEsp32,
@@ -87,6 +88,31 @@ test.describe('cloud /frames workspace @e2e', () => {
       expectNoCloudFrontendErrors(readErrors)
     })
   }
+
+  test('deploy drawer vocabulary: a cloud Pi frame deploys scenes and updates FrameOS', async ({ page }) => {
+    // docs/ui-vocabulary.md: the cloud drawer says "Deploy scenes & settings"
+    // and "Update FrameOS"; "push" and "upgrade" never reach a label.
+    const readErrors = attachFrontendErrorCollector(page)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await prepareCloudPage(page, 'light')
+    await serveCloudWorkspace(page)
+
+    await page.goto(`${CLOUD_ORIGIN}/frames/${cloudFrames[0].id}`, { waitUntil: 'domcontentloaded' })
+
+    const sidebar = page.locator('.workspace-sidebar').first()
+    const deployButton = sidebar.getByRole('button', { name: 'Deploy', exact: true })
+    await expect(deployButton).toBeVisible()
+    await deployButton.click()
+
+    const drawer = page.locator('.workspace-drawer').filter({ has: page.getByRole('heading', { name: 'Deploy' }) })
+    await expect(drawer).toBeVisible()
+    await expect(drawer.locator('.frame-tool-heading', { hasText: 'Scenes & settings' })).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Deploy scenes & settings' })).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Update FrameOS' })).toBeVisible()
+    await expect(drawer).not.toContainText(/\b(Push|Pushes|Pushing|Upgrade|Upgrades)\b/)
+
+    expectNoCloudFrontendErrors(readErrors)
+  })
 
   test('add-frame drawer: SD builder display picker prefills panel dimensions', async ({ page }) => {
     const readErrors = attachFrontendErrorCollector(page)

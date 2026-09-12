@@ -984,7 +984,7 @@ export const framesModel = kea<framesModelType>([
           frameId: id,
           kind: 'deploy',
           title: 'Deploying scenes',
-          detail: 'Pushing scenes to the frame',
+          detail: 'Sending scenes to the frame',
         })
         try {
           const frame = values.frames[id]

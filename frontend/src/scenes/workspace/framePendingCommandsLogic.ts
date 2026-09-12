@@ -58,8 +58,8 @@ const commandLabels: Record<string, string> = {
   restart_runtime: 'Restart FrameOS',
   set_current_scene: 'Switch scene',
   set_schedule: 'Update the schedule',
-  set_scenes: 'Push scenes',
-  set_settings: 'Push settings',
+  set_scenes: 'Deploy scenes',
+  set_settings: 'Deploy settings',
 }
 
 export function pendingCommandLabel(command: FramePendingCommand): string {

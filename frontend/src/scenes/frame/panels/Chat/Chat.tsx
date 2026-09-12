@@ -371,7 +371,7 @@ export function Chat() {
         aria-label="Proposed frame install"
       >
         <div className="font-semibold">
-          {proposal.already_assigned ? 'Re-deploy' : 'Install'} &quot;{proposal.scene.name}&quot;
+          {proposal.already_assigned ? 'Reinstall' : 'Install'} &quot;{proposal.scene.name}&quot;
           {proposal.scene.version ? ` (version ${proposal.scene.version})` : ''} on {proposal.frame.name}
         </div>
         <div className="frame-tool-muted text-xs">

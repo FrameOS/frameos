@@ -7,7 +7,7 @@ import type { FrameId, FrameScene } from '../../types'
  * the same `upload-scenes` command the over-the-air push delivers, for a board
  * that cannot reach the network.
  *
- * Shared by the standalone "Push scenes over USB" card and the firmware
+ * Shared by the standalone "Deploy scenes over USB" card and the firmware
  * updater's "Also push scenes & settings" tick, so the two cannot drift into
  * sending different bodies for the same words.
  *
@@ -24,5 +24,5 @@ export async function pushScenesOverUsb(frameId: FrameId, scenes: FrameScene[]):
 }
 
 export function pushedScenesMessage(count: number): string {
-  return `Pushed ${count} scene${count === 1 ? '' : 's'} over USB.`
+  return `Deployed ${count} scene${count === 1 ? '' : 's'} over USB.`
 }
