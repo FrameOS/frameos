@@ -45,7 +45,7 @@ async def _template_from_request(
     data: CloudStorePublishRequest, db: Session, redis: Redis, user: User
 ) -> Template:
     """The template to publish: an existing one, or a transient one built
-    from inline scenes ("Save to private cloud" straight off a frame)."""
+    from inline scenes ("Save to cloud (private)" straight off a frame)."""
     if data.template_id:
         template = db.query(Template).filter_by(id=data.template_id).first()
         if template is None or get_user_project(db, user, template.project_id) is None:

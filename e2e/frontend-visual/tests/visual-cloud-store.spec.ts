@@ -10,7 +10,7 @@ import { visualThemes, visualViewports } from './visual-cases'
 
 /** Visual states of the "Private cloud scenes" store integration: the
  * Templates panel with a populated/empty private cloud, the not-connected
- * promo, and the "Save to private cloud" modal. The real backend is never
+ * promo, and the "Save to cloud (private)" modal. The real backend is never
  * linked during visual runs, so the /api/cloud/* surface is mocked at the
  * network layer — mocks must be installed BEFORE page.goto because
  * cloudLogic and cloudDriveLogic load on mount. */
@@ -191,7 +191,7 @@ const cloudVisualCases: CloudVisualCase[] = [
   },
   {
     id: 'workspace-save-to-private-cloud',
-    title: 'Save to private cloud modal',
+    title: 'Save to cloud (private) modal',
     path: '/scenes/1/scene-dashboard',
     viewports: ['full'],
     variants: [
@@ -208,8 +208,8 @@ const cloudVisualCases: CloudVisualCase[] = [
           // The scene dropdown trigger is the row's only other button; its
           // ellipsis icon carries no accessible name.
           await sceneRow.locator('button').last().click()
-          await page.getByRole('menuitem', { name: 'Save to private cloud' }).click()
-          await page.getByRole('heading', { name: 'Save to private cloud' }).first().waitFor()
+          await page.getByRole('menuitem', { name: 'Save to cloud (private)' }).click()
+          await page.getByRole('heading', { name: 'Save to cloud (private)' }).first().waitFor()
           await page.getByText('Visibility').first().waitFor()
         },
       },

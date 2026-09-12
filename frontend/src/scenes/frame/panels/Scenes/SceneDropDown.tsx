@@ -133,7 +133,7 @@ export function SceneDropDown({
         isInFrameAdminMode()
           ? null
           : {
-              label: 'Save to private cloud',
+              label: 'Save to cloud (private)',
               onClick: () => {
                 if (!hasDriveScope) {
                   window.alert(
