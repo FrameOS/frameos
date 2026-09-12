@@ -104,6 +104,9 @@ export function frameOriginAfterApply(origin: PageOrigin, listeners: FrameApplyL
     return null
   }
   const target = reachable.find((listener) => listener.tls === secure) ?? reachable[0]
+  if (!target) {
+    return null
+  }
   const scheme = target.tls ? 'https' : 'http'
   const defaultPort = target.tls ? 443 : 80
   const host = bareHostname(origin.hostname).includes(':') ? `[${bareHostname(origin.hostname)}]` : origin.hostname
