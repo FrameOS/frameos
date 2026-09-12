@@ -18,6 +18,7 @@ import {
   frameSupportsUsbSerialConsole,
   frameToolPanelDisabledReason,
   frameToolPanelIsAllowed,
+  isAdminApiOnlyFrame,
   isEmbeddedHardwareFrame,
   isEsp32CloudFrame,
   isVirtualFrame,
@@ -532,6 +533,95 @@ describe("embedded-hardware frames on the backend control plane", () => {
       expect(frameToolPanelIsAllowed("backend", "terminal", frame)).toBe(true);
       expect(frameMenuActionIsAllowed("backend", "stop", frame)).toBe(true);
     }
+  });
+});
+
+describe("frames the backend reaches only over their admin API", () => {
+  // An adopted generic Buildroot card: no FrameOS Remote on the image, no SSH
+  // key or password of this backend's on it. The admin login is the whole
+  // transport — "remote lite" — and the workspace is shaped like the cloud's:
+  // no shell, no Remote verbs, no build artifacts; assets, fonts, service
+  // keys, scenes and settings all ride the frame's own API.
+  const adoptedCard = { mode: "buildroot", buildroot: { adopted: true }, agent: { agentEnabled: false } };
+
+  it("classifies the card by the backend's frame_has_shell_access rule, inverted", () => {
+    expect(isAdminApiOnlyFrame(adoptedCard)).toBe(true);
+    // A card this backend wrote carries its default SSH key.
+    expect(isAdminApiOnlyFrame({ mode: "buildroot", buildroot: { adopted: false } })).toBe(false);
+    expect(isAdminApiOnlyFrame({ mode: "buildroot", buildroot: {} })).toBe(false);
+    // Any shell of ours ends the special case.
+    expect(isAdminApiOnlyFrame({ ...adoptedCard, ssh_pass: "secret" })).toBe(false);
+    expect(isAdminApiOnlyFrame({ ...adoptedCard, ssh_keys: ["key-1"] })).toBe(false);
+    expect(isAdminApiOnlyFrame({ ...adoptedCard, agent: { agentEnabled: true, agentRunCommands: true } })).toBe(false);
+    // A Remote that may not run commands is no shell.
+    expect(isAdminApiOnlyFrame({ ...adoptedCard, agent: { agentEnabled: true, agentRunCommands: false } })).toBe(true);
+    // rpios and embedded frames never qualify, whatever the flag says.
+    expect(isAdminApiOnlyFrame({ mode: "rpios", buildroot: { adopted: true } })).toBe(false);
+    expect(isAdminApiOnlyFrame({ mode: "embedded", buildroot: { adopted: true } })).toBe(false);
+    for (const frame of [undefined, null, {}]) {
+      expect(isAdminApiOnlyFrame(frame)).toBe(false);
+    }
+  });
+
+  it("hides the Terminal (an SSH session that could never connect) but keeps Ping", () => {
+    expect(frameToolPanelIsAllowed("backend", "terminal", adoptedCard)).toBe(false);
+    expect(sceneToolPanelIsAllowed("backend", "terminal", adoptedCard)).toBe(false);
+    // The backend host pings over ICMP and HTTP; no shell involved.
+    expect(frameToolPanelIsAllowed("backend", "ping", adoptedCard)).toBe(true);
+    expect(sceneToolPanelIsAllowed("backend", "ping", adoptedCard)).toBe(true);
+  });
+
+  it("keeps assets, logs, metrics, schedule, settings and debug (all served over the admin API or the backend's own store)", () => {
+    for (const panel of ["assets", "logs", "metrics", "schedule", "settings", "debug", "preview", "overview"] as const) {
+      expect(frameToolPanelIsAllowed("backend", panel, adoptedCard)).toBe(true);
+      expect(frameToolPanelDisabledReason("backend", panel, adoptedCard)).toBeNull();
+    }
+  });
+
+  it("hides Deploy Remote, Restart Remote and Stop", () => {
+    for (const action of ["deployRemote", "restartRemote", "stop"] as const) {
+      expect(frameMenuActionIsAllowed("backend", action, adoptedCard)).toBe(false);
+    }
+  });
+
+  it("keeps reboot, restart, render, deploy, the SD-card builder and the bookkeeping verbs", () => {
+    // Reboot and restart ride the runtime's control verbs; deploy opens the
+    // admin-API-shaped drawer; a new card is how such a frame gets a shell
+    // again, so building one stays offered.
+    for (const action of ["reboot", "restart", "render", "deploy", "buildSdCard", "rename", "archive", "delete", "cancelDeploy"] as const) {
+      expect(frameMenuActionIsAllowed("backend", action, adoptedCard)).toBe(true);
+      expect(frameMenuActionDisabledReason("backend", action, adoptedCard)).toBeNull();
+    }
+  });
+
+  it("links to no Remote or reboot-cron settings section, keeps the rest", () => {
+    for (const section of ["frame-settings-agent", "frame-settings-reboot"]) {
+      expect(frameSettingsSectionIsAllowed("backend", section, adoptedCard)).toBe(false);
+    }
+    // The SSH anchor stays: the section renders its Frame host field alone.
+    for (const section of allowedFrameSettingsSections.backend) {
+      if (section === "frame-settings-agent" || section === "frame-settings-reboot") {
+        continue;
+      }
+      expect(frameSettingsSectionIsAllowed("backend", section, adoptedCard)).toBe(
+        section !== "frame-settings-power" && section !== "frame-settings-store-scene-services",
+      );
+    }
+  });
+
+  it("only applies on the backend control plane", () => {
+    // The cloud and the on-device panel gate by their own rules; the card's
+    // row never reaches them with the flag anyway.
+    expect(frameToolPanelIsAllowed("frameAdmin", "settings", adoptedCard)).toBe(true);
+    expect(frameMenuActionIsAllowed("cloud", "restart", adoptedCard)).toBe(true);
+    expect(frameSettingsSectionIsAllowed("frameAdmin", "frame-settings-info", adoptedCard)).toBe(true);
+  });
+
+  it("leaves a Buildroot card this backend wrote the full backend surface", () => {
+    const ownCard = { mode: "buildroot", buildroot: { platform: "raspberry-pi-64" } };
+    expect(frameToolPanelIsAllowed("backend", "terminal", ownCard)).toBe(true);
+    expect(frameMenuActionIsAllowed("backend", "stop", ownCard)).toBe(true);
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-agent", ownCard)).toBe(true);
   });
 });
 

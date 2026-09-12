@@ -130,7 +130,7 @@ from app.utils.frame_http import (
     _frame_scheme_port,
     _is_embedded_frame,
 )
-from app.utils import embedded_assets, virtual_assets
+from app.utils import admin_api_assets, embedded_assets, virtual_assets
 from app.api.frame_sync import (
     _frame_admin_request,
     frame_has_shell_access,
@@ -1837,11 +1837,23 @@ async def api_frame_local_binary_zip(
     return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
+def _assets_over_device_http(frame: Frame) -> bool:
+    """Whether this frame's assets are reached through the device's own HTTP
+    API rather than SSH/Remote: embedded boards (no shell by nature) and the
+    Linux frames this backend reaches only over their admin API."""
+    return _is_embedded_frame(frame) or not frame_has_shell_access(frame)
+
+
 def _device_assets(frame: Frame):
     """Asset backend for frames without SSH: virtual frames keep assets on the
-    backend disk, embedded frames proxy to the device HTTP API. Both modules
-    share the same function signatures."""
-    return virtual_assets if is_virtual_frame(frame) else embedded_assets
+    backend disk, embedded frames proxy to the device HTTP API, and a Linux
+    frame the backend reaches only over its admin API proxies to that. The
+    three modules share the same function signatures."""
+    if is_virtual_frame(frame):
+        return virtual_assets
+    if _is_embedded_frame(frame):
+        return embedded_assets
+    return admin_api_assets
 
 
 async def _embedded_asset_file_response(
@@ -1896,6 +1908,44 @@ async def _embedded_asset_file_response(
     )
 
 
+async def _admin_api_asset_file_response(
+    redis: Redis,
+    frame: Frame,
+    *,
+    full_path: str,
+    rel_path: str,
+    mode: str,
+    filename: str,
+    thumb: bool,
+) -> StreamingResponse:
+    """Serve one asset from a Linux frame reached over its admin API. The
+    runtime renders thumbnails itself (PNG, cached under .thumbs/), so a
+    thumb request asks for that instead of pulling the original."""
+    try:
+        data, device_content_type = await admin_api_assets.download_asset(frame, redis, full_path, thumb=thumb)
+    except HTTPException as exc:
+        if exc.status_code == HTTPStatus.NOT_FOUND:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
+        raise
+
+    if thumb:
+        media_type = device_content_type.split(";", 1)[0].strip() or THUMBNAIL_CONTENT_TYPE
+        return StreamingResponse(io.BytesIO(data), media_type=media_type)
+
+    md5 = hashlib.md5(data).hexdigest()
+    await redis.set(f"asset:{md5}", data, ex=86400 * 30)
+
+    media_type = "application/octet-stream"
+    if mode == "image":
+        media_type = mimetypes.guess_type(filename or rel_path)[0] or "application/octet-stream"
+
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers=inert_asset_headers(media_type, filename, inline=mode != "download"),
+    )
+
+
 @api_open.get("/projects/{project_id}/frames/{id:int}/asset")
 async def api_frame_get_asset(
     project_id: int,
@@ -1940,6 +1990,17 @@ async def api_frame_get_asset(
 
     if _is_embedded_frame(frame):
         return await _embedded_asset_file_response(
+            redis,
+            frame,
+            full_path=full_path,
+            rel_path=rel_path,
+            mode=mode,
+            filename=filename,
+            thumb=thumb,
+        )
+
+    if not frame_has_shell_access(frame):
+        return await _admin_api_asset_file_response(
             redis,
             frame,
             full_path=full_path,
@@ -2558,9 +2619,10 @@ async def _load_frame_assets(
     frame: Frame,
     assets_path: str,
 ) -> embedded_assets.AssetListing:
-    if _is_embedded_frame(frame):
+    if _assets_over_device_http(frame):
         # Embedded devices report whether their SD card is mounted; virtual
-        # frames answer with a plain list (their store is always there).
+        # frames answer with a plain list (their store is always there); a
+        # Linux frame reached over its admin API lists through that.
         return _as_asset_listing(await _device_assets(frame).list_assets(frame, redis))
 
     if await _use_remote(frame, redis):
@@ -2772,6 +2834,23 @@ async def api_frame_assets_sync(
             "message": "Fonts synced successfully" if uploaded else "Fonts are already up to date",
             "uploaded": uploaded,
         }
+    if not frame_has_shell_access(frame):
+        # A Linux frame reached over its admin API: the same size-compared
+        # upload the ESP32 path makes, through the runtime's asset routes.
+        from app.models.assets import sync_embedded_font_assets
+
+        listing = await admin_api_assets.list_assets(frame, redis)
+        try:
+            uploaded = await sync_embedded_font_assets(db, redis, frame, listing, assets_client=admin_api_assets)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        await _invalidate_frame_assets_cache(redis, frame, frame.assets_path or "/srv/assets")
+        return {
+            "message": "Fonts synced successfully" if uploaded else "Fonts are already up to date",
+            "uploaded": uploaded,
+        }
     try:
         from app.models.assets import sync_assets
 
@@ -2811,7 +2890,7 @@ async def api_frame_assets_upload_image(
     if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
         _bad_request("Invalid asset path")
 
-    if _is_embedded_frame(frame):
+    if _assets_over_device_http(frame):
         # The device API creates parent dirs and replaces in place; the
         # md5-derived filename keeps re-uploads of identical bytes idempotent.
         await _device_assets(frame).upload_asset(frame, redis, combined_path, data)
@@ -2862,7 +2941,7 @@ def _asset_upload_combined_path(frame: Frame, subdir: str, filename: str) -> tup
 async def _asset_upload_store(
     db: Session, redis: Redis, frame: Frame, combined_path: str, data: bytes
 ) -> None:
-    if _is_embedded_frame(frame):
+    if _assets_over_device_http(frame):
         await _device_assets(frame).upload_asset(frame, redis, combined_path, data)
     else:
         await upload_file(db, redis, frame, combined_path, data)
@@ -3055,7 +3134,7 @@ async def api_frame_assets_mkdir(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    if _is_embedded_frame(frame):
+    if _assets_over_device_http(frame):
         await _device_assets(frame).make_dir(frame, redis, full_path)
     else:
         await make_dir(db, redis, frame, full_path)
@@ -3084,7 +3163,7 @@ async def api_frame_assets_delete(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    if _is_embedded_frame(frame):
+    if _assets_over_device_http(frame):
         await _device_assets(frame).delete_path(frame, redis, full_path)
     else:
         await delete_path(db, redis, frame, full_path)
@@ -3117,7 +3196,7 @@ async def api_frame_assets_rename(
     ) or not dst_full.startswith(os.path.normpath(assets_path)):
         _bad_request("Invalid asset path")
 
-    if _is_embedded_frame(frame):
+    if _assets_over_device_http(frame):
         await _device_assets(frame).rename_path(frame, redis, src_full, dst_full)
     else:
         await rename_path(db, redis, frame, src_full, dst_full)
@@ -3133,6 +3212,22 @@ def _reject_embedded_frame(frame: Frame, reason: str) -> None:
     """
     if _is_embedded_frame(frame):
         _bad_request(reason)
+
+
+def _reject_admin_api_only_frame(frame: Frame, reason: str) -> None:
+    """400 for SSH/Remote verbs on a Linux frame this backend reaches only
+    over its admin API (an adopted generic card: no Remote, no SSH key or
+    password). The SSH path would only fail with "No SSH private keys
+    available" deep in a task log; saying so up front is kinder — and the
+    workspace hides these controls for such frames anyway."""
+    if not _is_embedded_frame(frame) and not frame_has_shell_access(frame):
+        _bad_request(reason)
+
+
+NO_SHELL_REASON = (
+    "This backend reaches the frame only over its admin API (no FrameOS Remote, no SSH), "
+    "so this action is not available"
+)
 
 
 @api_project.post("/frames/{id:int}/ssh_host_key/forget")
@@ -3160,6 +3255,7 @@ async def api_frame_clear_build_cache(
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     _reject_embedded_frame(frame, "Embedded frames have no on-device build cache to clear")
+    _reject_admin_api_only_frame(frame, f"{NO_SHELL_REASON}: there is no build cache to clear on a release image")
 
     if await _use_remote(frame, redis):
         try:
@@ -3252,6 +3348,7 @@ async def api_frame_deploy_remote_event(
 ):
     frame = _project_frame(db, id) or _not_found()
     _reject_embedded_frame(frame, "FrameOS Remote does not run on embedded frames")
+    _reject_admin_api_only_frame(frame, f"{NO_SHELL_REASON}: installing FrameOS Remote needs a shell on the frame")
     remote_transport = _remote_task_transport(transport)
     try:
         from app.tasks import deploy_remote
@@ -3271,6 +3368,7 @@ async def api_frame_restart_remote_event(
 ):
     frame = _project_frame(db, id) or _not_found()
     _reject_embedded_frame(frame, "FrameOS Remote does not run on embedded frames")
+    _reject_admin_api_only_frame(frame, f"{NO_SHELL_REASON}: there is no FrameOS Remote on this frame to restart")
     remote_transport = _remote_task_transport(transport)
     try:
         from app.tasks import restart_remote
@@ -3291,6 +3389,10 @@ async def api_frame_stop_event(
     _reject_embedded_frame(
         frame,
         "Stop is not available for embedded frames — the firmware is the runtime; use restart or reboot instead",
+    )
+    _reject_admin_api_only_frame(
+        frame,
+        f"{NO_SHELL_REASON}: stopping frameos.service needs a shell. Use Restart FrameOS or Reboot instead",
     )
     try:
         from app.tasks import stop_frame
@@ -3805,6 +3907,20 @@ async def api_frame_set_next_scene(
     if data.state is not None and not isinstance(data.state, dict):
         _bad_request("State must be an object")
 
+    if not _is_embedded_frame(frame) and not frame_has_shell_access(frame):
+        # No shell to write the boot-scene files with: the deploy job pushes
+        # the scenes over the frame's admin API and switches to this one once
+        # the runtime has taken them (frame_sync.push_backend_state_to_device).
+        try:
+            from app.tasks import fast_deploy_frame
+
+            await fast_deploy_frame(
+                id, redis, activate_scene={"sceneId": data.sceneId, "state": data.state or {}}
+            )
+        except Exception as e:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        return {"message": "Scene deploy queued over the frame's admin API"}
+
     state_dir = _frame_state_dir(frame)
     await make_dir(db, redis, frame, state_dir)
 
@@ -4122,6 +4238,10 @@ async def api_frame_update_ssh_keys(
     frame = _project_frame(db, id)
     if not frame:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    _reject_admin_api_only_frame(
+        frame,
+        f"{NO_SHELL_REASON}: authorized keys are installed over SSH, which needs a key already on the frame",
+    )
 
     settings = get_settings_dict(db, project_id=frame.project_id)
     try:

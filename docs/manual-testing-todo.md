@@ -11,13 +11,29 @@ empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.1
 
 ### Pi / Buildroot bench — cloud-managed frames
 
-- [ ] **Generic image still adopts with no Remote on it (`docs/buildroot-privileges.md` §4):**
-  release images no longer ship FrameOS Remote at all — flash a *generic*
-  Buildroot card, adopt it into a self-hosted backend, and verify the
-  backend's first deploy installs and enables the remote itself
-  (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
-  and that everything works after. The deploy also flips the frame back to
-  a root `frameos.service`, so check the unit's `User=` before and after.
+- [ ] **Generic image adopts with no Remote on it, and stays that way
+  ("remote lite", `docs/buildroot-privileges.md` §4, `docs/api-triality.md`
+  "Admin-API-only frames"):** release images ship no FrameOS Remote and the
+  backend never installs one on an adopted card — it is the frontend for the
+  card's own admin API, the way the cloud manages a frame. Flash a *generic*
+  Buildroot card, adopt it, and check that the whole surface works over that
+  API and that the unit stays the unprivileged `frameos` one (`User=` before
+  and after a deploy): the Assets panel lists, uploads (a photo over 2 MB,
+  which goes in chunks), renames, deletes and shows thumbnails (rendered by
+  the frame); "Sync fonts" lands the bundled faces in `fonts/`; a store
+  scene that needs a service key renders after "Deploy scenes & settings"
+  (the keys go through the frame's `POST /api/settings`, logged as "Service
+  keys written to the frame"); "Activate" on an edited scene in the scene
+  sidebar switches the panel to it; the scene tiles show the frame's own
+  snapshots right after adoption, before any render reaches the backend;
+  clearing the schedule or the GPIO buttons and saving actually clears them
+  on the frame; regenerating the frame access key keeps "Current image"
+  working. The workspace should look like the cloud's: no Terminal, no Stop
+  / Deploy Remote / Restart Remote, the SSH section reduced to "Frame host",
+  no Remote or Reboot-cron settings sections, no build .zip entries; the
+  API answers 400 to `stop`, `deploy_remote`, `restart_remote`,
+  `clear_build_cache` and `ssh_keys` for such a frame, and a queued full
+  deploy (`next_action: deploy`) lands as the same admin-API push.
 
 ### Backend (self-hosted) bench
 

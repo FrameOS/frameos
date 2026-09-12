@@ -30,6 +30,7 @@ export function FrameActionsMenu(): JSX.Element | null {
     downloadBinaryZip,
     downloadSdCardImage,
     deleteFrame,
+    adminLoginIsOnlyAccess,
     buildCacheLoading,
     buildZipLoading,
     cSourceZipLoading,
@@ -123,7 +124,11 @@ export function FrameActionsMenu(): JSX.Element | null {
           icon: <ArrowUpTrayIcon className="w-5 h-5" />,
           loading: false,
         },
-        ...(backendOwnsTheFrame
+        // Build artifacts of a frame the backend compiles for. A frame it
+        // reaches only over its admin API runs signed release images: nothing
+        // built here could be installed on it, so the entries are not offered
+        // (the same silence the cloud keeps).
+        ...(backendOwnsTheFrame && !adminLoginIsOnlyAccess
           ? [
               {
                 label: 'Download Nim build .zip',
@@ -152,6 +157,10 @@ export function FrameActionsMenu(): JSX.Element | null {
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                 loading: binaryZipLoading,
               },
+            ]
+          : []),
+        ...(backendOwnsTheFrame
+          ? [
               {
                 label: 'Delete frame',
                 title: frameDeleteCopy(workspaceSurfaceMode).title,

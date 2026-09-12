@@ -2,6 +2,7 @@ import type { FrameType } from '../../types'
 import versions from '../../../../versions.json'
 import { type FrameCompilationMode, normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { isAdminApiOnlyFrame } from '../workspace/workspaceSurfaces'
 
 export interface ChangeDetail {
   label: string
@@ -453,21 +454,11 @@ function previousFrameosVersion(plan?: DeployPlanResponse | null): string {
  * itself to the latest signed release.
  */
 export function frameAdminLoginIsOnlyAccess(frame: Partial<FrameType> | null | undefined): boolean {
-  if (!frame || (frame.mode ?? 'rpios') !== 'buildroot') {
-    return false
-  }
-  if (frame.agent?.agentEnabled && frame.agent?.agentRunCommands) {
-    return false
-  }
-  if ((frame.ssh_pass ?? '').trim()) {
-    return false
-  }
-  if (frame.ssh_keys && frame.ssh_keys.length > 0) {
-    return false
-  }
-  // A card this backend wrote carries its default key even when the row
-  // lists none; an adopted card carries nothing of ours.
-  return Boolean(frame.buildroot?.adopted)
+  // One predicate for the whole SPA: the surface gating in
+  // workspaceSurfaces.ts (the terminal, the Remote verbs, the settings
+  // sections) and the deploy logic here must agree on which frames these
+  // are. Mirrors the backend's frame_has_shell_access(), inverted.
+  return isAdminApiOnlyFrame(frame)
 }
 
 export function buildDeployPlanRequestBody(

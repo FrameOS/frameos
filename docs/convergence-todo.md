@@ -217,6 +217,14 @@ adopted generic card (no Remote, no SSH) could not be deployed to at all.
   signed self-upgrade (`/api/frames/{id}/device/upgrade`), the admin login
   locked as the one way in. Adoption follows the device's mode, board,
   TLS state and port instead of the backend's rpios/https defaults.
+  *(2026-09-12, "remote lite":* the rest of what that API allows — the
+  Assets panel and font sync, the service keys, scene activation, the
+  frame's own scene snapshots, explicit "off" states and the viewer/server
+  keys in the push, a queued full deploy landing as the push — and the
+  workspace shaped like the cloud's for such a frame: no terminal, Remote,
+  reboot cron or build artifacts, the shell verbs answering 400
+  (`docs/api-triality.md` "Admin-API-only frames"). Deliberately NOT an
+  escalation path: nothing installs a Remote or an SSH key on the card.)*
 - [ ] Stage 1: the backend hosts the management WebSocket. Either port
   `cloud/apps/frame-hub` (~3.7k lines of TS: session auth, protocol,
   queue, rate limits) into the FastAPI app or run the hub as a sidecar

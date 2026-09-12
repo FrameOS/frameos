@@ -64,12 +64,14 @@ def _fonts_to_sync(db: Session, frame: Frame) -> list[tuple[str, bytes]]:
     return sorted(fonts.items())
 
 
-async def sync_embedded_font_assets(db: Session, redis: Redis, frame: Frame, listing) -> int:
-    """Font sync for an ESP32 with an SD card.
+async def sync_embedded_font_assets(db: Session, redis: Redis, frame: Frame, listing, assets_client=None) -> int:
+    """Font sync over a device's own HTTP asset API.
 
     Same intent as upload_font_assets, different transport: an embedded frame
     has no shell, so the writes go over its own HTTP asset API
-    (utils/embedded_assets, which chunks anything large). Returns how many
+    (utils/embedded_assets, which chunks anything large) — and so does a
+    Linux frame this backend reaches only over its admin API
+    (utils/admin_api_assets, passed as `assets_client`). Returns how many
     fonts were uploaded.
 
     `listing` is the device's current asset listing, passed in rather than
@@ -79,6 +81,8 @@ async def sync_embedded_font_assets(db: Session, redis: Redis, frame: Frame, lis
     """
     from app.utils import embedded_assets
 
+    if assets_client is None:
+        assets_client = embedded_assets
     assets_path = embedded_assets.embedded_assets_path(frame)
     remote_sizes = {
         str(entry.get("path")): int(entry.get("size") or 0)
@@ -98,9 +102,9 @@ async def sync_embedded_font_assets(db: Session, redis: Redis, frame: Frame, lis
         await log(db, redis, frame.id, "stdout", "No fonts to upload")
         return 0
 
-    await log(db, redis, frame.id, "stdout", f"Uploading {len(pending)} fonts to the SD card")
+    await log(db, redis, frame.id, "stdout", f"Uploading {len(pending)} fonts over the frame's HTTP API")
     for remote_path, data in pending:
-        await embedded_assets.upload_asset(frame, redis, remote_path, data)
+        await assets_client.upload_asset(frame, redis, remote_path, data)
     return len(pending)
 
 ASSETS_WRITABLE_MARKER = "FRAMEOS_ASSETS_WRITABLE"

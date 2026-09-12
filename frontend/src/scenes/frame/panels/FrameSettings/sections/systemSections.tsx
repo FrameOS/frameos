@@ -451,8 +451,11 @@ export function LogsSection(): JSX.Element | null {
 }
 
 export function RebootSection(): JSX.Element | null {
-  const { frameForm, isEmbeddedMode } = useFrameSettings()
-  if (isEmbeddedMode) {
+  const { frameForm, isEmbeddedMode, adminLoginIsOnlyAccess } = useFrameSettings()
+  // The cron line behind this is written by a full deploy over SSH; a frame
+  // reached only over its admin API never gets one. Its Schedule panel's
+  // reboot event is the device-side equivalent.
+  if (isEmbeddedMode || adminLoginIsOnlyAccess) {
     return null
   }
   return (

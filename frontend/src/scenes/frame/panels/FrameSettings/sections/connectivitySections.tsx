@@ -56,6 +56,7 @@ export function SshSection(): JSX.Element {
     frameFormTouches,
     mode,
     isEmbeddedMode,
+    adminLoginIsOnlyAccess,
     touchFrameFormField,
     setFrameFormValues,
     forgetSshHostKey,
@@ -63,10 +64,15 @@ export function SshSection(): JSX.Element {
     hasSshKeyChangesToDeploy,
     openLogs,
   } = useFrameSettings()
+  // A frame this backend reaches only over its admin API keeps the host
+  // field — it is the address of that API — and nothing else here: no SSH
+  // is ever set up on it from this side (workspaceSurfaces.ts,
+  // isAdminApiOnlyFrame).
+  const hostOnly = isEmbeddedMode || adminLoginIsOnlyAccess
   return (
     <>
       <SectionHeading id="frame-settings-ssh" className="mt-2">
-        {isEmbeddedMode ? (
+        {hostOnly ? (
           <>Frame host</>
         ) : (
           <>
@@ -88,6 +94,8 @@ export function SshSection(): JSX.Element {
                   </p>
                   <p>Leave it blank to use the generated frame hostname.</p>
                 </>
+              ) : adminLoginIsOnlyAccess ? (
+                <p>The hostname or IP address where the backend reaches the frame&apos;s HTTP API.</p>
               ) : (
                 <>
                   <p>The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.</p>
@@ -99,7 +107,7 @@ export function SshSection(): JSX.Element {
         >
           <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
         </Field>
-        {!isEmbeddedMode ? (
+        {!hostOnly ? (
           <>
             <Field name="ssh_user" label="SSH user">
               <TextInput name="ssh_user" placeholder="pi" required />
@@ -188,8 +196,18 @@ export function SshSection(): JSX.Element {
 
 /** FrameOS Remote: the frame dials the backend, the backend drives the frame. */
 export function RemoteAgentSection(): JSX.Element | null {
-  const { frameForm, frameFormTouches, isEmbeddedMode, setFrameFormValues, touchFrameFormField } = useFrameSettings()
-  if (isEmbeddedMode) {
+  const {
+    frameForm,
+    frameFormTouches,
+    isEmbeddedMode,
+    adminLoginIsOnlyAccess,
+    setFrameFormValues,
+    touchFrameFormField,
+  } = useFrameSettings()
+  // No Remote is ever installed on a frame this backend reaches only over
+  // its admin API (there is no shell to install it with), so the toggles
+  // would save a wish nothing acts on.
+  if (isEmbeddedMode || adminLoginIsOnlyAccess) {
     return null
   }
   return (
