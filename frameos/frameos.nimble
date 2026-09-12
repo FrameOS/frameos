@@ -20,7 +20,7 @@ requires "https://github.com/FrameOS/pixie#28a9cc32e013b4d7dd72c830f4a25008cb725
 # FrameOS/mummy: upstream mummy plus TLS listeners (OpenSSL inside the epoll
 # loop), listeners added/removed while serving, and Request.secure. HTTPS on
 # Linux frames terminates here; see docs/native-https.md.
-requires "https://github.com/FrameOS/mummy#522e28f9d8b6d3c60e26a745cc00c9a24d5c57f8"
+requires "https://github.com/FrameOS/mummy#020dfe59fd112bef4b711684c41fe9f678f56889"
 requires "linuxfb >= 0.1.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"

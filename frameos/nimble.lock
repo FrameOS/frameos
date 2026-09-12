@@ -147,7 +147,7 @@
     },
     "mummy": {
       "version": "0.4.8",
-      "vcsRevision": "522e28f9d8b6d3c60e26a745cc00c9a24d5c57f8",
+      "vcsRevision": "020dfe59fd112bef4b711684c41fe9f678f56889",
       "url": "https://github.com/FrameOS/mummy",
       "downloadMethod": "git",
       "dependencies": [
@@ -156,7 +156,7 @@
         "crunchy"
       ],
       "checksums": {
-        "sha1": "bb1d80a3437dfd6eba5be7c376954140979a6a5c"
+        "sha1": "7c431abc28bbc3e411c385000d7dadf3549af240"
       }
     },
     "pixie": {
