@@ -604,7 +604,9 @@ def test_remote_ws_first_connection_of_a_shell_less_card_switches_the_frame_to_t
     frame_id, server_api_key = _shell_less_card()
     db = SessionLocal()
     try:
-        assert frame_has_shell_access(db.get(Frame, frame_id)) is False
+        card = db.get(Frame, frame_id)
+        assert card is not None
+        assert frame_has_shell_access(card) is False
     finally:
         db.close()
 
@@ -614,6 +616,7 @@ def test_remote_ws_first_connection_of_a_shell_less_card_switches_the_frame_to_t
     db = SessionLocal()
     try:
         updated = db.get(Frame, frame_id)
+        assert updated is not None
         assert updated.agent["agentEnabled"] is True
         assert updated.agent["agentRunCommands"] is True
         assert updated.agent["deployWithAgent"] is True
@@ -635,6 +638,7 @@ def test_remote_ws_leaves_the_remote_flags_of_a_frame_with_shell_access_alone(cl
     db = SessionLocal()
     try:
         updated = db.get(Frame, frame_id)
+        assert updated is not None
         assert updated.agent == {"agentSharedSecret": "agent-secret"}
     finally:
         db.close()

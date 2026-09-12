@@ -91,6 +91,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/select-missing-value.test.tsx",
       // The store error-code wording (2026-09 review §2), same reason.
       "**/src/test/shared-spa/store-scene-errors.test.ts",
+      "**/src/test/shared-spa/shell-less-deploy-dialog.test.tsx",
+      "**/src/test/shared-spa/long-running-task-toast.test.tsx",
     ],
   },
   js.configs.recommended,
