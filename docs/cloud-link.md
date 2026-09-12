@@ -547,6 +547,29 @@ GET  /api/cloud/store/drive       # "Private cloud scenes" listing (proxied, ima
 GET  /api/cloud/store/drive/image/{sceneId}   # preview image proxy (attaches the link token)
 ```
 
+The frame's own admin server adds two switches that a backend has no use for
+(admin-session-gated, `frameos/src/frameos/server/routes/cloud_api_routes.nim`):
+
+```http
+POST /api/cloud/managed      # {"enabled": bool} — hand this frame to cloud management, or take it back
+POST /api/cloud/cloud-login  # {"enabled": bool} — offer "Sign in with FrameOS Cloud" on this frame's login page
+```
+
+Both act on grants the link already carries and never ask the provider for
+more: `/managed` refuses with 409 unless the link holds `frame:managed` (and
+no self-hosted backend owns the frame), `/cloud-login` unless it holds
+`auth:login`. Turning `/managed` on runs flow B of docs/cloud-frames.md over
+the existing link token; the provider keys the frame on the linked client, so
+switching off and on again re-registers the SAME frame rather than making a
+second one. Turning it off is purely local: the frame stops answering the
+management socket and the account keeps the (now offline) frame.
+
+`/cloud-login` is local in both directions — the `auth:login` grant stays on
+the link either way. Off means `GET /api/cloud/login/options` stops offering
+the button AND `POST /api/cloud/login/start` refuses with 403, and the admin
+password comes back (see `local_fallback_enabled` below), so the two login
+switches can never both end up closed.
+
 `GET /api/cloud/status` shape (mirrored by `CloudStatus` in
 `frontend/src/types.tsx`):
 
@@ -563,6 +586,14 @@ GET  /api/cloud/store/drive/image/{sceneId}   # preview image proxy (attaches th
   "local_fallback_enabled": true
 }
 ```
+
+A frame's own admin server adds, for the two switches above: `mode`
+(`"managed"` once enrolled, absent while merely linked), `backend_managed`,
+`managed_available`, `managed_enroll_error`, `cloud_login_available` (the
+`auth:login` grant) and `cloud_login_enabled` (the switch). The settings box
+reads the first pair to say, in words, whether the cloud can drive this frame
+— a link that is live but not managed used to render as nothing but
+"Connected".
 
 `connection` is set only while `connecting`; `link` only while `connected`.
 The access token itself is never included.

@@ -350,6 +350,42 @@ export function connectedCloudStatus({
   }
 }
 
+/** A frame's OWN link to FrameOS Cloud, as the on-device /api/cloud/status
+ * answers it: linked to the account, and (unless `managed`) not yet driven by
+ * it. Frame links carry frame:* scopes, never the backend ones above. */
+export function connectedFrameCloudStatus({
+  managed = false,
+  cloudLoginEnabled = true,
+  localFallbackEnabled = true,
+}: { managed?: boolean; cloudLoginEnabled?: boolean; localFallbackEnabled?: boolean } = {}): Record<string, unknown> {
+  return {
+    enabled: true,
+    provider_url: 'https://cloud.frameos.net',
+    default_provider_url: 'https://cloud.frameos.net',
+    status: 'connected',
+    can_edit_provider: false,
+    poll_error: null,
+    local_fallback_enabled: localFallbackEnabled,
+    cloud_login_available: true,
+    cloud_login_enabled: cloudLoginEnabled,
+    managed_available: true,
+    managed_enroll_error: null,
+    backend_managed: false,
+    connection: null,
+    identity: null,
+    ...(managed ? { mode: 'managed' } : {}),
+    link: {
+      linked_client_id: 'lc-visual-frame-1',
+      scopes: ['frame:link', 'frame:managed', 'auth:login'],
+      account_id: 'acc-visual-1',
+      account_email: 'visual@example.com',
+      connected_at: '2026-05-20T09:00:00Z',
+      last_inventory_sync_at: '2026-05-23T11:45:00Z',
+      ...(managed ? { frame_id: 'frm-visual-1' } : {}),
+    },
+  }
+}
+
 export const cloudBackupFixtures = [
   {
     id: 'backup-frame-1',

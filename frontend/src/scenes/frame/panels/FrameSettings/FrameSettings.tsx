@@ -7,6 +7,7 @@ import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { FrameSettingsProvider, useFrameSettings, type FrameSettingsProps } from './frameSettingsContext'
 import { GpioButtonsSection } from './fields/sharedFields'
 import { FrameSettingsSection } from './sections/FrameSettingsSection'
+import { SettingsHeaderActions } from './SettingsHeaderActions'
 import {
   CloudServiceSettingsSection,
   CloudTelemetrySection,
@@ -95,7 +96,7 @@ function FrameSettingsPanel(): JSX.Element {
     >
       {/* Contains its own <form>, so it must stay outside the frameForm <Form> below. */}
       <FrameSettingsSection sectionKey="cloud-account">
-        <CloudSettingsSection headingId="frame-settings-cloud" />
+        <CloudSettingsSection headingId="frame-settings-cloud" action={<SettingsHeaderActions slot="cloud" />} />
       </FrameSettingsSection>
       <Form
         formKey="frameForm"

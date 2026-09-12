@@ -7,6 +7,7 @@
 import std/[json, os, strutils, times, unittest]
 
 import ../../channels
+import ../rate_limit
 import ./helpers/http_harness
 
 let workDir = getTempDir() / ("frameos-test-cloud-routes-" & $(epochTime().int64) & "-" & $getCurrentProcessId())
@@ -210,6 +211,128 @@ suite "local password login can be handed to the cloud":
     check httpRequest(server.port, "POST", "/api/cloud/local-fallback",
       headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
       body = $(%*{})).status == 400
+
+# One session for the whole suite: /api/admin/login is rate limited (ten
+# attempts per window), and a suite that signs in per test would spend the
+# budget the earlier suites left.
+var switchesCookie = ""
+proc switchAdminCookie(): string =
+  if switchesCookie.len == 0:
+    writeLinkState(connectedLoginLink(true))
+    switchesCookie = loginAsAdmin()
+  switchesCookie
+
+suite "the two cloud switches on the admin page":
+  setup:
+    drainEventChannel()
+    configureServerState(adminConfig(""))
+    # /api/admin/login is throttled, and the suites above spend most of the
+    # window's budget before this one starts.
+    resetRateLimits()
+
+  test "status names what each switch may do and whether it is on":
+    var state = connectedLoginLink(true)
+    state["scope"] = %"frame:link frame:managed auth:login"
+    writeLinkState(state)
+    let cookie = switchAdminCookie()
+    writeLinkState(state)
+    let payload = parseJson(httpRequest(server.port, "GET", "/api/cloud/status",
+      headers = [("Cookie", cookie)]).body)
+    check payload{"managed_available"}.getBool(false)
+    check payload{"cloud_login_available"}.getBool(false)
+    check payload{"cloud_login_enabled"}.getBool(false)
+    # Linked but not managed: the panel must be able to say so.
+    check payload{"mode"}.getStr("") == ""
+
+  test "cloud login is a local switch, and turning it off brings the password back":
+    # Sign in while the password still works, then put the frame in the state
+    # the switch is meant to rescue: passwords off, everything resting on the
+    # cloud button.
+    let cookie = switchAdminCookie()
+    writeLinkState(connectedLoginLink(false))
+    check parseJson(httpRequest(server.port, "GET", "/api/cloud/login/options").body){
+      "available"}.getBool(false)
+
+    let off = httpRequest(server.port, "POST", "/api/cloud/cloud-login",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": false}))
+    check off.status == 200
+    let offPayload = parseJson(off.body)
+    check not offPayload{"cloud_login_enabled"}.getBool(true)
+    check offPayload{"local_fallback_enabled"}.getBool(false)
+    # The grant is untouched; only this frame stopped offering the button.
+    check offPayload{"cloud_login_available"}.getBool(false)
+    let options = parseJson(httpRequest(server.port, "GET", "/api/cloud/login/options").body)
+    check not options{"available"}.getBool(true)
+    check options{"local_login_enabled"}.getBool(false)
+    check loginAsAdmin().len > 0
+    # Off means the handoff cannot be started either, not just that the
+    # button stops being drawn.
+    let start = httpRequest(server.port, "POST", "/api/cloud/login/start",
+      headers = [("Host", "kitchen.local:8787")])
+    check start.status == 403
+    check start.body.contains("switched off")
+
+    let on = httpRequest(server.port, "POST", "/api/cloud/cloud-login",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": true}))
+    check on.status == 200
+    check parseJson(on.body){"cloud_login_enabled"}.getBool(false)
+
+  test "cloud login cannot be switched on without the grant":
+    var state = connectedLoginLink(true)
+    let cookie = switchAdminCookie()
+    state["scope"] = %"frame:link"
+    writeLinkState(state)
+    let refused = httpRequest(server.port, "POST", "/api/cloud/cloud-login",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": true}))
+    check refused.status == 409
+    check refused.body.contains("auth:login")
+
+  test "managed mode switches off locally and keeps the link":
+    var state = connectedLoginLink(true)
+    state["scope"] = %"frame:link frame:managed auth:login"
+    state["mode"] = %"managed"
+    state["frame_id"] = %"frm-1"
+    state["ws_path"] = %"/api/frames/ws"
+    let cookie = switchAdminCookie()
+    writeLinkState(state)
+    let off = httpRequest(server.port, "POST", "/api/cloud/managed",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": false}))
+    check off.status == 200
+    let payload = parseJson(off.body)
+    check payload{"mode"}.getStr("") == ""
+    check payload{"status"}.getStr("") == "connected"
+    # Still offered, because the grant is still on the link.
+    check payload{"managed_available"}.getBool(false)
+    let stored = parseJson(readFile(workDir / "state" / "cloud_link.json"))
+    check stored{"frame_id"}.getStr("") == ""
+    check stored{"access_token"}.getStr("") == "cloud-token"
+
+  test "managed mode cannot be switched on without the grant":
+    var state = connectedLoginLink(true)
+    let cookie = switchAdminCookie()
+    state["scope"] = %"frame:link auth:login"
+    writeLinkState(state)
+    let refused = httpRequest(server.port, "POST", "/api/cloud/managed",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": true}))
+    check refused.status == 409
+    check refused.body.contains("connect again")
+
+  test "both switches are admin-only and validate their body":
+    let cookie = switchAdminCookie()
+    writeLinkState(%*{"status": "disconnected"})
+    for path in ["/api/cloud/managed", "/api/cloud/cloud-login"]:
+      check httpRequest(server.port, "POST", path,
+        headers = [("Content-Type", "application/json")],
+        body = $(%*{"enabled": true})).status == 401
+    for path in ["/api/cloud/managed", "/api/cloud/cloud-login"]:
+      check httpRequest(server.port, "POST", path,
+        headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+        body = $(%*{})).status == 400
 
 # No stopServer/removeDir teardown: like the other behavior tests, the mummy
 # worker threads are torn down by process exit (an explicit close from the

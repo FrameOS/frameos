@@ -49,6 +49,15 @@ proc cloudStatusPayload(state: JsonNode): JsonNode =
     # Effective, not stored: see localAdminLoginEnabled. The panel should show
     # what actually happens at the login screen.
     "local_fallback_enabled": localAdminLoginEnabled(state),
+    # The two switches the admin panel offers once a link is live, each split
+    # into "may this be offered" and "is it on". Both are local: the grants
+    # behind them were approved when the link was made, and turning one off
+    # never needs the provider's permission.
+    "cloud_login_available": cloudLoginGranted(state),
+    "cloud_login_enabled": cloudLoginPossible(state),
+    "managed_available": status == "connected" and
+      linkHasScope(state, "frame:managed") and not backendManaged,
+    "managed_enroll_error": jsonOrNull(state{"managed_enroll_error"}),
   }
   if status == "connecting":
     result["connection"] = %*{
@@ -395,9 +404,15 @@ proc addCloudApiRoutes*(router: var Router) =
         if state{"status"}.getStr("") != "connected" or state{"access_token"}.getStr("") == "":
           jsonResponse(request, Http409, %*{"detail": "This frame is not linked to FrameOS Cloud"})
           return
-        if not linkHasScope(state, "auth:login"):
+        # The grant AND the local switch: "Sign in here with FrameOS Cloud"
+        # being off has to mean the handoff cannot be started at all, not
+        # merely that the login page stops drawing the button.
+        if not cloudLoginPossible(state):
           jsonResponse(request, Http403,
-            %*{"detail": "The cloud link is missing the auth:login permission; reconnect with it enabled"})
+            %*{"detail": (if linkHasScope(state, "auth:login"):
+                            "Signing in with FrameOS Cloud is switched off on this frame"
+                          else:
+                            "The cloud link is missing the auth:login permission; reconnect with it enabled")})
           return
         providerUrl = providerUrlFromState(state)
         accessToken = state{"access_token"}.getStr("")
@@ -553,6 +568,120 @@ proc addCloudApiRoutes*(router: var Router) =
       headers["Set-Cookie"] = adminSessionCookieHeader(request, sessionToken)
       headers["Location"] = "/admin"
       request.respond(303, headers, "")
+  )
+
+  router.post("/api/cloud/managed", proc(request: Request) {.gcsafe.} =
+    ## The "Manage this frame from FrameOS Cloud" switch on the admin page.
+    ##
+    ## On: register this frame with the provider over the link it already has
+    ## (flow B of docs/cloud-frames.md) and start the management socket. The
+    ## `frame:managed` grant is checked here, never asked for — a link that
+    ## was never approved for it cannot escalate itself from this route.
+    ## Off: the frame stops answering the hub and the account keeps the frame;
+    ## switching back on re-registers the same one.
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      let payload = try:
+          parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+        except CatchableError:
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+          return
+      if payload{"enabled"} == nil or payload{"enabled"}.kind != JBool:
+        jsonResponse(request, Http400, %*{"detail": "Send {\"enabled\": true|false}"})
+        return
+      let enabled = payload{"enabled"}.getBool()
+
+      if not enabled:
+        withLock cloudLinkLock:
+          let state = loadCloudLinkState()
+          if clearManagedMode(state):
+            saveCloudLinkState(state)
+          jsonResponse(request, Http200, cloudStatusPayload(state))
+        # The private-network deny only applies to a managed frame.
+        refreshLocalNetworkPolicy(globalFrameConfig)
+        return
+
+      var providerUrl = ""
+      var accessToken = ""
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        if state{"status"}.getStr("") != "connected":
+          jsonResponse(request, Http409,
+            %*{"detail": "Connect this frame to FrameOS Cloud first"})
+          return
+        if isManagedLink(state):
+          jsonResponse(request, Http200, cloudStatusPayload(state))
+          return
+        if not linkHasScope(state, "frame:managed"):
+          jsonResponse(request, Http409,
+            %*{"detail": "This cloud link was not approved for managing the frame. " &
+                         "Disconnect and connect again to ask for it."})
+          return
+        providerUrl = providerUrlFromState(state)
+        accessToken = state{"access_token"}.getStr("")
+      if otherControlPlaneActive(globalFrameConfig):
+        jsonResponse(request, Http409,
+          %*{"detail": "This frame is managed by a self-hosted backend. " &
+                       "Remove serverHost from frame.json before letting FrameOS Cloud manage it."})
+        return
+      if accessToken.len == 0:
+        jsonResponse(request, Http409, %*{"detail": "This frame is not linked to FrameOS Cloud"})
+        return
+
+      # Another provider round trip, so no lock is held across it.
+      let outcome = enrollManagedFrame(providerUrl, "", accessToken, "", globalFrameConfig)
+      if not outcome.ok:
+        withLock cloudLinkLock:
+          let state = loadCloudLinkState()
+          state["managed_enroll_error"] = %outcome.error
+          saveCloudLinkState(state)
+        log(%*{"event": "cloud:enroll:error", "flow": "admin_toggle",
+               "status": outcome.status, "error": outcome.error})
+        jsonResponse(request, (if outcome.status == 409: Http409 else: Http502),
+          %*{"detail": "Could not hand this frame to FrameOS Cloud: " & outcome.error,
+             "error": outcome.error})
+        return
+      startCloudHubClient(globalFrameConfig)
+      refreshLocalNetworkPolicy(globalFrameConfig)
+      withLock cloudLinkLock:
+        jsonResponse(request, Http200, cloudStatusPayload(loadCloudLinkState()))
+  )
+
+  router.post("/api/cloud/cloud-login", proc(request: Request) {.gcsafe.} =
+    ## The "Sign in here with your FrameOS Cloud account" switch.
+    ##
+    ## Purely local: the `auth:login` grant stays on the link either way, and
+    ## this only decides whether this frame's login page offers the cloud
+    ## button. Turning it off also puts the admin password back, so the switch
+    ## can never be the last door closing behind the user.
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      let payload = try:
+          parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+        except CatchableError:
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+          return
+      if payload{"enabled"} == nil or payload{"enabled"}.kind != JBool:
+        jsonResponse(request, Http400, %*{"detail": "Send {\"enabled\": true|false}"})
+        return
+      let enabled = payload{"enabled"}.getBool()
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        if enabled and not cloudLoginGranted(state):
+          jsonResponse(request, Http409,
+            %*{"detail": "Connect this frame to FrameOS Cloud with the auth:login permission first"})
+          return
+        state["cloud_login_enabled"] = %enabled
+        if not enabled:
+          # Without cloud login there is only the password left, so store the
+          # flag that says so rather than relying on the effective answer.
+          state["local_fallback_enabled"] = %true
+        saveCloudLinkState(state)
+        jsonResponse(request, Http200, cloudStatusPayload(state))
   )
 
   router.post("/api/cloud/local-fallback", proc(request: Request) {.gcsafe.} =

@@ -111,6 +111,7 @@ export interface cloudLogicValues {
   isFeatureChangeSubmitting: boolean
   isProviderUrlSubmitting: boolean
   isProviderUrlValid: boolean
+  pendingCloudSwitch: 'login' | 'managed' | null
   providerEditorOpen: boolean
   providerUrl: CloudProviderForm
   providerUrlAllErrors: Record<string, any>
@@ -214,6 +215,12 @@ export interface cloudLogicActions {
   }
   setCloudError: (error: string | null) => {
     error: string | null
+  }
+  setCloudLoginEnabled: (enabled: boolean) => {
+    enabled: boolean
+  }
+  setCloudManaged: (enabled: boolean) => {
+    enabled: boolean
   }
   setFeatureDraft: (draft: string[] | null) => {
     draft: string[] | null
@@ -319,6 +326,8 @@ export const cloudLogic = kea<cloudLogicType>([
     linkCloudIdentity: true,
     unlinkCloudIdentity: true,
     setLocalFallback: (enabled: boolean) => ({ enabled }),
+    setCloudManaged: (enabled: boolean) => ({ enabled }),
+    setCloudLoginEnabled: (enabled: boolean) => ({ enabled }),
     setBackupFeature: (key: 'scenes' | 'frames' | 'all', enabled: boolean) => ({ key, enabled }),
     loadCloudBackups: true,
     backupAllToCloud: true,
@@ -466,6 +475,19 @@ export const cloudLogic = kea<cloudLogicType>([
         showBackupKeySuccess: () => true,
         hideBackupKey: () => false,
         disconnectCloud: () => false,
+      },
+    ],
+    // Which of the frame-admin switches is waiting on the device. Both write
+    // through /api/cloud/* and answer with a fresh status, so one marker for
+    // the whole pair is enough to disable them and show a spinner.
+    pendingCloudSwitch: [
+      null as 'login' | 'managed' | null,
+      {
+        setCloudManaged: () => 'managed',
+        setCloudLoginEnabled: () => 'login',
+        loadCloudStatusSuccess: () => null,
+        loadCloudStatusFailure: () => null,
+        setCloudError: () => null,
       },
     ],
   }),
@@ -662,6 +684,40 @@ export const cloudLogic = kea<cloudLogicType>([
       })
       if (!response.ok) {
         actions.setCloudError(await cloudErrorMessage(response, 'Could not change local password login'))
+        return
+      }
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    setCloudManaged: async ({ enabled }) => {
+      // Handing the frame to (or taking it back from) FrameOS Cloud. The
+      // `frame:managed` grant was approved when the link was made; the device
+      // checks it and refuses rather than asking for more.
+      const response = await apiFetch('/api/cloud/managed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(
+          await cloudErrorMessage(
+            response,
+            enabled ? 'Could not hand this frame to FrameOS Cloud' : 'Could not take this frame back from FrameOS Cloud'
+          )
+        )
+        actions.loadCloudStatus()
+        return
+      }
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    setCloudLoginEnabled: async ({ enabled }) => {
+      const response = await apiFetch('/api/cloud/cloud-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not change cloud sign-in'))
+        actions.loadCloudStatus()
         return
       }
       actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
