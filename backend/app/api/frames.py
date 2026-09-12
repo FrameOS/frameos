@@ -3504,13 +3504,12 @@ async def api_frame_embedded_firmware_ota(
 
 
 async def _record_device_reported_frameos_version(db: Session, redis: Redis, frame: Frame, payload: dict) -> None:
-    """A frame the backend cannot deploy FrameOS to updates itself, so the
-    version in its deploy baseline (what the drawer's "FrameOS a -> b" line
-    and the change indicator compare against) is only ever learnt from the
-    device: here from the upgrade status it just answered, and from the
-    version its bootup log carries (models/log.py)."""
-    if frame_has_shell_access(frame):
-        return
+    """The version in the deploy baseline (what the drawer's "FrameOS a -> b"
+    line and the change indicator compare against) follows what the device
+    says it runs: here the upgrade status it just answered, and the version
+    its bootup log carries (models/log.py). A shell-less card has no other
+    way to report an upgrade, and a frame the backend can deploy to still
+    upgrades itself through its own admin UI or the cloud."""
     version = payload.get("current_version") if isinstance(payload, dict) else None
     if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version.strip()):
         return

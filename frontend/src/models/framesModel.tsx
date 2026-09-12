@@ -17,6 +17,7 @@ import { router } from 'kea-router'
 import { frameLogic, sanitizeScene } from '../scenes/frame/frameLogic'
 import { compareFrames } from '../utils/frameSort'
 import { apiFetch, logApiError } from '../utils/apiFetch'
+import { mergeBroadcastFrame } from '../utils/frameSecrets'
 import { isCloudMode } from '../utils/cloudMode'
 import {
   sendCloudFrameCommand,
@@ -834,8 +835,9 @@ export const framesModel = kea<framesModelType>([
           ...state,
           [frame.id]: withStoredCloudScenes(
             sanitizeFrameForStore({
-              ...(state[frame.id] ?? {}),
-              ...frame,
+              // Secret leaves the broadcast strips from a block it sends
+              // (agent, network, …) keep the browser's copy.
+              ...mergeBroadcastFrame(state[frame.id], frame),
               // The socket broadcast carries the stored row; the derived
               // flash/memory layout only rides the REST read, so keep it.
               embedded:
@@ -1324,6 +1326,17 @@ export const framesModel = kea<framesModelType>([
       // happened while disconnected (backend deploys drop the socket at
       // exactly the moment statuses change) was missed, so refetch.
       actions.loadFrames()
+    },
+    [longRunningTasksModel.actionTypes.finishTask]: ({ task }) => {
+      // A backend deploy ends with the row's new baseline (frameos_version,
+      // the Remote version once it reconnects) — but the update_frame that
+      // carries it is the largest broadcast there is (scenes twice) and a
+      // slow socket drops it. The "deploy completed" log line arrives after
+      // the baseline is recorded, so re-read the row; the cloud deploy path
+      // refetches on its own.
+      if (task.kind === 'deploy' && task.status === 'success' && task.frameId && !isCloudMode()) {
+        actions.loadFrame(task.frameId)
+      }
     },
     [socketLogic.actionTypes.updateFrame]: ({ frame }) => {
       const sdImage = frame.buildroot?.sdImage

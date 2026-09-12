@@ -21,6 +21,19 @@ empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.1
 
 ### Backend (self-hosted) bench
 
+- [ ] **HyperPixel 2r native card from the HA add-on, second try (needs a
+  release after 2026.9.13):** the 2026-09-12 card (frame 10, generic
+  2026.9.13 image + setup blob) joined Wi-Fi, synced its clock and then
+  logged `FrameOS fatal: cannot open: ./frame.json` every 60 s — blank
+  panel, no backend logs. Cause: first-boot `frameos setup --with-setup`
+  runs the ownership sweep, THEN writes the payload's frame.json as root
+  0600, and the unit it installed runs as `frameos`. Fixed on main
+  (`writeSetupReleasePayload` hands the payload to the installed unit's
+  user). Re-flash from the next add-on and expect the runtime up on the
+  first boot after driver setup's reboot; then the panel question proper —
+  the native driver's DPI config.txt block was written correctly
+  (`enable_dpi_lcd=1`, `dpi_timings=480 … 19200000 6`, gpio alt2 lines).
+
 - [ ] **Adopted card, round two (2026-09-08 findings on frame-2c2ea9, all
   fixed on main the same day, needs the next backend release):** *(2026-09-09
   on the 2026.9.12 add-on: "Pending changes" did NOT open clean — "Network
@@ -419,6 +432,34 @@ empty. Last refreshed 2026-09-09 (shell-less "Update FrameOS" closed on 2026.9.1
   stamping the backend's, and the drawer re-reads the frame and plan once
   the upgrade finishes. (5) "Pending changes: Network settings" after every
   fast deploy — see the open "round two" box (secret-path mirror).
+  **Papercuts (1)–(4) CONFIRMED 2026-09-12** on the next release: frame 1
+  on the 10.8.0.62 backend went 2026.9.12 → 2026.9.13 through "Update
+  FrameOS" — the icon, the "Last upgrade" line, the poll through the
+  restart and the drawer re-read all behaved; the page reloaded on its own
+  at the end and the frame reported 2026.9.13. (5) stays with the "round
+  two" box. **Found the same day:** the HA backend (frame 14, a card it can
+  SSH into) kept offering `FrameOS 2026.9.12 -> 2026.9.13` after that
+  on-device upgrade, recheck or not — the bootup-line and upgrade-status
+  version recorders and the sync snapshot all skipped frames with shell
+  access. Fixed on main: the device-reported version is the baseline for
+  every non-embedded frame; needs a restart of FrameOS (a bootup line) on
+  the next add-on to catch up. The same drawer listed "Server scheme" as a
+  pending fast change on every frame: the field is new in 2026.9.13, so a
+  baseline recorded before it had no value to compare. Fixed on main (the
+  served baseline seeds the port-derived scheme), and every pending-change
+  row now shows "Deployed: … / Now: …" on hover. **Also (frame 4, full
+  deploy with a Remote upgrade):** the drawer kept `FrameOS Remote 2026.9.3
+  -> 2026.9.13` and the FrameOS line after the deploy finished; a reload
+  cleared both. Two causes, fixed on main: the `update_frame` broadcast
+  dropped the whole `agent` block (it carries the shared secret), so the
+  version the new Remote reported on its hello never reached the browser —
+  blocks now travel with their secret leaves stripped and the browser keeps
+  its own copies when merging; and a broadcast whose send timed out (2 s,
+  and the deploy's row is the biggest message there is) left the socket
+  forgotten but open, so nothing after it arrived — the backend now closes
+  it so the browser reconnects and refetches, and a "deploy completed" log
+  line re-reads the row regardless. Verify on the next add-on: after a full
+  deploy the drawer clears both lines on its own.
 
 - [x] **Shell-less frame from the deploy drawer** — everything but the update
   itself PASSED 2026-09-08 on frame-2c2ea9 (adopted generic 2026.9.11 card,

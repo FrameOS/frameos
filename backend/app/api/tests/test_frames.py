@@ -3782,10 +3782,12 @@ async def test_api_frame_device_admin_session_is_cached_and_reopened_on_401(asyn
 
 @pytest.mark.asyncio
 async def test_api_frame_device_upgrade_status_records_the_version_the_frame_reports(async_client, db, redis):
-    """A shell-less card upgrades itself; the row's deploy baseline learns
-    the new version from the status it answers, so the drawer stops saying
+    """A frame upgrades itself; the row's deploy baseline learns the new
+    version from the status it answers, so the drawer stops saying
     "2026.9.11 -> 2026.9.12" once the frame is on 2026.9.12. A fast deploy
-    over the admin API must not overwrite it with the backend's version."""
+    over the admin API must not overwrite it with the backend's version,
+    whether or not the backend could also SSH in — a sync installs no
+    FrameOS either way."""
     payload = {**_standalone_device_payload(), 'mode': 'buildroot', 'buildroot': {'platform': 'raspberry-pi-64'}}
     device_version = {'value': '2026.9.11'}
 
@@ -3820,10 +3822,21 @@ async def test_api_frame_device_upgrade_status_records_the_version_the_frame_rep
         from app.api.frame_sync import _frame_sync_snapshot
         assert _frame_sync_snapshot(frame)['frameos_version'] == '2026.9.12'
 
-        # A frame the backend deploys FrameOS to keeps the backend's version.
+        # The same for a frame the backend could deploy FrameOS to over SSH.
         frame.ssh_pass = 'raspberry'
         db.commit()
+        assert _frame_sync_snapshot(frame)['frameos_version'] == '2026.9.12'
+        device_version['value'] = '2026.9.13'
+        status = await async_client.get(f'/api/frames/{frame_id}/device/upgrade')
+        assert status.status_code == 200, status.text
+        db.expire_all()
+        frame = db.get(Frame, frame_id)
+        assert frame.last_successful_deploy['frameos_version'] == '2026.9.13'
+
+        # Only a baseline with no version at all takes the backend's own.
         from app.utils.versions import current_frameos_version
+        frame.last_successful_deploy = {k: v for k, v in frame.last_successful_deploy.items() if k != 'frameos_version'}
+        db.commit()
         assert _frame_sync_snapshot(frame)['frameos_version'] == current_frameos_version()
 
 

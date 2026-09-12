@@ -126,9 +126,14 @@ async def test_update_frame_publishes_committed_state_after_external_update(mock
     _redis, event, payload = mock_publish.await_args.args
     assert event == "update_frame"
     assert payload["status"] == "starting"
-    # The broadcast omits ``agent`` (it carries the shared secret); the
-    # refreshed row is what the next GET serves.
-    assert "agent" not in payload
+    # The broadcast carries ``agent`` minus the shared secret, so the
+    # workspace learns the version the Remote reported without a reload.
+    assert payload["agent"] == {
+        "agentEnabled": True,
+        "agentRunCommands": True,
+        "agentVersion": "2026.2.0",
+        "remoteCapabilities": {"fileWriteStream": True},
+    }
     assert frame.to_dict()["agent"]["agentVersion"] == "2026.2.0"
     assert frame.to_dict()["agent"]["remoteCapabilities"] == {"fileWriteStream": True}
 
@@ -175,6 +180,28 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["mountpoints"] == {"enabled": False, "items": []}
     assert data["error_behavior"]["mode"] == "show_error_retry"
     assert mock_publish.await_count == 1
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_to_dict_seeds_server_scheme_into_a_baseline_that_predates_it(_mock_publish, db, redis):
+    """A deploy recorded by a backend before 2026.9.13 stored no
+    `server_scheme`; the row now serves the port-derived one, so the served
+    baseline says the same or the drawer lists "Server scheme" as pending on
+    every frame until its next deploy (seen 2026-09-12 on the HA add-on)."""
+    frame = await new_frame(db, redis, "OldBaseline", "host", "server_host.com:8989")
+    frame.last_successful_deploy = {"name": "OldBaseline", "server_host": "server_host.com", "server_port": 8989}
+    db.commit()
+    data = frame.to_dict()
+    assert data["server_scheme"] == "http"
+    assert data["last_successful_deploy"]["server_scheme"] == "http"
+
+    frame.last_successful_deploy = {"name": "OldBaseline", "server_port": 443}
+    assert frame.to_dict()["last_successful_deploy"]["server_scheme"] == "https"
+
+    # A baseline that carries the field is served as recorded.
+    frame.last_successful_deploy = {"name": "OldBaseline", "server_port": 443, "server_scheme": "http"}
+    assert frame.to_dict()["last_successful_deploy"]["server_scheme"] == "http"
 
 
 def test_normalize_error_behavior_defaults_and_sanitizes_values():
@@ -539,8 +566,13 @@ async def test_update_frame_broadcast_carries_no_secrets(mock_publish, db, redis
     event, payload = mock_publish.await_args.args[1], mock_publish.await_args.args[2]
     assert event == "update_frame"
     assert payload["id"] == frame.id
-    for key in ("ssh_pass", "server_api_key", "frame_access_key", "https_proxy", "agent", "frame_admin_auth", "mountpoints"):
+    for key in ("ssh_pass", "server_api_key", "frame_access_key"):
         assert key not in payload
+    # The blocks travel without their secret leaves.
+    assert payload["frame_admin_auth"] == {"enabled": True, "user": "admin"}
+    assert "password" not in payload["mountpoints"]["items"][0]
+    assert "server_key" not in payload["https_proxy"]["certs"]
+    assert "agentSharedSecret" not in payload["agent"]
     serialized = json.dumps(payload)
     for secret in ("raspberry", "hunter2", "p1", frame.server_api_key, frame.frame_access_key, frame.agent["agentSharedSecret"]):
         assert secret not in serialized

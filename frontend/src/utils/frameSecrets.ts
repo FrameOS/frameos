@@ -100,6 +100,42 @@ function setDotted(target: Record<string, unknown>, dotted: string, key: string,
 }
 
 /**
+ * The frame row after an `update_frame` broadcast: `incoming` over
+ * `existing`, except that a secret leaf the broadcast left out of a block it
+ * did send (the backend strips them — websocket_frame_payload) keeps the
+ * value the browser already holds. Without this a broadcast that carried
+ * `agent` would have wiped the shared secret from the form; without the
+ * block at all the workspace never learnt `agent.agentVersion` after a
+ * Remote upgrade until a page reload.
+ */
+export function mergeBroadcastFrame<T extends object>(existing: T | null | undefined, incoming: Partial<T>): T {
+  const result: Record<string, unknown> = { ...(existing ?? {}), ...incoming }
+  for (const path of SECRET_PATHS) {
+    const container = path[0]
+    if (container === undefined || path.length < 2 || !(container in incoming)) {
+      continue
+    }
+    if (result[container] !== null && typeof result[container] === 'object') {
+      result[container] = JSON.parse(JSON.stringify(result[container]))
+    }
+    for (const { container: from, key, dotted } of walk(existing, path)) {
+      const value = from[key]
+      if (value === null || value === undefined || value === '') {
+        continue
+      }
+      let target: unknown = result
+      for (const part of dotted.split('.').slice(0, -1)) {
+        target = Array.isArray(target) ? target[Number(part)] : isRecord(target) ? target[part] : undefined
+      }
+      if (isRecord(target) && !(key in target)) {
+        target[key] = value
+      }
+    }
+  }
+  return result as T
+}
+
+/**
  * `snapshot` with every secret whose stored fingerprint matches the frame's
  * current fingerprint filled in from `current`. Snapshots without
  * fingerprints (none, or a backend that predates them) come back unchanged.

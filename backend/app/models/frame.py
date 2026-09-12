@@ -488,7 +488,7 @@ class Frame(Base):
             # in place of the secret leaves. The browser compares them with
             # the row's own fingerprints below, so the nested snapshot in an
             # update_frame broadcast never carries a secret.
-            'last_successful_deploy': served_deploy_snapshot(self.last_successful_deploy),
+            'last_successful_deploy': served_deploy_baseline(self.last_successful_deploy),
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
         result['secret_fingerprints'] = frame_secret_fingerprints(result)
@@ -522,6 +522,19 @@ def normalize_server_scheme(value: Any, port: Optional[int] = None) -> str:
 
 def server_scheme_for_frame(frame: "Frame") -> str:
     return normalize_server_scheme(getattr(frame, "server_scheme", None), frame.server_port)
+
+
+def served_deploy_baseline(snapshot: Any) -> Any:
+    """``last_successful_deploy`` as the browser diffs it against the row: the
+    secret-free form, with a field the recording backend did not know yet
+    filled in the way that backend's frame.json implied it. `server_scheme`
+    (2026.9.13) is the one so far: a baseline from before it has no key, the
+    row serves the port-derived guess, and the drawer read that as "Server
+    scheme" pending on every frame until its next deploy."""
+    served = served_deploy_snapshot(snapshot)
+    if not isinstance(served, dict) or "server_scheme" in served:
+        return served
+    return {**served, "server_scheme": server_scheme_from_port(served.get("server_port"))}
 
 
 def split_server_address(server_host: str) -> tuple[str, int, Optional[str]]:
@@ -702,11 +715,12 @@ def frame_has_shell_access(frame: Any) -> bool:
 def remember_device_reported_frameos_version(frame: Frame, version: str) -> bool:
     """Set the deploy baseline's `frameos_version` to what the device says it
     runs, leaving the rest of the baseline (scenes, settings, fingerprints)
-    exactly as deployed. For a frame the backend cannot install FrameOS on —
-    an adopted shell-less card, which upgrades itself — this is the only way
-    the row ever learns a new version; without it the deploy drawer kept
-    showing "2026.9.11 -> 2026.9.12" after the frame had upgraded. Returns
-    whether anything changed."""
+    exactly as deployed. For an adopted shell-less card, which upgrades
+    itself, this is the only way the row ever learns a new version; a frame
+    the backend can deploy to upgrades behind its back too (the device's own
+    admin UI, the cloud). Without it the deploy drawer kept showing
+    "2026.9.11 -> 2026.9.12" after the frame had upgraded. Returns whether
+    anything changed."""
     snapshot = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None
     if not snapshot or not version:
         return False

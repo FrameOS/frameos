@@ -753,10 +753,12 @@ def _frame_sync_snapshot(frame: Frame) -> dict[str, Any]:
     frameos_version = current_frameos_version()
     previous = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else {}
     device_reported = previous.get("frameos_version")
-    if not frame_has_shell_access(frame) and isinstance(device_reported, str) and device_reported:
+    if isinstance(device_reported, str) and device_reported:
         # A sync over the admin API installs no FrameOS: the baseline keeps
-        # the version the device last reported (upgrade status, bootup line)
-        # rather than claiming the backend's own — after one fast deploy a
+        # the version it has — what the device last reported (upgrade status,
+        # bootup line) or the last full deploy put there — rather than
+        # claiming the backend's own, the same rule as the SSH fast deploy
+        # (frame_deploy_workflow._plan_fast). After one fast deploy a
         # 2026.9.11 card read as 2026.9.12 here.
         snapshot["frameos_version"] = device_reported
     elif isinstance(frameos_version, str) and frameos_version:

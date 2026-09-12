@@ -109,9 +109,10 @@ async def store_connected_remote_version(
     finally:
         db.close()
 
-    # ``agent`` holds the shared secret and the browser merges broadcasts
-    # shallowly, so it is not sent (websocket_frame_payload); the new
-    # agentVersion / remoteCapabilities reach the UI on its next frame fetch.
+    # ``agent`` travels without its shared secret (websocket_frame_payload)
+    # and the browser keeps its own copy of that leaf when merging, so the
+    # new agentVersion / remoteCapabilities reach the workspace right away —
+    # the deploy drawer's "FrameOS Remote a -> b" line clears on this hello.
     await publish_message(
         redis,
         "update_frame",

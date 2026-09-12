@@ -759,7 +759,15 @@ function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | nul
   return (
     <div className="space-y-2">
       {changes.map((change) => (
-        <div key={`${change.label}:${change.requiresFullDeploy}`} className="flex items-center gap-2 text-sm">
+        <div
+          key={`${change.label}:${change.requiresFullDeploy}`}
+          className="flex items-center gap-2 text-sm"
+          title={
+            change.previousValue !== undefined || change.nextValue !== undefined
+              ? `Deployed: ${change.previousValue ?? 'Not set'}\nNow: ${change.nextValue ?? 'Not set'}`
+              : undefined
+          }
+        >
           <span
             className={clsx(
               'h-2.5 w-2.5 shrink-0 rounded-full',

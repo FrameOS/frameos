@@ -58,20 +58,33 @@ def test_redact_frame_secrets_strips_every_secret_leaf_and_keeps_the_rest():
     assert redacted["scenes"] == [{"id": "a"}]
 
 
-def test_websocket_payload_omits_secrets_and_their_containers_instead_of_blanking_them():
-    payload = websocket_frame_payload(frame_dict())
+def test_websocket_payload_omits_top_level_secrets_and_strips_the_leaves_from_their_containers():
+    source = frame_dict()
+    payload = websocket_frame_payload(source)
 
-    # The browser merges shallowly, so a container sent without its secret
-    # leaf would wipe the client's copy of that leaf. Omitted keys are kept.
-    for key in ("ssh_pass", "server_api_key", "frame_access_key", "https_proxy", "agent", "frame_admin_auth", "mountpoints", "network"):
+    for key in ("ssh_pass", "server_api_key", "frame_access_key"):
         assert key not in payload
+    # The containers travel so the rest of the block reaches the browser
+    # (agentVersion after a Remote upgrade); the browser keeps its own copy
+    # of the missing leaf when it merges (frameSecrets mergeBroadcastFrame).
+    assert payload["agent"] == {"agentEnabled": True, "agentRunCommands": False}
+    assert payload["frame_admin_auth"] == {"enabled": True, "user": "admin"}
+    assert "server_key" not in payload["https_proxy"]["certs"]
+    assert payload["https_proxy"]["certs"]["server"] == "CERT"
+    # A set password leaf goes, an empty one stays so shapes round-trip.
+    assert all(item.get("password") in (None, "") for item in payload["mountpoints"]["items"])
     assert payload["id"] == 7
     assert payload["name"] == "Kitchen"
     assert payload["scenes"] == [{"id": "a"}]
+    for secret in ("raspberry", "api-key", "access-key", "KEY", "shared", "hunter2", "p1"):
+        assert secret not in str(payload)
+    # The row's own objects are untouched.
+    assert source["agent"]["agentSharedSecret"] == "shared"
 
 
 def test_websocket_payload_handles_partial_broadcasts():
-    assert websocket_frame_payload({"agent": {"agentSharedSecret": "x"}, "id": 1, "project_id": 2}) == {
+    assert websocket_frame_payload({"agent": {"agentSharedSecret": "x", "agentVersion": "2026.9.13"}, "id": 1, "project_id": 2}) == {
+        "agent": {"agentVersion": "2026.9.13"},
         "id": 1,
         "project_id": 2,
     }

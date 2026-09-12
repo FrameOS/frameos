@@ -112,10 +112,17 @@ def redact_frame_secrets(frame_dict: dict) -> dict:
 
 
 def websocket_frame_payload(frame_dict: dict) -> dict:
-    """The ``update_frame`` broadcast shape: secrets and the objects that
-    carry them are omitted, never sent empty (shallow client merge)."""
-    payload = dict(frame_dict)
-    for key in TOP_LEVEL_SECRET_KEYS + SECRET_CONTAINER_KEYS:
+    """The ``update_frame`` broadcast shape: the top-level secrets are
+    omitted (never sent empty), and the objects that carry a secret leaf
+    travel with that leaf removed. The browser merges those objects leaf by
+    leaf, keeping its own copy of any secret the broadcast left out
+    (frontend/src/utils/frameSecrets mergeBroadcastFrame), so the rest of
+    the block — ``agent.agentVersion`` after a Remote upgrade, a network
+    setting — reaches the workspace without a page reload. Until 2026-09-12
+    the whole ``agent`` block was dropped and the drawer kept saying
+    "FrameOS Remote 2026.9.3 -> 2026.9.13" after the deploy."""
+    payload = redact_frame_secrets(frame_dict)
+    for key in TOP_LEVEL_SECRET_KEYS:
         payload.pop(key, None)
     # ``last_successful_deploy`` and ``secret_fingerprints`` stay: both are
     # secret-free (served_deploy_snapshot), and the browser needs the pair to

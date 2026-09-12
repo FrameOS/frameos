@@ -16,7 +16,7 @@ import { router } from 'kea-router'
 import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import { publishedReleaseModel } from '../../models/publishedReleaseModel'
 import { subscriptions } from '../../utils/keaSubscriptions'
-import { restoreDeployedSecrets } from '../../utils/frameSecrets'
+import { restoreDeployedSecrets, SECRET_PATHS } from '../../utils/frameSecrets'
 import {
   AppNodeData,
   NodeData,
@@ -949,6 +949,8 @@ function computeChangeDetails(
     if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: frameChangeDetailLabel(key, previous?.[key], next?.[key]),
+        previousValue: describeFrameChangeValue(key, previous?.[key]),
+        nextValue: describeFrameChangeValue(key, next?.[key]),
         requiresFullDeploy:
           !shellLess &&
           (key === 'mode' ||
@@ -1281,6 +1283,58 @@ function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string 
     default:
       return String(value)
   }
+}
+
+const FRAME_CHANGE_VALUE_MAX_CHARS = 240
+
+/** `value` with every secret leaf under `key` (utils/frameSecrets SECRET_PATHS)
+ * replaced by whether it is set, so a hover can show a whole settings block. */
+function redactFrameSecretLeaves(key: keyof FrameType, value: unknown): unknown {
+  const paths = SECRET_PATHS.filter((path) => path[0] === key && path.length > 1)
+  if (paths.length === 0 || !value || typeof value !== 'object') {
+    return value
+  }
+  const copy = JSON.parse(JSON.stringify(value))
+  const redact = (node: unknown, path: readonly string[]): void => {
+    const [head, ...rest] = path
+    if (head === undefined || !node || typeof node !== 'object') {
+      return
+    }
+    if (head === '*') {
+      if (Array.isArray(node)) {
+        node.forEach((item) => redact(item, rest))
+      }
+      return
+    }
+    const record = node as Record<string, unknown>
+    if (!(head in record)) {
+      return
+    }
+    if (rest.length === 0) {
+      record[head] = summarizeSecret(record[head])
+      return
+    }
+    redact(record[head], rest)
+  }
+  paths.forEach((path) => redact(copy, path.slice(1)))
+  return copy
+}
+
+/** One line of what a frame field holds, for the deploy drawer's hover on a
+ * pending change: the settings summary where one exists, a compact
+ * secret-free JSON for the rest, cut short past a screenful. */
+export function describeFrameChangeValue(key: keyof FrameType, value: unknown): string {
+  if (value === null || value === undefined || value === '') {
+    return 'Not set'
+  }
+  const summary = summarizeFrameFieldValue(key, value)
+  // Only the summarizer's fallthrough (`String(value)`) is useless for a
+  // block or a list; a field it knows keeps its wording.
+  if (typeof value !== 'object' || summary !== String(value)) {
+    return summary
+  }
+  const text = JSON.stringify(redactFrameSecretLeaves(key, value))
+  return text.length > FRAME_CHANGE_VALUE_MAX_CHARS ? `${text.slice(0, FRAME_CHANGE_VALUE_MAX_CHARS - 1)}…` : text
 }
 
 function buildUndeployedSummaryItems(

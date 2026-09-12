@@ -6,6 +6,10 @@ import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 export interface ChangeDetail {
   label: string
   requiresFullDeploy: boolean
+  /** What the deploy baseline holds and what the row holds now, summarised
+   * for a hover (secrets never appear, only whether they are set). */
+  previousValue?: string
+  nextValue?: string
   frameosVersionChange?: {
     kind: 'install' | 'upgrade'
     previousVersion?: string | null

@@ -105,6 +105,16 @@ class ConnectionManager:
                     if connection in self.active_connections:
                         self.active_connections.remove(connection)
                     self.connection_project_ids.pop(connection, None)
+            # Forgotten but left open, the browser's socket stayed silent —
+            # no close event, no reconnect, every later broadcast lost until
+            # Home Assistant Ingress recycled it — so the workspace showed a
+            # deploy's stale "FrameOS a -> b" line until a page reload. A
+            # close makes the browser reconnect and refetch (socketReconnected).
+            for connection in stale_connections:
+                try:
+                    await asyncio.wait_for(connection.close(), timeout=WEBSOCKET_BROADCAST_TIMEOUT)
+                except Exception:  # noqa: BLE001 — already gone is fine
+                    pass
 
 manager = ConnectionManager() # Local clients
 

@@ -255,10 +255,13 @@ async def test_gzip_body_over_the_cap_is_rejected_before_decompression(async_cli
 
 
 @pytest.mark.asyncio
-async def test_api_log_bootup_version_updates_a_shell_less_frames_baseline(async_client, db, redis):
-    """An adopted generic card upgrades itself and the runtime says which
-    FrameOS it booted; the deploy baseline's version follows, nothing else
-    in the baseline moves, and a frame the backend can deploy to ignores it."""
+async def test_api_log_bootup_version_updates_the_frames_baseline(async_client, db, redis):
+    """The runtime says which FrameOS it booted and the deploy baseline's
+    version follows, nothing else in the baseline moves. An adopted generic
+    card upgrades itself; a frame the backend can SSH into upgrades behind
+    its back through the device's own admin UI (2026-09-12: a 9.12 -> 9.13
+    upgrade done on the frame left the drawer offering 9.12 -> 9.13 for
+    good), so both follow the device."""
     frame = await new_frame(db, redis, 'AdoptedCard', 'localhost', 'localhost')
     frame.mode = 'buildroot'
     frame.buildroot = {'adopted': True, 'platform': 'raspberry-pi-64'}
@@ -283,7 +286,15 @@ async def test_api_log_bootup_version_updates_a_shell_less_frames_baseline(async
                                        headers={'Authorization': 'Bearer sshkey'})
     assert response.status_code == 200
     db.refresh(shell)
-    assert shell.last_successful_deploy['frameos_version'] == '2026.9.11'
+    assert shell.last_successful_deploy == {'name': 'SshFrame', 'frameos_version': '2026.9.12'}
+
+    # A dev build or a line without a version leaves the baseline alone.
+    for version in ('dev', '', None):
+        response = await async_client.post('/api/log', json={'log': {'event': 'bootup', 'version': version}},
+                                           headers={'Authorization': 'Bearer sshkey'})
+        assert response.status_code == 200
+    db.refresh(shell)
+    assert shell.last_successful_deploy['frameos_version'] == '2026.9.12'
 
 
 @pytest.mark.asyncio
