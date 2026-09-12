@@ -1088,6 +1088,16 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --dir frontend run build
 
+      # The build regenerates the committed app catalog and the config schema.
+      # PR #476 changed five Nim apps without rerunning it, and the stale
+      # sources shipped in the bundle for a day; fail instead.
+      - name: Generated frontend files are in sync
+        run: |
+          if ! git diff --exit-code -- frontend/src/generated frontend/schema; then
+            echo "::error::Committed generated files are stale. Run 'pnpm --dir frontend run build' and commit the result."
+            exit 1
+          fi
+
   pico-firmware:
     name: Pico W / Pico 2 W firmware
     runs-on: ubuntu-latest
