@@ -10,6 +10,7 @@ import locks
 
 import ../api
 import ../state
+from ../../scenes import getLastPublicState
 import ../../types
 import ../../config
 
@@ -146,6 +147,9 @@ suite "Server API helpers":
     check payload{"max_http_response_bytes"}.getInt() == DefaultMaxHttpResponseBytes
     check payload{"background_color"}.getStr() == "#123456"
     check payload{"active_connections"}.getInt() == 2
+    # The active scene rides the payload so the panel marks its tile on load.
+    check payload{"active_scene_id"}.getStr("") == getLastPublicState()[0].string or
+      not payload.hasKey("active_scene_id")
     check payload{"scenes"}.kind == JArray
     check payload{"scenes"}.len == 1
     check payload{"frame_access_key"}.getStr() == ""
@@ -310,6 +314,34 @@ suite "a settings change is classified by what it takes to apply":
       %*{"mountpoints": {"enabled": true, "items": []}})
     check mounts.mounts
     check not mounts.timezone
+
+suite "a save that moves the frame to another backend says so":
+  test "a different server host, port or scheme is a move; a key rotation is not":
+    let existing = %*{"serverHost": "10.0.0.5", "serverPort": 8989, "serverApiKey": "old"}
+    check backendChangeNotice(existing, %*{"serverHost": "10.0.0.5", "serverPort": 8989, "serverApiKey": "new"}) == nil
+    check backendChangeNotice(existing, existing) == nil
+    let moved = backendChangeNotice(existing, %*{"serverHost": "10.0.0.9", "serverPort": 8989, "serverApiKey": "new"})
+    check moved != nil
+    check moved["event"].getStr() == "server:changed"
+    check moved["previousServer"].getStr() == "http://10.0.0.5:8989"
+    check moved["server"].getStr() == "http://10.0.0.9:8989"
+    check moved["message"].getStr().contains("http://10.0.0.9:8989")
+    check moved["message"].getStr().contains("no longer receives its logs")
+    let rePorted = backendChangeNotice(existing, %*{"serverHost": "10.0.0.5", "serverPort": 8443})
+    check rePorted != nil
+    check rePorted["server"].getStr() == "https://10.0.0.5:8443"
+
+  test "a frame that had no backend, or is losing its address, moves nowhere":
+    check backendChangeNotice(%*{}, %*{"serverHost": "10.0.0.9", "serverPort": 8989}) == nil
+    check backendChangeNotice(%*{"serverHost": "", "serverPort": 8989}, %*{"serverHost": "10.0.0.9", "serverPort": 8989}) == nil
+    check backendChangeNotice(%*{"serverHost": "10.0.0.5", "serverPort": 8989}, %*{"serverHost": "", "serverPort": 0}) == nil
+
+  test "the notice cannot be delivered without an address, and a dead one does not throw":
+    check notifyPreviousBackend(%*{}, %*{"event": "server:changed"}) == 0
+    # 127.0.0.1:9 — discard port, nothing listens: the bounded client fails
+    # fast and the save goes on.
+    check notifyPreviousBackend(%*{"serverHost": "127.0.0.1", "serverPort": 9, "serverApiKey": "k"},
+      %*{"event": "server:changed"}) == 0
 
 suite "the frame payload round-trips what the device stores":
   test "device_config is patched, never replaced, and read back verbatim":

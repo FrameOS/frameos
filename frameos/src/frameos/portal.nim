@@ -888,6 +888,33 @@ proc defaultControlMode*(frameConfig: FrameConfig): string {.gcsafe.} =
     return "backend"
   "none"
 
+proc adminUiPreselected*(frameConfig: FrameConfig): bool =
+  ## Whether the setup form's "Enable admin UI" box starts ticked. Ticked
+  ## when the admin UI is already on, and on a frame that has never had an
+  ## admin password (first boot): the panel is how the frame gets managed
+  ## without a backend, so the form asks for a password rather than hiding
+  ## the option behind an unticked box. Someone who set a password and then
+  ## switched the panel off finds it off.
+  let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
+  let adminUser = adminAuth{"user"}.getStr("admin")
+  let hasAdminPass = adminAuth{"pass"}.getStr("").len > 0
+  if not hasAdminPass:
+    return true
+  adminAuth{"enabled"}.getBool(false) and adminUser.len > 0
+
+proc setupOptionsProblem*(options: PortalSetupOptions, frameConfig: FrameConfig): string =
+  ## What is wrong with a setup submission, or "" — the server-side check
+  ## behind the form's `required` marks. Persisting "admin UI on" with no
+  ## password used to silently write it OFF: the page said Saved, the
+  ## panel stayed locked out.
+  if options.adminEnabled:
+    let existing = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
+    if options.adminUser.strip().len == 0:
+      return "Admin user is required when the admin UI is enabled"
+    if options.adminPass.len == 0 and existing{"pass"}.getStr("").len == 0:
+      return "Admin password is required when the admin UI is enabled"
+  ""
+
 proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig): PortalSetupOptions =
   let device = params.getOrDefault("device", frameConfig.device)
   let deviceConfig = ensureDeviceConfig(frameConfig)
@@ -1902,7 +1929,7 @@ proc setupHtml*(frameOS: FrameOS): string =
   let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
   let adminUser = adminAuth{"user"}.getStr("admin")
   let hasAdminPass = adminAuth{"pass"}.getStr("").len > 0
-  let adminChecked = if adminAuth{"enabled"}.getBool(false) and adminUser.len > 0 and hasAdminPass: " checked" else: ""
+  let adminChecked = if adminUiPreselected(frameConfig): " checked" else: ""
   let adminPassExistingAttr = if hasAdminPass: "1" else: "0"
   let adminPassPlaceholder =
     if hasAdminPass:

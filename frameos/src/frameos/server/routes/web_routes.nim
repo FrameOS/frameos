@@ -198,6 +198,10 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http400, body = "Missing ssid")
         return
       let options = netportal.parseSetupOptions(params, globalFrameOS.frameConfig)
+      let problem = netportal.setupOptionsProblem(options, globalFrameOS.frameConfig)
+      if problem.len > 0:
+        request.respond(Http400, body = problem)
+        return
       if not netportal.persistPortalSetup(globalFrameOS, options):
         request.respond(Http500, body = netportal.setupHtml(globalFrameOS))
         return

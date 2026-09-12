@@ -174,6 +174,26 @@ the same day, the image half is open:
 
 ---
 
+## On-device admin
+
+The frame's own admin page (`http://<frame>:8787/admin`, the shared SPA in
+frame-control mode) is how a standalone frame is managed without a backend
+or the cloud. Since 2026-09-12 its "Add scene" drawer hides **Generate
+scene** (`allowedAddSceneActions` in `workspaceSurfaces.ts`): the button
+opened the AI chat, which only the backend and the cloud can run, so on the
+device it led to a "coming soon" panel. Bring it back once the frame can
+reach an AI. Two routes, not exclusive: the frame's FrameOS Cloud link
+(sign in from the panel, the cloud's AI and metering do the work — and the
+first scene could be on us, as the reason to link at all), and/or the
+owner's own OpenAI key entered under the frame's service keys (the scene
+then costs them, and the prompt/lint pipeline in
+`cloud/apps/auth-web/src/lib/ai/` would have to be callable from the
+device). The other AI entry points (the sparkles in the header and the
+scene editor) still open the same "coming soon" panel on the device; hide
+them the same way, or make them work, with this.
+
+---
+
 ## Canonical API gaps
 
 Matrix in `docs/api-triality.md`; nothing scheduled — the remaining deltas

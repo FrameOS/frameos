@@ -100,7 +100,9 @@ export function FrameSceneSidebarCard({
           frameId={frame.id}
           buttonTitle="Frame actions"
           includeSave={false}
-          buttonClassName="frameos-secondary-button flex h-full w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0"
+          // No h-full: 100% of an auto-height row resolves to nothing and the
+          // button came out shorter than Save. The row stretches its items.
+          buttonClassName="frameos-secondary-button flex w-9 shrink-0 self-stretch items-center justify-center rounded-lg !px-0 !py-0"
         />
       </div>
     )

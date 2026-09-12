@@ -43,7 +43,7 @@ import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from '.
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { registeredAddFramePanel } from './addFramePanelRegistry'
 import { frameToolDefinitionsForMode } from './frameToolDefinitions'
-import { addFrameFlows, workspaceMode } from './workspaceSurfaces'
+import { addFrameFlows, addSceneActionIsAllowed, workspaceMode } from './workspaceSurfaces'
 import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -69,6 +69,8 @@ import { splitScreenLayoutLogic } from './splitScreenLayoutLogic'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { normalizeSplitScreenSceneLayout } from '../../utils/splitScreenLayouts'
+import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../../utils/systemScenes'
+import { sceneIsActivating } from '../../utils/sceneActivation'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -726,29 +728,31 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           <span className="frameos-muted block truncate text-xs">Split the screen between multiple scenes</span>
         </span>
       </button>
-      <button
-        type="button"
-        onClick={() => {
-          const searchParams: Record<string, unknown> = {
-            ...router.values.searchParams,
-            drawer: 'chat',
-            drawerSource: 'templates',
-            frameId: String(frame.id),
-          }
-          delete searchParams.sceneId
-          delete searchParams.nodeId
-          router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
-        }}
-        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-      >
-        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
-          <SparklesIcon className="h-6 w-6" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="frameos-strong block truncate text-sm font-semibold">Generate scene</span>
-          <span className="frameos-muted block truncate text-xs">Open AI chat for this frame</span>
-        </span>
-      </button>
+      {addSceneActionIsAllowed(workspaceMode(), 'generate') ? (
+        <button
+          type="button"
+          onClick={() => {
+            const searchParams: Record<string, unknown> = {
+              ...router.values.searchParams,
+              drawer: 'chat',
+              drawerSource: 'templates',
+              frameId: String(frame.id),
+            }
+            delete searchParams.sceneId
+            delete searchParams.nodeId
+            router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
+          }}
+          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+            <SparklesIcon className="h-6 w-6" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="frameos-strong block truncate text-sm font-semibold">Generate scene</span>
+            <span className="frameos-muted block truncate text-xs">Open AI chat for this frame</span>
+          </span>
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => {
@@ -1044,6 +1048,10 @@ function SceneControlPanelContent({
     return null
   }
 
+  if (sceneControlSelection.sceneId === STATUS_SCREEN_SCENE_ID) {
+    return <StatusScreenControlPanel frame={frame} currentSceneId={currentSceneId} onClose={closeSceneControl} />
+  }
+
   const editingFrame = { ...frame, ...(frameForm ?? {}) } as Partial<FrameType>
   const { scene, sceneId, saved } = resolveSceneControlSelection(
     frame,
@@ -1205,6 +1213,86 @@ function SceneControlPanelContent({
           </div>
         </BindLogic>
       </BindLogic>
+    </div>
+  )
+}
+
+/**
+ * The drawer for the built-in status screen (`system/index`): a picture of
+ * it as it would render now, and Activate. No editor, no fields, no delete —
+ * the screen lives in the runtime binary, so there is nothing to edit or
+ * remove. Only the on-device panel lists it (FrameStatusScreenTile).
+ */
+function StatusScreenControlPanel({
+  frame,
+  currentSceneId,
+  onClose,
+}: {
+  frame: FrameType
+  currentSceneId: string
+  onClose: () => void
+}): JSX.Element {
+  const { activatingSceneId } = useValues(controlLogic({ frameId: frame.id }))
+  const { setCurrentScene } = useActions(controlLogic({ frameId: frame.id }))
+  const active = currentSceneId === STATUS_SCREEN_SCENE_ID
+  const activating = sceneIsActivating(activatingSceneId, STATUS_SCREEN_SCENE_ID)
+
+  return (
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+      <div className="flex h-full flex-col">
+        <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
+          <div className="min-w-0">
+            <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {frame.name || frameHost(frame)}
+            </div>
+            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+              {STATUS_SCREEN_SCENE_NAME}
+            </h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <XMarkIcon className="h-6 w-6" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div
+            className="frameos-card-media frameos-skeleton-surface relative mb-4 flex w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100"
+            style={{ aspectRatio: '16 / 9' }}
+          >
+            <FrameImage
+              frameId={frame.id}
+              sceneId={STATUS_SCREEN_SCENE_ID}
+              thumb
+              refreshable={false}
+              objectFit="contain"
+              hideWhileLoading
+              loadFullSizeAfterThumb
+              className="h-full w-full"
+              imageClassName="h-full w-full rounded-md object-contain"
+            />
+            {active ? <FrameImageOverlayControls frame={frame} sceneId={STATUS_SCREEN_SCENE_ID} /> : null}
+          </div>
+          <p className="frameos-muted mb-4 text-sm leading-6 text-slate-600">
+            The screen every frame ships with: its name, address, the installed scenes and the FrameOS Cloud link code.
+            It is part of the runtime and cannot be removed — activate it to check the frame is alive and reachable.
+          </p>
+          <SceneControlPanelModeTitle />
+          <button
+            type="button"
+            onClick={() => setCurrentScene(STATUS_SCREEN_SCENE_ID)}
+            disabled={activating}
+            aria-busy={activating || undefined}
+            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-wait disabled:opacity-70"
+          >
+            {activating ? <Spinner color="white" className="shrink-0" /> : <PlayIcon className="h-4 w-4 shrink-0" />}
+            {activating ? 'Activating…' : active ? 'Show again' : 'Activate scene'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

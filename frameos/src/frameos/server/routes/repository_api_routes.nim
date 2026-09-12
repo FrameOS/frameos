@@ -15,7 +15,7 @@ import ./common
 const RepoSceneAssetPrefix = "repo/scenes/"
 const TemplateJsonSuffix = "/template.json"
 
-proc decodePathSegment(value: string): string =
+proc decodePathSegment*(value: string): string =
   try:
     decodeQueryComponent(value)
   except CatchableError:
@@ -76,7 +76,7 @@ proc resolveTemplateResource(repositorySlug: string, templateSlug: string, resou
 
   RepoSceneAssetPrefix & repositorySlug & "/" & templateSlug & "/" & relative
 
-proc systemTemplateImagePath(repositorySlug: string, templateSlug: string): string {.gcsafe.} =
+proc systemTemplateImagePath*(repositorySlug: string, templateSlug: string): string {.gcsafe.} =
   if not validPathSegment(repositorySlug) or not validPathSegment(templateSlug):
     return ""
 

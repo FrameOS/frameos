@@ -12,6 +12,8 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { activeSceneFromLastState } from '../../../../utils/cloudFrameScenes'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
+import { sceneIdsRefer } from '../../../../utils/systemScenes'
+import { SCENE_ACTIVATION_TIMEOUT_MS } from '../../../../utils/sceneActivation'
 import type { TemplateType } from '../../../../types'
 import type { StateField } from '../../../../types'
 
@@ -37,6 +39,7 @@ function normaliseFrameStateRecord(payload: any): FrameStateRecord {
 export interface controlLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  activatingSceneId: string | null
   fields: StateField[]
   loading: boolean | string
   scene: FrameScene | null
@@ -89,6 +92,12 @@ export interface controlLogicActions {
   ) => {
     uploadedScenes: FrameScene[]
     payload?: any
+  }
+  sceneActivationSettled: (sceneId: string) => {
+    sceneId: string
+  }
+  sceneActivationStarted: (sceneId: string) => {
+    sceneId: string
   }
   setCurrentScene: (sceneId: string) => {
     sceneId: string
@@ -164,6 +173,13 @@ export const controlLogic = kea<controlLogicType>([
     sync: true,
     setCurrentScene: (sceneId: string) => ({ sceneId }),
     currentSceneChanged: (sceneId: string) => ({ sceneId }),
+    // The Activate button's own state: armed when an activation request
+    // leaves the browser, released when the frame logs that scene's
+    // render:done (or a render error, or the timeout). The toast queue
+    // tracks the same thing for the notification strip; this is for the
+    // button that was clicked, which used to give no sign at all.
+    sceneActivationStarted: (sceneId: string) => ({ sceneId }),
+    sceneActivationSettled: (sceneId: string) => ({ sceneId }),
   }),
   loaders(({ props, values }) => ({
     stateRecord: [
@@ -245,6 +261,14 @@ export const controlLogic = kea<controlLogicType>([
         currentSceneChanged: () => null,
       },
     ],
+    activatingSceneId: [
+      null as null | string,
+      {
+        sceneActivationStarted: (_, { sceneId }) => sceneId,
+        sceneActivationSettled: (state, { sceneId }) =>
+          state !== null && sceneIdsRefer(state, sceneId) ? null : state,
+      },
+    ],
   }),
   selectors({
     scenes: [
@@ -289,6 +313,12 @@ export const controlLogic = kea<controlLogicType>([
         actions.sync()
       }
     },
+    sceneActivationStarted: async ({ sceneId }, breakpoint) => {
+      // A later activation replaces this wait (kea cancels the older
+      // listener at its breakpoint), so only the newest request times out.
+      await breakpoint(SCENE_ACTIVATION_TIMEOUT_MS)
+      actions.sceneActivationSettled(sceneId)
+    },
     setCurrentScene: async ({ sceneId }) => {
       const scene =
         values.frameForm.scenes?.find((item) => item.id === sceneId) ??
@@ -300,6 +330,7 @@ export const controlLogic = kea<controlLogicType>([
         title: 'Activating scene',
         detail: scene?.name || sceneId,
       })
+      actions.sceneActivationStarted(sceneId)
       try {
         let usbSucceeded = false
         if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
@@ -337,7 +368,13 @@ export const controlLogic = kea<controlLogicType>([
           status: 'success',
           detail,
         })
+        if (isCloudMode()) {
+          // The cloud queues the verb; the frame's render:done may never
+          // reach this page. "Accepted" is as far as the button can see.
+          actions.sceneActivationSettled(sceneId)
+        }
       } catch (error) {
+        actions.sceneActivationSettled(sceneId)
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,
           kind: 'activate',
@@ -348,6 +385,14 @@ export const controlLogic = kea<controlLogicType>([
       }
     },
     syncSuccess: async ({ stateRecord }, breakpoint) => {
+      if (values.activatingSceneId !== null && stateRecord?.sceneId && stateRecord.sceneId.length > 0) {
+        // The frame says it is on the scene we asked for: the render:done
+        // happened while the socket was down (the runtime restarted, say)
+        // and the reconnect resync is the only signal left.
+        if (sceneIdsRefer(values.activatingSceneId, stateRecord.sceneId)) {
+          actions.sceneActivationSettled(stateRecord.sceneId)
+        }
+      }
       if (stateRecord?.sceneId?.startsWith(UPLOADED_SCENE_PREFIX)) {
         actions.loadUploadedScenes()
       }
@@ -368,6 +413,15 @@ export const controlLogic = kea<controlLogicType>([
       }
       try {
         const { event, sceneId } = JSON.parse(log.line)
+        if (values.activatingSceneId !== null) {
+          // The device reports an interpreted scene as `uploaded/<id>`;
+          // sceneActivationSettled compares the public ids.
+          if (event === 'render:done' && typeof sceneId === 'string') {
+            actions.sceneActivationSettled(sceneId)
+          } else if (event === 'render:error' || event === 'event:error') {
+            actions.sceneActivationSettled(values.activatingSceneId)
+          }
+        }
         if (event === 'render:sceneChange') {
           if (sceneId !== values.sceneId) {
             actions.currentSceneChanged(sceneId)

@@ -233,7 +233,7 @@ proc getSslContext(self: LoggerThread): SslContext =
     self.sslContext = newContext()
   self.sslContext
 
-proc postLogs(self: LoggerThread, body: string): int =
+proc postLogsTo(settings: LoggerSettings, sslContext: SslContext, body: string): int =
   ## Minimal HTTP POST with hard time bounds on connect, TLS handshake, send
   ## and the status read. Nim's HttpClient only applies its timeout to
   ## response reads; its connect/TLS/send phases block without limit, which
@@ -241,13 +241,13 @@ proc postLogs(self: LoggerThread, body: string): int =
   ## (DNS resolution inside connect() remains bounded only by the resolver.)
   var socket = newSocket()
   try:
-    socket.connect(self.settings.serverHost, Port(self.settings.serverPort), timeout = LogSendConnectTimeoutMs)
+    socket.connect(settings.serverHost, Port(settings.serverPort), timeout = LogSendConnectTimeoutMs)
     socket.setSocketSendRecvTimeouts(LogSendIoTimeoutMs)
-    if self.settings.useTls:
-      self.getSslContext().wrapConnectedSocket(socket, handshakeAsClient, self.settings.serverHost)
+    if settings.useTls:
+      sslContext.wrapConnectedSocket(socket, handshakeAsClient, settings.serverHost)
     let request = "POST /api/log HTTP/1.1\r\n" &
-      "Host: " & self.settings.serverHost & ":" & $self.settings.serverPort & "\r\n" &
-      "Authorization: Bearer " & self.settings.serverApiKey & "\r\n" &
+      "Host: " & settings.serverHost & ":" & $settings.serverPort & "\r\n" &
+      "Authorization: Bearer " & settings.serverApiKey & "\r\n" &
       "Content-Type: application/json\r\n" &
       "Content-Encoding: gzip\r\n" &
       "Content-Length: " & $body.len & "\r\n" &
@@ -259,6 +259,25 @@ proc postLogs(self: LoggerThread, body: string): int =
       result = parseInt(parts[1])
   finally:
     socket.close()
+
+proc postLogs(self: LoggerThread, body: string): int =
+  postLogsTo(self.settings, self.getSslContext(), body)
+
+proc postLogLinesOnce*(settings: LoggerSettings, logs: seq[SerializedLog]): int =
+  ## One bounded delivery of `logs` to the server in `settings`, outside the
+  ## logger thread. The thread only ever talks to the CURRENT server: a save
+  ## that re-points the frame at another backend reloads its settings within
+  ## milliseconds, so a line meant for the backend being left behind (the
+  ## adoption notice, server/api.nim) has to go out before the save lands.
+  ## Returns the HTTP status; the caller decides what a failure means.
+  if settings.serverHost.len == 0 or settings.serverPort <= 0 or logs.len == 0:
+    return 0
+  let sslContext = if settings.useTls: newContext() else: nil
+  try:
+    postLogsTo(settings, sslContext, compress(logsRequestBody(logs)))
+  finally:
+    if sslContext != nil:
+      sslContext.destroyContext()
 
 proc registerSendFailure(self: LoggerThread) =
   self.retryBackoff = clamp(self.retryBackoff * 2, 2.0, LogSendMaxBackoffSeconds)

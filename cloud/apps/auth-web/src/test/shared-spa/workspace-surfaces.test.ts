@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addFrameFlows,
+  addSceneActionIsAllowed,
+  allowedAddSceneActions,
   allowedFrameMenuActions,
   allowedFrameSettingsSections,
   allowedGlobalSettingsSections,
@@ -645,6 +647,24 @@ describe("the other two control planes are unchanged", () => {
   });
 });
 
+describe("the Add scene drawer's action stack", () => {
+  // "Generate scene" opens the AI chat, which the device cannot run: on the
+  // on-device panel it led to a "coming soon" dead end. Off there until the
+  // frame can reach an AI (docs/todo.md); everything else stays.
+  it("offers no AI generation on the on-device panel", () => {
+    expect(addSceneActionIsAllowed("frameAdmin", "generate")).toBe(false);
+    expect(allowedAddSceneActions.frameAdmin).not.toContain("generate");
+    for (const action of ["blank", "splitScreen", "upload", "starred"] as const) {
+      expect(addSceneActionIsAllowed("frameAdmin", action)).toBe(true);
+    }
+  });
+
+  it("keeps AI generation where an AI is reachable", () => {
+    expect(addSceneActionIsAllowed("backend", "generate")).toBe(true);
+    expect(addSceneActionIsAllowed("cloud", "generate")).toBe(true);
+  });
+});
+
 describe("allow-list hygiene", () => {
   // The whole point: a surface is invisible until someone lists it. Guard
   // against a mode's list silently becoming a superset of the backend's.
@@ -662,6 +682,7 @@ describe("allow-list hygiene", () => {
       [allowedSceneToolPanels, "scene tools", [], []],
       [allowedSceneUtilityPanels, "scene utilities", [], []],
       [allowedFrameSettingsSections, "settings sections", [], frameAdminOnlySettingsSections],
+      [allowedAddSceneActions, "add scene actions", [], []],
     ] as const;
     for (const [list, label, cloudOnly, frameAdminOnly] of lists) {
       for (const mode of ["cloud", "frameAdmin"] as const) {
@@ -685,6 +706,7 @@ describe("allow-list hygiene", () => {
       allowedSceneUtilityPanels,
       allowedFrameMenuActions,
       allowedFrameSettingsSections,
+      allowedAddSceneActions,
     ]) {
       for (const entries of Object.values(list)) {
         expect(new Set(entries).size).toBe(entries.length);

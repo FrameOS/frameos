@@ -56,6 +56,7 @@ import {
 } from './workspaceLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../../utils/systemScenes'
 import {
   frameChangeDrawerKind,
   frameMenuActionIsAllowed,
@@ -273,7 +274,11 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
       <div className="frameos-divider border-t border-slate-200/80 px-3 py-3">
         <div className="min-w-0 text-sm">
           <div className="frameos-strong truncate font-semibold text-slate-800">
-            {activeScene ? sceneDisplayName(activeScene) : 'current image'}
+            {activeScene
+              ? sceneDisplayName(activeScene)
+              : activeSceneId === STATUS_SCREEN_SCENE_ID
+              ? STATUS_SCREEN_SCENE_NAME
+              : 'current image'}
           </div>
           {nextSchedule ? (
             <div className="frameos-muted mt-1 truncate text-xs text-slate-500">
@@ -595,6 +600,71 @@ function FrameSceneTile({
   )
 }
 
+/**
+ * The built-in status screen as the first tile on the on-device panel. It is
+ * a real scene the runtime can show (`system/index`) with a real picture
+ * (the device renders it on request), but it lives in the binary, not in
+ * scenes.json: no menu, no drag, nothing to delete. Only the device lists it
+ * — a backend or cloud workspace manages what it installed, and the status
+ * screen was never installed.
+ */
+function FrameStatusScreenTile({
+  frame,
+  active,
+  highlighted,
+}: {
+  frame: FrameType
+  active: boolean
+  highlighted: boolean
+}): JSX.Element {
+  const { openSceneControl } = useActions(workspaceLogic)
+  const { hideForm } = useActions(newFrameForm)
+
+  return (
+    <div
+      data-workspace-scene-tile={STATUS_SCREEN_SCENE_ID}
+      data-workspace-scene-tile-frame={frame.id}
+      className={clsx(
+        'frameos-card group relative z-[1] h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
+        highlighted
+          ? selectedSurfaceClassName
+          : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          hideForm()
+          openSceneControl(frame.id, STATUS_SCREEN_SCENE_ID)
+        }}
+        className="flex h-full w-full flex-col"
+      >
+        <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
+          <FrameImage
+            frameId={frame.id}
+            sceneId={STATUS_SCREEN_SCENE_ID}
+            thumb
+            refreshable={false}
+            objectFit="cover"
+            className="h-full w-full rounded-none"
+          />
+        </div>
+        <div className="w-full px-3 py-2">
+          <div className="frameos-strong truncate text-sm font-semibold text-slate-900">{STATUS_SCREEN_SCENE_NAME}</div>
+          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">Built in · always installed</div>
+        </div>
+      </button>
+      {active ? (
+        <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
+          <div className="frameos-primary-fill rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+            Active
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType; compact?: boolean }): JSX.Element {
   const { templateDrawerFrameId } = useValues(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
@@ -713,6 +783,24 @@ function FrameScenesBlock({
     setMultiSelect(false)
   }
   const searchIsActive = search.trim().length > 0
+  // The device lists its built-in status screen first. Search filters it
+  // like any scene, by name or id.
+  const statusScreenMatchesSearch =
+    !searchIsActive ||
+    STATUS_SCREEN_SCENE_NAME.toLowerCase().includes(search.trim().toLowerCase()) ||
+    STATUS_SCREEN_SCENE_ID.includes(search.trim().toLowerCase())
+  const showStatusScreenTile = workspaceMode() === 'frameAdmin' && !multiSelectEnabled && statusScreenMatchesSearch
+  const statusScreenTile = showStatusScreenTile ? (
+    <FrameStatusScreenTile
+      frame={frame}
+      active={frame.active_scene_id === STATUS_SCREEN_SCENE_ID}
+      highlighted={
+        sceneControlSelection?.frameId === frame.id &&
+        sceneControlSelection.sceneId === STATUS_SCREEN_SCENE_ID &&
+        sceneControlSelection.source !== 'preview'
+      }
+    />
+  ) : null
   // While searching, `scenes` is only the matching subset; dependency grouping
   // needs the full (live) list so parents of a match still render.
   // Alphabetical: this list is how you find a scene, and a new one (a
@@ -825,8 +913,9 @@ function FrameScenesBlock({
           </>
         ) : null}
       </div>
-      {sceneOverviewEntries.length > 0 ? (
+      {sceneOverviewEntries.length > 0 || showStatusScreenTile ? (
         <div className="flex flex-wrap gap-4">
+          {statusScreenTile}
           {sceneOverviewEntries.map(({ scene, key, nested }) => {
             const active = sceneIsActive(scene, frame.active_scene_id)
             const selected =

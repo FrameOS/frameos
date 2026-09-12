@@ -74,6 +74,24 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
   cloud: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets', 'activity'],
 }
 
+/**
+ * The action stack at the top of the "Add scene" drawer. `generate` opens
+ * the AI chat, which only the backend and the cloud implement: on the
+ * device it opened a "coming soon" panel, so it is not offered there until
+ * the frame can reach an AI (docs/todo.md, "On-device admin").
+ */
+export type AddSceneAction = 'blank' | 'splitScreen' | 'generate' | 'upload' | 'starred'
+
+export const allowedAddSceneActions: Record<WorkspaceMode, readonly AddSceneAction[]> = {
+  backend: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
+  frameAdmin: ['blank', 'splitScreen', 'upload', 'starred'],
+  cloud: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
+}
+
+export function addSceneActionIsAllowed(mode: WorkspaceMode, action: AddSceneAction): boolean {
+  return allows(allowedAddSceneActions, mode, action)
+}
+
 /** The scene-tool shortcut row on the frame dashboard. Same verbs, same rules. */
 export const allowedSceneToolPanels: Record<WorkspaceMode, readonly WorkspaceUtilityPanel[]> = {
   backend: ['settings', 'schedule', 'logs', 'metrics', 'assets', 'terminal', 'ping'],

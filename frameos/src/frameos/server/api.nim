@@ -22,6 +22,7 @@ from frameos/cloud/enrollment import detectBoard
 import frameos/config
 import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
+from frameos/logger import LoggerSettings, postLogLinesOnce
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
     getDynamicSceneOptions
 from scenes/scenes import sceneOptions
@@ -523,6 +524,70 @@ proc persistCloudServiceSettingsUpdate*(settings: JsonNode): bool {.discardable.
       globalFrameOS.frameConfig.settings = copy(current)
     result = true
 
+proc configuredServerAddress(config: JsonNode): tuple[host: string, port: int, scheme: string] =
+  ## The backend a frame.json points at, as the frame would dial it.
+  if config == nil or config.kind != JObject:
+    return ("", 0, "")
+  let host = config{"serverHost"}.getStr("").strip()
+  let port = config{"serverPort"}.getInt(0)
+  (host, port, normalizeServerScheme(config{"serverScheme"}.getStr(""), port))
+
+proc serverAddressLabel(server: tuple[host: string, port: int, scheme: string]): string =
+  if server.host.len == 0:
+    return ""
+  if server.port > 0:
+    server.scheme & "://" & server.host & ":" & $server.port
+  else:
+    server.scheme & "://" & server.host
+
+proc backendChangeNotice*(existing, next: JsonNode): JsonNode =
+  ## Non-nil when a save moves the frame from one backend to another: a
+  ## second backend adopting a frame writes its own server_host/port through
+  ## `POST /api/frames/1`, and until now nothing said what became of the
+  ## first. The notice is logged locally AND delivered to the backend being
+  ## left (notifyPreviousBackend) — that is the only place its owner would
+  ## look for the answer. A key rotation on the same server is not a move.
+  let previous = configuredServerAddress(existing)
+  let current = configuredServerAddress(next)
+  if previous.host.len == 0 or current.host.len == 0:
+    return nil
+  if previous.host == current.host and previous.port == current.port and previous.scheme == current.scheme:
+    return nil
+  let previousLabel = serverAddressLabel(previous)
+  let currentLabel = serverAddressLabel(current)
+  %*{
+    "event": "server:changed",
+    "previousServer": previousLabel,
+    "server": currentLabel,
+    "message": "This frame is now managed by " & currentLabel & ". The server at " & previousLabel &
+      " no longer receives its logs and can no longer control it; remove the frame there, " &
+      "or adopt it again to take it back.",
+  }
+
+proc notifyPreviousBackend*(existing: JsonNode, notice: JsonNode): int =
+  ## Best-effort, bounded delivery of `notice` to the backend named in
+  ## `existing`, with the API key that backend issued. Returns the HTTP
+  ## status (0 when nothing was sent, or on a transport error, which is
+  ## logged); the save never waits on more than the log client's timeouts.
+  let previous = configuredServerAddress(existing)
+  if previous.host.len == 0 or previous.port <= 0:
+    return 0
+  let settings = LoggerSettings(
+    serverHost: previous.host,
+    serverPort: previous.port,
+    useTls: previous.scheme == "https",
+    serverApiKey: existing{"serverApiKey"}.getStr(""),
+    serverSendLogs: true,
+  )
+  try:
+    result = postLogLinesOnce(settings, @[SerializedLog(timestamp: epochTime(), event: "server:changed",
+      line: $notice)])
+    if result != 200:
+      log(%*{"event": "server:changed:notify:error", "server": serverAddressLabel(previous), "status": result})
+  except CatchableError as e:
+    log(%*{"event": "server:changed:notify:error", "server": serverAddressLabel(previous), "error": e.msg})
+    result = 0
+
 proc persistFrameApiUpdate*(payload: JsonNode) =
   if payload == nil or payload.kind != JObject:
     raise newException(ValueError, "Frame update payload must be a JSON object")
@@ -855,6 +920,12 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "scenes_modified_at": fileModifiedIso(scenesSource.path),
   }
   result["active_connections"] = %activeConnections
+  # The backend's row carries the scene the frame last reported; the panel
+  # marks that tile "Active" on load. Here the runtime IS the source, and
+  # without this the badge waited for the next scene change.
+  let (activeSceneId, _, _, _) = getLastPublicState()
+  if activeSceneId.string.len > 0:
+    result["active_scene_id"] = %activeSceneId.string
   # The last payload the admin saved wins for admins: what they typed is what
   # they read back, richer form state (colorNames, ESP32 fields) included.
   for key in storedFrameApi.keys:
@@ -891,6 +962,65 @@ proc addFrameSyncHeaders(headers: var mummy.HttpHeaders) =
   putHeaderIfPresent(headers, "X-FrameOS-Last-Successful-Deploy-At", lastSuccessfulDeployAt)
   headers["Access-Control-Expose-Headers"] = frameSyncExposeHeaders
 
+# The last `/image` PNG, keyed by the driver render it was encoded from.
+# Encoding 1920×1080 takes a second on a Pi and several while the runner is
+# busy saving a scene snapshot; the admin page asks twice per render (the
+# sidebar and the dashboard tile) on two signals (the WebSocket "render" ping
+# and the render:done log line), so without this one render cost four
+# encodes and the preview pulsed "loading" for most of a minute.
+type CachedFrameImage = object
+  generation: int
+  rotate: int
+  flip: string
+  source: string
+  png: string
+
+var frameImageCacheLock: Lock
+initLock(frameImageCacheLock)
+var frameImageCache {.guard: frameImageCacheLock.}: CachedFrameImage
+
+proc cachedFrameImagePng(generation: int): tuple[hit: bool, source: string, png: string] {.gcsafe.} =
+  ## The PNG encoded for this driver render, if it is the one in the cache.
+  ## Generation 0 is "nothing has been pushed to the panel yet" — never
+  ## cached, so a frame that is still booting keeps answering live.
+  if generation <= 0:
+    return (hit: false, source: "", png: "")
+  {.gcsafe.}:
+    withLock frameImageCacheLock:
+      if frameImageCache.generation == generation and frameImageCache.rotate == globalFrameConfig.rotate and
+          frameImageCache.flip == globalFrameConfig.flip and frameImageCache.png.len > 0:
+        return (hit: true, source: frameImageCache.source, png: frameImageCache.png)
+  (hit: false, source: "", png: "")
+
+proc rememberFrameImagePng(generation: int, source: string, png: string) {.gcsafe.} =
+  if generation <= 0 or png.len == 0:
+    return
+  {.gcsafe.}:
+    withLock frameImageCacheLock:
+      frameImageCache = CachedFrameImage(generation: generation, rotate: globalFrameConfig.rotate,
+        flip: globalFrameConfig.flip, source: source, png: png)
+
+proc frameImageHeaders(sceneId: SceneId, lastUpdate: float): mummy.HttpHeaders =
+  ## The headers a `/image` answer carries — the same set for GET and HEAD,
+  ## because the admin page reads the sync hints off a HEAD after every
+  ## image load and used to get a 405 from the device for its trouble.
+  result["Content-Type"] = "image/png"
+  result["Content-Disposition"] = &"inline; filename=\"{sceneId}.png\""
+  result["X-Scene-Id"] = $sceneId
+  addFrameSyncHeaders(result)
+  if lastUpdate > 0.0:
+    result["Last-Modified"] = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+
+proc buildFrameImageHeadResponse*(request: Request): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
+  ## HEAD /image: the GET's headers without encoding anything.
+  let (sceneId, _, _, lastUpdate) = getLastPublicState()
+  if shouldReturnNotModified(request.headers, lastUpdate):
+    var headers: mummy.HttpHeaders
+    headers["X-Scene-Id"] = $sceneId
+    addFrameSyncHeaders(headers)
+    return (Http304, headers, "")
+  (Http200, frameImageHeaders(sceneId, lastUpdate), "")
+
 proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
   let startedAt = epochTime()
   let logImageRequest = globalFrameConfig.debug
@@ -913,19 +1043,28 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
       })
     return (Http304, headers, "")
 
-  var headers: mummy.HttpHeaders
-  headers["Content-Type"] = "image/png"
-  headers["Content-Disposition"] = &"inline; filename=\"{sceneId}.png\""
-  headers["X-Scene-Id"] = $sceneId
-  addFrameSyncHeaders(headers)
-  if lastUpdate > 0.0:
-    let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
-    headers["Last-Modified"] = lastModified
+  var headers = frameImageHeaders(sceneId, lastUpdate)
+  let renderGeneration = driverRenderGenerationValue()
+  let cached = cachedFrameImagePng(renderGeneration)
+  if cached.hit:
+    if logImageRequest:
+      log(%*{
+        "event": "http:image",
+        "source": "cache:" & cached.source,
+        "status": int(Http200),
+        "sceneId": $sceneId,
+        "bytes": cached.png.len,
+        "ms": (epochTime() - startedAt) * 1000.0,
+        "processMemoryBefore": memoryBefore,
+        "processMemoryAfter": defaultProcessMemoryUsage(),
+      })
+    return (Http200, headers, cached.png)
   var driverPreview = "unknown"
   var driverPreviewError = ""
   try:
     let image = drivers.toPng(360 - globalFrameConfig.rotate, globalFrameConfig.flip)
     if image != "":
+      rememberFrameImagePng(renderGeneration, "driver", image)
       if logImageRequest:
         log(%*{
           "event": "http:image",
@@ -945,6 +1084,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
     driverPreviewError = e.msg
   try:
     let image = getLastImagePng()
+    rememberFrameImagePng(renderGeneration, "lastImage", image)
     if logImageRequest:
       var payload = %*{
         "event": "http:image",
