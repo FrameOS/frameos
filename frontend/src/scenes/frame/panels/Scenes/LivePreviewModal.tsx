@@ -27,6 +27,7 @@ import { previewSkipsNimMessage } from '../../../../utils/sceneExecution'
 import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import type { FrameId } from '../../../../types'
+import { openBlobInNewTab } from '../../../../utils/objectUrl'
 
 // Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
 // The preview's runtime lines are raw strings, so classify them by content.
@@ -60,11 +61,7 @@ export function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
       win?.close()
       return
     }
-    const url = URL.createObjectURL(blob)
-    if (win) {
-      win.location.href = url
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    openBlobInNewTab(blob, win)
   }, 'image/png')
 }
 

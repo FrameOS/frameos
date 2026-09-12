@@ -25,6 +25,7 @@ import { cloudDriveLogic } from './cloudDriveLogic'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { AppConfig, FrameOSSettings, FrameType } from '../../../../types'
 import { confirmDialog } from '../../../../utils/confirmDialogLogic'
+import { downloadBlob } from '../../../../utils/objectUrl'
 
 export interface TemplateLogicProps {
   frameId: FrameId
@@ -637,15 +638,7 @@ export const templatesLogic = kea<templatesLogicType>([
             throw new Error('Failed to create template')
           }
           if (target === 'zip') {
-            const blob = await response.blob()
-            const url = window.URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `${formValues.name}.zip`
-            document.body.appendChild(a)
-            a.click()
-            window.URL.revokeObjectURL(url)
-            document.body.removeChild(a)
+            downloadBlob(await response.blob(), `${formValues.name}.zip`)
           } else {
             actions.updateTemplate(await response.json())
           }

@@ -5,6 +5,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import clsx from 'clsx'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { terminalLogic } from './terminalLogic'
+import { downloadBlob } from '../../../../utils/objectUrl'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
 
 const terminalPalettes: Record<WorkspaceTheme, { foreground: readonly string[]; background: readonly string[] }> = {
@@ -125,15 +126,7 @@ export function Terminal() {
   const downloadTerminalLog = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
     const fileName = `frame-${frameId}-terminal-log-${timestamp}.log`
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    downloadBlob(new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }), fileName)
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

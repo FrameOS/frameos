@@ -1171,7 +1171,17 @@ export function SceneLivePreviewPanel({
         <div
           className={`live-preview__status${error ? " live-preview__status--error" : ""}`}
         >
-          {scenes === null ? "Loading the scene…" : previewGated ? "" : status}
+          <span>
+            {scenes === null ? "Loading the scene…" : previewGated ? "" : status}
+          </span>
+          {runtimeVersion ? (
+            <span
+              className="live-preview__runtime"
+              title="The FrameOS version this preview renders with. Frames render with their own firmware; a scene can look different on a frame running another version."
+            >
+              runtime {runtimeVersion}
+            </span>
+          ) : null}
         </div>
       </div>
       {error ? (
@@ -1332,16 +1342,7 @@ export function SceneLivePreviewPanel({
             of{" "}
             {formatMegabytes(
               deviceMemory.limitBytes - (deviceLimits?.previewOverheadBytes ?? 0)
-            )}{" "}
-            usable
-          </span>
-        ) : null}
-        {runtimeVersion ? (
-          <span
-            className="viewport-controls__hint"
-            title="The FrameOS version this preview renders with. Frames render with their own firmware; a scene can look different on a frame running another version."
-          >
-            runtime {runtimeVersion}
+            )}
           </span>
         ) : null}
       </div>

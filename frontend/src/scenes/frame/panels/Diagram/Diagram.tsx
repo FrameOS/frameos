@@ -26,6 +26,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
 } from 'react'
 import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
@@ -316,13 +317,13 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
     })
   }, [edges, selectedNodeIds])
 
-  const onDragOver = useCallback((event: any) => {
+  const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
   const onDrop = useCallback(
-    (event: any) => {
+    (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault()
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
       const reactFlowData = event.dataTransfer.getData('application/reactflow')

@@ -1,7 +1,7 @@
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { downloadJson } from '../../../../utils/downloadJson'
+import { downloadJson } from '../../../../utils/objectUrl'
 import { parseImportedFrameJson } from '../../../../utils/frameJsonImport'
 import { reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { frameHost } from '../../../../decorators/frame'

@@ -183,7 +183,7 @@ describe("SceneLivePreviewPanel memory limit", () => {
 
     // 9.98 MB of preview peak is 5.9 MB on the frame, under its 6.1 MB — the
     // numbers its own logs would show, not the preview's inflated ones.
-    expect(screen.getByText(/peak 5.9 MB of 6.1 MB usable/)).toBeTruthy();
+    expect(screen.getByText(/peak 5.9 MB of 6.1 MB$/)).toBeTruthy();
   });
 });
 

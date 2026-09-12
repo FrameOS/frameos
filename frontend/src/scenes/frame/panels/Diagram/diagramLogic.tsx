@@ -28,6 +28,7 @@ import {
   AppConfig,
   AppConfigField,
   AppNodeData,
+  NodeData,
   CodeNodeData,
   DiagramEdge,
   DiagramNode,
@@ -237,7 +238,15 @@ const snapshotOf = (values: {
  * control returns. The old `setTimeout(0)` reset left any edit in that tick
  * unrecorded (a Delete Node right after Cmd+Z had no history entry).
  */
-const withHistoryIgnored = (cache: Record<string, any>, fn: () => void): void => {
+/** What diagramLogic keeps on kea's per-logic `cache` between dispatches. */
+interface DiagramLogicCache {
+  ignoreHistory?: boolean
+  historyTimer?: number | null
+  pendingHistorySnapshot?: DiagramHistorySnapshot | null
+  hasAutoArranged?: boolean
+}
+
+const withHistoryIgnored = (cache: DiagramLogicCache, fn: () => void): void => {
   const previous = cache.ignoreHistory
   cache.ignoreHistory = true
   try {
@@ -257,7 +266,7 @@ const applyHistorySnapshot = (
     }
     values: { editingFrame: { scenes?: FrameScene[] } }
     props: { sceneId: string }
-    cache: Record<string, any>
+    cache: DiagramLogicCache
   },
   snapshot: DiagramHistorySnapshot
 ): void =>
@@ -310,7 +319,7 @@ const historySnapshotsEqual = (
 }
 
 const scheduleHistorySnapshot = (
-  cache: Record<string, any>,
+  cache: DiagramLogicCache,
   actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void },
   snapshot: DiagramHistorySnapshot,
   delayMs: number = HISTORY_DEBOUNCE_MS
@@ -328,7 +337,7 @@ const scheduleHistorySnapshot = (
 }
 
 const flushHistorySnapshot = (
-  cache: Record<string, any>,
+  cache: DiagramLogicCache,
   actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void }
 ): void => {
   if (!cache.historyTimer) {
@@ -344,7 +353,7 @@ const flushHistorySnapshot = (
 }
 
 const recordHistorySnapshot = (
-  cache: Record<string, any>,
+  cache: DiagramLogicCache,
   actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void },
   snapshot: DiagramHistorySnapshot
 ): void => {
@@ -897,7 +906,7 @@ export interface diagramLogicValues {
   editingFrame: Partial<FrameType>
   effectiveApps: Record<string, AppConfig>
   fitViewCounter: number
-  frameId: any
+  frameId: FrameId
   hasChanges: boolean
   history: DiagramHistoryState
   isCompiledScene: boolean
@@ -911,7 +920,7 @@ export interface diagramLogicValues {
   runtimeNodeErrorsByNodeId: Record<string, RuntimeNodeError>
   scene: FrameScene | null
   sceneApps: Record<string, SceneApp>
-  sceneId: any
+  sceneId: string
   sceneName: string
   sceneOptions: Option[]
   selectedEdge: DiagramEdge | null
@@ -1042,17 +1051,17 @@ export interface diagramLogicActions {
   updateNodeConfig: (
     id: string,
     field: string,
-    value: any
+    value: unknown
   ) => {
     field: string
     id: string
-    value: any
+    value: unknown
   }
   updateNodeData: (
     id: string,
-    data: Record<string, any>
+    data: Partial<NodeData>
   ) => {
-    data: Record<string, any>
+    data: Partial<NodeData>
     id: string
   }
 }
@@ -1072,11 +1081,11 @@ export interface diagramLogicMeta {
     ) => void | Promise<void>
   }
   __keaTypeGenInternalSelectorTypes: {
-    frameId: (arg: any) => any
-    sceneId: (arg: any) => any
-    originalFrame: (frames: Record<FrameId, FrameType>, frameId: any) => FrameType
+    frameId: (arg: any) => FrameId
+    sceneId: (arg: any) => string
+    originalFrame: (frames: Record<FrameId, FrameType>, frameId: FrameId) => FrameType
     editingFrame: (frameForm: Partial<FrameType>, originalFrame: FrameType) => Partial<FrameType>
-    scene: (editingFrame: Partial<FrameType>, sceneId: any) => FrameScene | null
+    scene: (editingFrame: Partial<FrameType>, sceneId: string) => FrameScene | null
     sceneName: (scene: FrameScene | null) => string
     isCompiledScene: (scene: FrameScene | null, editingFrame: Partial<FrameType>) => boolean
     sceneApps: (scene: FrameScene | null) => Record<string, SceneApp>
@@ -1095,7 +1104,7 @@ export interface diagramLogicMeta {
       nodes: DiagramNode[],
       edges: DiagramEdge[],
       sceneApps: Record<string, SceneApp>,
-      sceneId: any,
+      sceneId: string,
       originalFrame: FrameType
     ) => boolean
     nodesWithStyle: (nodes: DiagramNode[]) => DiagramNode[]
@@ -1104,7 +1113,7 @@ export interface diagramLogicMeta {
     runtimeNodeErrorsByNodeId: (
       logs: LogType[],
       editingFrame: Partial<FrameType>,
-      sceneId: any
+      sceneId: string
     ) => Record<string, RuntimeNodeError>
     canUndo: (history: DiagramHistoryState) => boolean
     canRedo: (history: DiagramHistoryState) => boolean
@@ -1143,9 +1152,9 @@ export const diagramLogic = kea<diagramLogicType>([
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
     setSceneApps: (apps: Record<string, SceneApp>, forceCompiled: boolean = false) => ({ apps, forceCompiled }),
     forkSceneApp: (nodeId: string) => ({ nodeId }),
-    updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
+    updateNodeData: (id: string, data: Partial<NodeData>) => ({ id, data }),
     updateEdge: (edge: DiagramEdge) => ({ edge }),
-    updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
+    updateNodeConfig: (id: string, field: string, value: unknown) => ({ id, field, value }),
     // One edit = one history entry. The picker used to setNodes, then
     // setEdges 200 ms later: two snapshots, and one Cmd+Z left a dangling node.
     setNodesAndEdges: (nodes: DiagramNode[], edges: DiagramEdge[]) => ({ nodes, edges }),
@@ -1280,11 +1289,11 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
   }),
   selectors({
-    frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
-    sceneId: [() => [(_, props) => props.sceneId], (sceneId) => sceneId],
+    frameId: [() => [(_, props) => props.frameId], (frameId: FrameId): FrameId => frameId],
+    sceneId: [() => [(_, props) => props.sceneId], (sceneId: string): string => sceneId],
     originalFrame: [
       (s) => [framesModel.selectors.frames, s.frameId],
-      (frames: Record<FrameId, FrameType>, frameId) => frames[frameId] || null,
+      (frames: Record<FrameId, FrameType>, frameId: diagramLogicValues['frameId']) => frames[frameId] || null,
     ],
     editingFrame: [
       (s) => [s.frameForm, s.originalFrame],
@@ -1293,7 +1302,7 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     scene: [
       (s) => [s.editingFrame, s.sceneId],
-      (editingFrame: diagramLogicValues['editingFrame'], sceneId) =>
+      (editingFrame: diagramLogicValues['editingFrame'], sceneId: diagramLogicValues['sceneId']) =>
         (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
     sceneName: [
@@ -1360,7 +1369,7 @@ export const diagramLogic = kea<diagramLogicType>([
         nodes: diagramLogicValues['nodes'],
         edges: diagramLogicValues['edges'],
         sceneApps: diagramLogicValues['sceneApps'],
-        sceneId,
+        sceneId: diagramLogicValues['sceneId'],
         originalFrame: diagramLogicValues['originalFrame']
       ) => {
         const scene = originalFrame?.scenes?.find((s) => s.id === sceneId)
@@ -1393,8 +1402,11 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     runtimeNodeErrorsByNodeId: [
       (s) => [s.logs, s.editingFrame, s.sceneId],
-      (logs: diagramLogicValues['logs'], editingFrame: diagramLogicValues['editingFrame'], sceneId) =>
-        runtimeNodeErrorsByNodeId(logs, editingFrame?.scenes ?? [], sceneId),
+      (
+        logs: diagramLogicValues['logs'],
+        editingFrame: diagramLogicValues['editingFrame'],
+        sceneId: diagramLogicValues['sceneId']
+      ) => runtimeNodeErrorsByNodeId(logs, editingFrame?.scenes ?? [], sceneId),
       { resultEqualityCheck: equal },
     ],
     canUndo: [(s) => [s.history], (history: diagramLogicValues['history']) => history.past.length > 1],

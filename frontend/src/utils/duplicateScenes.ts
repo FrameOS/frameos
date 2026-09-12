@@ -59,7 +59,7 @@ export function remapSceneIds(newScenes: FrameScene[], getNewSceneId: (id: strin
           const newConfig = { ...config }
           for (const field of frameEvent?.fields) {
             if (field.type === 'scene' && newConfig[field.name]) {
-              newConfig[field.name] = getNewSceneId(newConfig[field.name])
+              newConfig[field.name] = getNewSceneId(String(newConfig[field.name]))
             }
           }
           return { ...node, data: { ...data, config: newConfig } }
@@ -74,7 +74,7 @@ export function remapSceneIds(newScenes: FrameScene[], getNewSceneId: (id: strin
               const newConfig = { ...data.config }
               for (const field of configSource.fields) {
                 if ('type' in field && field.type === 'scene' && newConfig[field.name]) {
-                  newConfig[field.name] = getNewSceneId(newConfig[field.name])
+                  newConfig[field.name] = getNewSceneId(String(newConfig[field.name]))
                 }
               }
               const newConfigFields = configSource.fields.map((field) => {

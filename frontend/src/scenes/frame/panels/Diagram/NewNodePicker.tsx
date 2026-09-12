@@ -33,7 +33,7 @@ export function NewNodePicker() {
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, {
     strategy: 'fixed',
-    placement: placement as any,
+    placement,
   })
 
   useEffect(() => {

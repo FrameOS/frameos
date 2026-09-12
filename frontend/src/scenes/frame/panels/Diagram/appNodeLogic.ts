@@ -4,6 +4,7 @@ import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
 import {
   AppConfig,
+  AppNodeData,
   CodeNodeData,
   AppConfigField,
   DiagramNode,
@@ -31,6 +32,7 @@ import { frameEventForScene } from '../../../../utils/frameEvents'
 import type { RuntimeNodeError } from '../../../../utils/frameRuntimeErrors'
 import type { FrameType } from '../../../../types'
 import type { CodeNodeLanguage } from './diagramLogic'
+import type { NodeData } from '../../../../types'
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
   nodeId: string
@@ -47,7 +49,7 @@ export interface appNodeLogicValues {
   runtimeNodeErrorsByNodeId: Record<string, RuntimeNodeError> // diagramLogic
   frameForm: Partial<FrameType> // frameLogic
   scenes: FrameScene[] // frameLogic
-  allDefaultValues: Record<string, any>
+  allDefaultValues: Record<string, unknown>
   allFields: (AppConfigField | MarkdownField)[] | null
   app: AppConfig | null
   appMenuEditLabel: string
@@ -73,7 +75,7 @@ export interface appNodeLogicValues {
   isStateNode: boolean
   name: string
   node: DiagramNode | null
-  nodeConfig: Record<string, any>
+  nodeConfig: AppNodeData['config']
   nodeEdges: DiagramEdge[]
   nodeId: string
   nodeOutputFields: string[]
@@ -83,7 +85,7 @@ export interface appNodeLogicValues {
   sceneIsCompiled: boolean
   showNextPrev: boolean
   showOutput: boolean
-  sourceConfigJson: [Record<string, any> | null, string | Error | null]
+  sourceConfigJson: [Partial<AppConfig> | null, string | Error | null]
   sources: Record<string, string> | null
   stateFieldTitle: string | null
   stateFieldType: FieldType
@@ -108,9 +110,9 @@ export interface appNodeLogicActions {
   } // diagramLogic
   updateNodeData: (
     id: string,
-    data: Record<string, any>
+    data: Partial<NodeData>
   ) => {
-    data: Record<string, any>
+    data: Partial<NodeData>
     id: string
   } // diagramLogic
   deleteCodeField: (field: string) => {
@@ -128,7 +130,7 @@ export interface appNodeLogicMeta {
     nodeId: (arg: any) => string
     node: (nodes: DiagramNode[], nodeId: string) => DiagramNode | null
     nodeEdges: (edges: DiagramEdge[], nodeId: string) => DiagramEdge[]
-    nodeConfig: (node: DiagramNode | null) => Record<string, any>
+    nodeConfig: (node: DiagramNode | null) => AppNodeData['config']
     codeArgs: (nodeEdges: DiagramEdge[], nodeId: string) => string[]
     fieldInputFields: (nodeEdges: DiagramEdge[], nodeId: string) => string[]
     nodeOutputFields: (nodeEdges: DiagramEdge[], nodeId: string) => string[]
@@ -138,9 +140,9 @@ export interface appNodeLogicMeta {
       nodeId: string
     ) => RuntimeNodeError | null
     sources: (currentScene: FrameScene | null, node: DiagramNode | null) => Record<string, string> | null
-    sourceConfigJson: (sources: Record<string, string> | null) => [Record<string, any> | null, string | Error | null]
+    sourceConfigJson: (sources: Record<string, string> | null) => [Partial<AppConfig> | null, string | Error | null]
     configJsonError: (
-      sourceConfigJson: [Record<string, any> | null, string | Error | null],
+      sourceConfigJson: [Partial<AppConfig> | null, string | Error | null],
       sources: Record<string, string> | null
     ) => string | null
     app: (
@@ -167,7 +169,7 @@ export interface appNodeLogicMeta {
     appMenuEditLabel: (isNimAppInInterpretedScene: boolean) => string
     configJson: (
       app: AppConfig | null,
-      sourceConfigJson: [Record<string, any> | null, string | Error | null]
+      sourceConfigJson: [Partial<AppConfig> | null, string | Error | null]
     ) => AppConfig | null
     allFields: (
       app: AppConfig | null,
@@ -175,9 +177,9 @@ export interface appNodeLogicMeta {
       scene: FrameScene | null,
       currentScene: FrameScene | null,
       configJson: AppConfig | null,
-      nodeConfig: Record<string, any>
+      nodeConfig: Record<string, unknown>
     ) => (AppConfigField | MarkdownField)[] | null
-    allDefaultValues: (allFields: (AppConfigField | MarkdownField)[] | null) => Record<string, any>
+    allDefaultValues: (allFields: (AppConfigField | MarkdownField)[] | null) => Record<string, unknown>
     output: (configJson: AppConfig | null) => OutputField[] | null
     name: (
       app: AppConfig | null,
@@ -200,8 +202,8 @@ export interface appNodeLogicMeta {
       allFields: (AppConfigField | MarkdownField)[] | null,
       showOutput: boolean,
       showNextPrev: boolean,
-      nodeConfig: Record<string, any>,
-      allDefaultValues: Record<string, any>,
+      nodeConfig: Record<string, unknown>,
+      allDefaultValues: Record<string, unknown>,
       fieldInputFields: string[],
       nodeOutputFields: string[],
       event: AppConfig | null,
@@ -252,7 +254,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     nodeConfig: [
       (s) => [s.node],
-      (node: appNodeLogicValues['node']): Record<string, any> =>
+      (node: appNodeLogicValues['node']): AppNodeData['config'] =>
         node && 'config' in node?.data ? node?.data.config ?? {} : {},
       { resultEqualityCheck: equal },
     ],
@@ -317,14 +319,14 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     sourceConfigJson: [
       (s) => [s.sources],
-      (sources: appNodeLogicValues['sources']): [Record<string, any> | null, Error | string | null] => {
+      (sources: appNodeLogicValues['sources']): [Partial<AppConfig> | null, Error | string | null] => {
         try {
           if (sources) {
             const json = sources['config.json']
             if (json) {
-              const config = JSON.parse(json)
-              if (typeof config === 'object') {
-                return [config, null]
+              const config: unknown = JSON.parse(json)
+              if (config && typeof config === 'object' && !Array.isArray(config)) {
+                return [config as Partial<AppConfig>, null]
               }
             }
           }
@@ -462,8 +464,8 @@ export const appNodeLogic = kea<appNodeLogicType>([
           if ('seq' in field && Array.isArray(field.seq)) {
             let seqs: [string, number[]][] = []
             for (const [name, _min, _max] of field.seq) {
-              let min = typeof _min === 'number' ? _min : parseInt(nodeConfig[_min] ?? '1')
-              let max = typeof _max === 'number' ? _max : parseInt(nodeConfig[_max] ?? '1')
+              let min = typeof _min === 'number' ? _min : parseInt(String(nodeConfig[_min] ?? '1'))
+              let max = typeof _max === 'number' ? _max : parseInt(String(nodeConfig[_max] ?? '1'))
               let numbers = []
               for (let i = min; i <= max; i++) {
                 numbers.push(i)
@@ -508,14 +510,14 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     allDefaultValues: [
       (s) => [s.allFields],
-      (fields: appNodeLogicValues['allFields']): Record<string, any> => {
+      (fields: appNodeLogicValues['allFields']): Record<string, unknown> => {
         return (
           fields?.reduce((acc, field) => {
             if ('value' in field && 'name' in field) {
               acc[field.name] = field.value
             }
             return acc
-          }, {} as Record<string, any>) ?? {}
+          }, {} as Record<string, unknown>) ?? {}
         )
       },
     ],

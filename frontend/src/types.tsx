@@ -619,7 +619,16 @@ export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (v
   fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
 export type ConfigFieldConditionOperator =
-  'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte' | 'empty' | 'notEmpty' | 'in' | 'notIn'
+  | 'eq'
+  | 'ne'
+  | 'gt'
+  | 'lt'
+  | 'gte'
+  | 'lte'
+  | 'empty'
+  | 'notEmpty'
+  | 'in'
+  | 'notIn'
 
 export interface ConfigFieldCondition {
   field: string | '.meta.showOutput' | '.meta.showNextPrev'
@@ -817,7 +826,7 @@ export type EdgeType = 'appNodeEdge' | 'codeNodeEdge'
 export interface AppNodeData {
   keyword: string
   name?: string
-  config: Record<string, any>
+  config: Record<string, unknown>
   sources?: Record<string, string>
   cache?: CacheConfig
 }
@@ -842,7 +851,7 @@ export interface StateNodeData {
 
 export interface EventNodeData {
   keyword: string
-  config?: Record<string, any>
+  config?: Record<string, unknown>
 }
 
 export interface ButtonEventNodeData extends EventNodeData {
@@ -852,12 +861,12 @@ export interface ButtonEventNodeData extends EventNodeData {
 
 export interface DispatchNodeData {
   keyword: string
-  config: Record<string, any>
+  config: Record<string, unknown>
 }
 
 export interface SceneNodeData {
   keyword: string
-  config: Record<string, any>
+  config: Record<string, unknown>
 }
 
 export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData | SceneNodeData
