@@ -2,7 +2,7 @@
   "name": "Recycling Calendar for Belgium",
   "description": "Return a JSON event list of trash pickup dates",
   "category": "data",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "fields": [
     {
       "label": "Street name",
@@ -64,15 +64,6 @@
       "value": "en",
       "placeholder": "",
       "required": true
-    },
-    {
-      "label": "x-secret value",
-      "name": "xSecret",
-      "type": "string",
-      "value": "",
-      "placeholder": "",
-      "required": false,
-      "hint": "In case the default value stops working, open recycleapp.be, and copy the value of the x-secret header sent to `/v1/access-token`."
     },
     {
       "markdown": "[{ summary, startTime, endTime, timezone }]"

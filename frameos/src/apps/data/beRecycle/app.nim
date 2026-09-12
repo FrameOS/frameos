@@ -9,10 +9,12 @@ import frameos/apps
 import frameos/types
 import frameos/utils/http_client
 
-const API_ENDPOINT = "https://api.fostplus.be/recycle-public/app/v1"
+# FostPlus/RecycleApp.be replaced the old recycle-public/app API (which gated every
+# call behind a rotating, scraped `x-secret`) with this recyclecms public API. It needs
+# no token exchange at all — a single `x-consumer` header is enough. No secret to ship.
+const API_ENDPOINT = "https://api.fostplus.be/recyclecms/public/v1"
 const USER_AGENT = "Mozilla/5.0"
 const X_CONSUMER = "recycleapp.be"
-const X_SECRET = "Op2tDi2pBmh1wzeC5TaN2U3knZan7ATcfOQgxh4vqC0mDKmnPP2qzoQusmInpglfIkxx8SZrasBqi5zgMSvyHggK9j6xCQNQ8xwPFY2o03GCcQfcXVOyKsvGWLze7iwcfcgk2Ujpl0dmrt3hSJMCDqzAlvTrsvAEiaSzC9hKRwhijQAFHuFIhJssnHtDSB76vnFQeTCCvwVB27DjSVpDmq8fWQKEmjEncdLqIsRnfxLcOjGIVwX5V0LBntVbeiBvcjyKF2nQ08rIxqHHGXNJ6SbnAmTgsPTg7k6Ejqa7dVfTmGtEPdftezDbuEc8DdK66KDecqnxwOOPSJIN0zaJ6k2Ye2tgMSxxf16gxAmaOUqHS0i7dtG5PgPSINti3qlDdw6DTKEPni7X0rxM"
 
 type
   BeRecycleAuthenticateHook* = proc(self: App)
@@ -26,12 +28,10 @@ type
     streetName*: string
     number*: int
     postalCode*: int
-    xSecret*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
     headers: seq[SimpleHttpHeader]
-    expiresAt: string
 
   AddressIds = object
     zip: string
@@ -59,7 +59,7 @@ proc collectionsUrl*(zipId: string, streetId: string, houseNumber: int,
     "&streetId=" & queryParam(streetId) &
     "&houseNumber=" & queryParam($houseNumber) &
     "&fromDate=" & queryParam(fromDate) &
-    "&untilDate=" & queryParam(toDate) & "&size=200"
+    "&untilDate=" & queryParam(toDate) & "&size=100"
 
 proc fetchBody(self: App, url: string, httpMethod = "GET", body = ""): string =
   let response = boundedRequestWithHeaders(url,
@@ -72,20 +72,12 @@ proc fetchBody(self: App, url: string, httpMethod = "GET", body = ""): string =
   response.body
 
 proc authenticate(self: App) =
+  ## The recyclecms public API has no token exchange: the `x-consumer` header alone
+  ## authorises every call. This just attaches the headers reused by later requests.
   self.headers = @[
     (name: "User-Agent", value: USER_AGENT),
     (name: "x-consumer", value: X_CONSUMER),
-    (name: "x-secret", value: if self.appConfig.xSecret != "": self.appConfig.xSecret else: X_SECRET),
   ]
-  let url = API_ENDPOINT & "/access-token"
-  let atResp = self.fetchBody(url)
-  let atRespJson = parseJson(atResp)
-  if atRespJson.hasKey("accessToken"):
-    self.headers.add((name: "Authorization", value: atRespJson["accessToken"].getStr()))
-    # TODO: refetch if expired
-    self.expiresAt = atRespJson["expiresAt"].getStr()
-  else:
-    raise newException(ValueError, "Error occurred while requesting access-token.")
 
 proc fetchAddressIds(self: App): AddressIds =
   let url = zipcodesUrl(self.appConfig.postalCode)
@@ -102,7 +94,7 @@ proc fetchAddressIds(self: App): AddressIds =
     raise newException(ValueError, "Could not find the right zip code.")
 
   let streetUrl = streetsUrl(self.appConfig.streetName, zipId)
-  let streetResp = self.fetchBody(streetUrl, httpMethod = "POST")
+  let streetResp = self.fetchBody(streetUrl)
   let streetJson = parseJson(streetResp)
   var streetId = ""
 
@@ -149,7 +141,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   let startDay = startTs.format("{year/4}-{month/2}-{day/2}", timezone)
   let endDay = endTs.format("{year/4}-{month/2}-{day/2}", timezone)
 
-  self.log("Authenticating...")
+  self.log("Preparing request headers...")
   if beRecycleAuthenticateHook == nil:
     self.authenticate()
   else:
