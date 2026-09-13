@@ -1293,7 +1293,9 @@ function SceneControlPanelContent({
  * The drawer for the built-in status screen (`system/index`): a picture of
  * it as it would render now, and Activate. No editor, no fields, no delete —
  * the screen lives in the runtime binary, so there is nothing to edit or
- * remove. Listed on every surface (FrameStatusScreenTile).
+ * remove. No tile opens this any more — the frame's actions menu renders the
+ * status screen outright (framesModel.renderStatusScreen); this is what a
+ * restored `?drawer=scene&sceneId=system/index` still lands on.
  */
 function StatusScreenControlPanel({
   frame,
