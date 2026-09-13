@@ -1293,7 +1293,7 @@ function SceneControlPanelContent({
  * The drawer for the built-in status screen (`system/index`): a picture of
  * it as it would render now, and Activate. No editor, no fields, no delete —
  * the screen lives in the runtime binary, so there is nothing to edit or
- * remove. Only the on-device panel lists it (FrameStatusScreenTile).
+ * remove. Listed on every surface (FrameStatusScreenTile).
  */
 function StatusScreenControlPanel({
   frame,
@@ -1349,8 +1349,8 @@ function StatusScreenControlPanel({
             {active ? <FrameImageOverlayControls frame={frame} sceneId={STATUS_SCREEN_SCENE_ID} /> : null}
           </div>
           <p className="frameos-muted mb-4 text-sm leading-6 text-slate-600">
-            The screen every frame ships with: its name, address, the installed scenes and the FrameOS Cloud link code.
-            It is part of the runtime and cannot be removed — activate it to check the frame is alive and reachable.
+            Every frame has this screen. It shows the frame&apos;s name, address, installed scenes and cloud link code.
+            You can activate it to check the frame is alive, but you cannot remove it.
           </p>
           <SceneControlPanelModeTitle />
           <button

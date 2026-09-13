@@ -548,6 +548,23 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       queueRuntimeControl(request, "restart", "restart")
   )
 
+  # The backend reaches a shell-less frame's reboot through POST
+  # /event/reboot (tasks/restart_frame.py `_shell_less_control_event`); this
+  # is the same verb under the name the SPA already calls on the backend, so
+  # the frame's own admin page can offer "Reboot device" with no special
+  # case. The runner logs the line and then hands the reboot to the
+  # privileged door, so the response goes out first.
+  router.post("/api/frames/@id/reboot", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+        return
+      queueRuntimeControl(request, "reboot", "reboot")
+  )
+
   router.post("/api/frames/@id/upload_scenes", proc(request: Request) {.gcsafe.} =
     if not hasAdminAccess(request):
       request.respond(Http401, body = "Unauthorized")

@@ -48,6 +48,15 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// A catch-all segment, because the frame's built-in status screen is
+// `system/index` — a scene id with a slash in it. A single [sceneId] matched
+// one segment and 404'd on it, which is what broke the status screen tile the
+// moment it was listed outside the on-device panel (2026-09-13). Every other
+// scene id is one segment and joins back to itself.
+function sceneSegmentsToId(segments: string[] | undefined): string {
+  return (segments ?? []).join("/");
+}
+
 function imageResponse(content: Buffer, contentType: string, maxAge: number) {
   return new NextResponse(new Uint8Array(content), {
     headers: {
@@ -85,7 +94,7 @@ const coverBrowserMaxAge = 300;
 // are, by construction, content the account put there.
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ frameId: string; sceneId: string }> },
+  { params }: { params: Promise<{ frameId: string; sceneId: string[] }> },
 ) {
   const limited = await rateLimitResponse(request, "frames:scene_image", {
     limit: 600,
@@ -102,7 +111,8 @@ export async function GET(
   if (!db) {
     return response;
   }
-  const { frameId, sceneId } = await params;
+  const { frameId, sceneId: sceneIdSegments } = await params;
+  const sceneId = sceneSegmentsToId(sceneIdSegments);
   const frame = await frameForAccount(db, session.accountId, frameId);
   if (!frame) {
     return jsonError("invalid_frame", 404);
@@ -221,7 +231,7 @@ export async function GET(
 // of posts under made-up ids can never evict the device's real snapshots.
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ frameId: string; sceneId: string }> },
+  { params }: { params: Promise<{ frameId: string; sceneId: string[] }> },
 ) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -242,7 +252,8 @@ export async function POST(
   if (!db) {
     return response;
   }
-  const { frameId, sceneId } = await params;
+  const { frameId, sceneId: sceneIdSegments } = await params;
+  const sceneId = sceneSegmentsToId(sceneIdSegments);
   const frame = await frameForAccount(db, session.accountId, frameId);
   if (!frame) {
     return jsonError("invalid_frame", 404);

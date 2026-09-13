@@ -271,8 +271,10 @@ test.describe('on-frame admin UI @e2e', () => {
     await page.goto(`${FRAME_ORIGIN}/admin?tool=settings`, { waitUntil: 'domcontentloaded' })
 
     // The question the box used to leave unanswered: the link is live, but
-    // nothing on the cloud drives this frame yet.
+    // nothing on the cloud drives this frame yet. The tag is the answer at a
+    // glance; the sentence moved behind the (i) when the box was slimmed down.
     await expect(page.getByText('Linked, not managed')).toBeVisible()
+    await page.getByRole('button', { name: 'What this cloud status means' }).click()
     await expect(page.getByText(/Nothing on cloud\.frameos\.net can change what this frame shows/)).toBeVisible()
 
     // Both features are switches, so neither can turn itself on unannounced.
@@ -292,6 +294,7 @@ test.describe('on-frame admin UI @e2e', () => {
 
     await page.goto(`${FRAME_ORIGIN}/admin?tool=settings`, { waitUntil: 'domcontentloaded' })
     await expect(page.getByText('Managed from the cloud')).toBeVisible()
+    await page.getByRole('button', { name: 'What this cloud status means' }).click()
     await expect(page.getByText(/This frame answers to cloud\.frameos\.net/)).toBeVisible()
 
     expectNoFrameAdminErrors(readErrors)

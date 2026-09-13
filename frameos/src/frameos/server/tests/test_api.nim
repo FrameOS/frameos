@@ -298,6 +298,29 @@ suite "a settings change is classified by what it takes to apply":
       %*{"httpsProxy": {"serverCert": "c", "serverKey": "b"}}).listeners
     check not classifyFrameConfigChange(%*{"httpsProxy": {"enable": true}}, %*{"httpsProxy": {"enable": true}}).listeners
 
+  test "the API spelling of deviceConfig is not a restart on its own":
+    # A frame set up through the portal has no `deviceConfig` in frame.json,
+    # so apiDeviceConfig serves the TYPED one — renaming httpUploadUrl to
+    # uploadUrl and dropping the -1 "driver default" pins. The SPA posts that
+    # back, and the very first save used to restart the runtime for a
+    # difference that means nothing to any driver (2026-09-13 bench).
+    let runtimeSpelling = %*{"deviceConfig": {
+      "vcom": 0.0, "partial": false, "httpUploadUrl": "", "httpUploadHeaders": [],
+      "pins": {"rst": -1, "dc": -1, "cs": -1, "busy": -1}}}
+    let apiSpelling = %*{"deviceConfig": {
+      "vcom": 0.0, "partial": false, "uploadUrl": "", "uploadHeaders": []}}
+    let change = classifyFrameConfigChange(runtimeSpelling, apiSpelling)
+    check not change.restart
+    check not change.any
+
+    # A pin someone actually chose is still a change, and still a restart.
+    let withPin = %*{"deviceConfig": {
+      "vcom": 0.0, "partial": false, "uploadUrl": "", "uploadHeaders": [], "pins": {"rst": 17}}}
+    check classifyFrameConfigChange(runtimeSpelling, withPin).restart
+    # And so is a value that differs under either spelling.
+    check classifyFrameConfigChange(runtimeSpelling,
+      %*{"deviceConfig": {"vcom": 0.0, "partial": true, "uploadUrl": "", "uploadHeaders": []}}).restart
+
   test "driver-init keys and the network block need a restart":
     for key in ["device", "deviceConfig", "gpioButtons", "palette", "width", "height", "network"]:
       let change = classifyFrameConfigChange(%*{key: "before"}, %*{key: "after"})
@@ -331,10 +354,22 @@ suite "a save that moves the frame to another backend says so":
     check rePorted != nil
     check rePorted["server"].getStr() == "https://10.0.0.5:8443"
 
-  test "a frame that had no backend, or is losing its address, moves nowhere":
+  test "a frame that had no backend moves nowhere":
     check backendChangeNotice(%*{}, %*{"serverHost": "10.0.0.9", "serverPort": 8989}) == nil
     check backendChangeNotice(%*{"serverHost": "", "serverPort": 8989}, %*{"serverHost": "10.0.0.9", "serverPort": 8989}) == nil
-    check backendChangeNotice(%*{"serverHost": "10.0.0.5", "serverPort": 8989}, %*{"serverHost": "", "serverPort": 0}) == nil
+
+  test "clearing the address detaches, and the backend being left is told":
+    # The disconnect used to be the one move that said nothing: the backend
+    # kept the frame, stopped hearing from it, and offered a frame.json merge
+    # for its own address instead (2026-09-13 bench).
+    let detached = backendChangeNotice(%*{"serverHost": "10.0.0.5", "serverPort": 8989},
+      %*{"serverHost": "", "serverPort": 0})
+    check detached != nil
+    check detached["event"].getStr() == "server:detached"
+    check detached["previousServer"].getStr() == "http://10.0.0.5:8989"
+    check detached["server"].getStr() == ""
+    check detached["message"].getStr().contains("no longer managed by any server")
+    check detached["message"].getStr().contains("http://10.0.0.5:8989")
 
   test "the notice cannot be delivered without an address, and a dead one does not throw":
     check notifyPreviousBackend(%*{}, %*{"event": "server:changed"}) == 0

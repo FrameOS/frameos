@@ -23,6 +23,7 @@ import frameos/utils/time
 import frameos/scenes
 import frameos/boot_guard
 import frameos/runtime_diagnostics
+from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
 import frameos/utils/memory
 import frameos/watchdog
 
@@ -607,6 +608,13 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
   # keeps this queue non-empty forever — so after a burst the loop yields even
   # though more is queued, and a frame under such a scene still refreshes.
   var handledSinceYield = 0
+  # The detached `frameos upgrade` child reports only through its status file.
+  # Following it here means every surface that reads the frame log sees the
+  # upgrade happen — the frame's own admin page included, which before this
+  # showed a spinner and then silence.
+  var (upgradeWatcher, upgradeReplay) = initUpgradeLogWatcher(epochTime())
+  if upgradeReplay != nil:
+    self.logSignal(upgradeReplay)
 
   while true:
     # Heartbeat for systemd's WatchdogSec: stops when this thread hangs in a
@@ -749,6 +757,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
       let droppedEvents = eventsDroppedCounter.exchange(0)
       if droppedEvents > 0:
         self.logSignal(%*{"event": "events:dropped", "count": droppedEvents})
+      let upgradeLine = upgradeWatcher.poll(epochTime())
+      if upgradeLine != nil:
+        self.logSignal(upgradeLine)
       if self.triggerRenderNext and not self.isRendering:
         self.triggerRender()
         await sleepAsync(1)

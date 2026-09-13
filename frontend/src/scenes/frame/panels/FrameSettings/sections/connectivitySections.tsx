@@ -11,6 +11,7 @@ import { SshKeysSection } from '../../../../../components/sshKeys/SshKeysSection
 import { Switch } from '../../../../../components/Switch'
 import { TextArea } from '../../../../../components/TextArea'
 import { TextInput } from '../../../../../components/TextInput'
+import { Tooltip } from '../../../../../components/Tooltip'
 import { secureToken } from '../../../../../utils/secureToken'
 import { useFrameSettings } from '../frameSettingsContext'
 import { getCertificateHint } from '../frameSettingsHelpers'
@@ -499,21 +500,43 @@ export function FrameAdminPanelSection(): JSX.Element {
   return (
     <>
       <SectionHeading id="frame-settings-admin">
-        {isEmbeddedMode ? 'Frame setup access' : 'Frame admin panel (BETA)'}
-      </SectionHeading>
-      <p className="pl-2 @md:pl-8 text-sm text-gray-500">
         {isEmbeddedMode ? (
-          <>
-            Protects the ESP32 setup and control URL on normal Wi-Fi. Hotspot provisioning stays open so a new device
-            can be configured.
-          </>
+          'Frame setup access'
         ) : (
           <>
-            Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. Saving there
-            applies the change on the frame right away.{' '}
+            Frame admin panel
+            <Tooltip
+              label="About the frame admin panel"
+              title={
+                <div className="space-y-2">
+                  <p>
+                    The frame hosts its own copy of this interface at <code>/admin</code>. Saving there applies the
+                    change on the frame right away.
+                  </p>
+                  {adminUrl ? (
+                    <p>
+                      <A
+                        href={adminUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="frameos-link break-all hover:underline"
+                      >
+                        {adminUrl}
+                      </A>
+                    </p>
+                  ) : null}
+                </div>
+              }
+            />
           </>
         )}
-      </p>
+      </SectionHeading>
+      {isEmbeddedMode ? (
+        <p className="pl-2 @md:pl-8 text-sm text-gray-500">
+          Protects the ESP32 setup and control URL on normal Wi-Fi. Hotspot provisioning stays open so a new device can
+          be configured.
+        </p>
+      ) : null}
       <SectionBody>
         {embeddedAdminAuthMissing ? (
           <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
@@ -667,7 +690,7 @@ export function HttpsProxySection(): JSX.Element {
                   frame.https_proxy?.client_ca_cert_not_valid_after
               )}
             >
-              <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              <TextArea name="https_proxy.certs.client_ca" rows={3} placeholder="-----BEGIN CERTIFICATE-----" />
             </Field>
             <Field
               name="https_proxy.certs.server"
@@ -679,7 +702,7 @@ export function HttpsProxySection(): JSX.Element {
                 frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
               )}
             >
-              <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              <TextArea name="https_proxy.certs.server" rows={3} placeholder="-----BEGIN CERTIFICATE-----" />
             </Field>
 
             <Field
@@ -688,7 +711,7 @@ export function HttpsProxySection(): JSX.Element {
               tooltip="PEM private key for the certificate above. It stays in the frame's config and is never written to a separate file. Keep this secret."
               secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
             >
-              <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN EC PRIVATE KEY-----" />
+              <TextArea name="https_proxy.certs.server_key" rows={3} placeholder="-----BEGIN EC PRIVATE KEY-----" />
             </Field>
           </>
         ) : null}

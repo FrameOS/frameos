@@ -1,10 +1,23 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
-import { useCallback, useRef, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 
 /** How tall the prompt is allowed to grow before it scrolls instead. */
 const MAX_ROWS = 10;
+
+/**
+ * Below this the placeholder does not fit on one line, and a single-row box
+ * shows a truncated half-sentence with no hint of what to type.
+ */
+const NARROW_VIEWPORT_PX = 640;
+
+function minPromptRows(): number {
+  if (typeof window === "undefined") {
+    return 1;
+  }
+  return window.innerWidth < NARROW_VIEWPORT_PX ? 2 : 1;
+}
 
 // A quiet prompt box for the store front and "My scenes": describe a scene,
 // land in the new-scene editor with the AI already working on it
@@ -43,10 +56,26 @@ export function CreateSceneWithAiBox({
       Number.parseFloat(styles.borderBottomWidth);
     textarea.style.height = "0px";
     const wanted = textarea.scrollHeight - chrome;
-    const rows = Math.min(MAX_ROWS, Math.max(1, Math.round(wanted / lineHeight)));
+    const rows = Math.min(MAX_ROWS, Math.max(minPromptRows(), Math.round(wanted / lineHeight)));
     textarea.style.height = `${rows * lineHeight + chrome}px`;
     textarea.style.overflowY = rows < MAX_ROWS ? "hidden" : "auto";
   }, []);
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const attach = useCallback(
+    (textarea: HTMLTextAreaElement | null) => {
+      textareaRef.current = textarea;
+      resize(textarea);
+    },
+    [resize],
+  );
+
+  // Rotating a phone crosses the breakpoint; the box has to follow.
+  useEffect(() => {
+    const onResize = () => resize(textareaRef.current);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [resize]);
 
   // Enter sends the prompt (it is a form field, not a document); Shift+Enter
   // is the newline. `isComposing` keeps an IME's Enter out of it.
@@ -90,7 +119,7 @@ export function CreateSceneWithAiBox({
           placeholder="A clock with today's weather for Berlin, big text on dark green…"
           // Sized on mount too: the browser may restore a typed value on a
           // back-navigation, and ?prompt= round-trips through this field.
-          ref={resize}
+          ref={attach}
           required
           rows={1}
         />

@@ -52,6 +52,7 @@ import {
   sceneChildExpansionKey,
   sceneChildExpansionPath,
   sceneDependencyGroupingIsEnabled,
+  statusScreenIsShown,
   workspaceLogic,
 } from './workspaceLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
@@ -604,9 +605,9 @@ function FrameSceneTile({
  * The built-in status screen as the first tile on the on-device panel. It is
  * a real scene the runtime can show (`system/index`) with a real picture
  * (the device renders it on request), but it lives in the binary, not in
- * scenes.json: no menu, no drag, nothing to delete. Only the device lists it
- * — a backend or cloud workspace manages what it installed, and the status
- * screen was never installed.
+ * scenes.json: no menu, no drag, nothing to delete. Listed on every surface
+ * (the device draws it on request wherever the ask comes from), behind the
+ * "Show status screen" switch in the scene list's display menu.
  */
 function FrameStatusScreenTile({
   frame,
@@ -789,7 +790,17 @@ function FrameScenesBlock({
     !searchIsActive ||
     STATUS_SCREEN_SCENE_NAME.toLowerCase().includes(search.trim().toLowerCase()) ||
     STATUS_SCREEN_SCENE_ID.includes(search.trim().toLowerCase())
-  const showStatusScreenTile = workspaceMode() === 'frameAdmin' && !multiSelectEnabled && statusScreenMatchesSearch
+  // Every Linux frame draws this scene on request, so every surface can put it
+  // on the panel — until 2026-09-13 only the on-device page listed it, and from
+  // a backend or the cloud there was no way to show it at all. The ESP32
+  // firmware draws its own boot screen in C and has no `system/index`.
+  // Off-switch: "Show status screen" in the list's display menu.
+  const frameHasStatusScreen = (frame.mode ?? 'rpios') !== 'embedded'
+  const showStatusScreenTile =
+    frameHasStatusScreen &&
+    statusScreenIsShown(frameAssetFolderExpansion, frame.id, 'overview') &&
+    !multiSelectEnabled &&
+    statusScreenMatchesSearch
   const statusScreenTile = showStatusScreenTile ? (
     <FrameStatusScreenTile
       frame={frame}
@@ -891,6 +902,7 @@ function FrameScenesBlock({
           frameId={frame.id}
           surface="overview"
           multiSelect={{ enabled: multiSelectEnabled, onToggle: setMultiSelect }}
+          statusScreen={frameHasStatusScreen}
         />
         {multiSelectEnabled ? (
           <>
