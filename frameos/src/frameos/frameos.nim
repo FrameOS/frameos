@@ -5,6 +5,7 @@ import drivers/drivers as drivers
 import frameos/apps
 import frameos/config
 import frameos/display_detect
+import frameos/input_sources
 import frameos/logger
 import frameos/metrics
 import frameos/runner
@@ -150,11 +151,19 @@ var bootCanvas: Image = nil
 proc bootScreenSupported*(frameConfig: FrameConfig): bool =
   frameConfig.device in bootScreenDevices
 
+# Drivers that deliver input events rather than pixels. The status screen
+# names them (system/index, the "Inputs" row) so that whoever is standing in
+# front of the frame can see what is meant to drive it.
+const inputDriverNames = ["evdev", "gpioButton"]
+
 proc initDriversOnce(self: FrameOS) =
   if driversInitialized:
     return
   driversInitialized = true
   drivers.init(self)
+  for name in drivers.availableDriverNames():
+    if name in inputDriverNames:
+      noteInputSource(name)
   # A driver that probed the panel (framebuffer, HyperPixel) has overwritten
   # width/height in memory; make frame.json and the cloud's hardware report
   # say the same thing.

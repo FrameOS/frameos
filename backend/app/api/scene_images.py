@@ -105,7 +105,12 @@ def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
         return buf.read(), new_width, new_height
 
 
-@api_open.get("/projects/{project_id}/frames/{frame_id}/scene_images/{scene_id}")
+# `:path` because the frame's built-in status screen is `system/index`, a scene
+# id with a slash in it: a plain {scene_id} matches one segment and 404s on it,
+# which is what broke the tile the moment it was listed outside the on-device
+# panel (2026-09-13). Nothing longer lives under this GET prefix, so swallowing
+# the rest of the path is exactly right.
+@api_open.get("/projects/{project_id}/frames/{frame_id}/scene_images/{scene_id:path}")
 async def get_scene_image(
     project_id: int,
     frame_id: int,

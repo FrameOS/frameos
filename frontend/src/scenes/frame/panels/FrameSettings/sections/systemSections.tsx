@@ -58,7 +58,7 @@ export function NetworkSection(): JSX.Element {
               <Field
                 name="wifiCountry"
                 label="WiFi country"
-                hint="Two-letter country code (FR, US, …) — the radio's regulatory domain. Without it the frame cannot join access points on 2.4 GHz channels 12 or 13."
+                tooltip="Two-letter country code (FR, US, …): the radio's regulatory domain. Without it the frame cannot join access points on 2.4 GHz channels 12 or 13."
               >
                 <TextInput name="wifiCountry" placeholder="FR" autoComplete="off" maxLength={2} />
               </Field>

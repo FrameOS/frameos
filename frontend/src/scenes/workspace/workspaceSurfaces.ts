@@ -75,16 +75,17 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
 }
 
 /**
- * The action stack at the top of the "Add scene" drawer. `generate` opens
- * the AI chat, which only the backend and the cloud implement: on the
- * device it opened a "coming soon" panel, so it is not offered there until
- * the frame can reach an AI (docs/todo.md, "On-device admin").
+ * The action stack at the top of the "Add scene" drawer. `generate` opens the
+ * AI chat, which only the backend and the cloud implement. The on-device
+ * panel offers it anyway and answers with where to go instead
+ * (GenerateElsewhereModal in FramesHome): hiding it left people hunting for a
+ * button the other two surfaces have, which was the worse of the two answers.
  */
 export type AddSceneAction = 'blank' | 'splitScreen' | 'generate' | 'upload' | 'starred'
 
 export const allowedAddSceneActions: Record<WorkspaceMode, readonly AddSceneAction[]> = {
   backend: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
-  frameAdmin: ['blank', 'splitScreen', 'upload', 'starred'],
+  frameAdmin: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
   cloud: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
 }
 

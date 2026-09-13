@@ -549,11 +549,25 @@ proc backendChangeNotice*(existing, next: JsonNode): JsonNode =
   ## look for the answer. A key rotation on the same server is not a move.
   let previous = configuredServerAddress(existing)
   let current = configuredServerAddress(next)
-  if previous.host.len == 0 or current.host.len == 0:
-    return nil
-  if previous.host == current.host and previous.port == current.port and previous.scheme == current.scheme:
+  if previous.host.len == 0:
     return nil
   let previousLabel = serverAddressLabel(previous)
+  if current.host.len == 0:
+    # Clearing the backend address IS the disconnect, and it used to be the one
+    # move that said nothing: the backend kept the frame, stopped hearing from
+    # it, and offered a frame.json merge for its own address instead
+    # (2026-09-13). Tell it, in the same breath and over the same channel as a
+    # move to another server.
+    return %*{
+      "event": "server:detached",
+      "previousServer": previousLabel,
+      "server": "",
+      "message": "This frame is no longer managed by any server. " & previousLabel &
+        " no longer receives its logs and can no longer control it; remove the frame there, " &
+        "or adopt it again to take it back.",
+    }
+  if previous.host == current.host and previous.port == current.port and previous.scheme == current.scheme:
+    return nil
   let currentLabel = serverAddressLabel(current)
   %*{
     "event": "server:changed",
@@ -579,13 +593,17 @@ proc notifyPreviousBackend*(existing: JsonNode, notice: JsonNode): int =
     serverApiKey: existing{"serverApiKey"}.getStr(""),
     serverSendLogs: true,
   )
+  # The notice carries its own event name — a move is `server:changed`, a
+  # disconnect `server:detached` — and the backend reads that, so it must not
+  # be flattened to one label here.
+  let event = notice{"event"}.getStr("server:changed")
   try:
-    result = postLogLinesOnce(settings, @[SerializedLog(timestamp: epochTime(), event: "server:changed",
+    result = postLogLinesOnce(settings, @[SerializedLog(timestamp: epochTime(), event: event,
       line: $notice)])
     if result != 200:
-      log(%*{"event": "server:changed:notify:error", "server": serverAddressLabel(previous), "status": result})
+      log(%*{"event": event & ":notify:error", "server": serverAddressLabel(previous), "status": result})
   except CatchableError as e:
-    log(%*{"event": "server:changed:notify:error", "server": serverAddressLabel(previous), "error": e.msg})
+    log(%*{"event": event & ":notify:error", "server": serverAddressLabel(previous), "error": e.msg})
     result = 0
 
 proc persistFrameApiUpdate*(payload: JsonNode) =
@@ -624,6 +642,34 @@ const frameConfigListenerKeys = ["framePort", "bindHost", "httpsProxy"]
 # extended to the keys the cloud cannot push at all.
 const frameConfigRestartKeys = ["device", "deviceConfig", "gpioButtons", "palette", "width", "height", "network"]
 
+proc canonicalDeviceConfig(node: JsonNode): JsonNode =
+  ## One spelling of deviceConfig, so a save that only re-spells it is not a
+  ## restart.
+  ##
+  ## `apiDeviceConfig` serves the TYPED device config when frame.json has no
+  ## `deviceConfig` of its own — renaming `httpUploadUrl` to `uploadUrl` and
+  ## dropping the `-1` "driver default" pins on the way out. The SPA posts that
+  ## shape back, so on a freshly set up frame the very first save looked like a
+  ## deviceConfig change and restarted the runtime for nothing (2026-09-13
+  ## bench: the panel went dark ~7 s after the first Save). Both spellings mean
+  ## the same thing to every driver, so both sides are compared in the API's.
+  # Anything that is not an object is passed through untouched: there is
+  # nothing to re-spell, and flattening it to {} would hide a real change.
+  if node == nil or node.kind != JObject:
+    return node
+  result = copy(node)
+  for (runtimeKey, apiKey) in [("httpUploadUrl", "uploadUrl"), ("httpUploadHeaders", "uploadHeaders")]:
+    if result.hasKey(runtimeKey):
+      if not result.hasKey(apiKey):
+        result[apiKey] = result[runtimeKey]
+      result.delete(runtimeKey)
+  if result{"pins"} != nil and result["pins"].kind == JObject:
+    var pins = %*{}
+    for key, value in result["pins"].pairs:
+      if value.kind == JInt and value.getInt() >= 0:
+        pins[key] = value
+    if pins.len > 0: result["pins"] = pins else: result.delete("pins")
+
 proc runtimeVisibleConfig(node: JsonNode): JsonNode =
   ## frameApi is sync BOOKKEEPING, not runtime config: an echo of the last
   ## payload plus a frame_sync revision the merge freshly stamps on every
@@ -631,6 +677,8 @@ proc runtimeVisibleConfig(node: JsonNode): JsonNode =
   result = if node != nil and node.kind == JObject: copy(node) else: %*{}
   if result.hasKey("frameApi"):
     result.delete("frameApi")
+  if result.hasKey("deviceConfig"):
+    result["deviceConfig"] = canonicalDeviceConfig(result["deviceConfig"])
 
 proc classifyFrameConfigChange*(existing, next: JsonNode): FrameConfigChange =
   let before = runtimeVisibleConfig(existing)

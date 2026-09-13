@@ -1,4 +1,4 @@
-import std/[net, os, unittest]
+import std/[os, unittest]
 
 import ./helpers/http_harness
 import ../hotspot_listener
@@ -10,15 +10,6 @@ var server = startRouterServer(19338)
 proc exposeOnlyConfig(): FrameConfig =
   result = defaultFrameConfig()
   result.httpsProxy = HttpsProxyConfig(enable: true, port: 8443, exposeOnlyPort: true)
-
-proc connectionRefused(port: int): bool =
-  let probe = newSocket()
-  try:
-    probe.connect("127.0.0.1", Port(port), timeout = 1000)
-    probe.close()
-    false
-  except OSError:
-    true
 
 suite "hotspot listener":
   setup:
@@ -68,13 +59,7 @@ suite "hotspot listener":
     stopHotspotListener(server.server)
     check hotspotListenerPort() == 0
     check hotspotSetupPort(config) == 8787
-    var refused = false
-    for attempt in 0 ..< 100:
-      if connectionRefused(second):
-        refused = true
-        break
-      sleep(20)
-    check refused
+    check waitForPortRefused(second)
 
   test "a nil server is tolerated":
     let (port, _) = startHotspotListener(nil, exposeOnlyConfig())

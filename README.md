@@ -137,7 +137,7 @@ docker run -d -p 8989:8989 \
 
 ### Database
 
-The backend stores everything in SQLite (`./db/frameos.db` in the volume above) and needs nothing else. PostgreSQL is supported too: set `DATABASE_URL=postgresql+psycopg://user:password@host:5432/frameos` (the driver ships in the image, and CI runs the backend test suite against both databases).
+The backend stores everything in SQLite (`./db/frameos.db` in the volume above) and needs nothing else. SQLite is the only supported database — `DATABASE_URL` exists because the backend uses SQLAlchemy, but no other engine is tested or shipped with a driver.
 
 ### Cross-toolchain build container images
 

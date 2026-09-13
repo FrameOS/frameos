@@ -140,6 +140,56 @@ proc stopServer*(testServer: var TestServer) =
   testServer.server.close()
   joinThread(testServer.thread)
 
+type ProbeOutcome* = enum
+  ## What one TCP probe against a loopback port actually learned.
+  probeConnected   ## the port accepted the connection
+  probeRefused     ## the port actively refused it (nothing is listening)
+  probeTimedOut    ## no answer inside the deadline — not an answer either way
+
+proc probePort*(port: int, timeoutMs = 1000): ProbeOutcome =
+  ## One connect to 127.0.0.1, with every outcome named instead of thrown.
+  ##
+  ## `std/net` raises `TimeoutError` when the deadline passes, and that is a
+  ## plain `CatchableError`, NOT an `OSError` — so the obvious `except OSError`
+  ## around a timed `connect` does not catch it, and a single probe that misses
+  ## its deadline takes the whole test binary down with an unhandled exception.
+  ## That is exactly what a loaded CI runner did to the hotspot-listener suite
+  ## (net.nim(2136) connect / TimeoutError) on 2026-09-13. A timed-out probe is
+  ## not evidence of anything; callers poll again.
+  ##
+  ## The socket is closed on every path. `connect` leaves it open when it times
+  ## out, and these helpers probe up to a hundred times.
+  let probe = newSocket()
+  try:
+    probe.connect("127.0.0.1", Port(port), timeout = timeoutMs)
+    result = probeConnected
+  except TimeoutError:
+    result = probeTimedOut
+  except OSError:
+    result = probeRefused
+  finally:
+    probe.close()
+
+proc waitForPortOpen*(port: int, attempts = 100, timeoutMs = 500): bool =
+  ## Polls until something accepts on `port`.
+  for _ in 0 ..< attempts:
+    if probePort(port, timeoutMs) == probeConnected:
+      return true
+    sleep(20)
+  false
+
+proc waitForPortRefused*(port: int, attempts = 100, timeoutMs = 1000): bool =
+  ## Polls until `port` actively refuses, i.e. a listener really is gone.
+  ## A probe that times out counts as "not yet" and is retried, never as a
+  ## refusal: a socket whose accept loop has not unwound yet can swallow the
+  ## SYN, and calling that "closed" would make the assertion pass for the
+  ## wrong reason.
+  for _ in 0 ..< attempts:
+    if probePort(port, timeoutMs) == probeRefused:
+      return true
+    sleep(20)
+  false
+
 proc header*(response: TestResponse, name: string): string =
   response.headers.getOrDefault(name.toLowerAscii(), "")
 

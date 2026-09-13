@@ -151,17 +151,7 @@ suite "HTTPS listener":
 
   test "the listener can be removed while serving":
     server.server.removeListener(tlsListener)
-    var refused = false
-    for attempt in 0 ..< 100:
-      let probe = newSocket()
-      try:
-        probe.connect("127.0.0.1", Port(tlsPort), timeout = 1000)
-        probe.close()
-        sleep(20)
-      except OSError:
-        refused = true
-        break
-    check refused
+    check waitForPortRefused(tlsPort)
     check httpRequest(server.port, "GET", "/setup/status").status == 200
 
 stopServer(server)

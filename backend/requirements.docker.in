@@ -16,7 +16,6 @@ openai
 packaging
 pillow
 posthog>=7.5.1
-psycopg[binary]
 python-jose
 redis
 requests

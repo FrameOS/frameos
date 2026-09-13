@@ -44,6 +44,7 @@ import {
   usbRestart,
 } from './embeddedUsbLogsModel'
 import { frameSupportsUsbSerialConsole } from '../scenes/workspace/workspaceSurfaces'
+import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../utils/systemScenes'
 import type { FrameEmbeddedFlashSize } from '../types'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
@@ -561,6 +562,9 @@ export interface framesModelActions {
   renderFrame: (id: FrameId) => {
     id: FrameId
   }
+  renderStatusScreen: (id: FrameId) => {
+    id: FrameId
+  }
   restartFrame: (id: FrameId) => {
     id: FrameId
   }
@@ -647,6 +651,7 @@ export const framesModel = kea<framesModelType>([
     restartFrame: (id: FrameId) => ({ id }),
     rebootFrame: (id: FrameId) => ({ id }),
     renderFrame: (id: FrameId) => ({ id }),
+    renderStatusScreen: (id: FrameId) => ({ id }),
     deleteFrame: (id: FrameId) => ({ id }),
     renameFrame: (id: FrameId, name: string) => ({ id, name }),
     // Cloud only: a freshly enrolled frame is `pending` until its owner
@@ -968,6 +973,48 @@ export const framesModel = kea<framesModelType>([
           frameId: id,
           kind: 'render',
           detail: error instanceof Error ? error.message : 'Failed to render frame',
+        })
+        throw error
+      }
+    },
+    // The built-in status screen is not in scenes.json, so it has no tile to
+    // click — the frame's actions menu asks for it here. Activating it is the
+    // same `setCurrentScene` event a scene tile sends (the cloud's shim maps
+    // it onto the set_current_scene verb; an id nothing is assigned to stays a
+    // plain select). It lives in this model rather than in controlLogic so the
+    // frames home does not have to mount a per-frame logic, which would fetch
+    // every frame's state — see FrameSceneTile.
+    renderStatusScreen: async ({ id }) => {
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'activate',
+        sceneId: STATUS_SCREEN_SCENE_ID,
+        title: 'Activating scene',
+        detail: STATUS_SCREEN_SCENE_NAME,
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${id}/event/setCurrentScene`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sceneId: STATUS_SCREEN_SCENE_ID }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to send scene activation event')
+        }
+        socketLogic.actions.updateFrame({ id, active_scene_id: STATUS_SCREEN_SCENE_ID } as FrameType)
+        longRunningTasksModel.actions.finishTask({
+          frameId: id,
+          kind: 'activate',
+          sceneId: STATUS_SCREEN_SCENE_ID,
+          status: 'success',
+          detail: STATUS_SCREEN_SCENE_NAME,
+        })
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'activate',
+          sceneId: STATUS_SCREEN_SCENE_ID,
+          detail: error instanceof Error ? error.message : 'Failed to show the status screen',
         })
         throw error
       }

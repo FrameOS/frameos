@@ -26,7 +26,7 @@ import {
   normalizeFrameCompilationModeOption,
 } from '../../../../../utils/frameBuildOptions'
 import type { FrameType } from '../../../../../types'
-import { FrameActionsMenu } from '../FrameActionsMenu'
+import { SettingsHeaderActions } from '../SettingsHeaderActions'
 import { useFrameSettings } from '../frameSettingsContext'
 import { CertificateTriangle, scrollToFrameHttpApiSection, VirtualFrameUrlRow } from '../frameSettingsHelpers'
 import {
@@ -66,7 +66,7 @@ export function FrameInfoSection(): JSX.Element | null {
   }
   return (
     <>
-      <SectionHeading id="frame-settings-info" action={<FrameActionsMenu />}>
+      <SectionHeading id="frame-settings-info" action={<SettingsHeaderActions slot="fallback" />}>
         Frame info
       </SectionHeading>
       <SectionBody>
@@ -142,7 +142,7 @@ export function DeviceSettingsSection(): JSX.Element {
           Device settings
         </SectionHeading>
       ) : (
-        <SectionHeading id="frame-settings-device" action={<FrameActionsMenu />}>
+        <SectionHeading id="frame-settings-device" action={<SettingsHeaderActions slot="fallback" />}>
           Device settings
         </SectionHeading>
       )}

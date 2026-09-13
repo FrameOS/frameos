@@ -644,29 +644,8 @@ jobs:
             default_author: github_actions
 
   python:
-    name: Backend tests (${{ matrix.database }})
+    name: Backend tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # SQLite is what every install runs today; Postgres is supported via
-        # DATABASE_URL and only ever broke where nothing exercised it (column
-        # widths SQLite never enforced). The same suite runs on both.
-        database: [sqlite, postgres]
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: frameos
-          POSTGRES_PASSWORD: frameos
-          POSTGRES_DB: frameos_test
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -747,16 +726,11 @@ jobs:
           uv pip install -r requirements.txt
 
       # The suite builds its tables from the models; this runs the alembic
-      # chain end to end on the same database engine. Three data migrations
-      # used to open their own connection and could not see the tables the
-      # chain had just created on Postgres (one transaction per upgrade).
+      # chain end to end against a throwaway database.
       - name: Migrations upgrade head
         env:
-          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://frameos:frameos@127.0.0.1:55433/frameos_migrate' || 'sqlite:///migrations/migrate-check.db' }}
+          DATABASE_URL: sqlite:///migrations/migrate-check.db
         run: |
-          if [ "${{ matrix.database }}" = "postgres" ]; then
-            PGPASSWORD=frameos psql -h 127.0.0.1 -p 55433 -U frameos -d frameos_test -c 'CREATE DATABASE frameos_migrate'
-          fi
           cd backend
           source .venv/bin/activate
           rm -f migrations/migrate-check.db
@@ -764,10 +738,8 @@ jobs:
           TEST=1 PYTHONPATH=. alembic downgrade -1
           TEST=1 PYTHONPATH=. alembic upgrade head
 
+      # No DATABASE_URL: TestConfig's sqlite default is what every install runs.
       - name: Run Pytest
-        env:
-          # Empty falls through to TestConfig's sqlite default.
-          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://frameos:frameos@127.0.0.1:55433/frameos_test' || '' }}
         run: |
           cd backend
           source .venv/bin/activate
@@ -1083,10 +1055,28 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
+      # builtinApps.ts embeds each app's app_loader.nim, and those are
+      # generated and gitignored — without this step a clean checkout has none
+      # of them and the regenerated catalog can never match the committed one.
+      - name: Generate app loaders
+        run: |
+          cd frameos
+          FRAMEOS_ROOT_DIR="." python3 tools/makeapploaders.py
+
       - name: Build frontend
         run: |
           pnpm install --frozen-lockfile
           pnpm --dir frontend run build
+
+      # The build regenerates the committed app catalog and the config schema.
+      # PR #476 changed five Nim apps without rerunning it, and the stale
+      # sources shipped in the bundle for a day; fail instead.
+      - name: Generated frontend files are in sync
+        run: |
+          if ! git diff --exit-code -- frontend/src/generated frontend/schema; then
+            echo "::error::Committed generated files are stale. Run 'pnpm --dir frontend run build' and commit the result (app loaders first: cd frameos && FRAMEOS_ROOT_DIR=. python3 tools/makeapploaders.py)."
+            exit 1
+          fi
 
   pico-firmware:
     name: Pico W / Pico 2 W firmware

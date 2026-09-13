@@ -137,6 +137,65 @@ proc upgradeStatusMtime*(): float =
     discard
   0.0
 
+type UpgradeLogWatcher* = object
+  ## Follows upgrade-status.json and hands back the lines worth logging.
+  ##
+  ## `frameos upgrade` runs detached: it shares nothing with the runtime but
+  ## this file, so without someone watching it a person who pressed "Upgrade
+  ## FrameOS" watches a spinner and then nothing — which is exactly what the
+  ## frame's own admin page did, because the only watcher lived in the cloud
+  ## hub client (2026-09-13). The runtime owns it now and every surface that
+  ## reads the frame log — the frame's own page, a self-hosted backend, the
+  ## cloud — gets the same lines.
+  lastMtime: float
+  watchingSince: float
+  checkedAt: float
+
+const
+  UpgradeWatchCheckSeconds* = 5.0
+  ## Nothing has written the file for this long while an upgrade was in
+  ## flight: the child is gone. Say so once rather than leave the log ending
+  ## on a `running` line nothing will ever follow up.
+  UpgradeWatchStallSeconds* = 45 * 60.0
+  ## A terminal status written just before the upgrade restarted the runtime
+  ## is replayed on the next start — otherwise a successful upgrade is the one
+  ## case that never reports.
+  UpgradeWatchReplaySeconds* = 15 * 60.0
+
+proc initUpgradeLogWatcher*(now: float): tuple[watcher: UpgradeLogWatcher, replay: JsonNode] =
+  ## The watcher plus the line to log for an upgrade that finished (or is
+  ## still running) across the restart, if there is one.
+  let mtime = upgradeStatusMtime()
+  result.watcher = UpgradeLogWatcher(lastMtime: mtime, watchingSince: 0.0, checkedAt: now)
+  result.replay = nil
+  if mtime > 0 and now - mtime <= UpgradeWatchReplaySeconds:
+    let line = upgradeStatusLogLine(readUpgradeStatus())
+    result.replay = line
+    if line{"status"}.getStr("idle") notin UpgradeTerminalStatuses:
+      result.watcher.watchingSince = now
+
+proc poll*(watcher: var UpgradeLogWatcher, now: float): JsonNode =
+  ## One line to log, or nil. Rate-limited internally, so callers may call it
+  ## from a loop that ticks far faster than UpgradeWatchCheckSeconds.
+  if now - watcher.checkedAt < UpgradeWatchCheckSeconds:
+    return nil
+  watcher.checkedAt = now
+  let mtime = upgradeStatusMtime()
+  if mtime > watcher.lastMtime:
+    watcher.lastMtime = mtime
+    result = upgradeStatusLogLine(readUpgradeStatus())
+    watcher.watchingSince =
+      if result{"status"}.getStr("idle") in UpgradeTerminalStatuses: 0.0
+      elif watcher.watchingSince > 0.0: watcher.watchingSince
+      else: now
+    return
+  if watcher.watchingSince > 0.0 and now - watcher.watchingSince >= UpgradeWatchStallSeconds:
+    watcher.watchingSince = 0.0
+    return %*{"event": "cloud:upgrade", "status": "stalled",
+              "detail": "the upgrade process stopped reporting; check " &
+                        frameosInstallDir() / "logs" / "upgrade.log"}
+  nil
+
 const UpgradeInFlightMaxAge = initDuration(hours = 2)
 
 proc frameOSUpgradeInFlight*(): bool =

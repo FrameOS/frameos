@@ -94,30 +94,6 @@ proc clearCaptured() =
     {.cast(gcsafe).}:
       capturedJobs = @[]
 
-proc waitForPort(port: int): bool =
-  for attempt in 0 ..< 100:
-    let probe = newSocket()
-    try:
-      probe.connect("127.0.0.1", Port(port), timeout = 500)
-      probe.close()
-      return true
-    except OSError:
-      probe.close()
-      sleep(20)
-  false
-
-proc portRefused(port: int): bool =
-  for attempt in 0 ..< 100:
-    let probe = newSocket()
-    try:
-      probe.connect("127.0.0.1", Port(port), timeout = 500)
-      probe.close()
-      sleep(20)
-    except OSError:
-      probe.close()
-      return true
-  false
-
 proc httpsRequest(port: int, path: string, headers: openArray[(string, string)] = []): TestResponse =
   var socket = newSocket()
   let ctx = newContext(verifyMode = CVerifyNone)
@@ -290,16 +266,16 @@ suite "settings save applies on the device":
     check apply["listeners_changed"].getBool()
     check apply["listeners"] == %*[{"address": "127.0.0.1", "port": movedPort, "tls": false}]
     check storedConfig()["framePort"].getInt() == movedPort
-    check waitForPort(movedPort)
+    check waitForPortOpen(movedPort)
     # The session cookie is host-scoped: the same login works on the new port.
     let moved = httpRequest(movedPort, "GET", "/api/frames/1", headers = [("Cookie", cookie)])
     check moved.status == 200
-    check portRefused(plainPort)
+    check waitForPortRefused(plainPort)
     # Back to where the rest of the suite expects the server.
     let back = save(movedPort, cookie, %*{"frame_port": plainPort})
     check back.status == 200
-    check waitForPort(plainPort)
-    check portRefused(movedPort)
+    check waitForPortOpen(plainPort)
+    check waitForPortRefused(movedPort)
     check activeListenerSpecs() == @[ListenerSpec(address: "127.0.0.1", port: plainPort, tls: false)]
 
   test "a port the frame cannot bind refuses the save and keeps the config":
@@ -341,7 +317,7 @@ suite "settings save applies on the device":
     apply = parseJson(response.body)["apply"]
     check apply["listeners_changed"].getBool()
     check apply["listeners"] == %*[{"address": "127.0.0.1", "port": plainPort, "tls": false}]
-    check portRefused(tlsPort)
+    check waitForPortRefused(tlsPort)
 
   test "replacing the certificate rebinds the same port":
     let cookie = resetFrame()
@@ -371,7 +347,7 @@ suite "settings save applies on the device":
     check response.status == 200
     check not parseJson(response.body)["apply"]["listeners_changed"].getBool()
     check save(server.port, cookie, %*{"https_proxy": {"enable": false}}).status == 200
-    check portRefused(tlsPort)
+    check waitForPortRefused(tlsPort)
 
   test "a certificate the runtime cannot load refuses the save":
     let cookie = resetFrame()
@@ -381,7 +357,7 @@ suite "settings save applies on the device":
     check response.status == 409
     check parseJson(response.body)["detail"].getStr().contains("HTTPS on 127.0.0.1:" & $tlsPort)
     check not storedConfig()["httpsProxy"]["enable"].getBool()
-    check portRefused(tlsPort)
+    check waitForPortRefused(tlsPort)
 
   test "HTTPS enabled without a certificate stays plain, as at start-up":
     let cookie = resetFrame()

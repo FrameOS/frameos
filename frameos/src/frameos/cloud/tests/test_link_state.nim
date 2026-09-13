@@ -45,6 +45,53 @@ suite "link scope helpers":
     check not state.hasKey("scope")
     check not managedEnrollmentRequested(state)
 
+suite "the local cloud-login switch":
+  let granted = %*{"status": "connected", "scope": "frame:link auth:login"}
+
+  test "the switch defaults to on and only ever narrows the grant":
+    check cloudLoginGranted(granted)
+    check cloudLoginPossible(granted)
+    # Off: the grant is untouched, the frame simply stops offering it.
+    let off = %*{"status": "connected", "scope": "frame:link auth:login",
+                 "cloud_login_enabled": false}
+    check cloudLoginGranted(off)
+    check not cloudLoginPossible(off)
+    # And a switch left on cannot conjure a grant that was never made.
+    check not cloudLoginPossible(%*{"status": "connected", "scope": "frame:link",
+                                    "cloud_login_enabled": true})
+
+  test "switching cloud login off puts the admin password back":
+    # The password is only ever off while the cloud can take over, so the two
+    # switches can never both end up closed.
+    let both = %*{"status": "connected", "scope": "frame:link auth:login",
+                  "local_fallback_enabled": false, "cloud_login_enabled": false}
+    check localAdminLoginEnabled(both)
+
+  test "resetting a link restores both login switches":
+    let state = %*{"status": "connected", "scope": "frame:link auth:login",
+                   "cloud_login_enabled": false, "local_fallback_enabled": false}
+    resetLinkState(state)
+    check not state.hasKey("cloud_login_enabled")
+    check localAdminLoginEnabled(state)
+
+suite "leaving cloud-managed mode":
+  test "demoting keeps the link and drops only the managed fields":
+    let state = %*{"status": "connected", "provider_url": "https://cloud.example.com",
+                   "access_token": "tok", "scope": "frame:link frame:managed",
+                   "mode": "managed", "frame_id": "frm_1", "ws_path": "/api/frames/ws",
+                   "scenes_checksum": "abc", "managed_enroll_error": "boom"}
+    check clearManagedMode(state)
+    check not isManagedLink(state)
+    check state{"status"}.getStr("") == "connected"
+    check state{"access_token"}.getStr("") == "tok"
+    # The grant stays, so the switch can be turned back on without a new
+    # approval on the provider.
+    check "frame:managed" in state{"scope"}.getStr("")
+    for key in ["mode", "frame_id", "ws_path", "scenes_checksum", "managed_enroll_error"]:
+      check not state.hasKey(key)
+    # Idempotent: a second call has nothing to remove.
+    check not clearManagedMode(state)
+
 suite "exporting link state":
   test "redaction strips every secret-bearing key and nothing else":
     let state = %*{"provider_url": "https://cloud.frameos.net",

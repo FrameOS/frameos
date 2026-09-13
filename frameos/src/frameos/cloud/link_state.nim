@@ -114,8 +114,9 @@ proc resetLinkState*(state: JsonNode, pollError: string = "") =
               "poll_error", "local_origin",
               "connected_at", "last_inventory_sync_at", "login_states",
               # Local password login is only ever off while cloud login can
-              # take over, so unlinking restores it.
-              "local_fallback_enabled",
+              # take over, so unlinking restores it — as does dropping the
+              # cloud-login switch itself.
+              "local_fallback_enabled", "cloud_login_enabled",
               # Cloud-managed mode (docs/cloud-frames.md): leaving managed mode
               # or resetting the link always clears these too.
               "mode", "frame_id", "ws_path", "scenes_checksum", "managed_enroll_error"]:
@@ -137,11 +138,24 @@ proc expireIfNeeded*(state: JsonNode): bool =
 proc linkHasScope*(state: JsonNode, scope: string): bool =
   scope in state{"scope"}.getStr("").splitWhitespace()
 
-proc cloudLoginPossible*(state: JsonNode): bool =
-  ## Whether the browser could sign in through the provider right now — a
-  ## connected link that carries `auth:login`. The caller still has to check
-  ## that the admin panel has auth at all; that lives outside this module.
+proc cloudLoginGranted*(state: JsonNode): bool =
+  ## Whether the provider granted this link the right to sign users in — a
+  ## connected link carrying `auth:login`. The local switch below can still be
+  ## off; this is what says the switch may be offered at all.
   state{"status"}.getStr("") == "connected" and linkHasScope(state, "auth:login")
+
+proc cloudLoginPossible*(state: JsonNode): bool =
+  ## Whether the browser could sign in through the provider right now: the
+  ## grant above AND the local "sign in here with FrameOS Cloud" switch. The
+  ## caller still has to check that the admin panel has auth at all; that
+  ## lives outside this module.
+  ##
+  ## The switch defaults to on, because a link is only ever made from the
+  ## admin page or the setup portal, both of which ask for `auth:login`
+  ## deliberately. Turning it off leaves the grant in place and simply stops
+  ## this frame from offering the cloud button — and, through
+  ## `localAdminLoginEnabled`, brings the admin password straight back.
+  cloudLoginGranted(state) and state{"cloud_login_enabled"}.getBool(true)
 
 proc localAdminLoginEnabled*(state: JsonNode): bool =
   ## The effective answer to "may someone still sign in with the admin
@@ -230,3 +244,15 @@ proc isManagedLink*(state: JsonNode): bool =
   state{"mode"}.getStr("") == "managed" and
     state{"status"}.getStr("") == "connected" and
     state{"access_token"}.getStr("") != ""
+
+proc clearManagedMode*(state: JsonNode): bool =
+  ## Demote a cloud-managed frame back to a plain link, leaving the link token
+  ## and the account's frame untouched: the device just stops answering the
+  ## management socket (the hub thread notices the generation bump and idles).
+  ## Re-enrolling later re-registers the SAME frame — the provider keys it on
+  ## the linked client — so this switch is reversible in both directions.
+  ## Returns true when anything was removed, i.e. when the caller must save.
+  for key in ["mode", "frame_id", "ws_path", "scenes_checksum", "managed_enroll_error"]:
+    if state.hasKey(key):
+      state.delete(key)
+      result = true
