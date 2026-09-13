@@ -24,7 +24,7 @@ import { POST as createAccountScene } from "../../../app/api/account/scenes/rout
 import {
   GET as getSceneImage,
   POST as postSceneImage,
-} from "../../../app/api/frames/[frameId]/scene_images/[sceneId]/route";
+} from "../../../app/api/frames/[frameId]/scene_images/[...sceneId]/route";
 import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
 import { validateSceneZip } from "../../lib/store";
 import { readBlob } from "../../lib/blobs";
@@ -107,8 +107,10 @@ function postJsonRequest(path: string, body: unknown) {
   });
 }
 
+// The route is a catch-all ([...sceneId]) so `system/index` — the frame's
+// built-in status screen, a scene id with a slash — resolves at all.
 const routeParams = (frameId: string, sceneId: string) => ({
-  params: Promise.resolve({ frameId, sceneId }),
+  params: Promise.resolve({ frameId, sceneId: sceneId.split("/") }),
 });
 
 async function signIn() {

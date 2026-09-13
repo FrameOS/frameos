@@ -84,6 +84,7 @@ function FrameCloudStatusRow({
         <div className="flex flex-wrap items-center gap-2">
           <Tag color={managed ? 'teal' : 'gray'}>{managed ? 'Managed from the cloud' : 'Linked, not managed'}</Tag>
           <Tooltip
+            label="What this cloud status means"
             title={
               managed
                 ? `This frame answers to ${providerHost}: scenes, settings and reboots can come from there, and your cloud scene library is available on this page.`

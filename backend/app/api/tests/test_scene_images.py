@@ -246,3 +246,37 @@ async def test_copy_scene_image_without_a_source_is_400(async_client, db, redis)
 async def test_copy_scene_image_unknown_frame_is_404(async_client, db, redis):
     response = await async_client.post('/api/frames/99999/scene_images/scene-1/copy', json={"url": "x"})
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_scene_image_serves_the_status_screens_slashed_id(async_client, db, redis):
+    """`system/index` — the frame's built-in status screen — is a scene id
+    with a slash in it. A single-segment {scene_id} 404'd on it, which is what
+    broke the status screen tile the moment it was listed outside the
+    on-device panel (2026-09-13): the SPA logged a failed resource on every
+    workspace route that drew the tile. (Only the GET is widened; nothing
+    POSTs this id — the backend pulls the picture off the device.)"""
+    frame = await new_frame(db, redis, 'StatusFrame', 'localhost', 'localhost')
+    url = f'/api/projects/{frame.project_id}/frames/{frame.id}/scene_images/system/index'
+
+    # Nothing rendered yet: a placeholder the size of the panel, not a 404.
+    placeholder = await async_client.get(url)
+    assert placeholder.status_code == 200, placeholder.text
+    assert placeholder.headers['content-type'].startswith('image/')
+
+    # And once the frame's picture has been stored, that is what comes back.
+    png = _png_bytes((5, 6, 7), (32, 24))
+    stored = SceneImage(
+        project_id=frame.project_id,
+        frame_id=frame.id,
+        scene_id='system/index',
+        image=png,
+        width=32,
+        height=24,
+    )
+    db.add(stored)
+    db.commit()
+
+    served = await async_client.get(url)
+    assert served.status_code == 200, served.text
+    assert served.content == png
