@@ -1,14 +1,16 @@
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import { useState } from 'react'
-import type { CSSProperties, DragEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, DragEvent, MutableRefObject } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   CheckCircleIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CircleStackIcon,
   CommandLineIcon,
   DocumentTextIcon,
@@ -52,6 +54,10 @@ import {
   sceneChildExpansionKey,
   sceneChildExpansionPath,
   sceneDependencyGroupingIsEnabled,
+  sceneListExpandedPath,
+  sceneListIsExpanded,
+  sceneSortIsAlphabetical,
+  sceneUsageKey,
   workspaceLogic,
 } from './workspaceLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
@@ -69,7 +75,7 @@ import {
   buildSceneDependencyGraph,
   flatSceneDependencyEntries,
 } from './sceneDependencyGrouping'
-import { sortScenesAlphabetically } from '../../utils/sortScenes'
+import { sortScenesForDisplay, type SceneSortOrder } from '../../utils/sortScenes'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -79,6 +85,10 @@ const selectedSurfaceClassName = 'frameos-selected-surface'
 const sceneTileWidthRem = 9
 const sceneTileGapRem = 1
 const framePreviewMaxHeightRem = 32
+// Tiles are square (h-36 w-36) and the row's gap is gap-4, in pixels: the
+// scene row is laid out by hand, so it needs the numbers Tailwind uses.
+const sceneTilePx = sceneTileWidthRem * 16
+const sceneGapPx = sceneTileGapRem * 16
 const framePreviewMaxWidthRem = sceneTileWidthRem * 2 + sceneTileGapRem
 const sceneToolButtons = [
   { label: 'Settings', panel: 'settings', icon: AdjustmentsHorizontalIcon },
@@ -600,68 +610,30 @@ function FrameSceneTile({
   )
 }
 
-/**
- * The built-in status screen as the first tile on the on-device panel. It is
- * a real scene the runtime can show (`system/index`) with a real picture
- * (the device renders it on request), but it lives in the binary, not in
- * scenes.json: no menu, no drag, nothing to delete. Only the device lists it
- * — a backend or cloud workspace manages what it installed, and the status
- * screen was never installed.
- */
-function FrameStatusScreenTile({
-  frame,
-  active,
-  highlighted,
+/** Tile-shaped "+N more" / "Show less" switch at the end of the scene row. */
+function FrameSceneRowToggle({
+  expanded,
+  hiddenCount,
+  onToggle,
 }: {
-  frame: FrameType
-  active: boolean
-  highlighted: boolean
+  expanded: boolean
+  hiddenCount: number
+  onToggle: () => void
 }): JSX.Element {
-  const { openSceneControl } = useActions(workspaceLogic)
-  const { hideForm } = useActions(newFrameForm)
-
   return (
-    <div
-      data-workspace-scene-tile={STATUS_SCREEN_SCENE_ID}
-      data-workspace-scene-tile-frame={frame.id}
-      className={clsx(
-        'frameos-card group relative z-[1] h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
-        highlighted
-          ? selectedSurfaceClassName
-          : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
-      )}
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className="frameos-primary-hover-text frameos-add-scene-hover frameos-card group flex h-36 w-36 shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
     >
-      <button
-        type="button"
-        onClick={() => {
-          hideForm()
-          openSceneControl(frame.id, STATUS_SCREEN_SCENE_ID)
-        }}
-        className="flex h-full w-full flex-col"
-      >
-        <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
-          <FrameImage
-            frameId={frame.id}
-            sceneId={STATUS_SCREEN_SCENE_ID}
-            thumb
-            refreshable={false}
-            objectFit="cover"
-            className="h-full w-full rounded-none"
-          />
-        </div>
-        <div className="w-full px-3 py-2">
-          <div className="frameos-strong truncate text-sm font-semibold text-slate-900">{STATUS_SCREEN_SCENE_NAME}</div>
-          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">Built in · always installed</div>
-        </div>
-      </button>
-      {active ? (
-        <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
-          <div className="frameos-primary-fill rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
-            Active
-          </div>
-        </div>
-      ) : null}
-    </div>
+      <span className="frameos-primary-hover-text frameos-icon-tile flex h-12 w-12 items-center justify-center rounded-full bg-white/80 text-slate-400 shadow-sm transition">
+        {expanded ? <ChevronUpIcon className="h-7 w-7" /> : <ChevronDownIcon className="h-7 w-7" />}
+      </span>
+      <span className="frameos-strong text-sm font-semibold text-slate-700">
+        {expanded ? 'Show less' : `+${hiddenCount} more`}
+      </span>
+    </button>
   )
 }
 
@@ -726,15 +698,18 @@ function FrameScenesBlock({
   totalScenes,
   frameMatchesSearch,
   showSceneMenus,
+  previewRef,
 }: {
   frame: FrameType
   scenes: FrameScene[]
   totalScenes: number
   frameMatchesSearch?: boolean
   showSceneMenus?: boolean
+  /** The image card beside this block, measured to see how many rows fit. */
+  previewRef?: MutableRefObject<HTMLDivElement | null>
 }): JSX.Element {
-  const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
-  const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
+  const { frameAssetFolderExpansion, sceneControlSelection, search, sceneUsage } = useValues(workspaceLogic)
+  const { markSceneUsed, openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // `frameLogic.scenes` is `frameForm.scenes ?? frame.scenes ?? []` — unsaved
   // edits first, then the saved frame (which is what cloud mode hydrates), so
   // an empty/absent form never blanks the list.
@@ -744,6 +719,48 @@ function FrameScenesBlock({
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
   const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(() => new Set())
+  const sceneRowRef = useRef<HTMLDivElement | null>(null)
+  const [sceneRowMetrics, setSceneRowMetrics] = useState<{ width: number; height: number } | null>(null)
+  // Nothing records "recently used" server-side, so the surface stamps the
+  // scene the frame reports as active. `markSceneUsed` is deliberately out of
+  // the dependency list: the stamp is a timestamp, so re-running the effect on
+  // every render would loop.
+  const activeSceneId = frame.active_scene_id
+  useEffect(() => {
+    if (activeSceneId) {
+      markSceneUsed(frame.id, activeSceneId.replace(uploadedScenePrefix, ''))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frame.id, activeSceneId])
+  // The room the tiles have: the column's width, and the height left beside
+  // the image — from where the tiles start down to the bottom of the picture.
+  // Stacked (mobile) the image is above the tiles, so that height is <= 0 and
+  // the list is one row.
+  useEffect(() => {
+    const row = sceneRowRef.current
+    if (!row || typeof ResizeObserver === 'undefined') {
+      return
+    }
+    const measure = (): void => {
+      const previewRect = previewRef?.current?.getBoundingClientRect()
+      const height = previewRect ? previewRect.bottom - row.getBoundingClientRect().top : 0
+      const width = row.clientWidth
+      setSceneRowMetrics((previous) =>
+        previous && previous.width === width && Math.abs(previous.height - height) < 1 ? previous : { width, height }
+      )
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(row)
+    if (previewRef?.current) {
+      observer.observe(previewRef.current)
+    }
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [previewRef])
 
   const setMultiSelect = (enabled: boolean): void => {
     setMultiSelectEnabled(enabled)
@@ -783,29 +800,16 @@ function FrameScenesBlock({
     setMultiSelect(false)
   }
   const searchIsActive = search.trim().length > 0
-  // The device lists its built-in status screen first. Search filters it
-  // like any scene, by name or id.
-  const statusScreenMatchesSearch =
-    !searchIsActive ||
-    STATUS_SCREEN_SCENE_NAME.toLowerCase().includes(search.trim().toLowerCase()) ||
-    STATUS_SCREEN_SCENE_ID.includes(search.trim().toLowerCase())
-  const showStatusScreenTile = workspaceMode() === 'frameAdmin' && !multiSelectEnabled && statusScreenMatchesSearch
-  const statusScreenTile = showStatusScreenTile ? (
-    <FrameStatusScreenTile
-      frame={frame}
-      active={frame.active_scene_id === STATUS_SCREEN_SCENE_ID}
-      highlighted={
-        sceneControlSelection?.frameId === frame.id &&
-        sceneControlSelection.sceneId === STATUS_SCREEN_SCENE_ID &&
-        sceneControlSelection.source !== 'preview'
-      }
-    />
-  ) : null
   // While searching, `scenes` is only the matching subset; dependency grouping
   // needs the full (live) list so parents of a match still render.
-  // Alphabetical: this list is how you find a scene, and a new one (a
-  // converted copy, say) appended at the end is where nobody looks.
-  const allScenes = sortScenesAlphabetically(searchIsActive ? liveScenes : scenes)
+  // Recently used first — with only one row of tiles on show, the scene the
+  // frame is running and the ones before it are what belongs in it. "Sort by
+  // recently used" in the display menu switches back to A-Z.
+  const sortOrder: SceneSortOrder = sceneSortIsAlphabetical(frameAssetFolderExpansion, frame.id, 'overview')
+    ? 'name'
+    : 'recent'
+  const sceneUsedAt = (sceneId: string): number | undefined => sceneUsage[sceneUsageKey(frame.id, sceneId)]
+  const allScenes = sortScenesForDisplay(searchIsActive ? liveScenes : scenes, sortOrder, sceneUsedAt)
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
@@ -818,7 +822,7 @@ function FrameScenesBlock({
         sceneChildExpansion: frameAssetFolderExpansion,
         scenes: allScenes,
       })
-    : flatSceneDependencyEntries(sortScenesAlphabetically(scenes))
+    : flatSceneDependencyEntries(sortScenesForDisplay(scenes, sortOrder, sceneUsedAt))
   // Allow-list per control plane — see workspaceSurfaces.ts. The frame's
   // device profile never removes a shortcut; it disables it with a tooltip
   // (an esp32 cloud frame keeps Logs — pushed to the cloud and read back —
@@ -831,6 +835,60 @@ function FrameScenesBlock({
       ...button,
       disabledReason: sceneToolPanelDisabledReason(workspaceMode(), button.panel, frame),
     }))
+
+  const sceneTiles: JSX.Element[] = []
+  for (const { scene, key, nested } of sceneOverviewEntries) {
+    const active = sceneIsActive(scene, frame.active_scene_id)
+    const selected =
+      sceneControlSelection?.frameId === frame.id &&
+      sceneControlSelection.sceneId === scene.id &&
+      sceneControlSelection.source !== 'preview'
+    const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
+    const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frame.id, scene.id)]
+    sceneTiles.push(
+      <FrameSceneTile
+        key={key}
+        frame={frame}
+        scene={scene}
+        scenes={allScenes}
+        active={active}
+        highlighted={selected}
+        showMenu={showSceneMenus}
+        childSceneCount={childSceneCount}
+        childrenExpanded={childrenExpanded}
+        nested={nested}
+        onToggleChildren={() =>
+          setFrameAssetFolderExpanded(frame.id, sceneChildExpansionPath(scene.id), !childrenExpanded)
+        }
+        multiSelectEnabled={multiSelectEnabled}
+        multiSelected={selectedSceneIds.has(scene.id)}
+        onToggleMultiSelected={() => toggleSceneSelected(scene.id)}
+      />
+    )
+  }
+  // One row of scenes by default — two or more when the image beside them is
+  // tall enough that a single row would leave a hole under it. A search always
+  // shows every match, expanded.
+  const listExpanded = sceneListIsExpanded(frameAssetFolderExpansion, frame.id, 'overview') || searchIsActive
+  const sceneTilesPerRow = sceneRowMetrics
+    ? Math.max(1, Math.floor((sceneRowMetrics.width + sceneGapPx) / (sceneTilePx + sceneGapPx)))
+    : null
+  // A row that hangs a third of its height below the picture still reads as
+  // "beside the image", and a nearly-full second row beats a hole under it.
+  const sceneTileRows = sceneRowMetrics
+    ? Math.max(1, Math.floor((sceneRowMetrics.height + sceneGapPx + sceneTilePx / 3) / (sceneTilePx + sceneGapPx)))
+    : 1
+  const sceneSlots = sceneTilesPerRow === null ? null : sceneTilesPerRow * sceneTileRows
+  // +1 for the "Add scene" tile, which is always on the row.
+  const sceneRowOverflows = sceneSlots !== null && sceneTiles.length + 1 > sceneSlots
+  // The expand and "Add scene" tiles take the last two slots. When that would
+  // leave fewer than two scenes they wrap to a line of their own instead, and
+  // the measured rows fill with scenes — never fewer than two of them.
+  const visibleSceneCount = sceneSlots === null ? null : sceneSlots - 2 >= 2 ? sceneSlots - 2 : Math.max(2, sceneSlots)
+  const visibleSceneTiles =
+    !listExpanded && sceneRowOverflows && visibleSceneCount !== null
+      ? sceneTiles.slice(0, visibleSceneCount)
+      : sceneTiles
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneListDragData(event.dataTransfer)) {
@@ -913,38 +971,16 @@ function FrameScenesBlock({
           </>
         ) : null}
       </div>
-      {sceneOverviewEntries.length > 0 || showStatusScreenTile ? (
-        <div className="flex flex-wrap gap-4">
-          {statusScreenTile}
-          {sceneOverviewEntries.map(({ scene, key, nested }) => {
-            const active = sceneIsActive(scene, frame.active_scene_id)
-            const selected =
-              sceneControlSelection?.frameId === frame.id &&
-              sceneControlSelection.sceneId === scene.id &&
-              sceneControlSelection.source !== 'preview'
-            const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
-            const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frame.id, scene.id)]
-            return (
-              <FrameSceneTile
-                key={key}
-                frame={frame}
-                scene={scene}
-                scenes={allScenes}
-                active={active}
-                highlighted={selected}
-                showMenu={showSceneMenus}
-                childSceneCount={childSceneCount}
-                childrenExpanded={childrenExpanded}
-                nested={nested}
-                onToggleChildren={() =>
-                  setFrameAssetFolderExpanded(frame.id, sceneChildExpansionPath(scene.id), !childrenExpanded)
-                }
-                multiSelectEnabled={multiSelectEnabled}
-                multiSelected={selectedSceneIds.has(scene.id)}
-                onToggleMultiSelected={() => toggleSceneSelected(scene.id)}
-              />
-            )
-          })}
+      {sceneOverviewEntries.length > 0 ? (
+        <div ref={sceneRowRef} className="flex flex-wrap gap-4">
+          {visibleSceneTiles}
+          {sceneRowOverflows ? (
+            <FrameSceneRowToggle
+              expanded={listExpanded}
+              hiddenCount={sceneTiles.length - visibleSceneTiles.length}
+              onToggle={() => setFrameAssetFolderExpanded(frame.id, sceneListExpandedPath('overview'), !listExpanded)}
+            />
+          ) : null}
           <FrameAddSceneTile frame={frame} compact />
         </div>
       ) : search.trim() && frameMatchesSearch ? (
@@ -1019,6 +1055,7 @@ export function FrameDashboardSurface({
 }: FrameDashboardSurfaceProps): JSX.Element {
   const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const previewRef = useRef<HTMLDivElement | null>(null)
 
   const handleFrameDragOver = (event: DragEvent<HTMLElement>) => {
     if (!Array.from(event.dataTransfer.types).includes(FRAMEOS_TEMPLATE_DRAG_TYPE)) {
@@ -1054,13 +1091,16 @@ export function FrameDashboardSurface({
       <FrameDashboardHeader frame={frame} archived={archived} />
       <CloudPendingFrameBanner frame={frame} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
-        <FramePreviewPanel frame={frame} scenes={scenes} />
+        <div ref={previewRef} className="min-w-0">
+          <FramePreviewPanel frame={frame} scenes={scenes} />
+        </div>
         <FrameScenesBlock
           frame={frame}
           scenes={scenes}
           totalScenes={totalScenes}
           frameMatchesSearch={frameMatchesSearch}
           showSceneMenus={showSceneMenus}
+          previewRef={previewRef}
         />
       </div>
     </section>
