@@ -1080,6 +1080,27 @@ function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
   }
 }
 
+/**
+ * `sanitizeFrame` seeds the form with `buildroot.compilationMode: ''` even
+ * when the row has no such key, exactly as it does for `rpios` — but only
+ * `rpios` had a normalizer to undo it, so a buildroot row without the key
+ * read as an unsaved edit forever. On an ADOPTED card that was invisible and
+ * maddening: `buildroot` is in SHELL_LESS_BACKEND_ONLY_KEYS, so
+ * computeChangeDetails hides it while `unsavedChanges` still counted it —
+ * the deploy button lit up and the drawer listed nothing (2026-09-13 bench,
+ * frame 14). Adoption writes `buildroot` as `{adopted: true, …}` with no
+ * compilationMode, which is why only adopted cards showed it.
+ */
+function normalizeBuildrootForComparison(value: unknown): Record<string, unknown> {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const { compilationMode, ...rest } = source
+
+  return {
+    ...rest,
+    compilationMode: normalizeFrameCompilationMode(compilationMode),
+  }
+}
+
 function normalizeMountpointsForComparison(value: unknown): Record<string, any> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
   const rawItems = Array.isArray(source.items) ? source.items : []
@@ -1131,6 +1152,10 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
 
   if (key === 'rpios') {
     return normalizeRpiosForComparison(value)
+  }
+
+  if (key === 'buildroot') {
+    return normalizeBuildrootForComparison(value)
   }
 
   if (key === 'mountpoints') {

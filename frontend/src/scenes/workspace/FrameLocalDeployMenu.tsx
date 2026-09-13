@@ -1,5 +1,5 @@
 import { useActions } from 'kea'
-import { ArrowPathIcon, CloudArrowUpIcon, PowerIcon, RocketLaunchIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, ArrowUturnUpIcon, CloudArrowUpIcon, PowerIcon, RocketLaunchIcon } from '@heroicons/react/24/outline'
 import { EllipsisHorizontalIcon } from '@heroicons/react/24/solid'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
@@ -25,7 +25,8 @@ interface FrameLocalDeployMenuProps {
 
 /**
  * The on-device admin panel's "…" menu: what a standalone frame can do to
- * itself beyond saving (re-render, reload the runtime, restart FrameOS).
+ * itself beyond saving (re-render, reload the runtime, restart FrameOS,
+ * reboot the device).
  * Save is what deploys there — the device applies a save as it lands — so
  * this is a plain actions menu, not a second deploy button.
  */
@@ -38,7 +39,7 @@ export function FrameLocalDeployMenu({
   includeSave = true,
 }: FrameLocalDeployMenuProps): JSX.Element {
   const { saveFrame } = useActions(frameLogic({ frameId }))
-  const { loadFrame, renderFrame, restartFrame } = useActions(framesModel)
+  const { loadFrame, renderFrame, restartFrame, rebootFrame } = useActions(framesModel)
   const reloadFrame = async (): Promise<void> => {
     const response = await apiFetch(`/api/frames/${frameId}/reload`, { method: 'POST' })
     if (!response.ok) {
@@ -84,6 +85,17 @@ export function FrameLocalDeployMenu({
           title: 'Restart the on-frame FrameOS runtime',
           confirm: 'Restart the FrameOS runtime on this frame?',
           onClick: () => restartFrame(frameId),
+          icon: <ArrowUturnUpIcon className="h-5 w-5" />,
+        },
+        // The device answers POST /api/frames/{id}/reboot with the same
+        // `reboot` control event the backend fires on a shell-less frame, so
+        // framesModel.rebootFrame needs no on-device special case. Verified
+        // from the backend against an adopted card on 2026-09-13.
+        {
+          label: 'Reboot device',
+          title: 'Reboot the whole device, not just FrameOS',
+          confirm: 'Reboot this device? The frame goes dark until it boots back up.',
+          onClick: () => rebootFrame(frameId),
           icon: <PowerIcon className="h-5 w-5" />,
         },
       ]}

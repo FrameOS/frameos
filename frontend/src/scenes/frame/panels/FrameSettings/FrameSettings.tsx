@@ -90,6 +90,10 @@ function FrameSettingsPanel(): JSX.Element {
       className={clsx(
         'frame-tool-panel frame-settings-panel',
         scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible',
+        // The cloud box sits outside the form below; without this the form's
+        // first heading butts right up against it (the heading's own margin
+        // collapses through the form element).
+        'space-y-4',
         className
       )}
       id="panel-settings-div"
@@ -161,11 +165,14 @@ function FrameSettingsPanel(): JSX.Element {
         <FrameSettingsSection sectionKey="http-api">
           <HttpApiSection />
         </FrameSettingsSection>
-        <FrameSettingsSection sectionKey="frame-admin-panel">
-          <FrameAdminPanelSection />
-        </FrameSettingsSection>
+        {/* HTTPS is a property of the API listener above it, not a topic of
+            its own: reading "HTTP API on frame" and then a port/bind setting
+            only to find the TLS switch two sections later is the wrong order. */}
         <FrameSettingsSection sectionKey="https-proxy">
           <HttpsProxySection />
+        </FrameSettingsSection>
+        <FrameSettingsSection sectionKey="frame-admin-panel">
+          <FrameAdminPanelSection />
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="network">
           <NetworkSection />

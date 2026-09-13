@@ -12,6 +12,7 @@ import { sceneRequiresCompilation } from '../utils/sceneApps'
 import { previewSkipsNimMessage } from '../utils/sceneExecution'
 import { wasmPreviewCacheKey } from '../utils/wasmScenePreview'
 import type { FrameId, FrameType } from '../types'
+import { Spinner } from './Spinner'
 
 const placeholderRefreshAttempts = new Set<string>()
 
@@ -338,7 +339,11 @@ export function FrameImage({
         className?.includes('max-w-') || className?.includes('max-h-') ? '' : 'max-w-full max-h-full w-full h-full',
         'flex items-center justify-center',
         shouldProgressivelyLoadFullSize ? 'relative overflow-hidden' : null,
-        visiblyLoading ? 'continuous-fade-in-out' : null,
+        // The whole picture used to pulse in and out while a render was on its
+        // way, which reads as the frame misbehaving rather than as "working on
+        // it". A spinner in the corner says the same thing and leaves the last
+        // good image readable.
+        visiblyLoading && !shouldProgressivelyLoadFullSize ? 'relative' : null,
         visiblyLoading ? 'cursor-wait' : refreshable ? 'cursor-pointer' : 'cursor-default',
         className
       )}
@@ -346,6 +351,11 @@ export function FrameImage({
       title={refreshable ? 'Click to refresh' : undefined}
       {...props}
     >
+      {visiblyLoading ? (
+        <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-center justify-center rounded-md bg-white/70 p-1 shadow-sm ring-1 ring-slate-200/70 backdrop-blur">
+          <Spinner className="h-4 w-4" />
+        </div>
+      ) : null}
       {frame && (
         <>
           {imageSrc && !baseImageFailed ? (

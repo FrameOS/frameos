@@ -194,6 +194,30 @@ them the same way, or make them work, with this.
 
 ---
 
+## A frame that joins the cloud arrives with no scenes
+
+Found on the 2026-09-13 bench: flip "Manage this frame from FrameOS Cloud" on
+a frame that already runs its own scenes and the link comes up, but the cloud
+lists no scenes for it — the frame keeps rendering what it has, and the cloud
+shows an empty frame.
+
+Not a bug in the enrollment: the hub protocol has no device → cloud scene
+path at all. `docs/cloud-frames-contract.json` carries `set_scenes` (cloud →
+device) and the device's `scenes_checksum` ack, and that is the whole of it;
+`enrollManagedFrame` registers the device and nothing more. The cloud's model
+is a scene LIBRARY that assigns scenes to frames, so importing a device's
+scenes means minting store-scene records (with versions, images and
+provenance) for scenes that were never in anyone's library.
+
+What it needs, roughly: a device → cloud "here are my scenes" verb, a cloud
+importer that creates draft store scenes and frame assignments from it,
+dedupe against scenes the account already has (a re-enrolled frame must not
+fork every scene again), and a decision about what happens to a scene the
+device has and the cloud then reassigns. Worth doing — arriving at an empty
+cloud frame is a bad first five minutes — but it is a feature, not a fix.
+
+---
+
 ## Canonical API gaps
 
 Matrix in `docs/api-triality.md`; nothing scheduled — the remaining deltas

@@ -245,14 +245,15 @@ proc inputsLine*(frameConfig: FrameConfig, sources: seq[string]): string =
     pins.add(if button.label.len > 0: &"{button.pin} ({button.label})" else: $button.pin)
   if pins.len > 0:
     parts.add("GPIO " & pins.join(", "))
-  elif "gpioButton" in sources:
-    parts.add("GPIO buttons (none configured)")
+  # A build that carries the gpioButton driver but has no buttons wired up used
+  # to print "GPIO buttons (none configured)" on every frame that never had
+  # any. Nothing to say, so say nothing.
   if "evdev" in sources:
     parts.add("evdev (keyboard, mouse, touch)")
   for source in sources:
     if source notin ["gpioButton", "evdev"]:
       parts.add(source)
-  if parts.len == 0: "none" else: parts.join(" · ")
+  parts.join(" · ")
 
 proc managementLine*(frameConfig: FrameConfig, state: JsonNode = nil): string =
   ## Who controls this frame: FrameOS Cloud (managed enrollment), a
@@ -420,7 +421,11 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
   let cloudManaged = linkState{"mode"}.getStr("") == "managed"
   let cloudConnected = cloudManaged and linkState{"status"}.getStr("") == "connected"
   let remoteControl =
-    if cloudManaged or (frameConfig.agent != nil and frameConfig.agent.agentEnabled): "enabled"
+    # The cloud drives this frame through a fixed set of verbs and nothing
+    # else; "enabled" on its own leaves the reader wondering whether someone
+    # off-site has a shell here, so say it.
+    if cloudManaged: "enabled (no shell access)"
+    elif frameConfig.agent != nil and frameConfig.agent.agentEnabled: "enabled"
     # An adopted card takes commands, just not a shell: "disabled" was the
     # same kind of lie the old "Server: not configured" line told.
     elif adminApiOnlyControl(frameConfig): "limited (no shell access)"
@@ -463,10 +468,10 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
           self.linkQr = nil
           self.linkQrKey = ""
       result.aside.qr = self.linkQr
+  let inputs = inputsLine(frameConfig, inputSourceNames())
   result.rows = @[
     ("Name", deviceName),
     ("Device", deviceLine),
-    ("Inputs", inputsLine(frameConfig, inputSourceNames())),
     # Seconds only where the screen is redrawn often enough for them to be
     # true (the animated HDMI screen); a minute clock elsewhere.
     ("Time", clockLine(frameConfig, epoch, withSeconds = animating)),
@@ -479,6 +484,10 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
     ("Frame", frameUrl),
     ("Remote control", remoteLine),
   ]
+  # Nothing can drive this frame from the room it stands in: an "Inputs: none"
+  # row is a line of screen spent saying so.
+  if inputs.len > 0:
+    result.rows.insert(("Inputs", inputs), 2)
   let version = publishedFrameOSVersion(compiledFrameOSVersion())
   result.footer = if version.len == 0 or version == "unknown": "FrameOS" else: "FrameOS v" & version
   if entries.len == 0:

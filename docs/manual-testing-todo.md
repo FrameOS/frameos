@@ -5,77 +5,13 @@ Everything here shipped with green automated suites but needed a bench.
 evidence for what passed, in the original section order, because the open
 boxes point into it. Tick a box by moving its entry from Open to the matching
 Done section with the date and what was seen; delete the file when Open is
-empty. Last refreshed 2026-09-12 (HyperPixel 2r native card closed on 2026.9.14; Vannituba migration box closed, nothing to migrate; standalone on-device admin round three opened), after release 2026.9.14.
+empty. Last refreshed 2026-09-13 (the whole non-ESP32 side closed: on-device
+admin round three PASSED on 2026.9.15 and its "crash" explained, the adopted
+card PASSED with one empty-drawer bug found and fixed, the
+generic-image/Remote box closed as obsolete since remote lite). Only the
+ESP32 bench is left, and every box there needs hardware that was not to hand.
 
 ## Open
-
-### Pi / Buildroot bench — cloud-managed frames
-
-- [ ] **Generic image still adopts with no Remote on it (`docs/buildroot-privileges.md` §4):**
-  release images no longer ship FrameOS Remote at all — flash a *generic*
-  Buildroot card, adopt it into a self-hosted backend, and verify the
-  backend's first deploy installs and enables the remote itself
-  (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
-  and that everything works after. The deploy also flips the frame back to
-  a root `frameos.service`, so check the unit's `User=` before and after.
-
-### Backend (self-hosted) bench
-
-- [ ] **Adopted card, round two (2026-09-08 findings on frame-2c2ea9, all
-  fixed on main the same day, needs the next backend release):** *(2026-09-09
-  on the 2026.9.12 add-on: "Pending changes" did NOT open clean — "Network
-  settings" came back after every fast deploy. Cause found and fixed on main
-  (`ha-upgrade-papercuts`): the frontend's secret-path mirror lacked the two
-  `network.*` passwords PR #460 fingerprinted, so the baseline never equalled
-  the row; a shared-spa test now reads the backend list. Re-check with the
-  next add-on.)* re-adopt
-  a fresh generic card (or the same one, un-adopted) and check: logs arrive
-  without touching the device (the adopt log line says it restarted
-  FrameOS); "Current image" shows the panel and the scene gets its
-  snapshot (the write-back handed the keyless card the backend's access
-  key — the device's QR / `?k=` link now carries that key); "Pending
-  changes" opens clean after a page reload (`FrameBase` serves
-  `secret_fingerprints`); Restart FrameOS and Reboot work from the backend
-  with no shell (admin-API control verbs; the reboot goes through the
-  door), and Stop logs its "needs SSH or Remote" line instead of failing.
-  Not done: adoption still does not copy the device's stored scene
-  images (they reappear on the first render). The boot-partition SSH key
-  file stays first-boot-only, by decision (2026-09-08): re-reading it on
-  every boot would be an easy way into a running frame.
-  *(2026-09-12, round three on frame-02f856 / 10.8.0.62 with 2026.9.14: the
-  adoption itself held up — logs flowed, the admin surface worked. What was
-  wrong was the standalone on-device admin page before adoption; every
-  item is fixed on main and listed in the box below.)*
-
-- [ ] **Standalone on-device admin, round three (2026-09-12 findings on
-  frame-02f856 / 2026.9.14, all fixed on main the same day, needs the next
-  release on the card):** re-flash or upgrade a generic card and, BEFORE
-  adopting it, walk the on-device page at `http://<frame>:8787/admin`:
-  the setup portal's "Enable admin UI" box starts ticked with the password
-  blank (submitting it blank is refused with a 400, not silently written
-  off); "Add scene" no longer offers "Generate scene" (it opened a
-  "coming soon" panel; see `docs/todo.md` "On-device admin"); a store
-  scene's cover shows on its tile the moment it is installed (the SPA's
-  `POST …/scene_images/{id}/copy` is answered by the device now — before it
-  404ed, toasted "failed to copy", and the tile stayed blank until the
-  first render); "Current image" stops pulsing "loading" — the device
-  encodes the panel PNG once per render and the page asks at most every
-  3 s (on 2026.9.14 one activation cost a 9 s encode, and the animated
-  status screen re-fetched a 1.3 s encode every second); "Activate scene"
-  spins until that scene's `render:done` (matched across the `uploaded/`
-  prefix), settling on a reconnect resync if the socket dropped meanwhile;
-  the scene list starts with a "Status screen" tile (`system/index`, a real
-  picture drawn on request, no menu, cannot be removed) whose drawer
-  activates it; the "…" next to "Save & deploy" is the button's full
-  height. Then adopt the card into a backend and, from a SECOND backend,
-  adopt it again: the first backend's log for the frame must show the
-  `server:changed` line naming the new server (the device delivers it to
-  the old backend before the save lands, then logs it locally too).
-  Watch for: on 2026.9.14 the runtime RESTARTED once ~5 s after an
-  "Activate scene" from the drawer while the animated status screen was on
-  the panel (load 4.4; `boot:guard crashesWithoutRender: 1`, the ring
-  buffer lost the lines before the restart and no backend had the logs).
-  Not reproduced; if it happens again, pull `/srv/frameos/logs/` first.
 
 ### ESP32 bench
 
@@ -161,6 +97,22 @@ empty. Last refreshed 2026-09-12 (HyperPixel 2r native card closed on 2026.9.14;
   2 h window is for device-link/scope approvals, not frame confirm.
 
 ### Pi / Buildroot bench — cloud-managed frames
+
+- [x] **Generic image still adopts with no Remote on it** — CLOSED
+  2026-09-13, the box's premise expired. It was written on 2026-09-04 (#415)
+  for a world where the backend SSHed into an adopted card and installed
+  FrameOS Remote on first deploy. Since "remote lite" (#485, 2026-09-12)
+  there is nothing to install: a generic release card has no shell at all —
+  no Remote, and root SSH only with a key or password planted from the boot
+  partition — so `frame_has_shell_access()` (backend/app/models/frame.py)
+  routes it down the admin-API path and says outright that "the SSH/Remote
+  based deploy cannot even connect". No Remote is deployed, and
+  `frameos.service` stays `User=frameos`; verified on the 2026-09-13 card,
+  whose unit in `releases/release_2026.9.15/frameos.service` reads
+  `User=frameos` / `Group=frameos` after setup. What is left to verify is
+  that the admin-API path carries a whole adoption, which is the "Adopted
+  card, round two" box, still open. The shell-less card is the safety
+  property, not a gap.
 
 - [x] **Setup portal round two** — PASSED 2026-09-08 on a fresh generic
   2026.9.11 card (Pi Zero 2 W, HDMI), iPhone through the QR flow: the Wi-Fi
@@ -408,6 +360,89 @@ empty. Last refreshed 2026-09-12 (HyperPixel 2r native card closed on 2026.9.14;
   evidenced by the release dir, the service restart and the activity feed.)
 
 ### Backend (self-hosted) bench
+
+- [x] **Adopted card, round two / three** — PASSED 2026-09-13, frame 14 on the
+  2026.9.15 Home Assistant add-on with a generic Buildroot card. Adoption
+  brought every scene over with its images, the frame is controllable, and
+  **"Pending changes" opened clean** — the 2026-09-09 "Network settings comes
+  back after every fast deploy" regression is gone (the frontend's
+  secret-path mirror now carries the two `network.*` passwords, and a
+  shared-spa test reads the backend list). Restart FrameOS and Reboot device
+  both worked from the backend with no shell, over the runtime's own control
+  verbs. Adopting the same card from a SECOND backend logged the
+  `server:changed` line to the first one, naming the new server and telling
+  it what it lost:
+
+      server:changed
+        previousServer="http://homeassistant.local:8989"
+        server="http://10.4.0.47:8989"
+        message="This frame is now managed by http://10.4.0.47:8989. The
+        server at http://homeassistant.local:8989 no longer receives its logs
+        and can no longer control it; remove the frame there, or adopt it
+        again to take it back."
+
+  **One bug found and fixed:** right after adoption the deploy button said
+  there was something to save while the drawer listed nothing. `sanitizeFrame`
+  seeds the form with `buildroot.compilationMode: ''` whether or not the row
+  has the key — it does the same for `rpios`, which *has* a comparison
+  normalizer to undo it, while `buildroot` had none — so the key read as an
+  unsaved edit forever. It only showed on an adopted card because adoption
+  writes `buildroot` as `{adopted: true}` with no compilationMode, and because
+  `buildroot` is in `SHELL_LESS_BACKEND_ONLY_KEYS`, which
+  `computeChangeDetails` hides on a shell-less frame while `unsavedChanges`
+  still counted it: dirty button, empty drawer. Fixed with
+  `normalizeBuildrootForComparison` in frameLogic.ts, mirroring the rpios one,
+  plus a shared-spa regression test (verified red without the fix).
+
+  Still not done, unchanged: adoption does not copy the device's stored scene
+  images (they reappear on the first render), and the boot-partition SSH key
+  file stays first-boot-only by decision (2026-09-08) — re-reading it on every
+  boot would be an easy way into a running frame.
+
+- [x] **Standalone on-device admin, round three** — PASSED 2026-09-13 on a
+  freshly flashed generic Buildroot card (frame-e047ed, 1920x1080
+  framebuffer, release 2026.9.15, walked before adoption): every item in the
+  box held — the portal's "Enable admin UI" ticked with a blank password and
+  a blank submit refused, no "Generate scene" in Add scene, a store scene's
+  cover on its tile at install time, "Current image" no longer stuck on
+  loading, "Activate scene" spinning to the render, the "Status screen" tile
+  first in the list with no menu, and the "..." at full button height.
+  **The one scare was not a crash.** The runtime went down and came back
+  right after the first settings save; the card's own logs say it was the
+  intended restart:
+
+      02:11:00 http POST /api/frames/1
+      02:11:00 event:restart
+      02:11:00 restart "Restarting FrameOS runtime"
+      02:11:07 startup            (7 s later)
+      02:11:10 boot:guard crashesWithoutRender: 1
+
+  `state/boot_guard.json` afterwards reads `crashesWithoutRender: 0`,
+  `runtime/frameos-last-exit` reads `serviceResult=success exitCode=exited
+  exitStatus=0`, and the whole log holds exactly one restart and zero errors.
+  A save restarts by design when a `frameConfigRestartKeys` value differs
+  (`device`, `deviceConfig`, `gpioButtons`, `palette`, `width`, `height`,
+  `network` — server/api.nim `classifyFrameConfigChange`), and the response's
+  `apply.runtime: "restart"` is what makes the toast say "Saved, restarting
+  FrameOS to apply the display settings".
+
+  **Read `boot:guard crashesWithoutRender: N` as "this boot has not rendered
+  yet", never as "it crashed N times".** `registerBootCrash()` runs on every
+  startup and logs previous+1 before the first render; the render clears it.
+  The same misreading is what made the 2026-09-14 activate-then-restart look
+  like a crash in the round-three box — with no `frameos-last-exit` pulled
+  at the time, that sighting is unexplained but no longer evidence of one.
+
+  Still worth one follow-up: the first save on a fresh card appears to
+  restart because `apiDeviceConfig` (server/api.nim) serves the *typed*
+  device config when frame.json has none — renaming `httpUploadUrl` to
+  `uploadUrl` and dropping `-1` pins — so the SPA posts back a shape the
+  stored file does not have and `deviceConfig` reads as changed exactly
+  once. The card's frame.json now holds
+  `{"partial":false,"vcom":0,"partialMaxAreaPercent":0,
+  "partialMaxRefreshesBeforeFull":0,"uploadUrl":""}`, which round-trips
+  verbatim from here on. Confirm by saving settings a second time on that
+  frame: it should say "Saved" with no restart.
 
 - [x] **HyperPixel 2r native card from the HA add-on, second try** — PASSED
   2026-09-12 on frame 10 with release 2026.9.14 (the first release carrying

@@ -1083,6 +1083,14 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
+      # builtinApps.ts embeds each app's app_loader.nim, and those are
+      # generated and gitignored — without this step a clean checkout has none
+      # of them and the regenerated catalog can never match the committed one.
+      - name: Generate app loaders
+        run: |
+          cd frameos
+          FRAMEOS_ROOT_DIR="." python3 tools/makeapploaders.py
+
       - name: Build frontend
         run: |
           pnpm install --frozen-lockfile
@@ -1094,7 +1102,7 @@ jobs:
       - name: Generated frontend files are in sync
         run: |
           if ! git diff --exit-code -- frontend/src/generated frontend/schema; then
-            echo "::error::Committed generated files are stale. Run 'pnpm --dir frontend run build' and commit the result."
+            echo "::error::Committed generated files are stale. Run 'pnpm --dir frontend run build' and commit the result (app loaders first: cd frameos && FRAMEOS_ROOT_DIR=. python3 tools/makeapploaders.py)."
             exit 1
           fi
 

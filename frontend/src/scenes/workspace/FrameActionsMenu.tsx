@@ -10,6 +10,7 @@ import {
   NoSymbolIcon,
   PencilSquareIcon,
   PowerIcon,
+  RectangleGroupIcon,
   RocketLaunchIcon,
   StopCircleIcon,
   TrashIcon,
@@ -49,6 +50,7 @@ export function FrameActionsMenu({
     deployRemote,
     rebootFrame,
     renderFrame,
+    renderStatusScreen,
     restartRemote,
     restartFrame,
     setFrameArchived,
@@ -76,6 +78,9 @@ export function FrameActionsMenu({
   const deleteCopy = frameDeleteCopy(mode)
   const disabledReason = (action: FrameMenuAction): string | null => frameMenuActionDisabledReason(mode, action, frame)
   const renameDisabledReason = disabledReason('rename')
+  // Every Linux frame draws `system/index` on request; the ESP32 firmware
+  // draws its own boot screen in C and has no such scene.
+  const frameHasStatusScreen = (frame.mode ?? 'rpios') !== 'embedded'
 
   return (
     <DropdownMenu
@@ -101,6 +106,20 @@ export function FrameActionsMenu({
                 title: 'Re-render the current scene',
                 onClick: () => renderFrame(frame.id),
                 icon: <PlayIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        // The built-in status screen is no longer a tile in the scene list, so
+        // this menu is the way to it. framesModel sends the activation itself
+        // (see renderStatusScreen) — going through controlLogic would mount a
+        // per-frame logic for every card on the home page.
+        ...(frameHasStatusScreen
+          ? [
+              {
+                label: 'Render status screen',
+                title: "Show the frame's built-in name, address and scene list on the display",
+                onClick: () => renderStatusScreen(frame.id),
+                icon: <RectangleGroupIcon className="h-5 w-5" />,
               },
             ]
           : []),

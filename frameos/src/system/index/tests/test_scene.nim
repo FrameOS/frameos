@@ -264,12 +264,12 @@ suite "system/index scene":
 
   test "the inputs row lists configured GPIO pins and the input drivers in the build":
     var config = testConfig()
-    # Nothing wired, no input driver in the build.
-    check index_scene.inputsLine(config, @[]) == "none"
-    # The driver is there but frame.json declares no pins: say so, rather
-    # than leave the row looking like the board has no buttons at all.
-    check index_scene.inputsLine(config, @["gpioButton"]) ==
-      "GPIO buttons (none configured)"
+    # Nothing wired, no input driver in the build: the row is dropped entirely
+    # (see "the inputs row is absent when nothing can drive the frame").
+    check index_scene.inputsLine(config, @[]) == ""
+    # The gpioButton driver in the build with no pins in frame.json says
+    # nothing either — most frames have no buttons and never will.
+    check index_scene.inputsLine(config, @["gpioButton"]) == ""
     check index_scene.inputsLine(config, @["evdev"]) == "evdev (keyboard, mouse, touch)"
     config.gpioButtons = @[
       GPIOButton(pin: 5, label: "Next"),
@@ -291,6 +291,12 @@ suite "system/index scene":
       config.gpioButtons = @[GPIOButton(pin: 16, label: "Menu")]
       let screen = makeIndexScene(config).buildStatusScreen()
       check screen.rows.anyIt(it[0] == "Inputs" and it[1] == "GPIO 16 (Menu)")
+
+  test "the inputs row is absent when nothing can drive the frame":
+    initTimeZone()
+    withScenesJson("[]") do (_: string):
+      let screen = makeIndexScene(testConfig()).buildStatusScreen()
+      check not screen.rows.anyIt(it[0] == "Inputs")
 
   test "an adopted shell-less frame reports limited remote control, not disabled":
     initTimeZone()
