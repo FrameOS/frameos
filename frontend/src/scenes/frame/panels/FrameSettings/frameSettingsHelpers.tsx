@@ -88,7 +88,13 @@ export function newMountpoint(): FrameMountpointConfig {
   }
 }
 
-export function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
+/**
+ * Scroll the settings panel to one of its section anchors. Written for the
+ * HTTPS-proxy link and now used by anything that says "the setting you want is
+ * over there" — a sentence naming a field the reader then has to hunt for is
+ * the thing this replaces.
+ */
+export function scrollToFrameSettingsSection(e: React.MouseEvent, sectionId: string): void {
   if (typeof document === 'undefined') {
     return
   }
@@ -97,12 +103,16 @@ export function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
       ? e.target.closest('#panel-settings-div')
       : document.getElementById('panel-settings-div')
   const scrollingOuterDiv = frameSettingsDiv?.parentElement
-  const httpApiSection = frameSettingsDiv?.querySelector('#frame-http-proxy-section')
-  if (scrollingOuterDiv && httpApiSection) {
-    const offset = httpApiSection.getBoundingClientRect().top - scrollingOuterDiv.getBoundingClientRect().top
+  const section = frameSettingsDiv?.querySelector(`#${sectionId}`)
+  if (scrollingOuterDiv && section) {
+    const offset = section.getBoundingClientRect().top - scrollingOuterDiv.getBoundingClientRect().top
     scrollingOuterDiv.scrollTo({ top: offset, behavior: 'smooth' }) // works in frame settings panel
     scrollingOuterDiv?.parentElement?.scrollTo({ top: offset, behavior: 'smooth' }) // works in sd card modal
   }
+}
+
+export function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
+  scrollToFrameSettingsSection(e, 'frame-http-proxy-section')
 }
 
 export function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX.Element {

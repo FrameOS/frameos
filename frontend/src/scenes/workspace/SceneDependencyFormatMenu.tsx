@@ -7,6 +7,8 @@ import type { FrameId } from '../../types'
 import {
   sceneDependencyGroupingDisabledPath,
   sceneDependencyGroupingIsEnabled,
+  statusScreenHiddenPath,
+  statusScreenIsShown,
   type SceneDependencyGroupingSurface,
   workspaceLogic,
 } from './workspaceLogic'
@@ -19,6 +21,8 @@ interface SceneDependencyFormatMenuProps {
     enabled: boolean
     onToggle: (enabled: boolean) => void
   }
+  /** Offer "Show status screen". Absent where the frame has no such scene. */
+  statusScreen?: boolean
 }
 
 export function SceneDependencyFormatMenu({
@@ -26,10 +30,12 @@ export function SceneDependencyFormatMenu({
   surface,
   className,
   multiSelect,
+  statusScreen,
 }: SceneDependencyFormatMenuProps): JSX.Element {
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frameId, surface)
+  const statusScreenShown = statusScreenIsShown(frameAssetFolderExpansion, frameId, surface)
 
   return (
     <DropdownMenu
@@ -49,6 +55,22 @@ export function SceneDependencyFormatMenu({
             />
           ),
         },
+        ...(statusScreen
+          ? [
+              {
+                content: () => (
+                  <Switch
+                    label="Show status screen"
+                    value={statusScreenShown}
+                    onChange={(shown) =>
+                      setFrameAssetFolderExpanded(frameId, statusScreenHiddenPath(surface), !shown)
+                    }
+                    fullWidth
+                  />
+                ),
+              },
+            ]
+          : []),
         ...(multiSelect
           ? [
               {

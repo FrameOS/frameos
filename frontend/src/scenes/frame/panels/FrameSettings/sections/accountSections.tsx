@@ -67,18 +67,22 @@ export function FrameAdminServiceSecretsSection(): JSX.Element {
             )
 
             return (
-              <div key={settingsKey} className="frameos-inset rounded-lg border px-3 py-3 text-sm space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <div className="frameos-strong font-semibold">{details.title}</div>
-                    {details.description ? <div className="frameos-muted text-xs">{details.description}</div> : null}
+              // Collapsed by default: a dozen services' worth of key fields
+              // pushed every other setting off the page, and the summary row
+              // already says which ones are filled in. Native <details>, so no
+              // state to keep and the browser handles the toggle.
+              <details key={settingsKey} className="frameos-inset rounded-lg border px-3 py-3 text-sm">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
+                  <div className="frameos-strong font-semibold">
+                    {details.title}
+                    {details.description ? <Tooltip title={details.description} /> : null}
                   </div>
                   <div className="flex items-center gap-2">
                     <Tag color={saved ? 'teal' : 'yellow'}>{saved ? 'Saved' : 'Missing'}</Tag>
                     {details.fields.some((field) => field.secret) ? <Tag color="orange">Secret</Tag> : null}
                   </div>
-                </div>
-                <div className="space-y-2">
+                </summary>
+                <div className="mt-3 space-y-2">
                   {details.fields.map((field) => {
                     const value = settingsInputValue(getSettingsValue(settings, field.path))
                     return (
@@ -103,7 +107,7 @@ export function FrameAdminServiceSecretsSection(): JSX.Element {
                     )
                   })}
                 </div>
-              </div>
+              </details>
             )
           })}
         </div>

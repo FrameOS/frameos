@@ -117,6 +117,33 @@ export function sceneDependencyGroupingIsEnabled(
   return !expansion[sceneDependencyGroupingDisabledKey(frameId, surface)]
 }
 
+/**
+ * "Show status screen" in the scene list's display menu.
+ *
+ * The frame's built-in status screen (`system/index`) is a real scene the
+ * runtime draws on request, and every surface can activate it — but only the
+ * on-device panel used to list it, so from a backend or the cloud there was no
+ * way to put it on the panel at all. It is listed everywhere now, and hidden
+ * behind this toggle for anyone who does not want a scene they cannot edit in
+ * their list. Stored the same way as the grouping toggle: per frame, per
+ * surface, default ON (so the stored flag is the HIDDEN one).
+ */
+export function statusScreenHiddenPath(surface: SceneDependencyGroupingSurface): string {
+  return `status-screen-hidden:${surface}`
+}
+
+export function statusScreenHiddenKey(frameId: FrameId, surface: SceneDependencyGroupingSurface): string {
+  return frameAssetFolderExpansionKey(frameId, statusScreenHiddenPath(surface))
+}
+
+export function statusScreenIsShown(
+  expansion: Record<string, boolean>,
+  frameId: FrameId,
+  surface: SceneDependencyGroupingSurface
+): boolean {
+  return !expansion[statusScreenHiddenKey(frameId, surface)]
+}
+
 // NEVER a number parse: frame ids are opaque (the backend numbers frames, the
 // cloud keys them by uuid). Number()-ing the `?frameId=` of a cloud drawer URL
 // gave null, so applyDrawerFromSearch closed every drawer the moment its own

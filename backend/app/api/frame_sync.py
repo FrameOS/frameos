@@ -142,7 +142,27 @@ async def store_frame_sync_hint_headers(redis: Redis, frame_id: int, frame_heade
 # this frame: a device that reported `["openAI", …]` would have had those keys
 # shipped to it on the next deploy, and an adopted card imports the device's
 # payload wholesale — so the grant is decided here, never read back.
-FRAME_SYNC_BACKEND_OWNED_KEYS = frozenset({"mode", "agent", "frame_admin_auth", "service_setting_groups"})
+# The four `server_*` keys are how the frame reaches THIS backend, written by
+# this backend and only ever read back as noise. A frame that drops them is
+# leaving (it says so with a `server:detached` log line, api.nim
+# backendChangeNotice), and a frame pointed at a second backend has already
+# left; neither is an edit to merge. Before this they rode the diff, so
+# clearing the server URL on the device produced a "Server Host — Backend:
+# 10.4.0.47 / Frame: Not set" conflict with two equally wrong answers
+# (2026-09-13). The admin-API deploy still carries them: see
+# FRAME_PUSH_EXTRA_KEYS.
+FRAME_SYNC_BACKEND_OWNED_KEYS = frozenset(
+    {
+        "mode",
+        "agent",
+        "frame_admin_auth",
+        "service_setting_groups",
+        "server_host",
+        "server_port",
+        "server_scheme",
+        "server_send_logs",
+    }
+)
 
 FRAME_SYNC_FRAME_KEYS = tuple(
     key
@@ -1364,7 +1384,9 @@ async def _push_frame_sync_metadata(
 # Keys _sync_frame_json_payload would import from the device but adoption must
 # not: the backend just minted the server credentials it is about to write TO
 # the device, and the device's own view of them (empty, or a previous
-# backend's) must not clobber that.
+# backend's) must not clobber that. Now also backend-owned everywhere else
+# (FRAME_SYNC_BACKEND_OWNED_KEYS), so this is belt and braces — kept because
+# it is the one place that states the adoption-specific reason.
 ADOPT_SKIPPED_SYNC_KEYS = ("server_host", "server_port", "server_scheme", "server_send_logs")
 # A Buildroot device that predates reporting its board (< 2026.9.11) is most
 # likely the common 64-bit image; the platform is editable in frame settings.
@@ -1380,7 +1402,19 @@ logger = logging.getLogger(__name__)
 # and key (the backend's image fetch uses the key), the server API key (the
 # device's log shipper and the backend's control verbs share it), the log
 # file path and the timezone updater (both applied by the runtime itself).
-FRAME_PUSH_EXTRA_KEYS = ("frame_access", "frame_access_key", "server_api_key", "log_to_file", "timezone_updater")
+FRAME_PUSH_EXTRA_KEYS = (
+    "frame_access",
+    "frame_access_key",
+    "server_api_key",
+    "log_to_file",
+    "timezone_updater",
+    # Backend-owned (FRAME_SYNC_BACKEND_OWNED_KEYS), so out of the diff — but
+    # this push is how an adopted card learns where to send its logs at all.
+    "server_host",
+    "server_port",
+    "server_scheme",
+    "server_send_logs",
+)
 
 
 def _sync_frame_push_off_value(key: str, value: Any) -> Any:

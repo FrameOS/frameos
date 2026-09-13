@@ -350,6 +350,56 @@ suite "upgrade status reporting":
     expect ValueError:
       discard parseFrameOSUpgradeOptions(@["--no-restart"])
 
+  test "the watcher follows the status file and gives up on a dead child":
+    # Before 2026-09-13 this watch lived in the cloud hub client, so an upgrade
+    # started from the frame's own admin page reported nothing at all. It lives
+    # in the runtime now and every surface reads the same log.
+    let dir = getTempDir() / "frameos-upgrade-watch-test"
+    removeDir(dir)
+    createDir(dir)
+    defer: removeDir(dir)
+    putEnv("FRAMEOS_DIR", dir)
+    defer: delEnv("FRAMEOS_DIR")
+
+    # Nothing has ever been written: no replay, nothing to say.
+    var (watcher, replay) = initUpgradeLogWatcher(1000.0)
+    check replay == nil
+    check watcher.poll(1000.0) == nil
+    # Rate limited: a loop that ticks every millisecond must not stat the file
+    # every millisecond.
+    createDir(dir / "state")
+    writeFile(frameosUpgradeStatusPath(), $(%*{"status": "running", "message": "downloading"}))
+    check watcher.poll(1000.0 + UpgradeWatchCheckSeconds / 2) == nil
+
+    let running = watcher.poll(1000.0 + UpgradeWatchCheckSeconds)
+    check running != nil
+    check running{"status"}.getStr() == "running"
+    check running{"message"}.getStr() == "downloading"
+
+    # The file stops moving for the whole stall window: say so once, then stop.
+    let now = 1000.0 + UpgradeWatchCheckSeconds + UpgradeWatchStallSeconds
+    let stalled = watcher.poll(now)
+    check stalled != nil
+    check stalled{"status"}.getStr() == "stalled"
+    check watcher.poll(now + UpgradeWatchStallSeconds) == nil
+
+  test "a status written just before the restart is replayed on the way back up":
+    let dir = getTempDir() / "frameos-upgrade-replay-test"
+    removeDir(dir)
+    createDir(dir)
+    defer: removeDir(dir)
+    putEnv("FRAMEOS_DIR", dir)
+    defer: delEnv("FRAMEOS_DIR")
+    createDir(dir / "state")
+    writeFile(frameosUpgradeStatusPath(), $(%*{"status": "success", "latest_version": "2026.9.15"}))
+
+    # A successful upgrade restarts the runtime, so the outcome is written by a
+    # process that is gone before anyone could read it.
+    let (_, replayed) = initUpgradeLogWatcher(epochTime())
+    check replayed != nil
+    check replayed{"status"}.getStr() == "success"
+    check replayed{"latest_version"}.getStr() == "2026.9.15"
+
   test "the mtime probe answers 0 for a device that never upgraded":
     let dir = getTempDir() / "frameos-upgrade-mtime-test"
     createDir(dir)

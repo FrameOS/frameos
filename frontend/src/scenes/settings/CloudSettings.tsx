@@ -14,7 +14,9 @@ import { Spinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
 import { Tag } from '../../components/Tag'
 import { TextInput } from '../../components/TextInput'
+import { Tooltip } from '../../components/Tooltip'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { scrollToFrameSettingsSection } from '../frame/panels/FrameSettings/frameSettingsHelpers'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { availableCloudFeatures, cloudLogic } from './cloudLogic'
 import type { CloudStatus } from '../../types'
@@ -81,11 +83,13 @@ function FrameCloudStatusRow({
       <div className="w-full space-y-1 text-sm">
         <div className="flex flex-wrap items-center gap-2">
           <Tag color={managed ? 'teal' : 'gray'}>{managed ? 'Managed from the cloud' : 'Linked, not managed'}</Tag>
-        </div>
-        <div className="frameos-muted">
-          {managed
-            ? `This frame answers to ${providerHost}: scenes, settings and reboots can come from there, and your cloud scene library is available on this page.`
-            : `Nothing on ${providerHost} can change what this frame shows. The link signs you in and gives this page your cloud scene library; the frame is still driven from here.`}
+          <Tooltip
+            title={
+              managed
+                ? `This frame answers to ${providerHost}: scenes, settings and reboots can come from there, and your cloud scene library is available on this page.`
+                : `Nothing on ${providerHost} can change what this frame shows. The link signs you in and gives this page your cloud scene library; the frame is still driven from here.`
+            }
+          />
         </div>
         {cloudStatus?.managed_enroll_error ? (
           <div className="text-red-500">
@@ -113,6 +117,7 @@ function CloudFeatureSwitch({
   busy,
   nested,
   unavailableReason,
+  unavailableNode,
   children,
 }: {
   label: string
@@ -123,18 +128,23 @@ function CloudFeatureSwitch({
   busy?: boolean
   nested?: boolean
   unavailableReason?: string
+  /** Same slot as `unavailableReason`, when the blocker needs a link in it. */
+  unavailableNode?: ReactNode
   children?: ReactNode
 }): JSX.Element {
+  const blocked = unavailableNode ?? unavailableReason
   return (
     <div className={clsx('space-y-1', nested && 'border-l border-slate-500/20 pl-3')}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Switch value={value} onChange={onChange} disabled={disabled || !!unavailableReason} label={label} />
+      <div className="flex flex-wrap items-center gap-1">
+        <Switch value={value} onChange={onChange} disabled={disabled || !!blocked} label={label} />
+        <Tooltip title={description} label={`What "${label}" does`} />
         {busy ? <Spinner /> : null}
       </div>
-      <div className={clsx('frameos-muted', unavailableReason && 'text-amber-600 dark:text-amber-400')}>
-        {unavailableReason ?? description}
-      </div>
-      {children && value && !unavailableReason ? <div className="pt-2">{children}</div> : null}
+      {/* Only the blocker stays on the page: it is the one line that says why
+          the switch will not move, and hiding it behind the (i) would leave a
+          dead toggle with no explanation. */}
+      {blocked ? <div className="text-amber-600 dark:text-amber-400">{blocked}</div> : null}
+      {children && value && !blocked ? <div className="pt-2">{children}</div> : null}
     </div>
   )
 }
@@ -435,8 +445,23 @@ export function CloudSettingsSection({
                       cloudStatus?.managed_available
                         ? undefined
                         : cloudStatus?.backend_managed
-                        ? 'A self-hosted FrameOS backend already manages this frame. Clear serverHost in frame.json first.'
+                        ? undefined
                         : 'This link was never approved for it. Disconnect and connect again to ask for the permission.'
+                    }
+                    unavailableNode={
+                      !cloudStatus?.managed_available && cloudStatus?.backend_managed ? (
+                        <>
+                          A self-hosted FrameOS backend already manages this frame. Clear{' '}
+                          <button
+                            type="button"
+                            className="frameos-link underline"
+                            onClick={(e) => scrollToFrameSettingsSection(e, 'frame-settings-backend')}
+                          >
+                            Backend host
+                          </button>{' '}
+                          under &ldquo;Backend access&rdquo; first.
+                        </>
+                      ) : undefined
                     }
                   />
                   <CloudFeatureSwitch
