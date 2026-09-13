@@ -365,6 +365,16 @@ suite "frame api route behavior":
       let (restartReceived, restartPayload) = eventChannel.tryRecv()
       check restartReceived
       check restartPayload[1] == "restart"
+
+      # The frame's own admin page offers "Reboot device" beside Restart, and
+      # it calls the same path the backend calls on a shell-less frame.
+      drainEventChannel()
+      let reboot = httpRequest(server.port, "POST", "/api/frames/1/reboot", headers = [("Cookie", refreshedCookie)])
+      check reboot.status == 200
+      check parseJson(reboot.body)["action"].getStr() == "reboot"
+      let (rebootReceived, rebootPayload) = eventChannel.tryRecv()
+      check rebootReceived
+      check rebootPayload[1] == "reboot"
     finally:
       if hadConfigEnv:
         putEnv("FRAMEOS_CONFIG", oldConfigEnv)
@@ -523,6 +533,7 @@ suite "frame api route behavior":
     for path in [
       "/api/frames/2/reload",
       "/api/frames/2/restart",
+      "/api/frames/2/reboot",
     ]:
       let response = httpRequest(server.port, "POST", path, headers = [("Cookie", adminCookie)])
       check response.status == 404

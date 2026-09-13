@@ -164,6 +164,27 @@ describe("frameFormKeysEqual", () => {
     expect(frameFormKeysEqual(previous, next)).toBe(true);
   });
 
+  // 2026-09-13 bench, frame 14: right after adopting a generic Buildroot card
+  // the deploy button said there was something to save and the drawer listed
+  // nothing. `sanitizeFrame` seeds the form with `buildroot.compilationMode:
+  // ''` whether or not the row has the key (it does the same for `rpios`,
+  // which HAS a comparison normalizer), and adoption writes `buildroot` as
+  // `{adopted: true}` with no compilationMode — so the key read as an edit
+  // forever, while computeChangeDetails hid it because `buildroot` is a
+  // shell-less backend-only key.
+  it("does not call an adopted card's materialised buildroot.compilationMode an edit", () => {
+    const row = frame({ name: "Kitchen", mode: "buildroot", buildroot: { adopted: true } });
+    const seededForm = { ...row, buildroot: { adopted: true, compilationMode: "" } } as FrameType;
+    expect(frameFormKeysEqual(row, seededForm)).toBe(true);
+  });
+
+  it("still sees a real buildroot edit", () => {
+    const row = frame({ name: "Kitchen", mode: "buildroot", buildroot: { adopted: true } });
+    expect(
+      frameFormKeysEqual(row, { ...row, buildroot: { adopted: true, platform: "raspberry-pi-64" } } as FrameType),
+    ).toBe(false);
+  });
+
   it("is false when a form key moved, scenes included", () => {
     const previous = frame({ name: "Kitchen", interval: 60, scenes });
     expect(frameFormKeysEqual(previous, { ...previous, name: "Hall" })).toBe(false);
