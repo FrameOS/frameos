@@ -117,6 +117,48 @@ export function sceneDependencyGroupingIsEnabled(
   return !expansion[sceneDependencyGroupingDisabledKey(frameId, surface)]
 }
 
+/**
+ * "Sort by recently used" in the scene list's display menu, stored like the
+ * grouping flag: per frame, per surface, default ON — so the stored flag is
+ * the alphabetical one.
+ */
+export function sceneSortAlphabeticalPath(surface: SceneDependencyGroupingSurface): string {
+  return `scene-sort-alphabetical:${surface}`
+}
+
+export function sceneSortAlphabeticalKey(frameId: FrameId, surface: SceneDependencyGroupingSurface): string {
+  return frameAssetFolderExpansionKey(frameId, sceneSortAlphabeticalPath(surface))
+}
+
+export function sceneSortIsAlphabetical(
+  expansion: Record<string, boolean>,
+  frameId: FrameId,
+  surface: SceneDependencyGroupingSurface
+): boolean {
+  return !!expansion[sceneSortAlphabeticalKey(frameId, surface)]
+}
+
+/** The scene list shows one row of tiles until this is set. Default OFF. */
+export function sceneListExpandedPath(surface: SceneDependencyGroupingSurface): string {
+  return `scene-list-expanded:${surface}`
+}
+
+export function sceneListExpandedKey(frameId: FrameId, surface: SceneDependencyGroupingSurface): string {
+  return frameAssetFolderExpansionKey(frameId, sceneListExpandedPath(surface))
+}
+
+export function sceneListIsExpanded(
+  expansion: Record<string, boolean>,
+  frameId: FrameId,
+  surface: SceneDependencyGroupingSurface
+): boolean {
+  return !!expansion[sceneListExpandedKey(frameId, surface)]
+}
+
+export function sceneUsageKey(frameId: FrameId, sceneId: string): string {
+  return `${frameId}:${sceneId}`
+}
+
 // NEVER a number parse: frame ids are opaque (the backend numbers frames, the
 // cloud keys them by uuid). Number()-ing the `?frameId=` of a cloud drawer URL
 // gave null, so applyDrawerFromSearch closed every drawer the moment its own
@@ -939,6 +981,7 @@ export interface workspaceLogicValues {
   frameChangeDrawerSelection: FrameChangeDrawerSelection | null
   frameOrderSnapshot: FrameId[]
   frameToolScrollPositions: Record<string, number>
+  sceneUsage: Record<string, number>
   homeActiveFramesList: FrameType[]
   homeInactiveFramesList: FrameType[]
   lastAppsHref: string | null
@@ -1110,6 +1153,15 @@ export interface workspaceLogicActions {
   }
   selectNode: (nodeId: string | null) => {
     nodeId: string | null
+  }
+  markSceneUsed: (
+    frameId: FrameId,
+    sceneId: string,
+    at?: number
+  ) => {
+    at: number
+    frameId: FrameId
+    sceneId: string
   }
   setFrameAssetFolderExpanded: (
     frameId: FrameId,
@@ -1283,6 +1335,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       path,
       expanded,
     }),
+    markSceneUsed: (frameId: FrameId, sceneId: string, at: number = Date.now()) => ({ frameId, sceneId, at }),
   }),
   reducers({
     search: [
@@ -1493,6 +1546,21 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [] as FrameId[],
       {
         rememberTerminalSessionFrame: (state, { frameId }) => (state.includes(frameId) ? state : [...state, frameId]),
+      },
+    ],
+    /**
+     * "Recently used" for the scene list, kept here because nothing records it
+     * server-side: the surface stamps a scene the moment the frame reports it
+     * active, so the running scene sorts first and the ones before it follow.
+     */
+    sceneUsage: [
+      {} as Record<string, number>,
+      { persist: true, storageKey: 'workspaceLogic.sceneUsage' },
+      {
+        markSceneUsed: (state, { frameId, sceneId, at }) => {
+          const key = sceneUsageKey(frameId, sceneId)
+          return state[key] === at ? state : { ...state, [key]: at }
+        },
       },
     ],
     frameAssetFolderExpansion: [

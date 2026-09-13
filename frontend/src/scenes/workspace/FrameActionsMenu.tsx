@@ -10,6 +10,7 @@ import {
   NoSymbolIcon,
   PencilSquareIcon,
   PowerIcon,
+  RectangleGroupIcon,
   RocketLaunchIcon,
   StopCircleIcon,
   TrashIcon,
@@ -22,6 +23,7 @@ import { frameHost } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { workspaceLogic } from './workspaceLogic'
+import { STATUS_SCREEN_SCENE_ID } from '../../utils/systemScenes'
 import {
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
@@ -55,7 +57,7 @@ export function FrameActionsMenu({
     stopFrame,
     updateFrameFirmware,
   } = useActions(framesModel)
-  const { openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
+  const { openFrameChangeDrawer, openRenameFrameDialog, openSceneControl } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
   // Which verbs exist is a property of the control plane, not of this menu —
@@ -76,6 +78,9 @@ export function FrameActionsMenu({
   const deleteCopy = frameDeleteCopy(mode)
   const disabledReason = (action: FrameMenuAction): string | null => frameMenuActionDisabledReason(mode, action, frame)
   const renameDisabledReason = disabledReason('rename')
+  // Every Linux frame draws `system/index` on request; the ESP32 firmware
+  // draws its own boot screen in C and has no such scene.
+  const frameHasStatusScreen = (frame.mode ?? 'rpios') !== 'embedded'
 
   return (
     <DropdownMenu
@@ -101,6 +106,21 @@ export function FrameActionsMenu({
                 title: 'Re-render the current scene',
                 onClick: () => renderFrame(frame.id),
                 icon: <PlayIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        // The built-in status screen is no longer a tile in the scene list, so
+        // this is the way to it. It opens the scene panel rather than firing
+        // the activation from here: rendering a scene runs through
+        // controlLogic, and mounting that for every frame on the home page
+        // would fetch every frame's state (see FrameSceneTile).
+        ...(frameHasStatusScreen
+          ? [
+              {
+                label: 'Render status screen',
+                title: "Show the frame's built-in status screen on the display",
+                onClick: () => openSceneControl(frame.id, STATUS_SCREEN_SCENE_ID),
+                icon: <RectangleGroupIcon className="h-5 w-5" />,
               },
             ]
           : []),

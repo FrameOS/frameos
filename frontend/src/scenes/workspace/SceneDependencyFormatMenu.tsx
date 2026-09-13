@@ -7,6 +7,8 @@ import type { FrameId } from '../../types'
 import {
   sceneDependencyGroupingDisabledPath,
   sceneDependencyGroupingIsEnabled,
+  sceneSortAlphabeticalPath,
+  sceneSortIsAlphabetical,
   type SceneDependencyGroupingSurface,
   workspaceLogic,
 } from './workspaceLogic'
@@ -30,6 +32,7 @@ export function SceneDependencyFormatMenu({
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frameId, surface)
+  const sortByRecent = !sceneSortIsAlphabetical(frameAssetFolderExpansion, frameId, surface)
 
   return (
     <DropdownMenu
@@ -37,6 +40,16 @@ export function SceneDependencyFormatMenu({
       buttonTitle="Scene list display"
       className={clsx('h-8 w-8 items-center !rounded-lg !px-0 !py-0', className)}
       items={[
+        {
+          content: () => (
+            <Switch
+              label="Sort by recently used"
+              value={sortByRecent}
+              onChange={(recent) => setFrameAssetFolderExpanded(frameId, sceneSortAlphabeticalPath(surface), !recent)}
+              fullWidth
+            />
+          ),
+        },
         {
           content: () => (
             <Switch
