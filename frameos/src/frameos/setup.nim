@@ -749,6 +749,17 @@ proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
   discard runSetupCommand("mkdir -p /srv/frameos/state")
   discard runSetupCommand("rm -rf " & shellQuote(stateLink) & " && ln -s /srv/frameos/state " & shellQuote(stateLink))
 
+  # Make the release durable before anything points at it. A deploy writes
+  # frame.json and scenes.json.gz over the wire and moves straight on; ext4
+  # keeps those in delayed allocation for up to 30 s, so a frame that loses
+  # power or takes a watchdog reset inside that window comes back with
+  # `current` aimed at a release whose data files have a size and no blocks —
+  # NULs, which nothing can inflate or parse (ukseraamike, 2026-09-14). One
+  # `sync` per deploy buys the whole payload; the frame is idle here anyway,
+  # between the upload and the service restart.
+  setupLog("FrameOS setup: release activation: flushing the release to disk")
+  discard runSetupCommand("sync", raiseOnError = false)
+
   if appDir.startsWith("/srv/frameos/releases/release_"):
     setupLog("FrameOS setup: release activation: activating " & appDir)
     discard runSetupCommand("rm -rf /srv/frameos/current && ln -s " & shellQuote(appDir) & " /srv/frameos/current")

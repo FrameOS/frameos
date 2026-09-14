@@ -359,12 +359,21 @@ var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
 var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+var lastInterpretedScenesLoadError = ""
+
+proc interpretedScenesLoadError*(): string =
+  ## Why the last attempt to read scenes.json(.gz) off the disk failed, or ""
+  ## when the scenes on hand came from a read that worked. `startFrameOS`
+  ## consults this: the read itself happens too early to raise (see
+  ## `loadInterpretedScenesForStartup`).
+  lastInterpretedScenesLoadError
 
 proc resetInterpretedScenes*() =
   allScenesLoaded = false
   # A card that was full or missing may have been swapped along with the
   # scenes; give the disk tier another chance.
   imageSpillDisabled = false
+  lastInterpretedScenesLoadError = ""
   loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var compiledSceneExports = initTable[SceneId, ExportedScene]()
 
@@ -1846,6 +1855,12 @@ proc parseInterpretedScenes*(data: string): Table[SceneId, ExportedInterpretedSc
     except Exception as e:
       echo "Warning: Failed to load interpreted scene: ", e.msg
 
+type InterpretedScenesLoadError* = object of CatchableError
+  ## The scene payload on disk could not be read. Named so the fatal-startup
+  ## path can say which file and why: "Unable to detect compressed data
+  ## format" on its own tells nobody that a deploy landed a corrupt
+  ## scenes.json.gz and that a redeploy is the fix.
+
 proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] =
   let configuredFile = getEnv("FRAMEOS_SCENES_JSON")
   var sourcePath = ""
@@ -1866,24 +1881,67 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
   if sourcePath.len == 0:
     return initTable[SceneId, ExportedInterpretedScene]()
 
-  let encoded = readFile(sourcePath)
+  let encoded =
+    try:
+      readFile(sourcePath)
+    except CatchableError as e:
+      raise newException(InterpretedScenesLoadError,
+        "Could not read the scenes from " & sourcePath & ": " & e.msg)
 
   let decoded =
     if compressed:
-      uncompress(encoded)
+      try:
+        uncompress(encoded)
+      except CatchableError as e:
+        raise newException(InterpretedScenesLoadError,
+          "The scenes on this frame are corrupt: " & sourcePath & " (" & $encoded.len &
+          " bytes) could not be decompressed: " & e.msg & ". Deploy the frame again.")
     else:
       encoded
 
-  result = parseInterpretedScenes(decoded)
+  try:
+    result = parseInterpretedScenes(decoded)
+  except CatchableError as e:
+    raise newException(InterpretedScenesLoadError,
+      "The scenes on this frame are corrupt: " & sourcePath & " could not be parsed: " &
+      e.msg & ". Deploy the frame again.")
 
 proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
   loadedScenes = scenes
   allScenesLoaded = true
+  lastInterpretedScenesLoadError = ""
+
+proc loadInterpretedScenesForStartup*(): Table[SceneId, ExportedInterpretedScene] =
+  ## `loadInterpretedScenesFromDisk` for callers that cannot afford to raise.
+  ##
+  ## scenes.nim reads the scene table into a module-level `var`, which Nim
+  ## runs before `main` — so an exception there escapes the fatal-startup
+  ## handler in frameos.nim entirely and kills the process before the logger,
+  ## the boot guard, the error screen or the retry timer exist. A deploy that
+  ## loses its writes does exactly that: ext4 holds a just-written
+  ## scenes.json.gz in delayed allocation, and a frame that resets inside that
+  ## window comes back with a file that has a size and no blocks — 21 KB of
+  ## NULs that zippy cannot inflate. The frame then restarted every five
+  ## seconds forever with nothing on the panel and nothing in the log but the
+  ## traceback (ukseraamike, 2026-09-14: 2893 restarts in one boot).
+  ##
+  ## So: record the failure and hand back an empty table. The result is
+  ## deliberately *not* cached, so the next read tries the disk again and a
+  ## redeploy heals the frame without a restart.
+  try:
+    result = loadInterpretedScenesFromDisk()
+    lastInterpretedScenesLoadError = ""
+  except CatchableError as e:
+    lastInterpretedScenesLoadError = e.msg
+    result = initTable[SceneId, ExportedInterpretedScene]()
 
 proc getInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
   if allScenesLoaded:
     return loadedScenes
 
-  replaceInterpretedScenesCache(loadInterpretedScenesFromDisk())
+  let scenes = loadInterpretedScenesForStartup()
+  if lastInterpretedScenesLoadError.len > 0:
+    return scenes
+  replaceInterpretedScenesCache(scenes)
 
   return loadedScenes

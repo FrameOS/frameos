@@ -1247,6 +1247,14 @@ class FrameDeployWorkflow:
             await self.deployer._upload_frame_json_atomically("/srv/frameos/current/frame.json")
             await self.deployer._upload_scenes_json_atomically("/srv/frameos/current/scenes.json.gz", gzip=True)
             await self.deployer._upload_all_scenes_json_atomically("/srv/frameos/current/all_scenes.json.gz", gzip=True)
+            # A fast deploy rewrites the live release in place, so there is no
+            # older release to fall back to: get these on the card before the
+            # frame is asked to read them. The temp-plus-rename above makes the
+            # swap atomic against a reader, not against a reset — ext4 can hold
+            # the contents in delayed allocation for another 30 s, and a frame
+            # that resets in that window reads back a file with a size and no
+            # blocks (ukseraamike, 2026-09-14).
+            await self.deployer.exec_command("sync")
 
             if not plan.fast_deploy:
                 raise RuntimeError("Fast deploy plan missing")

@@ -424,6 +424,9 @@ block test_release_activation_switches_staged_release_current_symlink:
     doAssert commands == @[
       "mkdir -p /srv/frameos/state",
       "rm -rf '/srv/frameos/releases/release_build123/state' && ln -s /srv/frameos/state '/srv/frameos/releases/release_build123/state'",
+      # Before the symlink moves, never after: a reset between the two leaves
+      # `current` on the old release, which still works.
+      "sync",
       "rm -rf /srv/frameos/current && ln -s '/srv/frameos/releases/release_build123' /srv/frameos/current",
     ]
   finally:
@@ -442,6 +445,10 @@ block test_release_activation_does_not_repoint_current_when_running_current_rele
     doAssert commands == @[
       "mkdir -p /srv/frameos/state",
       "rm -rf '/srv/frameos/current/state' && ln -s /srv/frameos/state '/srv/frameos/current/state'",
+      # A fast deploy rewrites frame.json and scenes.json.gz inside
+      # /srv/frameos/current, so the flush matters there too even though no
+      # symlink moves.
+      "sync",
     ]
   finally:
     resetSetupCommandRunnerForTest()

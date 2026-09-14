@@ -1909,7 +1909,11 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
         ("/srv/frameos/current/scenes.json.gz", True),
         ("/srv/frameos/current/all_scenes.json.gz", True),
     ]
-    assert "cd /srv/frameos/current && sudo -n ./frameos setup" in deployer.commands
+    # The live release is rewritten in place, so the payload has to reach the
+    # card before the frame is restarted onto it.
+    assert deployer.commands.index("sync") < deployer.commands.index(
+        "cd /srv/frameos/current && sudo -n ./frameos setup"
+    )
 
 
 @pytest.mark.asyncio

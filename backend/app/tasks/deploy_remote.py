@@ -746,6 +746,12 @@ class RemoteDeployer(FrameDeployer):
         await self.log("stdout", "- Switching current FrameOS Remote release")
         await self.exec_command(
             "set -eu; "
+            # Flush the staged release before the pointer moves. ext4 holds a
+            # freshly uploaded release in delayed allocation for up to 30 s, so
+            # a frame that resets in that window would come back with `current`
+            # aimed at files that have a size and no blocks. Failing the other
+            # way (pointer not durable, release is) just keeps the old release.
+            "sync; "
             "cd /srv/frameos/remote; "
             "rm -f current.next; "
             f"ln -sfn {release_dir} current.next; "

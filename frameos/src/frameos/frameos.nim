@@ -19,6 +19,7 @@ import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
 from frameos/upgrade import reconcileInterruptedUpgradeStatus, installedFrameOSVersion
+from frameos/interpreter import interpretedScenesLoadError
 import frameos/cloud/hub_client
 import frameos/boot_guard
 import frameos/utils/image
@@ -392,6 +393,15 @@ proc startFrameOS*() {.async.} =
   # Tell systemd (Type=notify) we are up before any slow driver or scene
   # init; the runner loop takes over with WATCHDOG=1 heartbeats from here.
   notifyReady()
+  # scenes.nim builds its tables at module init, before main, so a scene
+  # payload it could not read was swallowed there rather than raised
+  # (loadInterpretedScenesForStartup). Read it again here, where the caller's
+  # handler can put the reason on the panel, count it against the boot guard
+  # and retry on the error-behavior timer. Re-reading is what makes it
+  # recoverable: a redeploy heals the frame on the next retry, with no restart
+  # and no reboot.
+  if interpretedScenesLoadError().len > 0:
+    reloadInterpretedScenes()
   setupRenderMemory()
   var frameOS = newFrameOS()
   await frameOS.start()
