@@ -22,7 +22,7 @@ from app.utils.embedded_assets import AssetListing
 from app.models import new_frame
 from app.models.frame import Frame, frame_has_shell_access
 from app.models.log import Log
-from app.models.metrics import Metrics
+from app.models.metrics import METRICS_RETAINED_PER_FRAME, Metrics
 from app.models.scene_image import SceneImage
 from app.models.settings import Settings
 from app.models.user import User
@@ -565,6 +565,22 @@ async def test_api_frame_recent_metrics_limits_metrics(async_client, db, redis):
     assert response.status_code == 200
     payload = response.json()
     assert [metric['metrics']['load'][0] for metric in payload['metrics']] == [2, 3]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_metrics_report_the_retention_window(async_client, db, redis):
+    # The panel counts its own datapoints and explains the number with this:
+    # the retained window, plus whatever arrived live since the page loaded.
+    # It rides the response because the cloud keeps a different depth, and a
+    # number the SPA hardcoded would be wrong on one of the two planes.
+    frame = await new_frame(db, redis, 'RetentionFrame', 'localhost', 'localhost')
+    db.add(Metrics(frame_id=frame.id, timestamp=datetime(2026, 6, 2, 3, 0, 0), metrics={"load": [0.1]}))
+    db.commit()
+
+    for path in (f'/api/frames/{frame.id}/metrics', f'/api/frames/{frame.id}/metrics/recent'):
+        response = await async_client.get(path)
+        assert response.status_code == 200
+        assert response.json()['retained'] == METRICS_RETAINED_PER_FRAME
 
 
 @pytest.mark.asyncio

@@ -162,6 +162,27 @@ describe("GET /api/frames/{id}/metrics", () => {
     ]);
   });
 
+  it("reports how many samples are retained, on both routes", async () => {
+    // The SPA's datapoint count is the retained window plus whatever arrived
+    // live, and it explains that to the user with this number. The cloud and
+    // the self-hosted backend keep different depths, so it travels with the
+    // samples rather than being one the shared SPA hardcodes.
+    const { frame } = await activeFrame();
+    await storeFrameMetrics(db, frame.id, { seq: 0 }, new Date());
+
+    const full = await getFrameMetrics(
+      getRequest(`/api/frames/${frame.id}/metrics`),
+      metricsParams(frame.id),
+    );
+    expect((await full.json()).retained).toBe(maxMetricsPerFrame);
+
+    const recent = await getFrameMetricsRecent(
+      getRequest(`/api/frames/${frame.id}/metrics/recent`),
+      metricsParams(frame.id),
+    );
+    expect((await recent.json()).retained).toBe(maxMetricsPerFrame);
+  });
+
   it("requires a session and hides other accounts' frames", async () => {
     const { frame } = await activeFrame();
     cookieJar.clear();

@@ -94,6 +94,10 @@ interface MetricsResponseReboot {
 interface MetricsResponse {
   metrics: MetricsType[]
   reboots?: MetricsResponseReboot[]
+  // How many samples this control plane keeps per frame (the backend and the
+  // cloud differ). Absent from an older backend, in which case the panel
+  // explains the count without the number.
+  retained?: number
 }
 
 export type MetricsTimeRangePreset = '1h' | '6h' | '12h' | '24h' | '3d' | '7d' | 'all' | 'custom'
@@ -921,9 +925,11 @@ export interface metricsLogicValues {
   logRebootMarkers: RebootMarker[]
   metricGapThresholdMs: number | null
   metricRebootMarkers: RebootMarker[]
+  metricSampleIntervalMs: number | null
   metrics: MetricsType[]
   metricsByCategory: Record<string, MetricSeries[]>
   metricsLoading: boolean
+  metricsRetained: number | null
   metricsTimeRange: TimeRange | null
   overviewChartSeriesByCategory: Record<string, ChartSeries[]>
   rebootMarkers: RebootMarker[]
@@ -989,6 +995,9 @@ export interface metricsLogicActions {
   setCurrentTime: (currentTime: number) => {
     currentTime: number
   }
+  setMetricsRetained: (retained: number | null) => {
+    retained: number | null
+  }
   setSelectedTimeRange: (
     start: number,
     end: number
@@ -1033,7 +1042,8 @@ export interface metricsLogicMeta {
       metricsTimeRange: TimeRange | null,
       defaultSelectedTimeRange: TimeRange | null
     ) => TimeRange | null
-    metricGapThresholdMs: (sortedMetrics: MetricsType[]) => number | null
+    metricSampleIntervalMs: (sortedMetrics: MetricsType[]) => number | null
+    metricGapThresholdMs: (metricSampleIntervalMs: number | null) => number | null
     metricsByCategory: (sortedMetrics: MetricsType[]) => Record<string, MetricSeries[]>
     headerMetricsByCategory: (
       metricsByCategory: Record<string, MetricSeries[]>,
@@ -1075,6 +1085,7 @@ export const metricsLogic = kea<metricsLogicType>([
     setChartWidth: (width: number) => ({ width }),
     toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
     setApiRebootMarkers: (markers: RebootMarker[]) => ({ markers }),
+    setMetricsRetained: (retained: number | null) => ({ retained }),
     requestMetrics: true,
     requestMetricsSuccess: true,
     requestMetricsFailure: (error: string) => ({ error }),
@@ -1091,6 +1102,7 @@ export const metricsLogic = kea<metricsLogicType>([
             }
             const data = (await response.json()) as MetricsResponse
             actions.setApiRebootMarkers(rebootMarkersFromResponse(data))
+            actions.setMetricsRetained(typeof data.retained === 'number' ? data.retained : null)
             return data.metrics
           } catch (error) {
             console.error(error)
@@ -1122,6 +1134,9 @@ export const metricsLogic = kea<metricsLogicType>([
               throw new Error('Failed to fetch metrics')
             }
             const data = (await response.json()) as MetricsResponse
+            if (typeof data.retained === 'number') {
+              actions.setMetricsRetained(data.retained)
+            }
             const responseRebootMarkers = rebootMarkersFromResponse(data)
             if (responseRebootMarkers.length > 0) {
               actions.setApiRebootMarkers(
@@ -1254,6 +1269,14 @@ export const metricsLogic = kea<metricsLogicType>([
       [] as RebootMarker[],
       {
         setApiRebootMarkers: (_, { markers }) => markers,
+      },
+    ],
+    // How many samples the server keeps per frame, as the server reported it.
+    // Null until the first load answers, and on a backend too old to say.
+    metricsRetained: [
+      null as number | null,
+      {
+        setMetricsRetained: (_, { retained }) => retained,
       },
     ],
     logRebootMarkers: [
@@ -1395,7 +1418,11 @@ export const metricsLogic = kea<metricsLogicType>([
           : timeRangeForPreset(metricsTimeRange, selectedTimeRangePreset) ?? defaultSelectedTimeRange
       },
     ],
-    metricGapThresholdMs: [
+    // How often this frame actually samples: the interval the samples report
+    // themselves when they carry one, falling back to the median gap between
+    // them. Used for the gap threshold below, and to say how much history the
+    // retained window is worth.
+    metricSampleIntervalMs: [
       (s) => [s.sortedMetrics],
       (metrics: metricsLogicValues['sortedMetrics']): number | null => {
         const deltas: number[] = []
@@ -1414,9 +1441,13 @@ export const metricsLogic = kea<metricsLogicType>([
             configuredIntervals.push(interval)
           }
         })
-        const interval = median(configuredIntervals) ?? median(deltas)
-        return Math.max(interval ? interval * GAP_THRESHOLD_MULTIPLIER : 0, MIN_GAP_CONNECTION_MS)
+        return median(configuredIntervals) ?? median(deltas)
       },
+    ],
+    metricGapThresholdMs: [
+      (s) => [s.metricSampleIntervalMs],
+      (interval: metricsLogicValues['metricSampleIntervalMs']): number | null =>
+        Math.max(interval ? interval * GAP_THRESHOLD_MULTIPLIER : 0, MIN_GAP_CONNECTION_MS),
     ],
     metricsByCategory: [
       (s) => [s.sortedMetrics],

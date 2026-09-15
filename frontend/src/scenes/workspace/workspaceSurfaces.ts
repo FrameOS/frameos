@@ -132,6 +132,10 @@ export type FrameMenuAction =
   | 'restart'
   | 'restartRemote'
   | 'stop'
+  // Power the panel itself off and back on (the runtime's turnOff / turnOn
+  // events). Only some displays can — see displayPowerDevices below.
+  | 'displayOff'
+  | 'displayOn'
   // Cloud only: enqueue notify_update_available — an advisory nudge; the
   // device downloads and signature-verifies the new firmware on its own
   // (docs/cloud-frames.md "Signed OTA"). The backend's firmware updates ride
@@ -146,6 +150,8 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
     'delete',
     'deploy',
     'deployRemote',
+    'displayOff',
+    'displayOn',
     'reboot',
     'rename',
     'render',
@@ -153,7 +159,10 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
     'restartRemote',
     'stop',
   ],
-  frameAdmin: ['localDeploy', 'rename', 'render'],
+  // Both planes POST the same /api/frames/{id}/event/{name} route — the
+  // backend forwards it to the frame, the on-device admin API hands it
+  // straight to the runtime's event channel.
+  frameAdmin: ['displayOff', 'displayOn', 'localDeploy', 'rename', 'render'],
   // `delete` = DELETE /api/frames/{id}: revoke the link, then drop the row
   // and everything cascaded to it. The device demotes to standalone.
   //
@@ -167,7 +176,11 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
   // scenes was a bare button in the scene sidebar that opened no dialog at
   // all and gave no confirmation of what it would send. See
   // FrameDeployPlanDrawer's cloud branch for what the dialog renders.
-  cloud: ['delete', 'deploy', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
+  // `displayOff`/`displayOn` ride set_display_power, which the Linux runtime
+  // answers by dispatching its own turnOff/turnOn events. Listed for the
+  // cloud like reboot and render are; the per-device gate below is what
+  // decides whether a given frame shows them.
+  cloud: ['delete', 'deploy', 'displayOff', 'displayOn', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
 }
 
 /**
@@ -345,7 +358,12 @@ export type FrameCapability = 'schedule' | 'settings' | 'logs' | 'metrics' | 'up
  * the two mode probes.
  */
 export interface FrameCapabilityInput {
-  hardware?: { platform?: string | null } | null
+  // `device` is the display attached to the frame (backend/app/drivers/
+  // devices.py ids), read by the display-power gate below. A backend frame
+  // carries it at the top level; a cloud-managed one reports it inside
+  // `hardware` (the device's own hello payload, enrollment.hardwarePayload).
+  hardware?: { platform?: string | null; device?: string | null } | null
+  device?: string | null
   embedded?: { platform?: string | null } | null
   scenes?: readonly { origin?: { storeSceneId?: unknown } | null }[] | null
   // The inputs of isAdminApiOnlyFrame — how (whether) this backend gets a
@@ -513,6 +531,32 @@ const adminApiOnlyHiddenMenuActions: readonly FrameMenuAction[] = ['deployRemote
  */
 const adminApiOnlyHiddenFrameSettingsSections: readonly string[] = ['frame-settings-agent', 'frame-settings-reboot']
 
+/**
+ * Displays whose driver can actually power the panel down and back up — what
+ * "Turn display off / on" in the frame's "…" menu sends (the runtime's
+ * `turnOff` / `turnOn` events, drivers.turnOff() / turnOn()).
+ *
+ * Only the two that DO something. The framebuffer driver runs `vcgencmd
+ * display_power`, falling back to blanking fb0; the HyperPixel 2.1" Round
+ * puts its ST7701 to sleep and drops the backlight GPIO. The waveshare driver
+ * is declared `can_turn_on_off` in backend/app/drivers/drivers.py — the
+ * codegen flag that emits the calls — but its turnOn/turnOff are empty procs,
+ * so listing it here would be a menu entry that does nothing; e-paper holds
+ * its image unpowered anyway, so there is nothing to switch.
+ */
+export const displayPowerDevices: readonly string[] = ['framebuffer', 'pimoroni.hyperpixel2r']
+
+export function deviceSupportsDisplayPower(device?: string | null): boolean {
+  return typeof device === 'string' && displayPowerDevices.includes(device)
+}
+
+/** The display a frame reports, wherever this control plane keeps it. */
+export function frameDisplayDevice(frame?: FrameCapabilityInput | null): string | null {
+  return frame?.device ?? frame?.hardware?.device ?? null
+}
+
+const displayPowerMenuActions: readonly FrameMenuAction[] = ['displayOff', 'displayOn']
+
 /** The admin-API-only gating applies on the backend control plane alone. */
 function hidesForAdminApiOnly(mode: WorkspaceMode, frame?: FrameCapabilityInput | null): boolean {
   return mode === 'backend' && isAdminApiOnlyFrame(frame)
@@ -657,6 +701,13 @@ export function frameMenuActionIsAllowed(
     return false
   }
   if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenMenuActions.includes(action)) {
+    return false
+  }
+  // The one gate that hides rather than disables on the DEVICE rather than
+  // the mode, and the one that answers false without a frame: a panel whose
+  // driver cannot switch off has no off to explain, and a caller asking the
+  // question with no frame in hand cannot know which display it would send to.
+  if (displayPowerMenuActions.includes(action) && !deviceSupportsDisplayPower(frameDisplayDevice(frame))) {
     return false
   }
   return allows(allowedFrameMenuActions, mode, action)

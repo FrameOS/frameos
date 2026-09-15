@@ -248,6 +248,11 @@ class FrameLogsResponse(BaseModel):
 class FrameMetricsResponse(BaseModel):
     metrics: List[Dict[str, Any]]
     reboots: List[Dict[str, Any]] = Field(default_factory=list)
+    # How many samples this control plane keeps per frame. The UI explains its
+    # own datapoint count with it, and the number differs between the backend
+    # and the cloud — so it travels with the data rather than being a constant
+    # the SPA hardcodes for whichever plane it was built against.
+    retained: Optional[int] = None
 
 class FrameImageLinkResponse(ImageTokenResponse):
     pass

@@ -616,6 +616,14 @@ export const cloudFramesContract = {
       ]
     },
     {
+      "type": "set_display_power",
+      "scope": null,
+      "content": false,
+      "profiles": [
+        "linux"
+      ]
+    },
+    {
       "type": "notify_update_available",
       "scope": null,
       "content": false,

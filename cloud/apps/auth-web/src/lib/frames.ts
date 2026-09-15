@@ -283,6 +283,10 @@ export const allowedFrameCommandTypes = new Set([
   "render",
   "restart_runtime",
   "set_current_scene",
+  // Powers the panel itself down or up ({on: bool}) — a driver capability
+  // only some displays have, which is why the workspace offers it per device
+  // rather than per plane. Linux only: e-paper holds its image unpowered.
+  "set_display_power",
   "set_schedule",
 ]);
 

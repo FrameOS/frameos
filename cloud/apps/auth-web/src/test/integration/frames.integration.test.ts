@@ -2784,6 +2784,38 @@ describe("frame management API", () => {
     expect(sceneCommand?.payload).toEqual({ scene_id: scene.id });
   });
 
+  it("queues set_display_power for the turnOn / turnOff events", async () => {
+    // The frame menu's Turn display off / on. The verb carries the flag, so
+    // the device has one payload to refuse rather than two verbs to know;
+    // which displays can act on it is the workspace's per-device gate.
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    for (const [eventName, on] of [
+      ["turnOff", false],
+      ["turnOn", true],
+    ] as const) {
+      const response = await postFrameEvent(
+        postJson(`/api/frames/${frame_id}/event/${eventName}`, {}, { origin: baseUrl }),
+        { params: Promise.resolve({ eventName, frameId: frame_id }) },
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ type: "set_display_power" });
+      const commands = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id));
+      const queued = commands.filter((command) => command.type === "set_display_power");
+      expect(queued.at(-1)?.payload).toEqual({ on });
+      // A power flip queued on Monday must not fire on Friday, like the
+      // other now-events.
+      expect(queued.at(-1)?.expiresAt).not.toBeNull();
+    }
+  });
+
   // A scene the device does not hold cannot be selected: it answers
   // set_current_scene with `apply-failed` while the queue says delivered
   // (seen on an E1002 on 2026-08-27: a preview had replaced the device's

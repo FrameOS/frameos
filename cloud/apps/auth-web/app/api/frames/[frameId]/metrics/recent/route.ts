@@ -75,5 +75,6 @@ export async function GET(
       frame.id,
       since === undefined ? {} : { since },
     ),
+    retained: maxMetricsPerFrame,
   });
 }

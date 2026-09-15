@@ -49,6 +49,7 @@ const maxScenesPerUpload = 20;
 //   render          → render
 //   setCurrentScene → set_current_scene {scene_id, state?}
 //   uploadScenes    → set_scenes {scenes, checksum, scene_id?, state?}
+//   turnOn/turnOff  → set_display_power {on}
 //
 // An uploadScenes push deliberately does NOT touch the frame's store-scene
 // assignments: the device's scenes_checksum will differ from the assigned
@@ -115,6 +116,17 @@ export async function POST(
     // broadcast), so mapping the event is all it takes.
     case "metrics":
       type = "get_metrics";
+      break;
+    // The frame menu's Turn display off / on. The verb carries the flag
+    // rather than being two verbs, so the device has one place to refuse a
+    // payload it cannot read; which displays can do anything with it is the
+    // workspace's gate (workspaceSurfaces.displayPowerDevices) — the queue
+    // does not know what panel is attached, and a frame whose driver ignores
+    // the event still acks, so gating here would be guesswork.
+    case "turnOn":
+    case "turnOff":
+      type = "set_display_power";
+      payload = { on: eventName === "turnOn" };
       break;
     case "setCurrentScene": {
       if (!sceneId || sceneId.length > maxSceneIdChars) {
