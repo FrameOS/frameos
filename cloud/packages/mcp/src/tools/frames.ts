@@ -150,7 +150,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_confirm",
     {
       description:
-        "Confirm a frame that enrolled with a multi-use claim token and is waiting in `pending` status; makes it active and installs the provisioning scenes. NOTE: this adopts whatever device booted with the code and lets it pull the account's service keys, so it is a sudo-mode action — it needs a fresh browser sign-in and is refused for API tokens (reauth_required). Ask the owner to confirm at /frames.",
+        "Confirm a frame that enrolled with a multi-use claim token and is waiting in `pending` status; makes it active and installs the provisioning scenes. NOTE: this adopts whatever device booted with the code and lets it pull the account's service keys, so it is refused for API tokens (api_token_not_allowed). Ask the owner to confirm at /frames.",
       inputSchema: { confirm: confirmed("adopts a physical device into the account"), frame_id: frameId },
     },
     async ({ frame_id }) =>
