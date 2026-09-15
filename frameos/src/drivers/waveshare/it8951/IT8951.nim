@@ -29,6 +29,7 @@
 
 import
   DEV_Config,
+  spiPacking,
   strformat,
   times
 
@@ -135,6 +136,7 @@ const
   it8951BusyTimeoutError = 1
   it8951DisplayTimeoutError = 2
   it8951InvalidArgumentError = 3
+  it8951SpiWriteError = 4
 
 var
   lastStage = "idle"
@@ -276,9 +278,25 @@ proc EPD_IT8951_WriteMuitiData(dataBuf: ptr UWORD; length: UDOUBLE) =
     DEV_Digital_Write(EPD_CS_PIN, UBYTE(HIGH))
     return
 
+  # One "write data" transaction carries the whole payload: the words go out
+  # big-endian in transfers of up to spiMaxTransferBytes, with a busy check
+  # between transfers so the host never outruns the controller's input FIFO.
+  # (Sending each word as its own ioctl, let alone each byte, took ~45 s for a
+  # 1872x1404 4bpp frame on a Pi Zero 2 W.)
   let data = cast[ptr UWordArray](dataBuf)
-  for i in 0 ..< length.int:
-    writeWord(data[i])
+  var chunk: array[spiMaxTransferBytes, UBYTE]
+  var offset = 0
+  while offset < length.int:
+    if offset > 0 and not EPD_IT8951_ReadBusy("writeMultiData:chunk"):
+      DEV_Digital_Write(EPD_CS_PIN, UBYTE(HIGH))
+      return
+    let count = min(length.int - offset, spiMaxTransferWords)
+    let bytes = packWordsBigEndian(toOpenArray(data, offset, offset + count - 1), chunk)
+    if not DEV_SPI_Write(addr chunk[0], bytes):
+      DEV_Digital_Write(EPD_CS_PIN, UBYTE(HIGH))
+      setError(it8951SpiWriteError, &"SPI write of {bytes} bytes failed at word {offset} of {length}")
+      return
+    offset += count
 
   DEV_Digital_Write(EPD_CS_PIN, UBYTE(HIGH))
 
@@ -458,8 +476,7 @@ proc sourceWords(loadImgInfo: ptr IT8951_Load_Img_Info): ptr UWordArray =
 
 proc EPD_IT8951_HostAreaPackedPixelWrite_1bp(
   loadImgInfo: ptr IT8951_Load_Img_Info;
-  areaImgInfo: ptr IT8951_Area_Img_Info;
-  packedWrite: bool
+  areaImgInfo: ptr IT8951_Area_Img_Info
 ) =
   if hasError() or loadImgInfo.isNil or areaImgInfo.isNil:
     return
@@ -478,23 +495,15 @@ proc EPD_IT8951_HostAreaPackedPixelWrite_1bp(
     sourceBufferLength = sourceBufferWidth * sourceBufferHeight
     sourceBuffer = sourceWords(loadImgInfo)
 
-  if packedWrite:
-    EPD_IT8951_WriteMuitiData(cast[ptr UWORD](sourceBuffer), UDOUBLE(sourceBufferLength))
-  else:
-    var index = 0
-    for _ in 0 ..< sourceBufferHeight:
-      for _ in 0 ..< sourceBufferWidth:
-        EPD_IT8951_WriteData(sourceBuffer[index])
-        inc index
-        if hasError():
-          return
+  EPD_IT8951_WriteMuitiData(cast[ptr UWORD](sourceBuffer), UDOUBLE(sourceBufferLength))
+  if hasError():
+    return
 
   EPD_IT8951_LoadImgEnd()
 
 proc EPD_IT8951_HostAreaPackedPixelWrite_2bp(
   loadImgInfo: ptr IT8951_Load_Img_Info;
-  areaImgInfo: ptr IT8951_Area_Img_Info;
-  packedWrite: bool
+  areaImgInfo: ptr IT8951_Area_Img_Info
 ) =
   if hasError() or loadImgInfo.isNil or areaImgInfo.isNil:
     return
@@ -513,23 +522,15 @@ proc EPD_IT8951_HostAreaPackedPixelWrite_2bp(
     sourceBufferLength = sourceBufferWidth * sourceBufferHeight
     sourceBuffer = sourceWords(loadImgInfo)
 
-  if packedWrite:
-    EPD_IT8951_WriteMuitiData(cast[ptr UWORD](sourceBuffer), UDOUBLE(sourceBufferLength))
-  else:
-    var index = 0
-    for _ in 0 ..< sourceBufferHeight:
-      for _ in 0 ..< sourceBufferWidth:
-        EPD_IT8951_WriteData(sourceBuffer[index])
-        inc index
-        if hasError():
-          return
+  EPD_IT8951_WriteMuitiData(cast[ptr UWORD](sourceBuffer), UDOUBLE(sourceBufferLength))
+  if hasError():
+    return
 
   EPD_IT8951_LoadImgEnd()
 
 proc EPD_IT8951_HostAreaPackedPixelWrite_4bp(
   loadImgInfo: ptr IT8951_Load_Img_Info;
-  areaImgInfo: ptr IT8951_Area_Img_Info;
-  packedWrite: bool
+  areaImgInfo: ptr IT8951_Area_Img_Info
 ) =
   if hasError() or loadImgInfo.isNil or areaImgInfo.isNil:
     return
@@ -548,16 +549,9 @@ proc EPD_IT8951_HostAreaPackedPixelWrite_4bp(
     sourceBufferLength = sourceBufferWidth * sourceBufferHeight
     sourceBuffer = sourceWords(loadImgInfo)
 
-  if packedWrite:
-    EPD_IT8951_WriteMuitiData(cast[ptr UWORD](sourceBuffer), UDOUBLE(sourceBufferLength))
-  else:
-    var index = 0
-    for _ in 0 ..< sourceBufferHeight:
-      for _ in 0 ..< sourceBufferWidth:
-        EPD_IT8951_WriteData(sourceBuffer[index])
-        inc index
-        if hasError():
-          return
+  EPD_IT8951_WriteMuitiData(cast[ptr UWORD](sourceBuffer), UDOUBLE(sourceBufferLength))
+  if hasError():
+    return
 
   EPD_IT8951_LoadImgEnd()
 
@@ -579,15 +573,12 @@ proc EPD_IT8951_HostAreaPackedPixelWrite_8bp(
   let
     sourceBufferWidth = (areaImgInfo[].Area_W.int * 8 div 8) div 2
     sourceBufferHeight = areaImgInfo[].Area_H.int
+    sourceBufferLength = sourceBufferWidth * sourceBufferHeight
     sourceBuffer = sourceWords(loadImgInfo)
 
-  var index = 0
-  for _ in 0 ..< sourceBufferHeight:
-    for _ in 0 ..< sourceBufferWidth:
-      EPD_IT8951_WriteData(sourceBuffer[index])
-      inc index
-      if hasError():
-        return
+  EPD_IT8951_WriteMuitiData(cast[ptr UWORD](sourceBuffer), UDOUBLE(sourceBufferLength))
+  if hasError():
+    return
 
   EPD_IT8951_LoadImgEnd()
 
@@ -718,7 +709,7 @@ proc EPD_IT8951_Clear_Refresh*(devInfo: IT8951_Dev_Info; targetMemoryAddr: UDOUB
   if hasError():
     return
 
-  EPD_IT8951_HostAreaPackedPixelWrite_4bp(addr loadImgInfo, addr areaImgInfo, false)
+  EPD_IT8951_HostAreaPackedPixelWrite_4bp(addr loadImgInfo, addr areaImgInfo)
   if hasError():
     return
 
@@ -731,8 +722,7 @@ proc EPD_IT8951_1bp_Refresh*(
   w: UWORD;
   h: UWORD;
   mode: UWORD;
-  targetMemoryAddr: UDOUBLE;
-  packedWrite: bool
+  targetMemoryAddr: UDOUBLE
 ) =
   if frameBuf.isNil:
     setError(it8951InvalidArgumentError, "1bpp refresh frame buffer is nil")
@@ -757,7 +747,7 @@ proc EPD_IT8951_1bp_Refresh*(
   if hasError():
     return
 
-  EPD_IT8951_HostAreaPackedPixelWrite_1bp(addr loadImgInfo, addr areaImgInfo, packedWrite)
+  EPD_IT8951_HostAreaPackedPixelWrite_1bp(addr loadImgInfo, addr areaImgInfo)
   if hasError():
     return
 
@@ -769,8 +759,7 @@ proc EPD_IT8951_1bp_Multi_Frame_Write*(
   y: UWORD;
   w: UWORD;
   h: UWORD;
-  targetMemoryAddr: UDOUBLE;
-  packedWrite: bool
+  targetMemoryAddr: UDOUBLE
 ) =
   if frameBuf.isNil:
     setError(it8951InvalidArgumentError, "1bpp multi-frame buffer is nil")
@@ -795,7 +784,7 @@ proc EPD_IT8951_1bp_Multi_Frame_Write*(
   if hasError():
     return
 
-  EPD_IT8951_HostAreaPackedPixelWrite_1bp(addr loadImgInfo, addr areaImgInfo, packedWrite)
+  EPD_IT8951_HostAreaPackedPixelWrite_1bp(addr loadImgInfo, addr areaImgInfo)
 
 proc EPD_IT8951_1bp_Multi_Frame_Refresh*(
   x: UWORD;
@@ -817,8 +806,7 @@ proc EPD_IT8951_2bp_Refresh*(
   w: UWORD;
   h: UWORD;
   hold: bool;
-  targetMemoryAddr: UDOUBLE;
-  packedWrite: bool
+  targetMemoryAddr: UDOUBLE
 ) =
   if frameBuf.isNil:
     setError(it8951InvalidArgumentError, "2bpp refresh frame buffer is nil")
@@ -843,7 +831,7 @@ proc EPD_IT8951_2bp_Refresh*(
   if hasError():
     return
 
-  EPD_IT8951_HostAreaPackedPixelWrite_2bp(addr loadImgInfo, addr areaImgInfo, packedWrite)
+  EPD_IT8951_HostAreaPackedPixelWrite_2bp(addr loadImgInfo, addr areaImgInfo)
   if hasError():
     return
 
@@ -859,8 +847,7 @@ proc EPD_IT8951_4bp_Refresh*(
   w: UWORD;
   h: UWORD;
   hold: bool;
-  targetMemoryAddr: UDOUBLE;
-  packedWrite: bool
+  targetMemoryAddr: UDOUBLE
 ) =
   if frameBuf.isNil:
     setError(it8951InvalidArgumentError, "4bpp refresh frame buffer is nil")
@@ -885,7 +872,7 @@ proc EPD_IT8951_4bp_Refresh*(
   if hasError():
     return
 
-  EPD_IT8951_HostAreaPackedPixelWrite_4bp(addr loadImgInfo, addr areaImgInfo, packedWrite)
+  EPD_IT8951_HostAreaPackedPixelWrite_4bp(addr loadImgInfo, addr areaImgInfo)
   if hasError():
     return
 

@@ -21,7 +21,7 @@ carries secrets (Wi-Fi credentials, the root password, cloud claim tokens).
 | File | What it is |
 | --- | --- |
 | `config.txt` | Raspberry Pi firmware config. FrameOS display driver setup appends what the panel needs (e.g. `dtoverlay=spi0-0cs` for manual dual-CS e-ink panels) and enables the memory cgroup marker line's counterpart below. Edits are made in place and require a reboot. |
-| `cmdline.txt` | Kernel command line (single line!). FrameOS setup adds `cgroup_enable=memory` so the memory clamps in `frameos.service` work. |
+| `cmdline.txt` | Kernel command line (single line!). FrameOS setup adds `cgroup_enable=memory` so the memory clamps in `frameos.service` work. Buildroot images also ship `cpufreq.default_governor=ondemand`: the Pi kernel's own default is `powersave`, which pins the CPU at its lowest clock (600 MHz on a Zero 2 W), and unlike Raspberry Pi OS there is no userspace service switching it. |
 
 ### Provisioning (consumed on first boot, then destroyed)
 
