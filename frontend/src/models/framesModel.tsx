@@ -591,6 +591,13 @@ export interface framesModelActions {
     deployWithAgent: boolean
     id: FrameId
   }
+  setDisplayPower: (
+    id: FrameId,
+    on: boolean
+  ) => {
+    id: FrameId
+    on: boolean
+  }
   setFrameArchived: (
     id: FrameId,
     archived: boolean
@@ -652,6 +659,7 @@ export const framesModel = kea<framesModelType>([
     rebootFrame: (id: FrameId) => ({ id }),
     renderFrame: (id: FrameId) => ({ id }),
     renderStatusScreen: (id: FrameId) => ({ id }),
+    setDisplayPower: (id: FrameId, on: boolean) => ({ id, on }),
     deleteFrame: (id: FrameId) => ({ id }),
     renameFrame: (id: FrameId, name: string) => ({ id, name }),
     // Cloud only: a freshly enrolled frame is `pending` until its owner
@@ -1017,6 +1025,47 @@ export const framesModel = kea<framesModelType>([
           detail: error instanceof Error ? error.message : 'Failed to show the status screen',
         })
         throw error
+      }
+    },
+    // Turn the panel itself off or back on, for the displays whose driver can
+    // (workspaceSurfaces.displayPowerDevices). One POST of the runtime's own
+    // `turnOff` / `turnOn` event — the same route every other event takes, so
+    // the backend forwards it and the on-device admin API hands it to the
+    // event channel. The device reports no display-power state back, so this
+    // is fire-and-tell rather than a toggle that could show which way it is.
+    setDisplayPower: async ({ id, on }) => {
+      const title = on ? 'Turning the display on' : 'Turning the display off'
+      const taskId = `displayPower:${id}:${Date.now()}`
+      longRunningTasksModel.actions.startTask({
+        id: taskId,
+        frameId: id,
+        kind: 'displayPower',
+        title,
+        detail: 'Request sent',
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${id}/event/${on ? 'turnOn' : 'turnOff'}`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error(
+            await frameActionErrorMessage(
+              response,
+              on ? 'Failed to turn the display on' : 'Failed to turn the display off'
+            )
+          )
+        }
+        longRunningTasksModel.actions.finishTask({
+          taskId,
+          frameId: id,
+          kind: 'displayPower',
+          detail: on ? 'Display turned on' : 'Display turned off',
+        })
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          taskId,
+          frameId: id,
+          kind: 'displayPower',
+          detail: error instanceof Error ? error.message : title,
+        })
       }
     },
     deployFrame: async ({ id, fastDeploy }) => {
