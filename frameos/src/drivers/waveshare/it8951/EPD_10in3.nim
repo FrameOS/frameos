@@ -95,7 +95,7 @@ proc EPD_10IN3_16Gray_Display*(Image: ptr UBYTE) =
       "width": EPD_10IN3_WIDTH,
       "height": EPD_10IN3_HEIGHT
     })
-    EPD_IT8951_4bp_Refresh(Image, 0, 0, EPD_10IN3_WIDTH, EPD_10IN3_HEIGHT, false, Init_Target_Memory_Addr, false)
+    EPD_IT8951_4bp_Refresh(Image, 0, 0, EPD_10IN3_WIDTH, EPD_10IN3_HEIGHT, false, Init_Target_Memory_Addr)
     raiseIt8951Error("display")
     logIt8951("display:done")
 

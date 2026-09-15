@@ -70,6 +70,13 @@ proc DEV_SPI_WriteByte*(value: UBYTE) =
   var data = value
   discard lgSpiWrite(spiHandle, cast[cstring](addr data), cint(1))
 
+proc DEV_SPI_Write*(data: ptr UBYTE; length: int): bool =
+  ## Sends `length` bytes as one spidev transfer. Keep `length` within
+  ## `spiPacking.spiMaxTransferBytes`; the kernel refuses bigger transfers.
+  if spiHandle < 0 or data.isNil or length <= 0:
+    return false
+  lgSpiWrite(spiHandle, cast[cstring](data), cint(length)) == cint(length)
+
 proc DEV_SPI_ReadByte*(): UBYTE =
   if spiHandle < 0:
     return UBYTE(0)
