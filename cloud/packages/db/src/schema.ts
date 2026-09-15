@@ -507,6 +507,45 @@ export const clientBackups = pgTable(
   }),
 );
 
+// What each account stores, precomputed (migration 0054). A cache for
+// /admin/storage — refreshed in the background by src/lib/storage-usage.ts,
+// never read by a quota check, and safe to truncate. computed_at travels
+// with the numbers so the page can say how old they are.
+export const accountStorageUsage = pgTable(
+  "account_storage_usage",
+  {
+    accountId: uuid("account_id")
+      .primaryKey()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    privateSceneBytes: bigint("private_scene_bytes", { mode: "number" })
+      .default(0)
+      .notNull(),
+    publicSceneBytes: bigint("public_scene_bytes", { mode: "number" })
+      .default(0)
+      .notNull(),
+    backupBytes: bigint("backup_bytes", { mode: "number" }).default(0).notNull(),
+    backupCount: integer("backup_count").default(0).notNull(),
+    frameLogBytes: bigint("frame_log_bytes", { mode: "number" })
+      .default(0)
+      .notNull(),
+    frameMetricsBytes: bigint("frame_metrics_bytes", { mode: "number" })
+      .default(0)
+      .notNull(),
+    frameAssetBytes: bigint("frame_asset_bytes", { mode: "number" })
+      .default(0)
+      .notNull(),
+    totalBytes: bigint("total_bytes", { mode: "number" }).default(0).notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    totalIdx: index("account_storage_usage_total_idx").on(
+      sql`${table.totalBytes} DESC`,
+    ),
+  }),
+);
+
 // Scenes (template zips) published to the FrameOS store. A scene row is the
 // package identity: slug, ownership, visibility, moderation state, and the
 // denormalized latest version. The actual payloads live in

@@ -4,7 +4,8 @@ import { AdminNav } from "../../src/components/AdminNav";
 import { AppShell } from "../../src/components/AppShell";
 import { getAdminOverview } from "../../src/lib/admin";
 import { requireSuperadmin } from "../../src/lib/admin-page";
-import { formatBytes } from "../../src/lib/format";
+import { formatBytes, formatDateTime } from "../../src/lib/format";
+import { storageSnapshotSummary } from "../../src/lib/storage-usage";
 import { runLiveChecks, runSystemChecks } from "../../src/lib/system-checks";
 
 export const metadata = { title: "Admin" };
@@ -21,7 +22,8 @@ function StatTile({
   label: string;
   // When given, the tile reads "value / total".
   total?: number;
-  value: number;
+  // A count, or an already-formatted figure (bytes) that has no total.
+  value: number | string;
 }) {
   return (
     <Link className="stat-tile" href={href}>
@@ -39,9 +41,10 @@ export default async function AdminPage() {
   await requireSuperadmin("/admin");
 
   const db = createDb();
-  const [overview, liveChecks] = await Promise.all([
+  const [overview, liveChecks, storage] = await Promise.all([
     getAdminOverview(db),
     runLiveChecks(),
+    storageSnapshotSummary(db),
   ]);
 
   return (
@@ -101,6 +104,16 @@ export default async function AdminPage() {
             href="/admin/users"
             label="Backups"
             value={overview.backups.count}
+          />
+          <StatTile
+            detail={
+              storage.computedAt
+                ? `measured ${formatDateTime(storage.computedAt)}`
+                : "not measured yet"
+            }
+            href="/admin/storage"
+            label="Stored"
+            value={formatBytes(storage.totalBytes)}
           />
           <StatTile
             detail="signed-in, unexpired"
