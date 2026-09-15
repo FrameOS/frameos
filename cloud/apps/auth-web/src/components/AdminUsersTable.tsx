@@ -1,7 +1,13 @@
 "use client";
 
-import { ShieldCheck, ShieldOff, Trash2, Unplug } from "lucide-react";
-import { useState } from "react";
+import {
+  MoreHorizontal,
+  ShieldCheck,
+  ShieldOff,
+  Trash2,
+  Unplug,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { formatBytes, formatDate } from "../lib/format";
 import { redirectToReauthIfRequired } from "../lib/reauth-client";
 import { Ratio } from "./Ratio";
@@ -219,47 +225,14 @@ export function AdminUsersTable({
                     {isSelf ? <span className="pill pill-ok">You</span> : null}
                   </td>
                   <td>
-                    <div className="inline-actions">
-                      <button
-                        className="button"
-                        disabled={busy || isSelf}
-                        onClick={() => void toggleSuperadmin(user)}
-                        title={
-                          isSelf
-                            ? "You cannot change your own superadmin flag"
-                            : undefined
-                        }
-                        type="button"
-                      >
-                        {user.isSuperadmin ? (
-                          <ShieldOff aria-hidden size={16} />
-                        ) : (
-                          <ShieldCheck aria-hidden size={16} />
-                        )}
-                        {user.isSuperadmin ? "Revoke admin" : "Make admin"}
-                      </button>
-                      <button
-                        className="button"
-                        disabled={busy || user.activeSessions === 0}
-                        onClick={() => void revokeSessions(user)}
-                        type="button"
-                      >
-                        <Unplug aria-hidden size={16} />
-                        Sign out everywhere
-                      </button>
-                      <button
-                        className="button button-danger"
-                        disabled={busy || isSelf}
-                        onClick={() => void deleteUser(user)}
-                        title={
-                          isSelf ? "You cannot delete your own account" : undefined
-                        }
-                        type="button"
-                      >
-                        <Trash2 aria-hidden size={16} />
-                        Delete
-                      </button>
-                    </div>
+                    <AdminUserRowMenu
+                      busy={busy}
+                      isSelf={isSelf}
+                      onDelete={() => void deleteUser(user)}
+                      onRevokeSessions={() => void revokeSessions(user)}
+                      onToggleSuperadmin={() => void toggleSuperadmin(user)}
+                      user={user}
+                    />
                   </td>
                 </tr>
               );
@@ -269,6 +242,134 @@ export function AdminUsersTable({
         </div>
       )}
     </>
+  );
+}
+
+// Every per-user action lives behind one "..." button: the row stays readable
+// at the width this table already needs for its nine other columns.
+function AdminUserRowMenu({
+  busy,
+  isSelf,
+  onDelete,
+  onRevokeSessions,
+  onToggleSuperadmin,
+  user,
+}: {
+  busy: boolean;
+  isSelf: boolean;
+  onDelete: () => void;
+  onRevokeSessions: () => void;
+  onToggleSuperadmin: () => void;
+  user: AdminUser;
+}) {
+  const [open, setOpen] = useState(false);
+  // Fixed-position coordinates: the panel must escape the table's own
+  // scroll container instead of being clipped by it.
+  const [panelPosition, setPanelPosition] = useState({ right: 0, top: 0 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const label = user.primaryEmail ?? user.displayName ?? user.id;
+
+  function run(action: () => void) {
+    setOpen(false);
+    action();
+  }
+
+  return (
+    <div className="row-menu" ref={containerRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`More actions for ${label}`}
+        className="button button--small"
+        disabled={busy}
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setPanelPosition({
+            right: window.innerWidth - rect.right,
+            top: rect.bottom + 4,
+          });
+          setOpen((value) => !value);
+        }}
+        title="More actions"
+        type="button"
+      >
+        <MoreHorizontal aria-hidden size={16} />
+      </button>
+      {open ? (
+        <div
+          className="row-menu__panel"
+          role="menu"
+          style={{ right: panelPosition.right, top: panelPosition.top }}
+        >
+          <button
+            className="row-menu__item"
+            disabled={isSelf}
+            onClick={() => run(onToggleSuperadmin)}
+            role="menuitem"
+            title={
+              isSelf ? "You cannot change your own superadmin flag" : undefined
+            }
+            type="button"
+          >
+            {user.isSuperadmin ? (
+              <ShieldOff aria-hidden size={16} />
+            ) : (
+              <ShieldCheck aria-hidden size={16} />
+            )}
+            {user.isSuperadmin ? "Revoke admin" : "Make admin"}
+          </button>
+          <button
+            className="row-menu__item"
+            disabled={user.activeSessions === 0}
+            onClick={() => run(onRevokeSessions)}
+            role="menuitem"
+            title={
+              user.activeSessions === 0
+                ? "This account has no active sessions"
+                : undefined
+            }
+            type="button"
+          >
+            <Unplug aria-hidden size={16} />
+            Sign out everywhere
+          </button>
+          <button
+            className="row-menu__item row-menu__item--danger"
+            disabled={isSelf}
+            onClick={() => run(onDelete)}
+            role="menuitem"
+            title={isSelf ? "You cannot delete your own account" : undefined}
+            type="button"
+          >
+            <Trash2 aria-hidden size={16} />
+            Delete
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
