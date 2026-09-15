@@ -1030,9 +1030,10 @@ export const framesModel = kea<framesModelType>([
     // Turn the panel itself off or back on, for the displays whose driver can
     // (workspaceSurfaces.displayPowerDevices). One POST of the runtime's own
     // `turnOff` / `turnOn` event — the same route every other event takes, so
-    // the backend forwards it and the on-device admin API hands it to the
-    // event channel. The device reports no display-power state back, so this
-    // is fire-and-tell rather than a toggle that could show which way it is.
+    // the backend forwards it, the on-device admin API hands it to the event
+    // channel, and the cloud's event shim maps it onto the queued
+    // set_display_power verb. The device reports no display-power state back,
+    // so this is fire-and-tell rather than a toggle showing which way it is.
     setDisplayPower: async ({ id, on }) => {
       const title = on ? 'Turning the display on' : 'Turning the display off'
       const taskId = `displayPower:${id}:${Date.now()}`
@@ -1057,7 +1058,17 @@ export const framesModel = kea<framesModelType>([
           taskId,
           frameId: id,
           kind: 'displayPower',
-          detail: on ? 'Display turned on' : 'Display turned off',
+          // On the cloud the event becomes a queued set_display_power verb,
+          // which a sleeping frame applies when it next dials in — saying
+          // "display turned off" there would be a claim about a device this
+          // request never reached.
+          detail: isCloudMode()
+            ? on
+              ? 'Turn-on queued for the frame'
+              : 'Turn-off queued for the frame'
+            : on
+            ? 'Display turned on'
+            : 'Display turned off',
         })
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({

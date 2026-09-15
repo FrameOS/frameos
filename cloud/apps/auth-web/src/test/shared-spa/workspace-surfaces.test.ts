@@ -20,6 +20,7 @@ import {
   frameSupportsUsbSerialConsole,
   deviceSupportsDisplayPower,
   displayPowerDevices,
+  frameDisplayDevice,
   frameToolPanelDisabledReason,
   frameToolPanelIsAllowed,
   isAdminApiOnlyFrame,
@@ -405,28 +406,38 @@ describe("the esp32 cloud device profile", () => {
 
   it("offers the display-power actions only to displays whose driver has one", () => {
     // turnOff/turnOn reach the panel through the runtime's event channel, so
-    // they exist wherever that route does — the backend and the on-device
-    // admin API — but only for a display whose driver does something with
-    // them. The waveshare driver is declared can_turn_on_off in the backend
-    // (that flag emits the calls) while its turnOn/turnOff are empty procs,
-    // which is the case this gate must keep out of the menu.
+    // they exist on every plane that can get an event there — the backend,
+    // the on-device admin API, and the cloud's set_display_power verb — but
+    // only for a display whose driver does something with them. The waveshare
+    // driver is declared can_turn_on_off in the backend (that flag emits the
+    // calls) while its turnOn/turnOff are empty procs, which is the case this
+    // gate must keep out of the menu.
     const hyperpixel = { device: "pimoroni.hyperpixel2r" };
     const hdmi = { device: "framebuffer" };
     const epaper = { device: "waveshare.EPD_7in5_V2" };
+    // A cloud-managed frame reports its display inside `hardware`, from the
+    // device's own hello payload, not as a top-level field.
+    const cloudHyperpixel = { hardware: { platform: "pi", device: "pimoroni.hyperpixel2r" } };
 
     for (const action of ["displayOff", "displayOn"] as const) {
       expect(frameMenuActionIsAllowed("backend", action, hyperpixel)).toBe(true);
       expect(frameMenuActionIsAllowed("backend", action, hdmi)).toBe(true);
       expect(frameMenuActionIsAllowed("frameAdmin", action, hyperpixel)).toBe(true);
+      expect(frameMenuActionIsAllowed("cloud", action, cloudHyperpixel)).toBe(true);
       expect(frameMenuActionIsAllowed("backend", action, epaper)).toBe(false);
       expect(frameMenuActionIsAllowed("backend", action, { device: "web_only" })).toBe(false);
+      // The esp32 profile answers unsupported_verb: e-paper holds its image
+      // unpowered, so the firmware has nothing to switch.
+      expect(frameMenuActionIsAllowed("cloud", action, esp32Frame)).toBe(false);
       // No frame, no display: the mode-level answer must not leak an entry
       // that would be sent to an unknown panel.
       expect(frameMenuActionIsAllowed("backend", action)).toBe(false);
-      // The cloud's four command verbs do not include display power.
-      expect(frameMenuActionIsAllowed("cloud", action, hyperpixel)).toBe(false);
+      expect(frameMenuActionIsAllowed("cloud", action)).toBe(false);
     }
 
+    expect(frameDisplayDevice(cloudHyperpixel)).toBe("pimoroni.hyperpixel2r");
+    expect(frameDisplayDevice(hdmi)).toBe("framebuffer");
+    expect(frameDisplayDevice(undefined)).toBeNull();
     expect(deviceSupportsDisplayPower(undefined)).toBe(false);
     expect(deviceSupportsDisplayPower(null)).toBe(false);
     expect([...displayPowerDevices].sort()).toEqual(["framebuffer", "pimoroni.hyperpixel2r"]);

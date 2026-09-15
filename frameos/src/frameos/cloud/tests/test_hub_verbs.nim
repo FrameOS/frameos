@@ -884,6 +884,25 @@ suite "cloud hub verb dispatcher":
     check handleCloudVerb(ctx, %*{"type": "restart_runtime"}).ack{"ok"}.getBool(false)
     check recorded.events.mapIt(it[0]) == @["restart"]
 
+  test "set_display_power dispatches turnOn / turnOff, and needs the flag":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    check handleCloudVerb(ctx, %*{"type": "set_display_power", "on": false})
+      .ack{"ok"}.getBool(false)
+    check handleCloudVerb(ctx, %*{"type": "set_display_power", "on": true})
+      .ack{"ok"}.getBool(false)
+    check recorded.events.mapIt(it[0]) == @["turnOff", "turnOn"]
+    check "set_display_power" in auditedVerbs(recorded)
+    # No flag, or one that is not a boolean: refused rather than guessed. A
+    # guess here is a display that stays off overnight.
+    let refused = Recorded()
+    let refusedCtx = makeContext(refused)
+    check handleCloudVerb(refusedCtx, %*{"type": "set_display_power"})
+      .ack{"error"}.getStr("") == "invalid_payload"
+    check handleCloudVerb(refusedCtx, %*{"type": "set_display_power", "on": "yes"})
+      .ack{"error"}.getStr("") == "invalid_payload"
+    check refused.events.len == 0
+
   test "notify_update_available triggers the injected upgrade, nothing else":
     let recorded = Recorded()
     let reply = handleCloudVerb(makeContext(recorded), %*{

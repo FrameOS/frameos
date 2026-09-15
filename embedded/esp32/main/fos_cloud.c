@@ -2588,10 +2588,16 @@ static void ws_handle_message(const char *data, size_t len)
          * the ack only means "the check was accepted". */
         ws_ack(id, true, NULL);
         fos_ota_request_cloud_update();
+    } else if (strcmp(type, "set_display_power") == 0) {
+        /* Documented, and deliberately not implemented here (contract:
+         * profiles ["linux"]). Powering a panel down is a driver capability;
+         * this profile drives e-paper, which holds its image with the power
+         * off and has no backlight to switch. `unsupported_verb` — the
+         * documented answer for a verb this plane does not serve — rather
+         * than `unknown_verb`, which would say the provider invented it. */
+        ws_ack(id, false, "unsupported_verb");
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
-        /* Every documented verb is now implemented on this profile —
-         * `unsupported_verb` retired with the last holdout (cloud OTA). */
     } else {
         /* Audit-log and refuse everything not in the allowlist. */
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");

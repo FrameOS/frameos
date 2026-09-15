@@ -176,7 +176,11 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
   // scenes was a bare button in the scene sidebar that opened no dialog at
   // all and gave no confirmation of what it would send. See
   // FrameDeployPlanDrawer's cloud branch for what the dialog renders.
-  cloud: ['delete', 'deploy', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
+  // `displayOff`/`displayOn` ride set_display_power, which the Linux runtime
+  // answers by dispatching its own turnOff/turnOn events. Listed for the
+  // cloud like reboot and render are; the per-device gate below is what
+  // decides whether a given frame shows them.
+  cloud: ['delete', 'deploy', 'displayOff', 'displayOn', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
 }
 
 /**
@@ -354,9 +358,11 @@ export type FrameCapability = 'schedule' | 'settings' | 'logs' | 'metrics' | 'up
  * the two mode probes.
  */
 export interface FrameCapabilityInput {
-  hardware?: { platform?: string | null } | null
-  // The display attached to the frame (backend/app/drivers/devices.py ids),
-  // read by the display-power gate below.
+  // `device` is the display attached to the frame (backend/app/drivers/
+  // devices.py ids), read by the display-power gate below. A backend frame
+  // carries it at the top level; a cloud-managed one reports it inside
+  // `hardware` (the device's own hello payload, enrollment.hardwarePayload).
+  hardware?: { platform?: string | null; device?: string | null } | null
   device?: string | null
   embedded?: { platform?: string | null } | null
   scenes?: readonly { origin?: { storeSceneId?: unknown } | null }[] | null
@@ -544,6 +550,11 @@ export function deviceSupportsDisplayPower(device?: string | null): boolean {
   return typeof device === 'string' && displayPowerDevices.includes(device)
 }
 
+/** The display a frame reports, wherever this control plane keeps it. */
+export function frameDisplayDevice(frame?: FrameCapabilityInput | null): string | null {
+  return frame?.device ?? frame?.hardware?.device ?? null
+}
+
 const displayPowerMenuActions: readonly FrameMenuAction[] = ['displayOff', 'displayOn']
 
 /** The admin-API-only gating applies on the backend control plane alone. */
@@ -696,7 +707,7 @@ export function frameMenuActionIsAllowed(
   // the mode, and the one that answers false without a frame: a panel whose
   // driver cannot switch off has no off to explain, and a caller asking the
   // question with no frame in hand cannot know which display it would send to.
-  if (displayPowerMenuActions.includes(action) && !deviceSupportsDisplayPower(frame?.device)) {
+  if (displayPowerMenuActions.includes(action) && !deviceSupportsDisplayPower(frameDisplayDevice(frame))) {
     return false
   }
   return allows(allowedFrameMenuActions, mode, action)

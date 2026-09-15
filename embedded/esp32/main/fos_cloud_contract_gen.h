@@ -95,6 +95,7 @@ static const fos_contract_verb_t k_fos_contract_verbs[] = {
     {"render", NULL, 0},
     {"reboot", NULL, 0},
     {"restart_runtime", NULL, 0},
+    {"set_display_power", NULL, 0},
     {"notify_update_available", NULL, 0},
     {"assets_list", NULL, 0},
     {"asset_get", NULL, 0},
@@ -105,7 +106,7 @@ static const fos_contract_verb_t k_fos_contract_verbs[] = {
     {"asset_rename", NULL, 0},
     {"image_get", NULL, 0},
 };
-#define FOS_CONTRACT_VERBS_COUNT 20
+#define FOS_CONTRACT_VERBS_COUNT 21
 
 #define FOS_CONTRACT_ASSET_MAX_FILE_BYTES 8388608
 #define FOS_CONTRACT_ASSET_PUT_MAX_BYTES 262144
