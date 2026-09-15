@@ -200,6 +200,9 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
           },
         },
       ],
+      // What the backend reports (METRICS_RETAINED_PER_FRAME): the panel's
+      // datapoint count explains itself with it.
+      retained: 11_000,
     })
   )
 

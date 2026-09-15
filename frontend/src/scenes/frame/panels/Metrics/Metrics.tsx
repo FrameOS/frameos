@@ -14,6 +14,7 @@ import {
   type TimeRange,
 } from './metricsLogic'
 import { frameLogic } from '../../frameLogic'
+import { formatFrameDuration } from '../../../../decorators/frame'
 import { BrushChart } from './BrushChart'
 import { Select } from '../../../../components/Select'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
@@ -38,6 +39,43 @@ const metricLabels: Record<string, string> = {
   wifiRssi: 'WiFi signal (RSSI)',
   batteryPercent: 'Battery charge (%)',
   batteryMillivolts: 'Battery voltage (mV)',
+}
+
+// "60 s" / "5 min" — the sampling rate, at the resolution people set it in.
+function formatSampleInterval(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 90) {
+    return `${seconds} s`
+  }
+  const minutes = Math.round(seconds / 60)
+  return minutes < 90 ? `${minutes} min` : formatFrameDuration(ms)
+}
+
+// Behind the (i) on "N datapoints loaded". The count is almost never round —
+// it is the retained window plus whatever arrived since the page opened — and
+// without this the number reads as arbitrary.
+function datapointsHelp(retained: number | null, sampleIntervalMs: number | null): JSX.Element {
+  const window = retained !== null && sampleIntervalMs !== null ? retained * sampleIntervalMs : null
+  return (
+    <div className="space-y-2">
+      <div>
+        {retained === null
+          ? 'The server keeps a fixed number of the newest samples for this frame'
+          : `The server keeps the newest ${retained.toLocaleString()} samples for this frame`}{' '}
+        and deletes the oldest as new ones arrive. This panel loads that whole window when it opens.
+      </div>
+      <div>
+        Samples that arrive while the page is open are added to what was loaded, without trimming — so the count creeps
+        past the limit until you reload. That is why it is rarely a round number.
+      </div>
+      {window !== null && sampleIntervalMs !== null ? (
+        <div>
+          This frame samples every {formatSampleInterval(sampleIntervalMs)}, so the retained window is roughly{' '}
+          {formatFrameDuration(window)} of history. Change it with the frame&apos;s metrics interval setting.
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 // Shown behind an (i) next to the card title; the number alone reads as
@@ -266,6 +304,8 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
     batteryMisreadCount,
     requestMetricsLoading,
     chartWidth,
+    metricsRetained,
+    metricSampleIntervalMs,
   } = useValues(metricsLogic({ frameId }))
   const {
     setSelectedTimeRange,
@@ -349,12 +389,24 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
             value={selectedTimeRangePreset}
             onChange={(value) => setSelectedTimeRangePreset(value as MetricsTimeRangePreset)}
           />
-          <div className="frame-tool-muted text-sm">
-            {metricsLoading
-              ? 'Loading metrics...'
-              : `${metrics.length} datapoint${metrics.length === 1 ? '' : 's'} loaded${
-                  latestDatapointLabel ? `, last datapoint ${latestDatapointLabel}` : ''
-                }`}
+          <div className="frame-tool-muted flex items-center gap-1.5 text-sm">
+            <span>
+              {metricsLoading
+                ? 'Loading metrics...'
+                : `${metrics.length} datapoint${metrics.length === 1 ? '' : 's'} loaded${
+                    latestDatapointLabel ? `, last datapoint ${latestDatapointLabel}` : ''
+                  }`}
+            </span>
+            {metricsLoading ? null : (
+              <Tooltip
+                title={datapointsHelp(metricsRetained, metricSampleIntervalMs)}
+                className="frame-tool-muted"
+                titleClassName="w-80 text-xs leading-snug"
+                label="Why this many datapoints"
+              >
+                <InformationCircleIcon className="h-4 w-4" aria-hidden="true" />
+              </Tooltip>
+            )}
           </div>
         </div>
         <div className="group/request-metrics relative inline-flex shrink-0">
