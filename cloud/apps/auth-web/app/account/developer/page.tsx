@@ -56,14 +56,15 @@ export default async function AccountDeveloperPage() {
             </p>
           </div>
         </div>
-        <section className="card">
-          <ApiTokensSection
-            canCreate={canCreate}
-            initialTokens={tokens}
-            maxTokens={maxApiTokensPerAccount}
-            reauthHref={reauthUrl.toString()}
-          />
-        </section>
+        {/* No .card around this one: the table draws its own box, and a card
+            behind it was a second surface with 18px of nothing between the
+            two borders. The create form sits under the table it adds to. */}
+        <ApiTokensSection
+          canCreate={canCreate}
+          initialTokens={tokens}
+          maxTokens={maxApiTokensPerAccount}
+          reauthHref={reauthUrl.toString()}
+        />
       </section>
 
       <section className="section-block">

@@ -115,7 +115,7 @@ export default async function AccountSecurityPage() {
             chats and security history. Binary files (scene zips, images,
             backups) are listed with a download link rather than embedded.
           </p>
-          <div className="actions">
+          <div className="actions actions--inline">
             <a className="button" download href="/api/account/export">
               <Download aria-hidden size={18} />
               Download my data

@@ -56,8 +56,10 @@ export function SignOutEverywhereForm() {
     }
   }, []);
 
+  // .stack, not .auth-form: this is one button in a wide card, not a form in
+  // the 420px auth shell (whose 18px top margin left it floating).
   return (
-    <div className="auth-form">
+    <div className="stack">
       {error ? (
         <p className="notice-error" role="alert">
           {error}
@@ -70,7 +72,7 @@ export function SignOutEverywhereForm() {
             : `Signed out ${revoked} other session${revoked === 1 ? "" : "s"}. This one stays.`}
         </p>
       ) : null}
-      <div className="actions">
+      <div className="actions actions--inline">
         <button
           className="button"
           disabled={state === "submitting"}

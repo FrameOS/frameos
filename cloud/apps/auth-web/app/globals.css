@@ -174,6 +174,15 @@ html.theme-dark .brand-logo--dark {
   margin-top: 24px;
 }
 
+/* One action in a wide content card is a button, not a bar across the card.
+   .actions is a grid, which stretches its children — right in the 420px auth
+   card it was written for, wrong anywhere the card is the page's width. */
+.actions--inline {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
 .button {
   display: inline-flex;
   min-height: 44px;
@@ -2455,6 +2464,12 @@ a.tag-pill:hover {
 .table-scroll {
   overflow-x: auto;
   margin: 16px 0;
+}
+
+/* Inside a .stack the grid gap already spaces the table; its own margin would
+   add to that and push the table away from what it belongs to. */
+.stack > .table-scroll {
+  margin: 0;
 }
 
 .turnstile-widget:not(:empty) {
