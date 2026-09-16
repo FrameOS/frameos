@@ -154,13 +154,16 @@ jobs:
       # hash anyway. The save uses rsync, not cp: two overlapping saves made
       # `cp -a` fail with "cannot create directory: File exists" on the dir
       # the other run had just created, and a warm-cache miss is never worth
-      # a red job.
+      # a red job. The restore is best effort for the same reason: a save
+      # running at the same time renames rsync temp files away under cp's
+      # feet ("cannot stat ... No such file or directory"), which took three
+      # shards down at once on 2026-09-16.
       - name: Restore nimcache
         run: |
           src="/mnt/cache/nimcache/frameos-tests/shard-${{ matrix.shard }}"
           if [ -d "$src" ]; then
             mkdir -p frameos/nimcache
-            cp -a "$src/." frameos/nimcache/
+            cp -a "$src/." frameos/nimcache/ || echo "::warning::partial nimcache restore from $src (a save was running at the same time)"
             echo "restored $(du -sh frameos/nimcache | cut -f1) from $src"
           else
             echo "no nimcache at $src yet"
