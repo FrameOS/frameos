@@ -101,6 +101,27 @@ function createNextConfig(phase: string): NextConfig {
     // workspace dependencies resolve into the bundle.
     output: "standalone",
     outputFileTracingRoot: path.join(__dirname, "../../.."),
+    async rewrites() {
+      return {
+        // The frames SPA (cloud-frontend) resolves root-absolute assets
+        // through assets_base_path, so it asks for the preview runtime at
+        // /frames-app/frameos-wasm/*. Its build copies frontend/public into
+        // public/frames-app, which only carries a wasm bundle on a dev
+        // machine that ran build_wasm.sh — in CI and production that
+        // directory is empty and every preview worker 404s ("Live preview
+        // worker failed to load"). The release-pinned runtime that
+        // scripts/copy-wasm-assets.mjs installs into public/frameos-wasm is
+        // the one copy that always exists, so serve it there too. afterFiles:
+        // a real file under public/frames-app/frameos-wasm (a local build)
+        // still wins, exactly as before.
+        afterFiles: [
+          {
+            source: "/frames-app/frameos-wasm/:path*",
+            destination: "/frameos-wasm/:path*",
+          },
+        ],
+      };
+    },
     async headers() {
       const noStoreHeader = {
         key: "Cache-Control",

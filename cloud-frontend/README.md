@@ -31,6 +31,8 @@ One prefix cannot serve all three concerns, so the wrapper splits them via
 | SPA routes | `route_base_path` | `/frames` | `urls.ts` and the route tables build navigation URLs from `getRouteBasePath()`, so all links/routes live under `/frames/**` (`/frames`, `/frames/:id`, `/frames/:id/scenes/...`, `/frames/apps/...`) while API URLs stay at the origin root. |
 | Public assets | `assets_base_path` | `/frames-app` | Root-absolute assets (`/img/...` logos, `/frameos-wasm/*` preview runtime, `/static/monaco/*`) resolve through `getAssetsBasePath()` to Next's `public/frames-app/`, matching esbuild's `publicPath: '/frames-app/static/'`. |
 
+One exception inside that row: `/frames-app/frameos-wasm/*` is rewritten by `next.config.ts` to `/frameos-wasm/*`, the release-pinned runtime that `scripts/copy-wasm-assets.mjs` installs. `public/frames-app/` is a copy of `frontend/public/`, which only holds a wasm bundle on a machine that ran `frameos/tools/build_wasm.sh`; in CI and production it is empty, and without the rewrite every preview worker 404s. A local build there still wins (the rewrite is `afterFiles`).
+
 The alternative — `ingress_path: '/frames'` plus stripping the base inside
 apiFetch — was rejected because the shared frontend also builds API URLs
 outside apiFetch (entityImagesModel, framesModel downloads,

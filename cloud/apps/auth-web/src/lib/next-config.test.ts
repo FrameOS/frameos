@@ -59,6 +59,36 @@ describe("API cache headers", () => {
   });
 });
 
+describe("frames SPA asset rewrites", () => {
+  it("serves the release wasm runtime under the SPA's assets base path", async () => {
+    // cloud-frontend asks for /frames-app/frameos-wasm/preview-worker.js
+    // (assets_base_path), but only public/frameos-wasm is guaranteed to hold
+    // a runtime: public/frames-app is a copy of frontend/public, which has
+    // no wasm bundle unless build_wasm.sh ran on that machine. Production
+    // shipped without it and every live preview failed to load its worker.
+    const config = createNextConfig(PHASE_PRODUCTION_SERVER);
+    const rewrites = await config.rewrites?.();
+    expect(rewrites).toBeTruthy();
+    expect(Array.isArray(rewrites)).toBe(false);
+    const { afterFiles } = rewrites as { afterFiles: { source: string; destination: string }[] };
+    const wasmRewrite = afterFiles.find((rule) => rule.source.startsWith("/frames-app/frameos-wasm/"));
+    expect(wasmRewrite).toEqual({
+      source: "/frames-app/frameos-wasm/:path*",
+      destination: "/frameos-wasm/:path*",
+    });
+    // @ts-expect-error -- Next ships this vendored dependency without types.
+    const { pathToRegexp } = (await import("next/dist/compiled/path-to-regexp")) as {
+      pathToRegexp: (source: string) => RegExp;
+    };
+    const matcher = pathToRegexp(wasmRewrite!.source);
+    for (const asset of ["preview-worker.js", "frameos.js", "frameos.wasm"]) {
+      expect(matcher.test(`/frames-app/frameos-wasm/${asset}`), asset).toBe(true);
+    }
+    // Only the runtime is redirected; the SPA's own bundle stays where it is.
+    expect(matcher.test("/frames-app/static/main.js")).toBe(false);
+  });
+});
+
 describe("Next.js security headers", () => {
   it("allows WebAssembly compilation without general eval in production", async () => {
     const policy = await contentSecurityPolicy(PHASE_PRODUCTION_SERVER);
