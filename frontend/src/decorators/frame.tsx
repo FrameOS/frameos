@@ -168,6 +168,16 @@ function estimatedCheckinPeriodSeconds(frame: FrameType): number | null {
  * known to sleep (a plain offline Pi, a USB-powered board that stays
  * connected).
  */
+/**
+ * The cloud's notify_update_available verb is in this frame's queue and
+ * unapplied — the owner already asked for the upgrade, and the frame (asleep
+ * or off) has not taken it yet. The frames list says "upgrade queued" and
+ * the "…" menu stops offering the same nudge again.
+ */
+export function frameUpgradeIsQueued(frame: FrameType): boolean {
+  return frame.pending_command_types?.includes('notify_update_available') ?? false
+}
+
 export function frameCheckin(frame: FrameType, now: number = Date.now()): FrameCheckin | null {
   if (frame.connected === true || (frame.active_connections ?? 0) > 0) {
     return null

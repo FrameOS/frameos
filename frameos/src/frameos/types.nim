@@ -332,6 +332,7 @@ type
   AppRoot* = ref object of RootObj
     nodeId*: NodeId
     nodeName*: string # used mainly for logging and saving assets
+    appKeyword*: string # "data/unsplash": the folder saved assets group under
     scene*: FrameScene
     frameConfig*: FrameConfig
 

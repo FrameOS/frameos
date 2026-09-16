@@ -96,6 +96,7 @@ export default tseslint.config(
       // Imports frameSettingsHelpers.tsx, which types React returns with the
       // bare `JSX` namespace; out of the tsconfig for the same reason.
       "**/src/test/shared-spa/frame-upgrade-card-labels.test.ts",
+      "**/src/test/shared-spa/flow-bridging.test.ts",
     ],
   },
   js.configs.recommended,

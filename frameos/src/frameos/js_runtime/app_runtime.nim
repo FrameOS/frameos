@@ -1073,6 +1073,7 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
   return DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),
+    appKeyword: keyword,
     scene: scene,
     frameConfig: scene.frameConfig,
     configJson: runtimeConfigFromNode(config, node.data{"config"}),

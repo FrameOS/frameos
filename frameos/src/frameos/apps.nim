@@ -233,6 +233,24 @@ proc cleanFilename*(self: string): string =
 
   return finalResult
 
+proc savedAssetDir*(assetsPath, appKeyword, nodeName: string): string =
+  ## Where an app's saved images go: `<assets>/saved/<app>`, so the assets
+  ## panel groups them by the app that fetched them (saved/unsplash,
+  ## saved/openaiImage, …). A node the owner named gets its own folder
+  ## underneath — two Unsplash nodes with different searches stay apart, as
+  ## they did when the node name alone chose the folder. Everything used to
+  ## land in one flat `saved/` (unnamed nodes) or in a top-level folder per
+  ## node name.
+  let app = appKeyword.replace("data/", "").cleanFilename()
+  let node =
+    if nodeName == "" or nodeName == appKeyword: ""
+    else: nodeName.replace("data/", "").cleanFilename()
+  result = assetsPath & "/saved"
+  if app != "":
+    result.add("/" & app)
+  if node != "" and node != app:
+    result.add("/" & node)
+
 proc saveAsset*(self: AppRoot, filename: string, extension: string, contents: string, isAuto: bool): string =
   if isAuto:
     if self.frameConfig.saveAssets.kind == JBool:
@@ -245,10 +263,9 @@ proc saveAsset*(self: AppRoot, filename: string, extension: string, contents: st
       return ""
 
   let assetsPath = if self.frameConfig.assetsPath == "": "/srv/assets" else: self.frameConfig.assetsPath
-  let appName = if self.nodeName == "": "saved" else: self.nodeName.replace("data/", "").cleanFilename()
   let basename = (if filename.len > 100: filename[0..100] else: filename).cleanFilename()
   let md5hash = getMD5(contents)
-  let cleanPath = &"{assetsPath}/{appName}"
+  let cleanPath = savedAssetDir(assetsPath, self.appKeyword, self.nodeName)
   let cleanFilename = &"{cleanPath}/{basename}.{md5hash}{extension}"
 
   try:

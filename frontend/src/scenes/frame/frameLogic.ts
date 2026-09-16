@@ -56,7 +56,7 @@ import { appsModel } from '../../models/appsModel'
 import { collectSecretSettingsFromScenes, settingsDetails } from './panels/secretSettings'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
-import { longRunningTasksModel } from '../../models/longRunningTasksModel'
+import { longRunningTasksModel, reportTaskOutcome } from '../../models/longRunningTasksModel'
 import { assignSceneImages, reportSceneImageFailure, type SceneImageSource } from '../../utils/sceneImages'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -2617,26 +2617,15 @@ export const frameLogic = kea<frameLogicType>([
           : undefined,
       }),
       submit: async (frame) => {
-        // A cloud Save is not the one quick POST it looks like: it pushes the
-        // settings, may push the schedule, then persists every scene as a new
-        // store-scene version and pushes the assignment list — seconds of
-        // network on a frame with a few scenes, with nothing on screen saying
-        // so. Only the FAILURE path used to report anything, so a slow save
-        // was indistinguishable from a click that did nothing.
+        // No toast for a save. The Save buttons spin off isFrameFormSubmitting
+        // for as long as this takes (seconds on the cloud, which persists every
+        // scene as a store-scene version), and a "Saved" toast on top of that
+        // was one more thing sliding into view and out again on every ⌘S.
+        // Failures still get a toast (submitFrameFormFailure): those are the
+        // ones a silent form would hide.
         //
-        // Registered here rather than in the buttons because Save has several
-        // entry points (the unsaved-changes drawer, the scene-control notice,
-        // the frame actions menu, ⌘S); this covers all of them at once, and
-        // the buttons additionally spin off isFrameFormSubmitting.
-        longRunningTasksModel.actions.startTask({
-          frameId: values.frameId,
-          kind: 'save',
-          title: 'Saving frame',
-          detail: isCloudMode() ? 'Saving settings and scenes to your cloud account' : null,
-        })
-        // A throw is left to submitFrameFormFailure below, which fails this
-        // very task with the reason — it is the one place that knows how to
-        // word it.
+        // A throw is left to submitFrameFormFailure below — it is the one
+        // place that knows how to word it.
         const apply = await saveFrameForm(frame, values.frameId, values.nextAction)
         // The on-device page may have just moved the frame from under
         // itself (new port, HTTPS on or off): follow it, path and all. The
@@ -2646,12 +2635,18 @@ export const frameLogic = kea<frameLogicType>([
             ? frameOriginAfterApply(window.location, apply.listeners)
             : null
         cache.frameSaveApply = apply
-        longRunningTasksModel.actions.finishTask({
-          frameId: values.frameId,
-          kind: 'save',
-          status: 'success',
-          detail: describeFrameSaveApply(apply, movingTo),
-        })
+        // The one save that IS worth a line: the device did something beyond
+        // storing the form (restarted its runtime, moved to a new port) and
+        // the owner should know why the frame just blinked.
+        const applied = describeFrameSaveApply(apply, movingTo)
+        if (applied !== 'Saved') {
+          reportTaskOutcome('success', {
+            frameId: values.frameId,
+            kind: 'save',
+            title: 'Saving frame',
+            detail: applied,
+          })
+        }
         if (movingTo) {
           followFrameOrigin(movingTo)
         }
@@ -3506,13 +3501,7 @@ export const frameLogic = kea<frameLogicType>([
         const detail = message.includes('frame_not_active')
           ? 'This frame is still pending — confirm it on its dashboard before saving changes to it.'
           : message
-        longRunningTasksModel.actions.startTask({
-          frameId: props.frameId,
-          kind: 'save',
-          title: 'Saving frame',
-          detail: null,
-        })
-        longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
+        reportTaskOutcome('error', { frameId: props.frameId, kind: 'save', title: 'Saving frame', detail })
         throw error
       }
       const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []
@@ -3584,13 +3573,13 @@ export const frameLogic = kea<frameLogicType>([
         // a trace — most visibly on the cloud, where saving to a frame the
         // owner has not confirmed yet is refused with `frame_not_active`
         // (409) and the workspace just sat there still saying "unsaved".
-        // Field-level validation renders inline; skip its sentinel error —
-        // but the running task the submit handler started is still spinning,
-        // so it has to be closed either way.
+        // Field-level validation renders inline, but the form may be off
+        // screen (⌘S from the frames list): say so, once.
         if (error?.message === 'Validation Failed') {
-          longRunningTasksModel.actions.taskFailed({
+          reportTaskOutcome('error', {
             frameId: props.frameId,
             kind: 'save',
+            title: 'Saving frame',
             detail: 'Some fields need fixing before this can be saved',
           })
           return
@@ -3599,8 +3588,7 @@ export const frameLogic = kea<frameLogicType>([
           error?.message?.includes('frame_not_active') && isCloudMode()
             ? 'This frame is still pending — confirm it on its dashboard before saving changes to it.'
             : error?.message || 'Failed to save the frame'
-        // No startTask: the submit handler opened one, and this fails it.
-        longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
+        reportTaskOutcome('error', { frameId: props.frameId, kind: 'save', title: 'Saving frame', detail })
       },
       saveAndDeployFrame: async () => {
         if (isCloudMode()) {

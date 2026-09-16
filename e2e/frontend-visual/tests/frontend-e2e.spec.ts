@@ -220,6 +220,24 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     expectNoFrontendErrors(readErrors)
   })
 
+  test('the metrics datapoint count explains itself', async ({ page }) => {
+    // "11001 datapoints loaded" is the retained window plus whatever arrived
+    // live since the page opened, which is why it is never round. The number
+    // of retained samples rides the metrics response (the cloud keeps a
+    // different depth), so this also pins that it reaches the panel.
+    const readErrors = await prepareAuthenticatedPage(page)
+    await page.goto('/frames/1/metrics', { waitUntil: 'domcontentloaded' })
+    await settleForScreenshot(page)
+
+    await page.getByRole('button', { name: 'Why this many datapoints' }).click()
+    await expect(page.getByText(/keeps the newest/i)).toContainText('11,000 samples')
+    await expect(page.getByText(/creeps past the limit/i)).toBeVisible()
+    // 11,000 samples at the fixture's 60 s interval.
+    await expect(page.getByText(/This frame samples every/i)).toContainText('7 d 15 h')
+
+    expectNoFrontendErrors(readErrors)
+  })
+
   test('all scene workspace utility drawers render', async ({ page }) => {
     const readErrors = await prepareAuthenticatedPage(page)
     await page.goto('/scenes/1/scene-dashboard', { waitUntil: 'domcontentloaded' })

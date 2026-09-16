@@ -53,5 +53,9 @@ export async function GET(
   return NextResponse.json({
     metrics: rows.map((row) => metricsRow(frame.id, row)),
     reboots: await frameRebootMarkers(db, frame.id),
+    // What the panel tells the user its datapoint count means. The cloud and
+    // the self-hosted backend keep different depths, so the number travels
+    // with the samples instead of being one the SPA hardcodes.
+    retained: maxMetricsPerFrame,
   });
 }

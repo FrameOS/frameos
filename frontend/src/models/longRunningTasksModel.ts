@@ -17,6 +17,7 @@ export type LongRunningTaskKind =
   | 'stop'
   | 'restart'
   | 'reboot'
+  | 'displayPower'
   | 'paste'
 export type LongRunningTaskStatus = 'running' | 'success' | 'error'
 

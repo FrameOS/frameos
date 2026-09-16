@@ -4582,6 +4582,7 @@ async def api_frame_metrics(
         return {
             "metrics": [metric.to_dict() for metric in metrics],
             "reboots": _reboot_markers_for_metrics(db, frame, metrics) if reboots else [],
+            "retained": METRICS_RETAINED_PER_FRAME,
         }
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -4607,6 +4608,7 @@ async def api_frame_recent_metrics(
         return {
             "metrics": [metric.to_dict() for metric in metrics],
             "reboots": _reboot_markers_for_metrics(db, frame, metrics, since) if reboots else [],
+            "retained": METRICS_RETAINED_PER_FRAME,
         }
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

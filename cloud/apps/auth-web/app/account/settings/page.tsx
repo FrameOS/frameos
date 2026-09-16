@@ -57,9 +57,10 @@ export default async function AccountSettingsPage() {
             </p>
           </div>
         </div>
-        <section className="card">
-          <AccountSshKeys initialKeys={sshKeysFrom(stored)} />
-        </section>
+        {/* No .card: the table draws its own box (see /account/developer),
+            and a card behind it was 18px of nothing above the header and
+            below the last row. */}
+        <AccountSshKeys initialKeys={sshKeysFrom(stored)} />
       </section>
     </>
   );

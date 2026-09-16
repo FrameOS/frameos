@@ -1,13 +1,14 @@
 "use client";
 
-import { MoreHorizontal, Unplug } from "lucide-react";
+import { Unplug } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   isReauthRequired,
   redirectToReauthIfRequired,
   takePendingReauthAction,
 } from "../lib/reauth-client";
+import { RowMenu } from "./RowMenu";
 
 // Per-row "..." menu on the installs table; destructive actions live here
 // instead of as always-visible buttons.
@@ -19,25 +20,7 @@ export function InstallRowMenu({
   name: string;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Fixed-position coordinates: the panel must escape the table's
-  // overflow:hidden (used for its rounded corners).
-  const [panelPosition, setPanelPosition] = useState({ right: 0, top: 0 });
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
 
   const resumeAction = `revoke-install:${linkedClientId}`;
 
@@ -45,11 +28,11 @@ export function InstallRowMenu({
   // finish it without reopening the menu or asking again.
   useEffect(() => {
     if (takePendingReauthAction(resumeAction)) {
-      void revoke({ resumed: true });
+      void revoke(() => undefined, { resumed: true });
     }
   }, [resumeAction]);
 
-  async function revoke({ resumed = false } = {}) {
+  async function revoke(close: () => void, { resumed = false } = {}) {
     if (
       !resumed &&
       !window.confirm(
@@ -78,49 +61,26 @@ export function InstallRowMenu({
       }
     }
     setBusy(false);
-    setOpen(false);
+    close();
     if (response.ok) {
       router.refresh();
     }
   }
 
   return (
-    <div className="row-menu" ref={containerRef}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className="button button--small"
-        onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          setPanelPosition({
-            right: window.innerWidth - rect.right,
-            top: rect.bottom + 4,
-          });
-          setOpen((value) => !value);
-        }}
-        title="More actions"
-        type="button"
-      >
-        <MoreHorizontal aria-hidden size={16} />
-      </button>
-      {open ? (
-        <div
-          className="row-menu__panel"
-          role="menu"
-          style={{ right: panelPosition.right, top: panelPosition.top }}
+    <RowMenu label={`More actions for ${name}`}>
+      {(close) => (
+        <button
+          className="row-menu__item"
+          disabled={busy}
+          onClick={() => void revoke(close)}
+          role="menuitem"
+          type="button"
         >
-          <button
-            className="row-menu__item"
-            disabled={busy}
-            onClick={() => void revoke()}
-            role="menuitem"
-            type="button"
-          >
-            <Unplug aria-hidden size={16} />
-            {busy ? "Revoking…" : "Revoke link"}
-          </button>
-        </div>
-      ) : null}
-    </div>
+          <Unplug aria-hidden size={16} />
+          {busy ? "Revoking…" : "Revoke link"}
+        </button>
+      )}
+    </RowMenu>
   );
 }

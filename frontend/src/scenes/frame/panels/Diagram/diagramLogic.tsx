@@ -51,6 +51,7 @@ import copy from 'copy-to-clipboard'
 import { stripSecretNodeConfig } from '../../../../utils/stripSecretFieldValues'
 import { reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { refreshNodeInternals } from './nodeInternals'
+import { bridgeFlowEdges, edgesAfterDeletingNodes } from './flowBridging'
 import { Option } from '../../../../components/Select'
 import {
   installSceneAppForKeyword,
@@ -949,6 +950,9 @@ export interface diagramLogicActions {
   setFrameFormValues: (values: DeepPartial<FrameType>) => {
     values: DeepPartial<FrameType>
   } // frameLogic
+  addBridgeEdges: (edges: DiagramEdge[]) => {
+    edges: DiagramEdge[]
+  }
   addEdge: (edge: Connection | DiagramEdge) => {
     edge: Connection | DiagramEdge
   }
@@ -1164,6 +1168,7 @@ export const diagramLogic = kea<diagramLogicType>([
     pasteFromClipboard: true,
     setCursorPosition: (position: XYPosition | null) => ({ position }),
     deleteApp: (id: string) => ({ id }),
+    addBridgeEdges: (edges: DiagramEdge[]) => ({ edges }),
     recordHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
     resetHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
     undo: true,
@@ -1238,9 +1243,12 @@ export const diagramLogic = kea<diagramLogicType>([
           return equal(state, newEdges) ? state : (newEdges as DiagramEdge[])
         },
         deleteApp: (state, { id }) => {
-          const newEdges = state.filter((edge) => edge.source !== id && edge.target !== id)
+          const newEdges = edgesAfterDeletingNodes(state, new Set([id]))
           return equal(state, newEdges) ? state : newEdges
         },
+        // The keyboard delete's counterpart of the rejoin above; see the
+        // onNodesChange listener for where the bridges come from.
+        addBridgeEdges: (state, { edges }) => (edges.length > 0 ? [...state, ...edges] : state),
         updateEdge: (state, { edge }) => {
           const newEdges = state.map((oldEdge) => (oldEdge.id === edge.id ? { ...oldEdge, ...edge } : oldEdge))
           return equal(state, newEdges) ? state : newEdges
@@ -1560,7 +1568,7 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
   })),
-  listeners(({ actions, values, props, cache, sharedListeners }) => ({
+  listeners(({ actions, values, props, cache, selectors, sharedListeners }) => ({
     selectNode: sharedListeners.nodesChanged,
     deselectNode: sharedListeners.nodesChanged,
     setNodes: [
@@ -1575,6 +1583,21 @@ export const diagramLogic = kea<diagramLogicType>([
     onNodesChange: [
       sharedListeners.nodesChanged,
       ({ changes }) => {
+        // Backspace/Delete on a node in the middle of the next→prev chain:
+        // ReactFlow removes the incident edges first (a separate
+        // onEdgesChange, stashed below with the edges it took), then the
+        // node. Rejoin the chain around it from that stash. The stash is
+        // consulted only in the same tick it was written, so an edge the
+        // user deleted on purpose earlier never turns into a bridge.
+        const deletedIds = new Set(changes.filter((change) => change.type === 'remove').map((change) => change.id))
+        const stash = cache.removedEdges as { at: number; edges: DiagramEdge[] } | undefined
+        cache.removedEdges = undefined
+        if (deletedIds.size > 0 && stash && Date.now() - stash.at < 100) {
+          const bridges = bridgeFlowEdges(stash.edges, deletedIds)
+          if (bridges.length > 0) {
+            actions.addBridgeEdges(bridges)
+          }
+        }
         if (cache.ignoreHistory) {
           return
         }
@@ -1643,7 +1666,12 @@ export const diagramLogic = kea<diagramLogicType>([
       }
       recordHistorySnapshot(cache, actions, snapshotOf(values))
     },
-    onEdgesChange: ({ changes }) => {
+    onEdgesChange: ({ changes }, _breakpoint, _action, previousState) => {
+      const removedIds = new Set(changes.filter((change) => change.type === 'remove').map((change) => change.id))
+      if (removedIds.size > 0) {
+        const before = selectors.rawEdges(previousState, props) as DiagramEdge[]
+        cache.removedEdges = { at: Date.now(), edges: before.filter((edge) => removedIds.has(edge.id)) }
+      }
       if (cache.ignoreHistory) {
         return
       }

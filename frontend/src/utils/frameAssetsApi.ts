@@ -1,4 +1,5 @@
 import { isInFrameAdminMode } from './frameAdmin'
+import { getBasePath } from './getBasePath'
 import { projectApiPathFromCache } from './projectApi'
 import type { FrameId } from '../types'
 
@@ -33,5 +34,9 @@ export function frameAssetUrl(
   if (options.filename) {
     params.set('filename', options.filename)
   }
-  return `${frameAssetApiPrefix(frameId)}/asset?${params.toString()}`
+  // Browser-facing (an <img src>, an <a href>), so it cannot lean on apiFetch
+  // to prepend the base path: under Home Assistant ingress a bare
+  // /api/projects/… URL is Home Assistant's own /api/, which answers 404 for
+  // every thumbnail on the page.
+  return `${getBasePath()}${frameAssetApiPrefix(frameId)}/asset?${params.toString()}`
 }

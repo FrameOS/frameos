@@ -3,7 +3,6 @@ import {
   absorbedSurfaces,
   accountAiUsage,
   accountBalanceMicros,
-  accountMarginBasisPoints,
   customerReceivableCode,
   customerStatement,
   readAccountPlan,
@@ -100,8 +99,6 @@ export default async function AccountAiPage() {
       // and whose money it guards (§5.3).
       resolveAiCredentials(db, accountId),
     ]);
-  // ONE margin definition, the same one metering prices with (plans.ts).
-  const marginBasisPoints = await accountMarginBasisPoints(db, accountId, settings);
   const sharedKey = credentials?.source === "shared";
   const dailyCapMicros = sharedKey ? settings.sharedKeyDailyCapMicros : settings.dailyCapMicros;
 
@@ -262,9 +259,8 @@ export default async function AccountAiPage() {
         <h2>How pricing works</h2>
         <p className="copy">
           We pay the model provider for every token a request uses, and add
-          our margin on top — {(marginBasisPoints / 100).toFixed(marginBasisPoints % 100 === 0 ? 0 : 2)}% on
-          your plan. That is the whole formula — no per-seat fee, no minimum,
-          nothing up front. The exact token counts and unit prices behind
+          our margin on top. That is the whole formula — no per-seat fee, no
+          minimum, nothing up front. The exact token counts and unit prices behind
           every request above are on record, which is what makes the numbers
           on this page checkable rather than merely asserted.
         </p>

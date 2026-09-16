@@ -5,8 +5,11 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUturnLeftIcon,
+  ClockIcon,
   CloudArrowDownIcon,
   CommandLineIcon,
+  LightBulbIcon,
+  MoonIcon,
   NoSymbolIcon,
   PencilSquareIcon,
   PowerIcon,
@@ -19,7 +22,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu, type DropdownMenuProps } from '../../components/DropdownMenu'
 import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
-import { frameHost } from '../../decorators/frame'
+import { frameHost, frameUpgradeIsQueued } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { workspaceLogic } from './workspaceLogic'
@@ -53,6 +56,7 @@ export function FrameActionsMenu({
     renderStatusScreen,
     restartRemote,
     restartFrame,
+    setDisplayPower,
     setFrameArchived,
     stopFrame,
     updateFrameFirmware,
@@ -120,6 +124,31 @@ export function FrameActionsMenu({
                 title: "Show the frame's built-in name, address and scene list on the display",
                 onClick: () => renderStatusScreen(frame.id),
                 icon: <RectangleGroupIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        // Only for displays whose driver actually powers the panel — the gate
+        // is in workspaceSurfaces (displayPowerDevices), so an e-paper frame
+        // never sees an entry that would do nothing. Two entries rather than
+        // one toggle: nothing reports the panel's power state back, so a
+        // toggle would have to guess which way it is pointing.
+        ...(allows('displayOff')
+          ? [
+              {
+                label: 'Turn display off',
+                title: 'Power the panel down; FrameOS keeps running and the scene keeps rendering',
+                onClick: () => setDisplayPower(frame.id, false),
+                icon: <MoonIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        ...(allows('displayOn')
+          ? [
+              {
+                label: 'Turn display on',
+                title: 'Power the panel back up',
+                onClick: () => setDisplayPower(frame.id, true),
+                icon: <LightBulbIcon className="h-5 w-5" />,
               },
             ]
           : []),
@@ -195,15 +224,24 @@ export function FrameActionsMenu({
         // lags behind the verb again.
         ...(allows('updateFirmware')
           ? [
-              {
-                label: 'Update firmware',
-                title:
-                  disabledReason('updateFirmware') ??
-                  'Ask the frame to check for new firmware and install it in the background',
-                disabled: Boolean(disabledReason('updateFirmware')),
-                onClick: () => updateFrameFirmware(frame.id),
-                icon: <CloudArrowDownIcon className="h-5 w-5" />,
-              },
+              frameUpgradeIsQueued(frame)
+                ? {
+                    // Already in the queue: a second click would only enqueue
+                    // the same nudge behind the first.
+                    label: 'Update queued',
+                    title: 'The update request is queued and applies when the frame next wakes',
+                    disabled: true,
+                    icon: <ClockIcon className="h-5 w-5" />,
+                  }
+                : {
+                    label: 'Update firmware',
+                    title:
+                      disabledReason('updateFirmware') ??
+                      'Ask the frame to check for new firmware and install it in the background',
+                    disabled: Boolean(disabledReason('updateFirmware')),
+                    onClick: () => updateFrameFirmware(frame.id),
+                    icon: <CloudArrowDownIcon className="h-5 w-5" />,
+                  },
             ]
           : []),
         ...(allows('restartRemote') && agentConfigured

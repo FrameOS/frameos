@@ -180,6 +180,7 @@ const CloudContractVerbs* = @[
   VerbSpec(verb: "render", scope: "", content: false),
   VerbSpec(verb: "reboot", scope: "", content: false),
   VerbSpec(verb: "restart_runtime", scope: "", content: false),
+  VerbSpec(verb: "set_display_power", scope: "", content: false),
   VerbSpec(verb: "notify_update_available", scope: "", content: false),
   VerbSpec(verb: "assets_list", scope: "", content: false),
   VerbSpec(verb: "asset_get", scope: "", content: false),
