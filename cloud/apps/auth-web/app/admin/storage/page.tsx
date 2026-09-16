@@ -8,6 +8,8 @@ import { formatBytes, formatDateTime } from "../../../src/lib/format";
 import {
   listAccountStorageForAdmin,
   refreshAccountStorageUsageSafely,
+  storageRefreshDue,
+  storageRefreshInFlight,
   storageSnapshotIsStale,
 } from "../../../src/lib/storage-usage";
 
@@ -38,12 +40,16 @@ export default async function AdminStoragePage({
   // page's job, but never the request's. A stale (or incomplete) snapshot
   // schedules a refresh with after(), which runs once this response has been
   // sent — so the sweep is not racing the render it would slow down, and its
-  // numbers land for the next load. The line below says how old the ones
-  // being shown are.
+  // numbers land for the next load. Not on every load, though: a sweep that
+  // just ran and still left an account unmeasured gets a few minutes before
+  // it is retried (storageRefreshDue), or the retry would be the page load.
+  // The line below says how old the figures being shown are.
   const stale = storageSnapshotIsStale(overview);
-  if (stale) {
+  const due = storageRefreshDue(overview);
+  if (due) {
     after(() => refreshAccountStorageUsageSafely(db));
   }
+  const refreshing = due || storageRefreshInFlight();
 
   const { totals } = overview;
 
@@ -117,19 +123,21 @@ export default async function AdminStoragePage({
               Search
             </button>
           </form>
-          <AdminStorageRefreshButton running={stale} />
+          <AdminStorageRefreshButton running={refreshing} />
         </div>
 
         <p className="copy">
-          {overview.oldestComputedAt
-            ? `Measured ${formatDateTime(overview.oldestComputedAt)}.`
+          {overview.computedAt
+            ? `Measured ${formatDateTime(overview.computedAt)}.`
             : "Never measured yet."}{" "}
           {overview.missing > 0
             ? `${overview.missing} account${overview.missing === 1 ? " has" : "s have"} not been measured yet.`
             : null}{" "}
-          {stale
+          {refreshing
             ? "A refresh is running in the background — reload in a moment."
-            : null}
+            : stale
+              ? "The last sweep could not measure everything; it is retried in a few minutes, or now with the button."
+              : null}
         </p>
 
         {overview.rows.length === 0 ? (

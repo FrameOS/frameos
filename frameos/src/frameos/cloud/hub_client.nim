@@ -1324,6 +1324,7 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     # two, and guessing which is how a display ends up off overnight.
     let onFlag = msg{"on"}
     if onFlag == nil or onFlag.kind != JBool:
+      ctx.audit("set_display_power", false, "invalid_payload")
       result = CloudVerbReply(ack: ackError(id, "invalid_payload"))
     else:
       let turnOn = onFlag.getBool()

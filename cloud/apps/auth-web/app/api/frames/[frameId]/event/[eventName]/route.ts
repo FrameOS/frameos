@@ -10,6 +10,7 @@ import {
 } from "../../../../../../src/lib/device-flow";
 import {
   enqueueFrameCommand,
+  frameContractProfile,
   frameForAccount,
   maxScenesPayloadBytes,
   supersedePendingCommands,
@@ -125,6 +126,12 @@ export async function POST(
     // the event still acks, so gating here would be guesswork.
     case "turnOn":
     case "turnOff":
+      // Linux only (docs/cloud-frames-contract.json): the esp32 profile
+      // answers unsupported_verb, so queueing it there would be a command
+      // that waits out its TTL to be refused.
+      if (frameContractProfile(frame) !== "linux") {
+        return jsonError("unsupported_event", 404);
+      }
       type = "set_display_power";
       payload = { on: eventName === "turnOn" };
       break;

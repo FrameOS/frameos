@@ -24,6 +24,7 @@ import {
   listAccountStorageForAdmin,
   measureAccountStorage,
   refreshAccountStorageUsage,
+  storageRefreshDue,
   storageSnapshotIsStale,
   storageSnapshotSummary,
 } from "../../lib/storage-usage";
@@ -237,6 +238,9 @@ describe("account storage snapshot", () => {
 
     expect(overview.missing).toBe(1);
     expect(storageSnapshotIsStale(overview)).toBe(true);
+    // Stale, but this process just swept: the page must not start another
+    // full sweep on every load to retry one account.
+    expect(storageRefreshDue(overview)).toBe(false);
     const row = overview.rows.find((entry) => entry.accountId === fresh);
     expect(row?.computedAt).toBeNull();
     expect(row?.totalBytes).toBe(0);

@@ -1,11 +1,12 @@
 "use client";
 
-import { Eye, EyeOff, MoreHorizontal, Trash2, X } from "lucide-react";
+import { Eye, EyeOff, Trash2, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import posthog from "posthog-js";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ownerActionErrorMessage } from "./ownerActionError";
+import { RowMenu } from "./RowMenu";
 
 // env.ts's myScenesPath, repeated here so this client component does not pull
 // the server-side env module into the browser bundle.
@@ -298,73 +299,29 @@ export function StoreSceneMenu({
       sceneId,
       visibility,
     });
-  const [open, setOpen] = useState(false);
-  const [panelPosition, setPanelPosition] = useState({ right: 0, top: 0 });
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
   // The menu stays open while a request runs (its items are disabled) and
   // after a refusal, so the error pill has somewhere to live; it closes when
   // the action went through, the owner backed out of the confirm, or a
   // dialog of its own took over (delete).
-  async function run(action: () => Promise<ActionOutcome>) {
+  async function run(close: () => void, action: () => Promise<ActionOutcome>) {
     if ((await action()) !== "failed") {
-      setOpen(false);
+      close();
     }
   }
 
   return (
-    <div className="row-menu" ref={containerRef}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`More actions for ${name}`}
-        className="scene-card__menu-button"
-        onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          setPanelPosition({
-            right: window.innerWidth - rect.right,
-            top: rect.bottom + 4,
-          });
-          setOpen((value) => !value);
-        }}
-        title="More actions"
-        type="button"
-      >
-        <MoreHorizontal aria-hidden size={16} />
-      </button>
-      {open ? (
-        <div
-          className="row-menu__panel"
-          role="menu"
-          style={{ right: panelPosition.right, top: panelPosition.top }}
-        >
+    <RowMenu
+      buttonClassName="scene-card__menu-button"
+      footer={deleteDialog}
+      label={`More actions for ${name}`}
+    >
+      {(close) => (
+        <>
           {status === "pulled" ? null : (
             <button
               className="row-menu__item"
               disabled={busy}
-              onClick={() => void run(toggleVisibility)}
+              onClick={() => void run(close, toggleVisibility)}
               role="menuitem"
               type="button"
             >
@@ -379,7 +336,7 @@ export function StoreSceneMenu({
           <button
             className="row-menu__item row-menu__item--danger"
             disabled={busy}
-            onClick={() => void run(remove)}
+            onClick={() => void run(close, remove)}
             role="menuitem"
             type="button"
           >
@@ -389,9 +346,8 @@ export function StoreSceneMenu({
           {error ? (
             <span className="row-menu__error pill pill-warning">{error}</span>
           ) : null}
-        </div>
-      ) : null}
-      {deleteDialog}
-    </div>
+        </>
+      )}
+    </RowMenu>
   );
 }

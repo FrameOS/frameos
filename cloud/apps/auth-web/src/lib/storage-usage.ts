@@ -13,7 +13,7 @@
 //
 // Refreshing is a background job, never part of rendering: the page reads the
 // snapshot and says how old it is, and a stale one triggers a refresh that
-// the NEXT load sees (see refreshAccountStorageUsageInBackground).
+// the NEXT load sees (storageRefreshDue + refreshAccountStorageUsageSafely).
 
 import { desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import {
@@ -167,7 +167,19 @@ async function writeSnapshot(
 // globalThis for the same reason the database pool does.
 const flightHolder = globalThis as typeof globalThis & {
   __frameosStorageRefresh?: Promise<StorageRefreshResult> | undefined;
+  // When the last sweep in this process finished, whatever it managed to
+  // measure. See storageRefreshDue.
+  __frameosStorageRefreshFinishedAt?: number | undefined;
 };
+
+/**
+ * How long a page load leaves a stale-but-just-swept snapshot alone before
+ * kicking off another sweep. A sweep that could not measure one account (a
+ * row it failed to read, an account deleted mid-sweep) leaves the snapshot
+ * "incomplete", and incomplete is stale — without this every admin page
+ * load would start a full sweep, forever, to retry the same account.
+ */
+export const storageRefreshRetryMs = 5 * 60 * 1000;
 
 export interface StorageRefreshResult {
   accounts: number;
@@ -191,6 +203,7 @@ export async function refreshAccountStorageUsage(
   }
   const flight = runRefresh(db).finally(() => {
     flightHolder.__frameosStorageRefresh = undefined;
+    flightHolder.__frameosStorageRefreshFinishedAt = Date.now();
   });
   flightHolder.__frameosStorageRefresh = flight;
   return flight;
@@ -251,8 +264,8 @@ export async function refreshAccountStorageUsageSafely(db: FramesDatabase) {
 
 /**
  * Just the headline for the admin overview tile: everything measured, and
- * when. One indexed aggregate — cheap enough for a page that renders it
- * alongside seven other counts.
+ * when the last sweep ran. One indexed aggregate — cheap enough for a page
+ * that renders it alongside seven other counts.
  */
 export async function storageSnapshotSummary(db: FramesDatabase): Promise<{
   computedAt: Date | null;
@@ -260,7 +273,7 @@ export async function storageSnapshotSummary(db: FramesDatabase): Promise<{
 }> {
   const [row] = await db
     .select({
-      computedAt: sql<Date | null>`min(${accountStorageUsage.computedAt})`,
+      computedAt: sql<Date | null>`max(${accountStorageUsage.computedAt})`,
       totalBytes: sql<number>`coalesce(sum(${accountStorageUsage.totalBytes}), 0)::float8`,
     })
     .from(accountStorageUsage);
@@ -278,9 +291,15 @@ export interface AdminStorageRow extends AccountStorageBuckets {
 }
 
 export interface AdminStorageOverview {
+  /**
+   * When the last sweep ran (every row it wrote shares one computedAt).
+   * The page's "Measured …" line, and what staleness is measured from —
+   * a row an earlier sweep failed on keeps its older stamp, and is listed
+   * as such, but must not make the whole snapshot look old.
+   */
+  computedAt: Date | null;
   /** Accounts with no snapshot row yet — never measured, or created since. */
   missing: number;
-  oldestComputedAt: Date | null;
   rows: AdminStorageRow[];
   totals: AccountStorageBuckets;
 }
@@ -345,7 +364,7 @@ export async function listAccountStorageForAdmin(
       frameAssetBytes: sql<number>`coalesce(sum(${accountStorageUsage.frameAssetBytes}), 0)::float8`,
       frameLogBytes: sql<number>`coalesce(sum(${accountStorageUsage.frameLogBytes}), 0)::float8`,
       frameMetricsBytes: sql<number>`coalesce(sum(${accountStorageUsage.frameMetricsBytes}), 0)::float8`,
-      oldestComputedAt: sql<Date | null>`min(${accountStorageUsage.computedAt})`,
+      computedAt: sql<Date | null>`max(${accountStorageUsage.computedAt})`,
       privateSceneBytes: sql<number>`coalesce(sum(${accountStorageUsage.privateSceneBytes}), 0)::float8`,
       publicSceneBytes: sql<number>`coalesce(sum(${accountStorageUsage.publicSceneBytes}), 0)::float8`,
       totalBytes: sql<number>`coalesce(sum(${accountStorageUsage.totalBytes}), 0)::float8`,
@@ -359,10 +378,8 @@ export async function listAccountStorageForAdmin(
     .where(isNull(accountStorageUsage.accountId));
 
   return {
+    computedAt: summary?.computedAt ? new Date(summary.computedAt) : null,
     missing: Number(missingRow?.count ?? 0),
-    oldestComputedAt: summary?.oldestComputedAt
-      ? new Date(summary.oldestComputedAt)
-      : null,
     rows: rows.map((row) => ({
       accountId: row.accountId,
       backupBytes: row.backupBytes ?? 0,
@@ -394,8 +411,21 @@ export async function listAccountStorageForAdmin(
 
 /** True when the snapshot is old enough (or incomplete enough) to redo. */
 export function storageSnapshotIsStale(overview: AdminStorageOverview): boolean {
-  if (overview.missing > 0 || !overview.oldestComputedAt) {
+  if (overview.missing > 0 || !overview.computedAt) {
     return true;
   }
-  return Date.now() - overview.oldestComputedAt.getTime() > storageSnapshotMaxAgeMs;
+  return Date.now() - overview.computedAt.getTime() > storageSnapshotMaxAgeMs;
+}
+
+/**
+ * Whether a page load should start a background sweep: the snapshot is
+ * stale, none is running (a reload will see the running one's numbers), and
+ * this process did not just finish one — see storageRefreshRetryMs.
+ */
+export function storageRefreshDue(overview: AdminStorageOverview): boolean {
+  if (!storageSnapshotIsStale(overview) || storageRefreshInFlight()) {
+    return false;
+  }
+  const finishedAt = flightHolder.__frameosStorageRefreshFinishedAt ?? 0;
+  return Date.now() - finishedAt > storageRefreshRetryMs;
 }
