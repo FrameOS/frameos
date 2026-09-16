@@ -149,8 +149,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
         >
           <H6>Add scenes repository</H6>
           <div className="frame-tool-muted text-sm">
-            Use a FrameOS repository JSON URL. Its scenes show up under{' '}
-            <span className="frameos-strong font-semibold">Scene store</span> after import.{' '}
+            Use a FrameOS repository JSON URL. Its scenes are listed here once imported.{' '}
             <a href="https://github.com/FrameOS/repo" target="_blank" rel="noreferrer" className="underline">
               Repository format
             </a>
@@ -175,6 +174,171 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
       </Button>
     )
   ) : null
+
+  // The Scene store page is the FrameOS Cloud store alone. Repositories the
+  // user added are listed on the Saved scenes page, next to the button that
+  // adds them.
+  const storeRepositories = repositories.filter(isCloudStoreRepository)
+  const addedRepositories = repositories.filter((repository) => !isCloudStoreRepository(repository))
+
+  const renderRepository = (repository: RepositoryType): JSX.Element => {
+    const systemRepository = isSystemRepository(repository)
+    const cloudStore = isCloudStoreRepository(repository)
+    const updatedLabel = repositoryUpdatedLabel(repository)
+    const menu = !inFrameAdminMode ? (
+      <DropdownMenu
+        buttonColor="secondary"
+        className="mr-3"
+        items={[
+          ...(!systemRepository
+            ? [
+                {
+                  label: 'Refresh',
+                  onClick: () => repository.id && refreshRepository(repository.id),
+                  icon: <ArrowPathIcon className="w-5 h-5" />,
+                  title: `Last refresh: ${repository.last_updated_at}`,
+                },
+              ]
+            : []),
+          {
+            label: 'Copy repository URL',
+            title: repository.url,
+            onClick: async () => repository.url && copy(repository.url),
+            icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
+          },
+          ...(!systemRepository
+            ? [
+                {
+                  label: 'Remove',
+                  onClick: () => repository.id && removeRepository(repository.id),
+                  icon: <TrashIcon className="w-5 h-5" />,
+                },
+              ]
+            : []),
+        ]}
+      />
+    ) : null
+    const rows = (repository.templates ?? [])
+      .map((template, index) => ({
+        template,
+        index,
+        compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
+      }))
+      // A microcontroller can never run these (shell apps,
+      // compiled-only nodes, …) — on ESP32 an unsupported row
+      // is pure noise, so hide it instead of graying it out.
+      // Fuller platforms keep the row with its reason.
+      .filter(({ compatibility }) => compatibility.supported || !isEsp32Frame(frameForm))
+      .toSorted(sortCompatibleTemplates)
+    const renderRow = ({ template, index, compatibility }: CompatibleTemplateRow): JSX.Element => {
+      const favouriteId = templateFavouriteId(template, repository)
+      return (
+        <TemplateRow
+          key={template.id ?? -index}
+          template={template}
+          frameId={frameId}
+          repository={repository}
+          favourite={favouriteTemplateIds.has(favouriteId)}
+          favouriteId={favouriteId}
+          onToggleFavourite={togglePersonalFavouriteTemplate}
+          saveRemoteAsLocal={!inFrameAdminMode ? (template) => saveRemoteAsLocal(repository, template) : undefined}
+          applyTemplate={(template) => {
+            applyRemoteToFrame(repository, template, openInstalledSceneDrawer)
+          }}
+          installedTemplatesByName={installedTemplatesByName}
+          templateDragData={
+            compatibility.supported
+              ? {
+                  template,
+                  repository: {
+                    id: repository.id,
+                    name: repository.name,
+                    url: repository.url,
+                  },
+                }
+              : undefined
+          }
+          compatibility={compatibility}
+        />
+      )
+    }
+
+    if (cloudStore) {
+      // The public store is one catalog split into the same shelves
+      // as the store front (utils/storeCategories), each shelf its
+      // own collapsible section. The repository itself is reduced
+      // to a status line: how many scenes, how fresh, and the menu.
+      const shelves = groupByStoreShelf(rows.map((row) => ({ ...row, category: row.template.category })))
+      return (
+        <div className="space-y-6 !mt-6" key={repository.id}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="frame-tool-muted min-w-0 break-words text-sm">
+              {repository.name || 'FrameOS Cloud store'}
+              {rows.length ? ` · ${rows.length} ${rows.length === 1 ? 'scene' : 'scenes'}` : ''}
+              {updatedLabel ? ` · ${updatedLabel}` : ''}
+            </div>
+            {menu}
+          </div>
+          {shelves.map(({ shelf, templates: shelfRows }) => {
+            const expandedKey = `${repository.url}#${shelf.slug}`
+            const expanded = isExpanded(expandedKey)
+            return (
+              <div className="space-y-2" key={shelf.slug}>
+                <H6
+                  className="flex cursor-pointer flex-wrap items-center gap-x-1"
+                  onClick={() => toggleExpanded(expandedKey)}
+                >
+                  {expanded ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
+                  {shelf.title}
+                  {` (${shelfRows.length})`}
+                </H6>
+                {expanded ? <div className="space-y-2">{shelfRows.map(renderRow)}</div> : null}
+              </div>
+            )
+          })}
+          {rows.length === 0 ? (
+            <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">
+              {search === ''
+                ? 'The scene store has no scenes for this frame yet.'
+                : `No store scenes match "${search}"`}
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-2 !mt-8" key={repository.id}>
+        <div className="flex gap-2 items-start justify-between">
+          <H6
+            className="flex min-w-0 cursor-pointer flex-wrap items-center gap-x-1 break-words"
+            onClick={() => toggleExpanded(repository.url)}
+          >
+            {isExpanded(repository.url) ? (
+              <ChevronDownIcon className="w-6 h-6" />
+            ) : (
+              <ChevronRightIcon className="w-6 h-6" />
+            )}
+            {repository.name || repository.url}
+            {repository.templates?.length ? ` (${repository.templates.length})` : ''}
+            {updatedLabel ? (
+              <span className="frame-tool-muted text-xs font-normal normal-case tracking-normal">· {updatedLabel}</span>
+            ) : null}
+          </H6>
+          {menu}
+        </div>
+        {isExpanded(repository.url) && repository.description ? (
+          <div className="frame-tool-muted break-words text-sm">{repository.description}</div>
+        ) : null}
+        {isExpanded(repository.url) && repository.templates ? (
+          <div className="space-y-2">{rows.map(renderRow)}</div>
+        ) : null}
+        {isExpanded(repository.url) && repository.templates?.length === 0 ? (
+          <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">This repository has no scenes.</div>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="frame-tool-panel space-y-4">
@@ -322,13 +486,19 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
         </div>
       )}
 
-      {section === 'saved' && addRepository ? (
+      {section === 'saved' && canAddRepository ? (
         <div className="space-y-2 !mt-8">
-          <H6>Scene repositories</H6>
+          <H6>
+            Scene repositories
+            {addedRepositories.length ? ` (${addedRepositories.length})` : ''}
+          </H6>
           <div className="frame-tool-muted text-sm">
-            Track another catalog of scenes alongside the store. Repositories you add are listed under{' '}
-            <span className="frameos-strong font-semibold">Scene store</span>.
+            Other catalogs of scenes, in the FrameOS repository JSON format. Their scenes are listed here.
           </div>
+          {addedRepositories.map(renderRepository)}
+          {addedRepositories.length === 0 && search !== '' && hiddenRepositories > 0 ? (
+            <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">No repositories match "{search}".</div>
+          ) : null}
           {addRepository}
         </div>
       ) : null}
@@ -341,202 +511,21 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
               Loading the scene store…
             </div>
           ) : null}
-          {(repositories ?? []).map((repository) => {
-            const systemRepository = isSystemRepository(repository)
-            const cloudStore = isCloudStoreRepository(repository)
-            const updatedLabel = repositoryUpdatedLabel(repository)
-            const menu = !inFrameAdminMode ? (
-              <DropdownMenu
-                buttonColor="secondary"
-                className="mr-3"
-                items={[
-                  ...(!systemRepository
-                    ? [
-                        {
-                          label: 'Refresh',
-                          onClick: () => repository.id && refreshRepository(repository.id),
-                          icon: <ArrowPathIcon className="w-5 h-5" />,
-                          title: `Last refresh: ${repository.last_updated_at}`,
-                        },
-                      ]
-                    : []),
-                  {
-                    label: 'Copy repository URL',
-                    title: repository.url,
-                    onClick: async () => repository.url && copy(repository.url),
-                    icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
-                  },
-                  ...(!systemRepository
-                    ? [
-                        {
-                          label: 'Remove',
-                          onClick: () => repository.id && removeRepository(repository.id),
-                          icon: <TrashIcon className="w-5 h-5" />,
-                        },
-                      ]
-                    : []),
-                ]}
-              />
-            ) : null
-            const rows = (repository.templates ?? [])
-              .map((template, index) => ({
-                template,
-                index,
-                compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
-              }))
-              // A microcontroller can never run these (shell apps,
-              // compiled-only nodes, …) — on ESP32 an unsupported row
-              // is pure noise, so hide it instead of graying it out.
-              // Fuller platforms keep the row with its reason.
-              .filter(({ compatibility }) => compatibility.supported || !isEsp32Frame(frameForm))
-              .toSorted(sortCompatibleTemplates)
-            const renderRow = ({ template, index, compatibility }: CompatibleTemplateRow): JSX.Element => {
-              const favouriteId = templateFavouriteId(template, repository)
-              return (
-                <TemplateRow
-                  key={template.id ?? -index}
-                  template={template}
-                  frameId={frameId}
-                  repository={repository}
-                  favourite={favouriteTemplateIds.has(favouriteId)}
-                  favouriteId={favouriteId}
-                  onToggleFavourite={togglePersonalFavouriteTemplate}
-                  saveRemoteAsLocal={
-                    !inFrameAdminMode ? (template) => saveRemoteAsLocal(repository, template) : undefined
-                  }
-                  applyTemplate={(template) => {
-                    applyRemoteToFrame(repository, template, openInstalledSceneDrawer)
-                  }}
-                  installedTemplatesByName={installedTemplatesByName}
-                  templateDragData={
-                    compatibility.supported
-                      ? {
-                          template,
-                          repository: {
-                            id: repository.id,
-                            name: repository.name,
-                            url: repository.url,
-                          },
-                        }
-                      : undefined
-                  }
-                  compatibility={compatibility}
-                />
-              )
-            }
-
-            if (cloudStore) {
-              // The public store is one catalog split into the same shelves
-              // as the store front (utils/storeCategories), each shelf its
-              // own collapsible section. The repository itself is reduced
-              // to a status line: how many scenes, how fresh, and the menu.
-              const shelves = groupByStoreShelf(rows.map((row) => ({ ...row, category: row.template.category })))
-              return (
-                <div className="space-y-6 !mt-6" key={repository.id}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="frame-tool-muted min-w-0 break-words text-sm">
-                      {repository.name || 'FrameOS Cloud store'}
-                      {rows.length ? ` · ${rows.length} ${rows.length === 1 ? 'scene' : 'scenes'}` : ''}
-                      {updatedLabel ? ` · ${updatedLabel}` : ''}
-                    </div>
-                    {menu}
-                  </div>
-                  {shelves.map(({ shelf, templates: shelfRows }) => {
-                    const expandedKey = `${repository.url}#${shelf.slug}`
-                    const expanded = isExpanded(expandedKey)
-                    return (
-                      <div className="space-y-2" key={shelf.slug}>
-                        <H6
-                          className="flex cursor-pointer flex-wrap items-center gap-x-1"
-                          onClick={() => toggleExpanded(expandedKey)}
-                        >
-                          {expanded ? (
-                            <ChevronDownIcon className="w-6 h-6" />
-                          ) : (
-                            <ChevronRightIcon className="w-6 h-6" />
-                          )}
-                          {shelf.title}
-                          {` (${shelfRows.length})`}
-                        </H6>
-                        {expanded ? <div className="space-y-2">{shelfRows.map(renderRow)}</div> : null}
-                      </div>
-                    )
-                  })}
-                  {rows.length === 0 ? (
-                    <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">
-                      {search === ''
-                        ? 'The scene store has no scenes for this frame yet.'
-                        : `No store scenes match "${search}"`}
-                    </div>
-                  ) : null}
-                </div>
-              )
-            }
-
-            return (
-              <div className="space-y-2 !mt-8" key={repository.id}>
-                <div className="flex gap-2 items-start justify-between">
-                  <H6
-                    className="flex min-w-0 cursor-pointer flex-wrap items-center gap-x-1 break-words"
-                    onClick={() => toggleExpanded(repository.url)}
-                  >
-                    {isExpanded(repository.url) ? (
-                      <ChevronDownIcon className="w-6 h-6" />
-                    ) : (
-                      <ChevronRightIcon className="w-6 h-6" />
-                    )}
-                    {repository.name || repository.url}
-                    {repository.templates?.length ? ` (${repository.templates.length})` : ''}
-                    {updatedLabel ? (
-                      <span className="frame-tool-muted text-xs font-normal normal-case tracking-normal">
-                        · {updatedLabel}
-                      </span>
-                    ) : null}
-                  </H6>
-                  {menu}
-                </div>
-                {isExpanded(repository.url) && repository.description ? (
-                  <div className="frame-tool-muted break-words text-sm">{repository.description}</div>
-                ) : null}
-                {isExpanded(repository.url) && repository.templates ? (
-                  <div className="space-y-2">{rows.map(renderRow)}</div>
-                ) : null}
-                {isExpanded(repository.url) && repository.templates?.length === 0 ? (
-                  <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">This repository has no scenes.</div>
-                ) : null}
-              </div>
-            )
-          })}
-          {!inFrameAdminMode ? (
-            <>
-              {(repositories.length === 0 && !storeScenesLoading) || hiddenRepositories > 0 ? (
-                <div className="space-y-2">
-                  {repositories.length === 0 ? <H6>Scene store</H6> : null}
-                  <div className="frame-tool-muted text-sm">
-                    {hiddenRepositories > 0 ? (
-                      <>
-                        {hiddenRepositories} {hiddenRepositories === 1 ? 'repository' : 'repositories'} had no match for
-                        "{search}".
-                      </>
-                    ) : canAddRepository && section === 'store' ? (
-                      <>
-                        No scene repositories yet. Connect FrameOS Cloud in Settings for the public store, or add a
-                        repository under <span className="frameos-strong font-semibold">Saved scenes</span>.
-                      </>
-                    ) : (
-                      <>You have no repositories installed.</>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-              {section === 'all' ? addRepository : null}
-            </>
-          ) : repositories.length === 0 && !storeScenesLoading ? (
+          {storeRepositories.map(renderRepository)}
+          {storeRepositories.length === 0 && !storeScenesLoading ? (
             <div className="space-y-2">
-              <H6>Bundled scenes</H6>
-              <div className="frame-tool-muted text-sm">No bundled scenes are available.</div>
+              <H6>Scene store</H6>
+              <div className="frame-tool-muted text-sm">
+                {inFrameAdminMode
+                  ? "The scene store could not be reached. Check the frame's connection and try again."
+                  : search !== ''
+                  ? `No store scenes match "${search}".`
+                  : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'}
+              </div>
             </div>
           ) : null}
+          {section === 'all' ? addedRepositories.map(renderRepository) : null}
+          {section === 'all' ? addRepository : null}
         </>
       ) : null}
     </div>

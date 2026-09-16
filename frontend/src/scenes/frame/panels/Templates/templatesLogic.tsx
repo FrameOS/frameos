@@ -486,7 +486,15 @@ export interface templatesLogicMeta {
       apps: Record<string, AppConfig>
     ) => number
     storeScenesLoading: (repositoriesLoading: boolean, allRepositories: RepositoryType[]) => boolean
-    savedSceneCount: (allTemplates: TemplateType[], driveTemplates: TemplateType[], hasDriveScope: boolean) => number
+    savedSceneCount: (
+      allTemplates: TemplateType[],
+      driveTemplates: TemplateType[],
+      hasDriveScope: boolean,
+      allRepositories: RepositoryType[],
+      frame: FrameType,
+      frameForm: Partial<FrameType>,
+      apps: Record<string, AppConfig>
+    ) => number
     savedScenesLoading: (templatesLoading: boolean, driveTemplatesLoading: boolean) => boolean
     hiddenRepositories: (allRepositories: RepositoryType[], repositories: RepositoryType[]) => number
     isExpanded: (expanded: Record<string, boolean>) => (url: string) => boolean
@@ -514,6 +522,26 @@ export type templatesLogicType = MakeLogicType<templatesLogicValues, templatesLo
  * or the cloud SPA's built-in `system-cloud-store` entry. */
 export function isCloudStoreRepository(repository: RepositoryType): boolean {
   return repository.id === 'system-cloud-store' || (repository.url ?? '').includes('/api/store/')
+}
+
+/** Rows the picker would list for these repositories: an ESP32 hides scenes it can never run. */
+function countRepositoryScenes(
+  repositories: RepositoryType[],
+  frame: FrameType,
+  frameForm: Partial<FrameType>,
+  apps: Record<string, AppConfig>
+): number {
+  const mode = frameForm?.mode ?? frame?.mode
+  const hideUnsupported = isEsp32Frame(frameForm)
+  let count = 0
+  for (const repository of repositories) {
+    for (const template of repository.templates ?? []) {
+      if (!hideUnsupported || templateCompatibilityForFrame(mode, template, apps, frameForm).supported) {
+        count += 1
+      }
+    }
+  }
+  return count
 }
 
 /** Scene store page order: the cloud store first, then the repositories the user added, by name. */
@@ -886,8 +914,9 @@ export const templatesLogic = kea<templatesLogicType>([
       },
     ],
     // The number behind "Scene store" in the Add scene drawer: every row the
-    // store page would list, so the two agree. Same rule as the page — an
-    // ESP32 hides scenes it can never run; fuller platforms count them all.
+    // store page would list (the cloud store alone), so the two agree. Same
+    // rule as the page — an ESP32 hides scenes it can never run; fuller
+    // platforms count them all.
     storeSceneCount: [
       (s) => [s.allRepositories, s.frame, s.frameForm, s.apps],
       (
@@ -895,19 +924,7 @@ export const templatesLogic = kea<templatesLogicType>([
         frame: templatesLogicValues['frame'],
         frameForm: templatesLogicValues['frameForm'],
         apps: templatesLogicValues['apps']
-      ): number => {
-        const mode = frameForm?.mode ?? frame?.mode
-        const hideUnsupported = isEsp32Frame(frameForm)
-        let count = 0
-        for (const repository of allRepositories) {
-          for (const template of repository.templates ?? []) {
-            if (!hideUnsupported || templateCompatibilityForFrame(mode, template, apps, frameForm).supported) {
-              count += 1
-            }
-          }
-        }
-        return count
-      },
+      ): number => countRepositoryScenes(allRepositories.filter(isCloudStoreRepository), frame, frameForm, apps),
     ],
     storeScenesLoading: [
       (s) => [s.repositoriesLoading, s.allRepositories],
@@ -916,21 +933,34 @@ export const templatesLogic = kea<templatesLogicType>([
         allRepositories: templatesLogicValues['allRepositories']
       ): boolean => repositoriesLoading && allRepositories.length === 0,
     ],
-    // The number behind "Saved scenes": private cloud scenes plus the
-    // backend's local scenes — whichever of the two this control plane has.
+    // The number behind "Saved scenes": private cloud scenes, the backend's
+    // local scenes and the scenes of repositories the user added — whichever
+    // of those this control plane has.
     savedSceneCount: [
-      (s) => [s.allTemplates, s.driveTemplates, s.hasDriveScope],
+      (s) => [s.allTemplates, s.driveTemplates, s.hasDriveScope, s.allRepositories, s.frame, s.frameForm, s.apps],
       (
         allTemplates: templatesLogicValues['allTemplates'],
         driveTemplates: templatesLogicValues['driveTemplates'],
-        hasDriveScope: templatesLogicValues['hasDriveScope']
+        hasDriveScope: templatesLogicValues['hasDriveScope'],
+        allRepositories: templatesLogicValues['allRepositories'],
+        frame: templatesLogicValues['frame'],
+        frameForm: templatesLogicValues['frameForm'],
+        apps: templatesLogicValues['apps']
       ): number => {
         if (isInFrameAdminMode()) {
           return 0
         }
         const drive = hasDriveScope ? driveTemplates.length : 0
         const local = isCloudMode() ? 0 : allTemplates.length
-        return drive + local
+        const added = isCloudMode()
+          ? 0
+          : countRepositoryScenes(
+              allRepositories.filter((repository) => !isCloudStoreRepository(repository)),
+              frame,
+              frameForm,
+              apps
+            )
+        return drive + local + added
       },
     ],
     savedScenesLoading: [

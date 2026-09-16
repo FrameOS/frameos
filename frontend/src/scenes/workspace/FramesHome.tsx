@@ -877,12 +877,10 @@ function AddSceneDrawerActions({
   // The frame's own admin panel has no saved scenes to show: no local
   // backend library, and the private cloud drive is a backend feature.
   const hasSavedScenesPage = !generatesElsewhere
-  const storeSubtitle = cloudMode
-    ? 'Public scenes on FrameOS Cloud'
-    : generatesElsewhere
-    ? 'Public scenes from FrameOS Cloud'
-    : 'Public scenes from FrameOS Cloud, plus repositories you add'
-  const savedSubtitle = cloudMode ? 'Your own scenes on FrameOS Cloud' : 'Your private cloud and local scenes'
+  const storeSubtitle = cloudMode ? 'Public scenes on FrameOS Cloud' : 'Public scenes from FrameOS Cloud'
+  const savedSubtitle = cloudMode
+    ? 'Your own scenes on FrameOS Cloud'
+    : 'Your private cloud scenes, local scenes and repositories'
   // Live list, so "Split screen" unlocks as soon as the first scene is added.
   const hasScenes = liveScenes.length > 0
   const favouriteTemplateCount = favouriteTemplates.length
