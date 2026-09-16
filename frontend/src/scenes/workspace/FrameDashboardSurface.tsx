@@ -590,7 +590,7 @@ function FrameSceneTile({
             event.stopPropagation()
             onToggleChildren?.()
           }}
-          className="frameos-scene-child-toggle absolute right-2 top-2 z-20 flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-bold shadow-sm backdrop-blur-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-scene-child-toggle absolute right-0 top-0 z-20 flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-bold shadow-sm backdrop-blur-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           {childrenExpanded ? '-' : '+'}
           {childSceneCount}
@@ -604,8 +604,8 @@ function FrameSceneTile({
           horizontal
           buttonColor="none"
           className={clsx(
-            'absolute right-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700',
-            hasChildScenes ? 'top-11' : 'top-2'
+            'absolute right-0 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700',
+            hasChildScenes ? 'top-9' : 'top-0'
           )}
         />
       ) : null}
