@@ -164,6 +164,9 @@ function templateZip({
     zipSync({
       [`${name}/template.json`]: strToU8(
         JSON.stringify({
+          // The exported index lists categorized scenes only; the classifier
+          // is not configured in tests, so the manifest names one.
+          category: "utilities",
           description: "A calm sunrise clock",
           image: "./image.jpg",
           imageHeight: 480,

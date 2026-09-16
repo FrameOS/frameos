@@ -176,12 +176,16 @@ function bearer(token: string) {
 }
 
 function templateZip({
+  // The exported repository index lists categorized scenes only; the
+  // classifier is not configured in tests, so the manifest names one.
+  category = "utilities",
   frameosVersion,
   image = true,
   imageBytes,
   name = "Sunrise Clock",
   scenes = [{ id: "scene-1", nodes: [] }],
 }: {
+  category?: string | null;
   frameosVersion?: string;
   image?: boolean;
   imageBytes?: Buffer;
@@ -191,6 +195,7 @@ function templateZip({
   const files: Record<string, Uint8Array> = {
     [`${name}/template.json`]: strToU8(
       JSON.stringify({
+        category: category ?? undefined,
         description: "A calm sunrise clock",
         frameosVersion,
         image: image ? "./image.jpg" : undefined,
