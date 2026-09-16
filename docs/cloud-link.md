@@ -455,7 +455,9 @@ one row at the new version's index; a store the user deleted is not brought
 back, and a URL the user edited by hand is left alone.
 
 **Private cloud scenes** — the account's own scenes, private ones included — is the
-same repository format behind the link token:
+same repository format behind the link token. In the workspace it is listed on the
+Add scene drawer's **Saved scenes** page next to the backend's local scenes; the
+public store and any other repositories sit behind **Scene store**:
 
 ```http
 GET {provider}/api/store/account/repository.json   # Bearer + store:publish

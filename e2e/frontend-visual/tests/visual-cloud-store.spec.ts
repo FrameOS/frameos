@@ -126,15 +126,19 @@ async function mockCloudStoreApi(
   })
 }
 
+/** Open the Add scene drawer and go to its "Saved scenes" page, where the
+ * private cloud list lives (the first page is actions only). */
 async function openAddSceneDrawer(page: Page): Promise<void> {
   await page
     .getByRole('button', { name: /Add scene/i })
     .first()
     .click()
-  await page
-    .getByRole('heading', { name: /Add scene/i })
+  const drawer = page
+    .locator('.workspace-drawer')
+    .filter({ has: page.getByRole('heading', { name: /Add scene/i }) })
     .last()
-    .waitFor()
+  await drawer.getByRole('button', { name: /^Saved scenes/i }).click()
+  await drawer.getByRole('heading', { name: /Saved scenes/i }).waitFor()
 }
 
 interface CloudVisualVariant {

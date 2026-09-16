@@ -134,6 +134,72 @@ async def test_get_repositories_persists_the_daily_refresh(async_client, db, mon
 
 
 @pytest.mark.asyncio
+async def test_get_repositories_returns_the_refreshed_catalog_when_it_lands_in_time(async_client, db, monkeypatch):
+    """The listing that triggers the daily refresh waits for it (briefly) and
+    answers with the new catalog, not the copy it just replaced.
+
+    Otherwise a scene picker opened once every few days keeps showing the
+    previous visit's catalog for ever.
+    """
+    async def fake_update(self):
+        self.templates = [{"name": "New", "image": "https://example.com/new/image"}]
+        self.last_updated_at = datetime.utcnow()
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    repo = Repository(
+        project_id=async_client.project_id,
+        name="Stale store",
+        url="https://example.com/repository.json",
+        templates=[{"name": "Old", "image": "https://example.com/old/image"}],
+        last_updated_at=datetime.utcnow() - timedelta(days=3),
+    )
+    db.add(repo)
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    listed = [r for r in response.json() if r["id"] == repo.id]
+    assert listed and listed[0]["templates"] == [{"name": "New", "image": "https://example.com/new/image"}]
+    await _drain_background_refreshes()
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_does_not_hang_on_a_slow_refresh(async_client, db, monkeypatch):
+    """A provider that does not answer within the wait must not hold the
+    listing: the cached copy comes back and the refresh finishes behind it."""
+    from app.api import repositories as repositories_api
+
+    monkeypatch.setattr(repositories_api, "STALE_REFRESH_WAIT_SECONDS", 0.05)
+
+    async def slow_update(self):
+        await asyncio.sleep(0.3)
+        self.templates = [{"name": "New"}]
+        self.last_updated_at = datetime.utcnow()
+
+    monkeypatch.setattr(Repository, "update_templates", slow_update)
+
+    repo = Repository(
+        project_id=async_client.project_id,
+        name="Slow store",
+        url="https://example.com/repository.json",
+        templates=[{"name": "Old"}],
+        last_updated_at=None,
+    )
+    db.add(repo)
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    listed = [r for r in response.json() if r["id"] == repo.id]
+    assert listed and listed[0]["templates"] == [{"name": "Old"}]
+
+    await _drain_background_refreshes()
+    db.expire_all()
+    assert db.query(Repository).filter_by(id=repo.id).one().templates == [{"name": "New"}]
+
+
+@pytest.mark.asyncio
 async def test_get_repository(async_client, db):
     repo = Repository(project_id=async_client.project_id, name="Test Repo", url="http://example.com/test.json")
     db.add(repo)
