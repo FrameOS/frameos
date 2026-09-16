@@ -184,6 +184,7 @@ export function TemplateRow({
   // Risk flag computed by the cloud store; the install confirmation lives in
   // the applyRemoteToFrame listener so drag-and-drop installs go through it too.
   const runsShellCommands = Boolean(template.flags?.includes('shell'))
+  const newerThanThisInstall = builtOnNewerFrameos(template.frameosVersion)
 
   return (
     <div
@@ -267,23 +268,22 @@ export function TemplateRow({
                   </Tag>
                 ) : null}
               </H6>
-              {template.author || template.frameosVersion ? (
+              {template.author || newerThanThisInstall ? (
                 <div className="frame-tool-muted text-xs">
                   {template.author ? <>by {template.author}</> : null}
-                  {template.author && template.frameosVersion ? ' · ' : null}
-                  {template.frameosVersion ? (
-                    builtOnNewerFrameos(template.frameosVersion) ? (
-                      <span
-                        className="text-amber-500"
-                        title={`Published from FrameOS ${template.frameosVersion}; this install runs ${CURRENT_FRAMEOS_VERSION}. Upgrade FrameOS for best results.`}
-                      >
-                        FrameOS {template.frameosVersion} — newer than this install
-                      </span>
-                    ) : (
-                      <span title="The FrameOS version this scene was published from">
-                        FrameOS {template.frameosVersion}
-                      </span>
-                    )
+                  {template.author && newerThanThisInstall ? ' · ' : null}
+                  {/* The store index is already filtered to scenes this
+                      FrameOS can run, so the version a scene was published
+                      from is noise there. It only matters when it is newer
+                      than this install — private cloud scenes are not
+                      version-filtered — and then it is a warning. */}
+                  {newerThanThisInstall ? (
+                    <span
+                      className="text-amber-500"
+                      title={`Published from FrameOS ${template.frameosVersion}; this install runs ${CURRENT_FRAMEOS_VERSION}. Upgrade FrameOS for best results.`}
+                    >
+                      FrameOS {template.frameosVersion} — newer than this install
+                    </span>
                   ) : null}
                 </div>
               ) : null}
