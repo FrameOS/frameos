@@ -472,7 +472,12 @@ function TaskLogLine({
       <span
         className={clsx(
           'min-w-0',
-          truncate ? 'truncate' : 'break-words',
+          // insertBreaks() seeds the line with <wbr> so the expanded list can
+          // wrap long paths and JSON at sensible points; a <wbr> is a break
+          // opportunity even inside `truncate`'s nowrap, which is how a long
+          // error line grew the collapsed strip to several rows. Hide them
+          // here so the single row stays a single row.
+          truncate ? 'truncate [&_wbr]:hidden' : 'break-words',
           taskLogLineClassName(log, formattedLine, theme)
         )}
       >

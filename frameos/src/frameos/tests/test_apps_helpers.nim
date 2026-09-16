@@ -41,6 +41,17 @@ suite "frameos app helpers":
     else:
       check maxImageResponseBytes(FrameConfig(maxHttpResponseBytes: 1234)) == 1234
 
+  test "saved assets group under saved/<app>, with a named node's own folder":
+    # Unnamed node: the app alone picks the folder.
+    check savedAssetDir("/srv/assets", "data/unsplash", "") == "/srv/assets/saved/unsplash"
+    # A JS app's nodeName defaults to its keyword: no extra folder.
+    check savedAssetDir("/srv/assets", "data/unsplash", "data/unsplash") == "/srv/assets/saved/unsplash"
+    # A node the owner named keeps its own folder, under the app's.
+    check savedAssetDir("/srv/assets", "data/openaiImage", "Sunsets") == "/srv/assets/saved/openaiImage/Sunsets"
+    # A compiled scene from before the keyword travelled: the name alone.
+    check savedAssetDir("/srv/assets", "", "Living room") == "/srv/assets/saved/Living room"
+    check savedAssetDir("/srv/assets", "", "") == "/srv/assets/saved"
+
   test "cleanFilename strips invalid chars and collapses spaces":
     check cleanFilename("hello   world") == "hello world"
     check cleanFilename("a/b:c*d?e\"f<g>h|i") == "abcdefghi"

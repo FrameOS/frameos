@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { frames, linkedClients } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../src/lib/device-flow";
-import { frameSummary } from "../../../src/lib/frames";
+import { frameSummary, pendingCommandTypesByFrame } from "../../../src/lib/frames";
 import { rateLimitResponse } from "../../../src/lib/rate-limit";
 import { readSession } from "../../../src/lib/session";
 
@@ -37,11 +37,16 @@ export async function GET(request: NextRequest) {
     .where(eq(frames.accountId, session.accountId))
     .orderBy(asc(frames.createdAt));
 
+  const pendingTypes = await pendingCommandTypesByFrame(
+    db,
+    rows.map(({ frame }) => frame.id),
+  );
   return NextResponse.json({
     frames: rows.map(({ frame, linkedClient }) => ({
       ...frameSummary(frame, linkedClient ?? undefined),
       last_metrics: frame.lastMetrics,
       last_state: frame.lastState,
+      pending_command_types: pendingTypes.get(frame.id) ?? [],
     })),
   });
 }

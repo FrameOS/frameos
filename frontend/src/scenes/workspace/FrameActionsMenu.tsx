@@ -5,6 +5,7 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUturnLeftIcon,
+  ClockIcon,
   CloudArrowDownIcon,
   CommandLineIcon,
   LightBulbIcon,
@@ -21,7 +22,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu, type DropdownMenuProps } from '../../components/DropdownMenu'
 import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
-import { frameHost } from '../../decorators/frame'
+import { frameHost, frameUpgradeIsQueued } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { workspaceLogic } from './workspaceLogic'
@@ -223,15 +224,24 @@ export function FrameActionsMenu({
         // lags behind the verb again.
         ...(allows('updateFirmware')
           ? [
-              {
-                label: 'Update firmware',
-                title:
-                  disabledReason('updateFirmware') ??
-                  'Ask the frame to check for new firmware and install it in the background',
-                disabled: Boolean(disabledReason('updateFirmware')),
-                onClick: () => updateFrameFirmware(frame.id),
-                icon: <CloudArrowDownIcon className="h-5 w-5" />,
-              },
+              frameUpgradeIsQueued(frame)
+                ? {
+                    // Already in the queue: a second click would only enqueue
+                    // the same nudge behind the first.
+                    label: 'Update queued',
+                    title: 'The update request is queued and applies when the frame next wakes',
+                    disabled: true,
+                    icon: <ClockIcon className="h-5 w-5" />,
+                  }
+                : {
+                    label: 'Update firmware',
+                    title:
+                      disabledReason('updateFirmware') ??
+                      'Ask the frame to check for new firmware and install it in the background',
+                    disabled: Boolean(disabledReason('updateFirmware')),
+                    onClick: () => updateFrameFirmware(frame.id),
+                    icon: <CloudArrowDownIcon className="h-5 w-5" />,
+                  },
             ]
           : []),
         ...(allows('restartRemote') && agentConfigured

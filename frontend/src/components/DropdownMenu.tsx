@@ -33,6 +33,8 @@ export interface DropdownMenuProps {
   buttonTitle?: string
   /** The trigger's accessible name. Defaults to buttonTitle, then "Menu" for the icon-only trigger. */
   buttonAriaLabel?: string
+  /** The panel's width, for menus whose rows (a switch with its label) do not fit the default w-56. */
+  menuClassName?: string
 }
 
 export function DropdownMenu({
@@ -44,6 +46,7 @@ export function DropdownMenu({
   buttonContent,
   buttonTitle,
   buttonAriaLabel,
+  menuClassName = 'w-56',
 }: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
@@ -72,6 +75,13 @@ export function DropdownMenu({
     ],
   })
   const isLoading = items.some((item) => item.loading)
+  // The button is the positioned ancestor of its corner adornment — unless
+  // the caller positions the button itself (the scene tile's "…" sits
+  // `absolute` in the tile's corner). Tailwind emits .relative after
+  // .absolute, so listing both left the tile's menu in normal flow, below
+  // the tile's bottom edge and behind its overflow-hidden: present in the
+  // DOM, never on screen.
+  const positioned = /\b(absolute|fixed|sticky)\b/.test(className ?? '')
 
   return (
     <Menu>
@@ -86,7 +96,8 @@ export function DropdownMenu({
             onClick={(e) => e.stopPropagation()}
             className={clsx(
               buttonColor(_buttonColor),
-              'relative inline-flex justify-center px-1 py-1 text-sm font-medium rounded-md focus:outline-none shadow-sm',
+              positioned ? null : 'relative',
+              'inline-flex justify-center px-1 py-1 text-sm font-medium rounded-md focus:outline-none shadow-sm',
               className
             )}
           >
@@ -115,7 +126,10 @@ export function DropdownMenu({
             >
               <Menu.Items
                 static
-                className="frameos-dropdown-menu z-[100] w-56 origin-top-right divide-y divide-slate-200/60 rounded-md focus:outline-none"
+                className={clsx(
+                  'frameos-dropdown-menu z-[100] origin-top-right divide-y divide-slate-200/60 rounded-md focus:outline-none',
+                  menuClassName
+                )}
                 ref={setPopperElement}
                 style={styles.popper}
                 {...attributes.popper}

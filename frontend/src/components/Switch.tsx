@@ -27,7 +27,7 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
       {leftLabel && <Label className="frameos-switch-label cursor-pointer">{leftLabel}</Label>}
       <button
         className={clsx(
-          'frameos-switch-track group inline-flex h-6 w-11 items-center rounded-full',
+          'frameos-switch-track group inline-flex h-6 w-11 shrink-0 items-center rounded-full',
           value || alwaysActive ? 'frameos-switch-track-on' : 'frameos-switch-track-off',
           disabled && 'cursor-not-allowed opacity-50'
         )}
@@ -45,7 +45,7 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
         </span>
         <span
           className={clsx(
-            'frameos-switch-thumb size-4 rounded-full transition',
+            'frameos-switch-thumb size-4 shrink-0 rounded-full transition',
             value ? 'translate-x-6' : 'translate-x-1'
           )}
         />

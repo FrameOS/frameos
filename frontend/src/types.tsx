@@ -144,6 +144,11 @@ export interface FrameType {
   next_wake_at?: string | null
   next_render_at?: string | null
   sleep_reason?: 'battery' | 'always' | 'battery_critical' | string | null
+  /** Cloud only: the contract verbs still queued for the device (pending or
+   * sent-but-unacked, unexpired), as the list and detail routes report them.
+   * What lets the frames list say "upgrade queued" instead of offering the
+   * same notify_update_available a second time to a sleeping frame. */
+  pending_command_types?: string[]
   frame_host: string
   frame_port: number
   frame_access_key: string

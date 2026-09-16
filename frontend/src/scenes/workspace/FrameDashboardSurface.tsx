@@ -10,6 +10,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CircleStackIcon,
+  ClockIcon,
   CommandLineIcon,
   DocumentTextIcon,
   InformationCircleIcon,
@@ -21,7 +22,7 @@ import {
 
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
-import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
+import { frameHost, frameIsHealthy, frameStatus, frameUpgradeIsQueued } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
@@ -375,6 +376,16 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
   )
 }
 
+// The small "waiting" clock in the bottom-right corner of the status word.
+function QueuedMarker(): JSX.Element {
+  return (
+    <ClockIcon
+      className="pointer-events-none absolute -bottom-0.5 right-0 h-3 w-3 text-amber-500"
+      aria-label="queued"
+    />
+  )
+}
+
 function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element {
   const { undeployedChangeDetails, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId: frame.id }))
   const { openFrameChangeDrawer } = useActions(workspaceLogic)
@@ -385,8 +396,15 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   // On the cloud, undeployed changes mean the last push is queued and still
   // unacked by the device — it applies by itself when the frame syncs, so
   // "deploy now" would ask for a click that changes nothing.
+  //
+  // "upgrade queued": the owner already asked for the upgrade and the
+  // notify_update_available verb is waiting for a frame that is asleep (or
+  // off) — offering "upgrade" again reads as if the first click was lost.
+  const upgradeQueued = onlyFrameosUpgrade && frameUpgradeIsQueued(frame)
   const changeLabel = unsavedChanges
     ? 'unsaved'
+    : upgradeQueued
+    ? 'upgrade queued'
     : onlyFrameosUpgrade
     ? 'upgrade'
     : undeployedChanges
@@ -409,14 +427,20 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
           type="button"
           onClick={() => openFrameChangeDrawer(frame.id, drawerKind)}
           className={clsx(
-            'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null
+            'frameos-change-status-link relative rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null,
+            upgradeQueued ? 'pr-3' : null
           )}
+          title={upgradeQueued ? 'The upgrade is queued and applies when the frame next wakes' : undefined}
         >
           {changeLabel}
+          {upgradeQueued ? <QueuedMarker /> : null}
         </button>
       ) : (
-        <span className="font-medium">{changeLabel}</span>
+        <span className={clsx('relative font-medium', upgradeQueued ? 'pr-3' : null)}>
+          {changeLabel}
+          {upgradeQueued ? <QueuedMarker /> : null}
+        </span>
       )}
       <span> - </span>
       {frameStatus(frame)}

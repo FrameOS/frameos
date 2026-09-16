@@ -36,6 +36,9 @@ export function SceneDependencyFormatMenu({
       buttonColor="secondary"
       buttonTitle="Scene list display"
       className={clsx('h-8 w-8 items-center !rounded-lg !px-0 !py-0', className)}
+      // Each row is a switch and its label; at the default w-56 the label
+      // wrapped to two lines and squeezed the switch's track under its knob.
+      menuClassName="w-72"
       items={[
         {
           content: () => (

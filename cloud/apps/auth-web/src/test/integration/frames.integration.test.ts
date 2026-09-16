@@ -40,6 +40,7 @@ import { POST as restartFrameRoute } from "../../../app/api/frames/[frameId]/res
 import { POST as rebootFrameRoute } from "../../../app/api/frames/[frameId]/reboot/route";
 import {
   allowedFrameSettings,
+  enqueueFrameCommand,
   esp32SettableKeys,
   maxClaimTokensPerAccount,
   maxFramesPerAccount,
@@ -2816,6 +2817,32 @@ describe("frame management API", () => {
     }
   });
 
+  it("refuses turnOn / turnOff for an esp32 frame instead of queueing a verb it cannot serve", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson("/api/frames/claim-tokens", { name: "E-paper" }, { origin: baseUrl }),
+    );
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const enrolled = await enroll(claim_token, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const response = await postFrameEvent(
+      postJson(`/api/frames/${frame_id}/event/turnOff`, {}, { origin: baseUrl }),
+      { params: Promise.resolve({ eventName: "turnOff", frameId: frame_id }) },
+    );
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: "unsupported_event" });
+    const commands = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame_id));
+    expect(commands.some((command) => command.type === "set_display_power")).toBe(false);
+  });
+
   // A scene the device does not hold cannot be selected: it answers
   // set_current_scene with `apply-failed` while the queue says delivered
   // (seen on an E1002 on 2026-08-27: a preview had replaced the device's
@@ -3244,6 +3271,37 @@ describe("frame management API", () => {
     expect(list.status).toBe(200);
     const listPayload = (await list.json()) as { frames: unknown[] };
     expect(listPayload.frames).toHaveLength(1);
+  });
+
+  it("lists which verbs are still queued for each frame", async () => {
+    // The frames list says "upgrade queued" on a sleeping frame whose
+    // notify_update_available is already waiting, so the owner is not
+    // offered the same upgrade twice. One grouped query for the account.
+    const { accountId, frame_id } = await enrolledFrame();
+    await enqueueFrameCommand(db, {
+      createdByAccountId: accountId,
+      frameId: frame_id,
+      payload: {},
+      type: "notify_update_available",
+    });
+    // An expired one is not "still queued".
+    await enqueueFrameCommand(db, {
+      createdByAccountId: accountId,
+      frameId: frame_id,
+      payload: {},
+      ttlMs: -1,
+      type: "reboot",
+    });
+
+    const list = await listFrames(getRequest("/api/frames"));
+    const listPayload = (await list.json()) as { frames: { id: string; pending_command_types: string[] }[] };
+    expect(listPayload.frames.find((frame) => frame.id === frame_id)?.pending_command_types).toEqual([
+      "notify_update_available",
+    ]);
+
+    const single = await getFrameDetail(getRequest(`/api/frames/${frame_id}`), routeParams(frame_id));
+    const singlePayload = (await single.json()) as { frame: { pending_command_types: string[] } };
+    expect(singlePayload.frame.pending_command_types).toEqual(["notify_update_available"]);
   });
 
   it("opens the log page on the NEWEST rows when the window overflows a page", async () => {

@@ -163,7 +163,10 @@ proc raiseUnknownApp(keyword: string) =
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   let i = appIndex(keyword)
   if i < 0: raiseUnknownApp(keyword)
-  appEntries[i].initProc(node, scene)
+  result = appEntries[i].initProc(node, scene)
+  # The loaders do not know their own keyword; saveAsset groups by it.
+  if result != nil:
+    result.appKeyword = keyword
 
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   let i = appIndex(keyword)

@@ -15,6 +15,7 @@ import {
   frameHardwareIsEsp32,
   frameSummary,
   linkedClientForFrame,
+  pendingCommandTypesByFrame,
   revokeFrame,
   supersedePendingCommands,
 } from "../../../../src/lib/frames";
@@ -51,11 +52,13 @@ export async function GET(
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
+  const pendingTypes = await pendingCommandTypesByFrame(db, [frame.id]);
   return NextResponse.json({
     frame: {
       ...frameSummary(frame, await linkedClientForFrame(db, frame)),
       last_metrics: frame.lastMetrics,
       last_state: frame.lastState,
+      pending_command_types: pendingTypes.get(frame.id) ?? [],
     },
   });
 }

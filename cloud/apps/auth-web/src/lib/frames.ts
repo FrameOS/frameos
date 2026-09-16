@@ -866,6 +866,42 @@ function pendingCommandView(
 // and the device has not acked it, which for a frame that went back to sleep
 // mid-delivery is indistinguishable from pending — and the hub will redeliver
 // it (redeliverSentCommands), so the owner can still meaningfully cancel it.
+/**
+ * Which verbs are still waiting on each of `frameIds`, for the frames list
+ * (one query for the whole account, not one per card). The SPA uses it to
+ * say "upgrade queued" on a sleeping frame whose notify_update_available is
+ * already in the queue, instead of offering the upgrade a second time.
+ */
+export async function pendingCommandTypesByFrame(
+  db: ReturnType<typeof createDb>,
+  frameIds: string[],
+): Promise<Map<string, string[]>> {
+  const byFrame = new Map<string, string[]>();
+  if (frameIds.length === 0) {
+    return byFrame;
+  }
+  const rows = await db
+    .selectDistinct({ frameId: frameCommands.frameId, type: frameCommands.type })
+    .from(frameCommands)
+    .where(
+      and(
+        inArray(frameCommands.frameId, frameIds),
+        inArray(frameCommands.status, ["pending", "sent"]),
+        or(
+          isNull(frameCommands.expiresAt),
+          gt(frameCommands.expiresAt, new Date()),
+        ),
+      ),
+    )
+    .orderBy(asc(frameCommands.frameId), asc(frameCommands.type));
+  for (const row of rows) {
+    const types = byFrame.get(row.frameId) ?? [];
+    types.push(row.type);
+    byFrame.set(row.frameId, types);
+  }
+  return byFrame;
+}
+
 export async function listPendingFrameCommands(
   db: ReturnType<typeof createDb>,
   frameId: string,
