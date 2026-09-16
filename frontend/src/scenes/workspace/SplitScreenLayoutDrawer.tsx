@@ -10,7 +10,7 @@ import {
   type PointerEvent,
   type RefObject,
 } from 'react'
-import { ArrowLeftIcon, EllipsisHorizontalIcon, TrashIcon, ViewColumnsIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { EllipsisHorizontalIcon, TrashIcon, ViewColumnsIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
 import type { FrameId, FrameScene, FrameType, StateField } from '../../types'
@@ -727,7 +727,12 @@ function SplitLeafControls({
     'frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" title="Split into left and right" onClick={() => onSplitLeaf(leafId, 'row')} className={buttonClass}>
+      <button
+        type="button"
+        title="Split into left and right"
+        onClick={() => onSplitLeaf(leafId, 'row')}
+        className={buttonClass}
+      >
         <ViewColumnsIcon className="h-4 w-4" />
         Split vertically
       </button>
@@ -927,14 +932,6 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
   const visiblePresets = morePresetsOpen
     ? splitScreenLayoutPresets
     : splitScreenLayoutPresets.slice(0, INITIAL_SPLIT_PRESET_COUNT)
-  const editingSplit = Boolean(editingSceneId)
-
-  const handleBack = (): void => {
-    closeGenerator()
-    if (editingSceneId) {
-      openSceneControl(frame.id, editingSceneId)
-    }
-  }
 
   const selectPreviewLeaf = (leafId: string): void => {
     selectLeaf(leafId)
@@ -1016,16 +1013,10 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
 
   return (
     <div className="split-screen-layout-drawer flex min-h-0 flex-1 flex-col">
+      {/* The back arrow sits in the drawer header (FramesHome's
+          OpenTemplateDrawer), where the list pages and the chat drawer have
+          theirs. */}
       <div className="flex items-center gap-2 px-4 py-3 sm:px-5">
-        <button
-          type="button"
-          onClick={handleBack}
-          title={editingSplit ? 'Back to scene' : 'Back to Add scene'}
-          aria-label={editingSplit ? 'Back to scene' : 'Back to Add scene'}
-          className="frameos-secondary-button inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <ArrowLeftIcon className="h-4 w-4" />
-        </button>
         <label className="min-w-0 flex-1">
           <span className="sr-only">Split scene title</span>
           <input

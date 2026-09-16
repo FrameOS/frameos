@@ -6,11 +6,11 @@ import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
   ArrowUpTrayIcon,
+  ArrowLeftIcon,
   ArrowUturnLeftIcon,
   BookmarkSquareIcon,
   BuildingStorefrontIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
   ChevronRightIcon,
   PhotoIcon,
   PencilSquareIcon,
@@ -612,13 +612,14 @@ export function TemplateDrawer(): JSX.Element | null {
 }
 
 function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
-  const { closeTemplateDrawer, setTemplateDrawerPage } = useActions(workspaceLogic)
+  const { closeTemplateDrawer, setTemplateDrawerPage, openSceneControl } = useActions(workspaceLogic)
   // The page lives in workspaceLogic and the URL (?drawerPage=store|saved),
   // so a reload reopens the same list.
   const { templateDrawerPage: page } = useValues(workspaceLogic)
   const setPage = setTemplateDrawerPage
   const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
   const { editingSceneId, generatorOpen } = useValues(splitLogic)
+  const { closeGenerator } = useActions(splitLogic)
   const { loadRepositoriesIfStale } = useActions(repositoriesModel)
   const { loadTemplatesIfStale } = useActions(templatesModel)
   const { loadDriveIfStale } = useActions(cloudDriveLogic)
@@ -660,8 +661,22 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
   }, [search, page])
 
   const frameLogicProps = { frameId: frame.id }
-  const drawerTitle = generatorOpen && editingSceneId ? 'Edit split' : ADD_SCENE_PAGE_TITLES[page]
-  const showBack = !generatorOpen && page !== 'actions'
+  const drawerTitle = generatorOpen ? (editingSceneId ? 'Edit split' : 'Split screen') : ADD_SCENE_PAGE_TITLES[page]
+  // One back arrow for every sub-view, in the header like the chat drawer's:
+  // a list page goes back to the actions; the split editor closes, and when
+  // it was editing an installed split it returns to that scene.
+  const showBack = generatorOpen || page !== 'actions'
+  const backLabel = generatorOpen && editingSceneId ? 'Back to scene' : 'Back to Add scene'
+  const goBack = (): void => {
+    if (generatorOpen) {
+      closeGenerator()
+      if (editingSceneId) {
+        openSceneControl(frame.id, editingSceneId)
+      }
+      return
+    }
+    setPage('actions')
+  }
 
   return (
     <div
@@ -677,11 +692,12 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
               {showBack ? (
                 <button
                   type="button"
-                  aria-label="Back to Add scene"
-                  onClick={() => setPage('actions')}
+                  title={backLabel}
+                  aria-label={backLabel}
+                  onClick={goBack}
                   className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
-                  <ChevronLeftIcon className="h-6 w-6" />
+                  <ArrowLeftIcon className="h-5 w-5" />
                 </button>
               ) : null}
               <div className="min-w-0 flex-1">
@@ -866,7 +882,7 @@ function AddSceneDrawerActions({
     : generatesElsewhere
     ? 'Public scenes from FrameOS Cloud'
     : 'Public scenes from FrameOS Cloud, plus repositories you add'
-  const savedSubtitle = cloudMode ? 'Your own scenes on FrameOS Cloud' : 'Your private cloud scenes and local scenes'
+  const savedSubtitle = cloudMode ? 'Your own scenes on FrameOS Cloud' : 'Your private cloud and local scenes'
   // Live list, so "Split screen" unlocks as soon as the first scene is added.
   const hasScenes = liveScenes.length > 0
   const favouriteTemplateCount = favouriteTemplates.length
