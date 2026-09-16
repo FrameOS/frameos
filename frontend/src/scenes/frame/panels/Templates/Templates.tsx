@@ -16,7 +16,7 @@ import { TrashIcon, ArrowPathIcon, PlusIcon, ChevronRightIcon, ChevronDownIcon }
 import React from 'react'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import copy from 'copy-to-clipboard'
-import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
+import { ArrowTopRightOnSquareIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { RepositoryType, TemplateType } from '../../../../types'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
@@ -50,6 +50,22 @@ function sortCompatibleTemplates(a: CompatibleTemplateRow, b: CompatibleTemplate
  * the frame's built-in store entry): nothing to refresh or remove. */
 function isSystemRepository(repository: RepositoryType): boolean {
   return Boolean(repository.id?.startsWith('system-'))
+}
+
+/** The store front to browse the public store in a browser tab: the origin the
+ * store's scene pages live on (each template's `url`), which follows a
+ * self-hosted provider; scenes.frameos.net when the catalog is empty. */
+function storeFrontUrl(repository: RepositoryType): string {
+  for (const template of repository.templates ?? []) {
+    if (typeof template.url === 'string' && /^https?:\/\//.test(template.url)) {
+      try {
+        return new URL(template.url).origin + '/'
+      } catch {
+        // fall through to the default
+      }
+    }
+  }
+  return 'https://scenes.frameos.net/'
 }
 
 /** "updated 3 h ago" for a repository header; null for built-ins, which never refresh. */
@@ -276,6 +292,16 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
               {repository.name || 'FrameOS Cloud store'}
               {rows.length ? ` · ${rows.length} ${rows.length === 1 ? 'scene' : 'scenes'}` : ''}
               {updatedLabel ? ` · ${updatedLabel}` : ''}
+              {' · '}
+              <a
+                href={storeFrontUrl(repository)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 underline"
+              >
+                scenes.frameos.net
+                <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+              </a>
             </div>
             {menu}
           </div>
