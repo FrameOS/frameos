@@ -43,7 +43,7 @@ import { FrameScene, FrameType, FrameId, SceneOrigin } from '../../types'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { FrameosShell } from './FrameosShell'
 import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from './workspaceLogic'
-import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
+import type { AddScenePage, OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { registeredAddFramePanel } from './addFramePanelRegistry'
 import { frameToolDefinitionsForMode } from './frameToolDefinitions'
 import { addFrameFlows, addSceneActionIsAllowed, workspaceMode } from './workspaceSurfaces'
@@ -60,7 +60,6 @@ import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
-import type { TemplatesSection } from '../frame/panels/Templates/Templates'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { repositoriesModel } from '../../models/repositoriesModel'
@@ -580,9 +579,6 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
   )
 }
 
-/** The Add scene drawer's pages: the actions, or one of the two scene lists. */
-type AddScenePage = 'actions' | Exclude<TemplatesSection, 'all'>
-
 const ADD_SCENE_PAGE_TITLES: Record<AddScenePage, string> = {
   actions: 'Add scene',
   store: 'Scene store',
@@ -616,13 +612,18 @@ export function TemplateDrawer(): JSX.Element | null {
 }
 
 function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
-  const { closeTemplateDrawer } = useActions(workspaceLogic)
+  const { closeTemplateDrawer, setTemplateDrawerPage } = useActions(workspaceLogic)
+  // The page lives in workspaceLogic and the URL (?drawerPage=store|saved),
+  // so a reload reopens the same list.
+  const { templateDrawerPage: page } = useValues(workspaceLogic)
+  const setPage = setTemplateDrawerPage
   const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
   const { editingSceneId, generatorOpen } = useValues(splitLogic)
   const { loadRepositoriesIfStale } = useActions(repositoriesModel)
   const { loadTemplatesIfStale } = useActions(templatesModel)
   const { loadDriveIfStale } = useActions(cloudDriveLogic)
-  const [page, setPage] = useState<AddScenePage>('actions')
+  const { search } = useValues(templatesLogic({ frameId: frame.id }))
+  const { setSearch } = useActions(templatesLogic({ frameId: frame.id }))
 
   useEffect(() => {
     // Every open refreshes the lists behind the two list buttons, so their
@@ -630,8 +631,33 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
     loadRepositoriesIfStale(ADD_SCENE_LISTS_MAX_AGE_MS)
     loadTemplatesIfStale(ADD_SCENE_LISTS_MAX_AGE_MS)
     loadDriveIfStale(ADD_SCENE_LISTS_MAX_AGE_MS)
+    // A reload (or a shared link) with ?q= restores the scene search.
+    const urlSearch = router.values.searchParams.q
+    if (typeof urlSearch === 'string' && urlSearch !== '') {
+      setSearch(urlSearch)
+    }
     // Kea actions are stable references; this runs once per open.
   }, [])
+
+  useEffect(() => {
+    // Keep ?q= in step with the search box while a list page is open. A
+    // replace, not a push: typing is not history. The actions page carries
+    // no search (its URL has no q, see setTemplateDrawerPage).
+    if (page === 'actions') {
+      return
+    }
+    const params = { ...router.values.searchParams }
+    const current = typeof params.q === 'string' ? params.q : ''
+    if (current === search) {
+      return
+    }
+    if (search) {
+      params.q = search
+    } else {
+      delete params.q
+    }
+    router.actions.replace(router.values.location.pathname, params, router.values.hashParams)
+  }, [search, page])
 
   const frameLogicProps = { frameId: frame.id }
   const drawerTitle = generatorOpen && editingSceneId ? 'Edit split' : ADD_SCENE_PAGE_TITLES[page]
@@ -812,7 +838,7 @@ function AddSceneDrawerActions({
   onOpenPage,
 }: {
   frame: FrameType
-  onOpenPage: (page: Exclude<TemplatesSection, 'all'>) => void
+  onOpenPage: (page: Exclude<AddScenePage, 'actions'>) => void
 }): JSX.Element {
   const cloudMode = isCloudMode()
   const { createBlankScene } = useActions(frameLogic({ frameId: frame.id }))
@@ -820,7 +846,7 @@ function AddSceneDrawerActions({
   const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
   const [generateElsewhereOpen, setGenerateElsewhereOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
-  const { openFrameTool, closeTemplateDrawer } = useActions(workspaceLogic)
+  const { openFrameTool, closeTemplateDrawer, openChatDrawer } = useActions(workspaceLogic)
   const generatesElsewhere = isInFrameAdminMode()
   const { applyFavouriteTemplatesToFrame, uploadSceneFile } = useActions(templatesLogic({ frameId: frame.id }))
   const {
@@ -920,15 +946,9 @@ function AddSceneDrawerActions({
               setGenerateElsewhereOpen(true)
               return
             }
-            const searchParams: Record<string, unknown> = {
-              ...router.values.searchParams,
-              drawer: 'chat',
-              drawerSource: 'templates',
-              frameId: String(frame.id),
-            }
-            delete searchParams.sceneId
-            delete searchParams.nodeId
-            router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
+            // Through the logic, so the chat drawer knows it came from here
+            // and its header offers "Back to Add scene".
+            openChatDrawer(frame.id, null, null, 'templates')
           }}
           className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >

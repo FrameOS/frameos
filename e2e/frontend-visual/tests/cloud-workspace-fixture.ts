@@ -205,9 +205,6 @@ export async function serveCloudWorkspace(
   await page.route(`${CLOUD_ORIGIN}/api/repositories`, (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   )
-  await page.route(`${CLOUD_ORIGIN}/api/repositories/system`, (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
-  )
   await page.route(`${CLOUD_ORIGIN}/api/frames/*/state`, (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sceneId: null, state: {} }) })
   )

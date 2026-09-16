@@ -427,7 +427,10 @@ export function FrameosShell({
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
-  const chatDrawerSource = router.values.searchParams.drawerSource === 'templates' ? 'templates' : null
+  // Carried in the selection (not read off the URL): the open-echo through
+  // actionToUrl rewrites the search params, and the source has to survive it
+  // for the header's "Back to Add scene" to show.
+  const chatDrawerSource = chatDrawerSelection?.source === 'templates' ? 'templates' : null
   const frameChangeDrawerFrame = frameChangeDrawerSelection ? frames[frameChangeDrawerSelection.frameId] : null
   // Keyed on the frame id: the drawer stays mounted while you click from one
   // frame to the next in the rail, and everything it holds in React state

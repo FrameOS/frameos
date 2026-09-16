@@ -509,39 +509,17 @@ export interface templatesLogicMeta {
 export type templatesLogicType = MakeLogicType<templatesLogicValues, templatesLogicActions, TemplateLogicProps> &
   templatesLogicMeta
 
-/** Where a repository sits in the scene store page. */
-export function repositoryRank(repository: RepositoryType): number {
-  // The FrameOS Cloud store comes first: it is the catalog people mean by
-  // "the scene store", whether a backend tracks it (a seeded row whose URL
-  // is the provider's /api/store/ index) or the SPA is the store itself.
-  if (repository.id === 'system-cloud-store' || (repository.url ?? '').includes('/api/store/')) {
-    return 0
-  }
-  // Bundled samples and galleries next, in the order the backend lists them.
-  if (repository.id?.startsWith('system-') || (repository.url ?? '').startsWith('/api/repositories/system/')) {
-    return 1
-  }
-  // Repositories the user added, by name.
-  return 2
-}
-
-/** The FrameOS Cloud store itself, whichever control plane tracks it. */
+/** The FrameOS Cloud store itself, whichever control plane tracks it: a
+ * backend's seeded row (URL under the provider's /api/store/), the frame's
+ * or the cloud SPA's built-in `system-cloud-store` entry. */
 export function isCloudStoreRepository(repository: RepositoryType): boolean {
-  return repositoryRank(repository) === 0
+  return repository.id === 'system-cloud-store' || (repository.url ?? '').includes('/api/store/')
 }
 
-/** What the Scene store page lists: the cloud store and repositories the
- * user added. The bundled samples/gallery repositories (`system-*`) are a
- * subset of the store and stay out of the picker since 2026-09-17; they
- * remain in `allRepositories` so favourites and "update available" checks
- * for scenes installed from them keep resolving. */
-export function isStoreRepository(repository: RepositoryType): boolean {
-  return repositoryRank(repository) !== 1
-}
-
+/** Scene store page order: the cloud store first, then the repositories the user added, by name. */
 function compareRepositories(a: RepositoryType, b: RepositoryType): number {
-  const rank = repositoryRank(a) - repositoryRank(b)
-  if (rank !== 0 || repositoryRank(a) === 1) {
+  const rank = Number(!isCloudStoreRepository(a)) - Number(!isCloudStoreRepository(b))
+  if (rank !== 0) {
     return rank
   }
   return (a.name || a.url).localeCompare(b.name || b.url)
@@ -886,14 +864,13 @@ export const templatesLogic = kea<templatesLogicType>([
         allRepositories: templatesLogicValues['allRepositories'],
         search: templatesLogicValues['search']
       ): RepositoryType[] => {
-        const storeRepositories = allRepositories.filter(isStoreRepository)
         if (search === '') {
-          return storeRepositories.toSorted(compareRepositories).map((repository) => ({
+          return allRepositories.toSorted(compareRepositories).map((repository) => ({
             ...repository,
             templates: repository.templates?.toSorted((a, b) => a.name.localeCompare(b.name)),
           }))
         }
-        return storeRepositories
+        return allRepositories
           .filter(
             (repository) =>
               searchInText(search, repository.name) ||
@@ -922,7 +899,7 @@ export const templatesLogic = kea<templatesLogicType>([
         const mode = frameForm?.mode ?? frame?.mode
         const hideUnsupported = isEsp32Frame(frameForm)
         let count = 0
-        for (const repository of allRepositories.filter(isStoreRepository)) {
+        for (const repository of allRepositories) {
           for (const template of repository.templates ?? []) {
             if (!hideUnsupported || templateCompatibilityForFrame(mode, template, apps, frameForm).supported) {
               count += 1
@@ -966,7 +943,7 @@ export const templatesLogic = kea<templatesLogicType>([
     hiddenRepositories: [
       (s) => [s.allRepositories, s.repositories],
       (allRepositories: templatesLogicValues['allRepositories'], repositories: templatesLogicValues['repositories']) =>
-        allRepositories.filter(isStoreRepository).length - repositories.length,
+        allRepositories.length - repositories.length,
     ],
     isExpanded: [
       (s) => [s.expanded],

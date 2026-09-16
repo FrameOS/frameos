@@ -156,25 +156,16 @@ export const repositoriesModel = kea<repositoriesModelType>([
               }
               return [cloudStoreRepository(cloudStoreRepositoryId, cloudStoreRepositoryUrl, await response.json())]
             }
-            const inFrameAdminMode = isInFrameAdminMode()
-            const systemResponse = await apiFetch('/api/repositories/system')
-            if (!systemResponse.ok) {
-              throw new Error('Failed to fetch system repositories')
-            }
-            const systemData = asRepositoryList(await systemResponse.json())
+            // On a backend this is the tracked repositories (the seeded cloud
+            // store among them); on the frame it is the cloud store the frame
+            // fetches from its provider. The bundled samples and galleries
+            // (/api/repositories/system) are a subset of the store and are no
+            // longer listed anywhere in the UI (2026-09-17).
             const response = await apiFetch('/api/repositories')
             if (!response.ok) {
               throw new Error('Failed to fetch repositories')
             }
-            const data = asRepositoryList(await response.json())
-            if (inFrameAdminMode) {
-              // On the frame /api/repositories is the cloud scene store the
-              // frame fetches from its provider. The bundled samples and
-              // galleries are a subset of it, so they only show while the
-              // store is unreachable (offline frame, no provider).
-              return data.length > 0 ? data : systemData
-            }
-            return [...systemData, ...data]
+            return asRepositoryList(await response.json())
           } catch (error) {
             logApiError(error)
             return values.repositories

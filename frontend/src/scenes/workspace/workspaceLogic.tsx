@@ -135,6 +135,8 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   delete nextSearch.deployView
   delete nextSearch.scrollToScene
   delete nextSearch.drawerSource
+  delete nextSearch.drawerPage
+  delete nextSearch.q
   return nextSearch
 }
 
@@ -310,6 +312,22 @@ export interface ChatDrawerSelection {
   frameId: FrameId
   sceneId: string | null
   nodeId?: string | null
+  /** 'templates' when opened from the Add scene drawer's "Generate scene": the chat header then offers a way back. */
+  source?: 'templates' | null
+}
+
+/** The Add scene drawer's pages: the actions, or one of its two scene lists. Kept in the URL (`drawerPage`). */
+export type AddScenePage = 'actions' | 'store' | 'saved'
+
+function templateDrawerPageFromSearch(search: Record<string, unknown>): AddScenePage {
+  const page = searchValue(search, 'drawerPage')
+  return page === 'store' || page === 'saved' ? page : 'actions'
+}
+
+/** The `q` (scene search) of the Add scene drawer, if the URL carries one. */
+function templateDrawerSearchFromSearch(search: Record<string, unknown>): string | null {
+  const value = searchValue(search, 'q')
+  return typeof value === 'string' && value !== '' ? value : null
 }
 
 export interface FrameRenameDialog {
@@ -960,6 +978,7 @@ export interface workspaceLogicValues {
   selectedSceneId: string | null
   selectedSceneIdsByFrame: Record<FrameId, string>
   templateDrawerFrameId: FrameId | null
+  templateDrawerPage: AddScenePage
   terminalSessionFrameIds: FrameId[]
   theme: WorkspaceTheme
   utilityPanel: WorkspaceUtilityPanel | null
@@ -1010,11 +1029,13 @@ export interface workspaceLogicActions {
   openChatDrawer: (
     frameId: FrameId,
     sceneId?: string | null,
-    nodeId?: string | null
+    nodeId?: string | null,
+    source?: 'templates' | null
   ) => {
     frameId: FrameId
     nodeId: string | null
     sceneId: string | null
+    source: 'templates' | null
   }
   openFrameChangeDrawer: (
     frameId: FrameId,
@@ -1077,8 +1098,12 @@ export interface workspaceLogicActions {
   openSecondarySidebar: () => {
     value: true
   }
-  openTemplateDrawer: (frameId: FrameId) => {
+  openTemplateDrawer: (
+    frameId: FrameId,
+    page?: AddScenePage
+  ) => {
     frameId: FrameId
+    page: AddScenePage
   }
   openUtilityPanel: (panel: WorkspaceUtilityPanel) => {
     panel: WorkspaceUtilityPanel
@@ -1139,6 +1164,9 @@ export interface workspaceLogicActions {
   }
   setSearch: (search: string) => {
     search: string
+  }
+  setTemplateDrawerPage: (page: AddScenePage) => {
+    page: AddScenePage
   }
   setTheme: (theme: WorkspaceTheme) => {
     theme: WorkspaceTheme
@@ -1238,14 +1266,21 @@ export const workspaceLogic = kea<workspaceLogicType>([
       source: 'preview' as const,
     }),
     closeSceneControl: true,
-    openTemplateDrawer: (frameId: FrameId) => ({ frameId }),
+    openTemplateDrawer: (frameId: FrameId, page: AddScenePage = 'actions') => ({ frameId, page }),
+    setTemplateDrawerPage: (page: AddScenePage) => ({ page }),
     closeTemplateDrawer: true,
     openScheduleDrawer: (frameId: FrameId) => ({ frameId }),
     closeScheduleDrawer: true,
-    openChatDrawer: (frameId: FrameId, sceneId: string | null = null, nodeId: string | null = null) => ({
+    openChatDrawer: (
+      frameId: FrameId,
+      sceneId: string | null = null,
+      nodeId: string | null = null,
+      source: 'templates' | null = null
+    ) => ({
       frameId,
       nodeId,
       sceneId,
+      source,
     }),
     closeChatDrawer: true,
     openFrameChangeDrawer: (
@@ -1352,6 +1387,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameChangeDrawer: () => null,
       },
     ],
+    templateDrawerPage: [
+      'actions' as AddScenePage,
+      {
+        openTemplateDrawer: (_, { page }) => page,
+        setTemplateDrawerPage: (_, { page }) => page,
+        closeTemplateDrawer: () => 'actions',
+      },
+    ],
     templateDrawerFrameId: [
       null as FrameId | null,
       {
@@ -1393,7 +1436,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     chatDrawerSelection: [
       null as ChatDrawerSelection | null,
       {
-        openChatDrawer: (_, { frameId, sceneId, nodeId }) => ({ frameId, nodeId, sceneId }),
+        openChatDrawer: (_, { frameId, sceneId, nodeId, source }) => ({ frameId, nodeId, sceneId, source }),
         closeChatDrawer: () => null,
         setSearch: () => null,
         navigateToFrame: () => null,
@@ -1958,11 +2001,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
           actions.openSceneControl(frameId, sceneId)
         }
       } else if (drawer === 'templates') {
-        actions.openTemplateDrawer(frameId)
+        actions.openTemplateDrawer(frameId, templateDrawerPageFromSearch(search))
       } else if (drawer === 'schedule') {
         actions.openFrameTool(frameId, 'schedule')
       } else if (drawer === 'chat') {
-        actions.openChatDrawer(frameId, sceneId, nodeId)
+        actions.openChatDrawer(
+          frameId,
+          sceneId,
+          nodeId,
+          searchValue(search, 'drawerSource') === 'templates' ? 'templates' : null
+        )
       } else if (drawer === 'unsavedChanges') {
         // Older links; where the deploy dialog exists it is the one that
         // lists unsaved changes now.
@@ -2101,8 +2149,27 @@ export const workspaceLogic = kea<workspaceLogicType>([
         sceneId: String(payload.sceneId),
       }),
     closeSceneControl: clearDrawerUrl,
-    openTemplateDrawer: (payload: Record<string, any>) =>
-      drawerUrlForFrame(payloadFrameId(payload.frameId), 'templates'),
+    openTemplateDrawer: (payload: Record<string, any>) => {
+      // A list page keeps its search in the URL (`q`), so a reload lands on
+      // the same page with the same filter. The drawer component owns `q`
+      // while open; this only carries it through the open-echo.
+      const page: AddScenePage = payload.page ?? 'actions'
+      const search = page === 'actions' ? null : templateDrawerSearchFromSearch(router.values.searchParams)
+      return drawerUrlForFrame(payloadFrameId(payload.frameId), 'templates', {
+        ...(page !== 'actions' ? { drawerPage: page } : {}),
+        ...(search ? { q: search } : {}),
+      })
+    },
+    setTemplateDrawerPage: (payload: Record<string, any>) => {
+      const page: AddScenePage = payload.page ?? 'actions'
+      const search = { ...router.values.searchParams }
+      delete search.drawerPage
+      delete search.q
+      if (page !== 'actions') {
+        search.drawerPage = page
+      }
+      return [router.values.location.pathname, search, router.values.hashParams]
+    },
     closeTemplateDrawer: clearDrawerUrl,
     openScheduleDrawer: (payload: Record<string, any>) => [
       urls.frame(payloadFrameId(payload.frameId), 'schedule'),
@@ -2114,6 +2181,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       drawerUrlForFrame(payloadFrameId(payload.frameId), 'chat', {
         ...(payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
         ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
+        ...(payload.source === 'templates' ? { drawerSource: 'templates' } : {}),
       }),
     closeChatDrawer: clearDrawerUrl,
     openFrameChangeDrawer: (payload: Record<string, any>) =>

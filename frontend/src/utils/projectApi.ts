@@ -97,9 +97,7 @@ export function isProjectScopedApiPath(path: string): boolean {
     path === '/api/cloud' ||
     path.startsWith('/api/cloud/') ||
     path === '/api/generate_ssh_keys' ||
-    path === '/api/log' ||
-    path === '/api/repositories/system' ||
-    path.startsWith('/api/repositories/system/')
+    path === '/api/log'
   ) {
     return false
   }

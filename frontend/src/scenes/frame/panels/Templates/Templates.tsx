@@ -46,8 +46,10 @@ function sortCompatibleTemplates(a: CompatibleTemplateRow, b: CompatibleTemplate
   return a.template.name.localeCompare(b.template.name)
 }
 
+/** A repository with no /api/repositories row behind it (the cloud SPA's and
+ * the frame's built-in store entry): nothing to refresh or remove. */
 function isSystemRepository(repository: RepositoryType): boolean {
-  return Boolean(repository.id?.startsWith('system-') || repository.url?.startsWith('/api/repositories/system/'))
+  return Boolean(repository.id?.startsWith('system-'))
 }
 
 /** "updated 3 h ago" for a repository header; null for built-ins, which never refresh. */
