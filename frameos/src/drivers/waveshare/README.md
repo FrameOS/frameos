@@ -55,6 +55,11 @@ touching vendor code, and a resync cannot undo it.
 Other driver families: `it8951/` (10.3" IT8951 controller, native Nim, Pi
 only) and `epd12in48/` (12.48" multi-controller boards, C + bindings, Pi only).
 
+The IT8951 port streams the pixel payload in 4 KB spidev transfers
+(`it8951/spiPacking.nim`) rather than the vendor's byte-at-a-time
+`DEV_SPI_WriteByte`: over spidev every call is an ioctl, and the vendor loop
+took ~45 s per 1872x1404 frame on a Pi Zero 2 W.
+
 ## Resyncing from the vendor tree
 
 1. Copy new C sources (`EPD_*` files) into `ePaper/`, skipping the forks listed above.

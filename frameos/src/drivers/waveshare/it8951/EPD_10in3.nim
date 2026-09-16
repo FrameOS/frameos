@@ -15,8 +15,10 @@ var Init_Target_Memory_Addr: UDOUBLE
 var activeDriver: Driver
 
 proc it8951Status(): JsonNode =
+  # "lastStage" is the controller-level step the driver reached; "stage" in
+  # the log event is the wrapper's own step (init/display/sleep...).
   %*{
-    "stage": $EPD_IT8951_GetLastStage(),
+    "lastStage": $EPD_IT8951_GetLastStage(),
     "waitMs": EPD_IT8951_GetLastWaitMs().int,
     "waitLoops": EPD_IT8951_GetLastWaitLoops().int,
     "busyPin": EPD_IT8951_GetLastBusyPin().int,
@@ -95,7 +97,7 @@ proc EPD_10IN3_16Gray_Display*(Image: ptr UBYTE) =
       "width": EPD_10IN3_WIDTH,
       "height": EPD_10IN3_HEIGHT
     })
-    EPD_IT8951_4bp_Refresh(Image, 0, 0, EPD_10IN3_WIDTH, EPD_10IN3_HEIGHT, false, Init_Target_Memory_Addr, false)
+    EPD_IT8951_4bp_Refresh(Image, 0, 0, EPD_10IN3_WIDTH, EPD_10IN3_HEIGHT, false, Init_Target_Memory_Addr)
     raiseIt8951Error("display")
     logIt8951("display:done")
 

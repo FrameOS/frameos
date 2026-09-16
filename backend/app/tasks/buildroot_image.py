@@ -4000,6 +4000,12 @@ if [ -f "$cmdline" ]; then
   if ! grep -Eq '(^|[[:space:]])cgroup_enable=memory([[:space:]]|$)' "$tmp_cmdline"; then
     printf ' cgroup_enable=memory cgroup_memory=1' >> "$tmp_cmdline"
   fi
+  # The Pi kernel boots with the powersave governor, which pins the CPU at its
+  # lowest clock (600 MHz on a Zero 2 W) forever. Raspberry Pi OS switches to
+  # ondemand from userspace at boot; on Buildroot the kernel does it itself.
+  if ! grep -Eq '(^|[[:space:]])cpufreq.default_governor=' "$tmp_cmdline"; then
+    printf ' cpufreq.default_governor=ondemand' >> "$tmp_cmdline"
+  fi
   printf '\\n' >> "$tmp_cmdline"
   mv "$tmp_cmdline" "$cmdline"
 fi
