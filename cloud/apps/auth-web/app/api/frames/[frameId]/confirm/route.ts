@@ -7,10 +7,6 @@ import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { applyProvisioningScenes } from "../../../../../src/lib/frame-provisioning";
 import { frameForAccount, frameSummary } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
-import {
-  recentApprovalMaxAgeSeconds,
-  requireRecentAuth,
-} from "../../../../../src/lib/recent-auth";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -39,22 +35,17 @@ export async function POST(
   }
   // Confirming adopts whatever booted with the multi-use code — possibly a
   // stranger's board — and the device then pulls the account's service keys.
-  // That is the same kind of decision as approving a device link: a person,
-  // recently authenticated, not a script's bearer token.
+  // That is a person's decision, not a script's bearer token. It is NOT in
+  // sudo mode, though: adding a frame is the first thing a new user does,
+  // and a 403 reauth_required on the "Confirm frame" button (which the
+  // workspace could only report as "try again") broke that flow outright.
+  // Revoking and deleting stay gated; confirming is additive.
   if (session.apiToken) {
     return jsonError("api_token_not_allowed", 403);
   }
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
-  }
-  const reauth = await requireRecentAuth(
-    db,
-    session.accountId,
-    recentApprovalMaxAgeSeconds,
-  );
-  if (reauth) {
-    return reauth;
   }
 
   const { frameId } = await params;

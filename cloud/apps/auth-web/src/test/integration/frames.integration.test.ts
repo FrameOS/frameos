@@ -10,6 +10,7 @@ import {
   frames,
   frameSceneAssignments,
   linkedClients,
+  sessions,
   storeScenes,
   storeSceneVersions,
   upsertAccountFromIdentity,
@@ -47,6 +48,7 @@ import {
   verifyFrameSignature,
 } from "../../lib/frames";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { recentApprovalMaxAgeSeconds } from "../../lib/recent-auth";
 import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
 
@@ -509,6 +511,32 @@ describe("cloud-managed frame enrollment", () => {
       .from(frames)
       .where(eq(frames.id, frame!.id));
     expect(confirmed?.status).toBe("active");
+  });
+
+  // Confirming is NOT a sudo-mode action. It briefly was (the 2 h approval
+  // window), and the workspace's "Confirm frame" button then answered
+  // "Could not confirm the frame (reauth_required) — try again" forever: a
+  // new user's very first step, dead until they signed out and back in.
+  // Revoke and delete keep their gate; adding a frame is additive.
+  it("confirms a pending frame from a session that signed in long ago", async () => {
+    const { accountId, frame_id } = await enrolledPendingFrame();
+    await db
+      .update(sessions)
+      .set({
+        authenticatedAt: new Date(
+          Date.now() - (recentApprovalMaxAgeSeconds + 60 * 60) * 1000,
+        ),
+      })
+      .where(eq(sessions.accountId, accountId));
+
+    const confirm = await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(confirm.status).toBe(200);
+    expect(((await confirm.json()) as { status: string }).status).toBe("active");
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(row?.status).toBe("active");
   });
 
   // ws_url is the device-side analogue of the SPA's cloud_ws_origin
