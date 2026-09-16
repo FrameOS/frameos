@@ -605,6 +605,27 @@ proc EPD_IT8951_Display_AreaBuf*(
   ]
   EPD_IT8951_WriteMultiArg(USDEF_I80_CMD_DPY_BUF_AREA, args)
 
+proc EPD_IT8951_DisplayGC16AndWait(
+  x: UWORD;
+  y: UWORD;
+  w: UWORD;
+  h: UWORD;
+  hold: bool;
+  targetMemoryAddr: UDOUBLE
+) =
+  ## Queues a GC16 refresh and waits for it to finish. The display command
+  ## only starts the waveform; the controller drives the panel for another
+  ## second or two. The caller puts the IT8951 to sleep as soon as the refresh
+  ## proc returns, which cut the refresh short, so wait for the LUT engine to
+  ## go idle first (Display_1bp already does).
+  if hold:
+    EPD_IT8951_Display_Area(x, y, w, h, GC16_Mode)
+  else:
+    EPD_IT8951_Display_AreaBuf(x, y, w, h, GC16_Mode, targetMemoryAddr)
+  if hasError():
+    return
+  EPD_IT8951_WaitForDisplayReady()
+
 proc EPD_IT8951_Display_1bp(
   x: UWORD;
   y: UWORD;
@@ -714,6 +735,9 @@ proc EPD_IT8951_Clear_Refresh*(devInfo: IT8951_Dev_Info; targetMemoryAddr: UDOUB
     return
 
   EPD_IT8951_Display_Area(UWORD(0), UWORD(0), devInfo.Panel_W, devInfo.Panel_H, mode)
+  if hasError():
+    return
+  EPD_IT8951_WaitForDisplayReady()
 
 proc EPD_IT8951_1bp_Refresh*(
   frameBuf: ptr UBYTE;
@@ -835,10 +859,7 @@ proc EPD_IT8951_2bp_Refresh*(
   if hasError():
     return
 
-  if hold:
-    EPD_IT8951_Display_Area(x, y, w, h, GC16_Mode)
-  else:
-    EPD_IT8951_Display_AreaBuf(x, y, w, h, GC16_Mode, targetMemoryAddr)
+  EPD_IT8951_DisplayGC16AndWait(x, y, w, h, hold, targetMemoryAddr)
 
 proc EPD_IT8951_4bp_Refresh*(
   frameBuf: ptr UBYTE;
@@ -876,10 +897,7 @@ proc EPD_IT8951_4bp_Refresh*(
   if hasError():
     return
 
-  if hold:
-    EPD_IT8951_Display_Area(x, y, w, h, GC16_Mode)
-  else:
-    EPD_IT8951_Display_AreaBuf(x, y, w, h, GC16_Mode, targetMemoryAddr)
+  EPD_IT8951_DisplayGC16AndWait(x, y, w, h, hold, targetMemoryAddr)
 
 proc EPD_IT8951_8bp_Refresh*(
   frameBuf: ptr UBYTE;
@@ -917,7 +935,4 @@ proc EPD_IT8951_8bp_Refresh*(
   if hasError():
     return
 
-  if hold:
-    EPD_IT8951_Display_Area(x, y, w, h, GC16_Mode)
-  else:
-    EPD_IT8951_Display_AreaBuf(x, y, w, h, GC16_Mode, targetMemoryAddr)
+  EPD_IT8951_DisplayGC16AndWait(x, y, w, h, hold, targetMemoryAddr)

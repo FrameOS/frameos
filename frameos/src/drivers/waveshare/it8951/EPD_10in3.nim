@@ -15,8 +15,10 @@ var Init_Target_Memory_Addr: UDOUBLE
 var activeDriver: Driver
 
 proc it8951Status(): JsonNode =
+  # "lastStage" is the controller-level step the driver reached; "stage" in
+  # the log event is the wrapper's own step (init/display/sleep...).
   %*{
-    "stage": $EPD_IT8951_GetLastStage(),
+    "lastStage": $EPD_IT8951_GetLastStage(),
     "waitMs": EPD_IT8951_GetLastWaitMs().int,
     "waitLoops": EPD_IT8951_GetLastWaitLoops().int,
     "busyPin": EPD_IT8951_GetLastBusyPin().int,
