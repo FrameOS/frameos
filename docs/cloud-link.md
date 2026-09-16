@@ -448,11 +448,16 @@ frameos.net's website runs these previews with the
 (built from `frameos/wasm` in this repo; its version always equals the
 FrameOS release the runtime was built from).
 
-A backend with a connected link seeds
-`{provider}/api/store/{frameosVersion}/repository.json` as a normal repository
-once per project (deleting it is respected). Upgrading FrameOS re-points that
-one row at the new version's index; a store the user deleted is not brought
-back, and a URL the user edited by hand is left alone.
+A backend seeds `{provider}/api/store/{frameosVersion}/repository.json` as a
+normal repository once per project (deleting it is respected): the linked
+provider's index when a link is connected, otherwise the default provider's —
+the public index needs no token, and since the scene picker stopped listing the
+bundled samples it is the only catalog the picker shows (`FRAMEOS_CLOUD_URL=disabled`
+seeds nothing). Upgrading FrameOS re-points that one row at the new version's
+index; a store the user deleted is not brought back, and a URL the user edited
+by hand is left alone. The picker groups the store by the same category shelves
+as the store front (`frontend/src/utils/storeCategories.ts`, checked against
+`cloud/apps/auth-web/src/lib/categories.ts` by the cloud test suite).
 
 **Private cloud scenes** — the account's own scenes, private ones included — is the
 same repository format behind the link token. In the workspace it is listed on the

@@ -352,14 +352,26 @@ async def get_repositories(db: Session = Depends(get_db)):
             db.add(Settings(project_id=project_id, key="@system/repository_global_cleanup", value="true"))
             db.commit()
 
-        # Seed the connected provider's store once per provider. The marker
-        # records its URL so changing providers replaces the old store, while
-        # deleting the repository remains respected until the provider changes.
+        # Seed the provider's store once per provider. The marker records its
+        # URL so changing providers replaces the old store, while deleting the
+        # repository remains respected until the provider changes.
         from app.models.cloud import current_cloud_backend_link
+        from app.utils.cloud_link import default_cloud_provider_url
 
         link = current_cloud_backend_link(db)
         if link is not None and link.status == "connected" and link.provider_url:
-            store_url = cloud_store_repository_url(link.provider_url)
+            provider_url: str | None = link.provider_url
+        else:
+            # Not linked: the default provider's public index needs no token,
+            # and since the scene picker stopped listing the bundled samples
+            # (2026-09-17) the store is the only catalog it has. None when
+            # FRAMEOS_CLOUD_URL=disabled hides the cloud feature.
+            try:
+                provider_url = default_cloud_provider_url()
+            except ValueError:
+                provider_url = None
+        if provider_url:
+            store_url = cloud_store_repository_url(provider_url)
             marker = db.query(Settings).filter_by(
                 project_id=project_id, key=CLOUD_STORE_REPOSITORY_MARKER
             ).first()
@@ -374,7 +386,7 @@ async def get_repositories(db: Session = Depends(get_db)):
             version_migration = (
                 marker_url is not None
                 and marker_url != store_url
-                and _is_same_provider_store_url(marker_url, link.provider_url)
+                and _is_same_provider_store_url(marker_url, provider_url)
             )
             should_seed = marker is None or (
                 marker_url is not None and marker_url != store_url and not version_migration

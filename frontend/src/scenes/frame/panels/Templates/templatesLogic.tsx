@@ -525,6 +525,20 @@ export function repositoryRank(repository: RepositoryType): number {
   return 2
 }
 
+/** The FrameOS Cloud store itself, whichever control plane tracks it. */
+export function isCloudStoreRepository(repository: RepositoryType): boolean {
+  return repositoryRank(repository) === 0
+}
+
+/** What the Scene store page lists: the cloud store and repositories the
+ * user added. The bundled samples/gallery repositories (`system-*`) are a
+ * subset of the store and stay out of the picker since 2026-09-17; they
+ * remain in `allRepositories` so favourites and "update available" checks
+ * for scenes installed from them keep resolving. */
+export function isStoreRepository(repository: RepositoryType): boolean {
+  return repositoryRank(repository) !== 1
+}
+
 function compareRepositories(a: RepositoryType, b: RepositoryType): number {
   const rank = repositoryRank(a) - repositoryRank(b)
   if (rank !== 0 || repositoryRank(a) === 1) {
@@ -872,13 +886,14 @@ export const templatesLogic = kea<templatesLogicType>([
         allRepositories: templatesLogicValues['allRepositories'],
         search: templatesLogicValues['search']
       ): RepositoryType[] => {
+        const storeRepositories = allRepositories.filter(isStoreRepository)
         if (search === '') {
-          return allRepositories.toSorted(compareRepositories).map((repository) => ({
+          return storeRepositories.toSorted(compareRepositories).map((repository) => ({
             ...repository,
             templates: repository.templates?.toSorted((a, b) => a.name.localeCompare(b.name)),
           }))
         }
-        return allRepositories
+        return storeRepositories
           .filter(
             (repository) =>
               searchInText(search, repository.name) ||
@@ -907,7 +922,7 @@ export const templatesLogic = kea<templatesLogicType>([
         const mode = frameForm?.mode ?? frame?.mode
         const hideUnsupported = isEsp32Frame(frameForm)
         let count = 0
-        for (const repository of allRepositories) {
+        for (const repository of allRepositories.filter(isStoreRepository)) {
           for (const template of repository.templates ?? []) {
             if (!hideUnsupported || templateCompatibilityForFrame(mode, template, apps, frameForm).supported) {
               count += 1
@@ -951,7 +966,7 @@ export const templatesLogic = kea<templatesLogicType>([
     hiddenRepositories: [
       (s) => [s.allRepositories, s.repositories],
       (allRepositories: templatesLogicValues['allRepositories'], repositories: templatesLogicValues['repositories']) =>
-        allRepositories.length - repositories.length,
+        allRepositories.filter(isStoreRepository).length - repositories.length,
     ],
     isExpanded: [
       (s) => [s.expanded],

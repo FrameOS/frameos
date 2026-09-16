@@ -678,7 +678,7 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
             {generatorOpen ? (
               <SplitScreenLayoutDrawer frame={frame} />
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">
                 {page === 'actions' ? (
                   <AddSceneDrawerActions frame={frame} onOpenPage={setPage} />
                 ) : (
@@ -839,7 +839,7 @@ function AddSceneDrawerActions({
     ? 'Public scenes on FrameOS Cloud'
     : generatesElsewhere
     ? 'Public scenes from FrameOS Cloud'
-    : 'Public scenes, bundled samples and repositories'
+    : 'Public scenes from FrameOS Cloud, plus repositories you add'
   const savedSubtitle = cloudMode ? 'Your own scenes on FrameOS Cloud' : 'Your private cloud scenes and local scenes'
   // Live list, so "Split screen" unlocks as soon as the first scene is added.
   const hasScenes = liveScenes.length > 0
@@ -858,7 +858,7 @@ function AddSceneDrawerActions({
         </span>
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">Scene store</span>
-          <span className="frameos-muted block truncate text-xs">{storeSubtitle}</span>
+          <span className="frameos-muted block text-xs">{storeSubtitle}</span>
         </span>
         <AddSceneCount count={storeSceneCount} loading={storeScenesLoading} />
         <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
@@ -874,7 +874,7 @@ function AddSceneDrawerActions({
           </span>
           <span className="min-w-0 flex-1">
             <span className="frameos-strong block truncate text-sm font-semibold">Saved scenes</span>
-            <span className="frameos-muted block truncate text-xs">{savedSubtitle}</span>
+            <span className="frameos-muted block text-xs">{savedSubtitle}</span>
           </span>
           <AddSceneCount count={savedSceneCount} loading={savedScenesLoading} />
           <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
@@ -892,7 +892,7 @@ function AddSceneDrawerActions({
         </span>
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">New blank scene</span>
-          <span className="frameos-muted block truncate text-xs">Start with a render event</span>
+          <span className="frameos-muted block text-xs">Start with a render event</span>
         </span>
       </button>
       <button
@@ -909,7 +909,7 @@ function AddSceneDrawerActions({
         </span>
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">Split screen</span>
-          <span className="frameos-muted block truncate text-xs">Split the screen between multiple scenes</span>
+          <span className="frameos-muted block text-xs">Split the screen between multiple scenes</span>
         </span>
       </button>
       {addSceneActionIsAllowed(workspaceMode(), 'generate') ? (
@@ -937,7 +937,7 @@ function AddSceneDrawerActions({
           </span>
           <span className="min-w-0 flex-1">
             <span className="frameos-strong block truncate text-sm font-semibold">Generate scene</span>
-            <span className="frameos-muted block truncate text-xs">
+            <span className="frameos-muted block text-xs">
               {generatesElsewhere ? 'Build one with AI at scenes.frameos.net' : 'Open AI chat for this frame'}
             </span>
           </span>
@@ -955,7 +955,7 @@ function AddSceneDrawerActions({
         </span>
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">Upload scene</span>
-          <span className="frameos-muted block truncate text-xs">Upload a template .zip or a scenes .json</span>
+          <span className="frameos-muted block text-xs">Upload a template .zip or a scenes .json</span>
         </span>
       </button>
       <input
@@ -989,7 +989,7 @@ function AddSceneDrawerActions({
           </span>
           <span className="min-w-0 flex-1">
             <span className="frameos-strong block truncate text-sm font-semibold">Install all starred scenes</span>
-            <span className="frameos-muted block truncate text-xs">
+            <span className="frameos-muted block text-xs">
               Personal favourites saved for this user
               {installableFavouriteTemplateCount !== favouriteTemplateCount
                 ? `, ${installableFavouriteTemplateCount} supported here`
