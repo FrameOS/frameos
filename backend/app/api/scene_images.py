@@ -10,7 +10,7 @@ import httpx
 from arq import ArqRedis as Redis
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.config import config
@@ -39,40 +39,55 @@ SYSTEM_TEMPLATE_IMAGE_PATH = re.compile(
 )
 
 
-def _generate_placeholder(
-    width: int | None = 320,
-    height: int | None = 240,
-    *,
-    font_path: str = "../frameos/assets/compiled/fonts/Ubuntu-Regular.ttf",
-    font_size: int = 32,
-    message: str = "No snapshot",
-) -> bytes:
+def _generate_placeholder(width: int | None = 320, height: int | None = 240) -> bytes:
     """
-    Return a PNG (bytes) that shows a black rectangle with centred white text.
+    Return a PNG (bytes) for a scene that has no snapshot yet.
 
-    Parameters
-    ----------
-    width, height  :  Dimensions in pixels; defaults are 400×300.
-    font_path      :  Path to a scalable font file (TTF/OTF).  If omitted,
-                      Pillow’s 8‑pixel bitmap font is used.
-    font_size      :  Point size for the scalable font.
-    message        :  The text to write.
+    Deliberately quiet: a tile-coloured rectangle with a faint, small
+    "picture" glyph (frame, sun, hills) in the middle and no text. A frame
+    whose scenes have all just been reinstalled shows a whole grid of these,
+    and a grid of loud "No snapshot" captions reads like an error page when
+    nothing is wrong — the pictures simply have not been rendered yet.
     """
-    width, height = int(width or 320), int(height or 240)
+    width, height = max(int(width or 320), 1), max(int(height or 240), 1)
 
-    img = Image.new("RGB", (width, height), "#1f2937")
+    background = "#1f2937"
+    ink = "#3b4757"
+
+    img = Image.new("RGB", (width, height), background)
     draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(font_path, font_size)
 
-    left, top, right, bottom = draw.textbbox((0, 0), message, font=font)
-    text_w, text_h = right - left, bottom - top
+    # Glyph box: a landscape 4:3 rectangle about a fifth of the shorter side,
+    # so it stays a small mark on both a 320px thumbnail and a full-size 1600px
+    # placeholder, and never touches the edges of a tiny or very narrow tile.
+    box_h = max(min(width, height) // 5, 6)
+    box_w = box_h * 4 // 3
+    if box_w > width - 4:
+        box_w = max(width - 4, 4)
+        box_h = max(box_w * 3 // 4, 4)
+    stroke = max(box_h // 12, 1)
+    left = (width - box_w) // 2
+    top = (height - box_h) // 2
+    right, bottom = left + box_w, top + box_h
 
-    draw.text(
-        ((width - text_w) / 2, (height - text_h) / 2),
-        message,
-        fill="white",
-        font=font,
-    )
+    draw.rounded_rectangle((left, top, right, bottom), radius=max(box_h // 8, 1), outline=ink, width=stroke)
+
+    # Sun: a small filled disc in the upper left.
+    sun_r = max(box_h // 9, 1)
+    sun_cx, sun_cy = left + box_w * 0.3, top + box_h * 0.32
+    draw.ellipse((sun_cx - sun_r, sun_cy - sun_r, sun_cx + sun_r, sun_cy + sun_r), fill=ink)
+
+    # Hills: two overlapping peaks rising from the bottom edge, clipped to the box.
+    inset = stroke
+    floor = bottom - inset
+    hills = [
+        (left + inset, floor),
+        (left + box_w * 0.38, top + box_h * 0.5),
+        (left + box_w * 0.58, top + box_h * 0.72),
+        (left + box_w * 0.72, top + box_h * 0.58),
+        (right - inset, floor),
+    ]
+    draw.polygon(hills, fill=ink)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
