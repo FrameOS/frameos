@@ -74,7 +74,8 @@ import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 const uploadedScenePrefix = 'uploaded/'
-const livePreviewSceneId = '__live_preview__'
+/** Scene drawer selection for "whatever the frame is showing", used while the active scene is unknown. */
+export const livePreviewSceneId = '__live_preview__'
 const activeSurfaceClassName = 'frameos-active-surface'
 const selectedSurfaceClassName = 'frameos-selected-surface'
 const sceneTileWidthRem = 9
@@ -228,9 +229,10 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
   const activeScene = scenes.find((scene) => sceneIsActive(scene, activeSceneId))
   const previewSelected =
     sceneControlSelection?.frameId === frame.id &&
-    (activeSceneId
-      ? sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId)
-      : sceneControlSelection.sceneId === livePreviewSceneId) &&
+    // A drawer opened before the active scene was known keeps the
+    // placeholder id after the scene resolves: still this card's selection.
+    (sceneControlSelection.sceneId === livePreviewSceneId ||
+      (!!activeSceneId && sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId))) &&
     sceneControlSelection.source === 'preview'
   const nextSchedule = nextScheduledEvent(frame.schedule)
   const nextScheduleTitle = nextSchedule

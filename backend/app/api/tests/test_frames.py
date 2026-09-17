@@ -734,6 +734,30 @@ async def test_api_frame_get_image_caches_sync_hint_headers_for_head(async_clien
     assert head_response.headers['x-frameos-sync-revision'] == 'rev-local'
     assert head_response.headers['x-frameos-deployed-revision'] == 'rev-deployed'
     assert head_response.headers['x-frameos-last-successful-deploy-at'] == '2026-06-28T09:59:00Z'
+    # The image named its scene: remembered (no TTL) and echoed on the HEAD.
+    assert head_response.headers['x-scene-id'] == 'scene-1'
+    assert 'X-Scene-Id' in head_response.headers['access-control-expose-headers']
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'scene-1'
+    assert await redis.ttl(f'frame:{frame.id}:active_scene') == -1
+    fetch_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frames_active_scene_falls_back_to_states_cache(async_client, db, redis):
+    from app.api.frames import _frame_states_cache_key, _write_frame_states_cache
+
+    frame = await new_frame(db, redis, 'RememberedSceneFrame', 'localhost', 'localhost')
+    await redis.delete(f'frame:{frame.id}:active_scene')
+    await _write_frame_states_cache(
+        redis, _frame_states_cache_key(frame.id), {'sceneId': 'remembered-scene', 'states': {}}
+    )
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock()) as fetch_frame:
+        list_response = await async_client.get('/api/frames')
+
+    list_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
+    assert list_frame['active_scene_id'] == 'remembered-scene'
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'remembered-scene'
     fetch_frame.assert_not_awaited()
 
 

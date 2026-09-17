@@ -385,6 +385,11 @@ export const controlLogic = kea<controlLogicType>([
       }
     },
     syncSuccess: async ({ stateRecord }, breakpoint) => {
+      // The frame row may not name a scene (nothing logged one lately): this
+      // answer does, so the workspace label catches up without its own request.
+      if (stateRecord?.sceneId && stateRecord.sceneId !== values.frame?.active_scene_id) {
+        socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: stateRecord.sceneId } as FrameType)
+      }
       if (values.activatingSceneId !== null && stateRecord?.sceneId && stateRecord.sceneId.length > 0) {
         // The frame says it is on the scene we asked for: the render:done
         // happened while the socket was down (the runtime restarted, say)

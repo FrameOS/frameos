@@ -64,7 +64,7 @@ import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { repositoriesModel } from '../../models/repositoriesModel'
 import { templatesModel } from '../../models/templatesModel'
-import { FrameDashboardSurface } from './FrameDashboardSurface'
+import { FrameDashboardSurface, livePreviewSceneId } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameImageOverlayControls } from './FrameImageOverlayControls'
 import { framesHomeLogic } from './framesHomeLogic'
@@ -1270,6 +1270,8 @@ function SceneControlPanelContent({
   const frame = frames[sceneControlSelection.frameId]
   const {
     sceneId: currentSceneId,
+    stateRecord,
+    stateRecordLoading,
     uploadedScenes,
     uploadedScenesLoading,
   } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
@@ -1283,17 +1285,24 @@ function SceneControlPanelContent({
     return null
   }
 
-  if (sceneControlSelection.sceneId === STATUS_SCREEN_SCENE_ID) {
+  // The preview card opens the drawer on "whatever is showing" when the frame
+  // row does not name a scene. Mounting controlLogic above already asked
+  // /states (the one request this costs, and only on a click), so follow it.
+  const selectedSceneId =
+    sceneControlSelection.sceneId === livePreviewSceneId
+      ? frame.active_scene_id || currentSceneId || livePreviewSceneId
+      : sceneControlSelection.sceneId
+  const activeSceneLoading =
+    selectedSceneId === livePreviewSceneId &&
+    // Same condition controlLogic re-syncs on: an answer is still coming.
+    (stateRecordLoading || (!!stateRecord?.cache?.refreshing && !stateRecord.cache.cached))
+
+  if (selectedSceneId === STATUS_SCREEN_SCENE_ID) {
     return <StatusScreenControlPanel frame={frame} currentSceneId={currentSceneId} onClose={closeSceneControl} />
   }
 
   const editingFrame = { ...frame, ...(frameForm ?? {}) } as Partial<FrameType>
-  const { scene, sceneId, saved } = resolveSceneControlSelection(
-    frame,
-    editingFrame,
-    sceneControlSelection.sceneId,
-    uploadedScenes
-  )
+  const { scene, sceneId, saved } = resolveSceneControlSelection(frame, editingFrame, selectedSceneId, uploadedScenes)
 
   if (!scene) {
     return (
@@ -1316,7 +1325,9 @@ function SceneControlPanelContent({
             </button>
           </div>
           <div className="frameos-muted px-5 py-4 text-sm">
-            {uploadedScenesLoading ? 'Loading active scene...' : 'The active scene is not available.'}
+            {uploadedScenesLoading || activeSceneLoading
+              ? 'Loading active scene...'
+              : 'The active scene is not available.'}
           </div>
         </div>
       </div>
