@@ -550,10 +550,13 @@ async def test_get_repositories_seeds_the_default_providers_store_without_link(a
 @pytest.mark.asyncio
 async def test_get_repositories_seeds_nothing_when_cloud_is_disabled(async_client, db, monkeypatch):
     """FRAMEOS_CLOUD_URL=disabled hides the cloud feature, store included."""
-    from app.config import config
     from app.models.settings import Settings
+    from app.utils import cloud_link
 
-    monkeypatch.setattr(config, "FRAMEOS_CLOUD_URL", "disabled")
+    # Patch the config instance cloud_link actually reads, not `app.config.config`:
+    # test_ingress.py reloads app.config, which leaves earlier importers (this
+    # module among them) holding the previous instance.
+    monkeypatch.setattr(cloud_link.config, "FRAMEOS_CLOUD_URL", "disabled")
 
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200

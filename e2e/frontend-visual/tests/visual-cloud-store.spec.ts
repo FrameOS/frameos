@@ -133,12 +133,15 @@ async function openAddSceneDrawer(page: Page): Promise<void> {
     .getByRole('button', { name: /Add scene/i })
     .first()
     .click()
-  const drawer = page
-    .locator('.workspace-drawer')
+  const drawers = page.locator('.workspace-drawer')
+  await drawers
     .filter({ has: page.getByRole('heading', { name: /Add scene/i }) })
     .last()
-  await drawer.getByRole('button', { name: /^Saved scenes/i }).click()
-  await drawer.getByRole('heading', { name: /Saved scenes/i }).waitFor()
+    .getByRole('button', { name: /^Saved scenes/i })
+    .click()
+  // The drawer's heading changes to the page title, so re-resolve it here
+  // rather than through the "Add scene" filter above.
+  await drawers.getByRole('heading', { name: /Saved scenes/i }).last().waitFor()
 }
 
 interface CloudVisualVariant {
