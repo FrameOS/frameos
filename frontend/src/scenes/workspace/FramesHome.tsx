@@ -73,7 +73,7 @@ import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { setFrameosSceneDragData } from './sceneDrag'
 import { SplitScreenLayoutDrawer } from './SplitScreenLayoutDrawer'
-import { splitScreenLayoutLogic } from './splitScreenLayoutLogic'
+import { closeSplitGenerator, splitScreenLayoutLogic } from './splitScreenLayoutLogic'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { normalizeSplitScreenSceneLayout } from '../../utils/splitScreenLayouts'
@@ -562,6 +562,7 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
       onClick={() => {
         hideForm()
         closeSceneControl()
+        closeSplitGenerator(frame.id)
         openTemplateDrawer(frame.id)
       }}
       className={clsx(

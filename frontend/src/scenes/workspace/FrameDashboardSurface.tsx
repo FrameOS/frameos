@@ -55,6 +55,7 @@ import {
   sceneDependencyGroupingIsEnabled,
   workspaceLogic,
 } from './workspaceLogic'
+import { closeSplitGenerator } from './splitScreenLayoutLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../../utils/systemScenes'
@@ -640,6 +641,7 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
       onClick={() => {
         hideForm()
         closeSceneControl()
+        closeSplitGenerator(frame.id)
         openTemplateDrawer(frame.id)
       }}
       className={clsx(

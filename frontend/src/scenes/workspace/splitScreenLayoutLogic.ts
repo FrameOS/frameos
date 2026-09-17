@@ -427,3 +427,17 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
   })),
   beforeUnmount(({ cache }) => removeResizeListeners(cache)),
 ])
+
+/**
+ * "Add scene" means the Add scene page. The split editor is a view inside
+ * that same drawer, and its open flag outlives the drawer while another
+ * drawer keeps this logic mounted — so an explicit Add scene click closes it.
+ * Not done in workspaceLogic's openTemplateDrawer: the URL replays that
+ * action, which would close a split editor that was just opened.
+ */
+export function closeSplitGenerator(frameId: FrameId): void {
+  const logic = splitScreenLayoutLogic.findMounted({ frameId })
+  if (logic?.values.generatorOpen) {
+    logic.actions.closeGenerator()
+  }
+}

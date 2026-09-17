@@ -34,6 +34,7 @@ import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
+import { closeSplitGenerator } from './splitScreenLayoutLogic'
 import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { Diagram, DiagramToolbar } from '../frame/panels/Diagram/Diagram'
@@ -260,7 +261,10 @@ function SceneSelector({
             <button
               type="button"
               title="Add scene"
-              onClick={() => openTemplateDrawer(frame.id)}
+              onClick={() => {
+                closeSplitGenerator(frame.id)
+                openTemplateDrawer(frame.id)
+              }}
               className="frameos-icon-button flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               <PlusIcon className="h-4 w-4" />
@@ -273,7 +277,10 @@ function SceneSelector({
             <div>No scenes</div>
             <button
               type="button"
-              onClick={() => openTemplateDrawer(frame.id)}
+              onClick={() => {
+                closeSplitGenerator(frame.id)
+                openTemplateDrawer(frame.id)
+              }}
               className="frameos-secondary-button mt-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               <PlusIcon className="h-4 w-4" />
@@ -972,7 +979,10 @@ function SceneCanvas({
           {!hasScenes ? (
             <button
               type="button"
-              onClick={() => openTemplateDrawer(frameId)}
+              onClick={() => {
+                closeSplitGenerator(frameId)
+                openTemplateDrawer(frameId)
+              }}
               className="frameos-primary-action mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               <PlusIcon className="h-5 w-5" />

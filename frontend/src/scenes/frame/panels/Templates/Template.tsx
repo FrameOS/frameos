@@ -16,18 +16,20 @@ import {
   DocumentPlusIcon,
   CheckIcon,
   EyeIcon,
+  PhotoIcon,
   StarIcon as StarOutlineIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
 import { Tag } from '../../../../components/Tag'
 import { useEntityImage } from '../../../../models/entityImagesModel'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { appsModel } from '../../../../models/appsModel'
 import { useActions, useValues } from 'kea'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { cloudLogic } from '../../../settings/cloudLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { imageElementIsBlank } from '../../../../utils/blankImage'
 import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
@@ -75,6 +77,43 @@ interface TemplateProps {
   favourite?: boolean
   favouriteId?: string
   onToggleFavourite?: (favouriteId: string) => void
+}
+
+/**
+ * The row's 90px picture. Always there: a scene saved without a cover, one
+ * whose cover no longer loads, and one whose cover is a blank rectangle (old
+ * saves uploaded it before anything was drawn) all show the same quiet
+ * "picture" glyph the frames index uses for a scene with no snapshot yet.
+ */
+function TemplateThumbnail({ imageUrl, className }: { imageUrl: string | null; className?: string }): JSX.Element {
+  const [unusable, setUnusable] = useState(false)
+  useEffect(() => setUnusable(false), [imageUrl])
+
+  return (
+    <div
+      className={clsx(
+        'relative flex h-[90px] w-[90px] flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-500/20 bg-[#1f2937]',
+        className
+      )}
+    >
+      <PhotoIcon className="h-8 w-8 text-[#3b4757]" aria-hidden="true" />
+      {imageUrl && !unusable ? (
+        <img
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={() => setUnusable(true)}
+          onLoad={(event) => {
+            if (imageElementIsBlank(event.currentTarget)) {
+              setUnusable(true)
+            }
+          }}
+        />
+      ) : null}
+    </div>
+  )
 }
 
 export function TemplateRow({
@@ -222,15 +261,10 @@ export function TemplateRow({
         </button>
       ) : null}
       <div className="flex items-start justify-between gap-2">
-        {imageUrl ? (
-          <div
-            className={clsx(
-              'h-[90px] w-[90px] flex-shrink-0 rounded-xl border border-slate-500/20 bg-cover bg-center',
-              templateDragData && canInstall && 'cursor-grab active:cursor-grabbing'
-            )}
-            style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
-          />
-        ) : null}
+        <TemplateThumbnail
+          imageUrl={imageUrl}
+          className={clsx(templateDragData && canInstall && 'cursor-grab active:cursor-grabbing')}
+        />
         <div className="break-inside-avoid space-y-1 w-full">
           <div className="flex flex-col items-start justify-between gap-1 @md:flex-row">
             <div className="flex-1">
