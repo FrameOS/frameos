@@ -461,7 +461,7 @@ as the store front (`frontend/src/utils/storeCategories.ts`, checked against
 
 **Private cloud scenes** — the account's own scenes, private ones included — is the
 same repository format behind the link token. In the workspace it is listed on the
-Add scene drawer's **Saved scenes** page next to the backend's local scenes; the
+Add scene drawer's **Private scenes** page next to the local backend scenes; the
 public store and any other repositories sit behind **Scene store**:
 
 ```http

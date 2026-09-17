@@ -582,7 +582,7 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
 const ADD_SCENE_PAGE_TITLES: Record<AddScenePage, string> = {
   actions: 'Add scene',
   store: 'Scene store',
-  saved: 'Saved scenes',
+  saved: 'Private scenes',
 }
 
 // A list fetched within the last minute is fresh enough to reuse when the
@@ -874,7 +874,7 @@ function AddSceneDrawerActions({
     savedScenesLoading,
   } = useValues(templatesLogic({ frameId: frame.id }))
   const uploadSceneInputRef = useRef<HTMLInputElement>(null)
-  // The frame's own admin panel has no saved scenes to show: no local
+  // The frame's own admin panel has no private scenes to show: no local
   // backend library, and the private cloud drive is a backend feature.
   const hasSavedScenesPage = !generatesElsewhere
   const storeSubtitle = cloudMode ? 'Public scenes on FrameOS Cloud' : 'Public scenes from FrameOS Cloud'
@@ -913,7 +913,7 @@ function AddSceneDrawerActions({
             <BookmarkSquareIcon className="h-6 w-6" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="frameos-strong block truncate text-sm font-semibold">Saved scenes</span>
+            <span className="frameos-strong block truncate text-sm font-semibold">Private scenes</span>
             <span className="frameos-muted block text-xs">{savedSubtitle}</span>
           </span>
           <AddSceneCount count={savedSceneCount} loading={savedScenesLoading} />

@@ -933,7 +933,7 @@ export const templatesLogic = kea<templatesLogicType>([
         allRepositories: templatesLogicValues['allRepositories']
       ): boolean => repositoriesLoading && allRepositories.length === 0,
     ],
-    // The number behind "Saved scenes": private cloud scenes, the backend's
+    // The number behind "Private scenes": private cloud scenes, the backend's
     // local scenes and the scenes of repositories the user added — whichever
     // of those this control plane has.
     savedSceneCount: [

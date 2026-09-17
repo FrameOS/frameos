@@ -99,7 +99,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
   const inFrameAdminMode = isInFrameAdminMode()
   // On the cloud control plane the account's scene library IS the cloud
   // drive and the store catalog is a built-in repository; the self-hosted
-  // "My local scenes" (/api/templates) and "Add repository"
+  // "Local backend scenes" (/api/templates) and "Add repository"
   // (/api/repositories) surfaces have no server behind them there.
   const cloudMode = isCloudMode()
   const showStore = section !== 'saved'
@@ -150,7 +150,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
     section === 'store'
       ? 'Search the scene store, or paste a scene URL...'
       : section === 'saved'
-      ? 'Search saved scenes...'
+      ? 'Search private scenes...'
       : 'Search scenes, or paste a scene URL...'
 
   const addRepository = canAddRepository ? (
@@ -192,7 +192,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
   ) : null
 
   // The Scene store page is the FrameOS Cloud store alone. Repositories the
-  // user added are listed on the Saved scenes page, next to the button that
+  // user added are listed on the Private scenes page, next to the button that
   // adds them.
   const storeRepositories = repositories.filter(isCloudStoreRepository)
   const addedRepositories = repositories.filter((repository) => !isCloudStoreRepository(repository))
@@ -451,7 +451,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
           <div className="flex justify-between w-full items-center">
             <H6 className="flex cursor-pointer items-center gap-1" onClick={() => toggleExpanded('')}>
               {isExpanded('') ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
-              My local scenes
+              Local backend scenes
               {templates.length ? ` (${templates.length})` : ''}
             </H6>
             <DropdownMenu
@@ -506,7 +506,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
           )}
           {isExpanded('') && templates.length === 0 ? (
             <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">
-              {search === '' ? 'You have no saved scenes.' : `No saved scenes match "${search}"`}
+              {search === '' ? 'You have no local backend scenes.' : `No local backend scenes match "${search}"`}
             </div>
           ) : null}
         </div>
