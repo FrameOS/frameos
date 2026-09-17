@@ -1117,10 +1117,18 @@ def _frame_states_cache_meta(
 
 
 async def _active_scene_id_from_cache(redis: Redis, frame_id: int) -> str:
+    """The last scene this frame is known to show. Never asks the device:
+    callers run per frame on the frames list."""
     active_scene = await redis.get(f"frame:{frame_id}:active_scene")
-    if not active_scene:
-        return ""
-    return active_scene.decode() if isinstance(active_scene, bytes) else str(active_scene)
+    if active_scene:
+        return active_scene.decode() if isinstance(active_scene, bytes) else str(active_scene)
+    # The key used to expire after five minutes; the states cache outlives it
+    # and names the scene it was read for. Backfill so this runs once.
+    cached = await _read_frame_states_cache(redis, _frame_states_cache_key(frame_id))
+    scene_id = _normalise_frame_states_payload(cached)["sceneId"] if cached else ""
+    if scene_id:
+        await redis.set(f"frame:{frame_id}:active_scene", scene_id, nx=True)
+    return scene_id
 
 
 async def _remote_file_md5(
@@ -2431,6 +2439,13 @@ async def api_frame_get_image(
 
     if request.method == "HEAD":
         headers = await read_frame_sync_hint_headers(redis, frame.id)
+        # The workspace HEADs every image it shows: name the scene in it, so
+        # a frame that has not logged a scene change lately is still labelled.
+        active_scene = await _active_scene_id_from_cache(redis, frame.id)
+        if active_scene:
+            headers["X-Scene-Id"] = active_scene
+            exposed = headers.get("Access-Control-Expose-Headers")
+            headers["Access-Control-Expose-Headers"] = f"{exposed}, X-Scene-Id" if exposed else "X-Scene-Id"
         if not await _get_cached_frame_image(redis, cache_key):
             headers.update(FRAME_IMAGE_PLACEHOLDER_HEADERS)
         return Response(content=b"", media_type="image/png", headers=headers)
@@ -2491,10 +2506,11 @@ async def api_frame_get_image(
                     None, _coerce_frame_image_to_png, body, headers
                 )
                 scene_id = headers.get("x-scene-id")
-                if not scene_id:
-                    encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
-                    if encoded_scene_id:
-                        scene_id = encoded_scene_id.decode("utf-8")
+                if scene_id:
+                    # The frame says which scene drew this image.
+                    await redis.set(f"frame:{id}:active_scene", scene_id)
+                else:
+                    scene_id = await _active_scene_id_from_cache(redis, id) or None
                 await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
                 response_headers = await store_frame_sync_hint_headers(redis, frame.id, headers)
 

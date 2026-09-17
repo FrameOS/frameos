@@ -309,7 +309,9 @@ async def process_log(
     if event in ("render:scene", "render:sceneChange", "event:setCurrentScene"):
         scene_id = log.get("sceneId") or log.get("scene") or log.get("id")
         if scene_id:
-            await redis.set(f"frame:{frame.id}:active_scene", scene_id, ex=300)
+            # No TTL: a frame that renders once an hour (or sleeps for a day)
+            # is still showing this scene, and every other writer keeps it too.
+            await redis.set(f"frame:{frame.id}:active_scene", scene_id)
 
     changes: dict[str, Any] = {}
     if event == 'render':

@@ -6,7 +6,7 @@ import { projectApiPathFromCache } from '../utils/projectApi'
 import { apiFetch } from '../utils/apiFetch'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
 import { isCloudMode } from '../utils/cloudMode'
-import { planFrameImageRefresh } from '../utils/frameImageRefresh'
+import { frameUpdateFromImageHeaders, planFrameImageRefresh } from '../utils/frameImageRefresh'
 import type { FrameType } from '../types'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -182,22 +182,10 @@ export const entityImagesModel = kea<entityImagesModelType>([
         if (!response.ok) {
           return
         }
-        const syncChanged = response.headers.get('x-frameos-sync-changed')
-        if (syncChanged !== '0' && syncChanged !== '1') {
-          return
+        const update = frameUpdateFromImageHeaders(Number(match[1]), response.headers)
+        if (update) {
+          socketLogic.actions.updateFrame(update as FrameType)
         }
-        socketLogic.actions.updateFrame({
-          id: Number(match[1]),
-          frame_sync_hint: {
-            has_changes: syncChanged === '1',
-            checked_at: response.headers.get('x-frameos-sync-checked-at') || new Date().toISOString(),
-            current_revision: response.headers.get('x-frameos-sync-revision'),
-            deployed_revision: response.headers.get('x-frameos-deployed-revision'),
-            frame_config_modified_at: response.headers.get('x-frameos-frame-config-modified-at'),
-            scenes_modified_at: response.headers.get('x-frameos-scenes-modified-at'),
-            last_successful_deploy_at: response.headers.get('x-frameos-last-successful-deploy-at'),
-          },
-        } as FrameType)
       } catch (error) {
         console.warn('Failed to refresh frame image metadata', error)
       }

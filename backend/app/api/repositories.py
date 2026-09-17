@@ -89,11 +89,20 @@ async def _refresh_repository(repository_id: str, project_id: int) -> None:
         db.close()
 
 
-def _schedule_repository_refresh(repository: Repository) -> None:
+# How long a listing waits for a stale repository's refresh before answering
+# with whatever is cached. Long enough for a healthy provider (well under a
+# second), short enough that a dead one does not hang the scene picker: the
+# refresh itself keeps running in the background and the next listing sees it.
+STALE_REFRESH_WAIT_SECONDS = 5.0
+
+
+def _schedule_repository_refresh(repository: Repository) -> asyncio.Task | None:
+    """Start refreshing `repository` in the background; returns the task, or
+    None when a refresh for it is already in flight."""
     repository_id = repository.id
     if repository_id in _refreshing_repository_ids:
         # Listings are polled; one in-flight refresh per repository is plenty.
-        return
+        return None
     _refreshing_repository_ids.add(repository_id)
     task = asyncio.create_task(_refresh_repository(repository_id, repository.project_id))
     background_refresh_tasks.add(task)
@@ -103,6 +112,7 @@ def _schedule_repository_refresh(repository: Repository) -> None:
         _refreshing_repository_ids.discard(repository_id)
 
     task.add_done_callback(_done)
+    return task
 
 
 @lru_cache(maxsize=256)
@@ -342,14 +352,26 @@ async def get_repositories(db: Session = Depends(get_db)):
             db.add(Settings(project_id=project_id, key="@system/repository_global_cleanup", value="true"))
             db.commit()
 
-        # Seed the connected provider's store once per provider. The marker
-        # records its URL so changing providers replaces the old store, while
-        # deleting the repository remains respected until the provider changes.
+        # Seed the provider's store once per provider. The marker records its
+        # URL so changing providers replaces the old store, while deleting the
+        # repository remains respected until the provider changes.
         from app.models.cloud import current_cloud_backend_link
+        from app.utils.cloud_link import default_cloud_provider_url
 
         link = current_cloud_backend_link(db)
         if link is not None and link.status == "connected" and link.provider_url:
-            store_url = cloud_store_repository_url(link.provider_url)
+            provider_url: str | None = link.provider_url
+        else:
+            # Not linked: the default provider's public index needs no token,
+            # and since the scene picker stopped listing the bundled samples
+            # (2026-09-17) the store is the only catalog it has. None when
+            # FRAMEOS_CLOUD_URL=disabled hides the cloud feature.
+            try:
+                provider_url = default_cloud_provider_url()
+            except ValueError:
+                provider_url = None
+        if provider_url:
+            store_url = cloud_store_repository_url(provider_url)
             marker = db.query(Settings).filter_by(
                 project_id=project_id, key=CLOUD_STORE_REPOSITORY_MARKER
             ).first()
@@ -364,7 +386,7 @@ async def get_repositories(db: Session = Depends(get_db)):
             version_migration = (
                 marker_url is not None
                 and marker_url != store_url
-                and _is_same_provider_store_url(marker_url, link.provider_url)
+                and _is_same_provider_store_url(marker_url, provider_url)
             )
             should_seed = marker is None or (
                 marker_url is not None and marker_url != store_url and not version_migration
@@ -423,12 +445,27 @@ async def get_repositories(db: Session = Depends(get_db)):
 
         repositories = project_query(db, Repository).all()
 
+        refreshes: list[asyncio.Task] = []
         for r in repositories:
             # if haven't refreshed in a day
             if not r.last_updated_at or r.last_updated_at < datetime.utcnow() - timedelta(seconds=86400):
                 # schedule updates in the background (in their own session, and
                 # committed — see _refresh_repository)
-                _schedule_repository_refresh(r)
+                task = _schedule_repository_refresh(r)
+                if task is not None:
+                    refreshes.append(task)
+
+        if refreshes:
+            # Give the refresh a moment to land so THIS answer carries the new
+            # catalog. Returning the stale copy and refreshing behind it meant
+            # a picker that is opened once every few days (a Home Assistant
+            # tab, say) always showed the catalog from the previous visit —
+            # weeks-old scenes, long after several FrameOS upgrades. The wait
+            # never cancels the task: a slow provider finishes in the
+            # background and the next listing picks the result up.
+            await asyncio.wait(refreshes, timeout=STALE_REFRESH_WAIT_SECONDS)
+            db.expire_all()
+            repositories = project_query(db, Repository).all()
 
         return [r.to_dict() for r in repositories]
     except SQLAlchemyError as e:

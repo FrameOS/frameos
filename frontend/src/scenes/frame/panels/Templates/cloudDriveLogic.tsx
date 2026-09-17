@@ -1,4 +1,4 @@
-import { MakeLogicType, afterMount, connect, kea, listeners, path, selectors } from 'kea'
+import { MakeLogicType, actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
 import { RepositoryType, TemplateType } from '../../../../types'
@@ -21,6 +21,7 @@ export interface cloudDriveLogicValues {
   grantedScopes: string[] // cloudLogic
   cloudConnected: boolean
   cloudEnabled: boolean
+  driveLoadedAt: number | null
   driveRepository: RepositoryType
   driveTemplates: TemplateType[]
   driveTemplatesLoading: boolean
@@ -43,6 +44,9 @@ export interface cloudDriveLogicActions {
   ) => {
     error: string
     errorObject?: any
+  }
+  loadDriveIfStale: (maxAgeMs: number) => {
+    maxAgeMs: number
   }
   loadDriveSuccess: (
     driveTemplates: TemplateType[],
@@ -78,6 +82,18 @@ export const cloudDriveLogic = kea<cloudDriveLogicType>([
   connect({
     values: [cloudLogic, ['grantedScopes', 'cloudProviderUrl', 'cloudStatus']],
     actions: [cloudLogic, ['loadCloudStatusSuccess']],
+  }),
+  actions({
+    /** Reload unless fetched within `maxAgeMs` — the scene picker calls this on open. */
+    loadDriveIfStale: (maxAgeMs: number) => ({ maxAgeMs }),
+  }),
+  reducers({
+    driveLoadedAt: [
+      null as number | null,
+      {
+        loadDriveSuccess: () => Date.now(),
+      },
+    ],
   }),
   loaders(() => ({
     driveTemplates: [
@@ -149,6 +165,16 @@ export const cloudDriveLogic = kea<cloudDriveLogicType>([
       if (values.hasDriveScope) {
         actions.loadDrive()
       }
+    },
+    loadDriveIfStale: ({ maxAgeMs }) => {
+      if (!values.hasDriveScope || values.driveTemplatesLoading) {
+        return
+      }
+      const loadedAt = values.driveLoadedAt
+      if (loadedAt !== null && Date.now() - loadedAt < maxAgeMs) {
+        return
+      }
+      actions.loadDrive()
     },
   })),
   afterMount(({ actions, values }) => {

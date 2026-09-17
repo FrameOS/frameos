@@ -530,6 +530,10 @@ export interface TemplateType {
   frameosVersion?: string
   /** Risk flags computed by the cloud store, e.g. 'shell' for scenes that run shell commands. */
   flags?: string[]
+  /** Store category slug (FrameOS Cloud store scenes); see utils/storeCategories. */
+  category?: string
+  /** Free-form tags (FrameOS Cloud store scenes). */
+  tags?: string[]
   /** Store scene uuid ("Private cloud scenes" entries). */
   sceneId?: string
   /** Scene page on the cloud store. */

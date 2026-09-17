@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FRAME_IMAGE_REFRESH_MIN_INTERVAL_MS,
+  frameUpdateFromImageHeaders,
   planFrameImageRefresh,
 } from "../../../../../../frontend/src/utils/frameImageRefresh";
 import {
@@ -72,5 +73,38 @@ describe("sceneIsActivating", () => {
   it("gives up eventually rather than spinning forever", () => {
     expect(SCENE_ACTIVATION_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
     expect(SCENE_ACTIVATION_TIMEOUT_MS).toBeLessThanOrEqual(5 * 60_000);
+  });
+});
+
+// The workspace HEADs every frame image it shows. That response names the
+// scene that drew the image, which is how a frame that has not logged a scene
+// change lately still gets an "active scene" label — no /states round-trip.
+describe("frameUpdateFromImageHeaders", () => {
+  const now = new Date("2026-09-17T10:00:00Z");
+
+  it("takes the active scene even when the frame sends no sync hint", () => {
+    const headers = new Headers({ "X-Scene-Id": "uploaded/abc" });
+    expect(frameUpdateFromImageHeaders(35, headers, now)).toEqual({ id: 35, active_scene_id: "uploaded/abc" });
+  });
+
+  it("carries the sync hint and the scene in one update", () => {
+    const headers = new Headers({
+      "X-Scene-Id": "abc",
+      "X-FrameOS-Sync-Changed": "1",
+      "X-FrameOS-Sync-Revision": "rev-local",
+    });
+    const update = frameUpdateFromImageHeaders(35, headers, now);
+    expect(update?.active_scene_id).toBe("abc");
+    expect(update?.frame_sync_hint).toMatchObject({
+      has_changes: true,
+      checked_at: now.toISOString(),
+      current_revision: "rev-local",
+    });
+  });
+
+  it("leaves a known scene alone when the response names none", () => {
+    const update = frameUpdateFromImageHeaders(35, new Headers({ "X-FrameOS-Sync-Changed": "0" }), now);
+    expect(update).not.toHaveProperty("active_scene_id");
+    expect(frameUpdateFromImageHeaders(35, new Headers(), now)).toBeNull();
   });
 });

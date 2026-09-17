@@ -10,6 +10,20 @@ from app.utils.versions import current_frameos_version
 from sqlalchemy.exc import InvalidRequestError
 
 
+@pytest.fixture(autouse=True)
+def _no_outbound_repository_fetches(monkeypatch):
+    """Every listing may now seed the default provider's store (no link
+    needed), so a real `update_templates` would reach cloud.frameos.net from
+    the test suite. Stub it; tests that care install their own fake."""
+
+    async def fake_update(self):
+        self.last_updated_at = datetime.utcnow()
+        if self.templates is None:
+            self.templates = []
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+
 async def _drain_background_refreshes():
     """Wait for the refresh tasks GET /api/repositories schedules."""
     from app.api.repositories import background_refresh_tasks
@@ -131,6 +145,72 @@ async def test_get_repositories_persists_the_daily_refresh(async_client, db, mon
     refreshed = db.query(Repository).filter_by(id=repo.id).one()
     assert refreshed.templates == [{"name": "New", "image": "https://example.com/new/image"}]
     assert refreshed.last_updated_at > datetime.utcnow() - timedelta(minutes=1)
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_returns_the_refreshed_catalog_when_it_lands_in_time(async_client, db, monkeypatch):
+    """The listing that triggers the daily refresh waits for it (briefly) and
+    answers with the new catalog, not the copy it just replaced.
+
+    Otherwise a scene picker opened once every few days keeps showing the
+    previous visit's catalog for ever.
+    """
+    async def fake_update(self):
+        self.templates = [{"name": "New", "image": "https://example.com/new/image"}]
+        self.last_updated_at = datetime.utcnow()
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    repo = Repository(
+        project_id=async_client.project_id,
+        name="Stale store",
+        url="https://example.com/repository.json",
+        templates=[{"name": "Old", "image": "https://example.com/old/image"}],
+        last_updated_at=datetime.utcnow() - timedelta(days=3),
+    )
+    db.add(repo)
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    listed = [r for r in response.json() if r["id"] == repo.id]
+    assert listed and listed[0]["templates"] == [{"name": "New", "image": "https://example.com/new/image"}]
+    await _drain_background_refreshes()
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_does_not_hang_on_a_slow_refresh(async_client, db, monkeypatch):
+    """A provider that does not answer within the wait must not hold the
+    listing: the cached copy comes back and the refresh finishes behind it."""
+    from app.api import repositories as repositories_api
+
+    monkeypatch.setattr(repositories_api, "STALE_REFRESH_WAIT_SECONDS", 0.05)
+
+    async def slow_update(self):
+        await asyncio.sleep(0.3)
+        self.templates = [{"name": "New"}]
+        self.last_updated_at = datetime.utcnow()
+
+    monkeypatch.setattr(Repository, "update_templates", slow_update)
+
+    repo = Repository(
+        project_id=async_client.project_id,
+        name="Slow store",
+        url="https://example.com/repository.json",
+        templates=[{"name": "Old"}],
+        last_updated_at=None,
+    )
+    db.add(repo)
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    listed = [r for r in response.json() if r["id"] == repo.id]
+    assert listed and listed[0]["templates"] == [{"name": "Old"}]
+
+    await _drain_background_refreshes()
+    db.expire_all()
+    assert db.query(Repository).filter_by(id=repo.id).one().templates == [{"name": "New"}]
 
 
 @pytest.mark.asyncio
@@ -441,10 +521,52 @@ async def test_version_bump_drops_the_duplicate_when_the_user_added_the_new_inde
 
 
 @pytest.mark.asyncio
-async def test_get_repositories_does_not_seed_store_without_link(async_client, db):
+async def test_get_repositories_seeds_the_default_providers_store_without_link(async_client, db):
+    """An unlinked backend still gets the public store: the default provider's
+    index needs no token, and it is the only catalog the scene picker lists
+    now that the bundled samples are hidden. A marker left by another
+    provider is replaced, the way a provider change always was."""
+    from app.models.settings import Settings
+
+    db.add(
+        Settings(
+            project_id=async_client.project_id,
+            key="@system/cloud_store_repository_added",
+            value="https://cloud.example.com/api/store/2000.1.1/repository.json",
+        )
+    )
+    db.commit()
+
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200
-    assert all("/api/store/" not in (r["url"] or "") for r in response.json())
+    default_store_url = cloud_store_repository_url("https://cloud.frameos.net")
+    assert [r["url"] for r in response.json() if "/api/store/" in (r["url"] or "")] == [default_store_url]
+    marker = db.query(Settings).filter_by(
+        project_id=async_client.project_id, key="@system/cloud_store_repository_added"
+    ).one()
+    assert marker.value == default_store_url
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_seeds_nothing_when_cloud_is_disabled(async_client, db, monkeypatch):
+    """FRAMEOS_CLOUD_URL=disabled hides the cloud feature, store included."""
+    from app.models.settings import Settings
+    from app.utils import cloud_link
+
+    # Patch the config instance cloud_link actually reads, not `app.config.config`:
+    # test_ingress.py reloads app.config, which leaves earlier importers (this
+    # module among them) holding the previous instance.
+    monkeypatch.setattr(cloud_link.config, "FRAMEOS_CLOUD_URL", "disabled")
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    assert [r for r in response.json() if "/api/store/" in (r["url"] or "")] == []
+    assert (
+        db.query(Settings)
+        .filter_by(project_id=async_client.project_id, key="@system/cloud_store_repository_added")
+        .first()
+        is None
+    )
 
 
 @pytest.mark.asyncio

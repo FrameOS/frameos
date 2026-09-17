@@ -1,12 +1,15 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
   ArrowUpTrayIcon,
+  ArrowLeftIcon,
   ArrowUturnLeftIcon,
+  BookmarkSquareIcon,
+  BuildingStorefrontIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   PhotoIcon,
@@ -40,11 +43,12 @@ import { FrameScene, FrameType, FrameId, SceneOrigin } from '../../types'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { FrameosShell } from './FrameosShell'
 import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from './workspaceLogic'
-import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
+import type { AddScenePage, OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { registeredAddFramePanel } from './addFramePanelRegistry'
 import { frameToolDefinitionsForMode } from './frameToolDefinitions'
 import { addFrameFlows, addSceneActionIsAllowed, workspaceMode } from './workspaceSurfaces'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isCloudMode } from '../../utils/cloudMode'
 import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -57,7 +61,10 @@ import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
-import { FrameDashboardSurface } from './FrameDashboardSurface'
+import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
+import { repositoriesModel } from '../../models/repositoriesModel'
+import { templatesModel } from '../../models/templatesModel'
+import { FrameDashboardSurface, livePreviewSceneId } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameImageOverlayControls } from './FrameImageOverlayControls'
 import { framesHomeLogic } from './framesHomeLogic'
@@ -66,7 +73,7 @@ import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { setFrameosSceneDragData } from './sceneDrag'
 import { SplitScreenLayoutDrawer } from './SplitScreenLayoutDrawer'
-import { splitScreenLayoutLogic } from './splitScreenLayoutLogic'
+import { closeSplitGenerator, splitScreenLayoutLogic } from './splitScreenLayoutLogic'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { normalizeSplitScreenSceneLayout } from '../../utils/splitScreenLayouts'
@@ -555,6 +562,7 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
       onClick={() => {
         hideForm()
         closeSceneControl()
+        closeSplitGenerator(frame.id)
         openTemplateDrawer(frame.id)
       }}
       className={clsx(
@@ -572,12 +580,22 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
   )
 }
 
+const ADD_SCENE_PAGE_TITLES: Record<AddScenePage, string> = {
+  actions: 'Add scene',
+  store: 'Scene store',
+  saved: 'Private scenes',
+}
+
+// A list fetched within the last minute is fresh enough to reuse when the
+// drawer reopens; anything older is fetched again. Cheap on every control
+// plane (the catalogs are cached server-side), and it is what keeps a tab
+// left open for days — Home Assistant's ingress panel — from showing the
+// store it loaded at mount for ever.
+const ADD_SCENE_LISTS_MAX_AGE_MS = 60_000
+
 export function TemplateDrawer(): JSX.Element | null {
   const { templateDrawerFrameId } = useValues(workspaceLogic)
   const { frames } = useValues(framesModel)
-  const { closeTemplateDrawer } = useActions(workspaceLogic)
-  const splitLogic = splitScreenLayoutLogic({ frameId: templateDrawerFrameId ?? 0 })
-  const { editingSceneId, generatorOpen } = useValues(splitLogic)
 
   if (!templateDrawerFrameId) {
     return null
@@ -588,8 +606,78 @@ export function TemplateDrawer(): JSX.Element | null {
     return null
   }
 
+  // Keyed so switching frames remounts the drawer: fresh page state, fresh
+  // list refresh. Mounted only while open, so the list logics it mounts
+  // (the cloud drive among them) are not mounted by every frames page.
+  return <OpenTemplateDrawer key={frame.id} frame={frame} />
+}
+
+function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
+  const { closeTemplateDrawer, setTemplateDrawerPage, openSceneControl } = useActions(workspaceLogic)
+  // The page lives in workspaceLogic and the URL (?drawerPage=store|saved),
+  // so a reload reopens the same list.
+  const { templateDrawerPage: page } = useValues(workspaceLogic)
+  const setPage = setTemplateDrawerPage
+  const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
+  const { editingSceneId, generatorOpen } = useValues(splitLogic)
+  const { closeGenerator } = useActions(splitLogic)
+  const { loadRepositoriesIfStale } = useActions(repositoriesModel)
+  const { loadTemplatesIfStale } = useActions(templatesModel)
+  const { loadDriveIfStale } = useActions(cloudDriveLogic)
+  const { search } = useValues(templatesLogic({ frameId: frame.id }))
+  const { setSearch } = useActions(templatesLogic({ frameId: frame.id }))
+
+  useEffect(() => {
+    // Every open refreshes the lists behind the two list buttons, so their
+    // counts and contents are current.
+    loadRepositoriesIfStale(ADD_SCENE_LISTS_MAX_AGE_MS)
+    loadTemplatesIfStale(ADD_SCENE_LISTS_MAX_AGE_MS)
+    loadDriveIfStale(ADD_SCENE_LISTS_MAX_AGE_MS)
+    // A reload (or a shared link) with ?q= restores the scene search.
+    const urlSearch = router.values.searchParams.q
+    if (typeof urlSearch === 'string' && urlSearch !== '') {
+      setSearch(urlSearch)
+    }
+    // Kea actions are stable references; this runs once per open.
+  }, [])
+
+  useEffect(() => {
+    // Keep ?q= in step with the search box while a list page is open. A
+    // replace, not a push: typing is not history. The actions page carries
+    // no search (its URL has no q, see setTemplateDrawerPage).
+    if (page === 'actions') {
+      return
+    }
+    const params = { ...router.values.searchParams }
+    const current = typeof params.q === 'string' ? params.q : ''
+    if (current === search) {
+      return
+    }
+    if (search) {
+      params.q = search
+    } else {
+      delete params.q
+    }
+    router.actions.replace(router.values.location.pathname, params, router.values.hashParams)
+  }, [search, page])
+
   const frameLogicProps = { frameId: frame.id }
-  const drawerTitle = generatorOpen && editingSceneId ? 'Edit split' : 'Add scene'
+  const drawerTitle = generatorOpen ? (editingSceneId ? 'Edit split' : 'Split screen') : ADD_SCENE_PAGE_TITLES[page]
+  // One back arrow for every sub-view, in the header like the chat drawer's:
+  // a list page goes back to the actions; the split editor closes, and when
+  // it was editing an installed split it returns to that scene.
+  const showBack = generatorOpen || page !== 'actions'
+  const backLabel = generatorOpen && editingSceneId ? 'Back to scene' : 'Back to Add scene'
+  const goBack = (): void => {
+    if (generatorOpen) {
+      closeGenerator()
+      if (editingSceneId) {
+        openSceneControl(frame.id, editingSceneId)
+      }
+      return
+    }
+    setPage('actions')
+  }
 
   return (
     <div
@@ -602,7 +690,18 @@ export function TemplateDrawer(): JSX.Element | null {
         <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
             <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
-              <div className="min-w-0">
+              {showBack ? (
+                <button
+                  type="button"
+                  title={backLabel}
+                  aria-label={backLabel}
+                  onClick={goBack}
+                  className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  <ArrowLeftIcon className="h-5 w-5" />
+                </button>
+              ) : null}
+              <div className="min-w-0 flex-1">
                 <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
                   {frame.name || frameHost(frame)}
                 </div>
@@ -622,9 +721,12 @@ export function TemplateDrawer(): JSX.Element | null {
             {generatorOpen ? (
               <SplitScreenLayoutDrawer frame={frame} />
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                <AddSceneDrawerActions frame={frame} />
-                <Templates />
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">
+                {page === 'actions' ? (
+                  <AddSceneDrawerActions frame={frame} onOpenPage={setPage} />
+                ) : (
+                  <Templates section={page} />
+                )}
               </div>
             )}
             <EditTemplateModal />
@@ -687,7 +789,10 @@ function NewBlankSceneModal({
  * account to bill one to, so the button says where the generator lives and how
  * a scene made there gets back here, rather than being missing entirely.
  */
-function GenerateElsewhereModal({ onClose, onOpenCloudSettings }: {
+function GenerateElsewhereModal({
+  onClose,
+  onOpenCloudSettings,
+}: {
   onClose: () => void
   onOpenCloudSettings: () => void
 }): JSX.Element {
@@ -733,17 +838,50 @@ function GenerateElsewhereModal({ onClose, onOpenCloudSettings }: {
   )
 }
 
-function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
+function AddSceneCount({ count, loading }: { count: number; loading: boolean }): JSX.Element | null {
+  if (loading && count === 0) {
+    return <Spinner className="h-4 w-4 shrink-0" />
+  }
+  if (count === 0) {
+    return null
+  }
+  return (
+    <span className="frameos-tag shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums">{count}</span>
+  )
+}
+
+function AddSceneDrawerActions({
+  frame,
+  onOpenPage,
+}: {
+  frame: FrameType
+  onOpenPage: (page: Exclude<AddScenePage, 'actions'>) => void
+}): JSX.Element {
+  const cloudMode = isCloudMode()
   const { createBlankScene } = useActions(frameLogic({ frameId: frame.id }))
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
   const [generateElsewhereOpen, setGenerateElsewhereOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
-  const { openFrameTool, closeTemplateDrawer } = useActions(workspaceLogic)
+  const { openFrameTool, closeTemplateDrawer, openChatDrawer } = useActions(workspaceLogic)
   const generatesElsewhere = isInFrameAdminMode()
   const { applyFavouriteTemplatesToFrame, uploadSceneFile } = useActions(templatesLogic({ frameId: frame.id }))
-  const { favouriteTemplates, installableFavouriteTemplates } = useValues(templatesLogic({ frameId: frame.id }))
+  const {
+    favouriteTemplates,
+    installableFavouriteTemplates,
+    storeSceneCount,
+    storeScenesLoading,
+    savedSceneCount,
+    savedScenesLoading,
+  } = useValues(templatesLogic({ frameId: frame.id }))
   const uploadSceneInputRef = useRef<HTMLInputElement>(null)
+  // The frame's own admin panel has no private scenes to show: no local
+  // backend library, and the private cloud drive is a backend feature.
+  const hasSavedScenesPage = !generatesElsewhere
+  const storeSubtitle = cloudMode ? 'Public scenes on FrameOS Cloud' : 'Public scenes from FrameOS Cloud'
+  const savedSubtitle = cloudMode
+    ? 'Your own scenes on FrameOS Cloud'
+    : 'Your private cloud scenes, local scenes and repositories'
   // Live list, so "Split screen" unlocks as soon as the first scene is added.
   const hasScenes = liveScenes.length > 0
   const favouriteTemplateCount = favouriteTemplates.length
@@ -751,6 +889,38 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
 
   return (
     <div className="mb-4 grid gap-3">
+      <button
+        type="button"
+        onClick={() => onOpenPage('store')}
+        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+          <BuildingStorefrontIcon className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="frameos-strong block truncate text-sm font-semibold">Scene store</span>
+          <span className="frameos-muted block text-xs">{storeSubtitle}</span>
+        </span>
+        <AddSceneCount count={storeSceneCount} loading={storeScenesLoading} />
+        <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
+      </button>
+      {hasSavedScenesPage ? (
+        <button
+          type="button"
+          onClick={() => onOpenPage('saved')}
+          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+            <BookmarkSquareIcon className="h-6 w-6" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="frameos-strong block truncate text-sm font-semibold">Private scenes</span>
+            <span className="frameos-muted block text-xs">{savedSubtitle}</span>
+          </span>
+          <AddSceneCount count={savedSceneCount} loading={savedScenesLoading} />
+          <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => {
@@ -763,7 +933,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
         </span>
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">New blank scene</span>
-          <span className="frameos-muted block truncate text-xs">Start with a render event</span>
+          <span className="frameos-muted block text-xs">Start with a render event</span>
         </span>
       </button>
       <button
@@ -780,7 +950,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
         </span>
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">Split screen</span>
-          <span className="frameos-muted block truncate text-xs">Split the screen between multiple scenes</span>
+          <span className="frameos-muted block text-xs">Split the screen between multiple scenes</span>
         </span>
       </button>
       {addSceneActionIsAllowed(workspaceMode(), 'generate') ? (
@@ -791,15 +961,9 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
               setGenerateElsewhereOpen(true)
               return
             }
-            const searchParams: Record<string, unknown> = {
-              ...router.values.searchParams,
-              drawer: 'chat',
-              drawerSource: 'templates',
-              frameId: String(frame.id),
-            }
-            delete searchParams.sceneId
-            delete searchParams.nodeId
-            router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
+            // Through the logic, so the chat drawer knows it came from here
+            // and its header offers "Back to Add scene".
+            openChatDrawer(frame.id, null, null, 'templates')
           }}
           className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
@@ -808,7 +972,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           </span>
           <span className="min-w-0 flex-1">
             <span className="frameos-strong block truncate text-sm font-semibold">Generate scene</span>
-            <span className="frameos-muted block truncate text-xs">
+            <span className="frameos-muted block text-xs">
               {generatesElsewhere ? 'Build one with AI at scenes.frameos.net' : 'Open AI chat for this frame'}
             </span>
           </span>
@@ -826,7 +990,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
         </span>
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">Upload scene</span>
-          <span className="frameos-muted block truncate text-xs">Upload a template .zip or a scenes .json</span>
+          <span className="frameos-muted block text-xs">Upload a template .zip or a scenes .json</span>
         </span>
       </button>
       <input
@@ -860,7 +1024,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           </span>
           <span className="min-w-0 flex-1">
             <span className="frameos-strong block truncate text-sm font-semibold">Install all starred scenes</span>
-            <span className="frameos-muted block truncate text-xs">
+            <span className="frameos-muted block text-xs">
               Personal favourites saved for this user
               {installableFavouriteTemplateCount !== favouriteTemplateCount
                 ? `, ${installableFavouriteTemplateCount} supported here`
@@ -1107,6 +1271,8 @@ function SceneControlPanelContent({
   const frame = frames[sceneControlSelection.frameId]
   const {
     sceneId: currentSceneId,
+    stateRecord,
+    stateRecordLoading,
     uploadedScenes,
     uploadedScenesLoading,
   } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
@@ -1120,17 +1286,24 @@ function SceneControlPanelContent({
     return null
   }
 
-  if (sceneControlSelection.sceneId === STATUS_SCREEN_SCENE_ID) {
+  // The preview card opens the drawer on "whatever is showing" when the frame
+  // row does not name a scene. Mounting controlLogic above already asked
+  // /states (the one request this costs, and only on a click), so follow it.
+  const selectedSceneId =
+    sceneControlSelection.sceneId === livePreviewSceneId
+      ? frame.active_scene_id || currentSceneId || livePreviewSceneId
+      : sceneControlSelection.sceneId
+  const activeSceneLoading =
+    selectedSceneId === livePreviewSceneId &&
+    // Same condition controlLogic re-syncs on: an answer is still coming.
+    (stateRecordLoading || (!!stateRecord?.cache?.refreshing && !stateRecord.cache.cached))
+
+  if (selectedSceneId === STATUS_SCREEN_SCENE_ID) {
     return <StatusScreenControlPanel frame={frame} currentSceneId={currentSceneId} onClose={closeSceneControl} />
   }
 
   const editingFrame = { ...frame, ...(frameForm ?? {}) } as Partial<FrameType>
-  const { scene, sceneId, saved } = resolveSceneControlSelection(
-    frame,
-    editingFrame,
-    sceneControlSelection.sceneId,
-    uploadedScenes
-  )
+  const { scene, sceneId, saved } = resolveSceneControlSelection(frame, editingFrame, selectedSceneId, uploadedScenes)
 
   if (!scene) {
     return (
@@ -1153,7 +1326,9 @@ function SceneControlPanelContent({
             </button>
           </div>
           <div className="frameos-muted px-5 py-4 text-sm">
-            {uploadedScenesLoading ? 'Loading active scene...' : 'The active scene is not available.'}
+            {uploadedScenesLoading || activeSceneLoading
+              ? 'Loading active scene...'
+              : 'The active scene is not available.'}
           </div>
         </div>
       </div>

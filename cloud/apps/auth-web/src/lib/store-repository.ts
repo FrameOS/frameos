@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { getScenesBaseUrl } from "./env";
 import { frameosVersionSatisfiesSql } from "./store-versions-sql";
@@ -20,6 +20,12 @@ export async function buildStoreRepository(
     eq(storeScenes.visibility, "public"),
     eq(storeScenes.status, "active"),
     gt(storeScenes.latestVersion, 0),
+    // Uncategorized scenes stay out of the exported index for now
+    // (2026-09-17): the "Other scenes" shelf is where unverified and junk
+    // uploads land until someone files them, and frames should not offer
+    // those. The store front still lists them; lift this once the shelf is
+    // curated.
+    isNotNull(storeScenes.category),
   ];
   if (frameosVersion) {
     conditions.push(

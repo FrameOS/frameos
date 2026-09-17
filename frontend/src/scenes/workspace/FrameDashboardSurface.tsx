@@ -55,6 +55,7 @@ import {
   sceneDependencyGroupingIsEnabled,
   workspaceLogic,
 } from './workspaceLogic'
+import { closeSplitGenerator } from './splitScreenLayoutLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../../utils/systemScenes'
@@ -74,7 +75,8 @@ import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 const uploadedScenePrefix = 'uploaded/'
-const livePreviewSceneId = '__live_preview__'
+/** Scene drawer selection for "whatever the frame is showing", used while the active scene is unknown. */
+export const livePreviewSceneId = '__live_preview__'
 const activeSurfaceClassName = 'frameos-active-surface'
 const selectedSurfaceClassName = 'frameos-selected-surface'
 const sceneTileWidthRem = 9
@@ -228,9 +230,10 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
   const activeScene = scenes.find((scene) => sceneIsActive(scene, activeSceneId))
   const previewSelected =
     sceneControlSelection?.frameId === frame.id &&
-    (activeSceneId
-      ? sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId)
-      : sceneControlSelection.sceneId === livePreviewSceneId) &&
+    // A drawer opened before the active scene was known keeps the
+    // placeholder id after the scene resolves: still this card's selection.
+    (sceneControlSelection.sceneId === livePreviewSceneId ||
+      (!!activeSceneId && sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId))) &&
     sceneControlSelection.source === 'preview'
   const nextSchedule = nextScheduledEvent(frame.schedule)
   const nextScheduleTitle = nextSchedule
@@ -590,7 +593,7 @@ function FrameSceneTile({
             event.stopPropagation()
             onToggleChildren?.()
           }}
-          className="frameos-scene-child-toggle absolute right-2 top-2 z-20 flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-bold shadow-sm backdrop-blur-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-scene-child-toggle absolute right-0 top-0 z-20 flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-bold shadow-sm backdrop-blur-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           {childrenExpanded ? '-' : '+'}
           {childSceneCount}
@@ -604,8 +607,8 @@ function FrameSceneTile({
           horizontal
           buttonColor="none"
           className={clsx(
-            'absolute right-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700',
-            hasChildScenes ? 'top-11' : 'top-2'
+            'absolute right-0 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700',
+            hasChildScenes ? 'top-9' : 'top-0'
           )}
         />
       ) : null}
@@ -638,6 +641,7 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
       onClick={() => {
         hideForm()
         closeSceneControl()
+        closeSplitGenerator(frame.id)
         openTemplateDrawer(frame.id)
       }}
       className={clsx(

@@ -681,7 +681,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
         navigation="workspace"
         horizontal
         buttonColor="none"
-        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
+        className="absolute right-0 top-0 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
       />
     </div>
   )

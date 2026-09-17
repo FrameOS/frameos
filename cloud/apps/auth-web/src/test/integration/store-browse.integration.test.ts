@@ -64,6 +64,7 @@ async function seedPublisher() {
 async function seedScene(
   accountId: string,
   scene: {
+    category?: string | null;
     downloadCount?: number;
     frameosVersion?: string | null;
     name: string;
@@ -74,6 +75,8 @@ async function seedScene(
     .insert(storeScenes)
     .values({
       accountId,
+      // The exported index lists categorized scenes only.
+      category: scene.category === undefined ? "utilities" : scene.category,
       downloadCount: scene.downloadCount ?? 0,
       frameosVersion: scene.frameosVersion ?? null,
       latestVersion: 1,
@@ -137,6 +140,19 @@ describe("store repository indexes", () => {
     expect(templateNames(eight).sort()).toEqual(["Nightly", "Undeclared"]);
   });
 
+
+  it("leaves uncategorized scenes out of the exported index", async () => {
+    // The "Other scenes" shelf is where unverified uploads land until they
+    // are filed; frames get the categorized catalog only (store-repository.ts).
+    const accountId = await seedPublisher();
+    await seedScene(accountId, { name: "Filed" });
+    await seedScene(accountId, { category: null, name: "Unfiled" });
+
+    const payload = await readJson(
+      await getRepositoryJson(request("/api/store/repository.json")),
+    );
+    expect(templateNames(payload)).toEqual(["Filed"]);
+  });
   it("keeps the unversioned index listing everything, with relative URLs", async () => {
     const accountId = await seedPublisher();
     const scene = await seedScene(accountId, {
