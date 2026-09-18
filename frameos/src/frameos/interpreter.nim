@@ -362,7 +362,8 @@ var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var lastInterpretedScenesLoadError = ""
-var sceneDefinitionHashes = initTable[SceneId, string]() # see sceneDefinitionHash
+when rhythmStorageCompiled:
+  var sceneDefinitionHashes = initTable[SceneId, uint64]() # see sceneDefinitionHash
 
 proc interpretedScenesLoadError*(): string =
   ## Why the last attempt to read scenes.json(.gz) off the disk failed, or ""
@@ -373,7 +374,8 @@ proc interpretedScenesLoadError*(): string =
 
 proc resetInterpretedScenes*() =
   allScenesLoaded = false
-  sceneDefinitionHashes = initTable[SceneId, string]()
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
   # A card that was full or missing may have been swapped along with the
   # scenes; give the disk tier another chance.
   imageSpillDisabled = false
@@ -386,7 +388,8 @@ proc registerCompiledScene*(sceneId: SceneId, exported: ExportedScene) =
 
 proc setUploadedInterpretedScenes*(scenes: Table[SceneId, ExportedInterpretedScene]) =
   uploadedScenes = scenes
-  sceneDefinitionHashes = initTable[SceneId, string]()
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
 
 proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
   uploadedScenes
@@ -410,32 +413,34 @@ proc diagnosticKeyword(node: DiagramNode): string =
 # Scene nodes on their own rhythm
 # -------------------------
 
-proc sceneDefinitionHash(sceneId: SceneId, depth = 0): string =
-  ## A fingerprint of what an embedded scene IS: its graph, and the graphs of
-  ## whatever it embeds. Pixels the storage tier wrote for one definition must
-  ## never come back under another (a deploy between two deep-sleep wakes).
-  ## Node ids are left out — they are assigned at load, in load order.
-  if sceneDefinitionHashes.hasKey(sceneId):
-    return sceneDefinitionHashes[sceneId]
-  var exported: ExportedInterpretedScene
-  if loadedScenes.hasKey(sceneId): exported = loadedScenes[sceneId]
-  elif uploadedScenes.hasKey(sceneId): exported = uploadedScenes[sceneId]
-  else: return "compiled"
-  var text = $exported.backgroundColor & "|" & $exported.refreshInterval
-  for node in exported.nodes:
-    text.add("|" & node.nodeType & ":" & (if node.data.isNil: "" else: $node.data))
-    if node.nodeType == "scene" and depth < 8 and not node.data.isNil:
-      text.add("=" & sceneDefinitionHash(node.data{"keyword"}.getStr().SceneId, depth + 1))
-  for edge in exported.edges:
-    text.add("|" & edge.sourceHandle & ">" & edge.targetHandle)
-  result = rhythmHash(text)
-  sceneDefinitionHashes[sceneId] = result
+when rhythmStorageCompiled:
+  proc sceneDefinitionHash(sceneId: SceneId, depth = 0): uint64 =
+    ## A fingerprint of what an embedded scene IS: its graph, and the graphs of
+    ## whatever it embeds. Pixels the storage tier wrote for one definition must
+    ## never come back under another (a deploy between two deep-sleep wakes).
+    ## Node ids are left out — they are assigned at load, in load order.
+    if sceneDefinitionHashes.hasKey(sceneId):
+      return sceneDefinitionHashes[sceneId]
+    var exported: ExportedInterpretedScene
+    if loadedScenes.hasKey(sceneId): exported = loadedScenes[sceneId]
+    elif uploadedScenes.hasKey(sceneId): exported = uploadedScenes[sceneId]
+    else: return 0
+    var text = $exported.backgroundColor & "|" & $exported.refreshInterval
+    for node in exported.nodes:
+      text.add("|" & node.nodeType & ":" & (if node.data.isNil: "" else: $node.data))
+      if node.nodeType == "scene" and depth < 8 and not node.data.isNil:
+        text.add("=" & $sceneDefinitionHash(node.data{"keyword"}.getStr().SceneId, depth + 1))
+    for edge in exported.edges:
+      text.add("|" & edge.sourceHandle & ">" & edge.targetHandle)
+    result = rhythmHash(text)
+    if result == 0: result = 1 # 0 means "not computed yet"
+    sceneDefinitionHashes[sceneId] = result
 
-proc sceneStateKey(scene: FrameScene): string =
-  if scene.state.isNil: "" else: rhythmHash($scene.state)
+proc sceneStateKey(scene: FrameScene): uint64 =
+  rhythmStateKey(scene.state)
 
 proc runSceneNodeRender(owner: FrameScene, nodeId: NodeId, child: FrameScene,
-    exportedChild: ExportedScene, context: ExecutionContext, direct = false) =
+    exportedChild: ExportedScene, context: ExecutionContext, direct = false) {.noinline.} =
   ## A scene node handling `render`. The node is the scheduling boundary
   ## (frameos/scene_rhythm.nim): the child gets a fresh `nextSleep`, so
   ## `logic/nextSleepDuration` inside it means "this child next runs in N
@@ -443,8 +448,9 @@ proc runSceneNodeRender(owner: FrameScene, nodeId: NodeId, child: FrameScene,
   ## state is what it was, is painted from cached pixels instead of being run.
   let interpretedChild = child of InterpretedFrameScene
   let followsChildren = interpretedChild and InterpretedFrameScene(child).refreshFollowsChildren
-  if rhythmStorageTier and interpretedChild and ensureRhythm(child).defHash.len == 0:
-    child.rhythm.defHash = sceneDefinitionHash(child.id)
+  when rhythmStorageCompiled:
+    if rhythmStorageTier and interpretedChild and ensureRhythm(child).defHash == 0:
+      child.rhythm.defHash = sceneDefinitionHash(child.id)
   let visit = rhythmBeginSceneNode(child, owner, nodeId, context, sceneStateKey(child), direct)
   if visit.restored:
     owner.logger.log(%*{"event": "rhythm:reuse", "sceneId": child.id.string,
@@ -1919,6 +1925,17 @@ proc parseHook*(s: string, i: var int, v: var SceneId) =
   parseHook(s, i, tmp)
   v = SceneId(tmp)
 
+proc parseHook*(s: string, i: var int, v: var SplitLayoutMarker) =
+  ## The layout itself is the editor's; the runtime only needs to know it is
+  ## there. Skipping it keeps a JsonNode parser (and the parsed layout) out of
+  ## a firmware that would never read it.
+  eatSpace(s, i)
+  v.present = i < s.len and s[i] == '{'
+  skipValue(s, i)
+
+proc dumpHook*(s: var string, v: SplitLayoutMarker) =
+  s.add(if v.present: "{}" else: "null")
+
 proc parseHook*(s: string, i: var int, v: var Color) =
   var tmp: string
   parseHook(s, i, tmp)
@@ -1978,9 +1995,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     storeOrigin: sceneOriginIsStore(scene.origin),
     # A scene the split drawer generated draws nothing of its own: it follows
     # its cells' rhythm instead of re-running them all on its own interval.
-    refreshFollowsChildren: scene.settings != nil and
-      not scene.settings.splitScreenLayout.isNil and
-      scene.settings.splitScreenLayout.kind == JObject,
+    refreshFollowsChildren: scene.settings != nil and scene.settings.splitScreenLayout.present,
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.
     publicStateFields: refresh.fields.filterIt(it.access != "private"),
@@ -2069,7 +2084,8 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
 
 proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
   loadedScenes = scenes
-  sceneDefinitionHashes = initTable[SceneId, string]()
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
   allScenesLoaded = true
   lastInterpretedScenesLoadError = ""
 
@@ -2078,7 +2094,8 @@ proc addInterpretedScenesToCache*(scenes: Table[SceneId, ExportedInterpretedScen
   ## loader brings in the scenes a resident scene embeds.
   for sceneId, exported in scenes:
     loadedScenes[sceneId] = exported
-  sceneDefinitionHashes = initTable[SceneId, string]()
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
 
 proc embeddedSceneIds*(exported: ExportedInterpretedScene): seq[SceneId] =
   ## The scenes this one's scene nodes point at (its split's panels).

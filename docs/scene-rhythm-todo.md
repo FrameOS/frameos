@@ -25,6 +25,13 @@ and only stores when the measured arithmetic (run time minus read-back, over
 the wakes it sits out, against the write) is a clear win; otherwise the child
 just renders again.
 
+Flash: the branch is +34.5 KB on the ESP32-S3 image with the memory and
+storage tiers compiled out (`-d:frameosRhythmMemory` / `-d:frameosRhythmStorage`
+opt them in; they were +22 KB together). Of what is left, ~10 KB is
+scene_rhythm.nim, ~9.5 KB the interpreter's pass driver and scene-node
+handling, ~2 KB the embedded-scene loading, and ~7 KB is GCC inlining noise in
+modules whose generated C did not change.
+
 ## Not yet verified on hardware
 
 - [ ] **The 13.3E6** (16 MB PSRAM, RGBX canvas, SD card): the transient

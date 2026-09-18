@@ -81,6 +81,14 @@ rectangles.
 
 ## Pixel reuse: three tiers, by what the device can afford
 
+On the ESP32 the tiers below are **compiled out** by default: scheduling and
+partial passes are what matter there (a canvas that persists needs no copies),
+a full pass with something worth keeping only happens on a scene with an
+interval of its own, and the module mostly cannot afford the copy anyway — and
+every KB counts on a board at 78 % of its slot. `-d:frameosRhythmMemory` and
+`-d:frameosRhythmStorage` put them back for a firmware that wants them; host
+builds and tests always have them.
+
 A full pass wipes the canvas, and used to re-run children that were nowhere
 near due — the photo refetched because its sibling forced a pass. A child that
 is **not due**, whose **state is what it was** (parent → child inputs

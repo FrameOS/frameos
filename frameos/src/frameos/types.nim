@@ -340,13 +340,13 @@ type
                           ## split's default cell renderer): one rectangle cannot stand for it
     visitPass*: int       ## the pass that last visited it, to notice exactly that
     seqBegin*, seqEnd*: int ## paint-sequence interval of its last run
-    stateKey*: string     ## its state as of the last run (pixels are only as good as this)
-    seedKey*: string      ## its state before its FIRST run — what a fresh instance
+    stateKey*: uint64     ## a hash of its state as of the last run (pixels are only as good as this)
+    seedKey*: uint64      ## its state before its FIRST run — what a fresh instance
                           ## (a deep-sleep wake) has to match to reuse stored pixels
-    defHash*: string      ## its definition's fingerprint, for the storage tier
+    defHash*: uint64      ## its definition's fingerprint, for the storage tier
     snapshot*: Image      ## memory tier: its rectangle's pixels, when affordable
     snapshotSeq*: int     ## paint sequence the snapshot was taken at
-    snapshotKey*: string
+    snapshotKey*: uint64
     tree*: RhythmTree     ## top scene only
 
   RhythmTree* = ref object
@@ -456,8 +456,12 @@ type
     backgroundColor*: Color
     refreshInterval*: float
     ## Present on scenes the split-screen drawer generated. The runtime only
-    ## asks whether it is there: such a scene follows its children's rhythm.
-    splitScreenLayout*: JsonNode
+    ## asks whether it is there — such a scene follows its children's rhythm —
+    ## so the value is skipped, not parsed (interpreter.nim's parseHook).
+    splitScreenLayout*: SplitLayoutMarker
+
+  SplitLayoutMarker* = object
+    present*: bool
 
   # Imported scene from scenes.json
   FrameSceneInput* = ref object of RootObj

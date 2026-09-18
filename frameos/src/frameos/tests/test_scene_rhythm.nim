@@ -468,7 +468,7 @@ suite "scene rhythm":
         if path.endsWith(".px"): stored.add(path)
       check stored.len == 1
       var bytes = readFile(stored[0])
-      let header = 4 + 4 + 12 + 24 + 16 + 16 # magic, version, shape, due+interval+rate, two keys
+      let header = 4 + 4 + 12 + 24 + 16 # magic, version, shape, due+interval+rate, two keys
       for i in countup(header, bytes.len - 9, 4):
         bytes[i] = char(7); bytes[i + 1] = char(7); bytes[i + 2] = char(7); bytes[i + 3] = char(255)
       writeFile(stored[0], bytes)
