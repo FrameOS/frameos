@@ -1358,6 +1358,8 @@ static void client_task(void *arg)
                             /* a due date past the longest allowed interval is
                              * garbage (clock jump, stale RTC) — render */
                             s_next_render_due < wall_now + 7 * 86400 + 3600;
+        /* Why this pass, for the scene's own scheduling (frameos_nim.h). */
+        bool forced_pass = force_render;
         force_render = false;
         bool rendered = false;
         if (s_render_paused_for_memory) {
@@ -1378,6 +1380,7 @@ static void client_task(void *arg)
                 ESP_LOGW(TAG, "OTA in progress; skipping render cycle");
                 log_render_skipped("ota", -1);
             } else {
+                frameos_nim_set_pass_context(forced_pass, deep_sleep_now);
                 render_once();
                 rendered = true;
             }
@@ -1399,12 +1402,30 @@ static void client_task(void *arg)
         /* A per-render override from logic/nextSleepDuration beats both
          * intervals, like context.nextSleep on the Pi runner. Only valid
          * right after a render actually ran. */
+        /* Scenes embedded in the scene render on their own schedule, so the
+         * wake that matters is the soonest due time in the whole tree — a
+         * split of a minute clock and a ten-minute photo wakes every minute.
+         * `next_wake` is what is LEFT (seconds from now), so it is not run
+         * through compute_sleep_seconds, which would subtract this cycle's
+         * panel refresh from it a second time and wake before anything is
+         * due. A wall-clock-aligned schedule aligns to the cadence of
+         * whatever is due next instead. */
+        double next_wake = -1.0;
         if (rendered) {
-            double next_sleep = frameos_nim_next_sleep();
-            if (next_sleep >= 0.0) {
-                if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;
-                if (next_sleep < 1.0) next_sleep = 1.0;
-                interval = (uint32_t)next_sleep;
+            next_wake = frameos_nim_next_wake();
+            if (next_wake >= 0.0) {
+                double cadence = frameos_nim_wake_cadence();
+                if (cadence >= 1.0) {
+                    if (cadence > 7 * 86400.0) cadence = 7 * 86400.0;
+                    interval = (uint32_t)cadence;
+                }
+            } else {
+                double next_sleep = frameos_nim_next_sleep();
+                if (next_sleep >= 0.0) {
+                    if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;
+                    if (next_sleep < 1.0) next_sleep = 1.0;
+                    interval = (uint32_t)next_sleep;
+                }
             }
         }
         if (battery_critical && interval < FOS_BATTERY_CRITICAL_SLEEP_SEC) {
@@ -1412,6 +1433,15 @@ static void client_task(void *arg)
         }
 
         uint32_t sleep_s = compute_sleep_seconds(interval, cycle_start);
+        bool aligned = config->wake_schedule && fos_wifi_time_synced() && time(NULL) > 1000000000;
+        /* (A critical battery skipped the render, so next_wake is unset.) */
+        if (next_wake >= 0.0 && !aligned) {
+            if (next_wake > 7 * 86400.0) next_wake = 7 * 86400.0;
+            /* Round up: waking a fraction early means nothing is due yet. */
+            sleep_s = (uint32_t)next_wake;
+            if ((double)sleep_s < next_wake) sleep_s += 1;
+            if (sleep_s < 1) sleep_s = 1;
+        }
         /* A pass that ran before the scene store finished loading must not
          * park the frame for the whole fallback interval: scenes only load ON
          * a pass, so nothing wakes the loop when they become loadable, and a

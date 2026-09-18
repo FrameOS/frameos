@@ -65,6 +65,9 @@ extern void fos_nim_set_time_zone_impl(const char *time_zone);
 extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char *time_zone);
 extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
+extern double fos_nim_next_wake_impl(void);
+extern double fos_nim_wake_cadence_impl(void);
+extern void fos_nim_set_pass_context_impl(int forced, int canvas_volatile);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_send_event_impl(const char *event, const char *payload_json);
 
@@ -808,6 +811,32 @@ double frameos_nim_next_sleep(void)
     double next_sleep = fos_nim_next_sleep_impl();
     nim_lock_give();
     return next_sleep;
+}
+
+double frameos_nim_next_wake(void)
+{
+    if (!s_nim_ready) return -1;
+    if (!nim_lock_take()) return -1;
+    double next_wake = fos_nim_next_wake_impl();
+    nim_lock_give();
+    return next_wake;
+}
+
+double frameos_nim_wake_cadence(void)
+{
+    if (!s_nim_ready) return -1;
+    if (!nim_lock_take()) return -1;
+    double cadence = fos_nim_wake_cadence_impl();
+    nim_lock_give();
+    return cadence;
+}
+
+void frameos_nim_set_pass_context(bool forced, bool canvas_volatile)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_pass_context_impl(forced ? 1 : 0, canvas_volatile ? 1 : 0);
+    nim_lock_give();
 }
 
 bool frameos_nim_render_requested(void)

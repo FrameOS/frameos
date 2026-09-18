@@ -80,6 +80,8 @@
     "src/test/shared-spa/cloud-scene-persist-equality.test.ts",
     "src/test/shared-spa/scene-origin.test.ts",
     "src/test/shared-spa/embedded-editor-scene-sanitize.test.ts",
+    "src/test/shared-spa/split-scene-settings.test.ts",
+    "src/test/shared-spa/scene-rhythm.test.ts",
     // Same story from the other direction: it imports metricsLogic directly
     // for the metric-card hash helpers, and metricsLogic builds RebootMarker
     // objects with optional fields spelled as `undefined` — legal under the

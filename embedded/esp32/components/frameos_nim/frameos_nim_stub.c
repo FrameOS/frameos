@@ -70,6 +70,9 @@ bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, cha
 }
 double frameos_nim_scene_interval(void) { return 0; }
 double frameos_nim_next_sleep(void) { return -1; }
+double frameos_nim_next_wake(void) { return -1; }
+double frameos_nim_wake_cadence(void) { return -1; }
+void frameos_nim_set_pass_context(bool forced, bool canvas_volatile) { (void)forced; (void)canvas_volatile; }
 bool frameos_nim_render_requested(void) { return false; }
 bool frameos_nim_send_event(const char *event, const char *payload_json)
 {

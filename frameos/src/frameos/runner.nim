@@ -21,6 +21,8 @@ import frameos/types
 import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
+import frameos/scene_rhythm
+from frameos/interpreter import renderRhythmPass
 import frameos/boot_guard
 import frameos/runtime_diagnostics
 from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
@@ -171,7 +173,21 @@ proc configureControlCode(self: RunnerThread) =
     self.controlCodeRender = nil
     self.controlCodeData = nil
 
-proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
+proc persistentSceneCanvas(self: RunnerThread): Image =
+  ## The canvas interpreted scenes render into, kept from pass to pass at the
+  ## scene's (rotated) dimensions. That it persists is what lets an embedded
+  ## scene that is not due simply not run (frameos/scene_rhythm.nim) — so
+  ## nothing but a scene ever draws on it: overlays, flip and rotation happen
+  ## on the copy that goes out.
+  let (width, height) = case self.frameConfig.rotate:
+    of 90, 270: (self.frameConfig.height, self.frameConfig.width)
+    else: (self.frameConfig.width, self.frameConfig.height)
+  if self.sceneCanvas.isNil or self.sceneCanvas.width != width or self.sceneCanvas.height != height:
+    self.sceneCanvas = newImage(width, height)
+  self.sceneCanvas
+
+proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene,
+    force = rfFresh): (Image, float) =
   let sceneTimer = getMonoTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
@@ -184,9 +200,6 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     scene: scene,
     event: "render",
     payload: %*{},
-    image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
     hasImage: true,
     loopIndex: 0,
     loopKey: ".",
@@ -194,7 +207,41 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   )
 
   try:
-    discard exportedScene.render(scene, context)
+    # Interpreted scenes render through the rhythm pass: it decides whether the
+    # whole scene runs or only the embedded scenes that are due, straight into
+    # the persistent canvas. Compiled (legacy) scenes render as they always
+    # have, into a fresh image, on the top scene's schedule alone.
+    let rhythmPass = scene of InterpretedFrameScene
+    if rhythmPass:
+      let pass = renderRhythmPass(scene, self.persistentSceneCanvas(), force)
+      context.image = pass.image
+      context.nextSleep = pass.nextSleep
+      if pass.info.partial or pass.info.restored.len > 0:
+        # Which embedded scenes this pass actually ran, and which it painted
+        # from pixels it already had.
+        self.logger.log(%*{"event": "render:pass", "sceneId": scene.id.string,
+          "pass": (if pass.info.partial: "partial" else: "full"), "reason": pass.info.reason,
+          "ran": pass.info.ran, "reused": pass.info.restored})
+    else:
+      context.image = case self.frameConfig.rotate:
+        of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+        else: newImage(self.frameConfig.width, self.frameConfig.height)
+      discard exportedScene.render(scene, context)
+    let sceneImage = context.image
+
+    var outImage: Image
+    if sceneImage.width != requiredWidth or sceneImage.height != requiredHeight:
+      outImage = newImage(requiredWidth, requiredHeight)
+      outImage.fill(scene.backgroundColor)
+      scaleAndDrawImage(outImage, sceneImage, self.frameConfig.scalingMode)
+    elif rhythmPass:
+      # Never the persistent canvas itself: the overlays below, the flip, and
+      # whatever a driver does to its input must not end up in the next pass.
+      outImage = sceneImage.copy()
+    else:
+      outImage = sceneImage
+    context.image = outImage
+
     if self.frameConfig.controlCode.enabled:
       render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
       render_imageApp.App(self.controlCodeRender).run(context)
@@ -221,15 +268,6 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
         linkText.add("\n" & linkCode.verificationUri)
       render_textApp.App(self.linkCodeRender).appConfig.text = linkText
       render_textApp.App(self.linkCodeRender).run(context)
-    let image = context.image
-
-    var outImage: Image
-    if image.width != requiredWidth or image.height != requiredHeight:
-      outImage = newImage(requiredWidth, requiredHeight)
-      outImage.fill(scene.backgroundColor)
-      scaleAndDrawImage(outImage, image, self.frameConfig.scalingMode)
-    else:
-      outImage = image
     setLastImage(outImage)
     # The local-presence code, if one is pending. Drawn AFTER the render is
     # stored (setLastImage copies), so it reaches the panel only: the whole
@@ -239,14 +277,9 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # paint over it.
     let presenceCode = activeLocalAccessCode()
     if presenceCode.len > 0:
-      let sceneImage = context.image
-      context.image = outImage
-      try:
-        render_textApp.App(self.localAccessRender).appConfig.text =
-          "Local network access\n" & presenceCode
-        render_textApp.App(self.localAccessRender).run(context)
-      finally:
-        context.image = sceneImage
+      render_textApp.App(self.localAccessRender).appConfig.text =
+        "Local network access\n" & presenceCode
+      render_textApp.App(self.localAccessRender).run(context)
     case self.frameConfig.flip:
     of "horizontal":
       outImage.flipHorizontal()
@@ -343,7 +376,15 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       currentScene.isRendering = true
       self.triggerRenderNext = false # used to debounce render events received while rendering
 
-      var renderResult = self.renderSceneImage(exportedScene.get(), currentScene)
+      # Why this pass: a timer ran out (rfNone: only what is due runs), or
+      # someone asked (the message loop set `renderForce`). Another scene has
+      # drawn on the shared canvas since this one last did, so a scene change
+      # is never a pass that may keep anything.
+      var renderForce = self.renderForce
+      self.renderForce = rfNone
+      if sceneChangedThisCycle:
+        renderForce = rfFresh
+      var renderResult = self.renderSceneImage(exportedScene.get(), currentScene, renderForce)
       var lastRotatedImage = renderResult[0]
       let nextSleep = renderResult[1]
       # Read the interval AFTER the render: a scene that paces itself while
@@ -352,6 +393,20 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # before, the first cycle after every runtime start slept the scene's
       # init default — five static minutes of logo before the animation began.
       let interval = currentScene.refreshInterval
+      # Seconds until anything in the scene — itself or any scene embedded in
+      # it, at any depth — next wants to render (frameos/scene_rhythm.nim).
+      # Negative for a compiled scene, which keeps the rule below it: its own
+      # `nextSleep`, else its interval. Due times are absolute, so this is
+      # asked again wherever a duration is needed rather than carried around.
+      template secondsUntilDue(): float =
+        (block:
+          let rhythmWake = rhythmNextWakeSeconds(currentScene)
+          if rhythmWake >= 0: rhythmWake
+          elif nextSleep >= 0: nextSleep
+          else: max(interval - durationToSeconds(getMonoTime() - timer), 0.0))
+      # The cadence the loop is actually running at. A slow split around a
+      # ticking clock is a fast scene as far as logs and sockets go.
+      let wakeCadence = secondsUntilDue() + durationToSeconds(getMonoTime() - timer)
       reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
       # Refresh the scene's snapshot on a switch, and otherwise whenever the
       # one on disk has gone stale. Writing it only once per scene — which is
@@ -376,7 +431,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           })
       clearBootCrashCount()
       successfulSceneRenders += 1
-      if interval < 1:
+      if wakeCadence < 1:
         let now = getMonoTime()
         if now >= nextServerRenderAt:
           nextServerRenderAt = nextServerRenderAt + serverRenderDelay
@@ -396,11 +451,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       var driverRetryImage: Image = nil
       var driverRetrySeconds = 0.0
       try:
-        let nextRenderSeconds = if nextSleep >= 0:
-            nextSleep
-          else:
-            max(interval - durationToSeconds(getMonoTime() - timer), 0.0)
-        setNextRenderSeconds(nextRenderSeconds)
+        setNextRenderSeconds(secondsUntilDue())
         # TODO: render the driver part in another thread
         drivers.render(lastRotatedImage)
         noteDriverRendered()
@@ -439,7 +490,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         clearNextRenderSeconds()
       markRuntimeDone()
 
-      if interval < 1 or (nextSleep > 0 and nextSleep < interval):
+      if wakeCadence < 1:
         let now = getMonoTime()
         let elapsedSeconds = durationToSeconds(now - timer)
         if elapsedSeconds < FAST_SCENE_CUTOFF_SECONDS:
@@ -480,8 +531,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         break
 
       # If no sleep duration provided by the scene, calculate based on the interval
-      sleepDuration = if nextSleep >= 0: nextSleep * 1000
-                      else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
+      sleepDuration = max(secondsUntilDue() * 1000, 0.1)
       self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
       var nextDriverIdleTurnOffAt =
@@ -652,6 +702,16 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
       try:
         case event:
           of "render":
+            # A scene that dispatched `render` marked ITSELF due and says so
+            # (interpreter.nim): the pass runs what is due. "redraw" is an
+            # overlay that changed — rebuild the picture, keep what is not
+            # due. Anything else is a person or the control plane asking, and
+            # that renders everything.
+            case payload{"rhythm"}.getStr()
+            of "due": discard
+            of "redraw":
+              if self.renderForce == rfNone: self.renderForce = rfRedraw
+            else: self.renderForce = rfFresh
             self.triggerRenderNext = true
             continue
           of "turnOn":
@@ -692,6 +752,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               self.triggerRenderNext = true
               self.dispatchSceneEvent(some(sceneId), event, payload)
             elif payload.hasKey("state"):
+              self.renderForce = rfFresh
               self.triggerRenderNext = true
               self.dispatchSceneEvent(some(sceneId), event, payload)
             continue # don't dispatch this event to the scene

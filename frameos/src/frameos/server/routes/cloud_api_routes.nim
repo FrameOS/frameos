@@ -787,7 +787,7 @@ proc addCloudApiRoutes*(router: var Router) =
       # Cancelling a pending panel link must also stop the background tick
       # from starting a fresh one, and take the code off the display.
       clearPendingLinkCode()
-      sendEvent("render", %*{})
+      sendEvent("render", %*{"rhythm": "redraw"})
       # Leaving managed mode lifts the private-network HTTP deny immediately.
       refreshLocalNetworkPolicy(globalFrameConfig)
   )

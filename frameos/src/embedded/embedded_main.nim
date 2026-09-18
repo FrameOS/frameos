@@ -268,6 +268,7 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
   let interpreted = renderCurrentScene()
   if interpreted.isSome:
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
+  canvasTouched()
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
 proc packImageForFormat(
@@ -424,6 +425,7 @@ proc renderErrorFallback(
     # Into the persistent canvas: a fresh full-frame image here is exactly
     # the allocation an OOM-aborted render could not afford.
     let image = renderCanvas()
+    canvasTouched()
     image.renderErrorInto(image.width, image.height, message)
     if not packImageForFormat(image, buf, bufLen, pixelFormat):
       return 1
@@ -495,6 +497,7 @@ proc renderErrorFallbackAlloc(
     if raw == nil:
       return 1
     let image = renderCanvas()
+    canvasTouched()
     image.renderErrorInto(image.width, image.height, message)
     if not packImageForFormat(image, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat):
       renderBufferFree(raw)
@@ -598,6 +601,30 @@ proc fos_nim_next_sleep_impl(): cdouble {.exportc, cdecl.} =
   except CatchableError as e:
     log("next sleep failed: " & e.msg)
     -1.cdouble
+
+proc fos_nim_next_wake_impl(): cdouble {.exportc, cdecl.} =
+  ## Seconds from NOW until the scene, or any scene embedded in it, is next
+  ## due (frameos/scene_rhythm.nim); negative = no opinion, the interval logic
+  ## applies. Unlike the two above this is not an interval to subtract the
+  ## cycle's own duration from: it is already what is left.
+  try:
+    sceneNextWakeSeconds().cdouble
+  except Defect, CatchableError:
+    -1.cdouble
+
+proc fos_nim_wake_cadence_impl(): cdouble {.exportc, cdecl.} =
+  ## The interval of whatever is due next: what a wall-clock-aligned wake
+  ## schedule should align to. Negative = no opinion.
+  try:
+    sceneWakeCadenceSeconds().cdouble
+  except Defect, CatchableError:
+    -1.cdouble
+
+proc fos_nim_set_pass_context_impl(forced, canvasVolatile: cint) {.exportc, cdecl.} =
+  ## Before each render pass: was it asked for (render verb, button, console)
+  ## rather than timed, and is the frame about to deep sleep (the canvas will
+  ## not survive to the next pass)?
+  setPassContext(forced != 0, canvasVolatile != 0)
 
 proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## True once when a scene event (e.g. dispatched "render") asked for a

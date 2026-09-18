@@ -62,6 +62,8 @@ export default tseslint.config(
       // Same exclusion, same reason: sanitizeIncomingScenes is a thin wrapper
       // over that same sanitizeScene.
       "**/src/test/shared-spa/embedded-editor-scene-sanitize.test.ts",
+      "**/src/test/shared-spa/split-scene-settings.test.ts",
+      "**/src/test/shared-spa/scene-rhythm.test.ts",
       // Same exclusion, same reason from the other direction: it imports
       // metricsLogic, whose RebootMarker literals spell optional fields as
       // `undefined`.

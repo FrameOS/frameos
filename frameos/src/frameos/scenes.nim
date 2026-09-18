@@ -9,6 +9,7 @@ import frameos/hal/files as halFiles
 import frameos/types
 import frameos/interpreter
 import frameos/refresh_interval
+import frameos/scene_rhythm
 import frameos/js_runtime/runtime
 import frameos/js_runtime/app_runtime
 
@@ -79,6 +80,7 @@ proc findExportedScene*(sceneId: SceneId): Option[ExportedScene] =
 proc cleanupSceneRuntime*(scene: FrameScene) =
   if scene.isNil:
     return
+  rhythmRelease(scene)
   if scene of InterpretedFrameScene:
     let interpreted = InterpretedFrameScene(scene)
     for _, childScene in interpreted.sceneNodes:

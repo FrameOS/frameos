@@ -1900,6 +1900,10 @@ export function buildSplitScene(
     addEdge(eventNode.id, 'next', rootNodeId)
   }
 
+  // "Edit split → Save" regenerates the graph, not the scene: whatever else
+  // the scene's settings hold stays, under the three keys the layout owns.
+  const existingSettings = (sceneId && frame.scenes?.find((scene) => scene.id === sceneId)?.settings) || {}
+
   return sanitizeScene(
     {
       id: sceneId || uuidv4(),
@@ -1908,6 +1912,7 @@ export function buildSplitScene(
       edges,
       fields: [],
       settings: {
+        ...existingSettings,
         backgroundColor: background.color,
         execution: 'interpreted',
         splitScreenLayout: cloneSplitScreenSceneLayout(layout) as unknown as Record<string, any>,

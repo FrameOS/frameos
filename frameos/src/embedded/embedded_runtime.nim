@@ -7,7 +7,7 @@
 # run the AOT-compiled standard app library. The firmware's C side feeds us
 # scene JSON (from SPIFFS or the backend) and asks for rendered frames.
 
-import std/[json, locks, options, sequtils, strformat, tables]
+import std/[json, locks, options, sequtils, strformat, strutils, tables]
 import pixie
 
 import frameos/types
@@ -16,6 +16,7 @@ import std/times
 import frameos/channels
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
+import frameos/scene_rhythm
 import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
@@ -288,6 +289,7 @@ proc cleanupScene(scene: FrameScene) =
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
   when defined(memProbe): memProbe("  cleanupScene: entry")
+  rhythmRelease(scene)
   let interpreted = InterpretedFrameScene(scene)
   for _, childScene in interpreted.sceneNodes:
     cleanupScene(childScene)
@@ -607,25 +609,66 @@ proc sceneNextSleepSeconds*(): float =
   ## negative = no override, use the interval logic.
   lastNextSleep
 
+# ------------------------------------------------------------- scene rhythm
+#
+# Embedded scenes render when THEY are due (frameos/scene_rhythm.nim): the
+# canvas above persists between passes, so a pass runs only the scene nodes
+# whose time has come and leaves everyone else's pixels where they are. The
+# firmware's render task owns the clock, so the two sides tell each other
+# three things: C says why a pass is happening and whether the canvas is about
+# to be lost to deep sleep; Nim says how long until something is due again.
+
+var passForced = true
+  ## The pass was asked for (render verb, button, console) rather than timed.
+  ## True until C says otherwise, so a firmware that never calls
+  ## `setPassContext` renders everything every time, as it always did.
+
+proc setPassContext*(forced, canvasVolatile: bool) =
+  passForced = forced
+  # About to deep sleep: PSRAM goes dark and the canvas with it. A scene node
+  # with a long time left is worth writing to storage, so the next wake reads
+  # its pixels back instead of downloading the photo again.
+  rhythmCanvasVolatile = canvasVolatile
+
+proc sceneNextWakeSeconds*(): float =
+  ## Seconds from now until the scene, or any scene embedded in it, wants to
+  ## render; negative when nothing has rendered yet.
+  if currentScene.isNil: -1.0 else: rhythmNextWakeSeconds(currentScene)
+
+proc sceneWakeCadenceSeconds*(): float =
+  ## The interval of whatever is due next — what a wall-clock-aligned wake
+  ## schedule aligns to.
+  if currentScene.isNil: -1.0 else: rhythmNextWakeCadence(currentScene)
+
+proc canvasTouched*() =
+  ## Something that is not the scene drew on the canvas (an error frame, the
+  ## status screen): no rectangle on it is an embedded scene's picture any more.
+  if not currentScene.isNil:
+    rhythmInvalidate(currentScene)
+
 proc renderCurrentScene*(): Option[Image] =
   ## Render the active interpreted scene; none() when no scenes are loaded
   ## (the caller falls back to the baked demo scene).
   lastNextSleep = -1
   if not ensureScene():
     return none(Image)
-  # The persistent canvas goes in with the event; the interpreter's "render"
-  # handler fills it with the scene background and draws into it.
-  let context = ExecutionContext(
-    scene: currentScene,
-    event: "render",
-    payload: %*{},
-    image: renderCanvas(),
-    hasImage: true,
-    loopIndex: 0,
-    loopKey: ".",
-    nextSleep: -1
-  )
-  let image = interpreter.render(currentScene, context)
+  # A scene that asked for this pass marked itself due, so something is. A
+  # forced pass with nothing due is a person asking: render it all, fresh. A
+  # timed wake that landed early (whole-second sleeps, a wall-clock-aligned
+  # schedule) is still a wake FOR whatever is due next.
+  var force = rfNone
+  if not rhythmAnythingDue(currentScene):
+    if passForced: force = rfFresh
+    else: rhythmPullEarliestDue(currentScene)
+  # The persistent canvas goes in; a full pass fills it with the scene
+  # background and draws into it, a partial pass only touches what is due.
+  let pass = renderRhythmPass(currentScene, renderCanvas(), force)
+  let image = pass.image
+  lastNextSleep = pass.nextSleep
+  if pass.info.partial or pass.info.restored.len > 0:
+    log("render pass: " & (if pass.info.partial: "partial" else: "full") & " (" & pass.info.reason &
+      "), ran " & (if pass.info.ran.len == 0: "nothing" else: pass.info.ran.join(", ")) &
+      (if pass.info.restored.len > 0: ", reused " & pass.info.restored.join(", ") else: ""))
   # The scene is done with its JS nodes until the next render, which on this
   # board is minutes away. Hand their interpreters back now so the packing and
   # display work below — and the next render's image decodes — see the memory.
@@ -634,5 +677,4 @@ proc renderCurrentScene*(): Option[Image] =
   if image.isNil:
     log("render returned no image")
     return none(Image)
-  lastNextSleep = context.nextSleep
   some(image)

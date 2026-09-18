@@ -121,6 +121,22 @@ double frameos_nim_scene_interval(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */
 double frameos_nim_next_sleep(void);
+/* Scene rhythm (frameos/scene_rhythm.nim): embedded scenes render when THEY
+ * are due, so the next wake is the soonest due time in the whole scene tree.
+ * Seconds from NOW — not an interval to subtract the cycle's duration from —
+ * or negative for "no opinion" (no scene rendered yet). Consult right after a
+ * render. */
+double frameos_nim_next_wake(void);
+/* The interval of whatever is due next: what a wall-clock-aligned wake
+ * schedule aligns to. Negative = no opinion. */
+double frameos_nim_wake_cadence(void);
+/* Before each render pass. `forced`: the pass was asked for (render verb,
+ * button, console, schedule) rather than timed — with nothing due, a forced
+ * pass renders everything fresh, a timed one renders what is due next.
+ * `canvas_volatile`: the frame deep-sleeps after this pass, PSRAM and the
+ * canvas with it, so embedded scenes with a long time left are written to
+ * storage and read back on the next wake instead of being re-run. */
+void frameos_nim_set_pass_context(bool forced, bool canvas_volatile);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
 /* Deliver a JSON event payload to the current interpreted scene. */

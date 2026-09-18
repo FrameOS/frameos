@@ -537,6 +537,35 @@ operations one span for an owner — which is why the benchmark came back flat.
 
 </details>
 
+### The paint log: what the views made possible next
+
+Cells being views of a canvas that persists between renders is what scene
+rhythm (`docs/scene-rhythm.md`) stands on: an embedded scene that is not due
+does not run, and its pixels are simply still there. Two rules from this
+document carry over and one is new.
+
+- **Carried over: nothing but the scene writes the canvas.** The cache never
+  stores the live canvas (above), the ESP32 packers only read it, and the Pi
+  runner now draws its overlays, flip and rotation on the copy that goes out.
+  A pass that raised, an error frame, or the status screen invalidates the
+  canvas for partial passes (`rhythmInvalidate`).
+- **Carried over: every tier's floor is "do nothing".** A snapshot that does
+  not fit, storage without room, a file that does not match — the child runs,
+  which is yesterday's behaviour.
+- **New: the paint log.** During a pass the interpreter records one absolute
+  rectangle per executed render node (`rhythmNotePaint`, from the view's
+  `origin`/`stride`; containers that only delegate are skipped). Afterwards a
+  scene node is *overpainted* if any record after its own sequence interval
+  intersects its rectangle; only nodes that are not may render alone into the
+  canvas. It is deliberately conservative — a node handed the whole canvas is
+  assumed to paint all of it, a capped log (512) that overflows marks
+  everything overpainted — so a partial pass happens only when it is provably
+  the same picture a full pass would have produced.
+
+The erasing-blend caveat above matters here in one way: a child that punches
+alpha into its cell still starts from its own opaque background fill on every
+run, so a partial pass sees exactly what a full pass would.
+
 ### Transformer audit
 
 - `render/opacity` — **forwards**, shipped.
