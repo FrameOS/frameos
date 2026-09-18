@@ -332,6 +332,7 @@ type
     interpreted*: bool    ## compiled children are scheduled but never run alone
     dueAt*: float         ## monotonic seconds; 0 = now, Inf = follows its children
     interval*: float      ## seconds the last run asked to wait (logs, cache policy)
+    runSeconds*: float    ## how long its last real run took (what a stored rectangle saves)
     x*, y*, w*, h*: int   ## absolute rectangle on the pass canvas
     onCanvas*: bool       ## handed a view of the pass canvas, and drew into it
     overpainted*: bool    ## something outside it painted over its rectangle later
@@ -340,6 +341,8 @@ type
     visitPass*: int       ## the pass that last visited it, to notice exactly that
     seqBegin*, seqEnd*: int ## paint-sequence interval of its last run
     stateKey*: string     ## its state as of the last run (pixels are only as good as this)
+    seedKey*: string      ## its state before its FIRST run — what a fresh instance
+                          ## (a deep-sleep wake) has to match to reuse stored pixels
     defHash*: string      ## its definition's fingerprint, for the storage tier
     snapshot*: Image      ## memory tier: its rectangle's pixels, when affordable
     snapshotSeq*: int     ## paint sequence the snapshot was taken at

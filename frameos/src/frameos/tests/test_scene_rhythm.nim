@@ -54,6 +54,23 @@ proc colorChild(name, hex: string, interval: float, nextSleep = -1.0): ExportedI
     refreshInterval: interval, publicStateFields: @[], nodes: nodes, edges: edges, apps: %*{},
     init: init, render: render, runEvent: runEvent)
 
+proc mutatingChild(name, hex: string, interval: float): ExportedInterpretedScene =
+  ## render -> color -> setAsState(seen = 42): a scene that writes its own
+  ## state while rendering, like every scene built around logic/setAsState.
+  ExportedInterpretedScene(name: name, backgroundColor: parseHtmlColor("#000000"),
+    refreshInterval: interval, publicStateFields: @[],
+    nodes: @[
+      node(1, "event", %*{"keyword": "render"}),
+      node(2, "app", %*{"keyword": "render/color", "config": {"color": hex}}),
+      node(3, "app", %*{"keyword": "logic/setAsState", "config": {"stateKey": "seen", "debugLog": "false"}}),
+      node(4, "code", %*{"codeJS": "42", "codeArgs": [], "codeOutputs": [{"name": "valueJson", "type": "json"}]}),
+    ],
+    edges: @[
+      edge(1, 1, "next", 2, "prev"), edge(2, 2, "next", 3, "prev"),
+      edge(3, 4, "fieldOutput", 3, "fieldInput/valueJson"),
+    ],
+    apps: %*{}, init: init, render: render, runEvent: runEvent)
+
 proc splitOf(name: string, left, right: string, followsChildren: bool,
     interval = 300.0): ExportedInterpretedScene =
   ## render -> split(1x2) -> [scene left, scene right]
@@ -103,6 +120,8 @@ let
   pacedSplitId = "tests/rhythm/paced-split".SceneId
   innerId = "tests/rhythm/inner".SceneId
   sharedId = "tests/rhythm/shared".SceneId
+  mutatingId = "tests/rhythm/mutating".SceneId
+  mutatingSplitId = "tests/rhythm/mutating-split".SceneId
   nestedOuterId = "tests/rhythm/nested-outer".SceneId
 
 var uploaded = initTable[SceneId, ExportedInterpretedScene]()
@@ -110,6 +129,8 @@ uploaded[clockId] = colorChild("Clock", "#ff0000", 1.0)
 uploaded[photoId] = colorChild("Photo", "#0000ff", 600.0)
 uploaded[pacedId] = colorChild("Paced", "#00ff00", 3600.0, nextSleep = 42.0)
 uploaded[splitId] = splitOf("Split", clockId.string, photoId.string, followsChildren = true)
+uploaded[mutatingId] = mutatingChild("Mutating photo", "#0000ff", 600.0)
+uploaded[mutatingSplitId] = splitOf("Mutating split", clockId.string, mutatingId.string, followsChildren = true)
 uploaded[plainSplitId] = splitOf("Plain split", clockId.string, photoId.string,
   followsChildren = false, interval = 60.0)
 uploaded[outerId] = splitOf("Outer", splitId.string, pacedId.string, followsChildren = true)
@@ -154,6 +175,7 @@ suite "scene rhythm":
     rhythmNowOverride = 1000.0
     rhythmStorageTier = false
     rhythmCanvasVolatile = false
+    rhythmRunSecondsOverride = 30.0     # a photo: fetch + decode, worth a store
     availableRenderBytesOverride = 0
 
   test "absoluteRect reads a view's place off origin and stride":
@@ -446,7 +468,7 @@ suite "scene rhythm":
         if path.endsWith(".px"): stored.add(path)
       check stored.len == 1
       var bytes = readFile(stored[0])
-      let header = 4 + 4 + 12 + 16 + 16 + 16 # magic, version, shape, due+interval, two keys
+      let header = 4 + 4 + 12 + 24 + 16 + 16 # magic, version, shape, due+interval+rate, two keys
       for i in countup(header, bytes.len - 9, 4):
         bytes[i] = char(7); bytes[i + 1] = char(7); bytes[i + 2] = char(7); bytes[i + 3] = char(255)
       writeFile(stored[0], bytes)
@@ -477,6 +499,50 @@ suite "scene rhythm":
       let pass = renderRhythmPass(scene, canvas, rfRedraw)
       check pass.info.restored.len == 0
       check canvas.unsafe[30, 5].g == 255
+    removeDir(config.assetsPath)
+    rhythmWallOverride = -1
+
+  test "a scene that writes its own state still comes back from storage on a fresh wake":
+    rhythmStorageTier = true
+    rhythmCanvasVolatile = true
+    rhythmWallOverride = 1_800_000_000.0
+    removeDir(config.assetsPath)
+    createDir(config.assetsPath)
+    block firstWake:
+      let scene = newScene(mutatingSplitId)
+      discard renderRhythmPass(scene, newImage(W, H), rfRedraw)
+      let photo = InterpretedFrameScene(scene).sceneNodes[4.NodeId]
+      check photo.state{"seen"}.getInt() == 42       # it did write its state
+      check photo.rhythm.stateKey != photo.rhythm.seedKey
+      check countEvent("rhythm:store") == 1
+      # In memory, the pixels stay good: the state is what the run left.
+      rhythmNowOverride = 1060.0
+      let canvas = newImage(W, H)
+      check renderRhythmPass(scene, canvas, rfRedraw).info.restored.len == 0 # new canvas: nothing to copy
+    block nextWake:
+      rhythmNowOverride = 5.0
+      rhythmWallOverride = 1_800_000_060.0
+      let scene = newScene(mutatingSplitId)
+      let canvas = newImage(W, H)
+      let pass = renderRhythmPass(scene, canvas, rfRedraw)
+      # A fresh instance starts from the same seed the stored run started from.
+      check pass.info.restored.len == 1
+      check canvas.unsafe[30, 5].b == 255
+      check countEvent("rhythm:restore") == 1
+    removeDir(config.assetsPath)
+    rhythmWallOverride = -1
+
+  test "a store that would cost more than it saves is refused":
+    rhythmStorageTier = true
+    rhythmCanvasVolatile = true
+    rhythmWallOverride = 1_800_000_000.0
+    rhythmRunSecondsOverride = 0.0      # a colour fill: nothing to save
+    removeDir(config.assetsPath)
+    createDir(config.assetsPath)
+    let scene = newScene(splitId)
+    discard renderRhythmPass(scene, newImage(W, H), rfRedraw)
+    check countEvent("rhythm:store") == 0
+    check countEvent("rhythm:store:refused") == 1
     removeDir(config.assetsPath)
     rhythmWallOverride = -1
 

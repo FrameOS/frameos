@@ -449,6 +449,32 @@ proc loadScene*(payload: string): bool =
   log(&"loadScene: \"{sceneId.string}\" resident (1 of {max(sceneCatalog.len, 1)})")
   true
 
+proc addScene*(payload: string): bool =
+  ## A scene the resident one embeds (a split's panel), parsed into the cache
+  ## next to it — nothing is torn down. Scene nodes resolve by id at init, so a
+  ## split cannot start until every panel it names is resident too.
+  let inputs = parseInterpretedSceneInputs("[" & payload & "]")
+  if inputs.len == 0:
+    log("addScene: payload contained no scene")
+    return false
+  let newScenes = buildInterpretedScenes(inputs)
+  if newScenes.len == 0:
+    return false
+  addInterpretedScenesToCache(newScenes)
+  scenesLoadedCount = getInterpretedScenes().len
+  log(&"addScene: \"{inputs[0].id.string}\" resident alongside ({scenesLoadedCount} loaded)")
+  true
+
+proc missingSceneDependencies*(): seq[string] =
+  ## Scene ids the resident scenes embed that are not resident themselves and
+  ## that the catalog knows (so the firmware can read them off flash). Asked
+  ## again after each load: a panel may embed panels of its own.
+  let scenes = getInterpretedScenes()
+  for _, exported in scenes:
+    for id in embeddedSceneIds(exported):
+      if not scenes.hasKey(id) and catalogHas(id.string) and id.string notin result:
+        result.add(id.string)
+
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)
   let sceneId = SceneId(sceneIdText)

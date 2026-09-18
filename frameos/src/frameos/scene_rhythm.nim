@@ -50,10 +50,24 @@ const
     ## The storage tier costs flash wear; a node must have at least this long
     ## left, and must outlive the next wake by `StoredMinGainSeconds`.
   StoredMinGainSeconds = 30.0
+  StoredWriteMarginFactor = 2.0
+    ## A store must be expected to save this many times what it costs to write.
+  StoredMinSavingSeconds = 10.0
+    ## ...and at least this much awake time over the node's life. On a
+    ## deep-sleeping e-ink frame the wake itself costs a minute (boot, hello,
+    ## dither, a 30 s panel refresh); a store that shaves seconds off that is
+    ## flash wear for nothing, and re-rendering is the simpler answer.
+  StoredMaxWriteSeconds = 60.0
+    ## And never take longer than this, whatever it would save: a battery frame
+    ## that stays awake for minutes to write a cache has lost more than a
+    ## fetch costs. SPIFFS on the E1004 wrote a 1.9 MB cell in 32 s when the
+    ## partition was fresh and in 425 s once its dead pages needed collecting.
   StoredMaxAheadSeconds = 8.0 * 86400.0
     ## A stored due date further out than this is a clock that jumped.
+  StoredChunkBytes = 32 * 1024
+    ## Rows are written and read through a buffer this size.
   StoredFileMagic = "FOSR"
-  StoredFileVersion = 1'u32
+  StoredFileVersion = 2'u32
   StoredFileEnd = "FOSRDONE"
   PlausibleEpoch = 1_600_000_000.0
   HostKeptBudgetBytes = 96 * 1024 * 1024
@@ -71,6 +85,7 @@ type
     tier*: string       ## which one, for the log
     imageBefore: Image
     startedAt: float
+    stateKeyBefore: string
 
   PassState = ref object
     top: FrameScene
@@ -119,9 +134,19 @@ var
     ## Whether pixels may be read back from storage at all. Off on hosts: a Pi
     ## keeps its canvas and has memory for the rest.
 
+var storedReadBytesPerSecond = 300_000.0
+  ## What the last restore measured (SPIFFS on the E1004: ~300 KB/s). A
+  ## rectangle is only worth storing when reading it back beats running the
+  ## scene: for a small comic that is a wash, for a 30 s photo decode it is not.
+var storedWriteBytesPerSecond = 60_000.0
+  ## What the last store measured (SPIFFS on the E1004: ~60 KB/s; an SD card
+  ## is faster). The first estimate is the slow case, so a frame never pays
+  ## for a store the arithmetic below would have refused.
+
 when defined(testing):
   var rhythmNowOverride* = -1.0
   var rhythmWallOverride* = -1.0
+  var rhythmRunSecondsOverride* = -1.0 ## a frozen clock measures every run as 0
 
 proc rhythmNow*(): float =
   ## Monotonic seconds. Due times never ride the wall clock: NTP moves it by
@@ -296,20 +321,22 @@ proc takeSnapshot(state: PassState, node: FrameScene, source: Image, kept: bool)
 # ------------------------------------------------------------- budget: storage
 
 proc storeDir(frameConfig: FrameConfig): string =
-  ## Where stored rectangles live. NOT the spool's scratch directory: that one
-  ## is swept on every boot, and surviving a (deep-sleep) reboot is the point.
+  ## Where stored rectangles live: the assets directory — on an embedded
+  ## frame the SD card, when one is mounted — and nowhere else. NOT the
+  ## spool's scratch directory (swept on every boot, and surviving a
+  ## deep-sleep reboot is the point), and NOT the ESP32's SPIFFS state
+  ## partition: SPIFFS garbage-collects dead pages when it runs out of fresh
+  ## ones, and rewriting a 1.9 MB cell there took 32 s on a fresh partition
+  ## and 425–500 s once a few dead copies had piled up — the E1004 sat awake
+  ## for eight minutes to save itself a sixteen-second fetch. Without an SD
+  ## card the tier is a no-op: the child renders again, as it always did.
   if not frameConfig.isNil and frameConfig.assetsPath.len > 0:
     let preferred = frameConfig.assetsPath & "/.rhythm"
     if usableScratchDir(preferred):
       return preferred
-  when defined(frameosEmbedded):
-    # SPIFFS has no directories; the slash is part of the name.
-    if usableScratchDir("/state/rhythm"):
-      return "/state/rhythm"
-    ""
-  else:
-    let fallback = getTempDir() / "frameos-rhythm"
-    if usableScratchDir(fallback): fallback else: ""
+  ""
+
+proc cRename(a, b: cstring): cint {.importc: "rename", header: "<stdio.h>".}
 
 proc fnv1a(parts: varargs[string]): string =
   var h = 14695981039346656037'u64
@@ -344,6 +371,7 @@ proc fixed16(text: string): array[16, char] =
 
 proc writeStored(state: PassState, node: FrameScene, dueWall: float): bool =
   let r = node.rhythm
+  let startedAt = rhythmNow()
   let path = storedPath(state, node)
   if path.len == 0:
     return false
@@ -358,45 +386,71 @@ proc writeStored(state: PassState, node: FrameScene, dueWall: float): bool =
     view = state.canvas.view(r.x, r.y, r.w, r.h)
   except CatchableError:
     return false
+  # Written beside the old file and renamed over it: a power cut mid-write
+  # leaves the previous good rectangle, not half of a new one.
+  let tmpPath = path & ".tmp"
   var file: File
-  if not file.open(path, fmWrite):
+  if not file.open(tmpPath, fmWrite):
     return false
   var ok = true
   try:
     var magic = StoredFileMagic
     var version = StoredFileVersion
     var dims = [r.w.uint32, r.h.uint32, (if view.format == pfRgbx: 0'u32 else: 1'u32)]
-    var due = [dueWall, r.interval]
+    # The rate is in the header so the wake that reads this back knows how
+    # slow this flash was before it decides on its own write.
+    var due = [dueWall, r.interval, storedWriteBytesPerSecond]
     var defHash = fixed16(r.defHash)
-    var stateKey = fixed16(r.stateKey)
+    # The state the pixels were rendered FROM, not the state the run left
+    # behind: a scene that writes its own state while rendering (setAsState)
+    # starts every wake from its seed again, and that is what must match.
+    var stateKey = fixed16(r.seedKey)
     ok = file.writeBuffer(addr magic[0], 4) == 4 and
       file.writeBuffer(addr version, 4) == 4 and
       file.writeBuffer(addr dims[0], 12) == 12 and
-      file.writeBuffer(addr due[0], 16) == 16 and
+      file.writeBuffer(addr due[0], 24) == 24 and
       file.writeBuffer(addr defHash[0], 16) == 16 and
       file.writeBuffer(addr stateKey[0], 16) == 16
+    # Rows go out through one chunk buffer: SPIFFS costs per write call as
+    # much as per byte, and a 1200-byte row at a time was 42 KB/s on the
+    # E1004 (46 s for a half-canvas cell).
     let rowBytes = r.w * bytesPerPixel
+    var chunk = newString(StoredChunkBytes)
+    var filled = 0
     for y in 0 ..< r.h:
       if not ok: break
       let row =
         if view.format == pfRgbx: cast[pointer](addr view.data[view.dataIndex(0, y)])
         else: cast[pointer](addr view.data16[view.dataIndex(0, y)])
-      ok = file.writeBuffer(row, rowBytes) == rowBytes
+      if filled + rowBytes > chunk.len:
+        ok = file.writeBuffer(addr chunk[0], filled) == filled
+        filled = 0
+      copyMem(addr chunk[filled], row, rowBytes)
+      filled += rowBytes
+    if ok and filled > 0:
+      ok = file.writeBuffer(addr chunk[0], filled) == filled
     if ok:
       var tail = StoredFileEnd
       ok = file.writeBuffer(addr tail[0], 8) == 8
   except CatchableError:
     ok = false
   file.close()
+  if ok:
+    # C rename, not os.moveFile: its copy fallback drags symlink support into
+    # a firmware with no symlinks.
+    ok = cRename(tmpPath.cstring, path.cstring) == 0
   if not ok:
-    try: removeFile(path)
+    try: removeFile(tmpPath)
     except CatchableError: discard
     return false
+  let seconds = rhythmNow() - startedAt
+  if seconds > 0.05:
+    storedWriteBytesPerSecond = bytes.float / seconds
   node.logger.log(%*{"event": "rhythm:store", "node": nodeName(node), "bytes": bytes,
-    "validSeconds": round(dueWall - rhythmWallNow())})
+    "validSeconds": round(dueWall - rhythmWallNow()), "ms": round(seconds * 1000)})
   true
 
-const StoredHeaderBytes = 4 + 4 + 12 + 16 + 16 + 16
+const StoredHeaderBytes = 4 + 4 + 12 + 24 + 16 + 16
 
 proc readStored(state: PassState, node: FrameScene, target: Image, stateKey: string): float =
   ## Reads the node's stored rectangle straight into `target` (a view of the
@@ -426,12 +480,12 @@ proc readStored(state: PassState, node: FrameScene, target: Image, stateKey: str
   var magic = newString(4)
   var version: uint32
   var dims: array[3, uint32]
-  var due: array[2, float]
+  var due: array[3, float]
   var defHash, storedKey: array[16, char]
   if file.readBuffer(addr magic[0], 4) != 4 or magic != StoredFileMagic or
       file.readBuffer(addr version, 4) != 4 or version != StoredFileVersion or
       file.readBuffer(addr dims[0], 12) != 12 or
-      file.readBuffer(addr due[0], 16) != 16 or
+      file.readBuffer(addr due[0], 24) != 24 or
       file.readBuffer(addr defHash[0], 16) != 16 or
       file.readBuffer(addr storedKey[0], 16) != 16:
     return
@@ -444,15 +498,34 @@ proc readStored(state: PassState, node: FrameScene, target: Image, stateKey: str
   if remaining <= dueSlack(due[1]) or remaining > StoredMaxAheadSeconds:
     return
   r.interval = due[1]
+  if due[2] > 0: storedWriteBytesPerSecond = due[2]
   let rowBytes = target.width * bytesPerPixel
+  var chunk = newString(StoredChunkBytes)
+  var have = 0
+  var used = 0
   for y in 0 ..< target.height:
+    if used + rowBytes > have:
+      # Keep the partial row's bytes, top the chunk up from the file.
+      let rest = have - used
+      if rest > 0: moveMem(addr chunk[0], addr chunk[used], rest)
+      let got = file.readBuffer(addr chunk[rest], chunk.len - rest)
+      have = rest + got
+      used = 0
+      if have < rowBytes:
+        return
     let row =
       if target.format == pfRgbx: cast[pointer](addr target.data[target.dataIndex(0, y)])
       else: cast[pointer](addr target.data16[target.dataIndex(0, y)])
-    if file.readBuffer(row, rowBytes) != rowBytes:
-      return
+    copyMem(row, addr chunk[used], rowBytes)
+    used += rowBytes
+  # The end marker: whatever of it the last chunk already holds, the rest
+  # from the file.
   var tail = newString(8)
-  if file.readBuffer(addr tail[0], 8) != 8 or tail != StoredFileEnd:
+  let rest = min(have - used, 8)
+  if rest > 0: copyMem(addr tail[0], addr chunk[used], rest)
+  if rest < 8 and file.readBuffer(addr tail[rest], 8 - rest) != 8 - rest:
+    return
+  if tail != StoredFileEnd:
     return
   result = remaining
 
@@ -464,25 +537,54 @@ proc sweepStored(state: PassState, keep: seq[string]) =
     return
   try:
     for kind, path in walkDir(dir):
-      if kind == pcFile and path.endsWith(".px") and path notin keep:
+      if kind == pcFile and (path.endsWith(".px") or path.endsWith(".px.tmp")) and path notin keep:
         try: removeFile(path)
         except CatchableError: discard
   except CatchableError:
     discard
 
 proc storeWorthwhile(state: PassState): seq[FrameScene] =
-  ## Which of this pass's nodes are worth their flash wear: provably their own
-  ## pixels, a long time left, and still not due at the next wake. A node whose
-  ## ancestor is stored and good for just as long adds nothing.
+  ## Which of the nodes that RAN this pass are worth their flash wear and the
+  ## time the write takes: provably their own pixels, a long time left, still
+  ## not due at the next wake — and expected to save more than the write costs.
+  ## The saving is the node's own last run time (a photo: fetch + decode) per
+  ## wake it will sit out; the cost is its bytes at the rate the last write
+  ## measured. A node whose ancestor is stored and good for just as long adds
+  ## nothing.
   let tree = state.tree
   var nextWake = tree.topDueAt
+  var cadence = Inf
   for node in tree.nodes:
     if node.rhythm.active:
       nextWake = min(nextWake, node.rhythm.dueAt)
+      if node.rhythm.interval > 0: cadence = min(cadence, node.rhythm.interval)
+  if tree.topInterval > 0 and tree.topDueAt != Inf: cadence = min(cadence, tree.topInterval)
   for node in tree.nodes:
-    if not eligible(tree, node): continue
+    if not eligible(tree, node) or nodeName(node) in state.restoredNames: continue
+    let r = node.rhythm
     let due = subtreeDueAt(tree, node)
     if due == Inf or due - state.now < StoredMinSeconds or due - nextWake < StoredMinGainSeconds:
+      continue
+    let bytes = r.w * r.h * (if state.canvas.format == pfRgbx: 4 else: 2)
+    let writeSeconds = bytes.float / max(storedWriteBytesPerSecond, 1.0)
+    let readSeconds = bytes.float / max(storedReadBytesPerSecond, 1.0)
+    let reuses = if cadence == Inf: 1.0 else: max(1.0, floor((due - state.now) / max(cadence, 1.0)))
+    if r.runSeconds < readSeconds * StoredWriteMarginFactor:
+      node.logger.log(%*{"event": "rhythm:store:refused", "node": nodeName(node),
+        "reason": "reading it back (" & $round(readSeconds) & " s) is not faster than running it (" &
+          $round(r.runSeconds) & " s)"})
+      continue
+    if writeSeconds > StoredMaxWriteSeconds:
+      node.logger.log(%*{"event": "rhythm:store:refused", "node": nodeName(node),
+        "reason": "a " & $round(writeSeconds) & " s write at " &
+          $(storedWriteBytesPerSecond / 1024).int & " KB/s is over the " &
+          $StoredMaxWriteSeconds.int & " s ceiling"})
+      continue
+    let saving = (r.runSeconds - readSeconds) * reuses
+    if saving < writeSeconds * StoredWriteMarginFactor or saving < StoredMinSavingSeconds:
+      node.logger.log(%*{"event": "rhythm:store:refused", "node": nodeName(node),
+        "reason": "a " & $round(writeSeconds) & " s write to save " & $round(saving) &
+          " s over " & $reuses.int & " wake(s); rendering it again is cheaper"})
       continue
     var covered = false
     for other in result:
@@ -639,17 +741,17 @@ proc rhythmEndPass*(finalImage: Image, topNextSleep: float, topInterval: float,
       if not node.rhythm.active:
         node.rhythm.snapshot = nil
     # Storage tier: only when the canvas will not be there next time.
-    if rhythmStorageTier and not state.partial:
+    if rhythmStorageTier and not state.partial and storeDir(state.top.frameConfig).len > 0:
       var keep: seq[string] = @[]
       if rhythmCanvasVolatile and tree.valid and rhythmWallNow() > PlausibleEpoch:
+        # What came off storage this pass is still good: its write is paid for.
+        for node in tree.nodes:
+          if node.rhythm.active and nodeName(node) in state.restoredNames:
+            let path = storedPath(state, node)
+            if path.len > 0 and fileExists(path): keep.add(path)
         for node in storeWorthwhile(state):
-          let path = storedPath(state, node)
-          let name = nodeName(node)
-          if name in state.restoredNames and fileExists(path):
-            keep.add(path) # came from this very file; nothing new to write
-          elif writeStored(state, node,
-              rhythmWallNow() + (subtreeDueAt(tree, node) - rhythmNow())):
-            keep.add(path)
+          if writeStored(state, node, rhythmWallNow() + (subtreeDueAt(tree, node) - rhythmNow())):
+            keep.add(storedPath(state, node))
       sweepStored(state, keep)
   finally:
     lastPassInfo.ran = state.ranNames
@@ -666,6 +768,7 @@ proc rhythmBeginSceneNode*(child, owner: FrameScene, nodeId: NodeId,
   let r = ensureRhythm(child)
   r.isNode = true
   result.startedAt = rhythmNow()
+  result.stateKeyBefore = stateKey
   if pass.isNil or context.image.isNil:
     return
   let state = pass
@@ -713,8 +816,14 @@ proc rhythmBeginSceneNode*(child, owner: FrameScene, nodeId: NodeId,
         r.dueAt = state.now + remaining
         r.interpreted = true
         r.stateKey = stateKey
+        r.seedKey = stateKey
         result.restored = true
         result.tier = "storage"
+        let seconds = rhythmNow() - result.startedAt
+        if seconds > 0.05:
+          storedReadBytesPerSecond = (r.w * r.h * context.image.bytesPerPixel).float / seconds
+        child.logger.log(%*{"event": "rhythm:restore", "node": nodeName(child), "tier": "storage",
+          "validSeconds": round(remaining), "ms": round(seconds * 1000)})
     if result.restored:
       r.seqBegin = paintSeq + 1
       state.notePaintRect(rect.x, rect.y, rect.w, rect.h)
@@ -760,8 +869,17 @@ proc rhythmEndSceneNode*(child: FrameScene, context: ExecutionContext, visit: Sc
     return
   let finished = rhythmNow()
   let interval = if child.refreshInterval > 0: child.refreshInterval else: 0.0
+  r.runSeconds = finished - visit.startedAt
+  when defined(testing):
+    if rhythmRunSecondsOverride >= 0: r.runSeconds = rhythmRunSecondsOverride
   r.interval = if nextSleep >= 0: nextSleep else: interval
   r.dueAt = if nextSleep >= 0: finished + nextSleep else: visit.startedAt + interval
+  # The seed is the state this INSTANCE started life with: a scene that
+  # writes its own state while rendering carries that state into its next
+  # run, but a fresh instance (every deep-sleep wake) starts from the seed
+  # again — and that is what a stored rectangle has to be matched against.
+  if not r.ranOnce:
+    r.seedKey = visit.stateKeyBefore
   r.ranOnce = true
   r.interpreted = interpreted
   r.stateKey = stateKey

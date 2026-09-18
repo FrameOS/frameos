@@ -2073,6 +2073,21 @@ proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedSc
   allScenesLoaded = true
   lastInterpretedScenesLoadError = ""
 
+proc addInterpretedScenesToCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+  ## Alongside what is already resident — how the ESP32's one-scene-at-a-time
+  ## loader brings in the scenes a resident scene embeds.
+  for sceneId, exported in scenes:
+    loadedScenes[sceneId] = exported
+  sceneDefinitionHashes = initTable[SceneId, string]()
+
+proc embeddedSceneIds*(exported: ExportedInterpretedScene): seq[SceneId] =
+  ## The scenes this one's scene nodes point at (its split's panels).
+  for node in exported.nodes:
+    if node.nodeType == "scene" and not node.data.isNil and node.data.kind == JObject:
+      let id = node.data{"keyword"}.getStr()
+      if id.len > 0 and id.SceneId notin result:
+        result.add(id.SceneId)
+
 proc loadInterpretedScenesForStartup*(): Table[SceneId, ExportedInterpretedScene] =
   ## `loadInterpretedScenesFromDisk` for callers that cannot afford to raise.
   ##

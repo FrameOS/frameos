@@ -85,6 +85,12 @@ int frameos_nim_load_scenes(const char *json);
  * makes exactly one resident, tearing down the previous one. */
 int frameos_nim_set_scene_catalog(const char *index_json);
 int frameos_nim_load_scene(const char *scene_json);
+/* Lazy path, second step: a scene the resident one embeds (a split's panel),
+ * parsed alongside it — nothing torn down. */
+int frameos_nim_add_scene(const char *scene_json);
+/* JSON array of scene ids the resident scenes embed that are not resident
+ * yet ("[]" when complete). Valid until the next Nim call. */
+const char *frameos_nim_missing_scenes_json(void);
 /* Install the service settings the settings poll just fetched
  * (docs/cloud-frames.md, "Service settings"). `json` is the `settings` OBJECT
  * — group → field → value — for the six cloud-owned groups (frameOS, github,
