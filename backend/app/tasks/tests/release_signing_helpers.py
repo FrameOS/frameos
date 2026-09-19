@@ -22,10 +22,24 @@ TEST_SIGNING_PUBLIC_KEY_BASE64 = base64.b64encode(
 ).decode()
 
 
-def minisig_for(archive: Path, key: ed25519.Ed25519PrivateKey = TEST_SIGNING_KEY) -> str:
+def minisig_for(
+    archive: Path,
+    key: ed25519.Ed25519PrivateKey = TEST_SIGNING_KEY,
+    asset_name: str | None = None,
+) -> str:
+    """What tools/sign_firmware.py writes: the file signature, then the
+    trusted comment naming the release asset (default: the archive's own file
+    name) and the global signature over signature || comment."""
     digest = hashlib.blake2b(archive.read_bytes(), digest_size=64).digest()
-    blob = b"ED" + b"\x01" * 8 + key.sign(digest)
-    return "untrusted comment: test\n" + base64.b64encode(blob).decode() + "\n"
+    signature = key.sign(digest)
+    comment = f"frameos {asset_name or archive.name}"
+    return (
+        "untrusted comment: test\n"
+        + base64.b64encode(b"ED" + b"\x01" * 8 + signature).decode()
+        + f"\ntrusted comment: {comment}\n"
+        + base64.b64encode(key.sign(signature + comment.encode())).decode()
+        + "\n"
+    )
 
 
 def trust_test_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -39,7 +53,9 @@ def signing_download(archive: Path, calls: list[str] | None = None):
         if calls is not None:
             calls.append(url)
         if url.endswith(".minisig"):
-            destination.write_text(minisig_for(archive), encoding="utf-8")
+            # Signed as the asset the URL names, the way a release is.
+            asset_name = url[: -len(".minisig")].rsplit("/", 1)[-1]
+            destination.write_text(minisig_for(archive, asset_name=asset_name), encoding="utf-8")
         else:
             shutil.copy2(archive, destination)
 

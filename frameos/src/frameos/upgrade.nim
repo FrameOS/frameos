@@ -413,45 +413,102 @@ proc validateGithubReleaseAssetUrl*(url, version: string) =
 proc releaseSignatureUrl*(assetUrl: string): string =
   assetUrl & ".minisig"
 
-proc parseMinisigSignature*(minisig: string): string =
-  ## The first non-comment line of a .minisig is base64(ED + keyid8 + sig64).
-  ## Returns the 64-byte signature, base64 encoded for the Ed25519 verifier.
-  ##
-  ## The trusted-comment line and its global signature are ignored on purpose:
-  ## the device trusts a KEY, not a comment, and minisign's global signature
-  ## only binds the comment to the signature — it adds nothing once the key
-  ## check below has passed. Same reasoning as parse_minisig in
-  ## embedded/esp32/main/fos_ota.c, which this mirrors deliberately: two
-  ## implementations of one format should be readable side by side.
-  for rawLine in minisig.splitLines():
-    let line = rawLine.strip()
-    if line.len == 0 or line.startsWith("untrusted comment:") or
-        line.startsWith("trusted comment:"):
-      continue
-    var blob: string
-    try:
-      blob = decode(line)
-    except CatchableError:
-      raise newException(ValueError, "Release signature is not valid base64")
-    if blob.len != 74:
-      raise newException(ValueError,
-        "Release signature blob has the wrong length (" & $blob.len & ", expected 74)")
-    if blob[0] != 'E' or blob[1] != 'D':
-      raise newException(ValueError,
-        "Release signature is not the prehashed Ed25519 form this build accepts")
-    var keyIdHex = ""
-    for i in 2 ..< 10:
-      keyIdHex.add(toHex(ord(blob[i]), 2).toLowerAscii)
-    if keyIdHex != OtaSigningKeyIdHex:
-      raise newException(ValueError,
-        "Release is signed by key " & keyIdHex & ", not the key this build trusts (" &
-        OtaSigningKeyIdHex & ")")
-    return encode(blob[10 ..< 74])
-  raise newException(ValueError, "Release signature file contained no signature line")
+type
+  ReleaseSignature* = object
+    ## A .minisig, taken apart. Both signatures are base64 of the raw 64
+    ## bytes, the form the Ed25519 verifier takes.
+    signatureBase64*: string
+    signatureBytes: string
+    trustedComment*: string
+    globalSignatureBase64*: string
 
-proc verifyReleaseArchiveSignature*(archivePath, minisig: string) =
+const ReleaseTrustedCommentPrefix* = "frameos "
+  ## tools/sign_firmware.py writes `trusted comment: frameos <asset name>`.
+
+proc decodeMinisigBlob(line: string): string =
+  try:
+    result = decode(line)
+  except CatchableError:
+    raise newException(ValueError, "Release signature is not valid base64")
+
+proc parseMinisig*(minisig: string): ReleaseSignature =
+  ## A .minisig is four lines: an untrusted comment, base64(ED + keyid8 +
+  ## sig64) over the BLAKE2b-512 of the file, `trusted comment: …`, and the
+  ## global signature — Ed25519 over sig64 || trusted comment. The first
+  ## signature says "FrameOS released these bytes"; the comment says AS WHAT
+  ## (`frameos frameos-<version>-<target>.tar.gz`), and the global signature
+  ## is what makes the comment the signer's word rather than the uploader's.
+  ## All of it is required: a file without the comment half is refused, not
+  ## treated as an older format (every release since the first signed one
+  ## carries it). Mirrors fos_minisig_parse in embedded/esp32/main/
+  ## fos_minisig.c deliberately: two implementations of one format should be
+  ## readable side by side.
+  var blobs: seq[string] = @[]
+  var comments: seq[string] = @[]
+  for rawLine in minisig.splitLines():
+    # The comment is signed byte for byte, so only the line ending goes.
+    let line = rawLine.strip(leading = false, chars = {'\r', '\n'})
+    if line.strip().len == 0 or line.startsWith("untrusted comment:"):
+      continue
+    if line.startsWith("trusted comment: "):
+      comments.add(line["trusted comment: ".len .. ^1])
+      continue
+    blobs.add(line.strip())
+  if blobs.len == 0:
+    raise newException(ValueError, "Release signature file contained no signature line")
+
+  let blob = decodeMinisigBlob(blobs[0])
+  if blob.len != 74:
+    raise newException(ValueError,
+      "Release signature blob has the wrong length (" & $blob.len & ", expected 74)")
+  if blob[0] != 'E' or blob[1] != 'D':
+    raise newException(ValueError,
+      "Release signature is not the prehashed Ed25519 form this build accepts")
+  var keyIdHex = ""
+  for i in 2 ..< 10:
+    keyIdHex.add(toHex(ord(blob[i]), 2).toLowerAscii)
+  if keyIdHex != OtaSigningKeyIdHex:
+    raise newException(ValueError,
+      "Release is signed by key " & keyIdHex & ", not the key this build trusts (" &
+      OtaSigningKeyIdHex & ")")
+  result.signatureBytes = blob[10 ..< 74]
+  result.signatureBase64 = encode(result.signatureBytes)
+
+  if comments.len != 1 or blobs.len != 2:
+    raise newException(ValueError,
+      "Release signature does not say which release it is for (no trusted comment and global signature)")
+  let globalSignature = decodeMinisigBlob(blobs[1])
+  if globalSignature.len != 64:
+    raise newException(ValueError,
+      "Release global signature has the wrong length (" & $globalSignature.len & ", expected 64)")
+  result.trustedComment = comments[0]
+  result.globalSignatureBase64 = encode(globalSignature)
+
+proc parseMinisigSignature*(minisig: string): string =
+  ## The file signature alone, base64 of the raw 64 bytes.
+  parseMinisig(minisig).signatureBase64
+
+proc verifyReleaseSignatureBinding*(signature: ReleaseSignature, assetName: string) =
+  ## The half of the check that needs no archive: the trusted comment is the
+  ## signer's (global signature) and names `assetName`. The version and the
+  ## target a device installs come from GitHub metadata and its own
+  ## os-release; without this, anyone able to upload release assets — no
+  ## signing key needed — could attach last year's archive, or another
+  ## architecture's, under a new tag and every frame would verify and
+  ## install it.
+  if not verifySignatureBase64(OtaSigningPublicKeyBase64,
+      signature.signatureBytes & signature.trustedComment, signature.globalSignatureBase64):
+    raise newException(ValueError,
+      "Release signature's trusted comment is not signed by the FrameOS signing key")
+  if assetName.len == 0 or signature.trustedComment != ReleaseTrustedCommentPrefix & assetName:
+    raise newException(ValueError,
+      "Release signature is for \"" & signature.trustedComment & "\", not for " & assetName &
+      " — refusing a signed archive offered as a different version or target")
+
+proc verifyReleaseArchiveSignature*(archivePath, minisig, assetName: string) =
   ## Refuses to go further unless the archive was signed by the release key
-  ## baked into this build (ota_pubkey.nim).
+  ## baked into this build (ota_pubkey.nim) AS `assetName` — the
+  ## `frameos-<version>-<target>.tar.gz` this device worked out for itself.
   ##
   ## This is the whole point of signed OTA: the update channel must not become
   ## remote code execution if the control plane is compromised. The provider
@@ -459,9 +516,10 @@ proc verifyReleaseArchiveSignature*(archivePath, minisig: string) =
   ## whether the bytes are run, and it depends on nothing the provider
   ## controls. minisign prehashes with BLAKE2b-512 and signs the digest, so
   ## that digest is the message verified here.
-  let signatureBase64 = parseMinisigSignature(minisig)
+  let signature = parseMinisig(minisig)
+  verifyReleaseSignatureBinding(signature, assetName)
   let digest = blake2b512File(archivePath)
-  if not verifySignatureBase64(OtaSigningPublicKeyBase64, digest, signatureBase64):
+  if not verifySignatureBase64(OtaSigningPublicKeyBase64, digest, signature.signatureBase64):
     raise newException(ValueError,
       "Release signature does not verify against the FrameOS signing key — refusing to install " &
       archivePath)
@@ -947,7 +1005,7 @@ proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     let minisig =
       if releaseSignatureFetcher.isNil: downloadReleaseSignature(release)
       else: releaseSignatureFetcher(release)
-    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
+    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig, release.assetName)
     setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
 
     assembleReleaseFromArchive(release, workDir / "frameos.tar.gz", workDir, result)
@@ -1038,9 +1096,10 @@ proc statusPayload(status, message: string, release: FrameOSReleaseInfo, exitCod
 
 proc releaseInfoForVersion(version: string): FrameOSReleaseInfo =
   ## What install-release knows about the archive it was handed: the version
-  ## the caller claims (it is re-checked against frameos.service's needs only
-  ## by the signature — a signed archive of any version is a genuine release)
-  ## and this device's target.
+  ## the caller claims and this device's target. Together they are the asset
+  ## name the signature must have been made for (verifyReleaseSignatureBinding),
+  ## so the version root checked for "strictly newer" is the version root
+  ## installs — the runtime cannot pass an old signed archive off as a new one.
   result.version = normalizeReleaseVersion(version)
   result.tagName = "v" & result.version
   result.target = detectUpgradeTarget()
@@ -1111,7 +1170,7 @@ proc installStagedReleaseArchive*(archivePath, minisig, version: string): JsonNo
       setFilePermissions(workDir, {fpUserRead, fpUserWrite, fpUserExec})
       copyFileNoFollow(archivePath, workDir / "frameos.tar.gz", MaxReleaseArchiveBytes)
       setupLog("FrameOS upgrade: verifying the staged release signature as root")
-      verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
+      verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig, release.assetName)
       setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
       assembleReleaseFromArchive(release, workDir / "frameos.tar.gz", workDir, staged)
     finally:
@@ -1166,7 +1225,7 @@ proc performFrameOSUpgradeThroughDoor(release: FrameOSReleaseInfo): JsonNode =
     let minisig =
       if releaseSignatureFetcher.isNil: downloadReleaseSignature(release)
       else: releaseSignatureFetcher(release)
-    verifyReleaseArchiveSignature(archivePath, minisig)
+    verifyReleaseArchiveSignature(archivePath, minisig, release.assetName)
     setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & "); asking the privileged door to install")
     let res = requestPrivileged(pvInstallRelease, %*{
       "archive": archivePath,

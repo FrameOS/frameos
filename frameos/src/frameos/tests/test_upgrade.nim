@@ -5,6 +5,18 @@ import ../ota_pubkey
 import ../privileged
 import ../upgrade
 
+# The .minisig the release workflow published beside
+# frameos-2026.9.19-debian-bookworm-arm64.tar.gz: signed by the production key
+# (ota_pubkey.nim), so the trusted-comment checks run against real crypto
+# without the tests ever holding a secret key.
+const
+  RealReleaseAssetName = "frameos-2026.9.19-debian-bookworm-arm64.tar.gz"
+  RealReleaseMinisig = """untrusted comment: signature from FrameOS firmware key
+RUQnxMf13zADcFFcQyFKSGSP8dlnMFEnZtwiPYna8r7uZj3THgXiAyf55UahO6vTTswZUqCwN9/E/UsA5X9OcUiuBsjcK/nDeww=
+trusted comment: frameos frameos-2026.9.19-debian-bookworm-arm64.tar.gz
+uzpKdt8H7PSIz+P45GNmLUyI6GI3VVaytR4nGc7yjYeQMSns8swLi35Bf6rObL2ckov4/B+11BuzuTcHU+TsDg==
+"""
+
 suite "FrameOS upgrade helpers":
   test "distro release normalization maps buildroot to debian bookworm":
     check normalizeDistroRelease({
@@ -275,11 +287,53 @@ suite "FrameOS upgrade helpers":
     defer: removeDir(dir)
     let archive = dir / "frameos.tar.gz"
     writeFile(archive, "not really a release")
-    # A syntactically valid signature from the trusted key id, but over
-    # nothing: verification must fail on the signature, not wave it through.
-    let blob = "ED" & parseHexStr(OtaSigningKeyIdHex) & repeat("\x00", 64)
+    # The real signature of a real release, so the comment half passes and
+    # what is refused is the bytes: verification must fail on the file
+    # signature, not wave it through.
     expect ValueError:
-      verifyReleaseArchiveSignature(archive, "untrusted comment: x\n" & encode(blob) & "\n")
+      verifyReleaseArchiveSignature(archive, RealReleaseMinisig, RealReleaseAssetName)
+
+  test "a signature is only good for the version and target it names":
+    # docs/security-todo.md, "OTA signature binds archive bytes only": the
+    # version and target come from GitHub metadata, so without this anyone
+    # with release-upload rights could attach an old (or other-arch) signed
+    # archive under a new tag. RealReleaseMinisig is what the release
+    # workflow published for v2026.9.19 and verifies against the key in
+    # ota_pubkey.nim — the global signature is checked for real here.
+    let signature = parseMinisig(RealReleaseMinisig)
+    check signature.trustedComment == "frameos " & RealReleaseAssetName
+    verifyReleaseSignatureBinding(signature, RealReleaseAssetName)
+
+    # The same signed archive offered as a newer version, another target…
+    for otherName in [
+      "frameos-2026.9.20-debian-bookworm-arm64.tar.gz",
+      "frameos-2026.9.19-debian-bookworm-armhf.tar.gz",
+      "frameos-2026.9.19-debian-bookworm-arm64.tar.gz.evil",
+      "",
+    ]:
+      expect ValueError:
+        verifyReleaseSignatureBinding(signature, otherName)
+
+    # …or with the comment rewritten to match: the global signature is over
+    # signature || comment, so an edited comment is nobody's word.
+    let rewritten = RealReleaseMinisig.replace("2026.9.19", "2026.9.20")
+    expect ValueError:
+      verifyReleaseSignatureBinding(parseMinisig(rewritten),
+        "frameos-2026.9.20-debian-bookworm-arm64.tar.gz")
+
+  test "a signature with no signed comment is refused, not treated as legacy":
+    let lines = RealReleaseMinisig.splitLines()
+    # Bare file signature (what this parser accepted before).
+    expect ValueError:
+      discard parseMinisig(lines[0] & "\n" & lines[1] & "\n")
+    # Comment without its global signature, and a truncated global signature.
+    expect ValueError:
+      discard parseMinisig(lines[0] & "\n" & lines[1] & "\n" & lines[2] & "\n")
+    expect ValueError:
+      discard parseMinisig(lines[0] & "\n" & lines[1] & "\n" & lines[2] & "\n" & encode("short") & "\n")
+    # Two trusted comments: which one was signed is not a question to answer.
+    expect ValueError:
+      discard parseMinisig(lines[0] & "\n" & lines[1] & "\n" & lines[2] & "\n" & lines[2] & "\n" & lines[3] & "\n")
 
 suite "upgrade status reporting":
   # A cloud OTA used to log "scheduled" and then nothing at all: the upgrade
@@ -458,11 +512,13 @@ suite "staging verifies the signature before anything runs":
         archiveFetched = true
         writeFile(destination, "definitely not the bytes that were signed"),
       proc(release: FrameOSReleaseInfo): string =
-        # Well-formed and from the trusted key id, so it passes parsing and
-        # the failure is the actual Ed25519 verification of the bytes — the
-        # same shape a hijacked download would present.
+        # Well-formed, from the trusted key id and naming the right asset,
+        # so it passes parsing and the failure is actual Ed25519
+        # verification — the same shape a hijacked download would present.
         let blob = "ED" & parseHexStr(OtaSigningKeyIdHex) & repeat("\x00", 64)
-        "untrusted comment: x\n" & encode(blob) & "\n")
+        "untrusted comment: x\n" & encode(blob) & "\n" &
+          "trusted comment: frameos " & release.assetName & "\n" &
+          encode(repeat("\x00", 64)) & "\n")
 
     expect ValueError:
       discard stageFrameOSRelease(FrameOSReleaseInfo(

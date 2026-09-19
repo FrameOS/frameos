@@ -87,14 +87,16 @@ export function parseMinisignSignature(text) {
   if (blob.length !== 74 || blob.subarray(0, 2).toString("latin1") !== "ED") {
     throw new Error("signature blob must be base64(ED + keyid8 + signature64)");
   }
-  const trusted = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.startsWith("trusted comment:"));
+  // Byte for byte after the prefix: the comment is signed, so it is not
+  // trimmed. More than one is refused — which would have been signed?
+  const trusted = text.split(/\r?\n/).filter((line) => line.startsWith("trusted comment: "));
+  if (trusted.length > 1) {
+    throw new Error("signature carries more than one trusted comment");
+  }
   return {
     keyId: blob.subarray(2, 10),
     signature: blob.subarray(10, 74),
-    trustedComment: trusted ? trusted.slice("trusted comment:".length).trim() : null,
+    trustedComment: trusted.length === 1 ? trusted[0].slice("trusted comment: ".length) : null,
     globalSignature: lines[1] ? Buffer.from(lines[1], "base64") : null,
   };
 }
@@ -111,8 +113,15 @@ function ed25519Verify(publicKey, message, signature) {
   return cryptoVerify(null, message, key, signature);
 }
 
-/** Throws unless `fileBytes` carries a valid minisign signature from the key. */
-export function verifyMinisign({ publicKeyText, signatureText, fileBytes, label = "file" }) {
+/**
+ * Throws unless `fileBytes` carries a valid minisign signature from the key,
+ * made FOR `assetName`: the trusted comment (`frameos <asset name>`, covered
+ * by the global signature) must name the release asset that was asked for.
+ * The file signature alone only proves the bytes were released once — an
+ * older runtime tarball re-uploaded under this version's name, which needs
+ * release-upload rights and no signing key, would otherwise verify.
+ */
+export function verifyMinisign({ publicKeyText, signatureText, fileBytes, assetName, label = "file" }) {
   const pub = parseMinisignPublicKey(publicKeyText);
   const sig = parseMinisignSignature(signatureText);
   if (!sig.keyId.equals(pub.keyId)) {
@@ -122,11 +131,17 @@ export function verifyMinisign({ publicKeyText, signatureText, fileBytes, label 
   if (!ed25519Verify(pub.publicKey, digest, sig.signature)) {
     throw new Error(`${label}: signature does not verify against the release key`);
   }
-  if (sig.globalSignature && sig.trustedComment !== null) {
-    const message = Buffer.concat([sig.signature, Buffer.from(sig.trustedComment, "utf8")]);
-    if (!ed25519Verify(pub.publicKey, message, sig.globalSignature)) {
-      throw new Error(`${label}: trusted comment does not verify against the release key`);
-    }
+  if (!sig.globalSignature || sig.globalSignature.length !== 64 || sig.trustedComment === null) {
+    throw new Error(`${label}: signature does not say which release it is for (no trusted comment)`);
+  }
+  const message = Buffer.concat([sig.signature, Buffer.from(sig.trustedComment, "utf8")]);
+  if (!ed25519Verify(pub.publicKey, message, sig.globalSignature)) {
+    throw new Error(`${label}: trusted comment does not verify against the release key`);
+  }
+  if (!assetName || sig.trustedComment !== `frameos ${assetName}`) {
+    throw new Error(
+      `${label}: signature is for "${sig.trustedComment}", not for ${assetName} — refusing a signed archive offered as a different release`,
+    );
   }
   return { keyId: pub.keyId.toString("hex"), trustedComment: sig.trustedComment };
 }
@@ -198,6 +213,7 @@ export async function installReleaseRuntime({
     publicKeyText,
     signatureText: readFileSync(signature, "utf8"),
     fileBytes: readFileSync(tarball),
+    assetName: releaseAssetName(version),
     label: releaseAssetName(version),
   });
 

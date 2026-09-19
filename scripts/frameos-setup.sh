@@ -322,12 +322,13 @@ download_file() {
 verify_release_signature() {
   archive="$1"
   minisig="$2"
+  expected_asset="${3:-}"
   sig_dir="$work_dir/sig"
   mkdir -p "$sig_dir"
   # First non-comment line: base64(ED || keyid8 || sig64).
   # `|| true`: under `set -e` a pipeline that finds nothing would end the
   # script before the message below names the problem.
-  sig_line="$(grep -v '^untrusted comment:' "$minisig" | grep -v '^trusted comment:' | grep -m1 . || true)"
+  sig_line="$(grep -v '^untrusted comment:' "$minisig" | grep -v '^trusted comment:' | grep -m1 . | tr -d '\r' || true)"
   if [ -z "$sig_line" ]; then
     die "Release signature file is empty or malformed: $minisig"
   fi
@@ -345,6 +346,31 @@ verify_release_signature() {
   printf '%s\n%s\n%s\n' "-----BEGIN PUBLIC KEY-----" "$FRAMEOS_RELEASE_SIGNING_KEY_SPKI" "-----END PUBLIC KEY-----" > "$sig_dir/release.pub.pem"
   if ! openssl pkeyutl -verify -pubin -inkey "$sig_dir/release.pub.pem" -rawin -in "$sig_dir/digest.bin" -sigfile "$sig_dir/sig.bin" >/dev/null 2>&1; then
     die "Release signature does not verify against the FrameOS signing key — refusing to install $archive"
+  fi
+  # What the archive was signed AS. The signature above covers the bytes
+  # only: every archive the release key ever signed passes it, so an older
+  # release (or another architecture's) re-uploaded under this version's
+  # name would install with a valid signature — no signing key needed, only
+  # release-upload rights or a hostile mirror. The trusted comment is
+  # `frameos <asset name>` (tools/sign_firmware.py) and minisign's global
+  # signature is Ed25519 over sig64 || comment, so: exactly one comment, the
+  # global signature verifies, and the comment names the asset asked for.
+  if [ "$(grep -c '^trusted comment: ' "$minisig" || true)" != "1" ]; then
+    die "Release signature does not say which release it is for (no trusted comment): $minisig"
+  fi
+  trusted_comment="$(sed -n 's/^trusted comment: //p' "$minisig" | tr -d '\r')"
+  global_line="$(grep -v '^untrusted comment:' "$minisig" | grep -v '^trusted comment:' | grep . | sed -n 2p | tr -d '\r' || true)"
+  if ! printf '%s' "$global_line" | base64 -d > "$sig_dir/global.bin" 2>/dev/null ||
+     [ "$(wc -c < "$sig_dir/global.bin" | tr -d ' ')" -ne 64 ]; then
+    die "Release signature has no valid global signature: $minisig"
+  fi
+  cp "$sig_dir/sig.bin" "$sig_dir/signed-comment.bin"
+  printf '%s' "$trusted_comment" >> "$sig_dir/signed-comment.bin"
+  if ! openssl pkeyutl -verify -pubin -inkey "$sig_dir/release.pub.pem" -rawin -in "$sig_dir/signed-comment.bin" -sigfile "$sig_dir/global.bin" >/dev/null 2>&1; then
+    die "Release signature's trusted comment is not signed by the FrameOS signing key"
+  fi
+  if [ -z "$expected_asset" ] || [ "$trusted_comment" != "frameos $expected_asset" ]; then
+    die "Release signature is for \"$trusted_comment\", not for $expected_asset — refusing a signed archive offered as a different version or target"
   fi
   say "Release signature verified"
 }
@@ -1232,7 +1258,7 @@ trap 'rm -rf "$work_dir"' EXIT
 
 download_file "$archive_url" "$work_dir/frameos.tar.gz"
 download_file "$archive_url.minisig" "$work_dir/frameos.tar.gz.minisig"
-verify_release_signature "$work_dir/frameos.tar.gz" "$work_dir/frameos.tar.gz.minisig"
+verify_release_signature "$work_dir/frameos.tar.gz" "$work_dir/frameos.tar.gz.minisig" "${archive_url##*/}"
 mkdir -p "$work_dir/extract" "$frameos_release_dir" "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state" "$FRAMEOS_ASSETS_PATH"
 tar -xzf "$work_dir/frameos.tar.gz" -C "$work_dir/extract"
 

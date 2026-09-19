@@ -50,7 +50,7 @@ from app.tasks.precompiled_frameos import (
     frame_compiled_scene_count,
     release_version,
 )
-from app.utils.release_signing import verify_release_archive_signature
+from app.utils.release_signing import release_asset_name, verify_release_archive_signature
 from app.tasks.sd_image_blob_patch import (
     build_setup_blob_payload,
     patch_setup_blob_into_image,
@@ -540,9 +540,11 @@ def precompiled_buildroot_sd_image_signature_path(cache_path: Path) -> Path:
     return cache_path.with_name(cache_path.name + ".minisig")
 
 
-def _cached_sd_image_verifies(cache_path: Path) -> bool:
+def _cached_sd_image_verifies(cache_path: Path, asset_name: str) -> bool:
     """A cached SD image counts as a hit only while it still matches the
-    release signature stored beside it — same rule as the precompiled
+    release signature stored beside it, and that signature was made for
+    `asset_name` (this version's image for this platform, not an older or
+    another board's signed image) — same rule as the precompiled
     runtime archives (precompiled_frameos._cached_archive_verifies): the
     cache lives on disk for ever, is patched into every card the backend
     writes, and a planted image under the predictable cache name would
@@ -551,7 +553,7 @@ def _cached_sd_image_verifies(cache_path: Path) -> bool:
     try:
         if not (cache_path.is_file() and cache_path.stat().st_size > 0 and signature_path.is_file()):
             return False
-        verify_release_archive_signature(cache_path, signature_path.read_text(encoding="utf-8"))
+        verify_release_archive_signature(cache_path, signature_path.read_text(encoding="utf-8"), asset_name)
     except (ValueError, OSError):
         return False
     return True
@@ -577,7 +579,7 @@ async def download_precompiled_buildroot_sd_image(
     cache_path = precompiled_buildroot_sd_image_cache_path(url)
     signature_path = precompiled_buildroot_sd_image_signature_path(cache_path)
     if cache_path.is_file() and cache_path.stat().st_size > 0:
-        if _cached_sd_image_verifies(cache_path):
+        if _cached_sd_image_verifies(cache_path, release_asset_name(url)):
             await logger(
                 "stdout",
                 f"Using cached full precompiled Buildroot SD image release for {platform} (signature verified)",
@@ -629,7 +631,7 @@ async def download_precompiled_buildroot_sd_image(
         await download_release_file(f"{url}.minisig", temp_signature_path, timeout)
         minisig = temp_signature_path.read_text(encoding="utf-8", errors="replace")
         try:
-            verify_release_archive_signature(temp_path, minisig)
+            verify_release_archive_signature(temp_path, minisig, release_asset_name(url))
         except ValueError as exc:
             raise RuntimeError(
                 f"Full precompiled Buildroot SD image release for {platform} failed its signature check: {exc}"

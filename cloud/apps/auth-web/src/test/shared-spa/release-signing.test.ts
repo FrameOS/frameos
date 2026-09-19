@@ -9,9 +9,10 @@ import {
   hashingTransform,
   overrideReleaseSigningKeyForTests,
   parseMinisigSignature,
+  sdImageAssetName,
   verifyReleaseDigest,
 } from "../../../../../../cloud-frontend/src/lib/release-signing";
-import { testSigningKey } from "./fixtures/releaseSigning";
+import { testAssetName, testSigningKey } from "./fixtures/releaseSigning";
 
 // The browser SD image builder verifies the release image it downloads the
 // way every other reader of a release asset does (the devices, the backend,
@@ -121,8 +122,45 @@ describe("minisig verification", () => {
     overrideReleaseSigningKeyForTests(key.publicKeyBase64);
     const minisig = key.minisigFor(asset);
     const digest = new Blake2b512().update(asset).digest();
-    await expect(verifyReleaseDigest(digest, minisig)).resolves.toBeUndefined();
-    await expect(verifyReleaseDigest(digest, minisig.split("\n")[1]!)).resolves.toBeUndefined();
+    await expect(verifyReleaseDigest(digest, minisig, testAssetName)).resolves.toBeUndefined();
+    await expect(
+      verifyReleaseDigest(digest, minisig.replace(/\n/g, "\r\n"), testAssetName),
+    ).resolves.toBeUndefined();
+  });
+
+  it("accepts a signature only for the release and board it names", async () => {
+    // docs/security-todo.md, "OTA signature binds archive bytes only": an
+    // older (or another board's) genuinely signed image attached under a new
+    // tag verifies byte for byte; the signed trusted comment gives it away.
+    const key = testSigningKey();
+    overrideReleaseSigningKeyForTests(key.publicKeyBase64);
+    const minisig = key.minisigFor(asset);
+    const digest = new Blake2b512().update(asset).digest();
+    for (const other of [
+      "frameos-2026.9.21-raspberry-pi-64-buildroot.img.gz",
+      "frameos-2026.9.20-raspberry-pi-32-buildroot.img.gz",
+      "",
+    ]) {
+      await expect(verifyReleaseDigest(digest, minisig, other)).rejects.toMatchObject({
+        code: "signature_for_another_release",
+      });
+    }
+    // Rewriting the comment to match breaks the global signature.
+    await expect(
+      verifyReleaseDigest(
+        digest,
+        minisig.replace("2026.9.20", "2026.9.21"),
+        "frameos-2026.9.21-raspberry-pi-64-buildroot.img.gz",
+      ),
+    ).rejects.toMatchObject({ code: "signature_mismatch" });
+    // No signed comment at all is refused, not treated as an older format.
+    await expect(
+      verifyReleaseDigest(digest, minisig.split("\n").slice(0, 2).join("\n"), testAssetName),
+    ).rejects.toMatchObject({ code: "malformed_signature" });
+
+    expect(sdImageAssetName("v2026.9.20", "raspberry-pi-64")).toBe(testAssetName);
+    expect(() => sdImageAssetName(null, "raspberry-pi-64")).toThrow(ReleaseSignatureError);
+    expect(() => sdImageAssetName("v1/../2", "raspberry-pi-64")).toThrow(ReleaseSignatureError);
   });
 
   it("refuses a tampered asset, another key's signature, and a malformed file", async () => {
@@ -132,17 +170,19 @@ describe("minisig verification", () => {
     const tampered = new Uint8Array(asset);
     tampered[10] = (tampered[10] ?? 0) ^ 1;
     await expect(
-      verifyReleaseDigest(new Blake2b512().update(tampered).digest(), minisig),
+      verifyReleaseDigest(new Blake2b512().update(tampered).digest(), minisig, testAssetName),
     ).rejects.toMatchObject({ code: "signature_mismatch" });
 
     const digest = new Blake2b512().update(asset).digest();
     await expect(
-      verifyReleaseDigest(digest, testSigningKey().minisigFor(asset)),
+      verifyReleaseDigest(digest, testSigningKey().minisigFor(asset), testAssetName),
     ).rejects.toMatchObject({ code: "signature_mismatch" });
     // Without the override the pinned production key applies, and this
     // throwaway signature is not from it.
     overrideReleaseSigningKeyForTests(undefined);
-    await expect(verifyReleaseDigest(digest, minisig)).rejects.toBeInstanceOf(ReleaseSignatureError);
+    await expect(verifyReleaseDigest(digest, minisig, testAssetName)).rejects.toBeInstanceOf(
+      ReleaseSignatureError,
+    );
 
     expect(() => parseMinisigSignature("untrusted comment: only\n")).toThrow(/no signature line/);
     expect(() => parseMinisigSignature("not base64!!")).toThrow(/not valid base64/);
@@ -150,7 +190,7 @@ describe("minisig verification", () => {
     expect(() => parseMinisigSignature(Buffer.alloc(70, 0).toString("base64"))).toThrow(/wrong length/);
   });
 
-  it("trusts the key, not the key id or the trusted comment", () => {
+  it("trusts the key, not the key id", () => {
     const key = testSigningKey();
     const a = parseMinisigSignature(key.minisigFor(asset));
     const b = parseMinisigSignature(key.minisigFor(asset, { badKeyId: true }));
