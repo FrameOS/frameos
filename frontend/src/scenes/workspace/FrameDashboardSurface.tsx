@@ -13,7 +13,6 @@ import {
   ClockIcon,
   CommandLineIcon,
   DocumentTextIcon,
-  InformationCircleIcon,
   PlusIcon,
   SignalIcon,
   SparklesIcon,
@@ -31,6 +30,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
+import { SceneUpdateBanner } from './SceneUpdateBanner'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
@@ -571,14 +571,8 @@ function FrameSceneTile({
               Active
             </div>
           ) : null}
-          {updateVersion ? (
-            <div
-              title="Scene update available — use the scene menu to update"
-              className="pointer-events-auto flex items-center gap-1 rounded-full border border-sky-500/45 bg-white/95 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 shadow-sm backdrop-blur-sm"
-            >
-              <InformationCircleIcon className="h-3.5 w-3.5" />
-              <span>Update</span>
-            </div>
+          {updateVersion && !multiSelectEnabled ? (
+            <SceneUpdateBanner frameId={frame.id} sceneId={scene.id} size="small" />
           ) : null}
         </div>
       ) : null}

@@ -58,7 +58,6 @@ import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { sceneUtilityPanelIsAllowed, workspaceMode } from './workspaceSurfaces'
-import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -388,7 +387,7 @@ function SceneSelector({
                         {updateAvailable ? (
                           <Tag
                             color="teal"
-                            title="A newer version of this scene is available in the repository"
+                            title="A newer version of this scene is available"
                             className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
                           >
                             update
@@ -757,7 +756,7 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameS
 }
 
 function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
-  const { renameScene, updateSceneFromRepo } = useActions(scenesLogic({ frameId }))
+  const { renameScene, confirmSceneUpdate } = useActions(scenesLogic({ frameId }))
   const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const availableUpdateVersion = sceneUpdateVersions[scene.id]
   const nodes = scene.nodes ?? []
@@ -816,7 +815,7 @@ function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScen
             </div>
             <div className="frame-tool-muted truncate">
               {scene.origin?.templateName ? `"${scene.origin.templateName}" ` : 'This scene '}
-              has a newer version in the repository
+              has a newer version available
               {scene.origin?.version
                 ? ` (${shortSceneVersion(scene.origin.version)} → ${shortSceneVersion(availableUpdateVersion)})`
                 : ''}
@@ -825,22 +824,11 @@ function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScen
           </div>
           <button
             type="button"
-            onClick={() => {
-              void confirmDialog({
-                title: 'Update this scene from the repository?',
-                message: 'The latest published version replaces this copy. Any local changes to the scene are lost.',
-                confirmLabel: 'Update scene',
-                danger: true,
-              }).then((confirmed) => {
-                if (confirmed) {
-                  updateSceneFromRepo(scene.id)
-                }
-              })
-            }}
+            onClick={() => confirmSceneUpdate(scene.id)}
             className="frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <ArrowPathIcon className="h-4 w-4" />
-            <span>Update scene</span>
+            <span>Update to latest</span>
           </button>
         </div>
       ) : null}

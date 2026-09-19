@@ -16,6 +16,11 @@ export interface ApiFetchOptions extends RequestInit {}
 // each one as a real error (Next.js dev even counts them as page "issues").
 // Loaders whose catch swallows the error and returns a fallback log through
 // this instead.
+/** The standalone embedded editor: every apiFetch is a synthetic 404. */
+export function hasNoBackend(): boolean {
+  return typeof window !== 'undefined' && Boolean((window as any).FRAMEOS_EMBEDDED_NO_BACKEND)
+}
+
 export function logApiError(...args: unknown[]): void {
   if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
     console.debug(...args)

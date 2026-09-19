@@ -1,5 +1,5 @@
 import type { CloudSceneSource, FrameScene } from '../types'
-import type { CloudFrameSceneRow } from './cloudFrameScenes'
+import { cloudSceneHeldVersion, type CloudFrameSceneRow } from './cloudFrameScenes'
 import {
   cloudDeployActiveSceneId,
   createCloudAccountScene,
@@ -192,7 +192,12 @@ async function persistAndPushCloudFrameScenesNow(
   const claimedRuntimeIds = new Set<string>()
 
   for (const row of rows) {
-    const stored = await fetchStoreSceneScenesJson(row.scene_id)
+    // The version the workspace hydrated the form from — what the frame was
+    // sent — not the store's latest. Comparing the form against a NEWER
+    // version read every scene with a pending update as edited: an owned one
+    // was republished with its old content on top of the newer version, a
+    // public install was forked into a private copy, per save.
+    const stored = await fetchStoreSceneScenesJson(row.scene_id, cloudSceneHeldVersion(row))
     if (!stored) {
       // Unreadable (pulled scene, rate limit, transient error): keep the
       // assignment untouched rather than guessing — and claim every runtime

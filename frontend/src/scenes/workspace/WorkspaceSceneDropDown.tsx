@@ -55,7 +55,7 @@ export function WorkspaceSceneDropDown({
   // sceneUpdatesLogic and not scenesLogic: this dropdown renders on the frames
   // home, and scenesLogic would mount controlLogic, which fetches frame state.
   const { sceneUpdateVersions } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
-  const { updateSceneFromRepo } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
+  const { confirmSceneUpdate } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId: frame.id }))
   const { apps } = useValues(appsModel)
@@ -91,10 +91,9 @@ export function WorkspaceSceneDropDown({
           ...(sceneUpdateVersions[scene.id]
             ? [
                 {
-                  label: 'Update scene',
-                  confirm:
-                    'Update this scene to the latest version from the repository? Any local changes to the scene will be replaced.',
-                  onClick: () => updateSceneFromRepo(scene.id),
+                  label: 'Update to latest',
+                  // Asks before it replaces anything (sceneUpdatesLogic).
+                  onClick: () => confirmSceneUpdate(scene.id),
                   icon: <ArrowPathIcon className="h-5 w-5" />,
                 },
               ]

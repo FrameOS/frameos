@@ -53,6 +53,11 @@ export interface CloudSceneDeployState {
 export interface CloudSceneSource {
   scene_id: string
   scene_version?: number | null
+  /** The version the frame was last sent — the pin, or what "latest" meant at
+   * that push. The workspace shows THIS version's content. */
+  held_version?: number | null
+  /** Set when the store has a newer version the account can install. */
+  update_version?: number | null
 }
 
 export interface FrameType {

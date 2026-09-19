@@ -20,8 +20,15 @@ export interface CloudFrameSceneRow {
   scene_id: string
   /** null/undefined = the assignment tracks the latest published version. */
   scene_version?: number | null
+  /** The version the frame was last SENT: the pin, or what "latest" resolved
+   * to at the last push. Null when nothing records it (a frame from before
+   * the per-scene ledger that follows the latest). */
+  assigned_version?: number | null
   /** The store's newest version of this scene. */
   latest_version?: number | null
+  /** latest_version is ahead of assigned_version and installable —
+   * POST /api/frames/{frameId}/scenes/update takes the frame there. */
+  update_available?: boolean
   name?: string | null
   slug?: string | null
   position?: number | null
@@ -34,9 +41,32 @@ export interface CloudFrameSceneRow {
   granted_settings_groups?: string[]
 }
 
+/**
+ * The version of the scene the frame holds, as far as the control plane can
+ * know: what the last push carried, else the pin. An assignment that follows
+ * the latest is NOT at the store's latest — it only moves on a push — so the
+ * workspace shows (and saves against) this version, never "latest" when it
+ * can help it.
+ */
+export function cloudSceneHeldVersion(row: CloudFrameSceneRow): number | null {
+  return row.assigned_version ?? row.scene_version ?? null
+}
+
+/** The newer store version this assignment can be updated to, else null. */
+export function cloudSceneUpdateVersion(row: CloudFrameSceneRow): number | null {
+  const held = cloudSceneHeldVersion(row)
+  const latest = row.latest_version ?? null
+  // `update_available` also knows whether the account may still install the
+  // scene; an older server that does not send it is judged on versions alone.
+  if (row.update_available === false || held === null || latest === null || latest <= held) {
+    return null
+  }
+  return latest
+}
+
 /** Cache key for a store scene's scenes.json fetch. */
 export function cloudSceneCacheKey(row: CloudFrameSceneRow): string {
-  return `${row.scene_id}@${row.scene_version ?? 'latest'}`
+  return `${row.scene_id}@${cloudSceneHeldVersion(row) ?? 'latest'}`
 }
 
 /**
@@ -62,7 +92,7 @@ export function scenesFromStoreSceneJson(json: unknown): FrameScene[] | null {
  * scene, it just cannot light the Active badge or count nodes.
  */
 export function cloudSceneStub(row: CloudFrameSceneRow): FrameScene {
-  const version = row.scene_version ?? row.latest_version
+  const version = cloudSceneHeldVersion(row) ?? row.latest_version
   return {
     id: row.scene_id,
     name: row.name || row.slug || 'Untitled scene',

@@ -8,6 +8,7 @@ import {
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
 import {
+  assignedSceneVersion,
   assignScenesToFrame,
   maxScenesPerFrame,
   readSettingsGroupsField,
@@ -53,9 +54,11 @@ export async function GET(
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       latestVersion: storeScenes.latestVersion,
       position: frameSceneAssignments.position,
+      sceneAccountId: storeScenes.accountId,
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
       sceneSlug: storeScenes.slug,
+      sceneStatus: storeScenes.status,
       sceneVersion: frameSceneAssignments.sceneVersion,
       visibility: storeScenes.visibility,
     })
@@ -65,26 +68,46 @@ export async function GET(
     .orderBy(asc(frameSceneAssignments.position));
   return NextResponse.json({
     assigned_checksum: frame.assignedChecksum,
-    scenes: rows.map((row) => ({
-      // The store's newest version next to the pinned one (null = follows
-      // the latest at push time), so the workspace can tell when a frame's
-      // copy is behind.
-      latest_version: row.latestVersion,
-      name: row.sceneName,
-      position: row.position,
-      scene_id: row.sceneId,
-      scene_version: row.sceneVersion,
-      // Service settings, per assignment: what the assigned version's apps
-      // DECLARE (a request) and what the owner GRANTED (what the device may
-      // pull). Names only. A legacy row (no grant recorded yet) reports its
-      // declared list as granted, which is how it is served until the owner
-      // saves the list; a row whose declaration was never computed reports
-      // both as empty until the next push or pull computes it.
-      declared_settings_groups: readServiceSettingGroups(row.declaredSettingsGroups) ?? [],
-      granted_settings_groups: grantedSettingsGroupsForAssignment(row),
-      slug: row.sceneSlug,
-      visibility: row.visibility,
-    })),
+    scenes: rows.map((row) => {
+      // The version the frame was last SENT (the pin, or what "latest"
+      // resolved to at that push) next to the store's newest one: the frame's
+      // copy is behind exactly when the second is ahead of the first. Null on
+      // a frame that predates the per-scene ledger and follows the latest —
+      // nothing records what it holds, so no update is claimed.
+      const assignedVersion =
+        assignedSceneVersion(frame, row.sceneId) ?? row.sceneVersion ?? null;
+      // Only an update the account could actually take: a scene pulled from
+      // the store, or flipped private by its publisher, keeps running what
+      // the frame has and offers nothing newer.
+      const installable =
+        row.sceneStatus === "active" &&
+        (row.visibility === "public" ||
+          row.sceneAccountId === session.accountId);
+      return {
+        assigned_version: assignedVersion,
+        latest_version: row.latestVersion,
+        name: row.sceneName,
+        position: row.position,
+        scene_id: row.sceneId,
+        scene_version: row.sceneVersion,
+        // Service settings, per assignment: what the assigned version's apps
+        // DECLARE (a request) and what the owner GRANTED (what the device may
+        // pull). Names only. A legacy row (no grant recorded yet) reports its
+        // declared list as granted, which is how it is served until the owner
+        // saves the list; a row whose declaration was never computed reports
+        // both as empty until the next push or pull computes it.
+        declared_settings_groups:
+          readServiceSettingGroups(row.declaredSettingsGroups) ?? [],
+        granted_settings_groups: grantedSettingsGroupsForAssignment(row),
+        slug: row.sceneSlug,
+        // POST /scenes/update takes the frame there.
+        update_available:
+          installable &&
+          assignedVersion !== null &&
+          row.latestVersion > assignedVersion,
+        visibility: row.visibility,
+      };
+    }),
     scenes_checksum: frame.scenesChecksum,
   });
 }
