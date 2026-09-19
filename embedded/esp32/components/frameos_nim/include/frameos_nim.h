@@ -118,9 +118,7 @@ void frameos_nim_set_time_zone(const char *time_zone);
  * and keep UTC — or the slice does not hold the zone. */
 bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, char *rule_out, size_t rule_len);
 double frameos_nim_scene_interval(void);
-/* Sleep override from the scene's last render (frameos.setNextSleep(), or
- * logic/nextSleepDuration inside an embedded scene; at the top level that app
- * sets the scene interval above instead);
+/* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */

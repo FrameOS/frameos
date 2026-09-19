@@ -181,12 +181,11 @@ scene can change it without opening the editor:
   not, so editing `settings.refreshInterval` keeps working after a redeploy.
 
 There is no need to wire a state node into `logic/nextSleepDuration` to make
-the cadence configurable. That app still works and goes through the same
-flow: it writes its duration into the scene's refresh interval field, exactly
-as a control panel would, so the number it sets is the number every surface
-shows. (Inside an embedded scene — a split-screen panel — it also still tells
-the host scene's render cycle, as it always did.) `frameos.setNextSleep()`
-remains the raw one-off override of the pause after *this* render.
+the cadence configurable. That app (and `frameos.setNextSleep()`) is a
+**one-time override**: it sets how long to sleep after *this* render and
+leaves the refresh interval alone, so the render after that is back on the
+interval. Use it for the odd cycle — the interval is 3600, but sleep 900 now
+so refreshes line up with the hour — not as the scene's cadence.
 
 The rules live in `frameos/src/frameos/refresh_interval.nim` (runtime),
 `frontend/src/utils/refreshInterval.ts` (every control surface),

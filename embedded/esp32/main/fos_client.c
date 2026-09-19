@@ -1396,8 +1396,7 @@ static void client_task(void *arg)
             if (scene_interval > 7 * 86400.0) scene_interval = 7 * 86400.0;
             interval = (uint32_t)scene_interval;
         }
-        /* A per-render override (frameos.setNextSleep(), or an embedded
-         * scene's logic/nextSleepDuration) beats both
+        /* A per-render override from logic/nextSleepDuration beats both
          * intervals, like context.nextSleep on the Pi runner. Only valid
          * right after a render actually ran. */
         if (rendered) {

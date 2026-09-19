@@ -17,8 +17,10 @@
 ##
 ## The runtime reads the interval back out of the scene's state after every
 ## run, so `frameos.setState("refreshInterval", 60)`, a logic/setAsState node,
-## logic/nextSleepDuration, a setSceneState from a control panel and a
-## schedule's state all do the same thing. The same rules live in
+## a setSceneState from a control panel and a schedule's state all do the same
+## thing. (logic/nextSleepDuration and frameos.setNextSleep() are something
+## else: a one-time override of the sleep after the current render, which
+## leaves the interval alone.) The same rules live in
 ## `frontend/src/utils/refreshInterval.ts`, `frameos/wasm/src/refreshInterval.ts`
 ## and `backend/app/utils/refresh_interval.py`; keep them in step.
 
@@ -119,16 +121,3 @@ proc syncRefreshInterval*(scene: FrameScene) =
     return
   scene.refreshInterval = refreshIntervalFromState(
     scene.state, scene.refreshIntervalKey, scene.refreshIntervalDefault)
-
-proc setRefreshInterval*(scene: FrameScene, seconds: float): bool =
-  ## Set the scene's interval the way a control panel would: through its state
-  ## field, so every surface shows the new number. False for a value that is
-  ## not a positive number of seconds (nothing changes then).
-  if scene.isNil or parseRefreshSeconds(%seconds) <= 0.0:
-    return false
-  if scene.refreshIntervalKey.len > 0:
-    if scene.state.isNil or scene.state.kind != JObject:
-      scene.state = %*{}
-    scene.state[scene.refreshIntervalKey] = %seconds
-  scene.refreshInterval = seconds
-  true

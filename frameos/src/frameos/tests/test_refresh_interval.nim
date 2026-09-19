@@ -176,17 +176,18 @@ block test_runtime_follows_state:
 
   setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
-block test_next_sleep_duration_goes_through_the_state_field:
+block test_next_sleep_duration_is_a_one_time_override:
+  # Sleep 77 s after this render (to line up with the hour, say); the scene's
+  # interval stays what it was, so the render after that is back on it.
   setUploadedInterpretedScenes(exports)
   resetInterpretedScenes()
   let scene = initScene("tests/sleep-app")
-  doAssert scene.refreshInterval == 300.0
   var context = ExecutionContext(scene: scene, event: "render", payload: %*{},
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
   discard render(scene, context)
-  doAssert scene.state{"refreshInterval"}.getFloat() == 77.0
-  doAssert scene.refreshInterval == 77.0
-  doAssert context.nextSleep == -1
+  doAssert context.nextSleep == 77.0
+  doAssert scene.state{"refreshInterval"}.getFloat() == 300.0
+  doAssert scene.refreshInterval == 300.0
   setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
 block test_scene_sets_its_own_interval:
