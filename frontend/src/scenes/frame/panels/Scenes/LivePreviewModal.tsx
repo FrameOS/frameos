@@ -28,6 +28,7 @@ import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import type { FrameId } from '../../../../types'
 import { openBlobInNewTab } from '../../../../utils/objectUrl'
+import { sceneStateFields } from '../../../../utils/refreshInterval'
 
 // Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
 // The preview's runtime lines are raw strings, so classify them by content.
@@ -222,7 +223,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
     return Boolean(event.label)
   })
 
-  const publicFields = (livePreviewScene?.fields ?? []).filter((field) => field.access === 'public')
+  const publicFields = sceneStateFields(livePreviewScene).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
   const stateEntries = Object.entries(previewState)
   const publicEntries = stateEntries.filter(([key]) => publicFieldNames.has(key))

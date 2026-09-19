@@ -10,6 +10,7 @@ from app.models.apps import get_local_frame_apps, get_local_app_path, get_scene_
 from app.codegen.drivers_nim import DEFAULT_COMPILATION_MODE
 from app.codegen.utils import sanitize_nim_string, natural_keys, nim_comment, select_field_options
 from app.utils.js_apps import find_js_app_source_key
+from app.utils.refresh_interval import resolve_refresh_interval
 from app.utils.scene_execution import scene_is_interpreted
 
 def get_events_schema() -> list[dict]:
@@ -1235,7 +1236,18 @@ class SceneWriter:
         state_init_fields = []
         public_state_fields = []
         persisted_state_fields = []
-        for field in self.scene.get("fields", []):
+        refresh_interval = float(
+            self.scene.get("settings", {}).get("refreshInterval", None) or self.frame.interval or 300
+        )
+        if math.isnan(refresh_interval):
+            refresh_interval = 300.0
+        if refresh_interval < 0.001:
+            refresh_interval = 0.001
+        # The refresh interval is a state field: the scene's own (by role or by
+        # name) or an implicit public one, always listed last. The interpreter
+        # does the same for interpreted scenes (frameos/refresh_interval.nim).
+        refresh = resolve_refresh_interval(self.scene.get("fields", []), refresh_interval)
+        for field in refresh.fields:
             name = field.get("name", "")
             if name == "":
                 continue
@@ -1275,6 +1287,9 @@ class SceneWriter:
                         f", showIf: parseJson(\"{sanitize_nim_string(json.dumps(show_if))}\")"
                     )
 
+                role = field.get("role", None)
+                role_nim = f', role: "{sanitize_nim_string(str(role))}"' if role else ""
+
                 public_state_fields.append(
                     f"StateField(name: \"{sanitize_nim_string(field.get('name', ''))}\", "
                     f"label: \"{sanitize_nim_string(field.get('label', field.get('name', '')))}\", "
@@ -1283,7 +1298,8 @@ class SceneWriter:
                     f"required: {'true' if field.get('required', False) else 'false'}, "
                     f"secret: {'true' if field.get('secret', False) else 'false'}, "
                     f"value: {value_literal}"
-                    f"{show_if_nim})"
+                    f"{show_if_nim}"
+                    f"{role_nim})"
                 )
             if field.get("persist", "memory") == "disk":
                 persisted_state_fields.append(f'"{sanitize_nim_string(name)}"')
@@ -1303,14 +1319,8 @@ class SceneWriter:
       runEvent(scene, openContext)
     """
 
-        refresh_interval = float(
-            self.scene.get("settings", {}).get("refreshInterval", None) or self.frame.interval or 300
-        )
-        if math.isnan(refresh_interval):
-            refresh_interval = 300.0
-        if refresh_interval < 0.001:
-            refresh_interval = 0.001
-        scene_refresh_interval = str(refresh_interval)
+        scene_refresh_interval = str(float(refresh.default_seconds))
+        refresh_interval_key = sanitize_nim_string(refresh.key)
 
         background_color = self.scene.get("settings", {}).get("backgroundColor", None)
         if background_color is None:
@@ -1326,6 +1336,7 @@ import std/monotimes
 import frameos/values
 import frameos/types
 import frameos/channels
+import frameos/refresh_interval
 import frameos/utils/image
 import frameos/utils/url
 import frameos/utils/time
@@ -1365,8 +1376,12 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
 
+proc syncRefreshInterval(self: FrameScene) =
+  self.refreshInterval = refreshIntervalFromState(self.state, "{refresh_interval_key}", {scene_refresh_interval})
+
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   runEvent(Scene(self), context)
+  syncRefreshInterval(self)
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)
@@ -1386,11 +1401,15 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   {(newline + "  ").join(self.init_apps)}
   runEvent(self, context)
   {open_event_in_init}
+  syncRefreshInterval(scene)
 {{.pop.}}
 
 var exportedScene* = ExportedScene(
   publicStateFields: PUBLIC_STATE_FIELDS,
   persistedStateKeys: PERSISTED_STATE_KEYS,
+  refreshIntervalKey: "{refresh_interval_key}",
+  refreshIntervalDefault: {scene_refresh_interval},
+  refreshIntervalImplicit: {'true' if refresh.implicit else 'false'},
   init: init,
   runEvent: runEvent,
   render: render

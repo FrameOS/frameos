@@ -8,6 +8,7 @@ import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
 import frameos/types
 import frameos/interpreter
+import frameos/refresh_interval
 import frameos/js_runtime/runtime
 import frameos/js_runtime/app_runtime
 
@@ -646,8 +647,18 @@ proc updateLastPersistedState*(self: FrameScene) =
   let sceneExport = findExportedScene(self.id)
   if sceneExport.isNone:
     return
-  let persistedStateKeys = sceneExport.get().persistedStateKeys
+  let exported = sceneExport.get()
+  let persistedStateKeys = exported.persistedStateKeys
   var hasChanges = false
+  # An implicit refresh interval still on the scene's default is not worth a
+  # file: persisting it would pin the old number when the scene's settings
+  # change. Once somebody customizes it, it persists like any other field.
+  proc worthPersisting(key: string): bool =
+    if not self.state.hasKey(key):
+      return false
+    if exported.refreshIntervalImplicit and key == exported.refreshIntervalKey:
+      return parseRefreshSeconds(self.state[key]) != exported.refreshIntervalDefault
+    true
   if not lastPersistedStates.hasKey(self.id.string):
     discard loadPersistedState(self.id)
   if not lastPersistedStates.hasKey(self.id.string):
@@ -658,10 +669,11 @@ proc updateLastPersistedState*(self: FrameScene) =
       persistedState.delete(key)
       hasChanges = true
   for key in persistedStateKeys:
-    if self.state.hasKey(key) and self.state[key] != persistedState{key}:
+    let keep = worthPersisting(key)
+    if keep and self.state[key] != persistedState{key}:
       persistedState[key] = copy(self.state[key])
       hasChanges = true
-    elif not self.state.hasKey(key) and persistedState.hasKey(key):
+    elif not keep and persistedState.hasKey(key):
       persistedState.delete(key)
       hasChanges = true
   if hasChanges:

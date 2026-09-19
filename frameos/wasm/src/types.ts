@@ -35,6 +35,8 @@ export interface StateField {
   persist?: 'memory' | 'disk'
   access?: 'private' | 'public'
   showIf?: ShowIfCondition[]
+  /** `refreshInterval`: this field's value is the scene's seconds between renders (one per scene). */
+  role?: 'refreshInterval'
 }
 
 export interface SceneNode {

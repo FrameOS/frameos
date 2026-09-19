@@ -18,7 +18,7 @@ Globals available inside a code node — and nothing else:
 
 | global | what it is |
 |---|---|
-| `state.<field>` | the scene's state fields (declare them in the scene's `fields`) |
+| `state.<field>` | the scene's state fields (declare them in the scene's `fields`), plus `state.refreshInterval` — see [the refresh interval](#the-refresh-interval-is-a-state-field) |
 | `<arg>` | every declared `codeArgs` entry, by name |
 | `context` | `{ event, payload, loopIndex, loopKey, hasImage }` |
 | `console.log/warn/error` | goes to the frame log |
@@ -143,6 +143,47 @@ scene-local app `category: "render"`: as of Aug 2026 such an app placed in the
 prev/next chain draws nothing and logs nothing. The pattern that works is a
 **data app whose `get()` returns `frameos.svg(...)`**, wired into a
 `render/image` node — that is how the Weather sample's `weatherPanel` works.
+
+## The refresh interval is a state field
+
+How often a scene renders is part of its state, so the person running the
+scene can change it without opening the editor:
+
+- Every scene has a public state field **`refreshInterval`**, labelled
+  "Refresh interval (seconds)" and listed **last** wherever the scene's options
+  are shown: the frame's own control panel (`/c`), the admin UI, the backend,
+  the cloud, schedules and the live preview. A scene does not declare it; its
+  default is `settings.refreshInterval`.
+- Read it as `state.refreshInterval` (code nodes, state nodes) or
+  `app.state.refreshInterval` (JS apps). Write it like any other state —
+  `frameos.setState("refreshInterval", 60)` or a `logic/setAsState` node — and
+  the next sleep uses the new value. A `setSceneState` / `setCurrentScene`
+  payload, a schedule's state and a control panel all do the same thing.
+- A scene that wants its own wording marks **one** numeric field with
+  `"role": "refreshInterval"`:
+
+  ```json
+  { "name": "seconds", "label": "Seconds per image", "type": "float", "value": "600",
+    "access": "public", "persist": "disk", "role": "refreshInterval" }
+  ```
+
+  That field then *is* the interval (its `value` is the scene's default and
+  wins over `settings.refreshInterval`), it moves to the end of the list, and
+  no implicit `refreshInterval` field is added. A field literally named
+  `refreshInterval` is taken over the same way without a role. Make the field
+  `"access": "private"` to keep the interval out of people's hands.
+- Anything that is not a positive number falls back to the scene's default.
+  A customized implicit interval is persisted; one still on the default is
+  not, so editing `settings.refreshInterval` keeps working after a redeploy.
+
+There is no need to wire a state node into `logic/nextSleepDuration` to make
+the cadence configurable. That app (and `frameos.setNextSleep()`) remains for
+what it is good at: a one-off override of the pause after *this* render.
+
+The rules live in `frameos/src/frameos/refresh_interval.nim` (runtime),
+`frontend/src/utils/refreshInterval.ts` (every control surface),
+`frameos/wasm/src/refreshInterval.ts` (the preview package) and
+`backend/app/utils/refresh_interval.py` (compiled scenes, virtual frames).
 
 ## SVG that the frame can draw
 

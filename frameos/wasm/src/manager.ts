@@ -4,6 +4,7 @@
 // but runs entirely in the browser against the wasm runtime.
 import { FrameOSPreview, type FrameOSPreviewOptions } from './preview'
 import { selectFieldOptions } from './options'
+import { sceneStateFields } from './refreshInterval'
 import { coerceStateFieldValue, evaluateShowIf, stateFieldShowIfValues } from './showIf'
 import { sceneEventButtons, type FrameOSScene, type StateField } from './types'
 
@@ -119,7 +120,7 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
   }
 
   function publicFields(scene: FrameOSScene | undefined): StateField[] {
-    return (scene?.fields ?? []).filter((field) => field.access === 'public' && field.name)
+    return sceneStateFields(scene).filter((field) => field.access === 'public' && field.name)
   }
 
   function fieldValues(scene: FrameOSScene | undefined): Record<string, unknown> {

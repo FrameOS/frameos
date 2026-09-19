@@ -7,6 +7,7 @@ import { fetchTemplateScenes } from './templatesLogic'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 import type { FrameType } from '../../../../types'
 import type { StateField } from '../../../../types'
+import { sceneStateFields } from '../../../../utils/refreshInterval'
 
 export interface TemplateRowLogicProps {
   frameId?: FrameId
@@ -147,7 +148,7 @@ export const templateRowLogic = kea<templateRowLogicType>([
     trySceneFields: [
       (s) => [s.trySceneConfig],
       (trySceneConfig: templateRowLogicValues['trySceneConfig']) =>
-        (trySceneConfig?.mainScene?.fields ?? []).filter((field) => field.access === 'public'),
+        sceneStateFields(trySceneConfig?.mainScene).filter((field) => field.access === 'public'),
     ],
   }),
   listeners(({ actions, values, props }) => ({

@@ -7,6 +7,7 @@ import { isScheduledSystemEvent, ScheduledSystemEventName } from '../../../../ut
 import type { FrameType } from '../../../../types'
 import type { DeepPartial } from 'kea-forms/lib/types'
 import type { FrameScene, FrameSchedule } from '../../../../types'
+import { sceneStateFields } from '../../../../utils/refreshInterval'
 
 export interface ScheduleLogicProps {
   frameId: FrameId
@@ -212,7 +213,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
         frameForm: scheduleLogicValues['frameForm']
       ): Record<string, StateField[]> =>
         (frameForm?.scenes ?? frame.scenes ?? []).reduce((acc, scene) => {
-          acc[scene.id] = scene.fields ?? []
+          acc[scene.id] = sceneStateFields(scene)
           return acc
         }, {} as Record<string, StateField[]>),
     ],

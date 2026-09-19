@@ -51,6 +51,7 @@
       },
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "label": "Seconds between renders",
         "type": "float",
         "value": "0.0416",

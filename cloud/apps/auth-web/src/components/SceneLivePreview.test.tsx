@@ -419,6 +419,7 @@ describe("SceneLivePreviewPanel editor reloads", () => {
     fireEvent.click(screen.getByRole("button", { name: /Apply & render/ }));
     expect(previews[0]!.setSceneState).toHaveBeenCalledWith({
       accent: "#d98a5a",
+      refreshInterval: 300,
       showDate: true,
       style: "minimal",
     });
@@ -549,6 +550,7 @@ describe("SceneLivePreviewPanel state-field form", () => {
     fireEvent.click(screen.getByRole("button", { name: /Apply & render/ }));
     expect(previews[0]!.setSceneState).toHaveBeenCalledWith({
       accent: "#ABC",
+      refreshInterval: 300,
       showDate: true,
       style: "station",
     });
@@ -584,6 +586,7 @@ describe("SceneLivePreviewPanel state-field form", () => {
     expect(showDate.checked).toBe(true);
     expect(previews[0]!.setSceneState).toHaveBeenLastCalledWith({
       accent: "#d98a5a",
+      refreshInterval: 300,
       showDate: true,
       style: "station",
     });
@@ -615,6 +618,7 @@ describe("SceneLivePreviewPanel auto apply", () => {
     expect(setSceneState).toHaveBeenCalledTimes(1);
     expect(setSceneState).toHaveBeenLastCalledWith({
       accent: "#d98a5a",
+      refreshInterval: 300,
       showDate: true,
       style: "minimal",
     });
@@ -633,6 +637,7 @@ describe("SceneLivePreviewPanel auto apply", () => {
     expect(setSceneState).toHaveBeenCalledTimes(2);
     expect(setSceneState).toHaveBeenLastCalledWith({
       accent: "#112233",
+      refreshInterval: 300,
       showDate: true,
       style: "minimal",
     });

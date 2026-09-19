@@ -40,6 +40,7 @@
       },
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "label": "Refresh interval in seconds",
         "type": "float",
         "value": "900",

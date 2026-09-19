@@ -7,6 +7,11 @@ import { TextInput } from '../../../../components/TextInput'
 import { appConfigFieldTypes, type AppConfigField, type StateField } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { ShowIfEditor, type ShowIfConditions } from './ShowIfEditor'
+import {
+  REFRESH_INTERVAL_LABEL,
+  REFRESH_INTERVAL_ROLE,
+  refreshIntervalFieldIndex,
+} from '../../../../utils/refreshInterval'
 
 export function codenameToLabel(codename: string): string {
   const label = codename
@@ -17,6 +22,54 @@ export function codenameToLabel(codename: string): string {
     .replace(/\s+/g, ' ')
     .toLowerCase()
   return label ? label.charAt(0).toUpperCase() + label.slice(1) : ''
+}
+
+/**
+ * "Use as refresh interval": at most one state field carries the role. A field
+ * literally named `refreshInterval` has it by name (unless another field took
+ * the role), so its switch is on and locked.
+ */
+function RefreshIntervalRoleField<T extends AppConfigField>({
+  fields,
+  index,
+  setFields,
+}: {
+  fields: T[]
+  index: number
+  setFields: (fields: T[]) => void
+}): JSX.Element {
+  const stateFields = fields as StateField[]
+  const active = refreshIntervalFieldIndex(stateFields) === index
+  const byName = active && stateFields[index]?.role !== REFRESH_INTERVAL_ROLE
+  return (
+    <Field
+      name="role"
+      label="Use as refresh interval"
+      tooltip={
+        <>
+          The value of this field is how many seconds the scene waits between renders. It is shown last, in place of the
+          default "{REFRESH_INTERVAL_LABEL}" control. Only one field per scene can have this role; a field named{' '}
+          <code>refreshInterval</code> has it automatically.
+        </>
+      }
+    >
+      {() => (
+        <Switch
+          aria-label="Use as refresh interval"
+          value={active}
+          disabled={byName}
+          onChange={(enabled) =>
+            setFields(
+              fields.map((other, i) => {
+                const { role: _role, ...rest } = other as StateField
+                return (i === index && enabled ? { ...rest, role: REFRESH_INTERVAL_ROLE } : rest) as T
+              })
+            )
+          }
+        />
+      )}
+    </Field>
+  )
 }
 
 interface FieldDefinitionFormProps<T extends AppConfigField> {
@@ -208,6 +261,7 @@ export function FieldDefinitionForm<T extends AppConfigField>({
               />
             )}
           </Field>
+          <RefreshIntervalRoleField fields={fields} index={index} setFields={setFields} />
         </>
       ) : null}
       <div className="flex w-full items-center justify-between gap-2">

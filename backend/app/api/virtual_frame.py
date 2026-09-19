@@ -39,6 +39,7 @@ from app.redis import get_redis
 from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
 from app.utils import virtual_assets
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
+from app.utils.refresh_interval import resolve_refresh_interval
 
 from . import api_public
 from .embedded_device import (
@@ -103,8 +104,16 @@ def _scene_by_id(frame: Frame, scene_id: str | None) -> dict | None:
 
 
 def _scene_fields(scene: dict) -> list[dict]:
+    # Every scene's fields end with its refresh interval, declared or implicit,
+    # exactly as the runtime lists them (app/utils/refresh_interval.py) — so a
+    # control panel's `refreshInterval` is settable and stored here too.
     fields = scene.get("fields")
-    return [f for f in fields if isinstance(f, dict) and f.get("name")] if isinstance(fields, list) else []
+    settings = scene.get("settings")
+    resolved = resolve_refresh_interval(
+        fields if isinstance(fields, list) else [],
+        settings.get("refreshInterval") if isinstance(settings, dict) else None,
+    )
+    return [f for f in resolved.fields if f.get("name")]
 
 
 def _settable_field_names(scene: dict) -> set[str]:

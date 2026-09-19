@@ -320,6 +320,65 @@ def test_public_state_fields_include_value_and_show_if():
     assert '"counter": %*(5)' in source
 
 
+def _refresh_scene(fields, refresh_interval=3600):
+    return {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [{"id": "event", "type": "event", "data": {"keyword": "render"}, "position": {"x": 0, "y": 0}}],
+        "edges": [],
+        "fields": fields,
+        "settings": {"execution": "compiled", "refreshInterval": refresh_interval, "backgroundColor": "#000000"},
+        "apps": {},
+    }
+
+
+def test_refresh_interval_is_an_implicit_public_state_field():
+    frame = SimpleNamespace(interval=300, debug=False, scenes=[])
+    source = write_scene_nim(
+        frame,
+        _refresh_scene([{"name": "search", "type": "string", "value": "birds", "access": "public"}], 900),
+    )
+
+    # Listed last, seeded from settings.refreshInterval, read back after every event
+    assert source.index('StateField(name: "search"') < source.index('StateField(name: "refreshInterval"')
+    assert 'label: "Refresh interval (seconds)"' in source
+    assert '"refreshInterval": %*(900.0)' in source
+    assert 'refreshIntervalFromState(self.state, "refreshInterval", 900.0)' in source
+    assert 'refreshIntervalKey: "refreshInterval"' in source
+    assert "refreshIntervalImplicit: true" in source
+    assert 'PERSISTED_STATE_KEYS*: seq[string] = @["refreshInterval"]' in source
+
+
+def test_refresh_interval_role_takes_over_an_existing_field():
+    frame = SimpleNamespace(interval=300, debug=False, scenes=[])
+    source = write_scene_nim(
+        frame,
+        _refresh_scene(
+            [
+                {
+                    "name": "seconds",
+                    "type": "float",
+                    "value": "600",
+                    "label": "Seconds per image",
+                    "access": "public",
+                    "persist": "disk",
+                    "role": "refreshInterval",
+                },
+                {"name": "search", "type": "string", "value": "birds", "access": "public"},
+            ]
+        ),
+    )
+
+    assert 'StateField(name: "refreshInterval"' not in source
+    # Moved last, keeps its label, and its own default beats settings.refreshInterval
+    assert source.index('StateField(name: "search"') < source.index('StateField(name: "seconds"')
+    assert 'label: "Seconds per image"' in source
+    assert 'role: "refreshInterval"' in source
+    assert 'refreshIntervalFromState(self.state, "seconds", 600.0)' in source
+    assert "refreshInterval: 600.0, backgroundColor" in source
+    assert "refreshIntervalImplicit: false" in source
+
+
 def test_select_options_accept_strings_and_value_label_pairs():
     scene = {
         "id": "scene",

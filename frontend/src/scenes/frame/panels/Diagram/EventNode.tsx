@@ -20,6 +20,7 @@ import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { NodeZoomLabel } from './NodeZoomLabel'
 import { frameEventForScene } from '../../../../utils/frameEvents'
+import { parseRefreshSeconds, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
 
 export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -43,7 +44,13 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
     eventFilterConfig.label = data.label
   }
 
-  const refreshInterval = scene?.settings?.refreshInterval
+  // A scene that declares its own interval field (by role or by name) keeps
+  // its default there; settings.refreshInterval is only the fallback then.
+  const refreshFieldIndex = refreshIntervalFieldIndex(scene?.fields)
+  const refreshInterval =
+    refreshFieldIndex >= 0
+      ? parseRefreshSeconds(scene?.fields?.[refreshFieldIndex]?.value) || undefined
+      : scene?.settings?.refreshInterval
   const backgroundColor = scene?.settings?.backgroundColor ?? '#000000'
 
   const updateEventFilter = (fieldName: string, value: string): void => {
@@ -73,6 +80,18 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
     }
 
     updateScene(sceneId, { settings: newSettings })
+  }
+
+  const updateRefreshInterval = (value: number | undefined): void => {
+    if (!sceneId || refreshFieldIndex < 0) {
+      updateSceneSetting('refreshInterval', value)
+      return
+    }
+    updateScene(sceneId, {
+      fields: (scene?.fields ?? []).map((field, index) =>
+        index === refreshFieldIndex ? { ...field, value: value === undefined ? '' : String(value) } : field
+      ),
+    })
   }
 
   // these fields are deprecated, but keep showing nodes that are connected
@@ -149,7 +168,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
           <div className="flex items-center gap-2">
             <div className="flex-1">Refresh interval</div>
             <Tooltip
-              title="Seconds between automatic re-renders of this scene. Can be a large number (3600 seconds = 1 hour), or a very small number for real-time rendering (0.04s = 25fps)."
+              title="The default number of seconds between automatic re-renders of this scene. Can be a large number (3600 seconds = 1 hour), or a very small number for real-time rendering (0.04s = 25fps). Anyone controlling the scene can change it: it is the last of the scene's options."
               containerClassName="ml-1 inline-block align-sub"
               label="About the render interval"
             >
@@ -160,7 +179,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
               className="max-w-[70px]"
               value={refreshInterval}
               placeholder={String(defaultInterval)}
-              onChange={(value) => updateSceneSetting('refreshInterval', value)}
+              onChange={updateRefreshInterval}
             />
           </div>
         </td>

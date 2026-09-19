@@ -3,7 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { sceneSettingsLogic } from './sceneSettingsLogic'
 import { Form, Group } from 'kea-forms'
 import { Field } from '../../../../components/Field'
-import { NumberTextInput } from '../../../../components/NumberTextInput'
+import { RefreshIntervalInput } from '../../../../components/RefreshIntervalInput'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
@@ -11,6 +11,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
+import { REFRESH_INTERVAL_FIELD_NAME, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -20,6 +21,11 @@ export interface SceneSettingsProps {
 
 const sceneSettingsFieldClass = 'scene-settings-field frame-tool-row rounded-xl p-3 @md:items-center @md:gap-4'
 const sceneSettingsEmbeddedFieldClass = 'scene-settings-field @md:items-center @md:gap-4'
+
+const refreshIntervalTooltip =
+  'The default number of seconds between renders. Anyone controlling the scene can change it: it is the last control ' +
+  'wherever the scene\'s options are shown. Use a large number like "60" or more for e-ink frames. A number below 1 ' +
+  'activates realtime mode (0.041s = 24fps, 0.016s = 60fps): only if your hardware supports it.'
 
 function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
   return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
@@ -33,6 +39,8 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     return <></>
   }
   const fieldClassName = embedded ? sceneSettingsEmbeddedFieldClass : sceneSettingsFieldClass
+  const refreshFieldIndex = refreshIntervalFieldIndex(scene.fields)
+  const refreshFieldName = refreshFieldIndex >= 0 ? scene.fields?.[refreshFieldIndex]?.name : undefined
   const frameRunsInterpreted = frameRunsScenesInterpreted(frameForm.mode)
   const execution = sceneExecutionForFrame(scene, frameForm.mode)
   const hasCompiledOnlyContent = sceneRequiresCompilation(scene)
@@ -47,25 +55,52 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     >
       <Group name={['scenes', sceneIndex]}>
         <div className="w-full space-y-3 @container">
-          <Group name={['settings']}>
-            <Field
-              className={fieldClassName}
-              name="refreshInterval"
-              label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
-              tooltip={
-                <>
-                  How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
-                  frames. A number below 1 activates realtime mode (0.041s = 24fps, 0.016s = 60fps). This should be used
-                  when you're certain of your setup and only if your hardware supports it.
-                </>
-              }
-            >
-              <NumberTextInput
+          {refreshFieldIndex >= 0 ? (
+            // The scene declares its own interval field (by role or by name):
+            // that field's default IS the scene's default.
+            <Group name={['fields', refreshFieldIndex]}>
+              <Field
+                className={fieldClassName}
+                name="value"
+                label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
+                tooltip={
+                  <>
+                    {refreshIntervalTooltip} This scene keeps it in its own state field,{' '}
+                    <code>state.{refreshFieldName}</code>; this is that field's default.
+                  </>
+                }
+              >
+                {({ value, onChange }) => (
+                  <RefreshIntervalInput
+                    value={value}
+                    onChange={(seconds) => onChange(seconds === undefined ? '' : String(seconds))}
+                    placeholder={String(scene.settings?.refreshInterval || frameForm.interval || 300)}
+                    className="h-10 @md:max-w-[9rem]"
+                  />
+                )}
+              </Field>
+            </Group>
+          ) : (
+            <Group name={['settings']}>
+              <Field
+                className={fieldClassName}
                 name="refreshInterval"
-                placeholder={String(frameForm.interval || 300)}
-                className="h-10 @md:max-w-[9rem]"
-              />
-            </Field>
+                label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
+                tooltip={
+                  <>
+                    {refreshIntervalTooltip} Scene code reads it as <code>state.{REFRESH_INTERVAL_FIELD_NAME}</code>.
+                  </>
+                }
+              >
+                <RefreshIntervalInput
+                  name="refreshInterval"
+                  placeholder={String(frameForm.interval || 300)}
+                  className="h-10 @md:max-w-[9rem]"
+                />
+              </Field>
+            </Group>
+          )}
+          <Group name={['settings']}>
             <Field
               className={fieldClassName}
               name="backgroundColor"

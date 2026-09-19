@@ -24,6 +24,7 @@ import {
 import { StateFieldEdit } from '../scenes/frame/panels/Scenes/StateFieldEdit'
 import type { FrameId } from '../types'
 import { hostMessageTarget, isHostReply } from './embedOrigins'
+import { sceneStateFields } from '../utils/refreshInterval'
 
 // The Preview drawer panel of the standalone embedded editor: runs the edited
 // scenes through the frameos-wasm runtime, in the browser — canvas, event
@@ -206,7 +207,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     return Boolean(event.label)
   })
 
-  const publicFields = (livePreviewScene?.fields ?? []).filter((field) => field.access === 'public')
+  const publicFields = sceneStateFields(livePreviewScene).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
   const stateEntries = Object.entries(previewState)
   const publicEntries = stateEntries.filter(([key]) => publicFieldNames.has(key))

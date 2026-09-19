@@ -21,7 +21,7 @@ Reference shapes:
   - state: { keyword: string, value?: string } — keyword is a scene field name; value is its string default.
   - code: { codeJS: string, codeArgs?: {name,type}[], codeOutputs?: {name,type}[] } — QuickJS snippet.
   - scene: { keyword: string, config: object } — embeds another scene by id.
-- Field: { name, type, label?, description?, required?, value?, options?, access?, persist? }
+- Field: { name, type, label?, description?, required?, value?, options?, access?, persist?, role? }
 - "options" (select fields only): a list of strings — ["dark", "light"] — or of { "value": "dark",
   "label": "Dark mode" } pairs when the label shown should differ from the stored value. Nothing else;
   config and state always hold the option's value, never its label.
@@ -85,8 +85,13 @@ Rules:
   "export function init(app)" runs once. Copy the Weather example's weatherPanel for the pattern.
 - Layout apps (e.g. render/split) accept scene or render nodes on sourceHandle
   "field/render_functions[row][col]" -> targetHandle "prev".
-- settings.refreshInterval (seconds) controls render cadence. Never set it below 3600 when the scene calls
+- settings.refreshInterval (seconds) is the default render cadence. Never set it below 3600 when the scene calls
   paid APIs (e.g. data/openaiImage) unless explicitly asked. settings.backgroundColor is a hex fill.
+- Every scene automatically exposes its cadence to users as a final public state field "refreshInterval"
+  ("Refresh interval (seconds)", readable as state.refreshInterval). Never add your own interval field or a
+  logic/nextSleepDuration app just to make the cadence configurable. Only when the interval deserves a
+  scene-specific label (e.g. "Seconds per image"), declare ONE float field with role: "refreshInterval";
+  its value is then the interval.
 - Caching: app/code nodes accept data.cache { enabled, inputEnabled, durationEnabled, duration } — cache
   expensive data fetches, refresh on a sensible schedule.
 - Rich text via caret syntax in text apps: ^(16) size, ^(#FF00FF) color, ^(PTSans-Bold.ttf) font,

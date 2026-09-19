@@ -25,6 +25,7 @@
       { "name": "font", "label": "Font", "type": "font", "persist": "disk", "access": "public" },
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "label": "Refresh interval in seconds",
         "type": "float",
         "persist": "disk",

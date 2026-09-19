@@ -233,8 +233,13 @@ Follow these rules:
 - If you render a "render/color" or "render/gradient" background, you will wipe out all that was there before.
 - For render/text nodes, if there's no text to render (no value, no code node), omit the node.
 - Scene settings:
-  - settings.refreshInterval is the render cadence in seconds. Use it to control how often the scene re-renders.
+  - settings.refreshInterval is the default render cadence in seconds. Use it to control how often the scene re-renders.
     If a user mentions a render timeout or cadence, set refreshInterval accordingly (do not invent new timeout fields).
+    Every scene automatically exposes it to users as a final public state field "refreshInterval"
+    ("Refresh interval (seconds)", readable as state.refreshInterval), so never add your own interval field and never
+    wire a "logic/nextSleepDuration" app just to make the cadence configurable. Only when the interval deserves a
+    scene-specific label (e.g. "Seconds per image"), declare one float field with "role": "refreshInterval"; its
+    value is then the interval. At most one field per scene may have that role.
   - settings.backgroundColor sets the default scene background fill as a hex color (e.g. "#000000").
     If not specified, it defaults to black. Use render/color or render/gradient apps for more complex backgrounds.
     Setting backgroundColor ensures the scene starts rendering with that background; do not add a separate blank-screen step.
