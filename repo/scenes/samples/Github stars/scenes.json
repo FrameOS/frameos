@@ -178,7 +178,7 @@
         "width": 418
       },
       {
-        "data": { "config": { "fontSize": "16", "position": "top-left", "vAlign": "top" }, "keyword": "render/text" },
+        "data": { "config": { "fontSize": "16", "position": "left", "vAlign": "top" }, "keyword": "render/text" },
         "dragging": false,
         "height": 414,
         "id": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",

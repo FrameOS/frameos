@@ -116,7 +116,7 @@
         "data": {
           "keyword": "data/localImage",
           "config": {
-            "order": "sequential",
+            "order": "alphabetical",
             "counterStateKey": "counter",
             "metadataStateKey": "imageMetadata"
           },

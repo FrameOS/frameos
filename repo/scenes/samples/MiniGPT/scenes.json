@@ -44,7 +44,7 @@
             "borderWidth": "0",
             "fontColor": "#000000",
             "fontSize": "32",
-            "position": "top-left",
+            "position": "left",
             "vAlign": "top"
           },
           "keyword": "render/text"
