@@ -46,7 +46,7 @@ export function SceneDropDown({
   const { editScene, editSceneJSON } = useActions(frameEditorsLogic)
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { scenes, sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
-  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, updateSceneFromRepo } =
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, confirmSceneUpdate } =
     useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId }))
   const { hasDriveScope } = useValues(cloudDriveLogic)
@@ -82,10 +82,9 @@ export function SceneDropDown({
       items={[
         sceneUpdateVersions[sceneId]
           ? {
-              label: 'Update scene',
-              confirm:
-                'Update this scene to the latest version from the repository? Any local changes to the scene will be replaced.',
-              onClick: () => updateSceneFromRepo(scene.id),
+              label: 'Update to latest',
+              // Asks before it replaces anything (sceneUpdatesLogic).
+              onClick: () => confirmSceneUpdate(scene.id),
               icon: <ArrowPathIcon className="w-5 h-5" />,
             }
           : null,

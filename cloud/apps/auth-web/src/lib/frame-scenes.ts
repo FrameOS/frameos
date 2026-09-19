@@ -128,6 +128,9 @@ export type AssignScenesSuccess = {
   // Store scene id → the groups it ends up granted, so a caller can tell the
   // owner what a freshly installed scene still needs.
   grantedSettingsGroups: Record<string, string[]>;
+  // Store scene id → the version this push carries (what an unpinned
+  // assignment resolved to).
+  sceneVersions: Record<string, number>;
 };
 
 export type AssignScenesOutcome =
@@ -471,6 +474,140 @@ export async function assignScenesToFrame(
       commandId: command?.id,
       grantedSettingsGroups: grantedByScene,
       sceneNames: payload.sceneNames,
+      sceneVersions: Object.fromEntries(
+        Object.entries(payload.sceneStates).map(([sceneId, state]) => [
+          sceneId,
+          state.version,
+        ]),
+      ),
+    },
+  };
+}
+
+// The version of a store scene the LAST assignment push to this frame carried
+// (frames.assigned_scene_state, written by every push). For a pinned
+// assignment that is the pin; for one that follows the latest it is whatever
+// "latest" meant at that push — the only record of which version the frame
+// was actually sent. Undefined on frames that predate the per-scene ledger.
+export function assignedSceneVersion(
+  frame: { assignedSceneState: unknown },
+  sceneId: string,
+): number | undefined {
+  const state = frame.assignedSceneState;
+  if (!state || typeof state !== "object") {
+    return undefined;
+  }
+  const version = (state as Record<string, { version?: unknown } | undefined>)[
+    sceneId
+  ]?.version;
+  return typeof version === "number" && Number.isInteger(version) && version > 0
+    ? version
+    : undefined;
+}
+
+export type UpdateSceneOutcome =
+  | {
+      ok: true;
+      result: {
+        // False when the frame was already sent the newest version: nothing
+        // was pushed (a battery frame is not woken for a no-op).
+        updated: boolean;
+        assignedChecksum: string | null;
+        commandId: string | undefined;
+        previousVersion: number | undefined;
+        sceneVersion: number;
+      };
+    }
+  | { ok: false; failure: AssignScenesFailure };
+
+/**
+ * "Update to latest" for ONE assigned store scene: move the frame to the
+ * newest published version and push. A pinned assignment is re-pinned at that
+ * version (it stays pinned — whoever pinned it asked for no surprises); one
+ * that follows the latest needs no rewrite, the push itself resolves it. Every
+ * other assignment, its order and every grant stay as they are. A version
+ * that newly declares a service-settings group is NOT granted it here: the
+ * grant only ever narrows on an update, the owner widens it in the frame's
+ * settings.
+ */
+export async function updateAssignedSceneToLatest(
+  db: Database,
+  {
+    accountId,
+    activeSceneId,
+    actor,
+    frame,
+    sceneId,
+  }: {
+    accountId: string;
+    activeSceneId?: string | undefined;
+    actor: unknown;
+    frame: FrameRow;
+    sceneId: string;
+  },
+): Promise<UpdateSceneOutcome> {
+  const existing = await currentSceneAssignments(db, frame.id);
+  const current = existing.find((entry) => entry.sceneId === sceneId);
+  if (!current) {
+    return {
+      ok: false,
+      failure: {
+        code: "scene_not_assigned",
+        detail: { scene_id: sceneId },
+        status: 404,
+      },
+    };
+  }
+  const latest = await pinnedSceneVersion(db, sceneId, null);
+  if (!latest) {
+    return {
+      ok: false,
+      failure: {
+        code: "scene_version_missing",
+        detail: { scene_id: sceneId },
+        status: 400,
+      },
+    };
+  }
+  const previousVersion =
+    assignedSceneVersion(frame, sceneId) ?? current.sceneVersion ?? undefined;
+  const pinMoves =
+    current.sceneVersion !== null && current.sceneVersion !== latest.version;
+  if (previousVersion === latest.version && !pinMoves) {
+    return {
+      ok: true,
+      result: {
+        assignedChecksum: frame.assignedChecksum,
+        commandId: undefined,
+        previousVersion,
+        sceneVersion: latest.version,
+        updated: false,
+      },
+    };
+  }
+  const outcome = await assignScenesToFrame(db, {
+    accountId,
+    ...(activeSceneId ? { activeSceneId } : {}),
+    actor,
+    frame,
+    requested: existing.map((entry) =>
+      entry.sceneId === sceneId && entry.sceneVersion !== null
+        ? { ...entry, sceneVersion: latest.version }
+        : entry,
+    ),
+    via: "scene_update",
+  });
+  if (!outcome.ok) {
+    return outcome;
+  }
+  return {
+    ok: true,
+    result: {
+      assignedChecksum: outcome.result.assignedChecksum,
+      commandId: outcome.result.commandId,
+      previousVersion,
+      sceneVersion: outcome.result.sceneVersions[sceneId] ?? latest.version,
+      updated: true,
     },
   };
 }

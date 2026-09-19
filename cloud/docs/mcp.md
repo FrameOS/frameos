@@ -131,8 +131,9 @@ real client. `GET` and `DELETE` answer 405: there is nothing to stream or end.
 Around 70 tools in five groups; every one documents its parameters. Read-only
 tools are annotated `readOnlyHint`, destructive ones `destructiveHint` and
 take `confirm: true` — as does every tool that changes what a physical frame
-does, shows or stores (`frame_scene_install`, `frame_scenes_set`,
-`frame_scene_activate`, `frame_scene_remove`, `frame_settings_update`,
+does, shows or stores (`frame_scene_install`, `frame_scene_update`,
+`frame_scenes_set`, `frame_scene_activate`, `frame_scene_remove`,
+`frame_settings_update`,
 `frame_schedule_set`, `frame_command_send`, `frame_reboot`, `frame_restart`,
 the `frame_asset_*` writes, `frame_assets_sync_fonts`,
 `frame_service_settings_enable`, `frame_firmware_update`). A test enumerates
@@ -154,7 +155,8 @@ a frame's logs must not be able to talk an agent into installing something.
   id, a URL — store page, zip, scenes.json — or raw JSON; optional activate;
   `settings_groups` grants the scene the account's service keys it declares —
   without it a store scene gets none, and the answer says what it still needs),
-  `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
+  `frame_scene_update` (one installed scene to its newest store version, for a
+  `frame_scenes_list` row with `update_available`), `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
   `frame_screenshot`, `frame_scene_preview`, `frame_logs` (limit, search and
   since travel as query parameters of `GET /api/frames/{id}/logs`, so the
   database cuts the page),

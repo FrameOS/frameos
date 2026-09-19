@@ -1060,6 +1060,8 @@ GET  {provider}/api/frames/{id}/logs           # retained logs (telemetry:logs)
 GET  {provider}/api/frames/{id}/activity       # the frame's audit trail, newest first; ?limit= (≤200), ?before=&before_id= cursor from next_cursor
 GET  {provider}/api/frames/{id}/scenes         # assigned scenes
 POST {provider}/api/frames/{id}/scenes         # assign scene versions → enqueues set_scenes
+POST {provider}/api/frames/{id}/scenes/add     # add (or re-pin) ONE scene, keeping the rest
+POST {provider}/api/frames/{id}/scenes/update  # {"scene_id"} → that scene's newest version (see "Scene updates")
 POST {provider}/api/frames/{id}/settings       # declarative settings → persists them, enqueues set_settings
 POST {provider}/api/frames/{id}/schedule       # {"schedule": {…}, "utcOffsetMinutes"?: N} → persists the schedule, enqueues set_schedule (disabled events stripped from the push)
 POST {provider}/api/frames/{id}/command        # {"type": "render" | "reboot" | "restart_runtime" | "set_current_scene", …}
@@ -1115,6 +1117,37 @@ scene that wants a key it does not have:
   `settings:services`. Omitted, never `false`, when the caller could not
   answer (a hub broadcast without the link row); the SPA merges summaries
   over the frame it holds, so an absent field keeps its last known value.
+
+**Scene updates.** An assignment names a store scene and, optionally, a
+pinned version; one without a pin *follows the latest* — but only at push
+time, so a frame is never at "latest", it is at whatever version its last
+push carried. `GET /api/frames/{id}/scenes` says so per scene:
+`scene_version` (the pin, or null), `assigned_version` (the version the frame
+was last sent, from the per-scene deploy ledger; null only on a frame that
+predates the ledger and follows the latest), `latest_version`, and
+`update_available` — the store is ahead of the frame AND the account can still
+install the scene (not pulled, not taken private by its publisher). The
+workspace shows the *assigned* version's content, lays "Update available" over
+the scene's image and offers "Update to latest" in the scene menu; both call
+
+```http
+POST {provider}/api/frames/{id}/scenes/update
+{"scene_id": "<store scene uuid>", "active_scene_id"?: "<runtime scene id>"}
+```
+
+which moves that one scene to the newest published version and enqueues the
+`set_scenes` push: a pinned assignment is re-pinned there (it stays a pin),
+one that follows the latest needs no rewrite. Every other assignment, the
+order and every service-settings grant are kept — a version that newly
+declares a group is not granted it. `active_scene_id` is the scene the push
+should leave on screen. The answer carries `scene_version`,
+`previous_version`, `command_id` and `status`: `queued`, or `up_to_date` with
+no push at all when the frame was already sent the newest version (a battery
+frame is not woken for nothing). `404 scene_not_assigned` when the scene is
+not on the frame; the assignment gates (`invalid_scene`, `scene_not_allowed`,
+`scene_version_missing`, `frame_not_active`) apply unchanged. Any other push
+— a Save, an activate on an out-of-sync frame, the hub's empty-store resync —
+still resolves a following assignment to the latest, as before.
 
 The metrics routes return `{"metrics": [...], "reboots": [...]}`, matching the
 self-hosted backend. Markers are derived from the device's own

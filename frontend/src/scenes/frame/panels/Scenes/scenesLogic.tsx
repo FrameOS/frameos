@@ -224,6 +224,9 @@ export interface scenesLogicActions {
     event: string
     payload: Record<string, any>
   } // frameLogic
+  confirmSceneUpdate: (sceneId: string) => {
+    sceneId: string
+  } // sceneUpdatesLogic
   updateSceneFromRepo: (sceneId: string) => {
     sceneId: string
   } // sceneUpdatesLogic
@@ -533,7 +536,7 @@ export const scenesLogic = kea<scenesLogicType>([
       controlLogic({ frameId }),
       ['sync as syncActiveScene'],
       sceneUpdatesLogic({ frameId }),
-      ['updateSceneFromRepo'],
+      ['updateSceneFromRepo', 'confirmSceneUpdate'],
     ],
   })),
   actions({
