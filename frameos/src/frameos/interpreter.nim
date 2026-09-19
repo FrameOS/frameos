@@ -15,6 +15,7 @@ import frameos/node_config
 import frameos/planner
 import frameos/refresh_interval
 import frameos/runtime_diagnostics
+import frameos/scene_rhythm
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
@@ -361,6 +362,8 @@ var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var lastInterpretedScenesLoadError = ""
+when rhythmStorageCompiled:
+  var sceneDefinitionHashes = initTable[SceneId, uint64]() # see sceneDefinitionHash
 
 proc interpretedScenesLoadError*(): string =
   ## Why the last attempt to read scenes.json(.gz) off the disk failed, or ""
@@ -371,6 +374,8 @@ proc interpretedScenesLoadError*(): string =
 
 proc resetInterpretedScenes*() =
   allScenesLoaded = false
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
   # A card that was full or missing may have been swapped along with the
   # scenes; give the disk tier another chance.
   imageSpillDisabled = false
@@ -383,6 +388,8 @@ proc registerCompiledScene*(sceneId: SceneId, exported: ExportedScene) =
 
 proc setUploadedInterpretedScenes*(scenes: Table[SceneId, ExportedInterpretedScene]) =
   uploadedScenes = scenes
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
 
 proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
   uploadedScenes
@@ -401,6 +408,63 @@ proc diagnosticKeyword(node: DiagramNode): string =
   if node.data.hasKey("name") and node.data["name"].kind == JString:
     return node.data["name"].getStr()
   ""
+
+# -------------------------
+# Scene nodes on their own rhythm
+# -------------------------
+
+when rhythmStorageCompiled:
+  proc sceneDefinitionHash(sceneId: SceneId, depth = 0): uint64 =
+    ## A fingerprint of what an embedded scene IS: its graph, and the graphs of
+    ## whatever it embeds. Pixels the storage tier wrote for one definition must
+    ## never come back under another (a deploy between two deep-sleep wakes).
+    ## Node ids are left out — they are assigned at load, in load order.
+    if sceneDefinitionHashes.hasKey(sceneId):
+      return sceneDefinitionHashes[sceneId]
+    var exported: ExportedInterpretedScene
+    if loadedScenes.hasKey(sceneId): exported = loadedScenes[sceneId]
+    elif uploadedScenes.hasKey(sceneId): exported = uploadedScenes[sceneId]
+    else: return 0
+    var text = $exported.backgroundColor & "|" & $exported.refreshInterval
+    for node in exported.nodes:
+      text.add("|" & node.nodeType & ":" & (if node.data.isNil: "" else: $node.data))
+      if node.nodeType == "scene" and depth < 8 and not node.data.isNil:
+        text.add("=" & $sceneDefinitionHash(node.data{"keyword"}.getStr().SceneId, depth + 1))
+    for edge in exported.edges:
+      text.add("|" & edge.sourceHandle & ">" & edge.targetHandle)
+    result = rhythmHash(text)
+    if result == 0: result = 1 # 0 means "not computed yet"
+    sceneDefinitionHashes[sceneId] = result
+
+proc sceneStateKey(scene: FrameScene): uint64 =
+  rhythmStateKey(scene.state)
+
+proc runSceneNodeRender(owner: FrameScene, nodeId: NodeId, child: FrameScene,
+    exportedChild: ExportedScene, context: ExecutionContext, direct = false) {.noinline.} =
+  ## A scene node handling `render`. The node is the scheduling boundary
+  ## (frameos/scene_rhythm.nim): the child gets a fresh `nextSleep`, so
+  ## `logic/nextSleepDuration` inside it means "this child next runs in N
+  ## seconds" and never reaches the parent; and a child that is not due, whose
+  ## state is what it was, is painted from cached pixels instead of being run.
+  let interpretedChild = child of InterpretedFrameScene
+  let followsChildren = interpretedChild and InterpretedFrameScene(child).refreshFollowsChildren
+  when rhythmStorageCompiled:
+    if rhythmStorageTier and interpretedChild and ensureRhythm(child).defHash == 0:
+      child.rhythm.defHash = sceneDefinitionHash(child.id)
+  let visit = rhythmBeginSceneNode(child, owner, nodeId, context, sceneStateKey(child), direct)
+  if visit.restored:
+    owner.logger.log(%*{"event": "rhythm:reuse", "sceneId": child.id.string,
+      "nodeId": nodeId.int, "tier": visit.tier})
+    return
+  let parentSleep = context.nextSleep
+  context.nextSleep = -1
+  try:
+    exportedChild.runEvent(child, context)
+  finally:
+    let childSleep = context.nextSleep
+    context.nextSleep = parentSleep
+    rhythmEndSceneNode(child, context, visit, childSleep, followsChildren,
+      interpretedChild, sceneStateKey(child))
 
 # -------------------------
 # Core node runner
@@ -745,6 +809,14 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         if asDataNode:
           result = getInterpretedApp(keyword, app, context)
         else:
+          # The paint log (frameos/scene_rhythm.nim): one rectangle per executed
+          # render node, which is what decides whether an embedded scene's
+          # pixels are still its own after the pass. Containers that only
+          # delegate are not paint ops — what they run is recorded as it runs.
+          if context.event == "render" and context.hasImage and rhythmPassActive() and
+              keyword != "render/split" and
+              not (keyword.startsWith("logic/") and not app.isDynamicJsApp()):
+            rhythmNotePaint(context.image)
           runInterpretedApp(keyword, app, context)
 
     of "source":
@@ -862,6 +934,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         # on the Pi and recurses on the ESP32. Logged once per run, then dropped.
         case takeDispatchBudget()
         of dvAllowed:
+          if eventName == "render":
+            # A scene asking to be drawn again means THAT scene: embedded, it
+            # re-renders alone; at the top, everything not due keeps its pixels.
+            rhythmMarkDue(FrameScene(self))
+            finalPayload = if finalPayload.isNil or finalPayload.kind != JObject: %*{}
+                           else: copy(finalPayload)
+            finalPayload["rhythm"] = %"due"
           sendEvent(eventName, finalPayload)
         of dvRefusedFirst:
           self.logger.log(%*{
@@ -1123,7 +1202,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         markRuntimeCheckpoint("scene:delegate", currentSceneId = self.id.string, contextEvent = context.event,
           nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword,
           childSceneId = childScene.id.string)
-      exportedChild.runEvent(childScene, context)
+      if context.event == "render" and context.hasImage and not context.image.isNil:
+        runSceneNodeRender(self, currentNodeId, childScene, exportedChild, context)
+      else:
+        exportedChild.runEvent(childScene, context)
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
 
@@ -1261,6 +1343,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     edges: @[],
     apps: exportedScene.apps,
     storeOrigin: exportedScene.storeOrigin,
+    refreshFollowsChildren: exportedScene.refreshFollowsChildren,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -1599,8 +1682,11 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
   of "setSceneState":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       applyPublicStateFromPayload(scene, context.payload["state"])
+    # New state means THIS scene is due — embedded, it re-renders alone; at the
+    # top, children whose own state did not change keep their pixels.
+    rhythmMarkDue(self)
     if context.payload.hasKey("render"):
-      sendEvent("render", %*{})
+      sendEvent("render", %*{"rhythm": "due"})
   of "setCurrentScene":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       applyPublicStateFromPayload(scene, context.payload["state"])
@@ -1706,6 +1792,69 @@ proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)
   result = context.image
 
+type RhythmPassResult* = object
+  image*: Image        ## what the pass left to show: the canvas, unless the scene swapped it
+  nextSleep*: float    ## the top scene's own `nextSleep` on a full pass, else -1
+  info*: RhythmPassInfo
+
+proc renderRhythmPass*(top: FrameScene, canvas: Image, force = rfNone): RhythmPassResult =
+  ## One render pass of an interpreted scene into a canvas that persists
+  ## between passes — the single entry point of every host (runner.nim,
+  ## embedded_runtime.nim, wasm_main.nim). Decides between a full pass and a
+  ## partial one (frameos/scene_rhythm.nim), runs it, and leaves the due times
+  ## `rhythmNextWakeSeconds` reads.
+  let plan = rhythmPlan(top, canvas, force)
+  result.nextSleep = -1
+  result.image = canvas
+  if plan.partial:
+    rhythmBeginPass(top, canvas, partial = true, allowReuse = true, plan.reason)
+    try:
+      for node in plan.nodes:
+        let r = node.rhythm
+        if r.owner.isNil or not (r.owner of InterpretedFrameScene):
+          continue
+        let owner = InterpretedFrameScene(r.owner)
+        if not owner.sceneExportByNodeId.hasKey(r.nodeId):
+          continue
+        let view = canvas.view(r.x, r.y, r.w, r.h)
+        let context = ExecutionContext(
+          scene: (if r.ctxScene.isNil: r.owner else: r.ctxScene),
+          event: "render", payload: %*{}, image: view, hasImage: true,
+          loopIndex: r.loopIndex, loopKey: r.loopKey, nextSleep: -1)
+        rhythmBeginDirectRun(node)
+        try:
+          runSceneNodeRender(r.owner, r.nodeId, node, owner.sceneExportByNodeId[r.nodeId],
+            context, direct = true)
+        except CatchableError as e:
+          top.logger.log(%*{"event": "rhythm:node:error", "sceneId": node.id.string,
+            "nodeId": r.nodeId.int, "error": e.msg})
+        if context.image != view and not context.image.isNil:
+          # It drew into an image of its own; put it where it belongs.
+          view.draw(context.image)
+        rhythmAnalyzeDirectRun(node)
+    finally:
+      rhythmEndPass(canvas, -1, 0, false, 0)
+  else:
+    let context = ExecutionContext(scene: top, event: "render", payload: %*{},
+      image: canvas, hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let startedAt = rhythmNow()
+    rhythmBeginPass(top, canvas, partial = false, allowReuse = force != rfFresh, plan.reason)
+    var finished = false
+    try:
+      runEvent(top, context)
+      finished = true
+    finally:
+      rhythmEndPass(context.image, context.nextSleep, top.refreshInterval,
+        top of InterpretedFrameScene and InterpretedFrameScene(top).refreshFollowsChildren,
+        startedAt)
+      if not finished:
+        # A pass that raised left the canvas half drawn: no rectangle on it is
+        # anyone's finished picture.
+        rhythmInvalidate(top)
+    result.image = context.image
+    result.nextSleep = context.nextSleep
+  result.info = rhythmLastPassInfo()
+
 # -------------------------
 # Serialization hooks
 # -------------------------
@@ -1776,6 +1925,17 @@ proc parseHook*(s: string, i: var int, v: var SceneId) =
   parseHook(s, i, tmp)
   v = SceneId(tmp)
 
+proc parseHook*(s: string, i: var int, v: var SplitLayoutMarker) =
+  ## The layout itself is the editor's; the runtime only needs to know it is
+  ## there. Skipping it keeps a JsonNode parser (and the parsed layout) out of
+  ## a firmware that would never read it.
+  eatSpace(s, i)
+  v.present = i < s.len and s[i] == '{'
+  skipValue(s, i)
+
+proc dumpHook*(s: var string, v: SplitLayoutMarker) =
+  s.add(if v.present: "{}" else: "null")
+
 proc parseHook*(s: string, i: var int, v: var Color) =
   var tmp: string
   parseHook(s, i, tmp)
@@ -1833,6 +1993,9 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: refresh.fields,
     storeOrigin: sceneOriginIsStore(scene.origin),
+    # A scene the split drawer generated draws nothing of its own: it follows
+    # its cells' rhythm instead of re-running them all on its own interval.
+    refreshFollowsChildren: scene.settings != nil and scene.settings.splitScreenLayout.present,
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.
     publicStateFields: refresh.fields.filterIt(it.access != "private"),
@@ -1921,8 +2084,26 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
 
 proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
   loadedScenes = scenes
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
   allScenesLoaded = true
   lastInterpretedScenesLoadError = ""
+
+proc addInterpretedScenesToCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+  ## Alongside what is already resident — how the ESP32's one-scene-at-a-time
+  ## loader brings in the scenes a resident scene embeds.
+  for sceneId, exported in scenes:
+    loadedScenes[sceneId] = exported
+  when rhythmStorageCompiled:
+    sceneDefinitionHashes = initTable[SceneId, uint64]()
+
+proc embeddedSceneIds*(exported: ExportedInterpretedScene): seq[SceneId] =
+  ## The scenes this one's scene nodes point at (its split's panels).
+  for node in exported.nodes:
+    if node.nodeType == "scene" and not node.data.isNil and node.data.kind == JObject:
+      let id = node.data{"keyword"}.getStr()
+      if id.len > 0 and id.SceneId notin result:
+        result.add(id.SceneId)
 
 proc loadInterpretedScenesForStartup*(): Table[SceneId, ExportedInterpretedScene] =
   ## `loadInterpretedScenesFromDisk` for callers that cannot afford to raise.

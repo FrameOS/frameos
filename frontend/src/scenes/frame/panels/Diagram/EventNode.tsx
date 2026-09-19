@@ -21,6 +21,7 @@ import { Tooltip } from '../../../../components/Tooltip'
 import { NodeZoomLabel } from './NodeZoomLabel'
 import { frameEventForScene } from '../../../../utils/frameEvents'
 import { parseRefreshSeconds, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
+import { sceneFollowsChildren } from '../../../../utils/sceneRhythm'
 
 export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -174,13 +175,18 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
             >
               <InformationCircleIcon className="frameos-node-muted-text h-4 w-4" aria-hidden="true" />
             </Tooltip>
-            <NumberTextInput
-              theme="node"
-              className="max-w-[70px]"
-              value={refreshInterval}
-              placeholder={String(defaultInterval)}
-              onChange={updateRefreshInterval}
-            />
+            {sceneFollowsChildren(scene) ? (
+              // A split follows its panels; there is no interval of its own to set.
+              <span title="A split screen renders when the scenes inside it are due.">auto</span>
+            ) : (
+              <NumberTextInput
+                theme="node"
+                className="max-w-[70px]"
+                value={refreshInterval}
+                placeholder={String(defaultInterval)}
+                onChange={updateRefreshInterval}
+              />
+            )}
           </div>
         </td>
       </tr>

@@ -15,6 +15,7 @@ import pixie
 import frameos/types
 import frameos/channels
 import frameos/interpreter
+import frameos/scene_rhythm
 import frameos/planner
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
@@ -44,6 +45,7 @@ var
   renderRequested = false
   handlingEvent = false
   lastImage: Image
+  sceneCanvas: Image ## persists between renders; see frameos_wasm_render_impl
   lastNextSleep: float = -1
   sceneInfoBuffer: string
   sceneStateBuffer: string
@@ -72,6 +74,7 @@ proc cleanupScene(scene: FrameScene) =
   ## the last reference (mirrors src/embedded/embedded_runtime.nim).
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
+  rhythmRelease(scene)
   let interpreted = InterpretedFrameScene(scene)
   for _, childScene in interpreted.sceneNodes:
     cleanupScene(childScene)
@@ -166,6 +169,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     scenesLoadedCount = 0
     renderRequested = false
     lastImage = nil
+    sceneCanvas = nil
     pendingSceneStates = initTable[string, JsonNode]()
 
     var settings = %*{}
@@ -355,21 +359,27 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
     # each render happening even when cached apps return an identical image.
     log($(%*{"event": "render:scene", "width": frameConfig.width, "height": frameConfig.height}))
     let renderStarted = epochTime()
-    let context = ExecutionContext(
-      scene: currentScene,
-      event: "render",
-      payload: %*{},
-      hasImage: false,
-      loopIndex: 0,
-      loopKey: ".",
-      nextSleep: -1
-    )
-    let image = interpreter.render(currentScene, context)
+    # The same rhythm pass the frame runs (frameos/scene_rhythm.nim), into a
+    # canvas that persists between renders — so the editor shows a split's
+    # clock ticking and its photos holding still, as the device will. The
+    # worker's timer fires when something is due; a render with nothing due
+    # is someone pressing the button, and renders everything.
+    let (canvasWidth, canvasHeight) =
+      if frameConfig.rotate in [90, 270]: (frameConfig.height, frameConfig.width)
+      else: (frameConfig.width, frameConfig.height)
+    if sceneCanvas.isNil or sceneCanvas.width != canvasWidth or sceneCanvas.height != canvasHeight:
+      sceneCanvas = newImage(canvasWidth, canvasHeight)
+    let pass = renderRhythmPass(currentScene, sceneCanvas,
+      if rhythmAnythingDue(currentScene): rfNone else: rfFresh)
+    let image = pass.image
     if image.isNil:
       setLastError("render returned no image")
       return 2
     lastImage = image
-    lastNextSleep = context.nextSleep
+    lastNextSleep = rhythmNextWakeSeconds(currentScene)
+    if pass.info.partial or pass.info.restored.len > 0:
+      log($(%*{"event": "render:pass", "pass": (if pass.info.partial: "partial" else: "full"),
+        "reason": pass.info.reason, "ran": pass.info.ran, "reused": pass.info.restored}))
     log($(%*{
       "event": "render:done",
       "sceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
@@ -426,8 +436,9 @@ proc frameos_wasm_render_requested(): bool {.exportc, cdecl.} =
 # ------------------------------------------------------------------- status
 
 proc frameos_wasm_next_sleep(): cdouble {.exportc, cdecl.} =
-  ## Seconds the scene asked to sleep before the next render
-  ## (logic/nextSleepDuration); -1 when the scene didn't override it.
+  ## Seconds until the scene — or any scene embedded in it — next wants to
+  ## render (frameos/scene_rhythm.nim); -1 before the first render. The
+  ## worker sleeps this long when it is set, whatever the scene's interval.
   lastNextSleep.cdouble
 
 proc frameos_wasm_scene_interval(): cdouble {.exportc, cdecl.} =

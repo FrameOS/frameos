@@ -117,7 +117,9 @@ proc requestRender() {.gcsafe.} =
   ## A sleeping scene renders on its own schedule; every state change that
   ## puts a code on the panel or takes one off asks for a frame right away.
   {.gcsafe.}:
-    sendEvent("render", %*{})
+    # "redraw": the code is an overlay on the scene's picture, not part of it.
+    # The scene — and every photo embedded in it — has no reason to run again.
+    sendEvent("render", %*{"rhythm": "redraw"})
 
 # ---------------------------------------------------------------------------
 # Start

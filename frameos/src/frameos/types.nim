@@ -305,6 +305,59 @@ type
     ## cache to protect and the live canvas is safe after all.
     ownedForCache*: bool
 
+  # Why a render pass is happening, which decides how much of it may be skipped
+  # (frameos/scene_rhythm.nim).
+  RhythmForce* = enum
+    rfNone    ## a timer woke the loop: run what is due
+    rfRedraw  ## the picture must be rebuilt (boot, wake, an overlay changed);
+              ## not-due embedded scenes may come back from their cached pixels
+    rfFresh   ## someone asked for a render (render now, activation, deploy):
+              ## everything runs, nothing is reused
+
+  # When one scene instance next renders, and where it drew last time. Every
+  # scene embedded through a scene node carries one, so a clock inside a split
+  # ticks on its own schedule instead of its parent's. Owned and explained by
+  # frameos/scene_rhythm.nim; tens of bytes, never pixels — except `snapshot`,
+  # which exists only while the memory tier decided it could afford it.
+  SceneRhythm* = ref object
+    isNode*: bool         ## embedded through a scene node (false: the top scene)
+    parent*: FrameScene   ## enclosing scene-node instance; nil directly under the top scene
+    owner*: FrameScene    ## the scene whose graph holds the node
+    nodeId*: NodeId       ## that node's id in `owner`
+    ctxScene*: FrameScene ## context.scene / loopIndex / loopKey the node last ran
+    loopIndex*: int       ## with, so a direct (partial-pass) run looks the same
+    loopKey*: string
+    active*: bool         ## its pixels are part of the picture on the canvas
+    ranOnce*: bool
+    interpreted*: bool    ## compiled children are scheduled but never run alone
+    dueAt*: float         ## monotonic seconds; 0 = now, Inf = follows its children
+    interval*: float      ## seconds the last run asked to wait (logs, cache policy)
+    runSeconds*: float    ## how long its last real run took (what a stored rectangle saves)
+    x*, y*, w*, h*: int   ## absolute rectangle on the pass canvas
+    onCanvas*: bool       ## handed a view of the pass canvas, and drew into it
+    overpainted*: bool    ## something outside it painted over its rectangle later
+    shared*: bool         ## one instance drawn into several rectangles in a pass (a
+                          ## split's default cell renderer): one rectangle cannot stand for it
+    visitPass*: int       ## the pass that last visited it, to notice exactly that
+    seqBegin*, seqEnd*: int ## paint-sequence interval of its last run
+    stateKey*: uint64     ## a hash of its state as of the last run (pixels are only as good as this)
+    seedKey*: uint64      ## its state before its FIRST run — what a fresh instance
+                          ## (a deep-sleep wake) has to match to reuse stored pixels
+    defHash*: uint64      ## its definition's fingerprint, for the storage tier
+    snapshot*: Image      ## memory tier: its rectangle's pixels, when affordable
+    snapshotSeq*: int     ## paint sequence the snapshot was taken at
+    snapshotKey*: uint64
+    tree*: RhythmTree     ## top scene only
+
+  RhythmTree* = ref object
+    canvasBuffer*: pointer ## identity + shape of the canvas the rectangles are on
+    canvasWidth*, canvasHeight*: int
+    canvasFormat*: PixelFormat
+    valid*: bool           ## false: the last pass left nothing partial passes can trust
+    nodes*: seq[FrameScene] ## active scene-node instances, in paint order
+    topDueAt*: float
+    topInterval*: float    ## what the top scene last asked to wait
+
   # Runtime state while running the scene (for compiled frames)
   FrameScene* = ref object of RootObj
     id*: SceneId
@@ -323,6 +376,7 @@ type
     getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
+    rhythm*: SceneRhythm
 
   FontStyle* = ref object
     typeface*: Typeface
@@ -368,6 +422,10 @@ type
     name*: string
     backgroundColor*: Color
     refreshInterval*: float
+    ## The scene has nothing of its own that changes with time (a generated
+    ## split): it is never due by itself and renders when its embedded scenes
+    ## are. See frameos/scene_rhythm.nim.
+    refreshFollowsChildren*: bool
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
     apps*: JsonNode
@@ -397,6 +455,13 @@ type
   FrameSceneSettings* = ref object
     backgroundColor*: Color
     refreshInterval*: float
+    ## Present on scenes the split-screen drawer generated. The runtime only
+    ## asks whether it is there — such a scene follows its children's rhythm —
+    ## so the value is skipped, not parsed (interpreter.nim's parseHook).
+    splitScreenLayout*: SplitLayoutMarker
+
+  SplitLayoutMarker* = object
+    present*: bool
 
   # Imported scene from scenes.json
   FrameSceneInput* = ref object of RootObj
@@ -416,6 +481,7 @@ type
     edges*: seq[DiagramEdge]
     apps*: JsonNode
     storeOrigin*: bool ## see ExportedInterpretedScene.storeOrigin
+    refreshFollowsChildren*: bool ## see ExportedInterpretedScene.refreshFollowsChildren
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
@@ -538,6 +604,12 @@ type
     isRendering*: bool = false
     triggerRenderNext*: bool = false
     forceSceneReload*: bool = false
+    # Why the next pass was asked for; rfNone when only a timer ran out.
+    renderForce*: RhythmForce
+    # The scene canvas, kept between passes so an embedded scene that is not
+    # due can simply not run: its pixels are still here. Pre-overlay and
+    # pre-flip; what goes to the driver is always a copy.
+    sceneCanvas*: Image
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
     localAccessRender*: AppRoot

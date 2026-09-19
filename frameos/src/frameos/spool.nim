@@ -230,7 +230,7 @@ proc materialize*(spool: Spool, maxBytes = 0): string =
     for window in spool.windows():
       result.add(window)
 
-proc usableScratchDir(path: string): bool =
+proc usableScratchDir*(path: string): bool =
   ## Existence first, then a leaf-only mkdir, then a probe file. Never
   ## `createDir`: it mkdirs every path component, and on the ESP32 the SD
   ## card is mounted wholesale at "/srv/assets" — "/srv" is not a directory

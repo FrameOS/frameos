@@ -26,6 +26,8 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
 void frameos_nim_apply_service_settings(const char *json) { (void)json; }
 int frameos_nim_set_scene_catalog(const char *index_json) { (void)index_json; return 0; }
 int frameos_nim_load_scene(const char *scene_json) { (void)scene_json; return 0; }
+int frameos_nim_add_scene(const char *scene_json) { (void)scene_json; return 0; }
+const char *frameos_nim_missing_scenes_json(void) { return "[]"; }
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
 {
     (void)pixel_format;
@@ -70,6 +72,9 @@ bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, cha
 }
 double frameos_nim_scene_interval(void) { return 0; }
 double frameos_nim_next_sleep(void) { return -1; }
+double frameos_nim_next_wake(void) { return -1; }
+double frameos_nim_wake_cadence(void) { return -1; }
+void frameos_nim_set_pass_context(bool forced, bool canvas_volatile) { (void)forced; (void)canvas_volatile; }
 bool frameos_nim_render_requested(void) { return false; }
 bool frameos_nim_send_event(const char *event, const char *payload_json)
 {

@@ -12,6 +12,7 @@ import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 import { REFRESH_INTERVAL_FIELD_NAME, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
+import { describeSceneRhythm, sceneFollowsChildren, sceneRhythm } from '../../../../utils/sceneRhythm'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -55,7 +56,29 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     >
       <Group name={['scenes', sceneIndex]}>
         <div className="w-full space-y-3 @container">
-          {refreshFieldIndex >= 0 ? (
+          {sceneFollowsChildren(scene) ? (
+            // A split draws nothing of its own, so it has no interval: each
+            // panel renders on its own schedule and the rest hold still.
+            <Group name={['settings']}>
+              <Field
+                className={fieldClassName}
+                name="refreshInterval"
+                label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
+                tooltip={
+                  <>
+                    A split screen follows its panels: each one renders when its own scene is due, and the others keep
+                    their picture until their time comes. Set the interval on the scenes inside it, or per panel in the
+                    panel's options.
+                  </>
+                }
+              >
+                <div className="frameos-muted flex h-10 items-center text-sm font-semibold">
+                  Auto —{' '}
+                  {describeSceneRhythm(sceneRhythm(scene, {}, frameForm.scenes ?? [], frameForm.interval || 300))}
+                </div>
+              </Field>
+            </Group>
+          ) : refreshFieldIndex >= 0 ? (
             // The scene declares its own interval field (by role or by name):
             // that field's default IS the scene's default.
             <Group name={['fields', refreshFieldIndex]}>

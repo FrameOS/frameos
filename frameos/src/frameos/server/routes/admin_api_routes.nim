@@ -130,7 +130,7 @@ proc addAdminApiRoutes*(router: var Router) =
         let challenge = startLocalAccessChallenge()
         # A sleeping scene renders on its own schedule, and the code is useless
         # until it is actually on the panel, so ask for a frame now.
-        sendEvent("render", %*{})
+        sendEvent("render", %*{"rhythm": "redraw"})
         # No "code" in the response on purpose: a caller who could read it
         # without seeing the panel is precisely who this keeps out.
         jsonResponse(request, Http200, %*{
@@ -159,7 +159,7 @@ proc addAdminApiRoutes*(router: var Router) =
       if not verdict.ok:
         # Repaint either way: a spent or failed ceremony must not leave a live
         # code on the panel for the next person walking past.
-        sendEvent("render", %*{})
+        sendEvent("render", %*{"rhythm": "redraw"})
         jsonResponse(request, Http403, %*{"detail": verdict.detail})
         return
       try:
@@ -172,10 +172,10 @@ proc addAdminApiRoutes*(router: var Router) =
           of "localNetwork": setLocalNetworkAccess(payload{"enabled"}.getBool(true))
           of "shellApps": setShellAppsAccess(payload{"enabled"}.getBool(true))
           else:
-            sendEvent("render", %*{})
+            sendEvent("render", %*{"rhythm": "redraw"})
             jsonResponse(request, Http400, %*{"detail": "Unknown scope: " & scope})
             return
-        sendEvent("render", %*{})
+        sendEvent("render", %*{"rhythm": "redraw"})
         jsonResponse(request, Http200, updated)
       except CatchableError as error:
         jsonResponse(request, Http500, %*{"detail": error.msg})

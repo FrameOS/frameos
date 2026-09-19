@@ -658,10 +658,10 @@ function scheduleNextRender() {
   try {
     const interval = call('frameos_wasm_scene_interval', 'number', [], [])
     const nextSleep = call('frameos_wasm_next_sleep', 'number', [], [])
-    seconds = interval > 0 ? interval : 300
-    if (nextSleep >= 0 && nextSleep < seconds) {
-      seconds = nextSleep
-    }
+    // nextSleep is the runtime's own answer: seconds until the scene, or any
+    // scene embedded in it, is next due. It can be longer than the scene's
+    // interval (a split follows its cells), so it wins outright when set.
+    seconds = nextSleep >= 0 ? nextSleep : interval > 0 ? interval : 300
   } catch (e) {
     seconds = 300
   }
