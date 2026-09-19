@@ -50,6 +50,17 @@ answer).
   is still under the finger (rotate 0 passed on the Pi 5, see Done).
 - [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
   driver). The write the driver makes was run by hand as uid 990 — see Done.
+- [ ] **HyperPixel 2.1" Round on a Pi 5 (`"path":"kms"`):** setup writes
+  `dtoverlay=vc4-kms-v3d` + `dtoverlay=vc4-kms-dpi-hyperpixel2r`, the panel
+  shows the scene, "Turn display off / on" blanks and restores it. No touch
+  there by design (the kernel's init bus holds the touch bus's pins). Same
+  code shape as the 4.0's KMS path, which passed; this one has not met a
+  panel.
+- [ ] **Round touch during a display power change:** a finger on the glass
+  while "Turn display off / on" runs is the one window where the init bus and
+  the kernel's I2C can collide (nothing arbitrates GPIO 10/11). Expected
+  worst case: a garbled panel until the next init. Off/on with nobody
+  touching passed (see Done).
 - [ ] **Moving a card between HyperPixels and boards:** change the device
   4.0 → Square → 2.1" Round and back; after each deploy + reboot config.txt
   holds exactly one `dpi_timings=` line and at most one HyperPixel
@@ -140,6 +151,26 @@ answer).
   with "Error applying setting, reverse things back" and no fb0 — hence the
   two `=off` lines; and a later `dtoverlay=i2c-gpio` silently re-points the
   touch bus at GPIO 23/24.
+
+- [x] **HyperPixel 2.1" Round touch, Pi Zero 2 W, Buildroot, HA backend
+  frame 5 (10.8.0.14) — PASSED 2026-09-19** on a cross-built `2026.9.19` from
+  the `hyperpixel2r-touch` branch dropped in as a release dir. `frameos setup`
+  added exactly `gpio=27=ip,pu` and `dtoverlay=frameos-hyperpixel2r-touch` to
+  the existing block and wrote `/boot/overlays/frameos-hyperpixel2r-touch.dtbo`;
+  after the reboot `i2c-gpio i2c@0: using lines 522 (SDA) and 523 (SCL)`,
+  `edt_ft5x06 11-0015 … generic ft5x06 (00)` → `/dev/input/event0`, evdev
+  listens to it. **The panel still inits with the kernel holding GPIO 10/11**:
+  `driver:inkyHyperPixel2r` logs `"bus":"gpiomem"`, `panel-complete`, and the
+  normal scene is on the glass. Raw taps at the top / right / bottom / left
+  edges read (233,30) (470,233) (225,474) (5,250): range 0..479 (the kernel
+  overlay's 240 is not this panel's), orientation as seen. A hand-installed
+  touch-test scene puts its dot under the finger, off-diagonal spots
+  included. `POST /event/turnOff?k=…` then `turnOn`: backlight GPIO low then
+  high (`/sys/kernel/debug/gpio`), no I2C errors in dmesg, picture back and
+  touch still working afterwards. Trap for the next bench: `systemctl stop
+  frameos` puts the panel to sleep (turnOff on shutdown) AND frees GPIO 19,
+  which the kernel returns to an input — a raw `cat > /dev/fb0` test pattern
+  then shows nothing even with the backlight forced on through sysfs.
 
 ### Browser only — cloud auth
 

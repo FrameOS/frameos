@@ -1,7 +1,7 @@
-import json, pixie, strformat, posix
-import std/volatile
+import json, pixie, strformat
 
 import lib/lgpio
+import lib/gpiomem
 import frameos/driver_context
 import frameos/device_setup
 
@@ -32,12 +32,6 @@ const
   GpioCs = 18
   GpioBacklight = 19
   BitDelaySeconds = 0.00001
-  # BCM283x/BCM2711 GPIO block, as /dev/gpiomem maps it (word offsets).
-  GpioMemPath = "/dev/gpiomem"
-  GpioMemBytes = 4096
-  GpFsel0 = 0
-  GpSet0 = 7
-  GpClr0 = 10
 
 type Driver* = ref object of frameBuffer.Driver
   mode*: string
@@ -47,12 +41,12 @@ type Driver* = ref object of frameBuffer.Driver
   # GPIO 27 is the init bus clock AND the touch controller's interrupt line.
   # On a touch board the kernel holds it as an IRQ, and gpiolib refuses to
   # hand an IRQ line out as an output, so the clock is driven the way
-  # Pimoroni's own init does it: straight through the GPIO registers, and
-  # given back as an input the moment a burst ends. Non-touch boards take the
-  # same path so there is one to test. nil = no usable /dev/gpiomem (a kernel
-  # without it): the clock is then an ordinary lgpio claim, which works
-  # wherever nothing else holds the pin.
-  gpioMem: ptr UncheckedArray[uint32]
+  # Pimoroni's own init does it: straight through the GPIO registers
+  # (lib/gpiomem), and given back as an input the moment a burst ends.
+  # Non-touch boards take the same path so there is one to test. nil = no
+  # usable /dev/gpiomem (a kernel without it): the clock is then an ordinary
+  # lgpio claim, which works wherever nothing else holds the pin.
+  gpioMem: GpioMem
   clkClaimed: bool
   panelInitialized: bool
   # Set by turnOff, cleared by turnOn. While it holds, render still writes
@@ -79,19 +73,6 @@ proc claimOutput(self: Driver; pin: int; level: int) =
   if res < 0:
     raise newException(OSError, &"Unable to claim GPIO {pin} for HyperPixel 4: {$lguErrorText(res)}")
 
-proc openGpioMem(): ptr UncheckedArray[uint32] =
-  # The register layout below is the BCM283x/BCM2711 one. Only the firmware
-  # path gets here, and the Pi 5 (GPIO behind RP1, /dev/gpiomem0..4 instead)
-  # never takes that path.
-  let fd = posix.open(GpioMemPath, O_RDWR or O_SYNC)
-  if fd < 0:
-    return nil
-  let mapped = mmap(nil, GpioMemBytes, PROT_READ or PROT_WRITE, MAP_SHARED, fd, 0)
-  discard posix.close(fd)
-  if mapped == MAP_FAILED:
-    return nil
-  cast[ptr UncheckedArray[uint32]](mapped)
-
 proc ensureGpio(self: Driver) =
   if self.gpioHandle >= 0:
     return
@@ -112,16 +93,7 @@ proc writeClk(self: Driver; level: int) =
   if self.gpioMem.isNil:
     self.writePin(GpioClk, level)
   else:
-    let register = if level == LG_LOW: GpClr0 else: GpSet0
-    volatileStore(addr self.gpioMem[register], 1'u32 shl GpioClk)
-
-proc setClkFunction(self: Driver; output: bool) =
-  let register = GpFsel0 + GpioClk div 10
-  let shift = uint32((GpioClk mod 10) * 3)
-  var value = volatileLoad(addr self.gpioMem[register]) and not (7'u32 shl shift)
-  if output:
-    value = value or (1'u32 shl shift)
-  volatileStore(addr self.gpioMem[register], value)
+    self.gpioMem.write(GpioClk, level != LG_LOW)
 
 proc beginBus(self: Driver) =
   self.ensureGpio()
@@ -131,12 +103,12 @@ proc beginBus(self: Driver) =
       self.clkClaimed = true
   else:
     self.writeClk(LG_LOW)
-    self.setClkFunction(output = true)
+    self.gpioMem.setOutput(GpioClk, true)
 
 proc endBus(self: Driver) =
   ## Hands GPIO 27 back as an input: the touch controller drives it from here.
   if not self.gpioMem.isNil:
-    self.setClkFunction(output = false)
+    self.gpioMem.setOutput(GpioClk, false)
   elif self.clkClaimed:
     discard lgGpioFree(self.gpioHandle, GpioClk.cint)
     self.clkClaimed = false

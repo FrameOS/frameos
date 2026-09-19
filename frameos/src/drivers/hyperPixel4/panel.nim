@@ -41,9 +41,12 @@ const
 
   DpiTimingsRectangular* = "dpi_timings=480 0 10 16 59 800 0 15 113 15 0 0 0 60 0 32000000 6"
   DpiTimingsSquare* = "dpi_timings=720 0 15 15 15 720 0 10 10 10 0 0 0 60 0 35113500 6"
-  # The 2.1" Round's, so a card that moves between HyperPixels loses it:
-  # config.txt lets the last dpi_timings line win, and lines are only appended.
+  # The 2.1" Round's (drivers/inkyHyperPixel2r/panel.nim writes them), so a
+  # card that moves between HyperPixels loses them: config.txt lets the last
+  # dpi_timings line win, and lines are only appended.
   DpiTimingsRound* = "dpi_timings=480 0 10 16 55 480 0 15 60 15 0 0 0 60 0 19200000 6"
+  TouchOverlayRound* = "frameos-hyperpixel2r-touch"
+  KmsOverlayLineRound* = "dtoverlay=vc4-kms-dpi-hyperpixel2r"
   DpiOutputFormatRectangular* = "dpi_output_format=0x7f216"
   DpiOutputFormatSquare* = "dpi_output_format=0x7f226"
 
@@ -185,7 +188,7 @@ proc initFrames*(words: openArray[int]): seq[seq[int]] =
 
 const
   # Every line the firmware-DPI path writes that is the same for both panels.
-  FirmwareDpiLines = [
+  FirmwareDpiLines* = [
     "enable_dpi_lcd=1",
     "display_default_lcd=1",
     "dpi_group=2",
@@ -207,9 +210,10 @@ proc bootConfigLines*(panel: PanelSpec, path: DisplayPath): seq[string] =
   result = @[
     "#dtoverlay=hyperpixel4",
     "#dtoverlay=hyperpixel2r",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel2r",
+    "#" & KmsOverlayLineRound,
     "#dtoverlay=vc4-fkms-v3d",
     "#" & DpiTimingsRound,
+    "#dtoverlay=" & TouchOverlayRound,
   ]
   for line in KmsOverlayLines:
     if path == dpFirmware or line != kmsLine:

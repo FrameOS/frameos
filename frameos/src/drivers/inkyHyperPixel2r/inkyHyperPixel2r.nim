@@ -1,10 +1,28 @@
-import json, pixie, strformat, strutils
+import json, pixie, strformat
 
 import lib/lgpio
+import lib/gpiomem
 import frameos/driver_context
 import frameos/device_setup
 
 import drivers/frameBuffer/frameBuffer as frameBuffer
+import ./panel
+
+## The Pimoroni HyperPixel 2.1" Round, driven one of two ways (DisplayPath in
+## drivers/hyperPixel4/panel), picked by the board:
+##
+## Pi 0-4: firmware DPI carries the pixels into /dev/fb0 (setup writes the
+## dpi_* block into config.txt), and this driver sends the ST7701 its init
+## table over a bit-banged 3-wire bus and owns the backlight. Touch is the
+## kernel's edt-ft5x06 on an I2C bus setup enables with a small overlay —
+## over the same two pins as the init bus, which is why MOSI and the clock
+## below are special.
+##
+## Pi 5: the firmware cannot drive DPI at all, so setup enables the kernel's
+## vc4-kms-dpi-hyperpixel2r overlay, which inits the panel and owns the
+## backlight. This driver then touches no GPIO: it writes the fb0 KMS
+## emulates, and powers the panel by blanking it. No touch there: the
+## kernel's init bus holds the touch bus's pins.
 
 const
   GpioClk = 11
@@ -12,51 +30,22 @@ const
   GpioCs = 18
   GpioBacklight = 19
   BitDelaySeconds = 0.00001
-  PanelWidth = 480
-  PanelHeight = 480
-  # Pixels are carried by Raspberry Pi DPI into /dev/fb0; native GPIO owns the
-  # ST7701 sideband init bus and backlight GPIOs. The first three lines
-  # remove what the panel's previous drivers left in config.txt: Pimoroni's
-  # installer overlay (`hyperpixel2r`), the kernel's (`vc4-kms-dpi-…`, which
-  # the 2026-09-07..12 "legacy fb" driver wrote) and the KMS/FKMS display
-  # drivers, all of which claim the DPI pins or GPIO 19 ahead of us. The
-  # rest of the removals are what the hyperPixel4 driver writes for the 4.0
-  # and the 4.0 Square (drivers/hyperPixel4/panel.nim), for a card that moves
-  # between panels: config.txt lets the last dpi_timings line win, and setup
-  # only ever appends.
-  HyperPixelBootConfigLines* = @[
-    "#dtoverlay=hyperpixel2r",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel2r",
-    "#dtoverlay=vc4-kms-v3d",
-    "#dtoverlay=vc4-fkms-v3d",
-    "#dpi_timings=480 0 10 16 59 800 0 15 113 15 0 0 0 60 0 32000000 6",
-    "#dpi_timings=720 0 15 15 15 720 0 10 10 10 0 0 0 60 0 35113500 6",
-    "#dpi_output_format=0x7f226",
-    "#dtoverlay=frameos-hyperpixel4-touch",
-    "#dtoverlay=frameos-hyperpixel4sq-touch",
-    "#gpio=27=ip,pu",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel4",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel4,disable-touch",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel4sq",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel4sq,disable-touch",
-    "dtparam=i2c_arm=off",
-    "dtparam=spi=off",
-    "enable_dpi_lcd=1",
-    "display_default_lcd=1",
-    "dpi_group=2",
-    "dpi_mode=87",
-    "dpi_output_format=0x7f216",
-    "dpi_timings=480 0 10 16 55 480 0 15 60 15 0 0 0 60 0 19200000 6",
-    "gpio=0-9=a2,np",
-    "gpio=12-17=a2,np",
-    "gpio=20-25=a2,np",
-    "gpio=19=op,dh",
-  ]
 
 type Driver* = ref object of frameBuffer.Driver
   mode*: string
+  path: DisplayPath
   gpioHandle: cint
+  # GPIO 10 and 11 are the init bus's MOSI and clock AND the touch
+  # controller's I2C bus, which the kernel's i2c-gpio holds — so a gpiolib
+  # claim on them is refused. They are driven straight through the GPIO
+  # registers instead (lib/gpiomem), for the length of a burst, and handed
+  # back as inputs, which is what an open-drain bus idles as. The panel only
+  # listens while its chip select is low and the touch controller only to
+  # its own address, so the two buses share the wires; what they cannot share
+  # is a moment — see withBus. nil = no usable /dev/gpiomem: the pins are
+  # then ordinary lgpio claims, which works where no touch overlay is loaded.
+  gpioMem: GpioMem
+  busClaimed: bool
   panelInitialized: bool
   # Set by turnOff, cleared by turnOn. While it holds, render still writes
   # every frame into /dev/fb0 (so turnOn shows the current image, like the
@@ -68,14 +57,6 @@ type Driver* = ref object of frameBuffer.Driver
 proc log(self: Driver; payload: JsonNode) =
   if not self.isNil and not self.logger.isNil and not self.logger.log.isNil:
     self.logger.log(payload)
-
-proc determineGpioChip(): cint =
-  try:
-    if readFile("/proc/cpuinfo").contains("Raspberry Pi 5"):
-      return 4
-  except CatchableError:
-    discard
-  0
 
 proc delaySeconds(seconds: float) =
   if seconds > 0:
@@ -96,43 +77,77 @@ proc ensureGpio(self: Driver) =
   if self.gpioHandle >= 0:
     return
 
-  let gpioChip = determineGpioChip()
+  let gpioChip: cint = 0
   self.gpioHandle = lgGpiochipOpen(gpioChip)
   if self.gpioHandle < 0:
     raise newException(OSError, &"Unable to open gpiochip{gpioChip}: {$lguErrorText(self.gpioHandle)}")
 
-  self.claimOutput(GpioClk, LG_LOW)
-  self.claimOutput(GpioMosi, LG_LOW)
   self.claimOutput(GpioCs, LG_HIGH)
   self.claimOutput(GpioBacklight, LG_HIGH)
-  self.log(%*{"event": "driver:inkyHyperPixel2r", "gpiochip": gpioChip, "init": "gpio-ready"})
+  self.gpioMem = openGpioMem()
+  self.log(%*{"event": "driver:inkyHyperPixel2r", "gpiochip": gpioChip, "init": "gpio-ready",
+    "bus": (if self.gpioMem.isNil: "lgpio" else: "gpiomem")})
+
+proc writeBus(self: Driver; pin: int; level: int) =
+  if self.gpioMem.isNil:
+    self.writePin(pin, level)
+  else:
+    self.gpioMem.write(pin, level != LG_LOW)
+
+proc beginBus(self: Driver) =
+  self.ensureGpio()
+  if self.gpioMem.isNil:
+    if not self.busClaimed:
+      self.claimOutput(GpioClk, LG_LOW)
+      self.claimOutput(GpioMosi, LG_LOW)
+      self.busClaimed = true
+  else:
+    for pin in [GpioClk, GpioMosi]:
+      self.gpioMem.write(pin, false)
+      self.gpioMem.setOutput(pin, true)
+
+proc endBus(self: Driver) =
+  ## Hands GPIO 10/11 back as inputs: the I2C bus is the kernel's again.
+  if not self.gpioMem.isNil:
+    for pin in [GpioClk, GpioMosi]:
+      self.gpioMem.setOutput(pin, false)
+  elif self.busClaimed:
+    discard lgGpioFree(self.gpioHandle, GpioClk.cint)
+    discard lgGpioFree(self.gpioHandle, GpioMosi.cint)
+    self.busClaimed = false
+
+template withBus(self: Driver; body: untyped) =
+  ## A burst and an I2C transfer at the same moment would garble both, and
+  ## nothing arbitrates: the kernel only talks to the touch controller when a
+  ## finger makes it interrupt, so the window is a touch during the ~0.5 s of
+  ## an init or a display power change. The next init puts the panel right.
+  self.beginBus()
+  try:
+    body
+  finally:
+    self.endBus()
 
 proc writeSpiWord(self: Driver; value: int) =
   var data = value and 0x1ff
   for _ in 0 ..< 9:
-    self.writePin(GpioMosi, if (data and 0x100) != 0: LG_HIGH else: LG_LOW)
+    self.writeBus(GpioMosi, if (data and 0x100) != 0: LG_HIGH else: LG_LOW)
     data = (data shl 1) and 0x1ff
     delaySeconds(BitDelaySeconds)
-    self.writePin(GpioClk, LG_HIGH)
+    self.writeBus(GpioClk, LG_HIGH)
     delaySeconds(BitDelaySeconds)
-    self.writePin(GpioClk, LG_LOW)
-  self.writePin(GpioMosi, LG_LOW)
+    self.writeBus(GpioClk, LG_LOW)
+  self.writeBus(GpioMosi, LG_LOW)
 
 proc sendCommand(self: Driver; command: uint8; data: openArray[uint8] = []) =
-  self.ensureGpio()
+  ## Call inside withBus.
   self.writePin(GpioCs, LG_LOW)
   self.writeSpiWord(command.int)
   for value in data:
     self.writeSpiWord(0x100 or value.int)
   self.writePin(GpioCs, LG_HIGH)
 
-proc initializePanel(self: Driver) =
-  if self.panelInitialized:
-    return
-
-  self.ensureGpio()
-  self.log(%*{"event": "driver:inkyHyperPixel2r", "init": "panel-start"})
-
+proc sendInitTable(self: Driver) =
+  ## Call inside withBus.
   # ST7701 command table from Pimoroni's userspace HyperPixel 2.1R init path.
   self.sendCommand(0x01'u8)
   delayMs(240)
@@ -197,40 +212,39 @@ proc initializePanel(self: Driver) =
   self.sendCommand(0x29'u8)
   delayMs(20)
 
+proc initializePanel(self: Driver) =
+  # Under KMS the kernel's panel driver already did this, on pins it holds.
+  if self.panelInitialized or self.path == dpKms:
+    return
+
+  self.log(%*{"event": "driver:inkyHyperPixel2r", "init": "panel-start"})
+  self.withBus:
+    self.sendInitTable()
   self.writePin(GpioBacklight, LG_HIGH)
   self.panelInitialized = true
   self.log(%*{"event": "driver:inkyHyperPixel2r", "init": "panel-complete"})
 
 proc init*(frameOS: DriverContext): Driver =
   let fbDriver = frameBuffer.init(frameOS)
-  var screenInfo = frameBuffer.ScreenInfo(
-    width: PanelWidth,
-    height: PanelHeight,
-    bitsPerPixel: 32,
-    redOffset: 16,
-    redLength: 8,
-    greenOffset: 8,
-    greenLength: 8,
-    blueOffset: 0,
-    blueLength: 8,
-    alphaOffset: 24,
-    alphaLength: 8,
-  )
-  var logger = frameOS.logger
-  if not fbDriver.isNil:
-    screenInfo = fbDriver.screenInfo
-    logger = fbDriver.logger
-  else:
+  if not fbDriver.available:
+    # /dev/fb0 did not answer yet; render re-probes. Until then the panel's
+    # own geometry beats whatever the config happened to hold.
     frameOS.frameConfig.width = PanelWidth
     frameOS.frameConfig.height = PanelHeight
   result = Driver(
     name: "inkyHyperPixel2r",
-    screenInfo: screenInfo,
-    logger: logger,
+    screenInfo: fbDriver.screenInfo,
+    logger: fbDriver.logger,
+    available: fbDriver.available,
+    lastProbeError: fbDriver.lastProbeError,
+    probeRetrySeconds: fbDriver.probeRetrySeconds,
     mode: frameOS.frameConfig.mode,
+    path: detectDisplayPath(),
     gpioHandle: cint(-1),
     panelInitialized: false,
   )
+  result.log(%*{"event": "driver:inkyHyperPixel2r",
+    "path": (if result.path == dpKms: "kms" else: "firmware-dpi")})
   try:
     result.initializePanel()
   except Exception as e:
@@ -243,40 +257,55 @@ proc init*(frameOS: DriverContext): Driver =
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   discard frameOS
-  result = setupBootConfig(HyperPixelBootConfigLines)
+  setupPanel()
 
 proc render*(self: Driver, image: Image) =
-  if not self.panelInitialized and not self.displayOff:
+  if self.path == dpFirmware and not self.panelInitialized and not self.displayOff:
     try:
       self.initializePanel()
     except Exception as e:
       self.log(%*{"event": "driver:inkyHyperPixel2r", "error": "Panel init failed before render", "exception": e.msg})
   frameBuffer.render(self, image)
 
+proc setKmsPower(self: Driver; on: bool) =
+  # Blanking the emulated fb0 is a DPMS off: the kernel's panel driver sends
+  # display-off and drops the backlight, and the way back re-inits the panel.
+  # Writes into fb0 while it is blanked do not wake it.
+  let status = frameBuffer.runPrivilegedDisplayShell(
+    "echo " & (if on: "0" else: "1") & " > /sys/class/graphics/fb0/blank")
+  if status != 0:
+    self.log(%*{"event": "driver:inkyHyperPixel2r", "error": "Failed to blank/unblank fb0", "on": on})
+
 proc turnOn*(self: Driver) =
   self.displayOff = false
+  if self.path == dpKms:
+    self.setKmsPower(true)
+    return
   try:
     if not self.panelInitialized:
       # Never came up (init failed at boot): the sleep-out below would wake
       # an unconfigured ST7701. Run the whole table instead.
       self.initializePanel()
       return
-    self.ensureGpio()
-    self.sendCommand(0x11'u8)
-    delayMs(120)
-    self.sendCommand(0x29'u8)
-    delayMs(20)
+    self.withBus:
+      self.sendCommand(0x11'u8)
+      delayMs(120)
+      self.sendCommand(0x29'u8)
+      delayMs(20)
     self.writePin(GpioBacklight, LG_HIGH)
   except Exception as e:
     self.log(%*{"event": "driver:inkyHyperPixel2r", "error": "Failed to turn display on", "exception": e.msg})
 
 proc turnOff*(self: Driver) =
   self.displayOff = true
+  if self.path == dpKms:
+    self.setKmsPower(false)
+    return
   try:
-    self.ensureGpio()
-    self.sendCommand(0x28'u8)
-    delayMs(20)
-    self.sendCommand(0x10'u8)
+    self.withBus:
+      self.sendCommand(0x28'u8)
+      delayMs(20)
+      self.sendCommand(0x10'u8)
     self.writePin(GpioBacklight, LG_LOW)
     # panelInitialized stays true: sleep-in keeps the ST7701's registers, so
     # turnOn only needs sleep-out + display-on, and render must not re-init.

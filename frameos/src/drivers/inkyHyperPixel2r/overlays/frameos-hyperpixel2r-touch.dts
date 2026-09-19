@@ -1,0 +1,44 @@
+/*
+ * Touch for the Pimoroni HyperPixel 2.1" Round, and nothing else.
+ *
+ * The Round's touch controller (FocalTech FT5x06 family, 0x15, interrupt on
+ * GPIO 27) sits on a bit-banged I2C bus over GPIO 10 (SDA) and 11 (SCL) —
+ * the very pins its ST7701 init bus uses as MOSI and clock. That is why the
+ * kernel's vc4-kms-dpi-hyperpixel2r ships this bus disabled (its spi-gpio
+ * holds the pins) and Pimoroni reads touch from Python. FrameOS inits the
+ * panel from userspace instead, so the kernel can have the pins for I2C; the
+ * inkyHyperPixel2r driver borrows them through /dev/gpiomem for the length
+ * of an init burst, with the panel's chip select as the arbiter.
+ *
+ * Build: dtc -@ -I dts -O dtb -o frameos-hyperpixel2r-touch.dtbo frameos-hyperpixel2r-touch.dts
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			frameos_hyperpixel2r_i2c: i2c@0 {
+				compatible = "i2c-gpio";
+				gpios = <&gpio 10 6 /* sda, open drain */
+					 &gpio 11 6>; /* scl, open drain */
+				i2c-gpio,delay-us = <4>; /* ~100 kHz */
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				touch@15 {
+					compatible = "edt,edt-ft5406";
+					reg = <0x15>;
+					interrupt-parent = <&gpio>;
+					interrupts = <27 2>;
+					touchscreen-size-x = <480>;
+					touchscreen-size-y = <480>;
+				};
+			};
+		};
+	};
+};

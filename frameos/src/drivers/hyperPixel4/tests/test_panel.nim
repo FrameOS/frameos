@@ -3,16 +3,7 @@ import std/[os, sequtils, strutils, times]
 import frameos/device_setup
 import ../panel
 
-# Read, not imported: the 2.1" Round's driver pulls in lgpio, which only
-# compiles on Linux, and all this test wants from it is its config.txt lines.
-const roundDriverSource = staticRead("../../inkyHyperPixel2r/inkyHyperPixel2r.nim")
-
-proc roundBootConfigLines(): seq[string] =
-  let list = roundDriverSource.split("HyperPixelBootConfigLines* = @[", 1)[1].split("]", 1)[0]
-  for line in list.splitLines():
-    let quoted = line.strip().strip(chars = {','})
-    if quoted.len > 2 and quoted[0] == '"':
-      result.add(quoted[1 .. ^2])
+import ../../inkyHyperPixel2r/panel as roundPanel
 
 block test_device_ids_pick_the_panel_and_touch:
   let rect = panelForDevice("pimoroni.hyperpixel4")
@@ -106,8 +97,7 @@ block test_boot_config_carries_the_panel_timings_and_touch_only_when_asked:
 block test_every_hyperpixel_clears_the_other_panels_blocks:
   # A line one panel adds and another does not must be removed by that other,
   # or a card that changes panels boots with two competing DPI blocks.
-  doAssert DpiTimingsRound in roundBootConfigLines()
-  var lists = @[roundBootConfigLines()]
+  var lists = @[roundPanel.bootConfigLines(dpFirmware), roundPanel.bootConfigLines(dpKms)]
   for device in ["pimoroni.hyperpixel4", "pimoroni.hyperpixel4_touch",
       "pimoroni.hyperpixel4sq", "pimoroni.hyperpixel4sq_touch"]:
     for path in [dpFirmware, dpKms]:
@@ -122,7 +112,7 @@ block test_switching_panels_leaves_one_dpi_block:
   var config = "dtoverlay=vc4-kms-v3d\ndtoverlay=vc4-kms-dpi-hyperpixel4\n"
   for device in ["pimoroni.hyperpixel4_touch", "pimoroni.hyperpixel4sq", "pimoroni.hyperpixel4"]:
     config = applyBootConfigLines(config, panelForDevice(device).bootConfigLines(dpFirmware)).content
-  config = applyBootConfigLines(config, roundBootConfigLines()).content
+  config = applyBootConfigLines(config, roundPanel.bootConfigLines(dpFirmware)).content
   config = applyBootConfigLines(config, panelForDevice("pimoroni.hyperpixel4sq_touch").bootConfigLines(dpFirmware)).content
   let lines = config.splitLines()
   doAssert lines.filterIt(it.startsWith("dpi_timings=")) == @[DpiTimingsSquare]

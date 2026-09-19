@@ -604,7 +604,11 @@ proc setupStepsForDevice(device: string): seq[string] =
   if device == "http.upload":
     return @["Upload rendered PNG images to an HTTP endpoint."]
   if device == "pimoroni.hyperpixel2r":
-    return @["Write the DPI display block into boot config.", "Use the native HyperPixel 2.1 Round driver."]
+    return @[
+      "Write the display block for this board into boot config (the kernel's HyperPixel overlay on a Pi 5, firmware DPI otherwise).",
+      "Use the native HyperPixel 2.1 Round driver.",
+      "Enable the touch controller and read touches as pointer events (not on a Pi 5).",
+    ]
   if device in hyperPixel4Devices:
     result = @["Write the display block for this board into boot config (the kernel's HyperPixel overlay on a Pi 5, firmware DPI otherwise).", "Use the native HyperPixel 4.0 driver."]
     if device.endsWith("_touch"):
