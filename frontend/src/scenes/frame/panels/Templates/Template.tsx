@@ -20,6 +20,7 @@ import {
   StarIcon as StarOutlineIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
+import { Spinner } from '../../../../components/Spinner'
 import { Tag } from '../../../../components/Tag'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useEffect, useMemo, useState } from 'react'
@@ -72,6 +73,8 @@ interface TemplateProps {
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
   installedTemplatesByName: Record<string, boolean>
+  /** The install is running (the scene is being downloaded): the button spins. */
+  installing?: boolean
   templateDragData?: FrameosTemplateDragData
   compatibility?: CompatibilityResult
   favourite?: boolean
@@ -126,6 +129,7 @@ export function TemplateRow({
   editTemplate,
   saveRemoteAsLocal,
   installedTemplatesByName,
+  installing,
   templateDragData,
   compatibility,
   favourite,
@@ -329,16 +333,23 @@ export function TemplateRow({
                   size="small"
                   color={installedTemplatesByName[template.name] ? 'secondary' : 'primary'}
                   onClick={() => applyTemplate?.(template)}
-                  disabled={!canInstall}
-                  title={unsupported ? unsupportedReason : 'Install scene'}
+                  disabled={!canInstall || installing}
+                  aria-busy={installing}
+                  title={unsupported ? unsupportedReason : installing ? 'Installing…' : 'Install scene'}
                 >
-                  {!installedTemplatesByName[template.name] ? (
+                  {installing ? (
+                    <span className="flex h-5 w-5 items-center justify-center">
+                      <Spinner {...(installedTemplatesByName[template.name] ? {} : { color: 'white' as const })} />
+                    </span>
+                  ) : !installedTemplatesByName[template.name] ? (
                     <FolderPlusIcon className="w-5 h-5" />
                   ) : (
                     <CheckIcon className="w-5 h-5" />
                   )}
                   <span className="hidden @xs:inline">
-                    {installedTemplatesByName[template.name] ? (
+                    {installing ? (
+                      'Installing…'
+                    ) : installedTemplatesByName[template.name] ? (
                       'Installed'
                     ) : (
                       <>Install{templateScenes.length > 1 ? ` (${templateScenes.length})` : ''}</>

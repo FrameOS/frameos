@@ -134,6 +134,8 @@
     // workspace's types predate this package's compiler options. Vitest
     // still runs it; only tsc leaves it out.
     "src/test/shared-spa/scene-update-available.test.ts",
-    "src/test/shared-spa/scene-update-banner.test.tsx"
+    "src/test/shared-spa/scene-update-banner.test.tsx",
+    // Mounts templatesLogic (→ frameLogic), same reason.
+    "src/test/shared-spa/template-install-feedback.test.ts"
   ]
 }

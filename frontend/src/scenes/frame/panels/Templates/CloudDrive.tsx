@@ -9,6 +9,7 @@ import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { templatesLogic } from './templatesLogic'
 import { cloudDriveLogic } from './cloudDriveLogic'
+import { templateFavouriteId } from './templateFavourites'
 import { TemplateRow } from './Template'
 import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { searchInText } from '../../../../utils/searchInText'
@@ -26,7 +27,7 @@ interface CloudDriveProps {
 export function CloudDrive({ openInstalledSceneDrawer = false }: CloudDriveProps): JSX.Element {
   const { frameId, mode, frameForm } = useValues(frameLogic)
   const { apps } = useValues(appsModel)
-  const { isExpanded, search, installedTemplatesByName } = useValues(templatesLogic({ frameId }))
+  const { isExpanded, search, installedTemplatesByName, installingTemplateIds } = useValues(templatesLogic({ frameId }))
   const { toggleExpanded, applyRemoteToFrame, saveRemoteAsLocal } = useActions(templatesLogic({ frameId }))
   const { driveTemplates, driveTemplatesLoading, hasDriveScope, cloudConnected, cloudEnabled, driveRepository } =
     useValues(cloudDriveLogic)
@@ -113,6 +114,7 @@ export function CloudDrive({ openInstalledSceneDrawer = false }: CloudDriveProps
                     applyRemoteToFrame(driveRepository, template, openInstalledSceneDrawer)
                   }}
                   installedTemplatesByName={installedTemplatesByName}
+                  installing={Boolean(installingTemplateIds[templateFavouriteId(template, driveRepository)])}
                   templateDragData={
                     compatibility.supported
                       ? {

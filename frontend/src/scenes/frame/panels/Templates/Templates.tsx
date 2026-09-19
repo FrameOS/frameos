@@ -131,6 +131,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
     isExpanded,
     search,
     installedTemplatesByName,
+    installingTemplateIds,
     favouriteTemplateIds,
     storeScenesLoading,
   } = useValues(templatesLogic({ frameId }))
@@ -262,6 +263,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
             applyRemoteToFrame(repository, template, openInstalledSceneDrawer)
           }}
           installedTemplatesByName={installedTemplatesByName}
+          installing={Boolean(installingTemplateIds[favouriteId])}
           templateDragData={
             compatibility.supported
               ? {

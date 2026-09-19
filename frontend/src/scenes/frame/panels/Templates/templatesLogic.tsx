@@ -12,7 +12,7 @@ import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { isCloudMode } from '../../../../utils/cloudMode'
-import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { scenesRunShellCommands, templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
@@ -137,6 +137,7 @@ export interface templatesLogicValues {
     ValidationErrorType
   >
   addingUrlToFrame: boolean
+  installingTemplateIds: Record<string, boolean>
   expanded: Record<string, boolean>
   favouriteTemplateIds: Set<string>
   favouriteTemplates: TemplateWithFavouriteId[]
@@ -327,6 +328,12 @@ export interface templatesLogicActions {
     values: DeepPartial<{
       url: string
     }>
+  }
+  remoteInstallStarted: (installId: string) => {
+    installId: string
+  }
+  remoteInstallFinished: (installId: string) => {
+    installId: string
   }
   setAddingUrlToFrame: (adding: boolean) => {
     adding: boolean
@@ -602,6 +609,9 @@ export const templatesLogic = kea<templatesLogicType>([
     setSearch: (search: string) => ({ search }),
     addUrlToFrame: (url: string, openDrawer?: boolean) => ({ url, openDrawer: openDrawer ?? false }),
     setAddingUrlToFrame: (adding: boolean) => ({ adding }),
+    // A catalog install in flight, by templateFavouriteId(template, repository).
+    remoteInstallStarted: (installId: string) => ({ installId }),
+    remoteInstallFinished: (installId: string) => ({ installId }),
     toggleExpanded: (url: string) => ({ url }),
     applyFavouriteTemplatesToFrame: (openDrawer?: boolean) => ({
       openDrawer: openDrawer ?? false,
@@ -799,6 +809,19 @@ export const templatesLogic = kea<templatesLogicType>([
   reducers({
     search: ['', { setSearch: (_, { search }) => search }],
     addingUrlToFrame: [false, { setAddingUrlToFrame: (_, { adding }) => adding }],
+    // Catalog scenes being installed right now — their Install button spins.
+    // Installing downloads the scene first (the backend fetches the store's
+    // zip), which can take seconds during which nothing else on screen moves.
+    installingTemplateIds: [
+      {} as Record<string, boolean>,
+      {
+        remoteInstallStarted: (state, { installId }) => ({ ...state, [installId]: true }),
+        remoteInstallFinished: (state, { installId }) => {
+          const { [installId]: _, ...rest } = state
+          return rest
+        },
+      },
+    ],
     showingModal: [
       false,
       {
@@ -1180,71 +1203,96 @@ export const templatesLogic = kea<templatesLogicType>([
       ) {
         return
       }
-      const scenes = await loadRepositoryTemplateScenes(repository, template)
-      const storeSceneId = (template as TemplateType & { sceneId?: string }).sceneId
-      // A cloud store install keeps the published scene ids. They are not a
-      // local detail there: the assignment below is what actually reaches the
-      // device, and the server resolves both the tile's cover image and (on
-      // the next save) the form scene's owning assignment BY those ids. A
-      // re-ided local copy therefore showed a permanently blank tile and got
-      // saved a second time as a private scene of its own.
-      const preserveSceneIds = isCloudMode() && Boolean(storeSceneId)
-      // Every installed scene records where it came from (`origin`: the
-      // store page + uuid + version for store scenes, repository/template
-      // otherwise). On the cloud the server stamps the same fields onto
-      // everything it serves and the stamp is stripped again before any
-      // publish (cloudFrameScenesSave.ts), so it can never lag the store.
-      actions.applyTemplate(templateWithSceneOrigins({ ...template, scenes }, repository), openDrawer, preserveSceneIds)
-
-      // On the cloud control plane the scene list that actually reaches the
-      // device is the server-side store-scene assignment (set_scenes over the
-      // hub WS) — the client-side applyTemplate above only shapes the
-      // workspace view. Both cloud catalogs (the public store and "my cloud
-      // scenes") carry the store scene uuid, so assign it here too.
-      if (isCloudMode() && storeSceneId) {
-        longRunningTasksModel.actions.startTask({
-          frameId: props.frameId,
-          kind: 'save',
-          title: `Adding "${template.name}"`,
-          detail: 'Assigning the scene to this frame',
-        })
+      const installId = templateFavouriteId(template, repository)
+      if (values.installingTemplateIds[installId]) {
+        return
+      }
+      actions.remoteInstallStarted(installId)
+      try {
+        let scenes: FrameScene[]
         try {
-          // Installing is the owner's consent: the scene is granted the
-          // service keys its apps declare, and the frame's Service settings
-          // section shows the grant per scene for adjusting later.
-          const assigned = await assignCloudFrameStoreScene(
-            props.frameId,
-            storeSceneId,
-            collectSecretSettingsFromScenes(scenes, values.apps)
-          )
-          longRunningTasksModel.actions.finishTask({
-            frameId: props.frameId,
-            kind: 'save',
-            status: 'success',
-            // Say what is left to do: the assignment is stored, but the frame
-            // only picks it up once the workspace pushes — and "queued" on its
-            // own read as "nothing more to do here".
-            detail: assigned
-              ? 'Added to this frame — press Save, then Deploy, to send it to the device'
-              : 'Scene was already on the frame',
-          })
-          if (assigned) {
-            // The server now owns this scene; rehydrate frame.scenes from the
-            // assignment list (force skips the poll throttle) so the tiles
-            // show server truth immediately — not just until the next reload.
-            framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
-            framesModel.actions.loadFrame(props.frameId)
-          }
+          scenes = await loadRepositoryTemplateScenes(repository, template)
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          longRunningTasksModel.actions.taskFailed({
+          // Was silent: the click simply did nothing.
+          reportTaskOutcome('error', {
             frameId: props.frameId,
             kind: 'save',
-            detail: message.includes('frame_not_active')
-              ? 'This frame is still pending — confirm it on its dashboard, then add the scene again.'
-              : message,
+            title: `Adding "${template.name}"`,
+            detail: error instanceof Error ? error.message : String(error),
           })
+          return
         }
+        const storeSceneId = (template as TemplateType & { sceneId?: string }).sceneId
+        // A cloud store install keeps the published scene ids. They are not a
+        // local detail there: the assignment below is what actually reaches the
+        // device, and the server resolves both the tile's cover image and (on
+        // the next save) the form scene's owning assignment BY those ids. A
+        // re-ided local copy therefore showed a permanently blank tile and got
+        // saved a second time as a private scene of its own.
+        const preserveSceneIds = isCloudMode() && Boolean(storeSceneId)
+        // Every installed scene records where it came from (`origin`: the
+        // store page + uuid + version for store scenes, repository/template
+        // otherwise). On the cloud the server stamps the same fields onto
+        // everything it serves and the stamp is stripped again before any
+        // publish (cloudFrameScenesSave.ts), so it can never lag the store.
+        actions.applyTemplate(
+          templateWithSceneOrigins({ ...template, scenes }, repository),
+          openDrawer,
+          preserveSceneIds
+        )
+
+        // On the cloud control plane the scene list that actually reaches the
+        // device is the server-side store-scene assignment (set_scenes over the
+        // hub WS) — the client-side applyTemplate above only shapes the
+        // workspace view. Both cloud catalogs (the public store and "my cloud
+        // scenes") carry the store scene uuid, so assign it here too.
+        if (isCloudMode() && storeSceneId) {
+          longRunningTasksModel.actions.startTask({
+            frameId: props.frameId,
+            kind: 'save',
+            title: `Adding "${template.name}"`,
+            detail: 'Assigning the scene to this frame',
+          })
+          try {
+            // Installing is the owner's consent: the scene is granted the
+            // service keys its apps declare, and the frame's Service settings
+            // section shows the grant per scene for adjusting later.
+            const assigned = await assignCloudFrameStoreScene(
+              props.frameId,
+              storeSceneId,
+              collectSecretSettingsFromScenes(scenes, values.apps)
+            )
+            longRunningTasksModel.actions.finishTask({
+              frameId: props.frameId,
+              kind: 'save',
+              status: 'success',
+              // Say what is left to do: the assignment is stored, but the frame
+              // only picks it up once the workspace pushes — and "queued" on its
+              // own read as "nothing more to do here".
+              detail: assigned
+                ? 'Added to this frame — press Save, then Deploy, to send it to the device'
+                : 'Scene was already on the frame',
+            })
+            if (assigned) {
+              // The server now owns this scene; rehydrate frame.scenes from the
+              // assignment list (force skips the poll throttle) so the tiles
+              // show server truth immediately — not just until the next reload.
+              framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+              framesModel.actions.loadFrame(props.frameId)
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            longRunningTasksModel.actions.taskFailed({
+              frameId: props.frameId,
+              kind: 'save',
+              detail: message.includes('frame_not_active')
+                ? 'This frame is still pending — confirm it on its dashboard, then add the scene again.'
+                : message,
+            })
+          }
+        }
+      } finally {
+        actions.remoteInstallFinished(installId)
       }
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
