@@ -28,6 +28,14 @@ export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } fro
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
 export { selectFieldOptions } from './options'
 export {
+  REFRESH_INTERVAL_FIELD_NAME,
+  REFRESH_INTERVAL_LABEL,
+  REFRESH_INTERVAL_ROLE,
+  parseRefreshSeconds,
+  refreshIntervalFieldIndex,
+  sceneStateFields,
+} from './refreshInterval'
+export {
   coerceStateFieldValue,
   evaluateShowIf,
   stateFieldShowIfValues,

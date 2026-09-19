@@ -70,7 +70,39 @@ suite "scene persistence helpers":
     let interpreted = buildInterpretedScenes(sceneInputs)
     let exported = interpreted["test/persist-flags".SceneId]
 
-    check exported.persistedStateKeys == @["diskField"]
+    # ...plus the implicit refresh interval, which only reaches the disk once
+    # it is customized (next test)
+    check exported.persistedStateKeys == @["diskField", "refreshInterval"]
+
+  test "an implicit refresh interval persists only once it leaves the scene's default":
+    let sceneId = "uploaded/persist-refresh".SceneId
+    let path = persistedPath(sceneId)
+    let uploadedBackupTable = uploadedScenes
+    try:
+      if fileExists(path):
+        removeFile(path)
+      updateUploadedScenes(buildInterpretedScenes(parseInterpretedSceneInputs($(%*[{
+        "id": sceneId.string, "name": "Persist refresh", "nodes": [], "edges": [], "fields": [],
+        "settings": {"backgroundColor": "#000000", "refreshInterval": 900.0}
+      }]))))
+
+      # On the default: nothing to remember, so a later edit of the scene's
+      # settings.refreshInterval is not shadowed by a stale file
+      let scene = FrameScene(id: sceneId, state: %*{"refreshInterval": 900.0})
+      scene.updateLastPersistedState()
+      check not fileExists(path)
+
+      scene.state["refreshInterval"] = %60
+      scene.updateLastPersistedState()
+      check loadPersistedState(sceneId){"refreshInterval"}.getInt() == 60
+
+      # Back on the default: the file goes away again
+      scene.state["refreshInterval"] = %"900"
+      scene.updateLastPersistedState()
+      check not fileExists(path)
+    finally:
+      updateUploadedScenes(uploadedBackupTable)
+      removePersistedState(sceneId)
 
   test "updateLastPersistedState removes stale keys when fields stop persisting":
     let sceneId = "uploaded/persist-prune".SceneId

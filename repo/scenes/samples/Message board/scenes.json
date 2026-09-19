@@ -32,6 +32,7 @@
       },
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "label": "Refresh background after (seconds)",
         "type": "float",
         "persist": "disk",

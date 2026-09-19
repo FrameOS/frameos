@@ -47,6 +47,10 @@ type ResolvedApp = {
   source: "catalog" | "scene" | "inline";
 };
 
+/** Mirrors frontend/src/utils/refreshInterval.ts. */
+const REFRESH_INTERVAL_ROLE = "refreshInterval";
+const REFRESH_INTERVAL_FIELD_NAME = "refreshInterval";
+
 const NODE_TYPES = new Set(["event", "dispatch", "app", "state", "code", "scene"]);
 const FIELD_TYPES = new Set([
   "string",
@@ -467,6 +471,7 @@ export function lintScene(
 
   // --- scene fields -------------------------------------------------------
   const declaredFields = new Map<string, JsonObject>();
+  let refreshIntervalRoleField: string | null = null;
   const rawFields = Array.isArray(scene.fields) ? scene.fields : [];
   rawFields.forEach((raw, index) => {
     const field = obj(raw);
@@ -511,7 +516,53 @@ export function lintScene(
     if (mismatch) {
       push("warning", `Scene field "${name}": ${mismatch}.`);
     }
+    // role: what the runtime uses the field for. "refreshInterval" makes the
+    // field's value the scene's seconds between renders; the runtime takes
+    // the first such field, so a second one is a control that does nothing.
+    if (field.role !== undefined && field.role !== null) {
+      if (field.role !== REFRESH_INTERVAL_ROLE) {
+        push(
+          "error",
+          `Scene field "${name}" has unknown role "${String(field.role)}". Allowed: ${REFRESH_INTERVAL_ROLE}.`,
+        );
+      } else {
+        if (refreshIntervalRoleField) {
+          push(
+            "error",
+            `Scene fields "${refreshIntervalRoleField}" and "${name}" both have role "${REFRESH_INTERVAL_ROLE}"; only one field can be the refresh interval.`,
+          );
+        } else {
+          refreshIntervalRoleField = name;
+        }
+        if (type && type !== "float" && type !== "integer") {
+          push(
+            "error",
+            `Scene field "${name}" has role "${REFRESH_INTERVAL_ROLE}" but type "${type}"; the refresh interval is a number of seconds (float or integer).`,
+          );
+        }
+      }
+    }
   });
+
+  // Every scene has an implicit public "refreshInterval" float field unless
+  // it declares one (frameos/src/frameos/refresh_interval.nim), so a state
+  // node may read it without a `fields` entry.
+  const namedRefreshField = declaredFields.get(REFRESH_INTERVAL_FIELD_NAME);
+  if (!namedRefreshField) {
+    declaredFields.set(REFRESH_INTERVAL_FIELD_NAME, { name: REFRESH_INTERVAL_FIELD_NAME, type: "float" });
+  } else if (
+    !refreshIntervalRoleField &&
+    str(namedRefreshField.type) !== "float" &&
+    str(namedRefreshField.type) !== "integer"
+  ) {
+    // The runtime only takes the name over on a numeric field, and cannot
+    // add its implicit field next to this one: the scene has no interval
+    // control at all.
+    push(
+      "warning",
+      `Scene field "${REFRESH_INTERVAL_FIELD_NAME}" has type "${str(namedRefreshField.type) ?? ""}", so it is not used as the refresh interval and the scene gets no refresh interval control. Make it float or integer, or rename it.`,
+    );
+  }
 
   // --- scene-local JS apps --------------------------------------------------
   if (sceneApps) {

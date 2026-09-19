@@ -62,6 +62,7 @@ import {
   sceneDependencyGroupingIsEnabled,
   workspaceLogic,
 } from './workspaceLogic'
+import { sceneStateFields } from '../../utils/refreshInterval'
 
 const DEFAULT_SPLIT_SCENE_NAME = 'Split screen'
 const INITIAL_SPLIT_PRESET_COUNT = 3
@@ -785,7 +786,8 @@ function SplitSceneOptionsPanel({
   }
 
   const state = leaf.state ?? {}
-  const fields = scene ? visiblePublicStateFields(scene.fields ?? [], state) : []
+  // Each panel's scene keeps its own refresh interval, like any scene
+  const fields = scene ? visiblePublicStateFields(sceneStateFields(scene), state) : []
 
   let body: JSX.Element
   if (!leaf.sceneId) {

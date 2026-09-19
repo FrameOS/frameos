@@ -313,6 +313,11 @@ type
     logger*: Logger
     state*: JsonNode
     refreshInterval*: float
+    ## The interval is a state field (refresh_interval.nim): the key it is
+    ## read back from after every run, and what applies when the state holds
+    ## no usable number. "" = the scene has no such field.
+    refreshIntervalKey*: string
+    refreshIntervalDefault*: float
     backgroundColor*: Color
     execNode*: proc(nodeId: NodeId, context: ExecutionContext)
     getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
@@ -345,6 +350,15 @@ type
   ExportedScene* = ref object of RootObj
     publicStateFields*: seq[StateField]
     persistedStateKeys*: seq[string]
+    ## The state key that holds the scene's refresh interval ("" = the scene
+    ## has none and `FrameScene.refreshInterval` is all there is). See
+    ## refresh_interval.nim.
+    refreshIntervalKey*: string
+    refreshIntervalDefault*: float
+    ## The field was added by the runtime rather than declared by the scene:
+    ## it is only persisted once somebody moves it off the scene's default, so
+    ## editing `settings.refreshInterval` keeps working after a redeploy.
+    refreshIntervalImplicit*: bool
     runEvent*: proc (self: FrameScene, context: ExecutionContext): void
     render*: proc (self: FrameScene, context: ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
@@ -509,6 +523,9 @@ type
     persist*: string
     access*: string
     showIf*: JsonNode
+    ## What the runtime uses the field for. "refreshInterval": this field's
+    ## value is the scene's seconds between renders (refresh_interval.nim).
+    role*: string
 
   RunnerThread* = ref object
     frameConfig*: FrameConfig

@@ -214,6 +214,7 @@
       },
       {
         "name": "refreshSeconds",
+        "role": "refreshInterval",
         "type": "float",
         "value": "900",
         "access": "public",

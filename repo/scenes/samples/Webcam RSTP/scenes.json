@@ -155,6 +155,7 @@
       },
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "label": "Refresh interval in seconds",
         "type": "float",
         "persist": "disk",

@@ -9,6 +9,7 @@ import {
   FrameOSPreview,
   panelPalettes,
   sceneEventButtons,
+  sceneStateFields,
   stateFieldShowIfValues,
   type FrameOSScene,
   type PanelPaletteKey,
@@ -699,7 +700,9 @@ export function SceneLivePreviewPanel({
   }, [scenes, currentSceneId]);
   const publicFields = useMemo(
     () =>
-      (currentScene?.fields ?? []).filter(
+      // Every scene's last control is its refresh interval, declared or
+      // implicit: the same list the frame's own control panel shows.
+      sceneStateFields(currentScene).filter(
         (field) => field.access === "public" && field.name,
       ),
     [currentScene],

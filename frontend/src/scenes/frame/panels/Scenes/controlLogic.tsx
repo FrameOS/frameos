@@ -16,6 +16,7 @@ import { sceneIdsRefer } from '../../../../utils/systemScenes'
 import { SCENE_ACTIVATION_TIMEOUT_MS } from '../../../../utils/sceneActivation'
 import type { TemplateType } from '../../../../types'
 import type { StateField } from '../../../../types'
+import { sceneStateFields } from '../../../../utils/refreshInterval'
 
 export interface ControlLogicProps {
   frameId: FrameId
@@ -283,7 +284,7 @@ export const controlLogic = kea<controlLogicType>([
     ],
     fields: [
       (s) => [s.scene],
-      (scene: controlLogicValues['scene']) => (scene?.fields ?? []).filter((field) => field.access === 'public'),
+      (scene: controlLogicValues['scene']) => sceneStateFields(scene).filter((field) => field.access === 'public'),
     ],
     scenesAsOptions: [
       (s) => [s.scenes],

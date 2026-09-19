@@ -359,6 +359,34 @@ async def test_virtual_set_scene_state_roundtrip(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_virtual_state_accepts_the_refresh_interval(async_client, db, redis):
+    # Every scene's last control is its refresh interval: implicit here (the
+    # scene declares none), or the field a scene gave the role to.
+    frame = await create_virtual_frame(async_client, db)
+    role_scene = _stateful_scene('scene-b')
+    role_scene['fields'].append(
+        {'name': 'seconds', 'type': 'float', 'access': 'public', 'value': '600', 'role': 'refreshInterval'})
+    frame.scenes = [_stateful_scene(), role_scene]
+    db.add(frame)
+    db.commit()
+
+    for scene_id, state in (('scene-a', {'refreshInterval': 60}),
+                            ('scene-b', {'seconds': 30, 'refreshInterval': 5})):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/setSceneState',
+            json={'sceneId': scene_id, 'state': state},
+            headers={'content-type': 'application/json'})
+        assert response.status_code == 200, response.text
+
+    response = await async_client.get(f'/api/frames/{frame.id}/states')
+    states = response.json()['states']
+    assert states['scene-a']['refreshInterval'] == 60
+    # Once a field has the role, `refreshInterval` is just an undeclared key.
+    assert states['scene-b']['seconds'] == 30
+    assert 'refreshInterval' not in states['scene-b']
+
+
+@pytest.mark.asyncio
 async def test_virtual_state_merges_and_parses_json_fields(async_client, db, redis):
     frame = await create_virtual_frame(async_client, db)
     frame.scenes = [_stateful_scene()]

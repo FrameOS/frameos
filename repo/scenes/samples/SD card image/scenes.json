@@ -43,6 +43,7 @@
         "access": "public",
         "label": "Seconds to show one image",
         "name": "seconds",
+        "role": "refreshInterval",
         "persist": "disk",
         "type": "float",
         "value": "900"

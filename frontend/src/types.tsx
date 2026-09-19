@@ -804,9 +804,14 @@ export interface FontMetadata {
   italic: boolean
 }
 
+/** What the runtime uses a state field for (see utils/refreshInterval.ts). */
+export type StateFieldRole = 'refreshInterval'
+
 export interface StateField extends AppConfigField {
   persist?: 'memory' | 'disk'
   access?: 'private' | 'public'
+  /** `refreshInterval`: this field's value is the scene's seconds between renders. One field per scene. */
+  role?: StateFieldRole
 }
 
 export interface MarkdownField {

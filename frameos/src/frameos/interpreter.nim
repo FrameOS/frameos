@@ -13,6 +13,7 @@ import frameos/cloud/scene_guard
 import frameos/js_runtime/run_budget
 import frameos/node_config
 import frameos/planner
+import frameos/refresh_interval
 import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
@@ -1252,6 +1253,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     frameConfig: frameConfig,
     logger: logger,
     refreshInterval: exportedScene.refreshInterval,
+    refreshIntervalKey: exportedScene.refreshIntervalKey,
+    refreshIntervalDefault: exportedScene.refreshIntervalDefault,
     backgroundColor: exportedScene.backgroundColor,
     state: %*{},
     nodes: initTable[NodeId, DiagramNode](),
@@ -1306,6 +1309,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
           discard
       scene.state[field.name] = valueToJson(valueFromJsonByType(seedValue, field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
+  scene.syncRefreshInterval()
 
   ## Pass 1: register nodes & event listeners (do not init apps yet)
   for node in exportedScene.nodes:
@@ -1684,6 +1688,9 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   try:
     runEventInner(self, context)
   finally:
+    # The run may have moved the interval: a setSceneState from a control
+    # panel, or the scene's own code assigning `state.refreshInterval`.
+    self.syncRefreshInterval()
     if armedHere:
       disarmRenderDeadline()
       setDispatchBudget(0)
@@ -1814,23 +1821,29 @@ proc annotateInterpretedSceneSourceNodeIds(data: string): string =
 # -------------------------
 
 proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedScene =
-  let refreshInterval = if scene.settings != nil: scene.settings.refreshInterval else: 300.0
+  let settingsInterval = if scene.settings != nil: scene.settings.refreshInterval else: 0.0
   let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
+  # The refresh interval is a state field: the scene's own (by role or by
+  # name), where the scene put it, or an implicit public one added last.
+  let refresh = resolveRefreshInterval(scene.fields, settingsInterval)
   ExportedInterpretedScene(
     name: scene.name,
     nodes: scene.nodes,
     edges: scene.edges,
     apps: if scene.apps.isNil: %*{} else: scene.apps,
-    stateFields: scene.fields,
+    stateFields: refresh.fields,
     storeOrigin: sceneOriginIsStore(scene.origin),
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.
-    publicStateFields: scene.fields.filterIt(it.access != "private"),
-    persistedStateKeys: scene.fields.filterIt(it.persist == "disk").mapIt(it.name),
+    publicStateFields: refresh.fields.filterIt(it.access != "private"),
+    persistedStateKeys: refresh.fields.filterIt(it.persist == "disk").mapIt(it.name),
+    refreshIntervalKey: refresh.key,
+    refreshIntervalDefault: refresh.defaultSeconds,
+    refreshIntervalImplicit: refresh.implicit,
     init: init,
     render: render,
     runEvent: runEvent,
-    refreshInterval: if refreshInterval > 0.0: refreshInterval else: 300.0,
+    refreshInterval: refresh.defaultSeconds,
     backgroundColor: backgroundColor
   )
 

@@ -1,6 +1,7 @@
 import { ColorInput } from '../../../../components/ColorInput'
 import { FontSelect } from '../../../../components/FontSelect'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
+import { RefreshIntervalInput } from '../../../../components/RefreshIntervalInput'
 import { Select } from '../../../../components/Select'
 import { selectFieldOptions } from '../../../../utils/selectOptions'
 import { TextArea } from '../../../../components/TextArea'
@@ -8,6 +9,7 @@ import { TextInput } from '../../../../components/TextInput'
 import { PathInput } from '../Assets/PathInput'
 import { FrameId, StateField } from '../../../../types'
 import { booleanFieldValue } from '../../../../utils/booleanField'
+import { REFRESH_INTERVAL_ROLE } from '../../../../utils/refreshInterval'
 
 /** The "true"/"false" option for a boolean value in either shape (a real
  * `true` from the frame's state or a scene default matched no option). */
@@ -63,6 +65,12 @@ export function StateFieldEdit({
     />
   ) : field.type === 'font' ? (
     <FontSelect
+      value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
+      onChange={onChange}
+    />
+  ) : field.role === REFRESH_INTERVAL_ROLE ? (
+    <RefreshIntervalInput
+      placeholder={field.placeholder}
       value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
       onChange={onChange}
     />

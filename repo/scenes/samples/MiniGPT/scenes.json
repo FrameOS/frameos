@@ -17,6 +17,7 @@
       { "name": "model", "label": "Model", "type": "string", "value": "gpt-5.5", "persist": "disk", "access": "public" },
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "label": "Refresh after (seconds)",
         "type": "float",
         "persist": "disk",

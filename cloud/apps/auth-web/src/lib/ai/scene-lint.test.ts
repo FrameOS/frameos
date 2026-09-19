@@ -203,6 +203,63 @@ describe("lintScenes", () => {
     ).toEqual({ errors: [], warnings: [] });
   });
 
+  it("accepts one refreshInterval role on a numeric field and rejects the rest", () => {
+    const seconds = { name: "seconds", role: "refreshInterval", type: "float", value: "600" };
+    expect(messages([scene({ fields: [seconds] })])).toEqual({ errors: [], warnings: [] });
+
+    expect(
+      messages([scene({ fields: [seconds, { ...seconds, name: "every" }] })]).errors,
+    ).toEqual([
+      expect.stringContaining('"seconds" and "every" both have role "refreshInterval"'),
+    ]);
+    expect(
+      messages([scene({ fields: [{ ...seconds, type: "string" }] })]).errors,
+    ).toEqual([expect.stringContaining('role "refreshInterval" but type "string"')]);
+    expect(
+      messages([scene({ fields: [{ ...seconds, role: "timeout" }] })]).errors,
+    ).toEqual([expect.stringContaining('unknown role "timeout"')]);
+  });
+
+  it("warns when a field named refreshInterval is not numeric", () => {
+    const named = { name: "refreshInterval", type: "string", value: "hourly" };
+    expect(messages([scene({ fields: [named] })])).toEqual({
+      errors: [],
+      warnings: [expect.stringContaining("is not used as the refresh interval")],
+    });
+    expect(messages([scene({ fields: [{ ...named, type: "integer", value: "60" }] })])).toEqual({
+      errors: [],
+      warnings: [],
+    });
+    // Another field has the role: the name is free for whatever the scene wants
+    expect(
+      messages([
+        scene({ fields: [named, { name: "seconds", role: "refreshInterval", type: "float", value: "600" }] }),
+      ]),
+    ).toEqual({ errors: [], warnings: [] });
+  });
+
+  it("lets a state node read the implicit refreshInterval field", () => {
+    const withStateNode = scene({
+      edges: [
+        { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+        {
+          id: "e2",
+          source: "st",
+          sourceHandle: "fieldOutput",
+          target: "text",
+          targetHandle: "fieldInput/text",
+          type: "codeNodeEdge",
+        },
+      ],
+      nodes: [
+        { data: { keyword: "render" }, id: "ev", type: "event" },
+        { data: { config: {}, keyword: "render/text" }, id: "text", type: "app" },
+        { data: { keyword: "refreshInterval" }, id: "st", type: "state" },
+      ],
+    });
+    expect(messages([withStateNode]).errors).toEqual([]);
+  });
+
   it("rejects select options that are neither a string nor a value/label pair", () => {
     const { errors } = messages([
       scene({

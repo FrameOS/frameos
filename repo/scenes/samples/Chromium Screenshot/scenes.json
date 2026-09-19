@@ -19,6 +19,7 @@
       },
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "type": "integer",
         "label": "Refresh seconds",
         "required": true,

@@ -24,6 +24,7 @@
       },
       {
         "name": "secondsBetweenImages",
+        "role": "refreshInterval",
         "label": "Seconds between images",
         "type": "float",
         "persist": "disk",

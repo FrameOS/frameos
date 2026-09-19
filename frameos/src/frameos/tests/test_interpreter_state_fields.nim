@@ -67,10 +67,12 @@ block test_state_field_parsing:
 
 block test_public_state_field_filtering:
   let exported = buildInterpretedScenes(inputs)[sceneInput.id]
-  doAssert exported.stateFields.len == 6
+  # The scene's six fields plus the implicit refresh interval (test_refresh_interval.nim)
+  doAssert exported.stateFields.len == 7
   let publicNames = exported.publicStateFields.mapIt(it.name)
   # Private fields are excluded; missing access defaults to public
-  doAssert publicNames == @["search", "legacyNoAccess", "metadataPosition", "showMetadata", "data"]
+  doAssert publicNames == @["search", "legacyNoAccess", "metadataPosition", "showMetadata", "data",
+    "refreshInterval"]
 
 block test_private_fields_still_seed_state:
   setUploadedInterpretedScenes(buildInterpretedScenes(inputs))

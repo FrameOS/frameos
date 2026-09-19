@@ -13,6 +13,7 @@ import { booleanFieldValue } from '../../../../utils/booleanField'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { StateField } from '../../../../types'
 import type { TemplateType } from '../../../../types'
+import { sceneStateFields } from '../../../../utils/refreshInterval'
 
 export interface ExpandedSceneLogicProps {
   frameId: FrameId
@@ -162,7 +163,7 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
         // Only submit fields the user can currently see, matching the
         // on-frame control page: hidden fields keep their current values
         const fields = visiblePublicStateFields(
-          values.scene?.fields ?? [],
+          sceneStateFields(values.scene),
           values.states[props.sceneId] ?? {},
           formValues
         )
@@ -230,7 +231,8 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
     ],
     fields: [
       (s) => [s.scene],
-      (scene: expandedSceneLogicValues['scene']) => (scene?.fields ?? []).filter((field) => field.access === 'public'),
+      (scene: expandedSceneLogicValues['scene']) =>
+        sceneStateFields(scene).filter((field) => field.access === 'public'),
     ],
     visibleFields: [
       (s) => [s.fields, s.states, s.stateChanges, (_, props) => props.sceneId],

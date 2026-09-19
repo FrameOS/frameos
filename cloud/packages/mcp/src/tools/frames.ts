@@ -353,7 +353,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_scene_activate",
     {
       description:
-        "Switch the frame to a scene now (store scene id or the runtime scene id from the device's scene list). Optional `state` seeds the scene's public fields (max 16 KiB). If the device is out of sync with its installed scenes, the whole set is pushed again with this scene active.",
+        "Switch the frame to a scene now (store scene id or the runtime scene id from the device's scene list). Optional `state` seeds the scene's public fields (max 16 KiB); every scene also takes `refreshInterval` there (seconds between renders) unless one of its own fields has role \"refreshInterval\". If the device is out of sync with its installed scenes, the whole set is pushed again with this scene active.",
       inputSchema: {
         confirm: confirmed("changes what the physical frame shows"),
         frame_id: frameId,

@@ -6,6 +6,7 @@
     "fields": [
       {
         "name": "seconds",
+        "role": "refreshInterval",
         "label": "Seconds to show one image",
         "type": "float",
         "persist": "disk",
