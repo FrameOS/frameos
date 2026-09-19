@@ -8,10 +8,11 @@
  * I2C bus (SDA 10, SCL 11), interrupt on GPIO 27, at whichever of its two
  * addresses the controller latched at power-on.
  *
- * Coordinates are reported in fb0's own 480x800 portrait frame: Y inverted,
- * X and Y NOT swapped. The kernel overlay swaps them (a landscape frame for
- * desktops); a bench with that overlay on a Pi 5 (2026-09-19) read a tap at
- * fb (65, 114) as (114, 65) with the swap and (65, 63) without it.
+ * The touch properties are the kernel overlay's, verbatim, swap included:
+ * the axis ranges they produce (X 0..799, Y 0..479) look transposed over a
+ * 480x800 fb0, but evdev scales each axis by its own range and X does run
+ * along fb0's x. A Pi 5 bench with the kernel overlay (2026-09-19) had every
+ * tap under the finger with these, and at its transpose without the swap.
  *
  * Build: dtc -@ -I dts -O dtb -o frameos-hyperpixel4-touch.dtbo frameos-hyperpixel4-touch.dts
  */
@@ -43,6 +44,7 @@
 					touchscreen-x-mm = <51>;
 					touchscreen-y-mm = <85>;
 					touchscreen-inverted-y;
+					touchscreen-swapped-x-y;
 				};
 
 				touch@5d {
@@ -55,6 +57,7 @@
 					touchscreen-x-mm = <51>;
 					touchscreen-y-mm = <85>;
 					touchscreen-inverted-y;
+					touchscreen-swapped-x-y;
 				};
 			};
 		};

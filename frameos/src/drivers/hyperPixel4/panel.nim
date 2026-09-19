@@ -144,8 +144,9 @@ proc detectDisplayPath*(): DisplayPath =
     result = dpFirmware
 
 const
-  # Every form of the kernel's overlay line this driver has written, plus the
-  # bare one a person would: whichever is not wanted is removed by name.
+  # Every form of the kernel's overlay line this driver writes or ever wrote
+  # (the touchscreen-swapped-x-y one only on a bench card, 2026-09-19):
+  # whichever is not wanted is removed by name.
   KmsOverlayLines* = [
     "dtoverlay=vc4-kms-dpi-hyperpixel4",
     "dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y",
@@ -156,17 +157,14 @@ const
 
 proc kmsOverlayLine*(kind: PanelKind, touch: bool): string =
   ## The kernel's overlay brings the touch controller with it unless told not
-  ## to. On the 4.0 it reports X and Y swapped by default — a landscape frame
-  ## over a portrait fb0 — and `touchscreen-swapped-x-y` is a toggle that
-  ## takes the swap back out (bench 2026-09-19: a tap at fb (65, 114) read
-  ## (114, 65) before, (65, 63)/(451, 704) corner to corner after). FrameOS
-  ## wants touch in fb0's own frame; the frame's `rotate` is applied on top.
-  if not touch:
-    "dtoverlay=vc4-kms-dpi-hyperpixel4" & (if kind == pkSquare: "sq" else: "") & ",disable-touch"
-  elif kind == pkSquare:
-    "dtoverlay=vc4-kms-dpi-hyperpixel4sq"
-  else:
-    "dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y"
+  ## to, and its touch orientation is right as it ships. On the 4.0 that looks
+  ## wrong on paper — ABS_X runs 0..799 and ABS_Y 0..479 over a 480x800 fb0 —
+  ## but the ranges are just labels: evdev scales each axis by its own range,
+  ## and X still runs along fb0's x. Bench 2026-09-19: toggling the swap out
+  ## put every tap at its transpose. (Test with a point OFF the diagonal; the
+  ## corners cannot tell a transpose from the truth.)
+  "dtoverlay=vc4-kms-dpi-hyperpixel4" & (if kind == pkSquare: "sq" else: "") &
+    (if touch: "" else: ",disable-touch")
 
 proc touchOverlayName*(panel: PanelSpec): string =
   if panel.kind == pkSquare: TouchOverlaySquare else: TouchOverlayRectangular

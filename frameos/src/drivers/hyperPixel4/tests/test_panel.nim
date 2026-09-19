@@ -71,9 +71,9 @@ block test_only_the_pi_5_family_needs_the_kernel_to_drive_dpi:
 block test_kms_boot_config_is_the_kernel_overlay_and_nothing_of_the_firmware_path:
   let touch = panelForDevice("pimoroni.hyperpixel4_touch").bootConfigLines(dpKms)
   doAssert "dtoverlay=vc4-kms-v3d" in touch
-  # Touch in fb0's frame: the overlay's default X/Y swap is toggled back out.
-  doAssert "dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y" in touch
-  doAssert "#dtoverlay=vc4-kms-dpi-hyperpixel4" in touch
+  # The overlay as it ships: its touch orientation is the right one (bench).
+  doAssert "dtoverlay=vc4-kms-dpi-hyperpixel4" in touch
+  doAssert "#dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y" in touch
   doAssert "#dtoverlay=vc4-kms-dpi-hyperpixel4,disable-touch" in touch
   doAssert "#enable_dpi_lcd=1" in touch and "#gpio=0-9=a2,np" in touch
   doAssert not touch.anyIt(it.startsWith("dpi_") or it.startsWith("gpio=") or it == "enable_dpi_lcd=1")
@@ -135,7 +135,7 @@ block test_a_card_that_moves_to_a_pi_5_and_back_keeps_one_display_path:
   config = applyBootConfigLines(config, panel.bootConfigLines(dpKms)).content
   var lines = config.splitLines()
   doAssert lines.filterIt(it.startsWith("dtoverlay=")) ==
-    @["dtoverlay=vc4-kms-v3d", "dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y"]
+    @["dtoverlay=vc4-kms-v3d", "dtoverlay=vc4-kms-dpi-hyperpixel4"]
   doAssert not lines.anyIt(it.startsWith("dpi_") or it.startsWith("gpio=") or it.startsWith("enable_dpi"))
 
   config = applyBootConfigLines(config, panel.bootConfigLines(dpFirmware)).content
@@ -156,8 +156,9 @@ block test_setup_installs_the_touch_overlay_beside_config_txt:
     # A flattened device tree, and the Goodix one at that.
     doAssert readFile(overlay).startsWith("\xd0\x0d\xfe\xed")
     doAssert "goodix,gt911" in readFile(overlay)
+    # Same touch orientation as the kernel's overlay, which a bench proved.
     doAssert "touchscreen-inverted-y" in readFile(overlay)
-    doAssert "touchscreen-swapped-x-y" notin readFile(overlay)
+    doAssert "touchscreen-swapped-x-y" in readFile(overlay)
     doAssert "dtoverlay=frameos-hyperpixel4-touch" in readFile(dir / "config.txt").splitLines()
 
     doAssert not setupPanel("pimoroni.hyperpixel4_touch", dpFirmware).rebootRequired
