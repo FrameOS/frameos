@@ -32,8 +32,13 @@ vi.mock("../../../../src/lib/release-signing", async (importOriginal) => {
     await importOriginal<typeof import("../../../../src/lib/release-signing")>();
   return {
     ...original,
-    verifyReleaseDigest: (digest: Uint8Array, minisig: string) =>
-      original.verifyReleaseDigest(digest, minisig, testPublicKeyBase64),
+    verifyReleaseBinding: (minisig: string, assetName: string | undefined) =>
+      original.verifyReleaseBinding(minisig, assetName, testPublicKeyBase64),
+    verifyReleaseDigest: (
+      digest: Uint8Array,
+      minisig: string,
+      assetName: string | undefined,
+    ) => original.verifyReleaseDigest(digest, minisig, assetName, testPublicKeyBase64),
   };
 });
 
@@ -43,7 +48,11 @@ const fetchMock = vi.fn<typeof fetch>();
 
 const imageBytes = new Uint8Array(70_000).map((_, i) => (i * 7) % 253);
 
-function minisigFor(bytes: Uint8Array) {
+const imageName = "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz";
+
+// What tools/sign_firmware.py writes: the file signature, the trusted comment
+// naming the asset, and the global signature over signature || comment.
+function minisigFor(bytes: Uint8Array, signedAs = imageName) {
   const digest = createReleaseDigest().update(bytes).digest();
   const signature = signDigest(null, digest, testKey.privateKey);
   const blob = Buffer.concat([
@@ -51,16 +60,21 @@ function minisigFor(bytes: Uint8Array) {
     Buffer.alloc(8, 0x27),
     signature,
   ]);
+  const comment = `frameos ${signedAs}`;
+  const globalSignature = signDigest(
+    null,
+    Buffer.concat([signature, Buffer.from(comment, "utf8")]),
+    testKey.privateKey,
+  );
   return (
     "untrusted comment: signature from FrameOS firmware key\n" +
     `${blob.toString("base64")}\n` +
-    "trusted comment: timestamp:1\n" +
-    `${Buffer.alloc(64, 1).toString("base64")}\n`
+    `trusted comment: ${comment}\n` +
+    `${globalSignature.toString("base64")}\n`
   );
 }
 
 const goodMinisig = minisigFor(imageBytes);
-const imageName = "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz";
 const imageUrl = `https://github.com/FrameOS/frameos/releases/download/v1.2.3/${imageName}`;
 
 function releaseWith({ minisig = true }: { minisig?: boolean } = {}) {
@@ -207,6 +221,31 @@ describe("GET /api/frames/sd-image", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: "unsigned_release" });
     expect(imageDownloads).toBe(0);
+  });
+
+  it("refuses a genuinely signed image of another release or board", async () => {
+    // docs/security-todo.md, "OTA signature binds archive bytes only": the
+    // bytes verify — they WERE released — but as something else. Attaching
+    // last month's image (or another board's) under a new tag needs only
+    // release-upload rights, no key; the signed trusted comment gives it away.
+    for (const signedAs of [
+      "frameos-1.2.2-raspberry-pi-64-buildroot.img.gz",
+      "frameos-1.2.3-raspberry-pi-32-buildroot.img.gz",
+    ]) {
+      resetSdImageVerdictsForTests();
+      mockGitHub({ minisig: minisigFor(imageBytes, signedAs) });
+      const response = await GET(request());
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({
+        error: "release_signature_invalid",
+        release: "v1.2.3",
+      });
+      // …and the browser is not handed that signature either.
+      const signature = await GET(request("?platform=raspberry-pi-64&signature=1"));
+      expect(signature.status).toBe(502);
+      // Decided from the signature alone: the gigabyte is never fetched.
+      expect(imageDownloads).toBe(0);
+    }
   });
 
   it("hands the browser the signature text on ?signature=1", async () => {

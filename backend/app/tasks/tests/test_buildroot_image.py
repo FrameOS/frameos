@@ -993,6 +993,26 @@ async def test_precompiled_buildroot_sd_image_is_verified_on_download_and_on_eve
         await buildroot_image_module.download_precompiled_buildroot_sd_image(platform="raspberry-pi-64", logger=logger)
     assert not result.archive_path.exists()
 
+    # A GENUINELY signed image of another release or board, served under this
+    # version's name: the bytes verify, but the signed trusted comment says
+    # what they were released as, and that is not what was asked for.
+    for other in (
+        "frameos-2026.6.2-raspberry-pi-64-buildroot.img.gz",
+        "frameos-2026.6.3-raspberry-pi-32-buildroot.img.gz",
+    ):
+        async def replayed_download(url, destination, _timeout, other=other):
+            if url.endswith(".minisig"):
+                destination.write_text(minisig_for(image, asset_name=other), encoding="utf-8")
+            else:
+                destination.write_bytes(image.read_bytes())
+
+        monkeypatch.setattr(buildroot_image_module, "download_release_file", replayed_download)
+        with pytest.raises(RuntimeError, match="different version or target"):
+            await buildroot_image_module.download_precompiled_buildroot_sd_image(
+                platform="raspberry-pi-64", logger=logger
+            )
+        assert not result.archive_path.exists()
+
 
 def test_precompiled_sd_image_status_does_not_require_cached_base_metadata(tmp_path):
     image_path = tmp_path / "frameos.img.gz"

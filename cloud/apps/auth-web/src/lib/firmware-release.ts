@@ -350,6 +350,12 @@ export async function fetchReleaseAssetText(
 // match the app's version string (esp_app_get_description()->version, i.e.
 // what `idf.py build` stamped), or the device sees itself as up to date and
 // does nothing.
+//
+// The device only installs an image SIGNED AS the asset it expects
+// (`frameos-<version>-<platform>-app.bin`, in the .minisig's trusted comment —
+// fos_minisig_verify_binding), so sign the dev file under that name:
+// `tools/sign_firmware.py sign --secret KEY --name
+// frameos-<version>-<platform>-app.bin .dev-firmware/<platform>.bin`.
 
 export interface DevFirmware {
   version: string;

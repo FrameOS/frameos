@@ -22,7 +22,7 @@ from app.models.frame import Frame
 from app.utils.scene_execution import scene_is_interpreted
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.versions import get_versions
-from app.utils.release_signing import verify_release_archive_signature
+from app.utils.release_signing import release_asset_name, verify_release_archive_signature
 
 RELEASE_BASE_URL = os.environ.get(
     "FRAMEOS_PRECOMPILED_RELEASE_BASE_URL",
@@ -144,8 +144,10 @@ def precompiled_frameos_cache_dir() -> Path:
     every local user, and the cache path of an archive is predictable (the
     sha256 of its URL), so a local user could park an OLDER, validly signed
     release under the expected name. The signature check on every hit
-    (``_cached_archive_verifies``) accepts any release the key signed; the
-    version pin (``_cached_archive_matches_version``) closes the downgrade.
+    (``_cached_archive_verifies``) only accepts an archive signed AS the
+    asset the URL names — version and target, via the signed trusted
+    comment; the version pin (``_cached_archive_matches_version``) is the
+    same claim read from inside the archive.
     """
     configured = os.environ.get("FRAMEOS_PRECOMPILED_CACHE_DIR")
     if configured:
@@ -169,23 +171,24 @@ def precompiled_frameos_signature_path(cache_path: Path) -> Path:
     return cache_path.with_name(cache_path.name + ".minisig")
 
 
-def _cached_archive_verifies(cache_path: Path, version: str | None = None) -> bool:
+def _cached_archive_verifies(cache_path: Path, asset_name: str, version: str | None = None) -> bool:
     """A cache hit is only a hit if the archive still matches its signature
-    AND names the release the URL asked for.
+    AND was signed as the release asset the URL asked for.
 
-    The signature binds bytes, not versions: any archive the release key ever
-    signed passes it, so a planted older archive under the expected name
-    would deploy a downgrade with a valid signature. ``metadata.json`` inside
-    the archive carries the version it was built as; when the URL names a
-    version (it always does for release downloads) the two must agree. A miss
-    on either check is treated as no cache at all: both files are removed
+    The file signature binds bytes, not versions: any archive the release key
+    ever signed passes it, so a planted older archive under the expected name
+    would deploy a downgrade with a valid signature. The signed trusted
+    comment names the asset (``frameos-<version>-<target>.tar.gz``) and must
+    equal ``asset_name``; ``metadata.json`` inside the archive carries the
+    version it was built as and, when ``version`` is given, must agree too. A
+    miss on any check is treated as no cache at all: both files are removed
     and the release is fetched afresh.
     """
     signature_path = precompiled_frameos_signature_path(cache_path)
     if not _has_cached_archive(cache_path) or not _has_cached_archive(signature_path):
         return False
     try:
-        verify_release_archive_signature(cache_path, signature_path.read_text(encoding="utf-8"))
+        verify_release_archive_signature(cache_path, signature_path.read_text(encoding="utf-8"), asset_name)
     except (ValueError, OSError):
         return False
     if version and not _cached_archive_matches_version(cache_path, version):
@@ -237,7 +240,7 @@ async def _cached_release_archive(
     cache_path = precompiled_frameos_cache_path(url)
     signature_path = precompiled_frameos_signature_path(cache_path)
     if _has_cached_archive(cache_path):
-        if _cached_archive_verifies(cache_path):
+        if _cached_archive_verifies(cache_path, release_asset_name(url)):
             await logger("stdout", f"Using cached precompiled {label} release for {target} (signature verified)")
             return cache_path, True
         await logger(
@@ -275,7 +278,7 @@ async def _cached_release_archive(
         await _download(f"{url}.minisig", temp_signature_path, timeout)
         minisig = temp_signature_path.read_text(encoding="utf-8", errors="replace")
         try:
-            verify_release_archive_signature(temp_path, minisig)
+            verify_release_archive_signature(temp_path, minisig, release_asset_name(url))
         except ValueError as exc:
             raise RuntimeError(f"Precompiled {label} release for {target} failed its signature check: {exc}") from exc
         os.replace(temp_signature_path, signature_path)

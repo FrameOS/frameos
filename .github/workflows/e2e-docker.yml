@@ -195,7 +195,10 @@ jobs:
                 -o /tmp/test_fos_url_guard
               /tmp/test_fos_url_guard
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                -Iembedded/esp32/components/monocypher \
                 embedded/esp32/main/fos_minisig.c embedded/esp32/main/tests/test_fos_minisig.c \
+                embedded/esp32/components/monocypher/monocypher.c \
+                embedded/esp32/components/monocypher/monocypher-ed25519.c \
                 -o /tmp/test_fos_minisig
               /tmp/test_fos_minisig
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \

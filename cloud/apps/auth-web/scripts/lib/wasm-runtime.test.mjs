@@ -54,6 +54,7 @@ describe("minisign verification", () => {
       publicKeyText: key.publicKeyText,
       signatureText: key.signFile(bytes, "x.tar.gz"),
       fileBytes: bytes,
+      assetName: "x.tar.gz",
     });
     expect(result.keyId).toBe("0102030405060708");
     expect(result.trustedComment).toBe("frameos x.tar.gz");
@@ -65,15 +66,42 @@ describe("minisign verification", () => {
     const bytes = Buffer.from("hello runtime");
     const signatureText = key.signFile(bytes, "x.tar.gz");
     expect(() =>
-      verifyMinisign({ publicKeyText: key.publicKeyText, signatureText, fileBytes: Buffer.from("hello runtimf") }),
+      verifyMinisign({
+        publicKeyText: key.publicKeyText,
+        signatureText,
+        fileBytes: Buffer.from("hello runtimf"),
+        assetName: "x.tar.gz",
+      }),
     ).toThrow(/does not verify/);
-    expect(() => verifyMinisign({ publicKeyText: other.publicKeyText, signatureText, fileBytes: bytes })).toThrow(
-      /does not verify/,
-    );
+    expect(() =>
+      verifyMinisign({ publicKeyText: other.publicKeyText, signatureText, fileBytes: bytes, assetName: "x.tar.gz" }),
+    ).toThrow(/does not verify/);
     const forged = signatureText.replace("trusted comment: frameos x.tar.gz", "trusted comment: frameos y.tar.gz");
-    expect(() => verifyMinisign({ publicKeyText: key.publicKeyText, signatureText: forged, fileBytes: bytes })).toThrow(
-      /trusted comment/,
-    );
+    expect(() =>
+      verifyMinisign({ publicKeyText: key.publicKeyText, signatureText: forged, fileBytes: bytes, assetName: "y.tar.gz" }),
+    ).toThrow(/trusted comment does not verify/);
+  });
+
+  it("accepts a signature only for the asset it names", () => {
+    // docs/security-todo.md, "OTA signature binds archive bytes only".
+    const key = makeKey();
+    const bytes = Buffer.from("hello runtime");
+    const signatureText = key.signFile(bytes, "frameos-2026.9.1-wasm.tar.gz");
+    for (const assetName of ["frameos-2026.9.2-wasm.tar.gz", "", undefined]) {
+      expect(() =>
+        verifyMinisign({ publicKeyText: key.publicKeyText, signatureText, fileBytes: bytes, assetName }),
+      ).toThrow(/offered as a different release/);
+    }
+    // A bare file signature (no signed comment) is refused, not legacy.
+    const bare = signatureText.split("\n").slice(0, 2).join("\n") + "\n";
+    expect(() =>
+      verifyMinisign({
+        publicKeyText: key.publicKeyText,
+        signatureText: bare,
+        fileBytes: bytes,
+        assetName: "frameos-2026.9.1-wasm.tar.gz",
+      }),
+    ).toThrow(/does not say which release/);
   });
 
   it("reads the committed release key", () => {
@@ -183,6 +211,22 @@ describe("installReleaseRuntime", () => {
         log: () => {},
       }),
     ).rejects.toThrow(/does not verify/);
+
+    // Last month's runtime, genuinely signed, re-uploaded under this
+    // version's name: the bytes verify, the signed comment names 2026.8.9.
+    const replayed = fetcher({
+      [url]: tarball,
+      [`${url}.minisig`]: Buffer.from(key.signFile(tarball, releaseAssetName("2026.8.9"))),
+    });
+    await expect(
+      installReleaseRuntime({
+        version: "2026.9.1",
+        cacheDir: join(dir, "cache-c"),
+        publicKeyPath: join(dir, "key.pub"),
+        fetchImpl: replayed.fetchImpl,
+        log: () => {},
+      }),
+    ).rejects.toThrow(/offered as a different release/);
 
     const missing = fetcher({});
     await expect(

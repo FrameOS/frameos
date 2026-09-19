@@ -433,6 +433,24 @@ Both halves are in place.
   (`frameos/src/frameos/upgrade.nim`) — before `tar -xzf`, because extracting
   an unverified archive already lets an attacker choose file contents and
   paths on the device.
+- A signature is good for ONE asset (2026-09-19). The file signature covers
+  bytes only, and which version and target those bytes are comes from
+  GitHub metadata — so by itself it would let anyone with release-upload
+  rights (no signing key) attach an older, or another architecture's, signed
+  archive under a new tag. `sign_firmware.py` writes `trusted comment:
+  frameos <asset file name>` (`frameos-<version>-<target>.tar.gz`,
+  `…-<platform>-app.bin`, `…-buildroot.img.gz`) and minisign's global
+  signature covers signature || comment. Every verifier checks the global
+  signature and that the comment names the asset IT worked out — the Pi from
+  the release version and its own os-release (`verifyReleaseSignatureBinding`
+  in `upgrade.nim`, again as root behind the privileged door), the ESP32 from
+  the manifest version and `fos_ota_platform()` before it downloads a byte
+  (`fos_minisig_verify_binding`), the backend from the URL it built
+  (`app/utils/release_signing.py`), the install scripts with openssl, the
+  cloud and the browser flasher from the release tag and the board
+  (`release-signing.ts`). A `.minisig` with no signed comment is refused, not
+  treated as an older format; the release job's own `verify` step makes the
+  same check, so an asset renamed after signing fails the release.
 - The cloud can only *suggest*: `notify_update_available` carries no URL,
   and the device fetches release metadata from its own configured archive.
   Since 2026-08-13 the buildroot/Pi client acts on the nudge by launching

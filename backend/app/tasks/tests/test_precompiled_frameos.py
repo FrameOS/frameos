@@ -12,12 +12,14 @@ from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_frameos import download_precompiled_frameos_release, frame_compiled_scene_count
 
 
-import base64
-import hashlib
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
-from app.tasks.tests.release_signing_helpers import signing_download as _signing_download, trust_test_key as _trust_test_key
+from app.tasks.tests.release_signing_helpers import (
+    minisig_for as _minisig_for,
+    signing_download as _signing_download,
+    trust_test_key as _trust_test_key,
+)
 
 
 
@@ -324,9 +326,9 @@ async def test_a_release_with_a_bad_signature_is_refused(tmp_path: Path, monkeyp
 
     async def fake_download(url: str, destination: Path, _timeout: float) -> None:
         if url.endswith(".minisig"):
-            digest = hashlib.blake2b(archive.read_bytes(), digest_size=64).digest()
-            blob = b"ED" + b"\x01" * 8 + other_key.sign(digest)
-            destination.write_text("untrusted comment: x\n" + base64.b64encode(blob).decode() + "\n")
+            # Everything right — shape, asset name — except who signed it.
+            asset_name = url[: -len(".minisig")].rsplit("/", 1)[-1]
+            destination.write_text(_minisig_for(archive, other_key, asset_name=asset_name))
         else:
             shutil.copy2(archive, destination)
 
@@ -342,3 +344,55 @@ async def test_a_release_with_a_bad_signature_is_refused(tmp_path: Path, monkeyp
     with pytest.raises(RuntimeError, match="signature"):
         await precompiled_frameos._cached_release_archive(url, "debian-trixie-arm64", 1.0, logger)
     assert not precompiled_frameos.precompiled_frameos_cache_path(url).exists()
+
+
+@pytest.mark.asyncio
+async def test_a_signed_archive_of_another_release_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """docs/security-todo.md, "OTA signature binds archive bytes only": whoever
+    can upload release assets (or answer for the release host) can serve an
+    OLDER or other-architecture archive, with the genuine signature it was
+    published with, under this version's name. The bytes verify; the signed
+    trusted comment says what they were released as, and that must be the
+    asset the backend asked for."""
+    archive = tmp_path / "release.tar.gz"
+    with tarfile.open(archive, "w:gz"):
+        pass
+
+    served_as: dict[str, str] = {}
+
+    async def fake_download(url: str, destination: Path, _timeout: float) -> None:
+        if url.endswith(".minisig"):
+            destination.write_text(_minisig_for(archive, asset_name=served_as["name"]))
+        else:
+            shutil.copy2(archive, destination)
+
+    _trust_test_key(monkeypatch)
+    monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr("app.tasks.precompiled_frameos._download", fake_download)
+
+    async def logger(level: str, message: str) -> None:
+        pass
+
+    url = precompiled_frameos.precompiled_frameos_release_url("debian-trixie-arm64", "2026.5.14")
+    assert url
+    for other in (
+        "frameos-2026.5.13-debian-trixie-arm64.tar.gz",  # last week's release
+        "frameos-2026.5.14-debian-trixie-armhf.tar.gz",  # another architecture
+        "frameos-2026.5.14-raspberry-pi-64-buildroot.img.gz",  # another kind of asset
+    ):
+        served_as["name"] = other
+        with pytest.raises(RuntimeError, match="different version or target"):
+            await precompiled_frameos._cached_release_archive(url, "debian-trixie-arm64", 1.0, logger)
+        assert not precompiled_frameos.precompiled_frameos_cache_path(url).exists()
+
+    served_as["name"] = "frameos-2026.5.14-debian-trixie-arm64.tar.gz"
+    cache_path, hit = await precompiled_frameos._cached_release_archive(url, "debian-trixie-arm64", 1.0, logger)
+    assert hit is False and cache_path.is_file()
+
+    # …and the cache is held to the same rule: a signature for another release
+    # planted beside the cached archive turns the hit into a fresh download.
+    precompiled_frameos.precompiled_frameos_signature_path(cache_path).write_text(
+        _minisig_for(archive, asset_name="frameos-2026.5.13-debian-trixie-arm64.tar.gz")
+    )
+    _, hit = await precompiled_frameos._cached_release_archive(url, "debian-trixie-arm64", 1.0, logger)
+    assert hit is False

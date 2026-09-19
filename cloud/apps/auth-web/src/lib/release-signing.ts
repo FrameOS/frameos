@@ -38,37 +38,127 @@ function releasePublicKey(publicKeyBase64 = releaseSigningPublicKeyBase64) {
   });
 }
 
+/** A .minisig, taken apart. */
+export interface ReleaseSignature {
+  /** Ed25519 over BLAKE2b-512 of the asset. */
+  signature: Buffer;
+  /** The text after `trusted comment: `, byte for byte — it is signed. */
+  trustedComment: string;
+  /** Ed25519 over signature || trustedComment. */
+  globalSignature: Buffer;
+}
+
+// tools/sign_firmware.py writes `trusted comment: frameos <asset name>`.
+const trustedCommentPrefix = "frameos ";
+const trustedCommentLine = "trusted comment: ";
+
+function decodeSignatureLine(line: string): Buffer | undefined {
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(line) ? Buffer.from(line, "base64") : undefined;
+}
+
 /**
- * The 64 signature bytes from a .minisig file, or undefined when the text is
- * not one.
+ * The parts of a .minisig file, or undefined when the text is not a complete
+ * one.
  *
- * The first non-comment line is base64(ED || keyid8 || sig64): "ED" marks
- * minisign's prehashed mode (the signature is over BLAKE2b-512 of the file).
- * The trusted-comment line and its global signature are ignored on purpose —
- * the cloud trusts a KEY, not a comment — mirroring parse_minisig_signature
- * in backend/app/utils/release_signing.py, parseMinisigSignature in
- * frameos/src/frameos/upgrade.nim and parse_minisig in fos_ota.c.
+ * Four lines: an untrusted comment, base64(ED || keyid8 || sig64) — "ED"
+ * marks minisign's prehashed mode, the signature is over BLAKE2b-512 of the
+ * file — then `trusted comment: …` and the global signature over sig64 ||
+ * comment. The first signature says "FrameOS released these bytes"; the
+ * comment says AS WHAT, and the global signature makes that the signer's
+ * word. All of it is required: a file with no comment half is refused rather
+ * than treated as an older format. Mirrors parse_minisig in
+ * backend/app/utils/release_signing.py, parseMinisig in
+ * frameos/src/frameos/upgrade.nim and fos_minisig.c.
  */
-export function parseMinisigSignature(minisig: string): Buffer | undefined {
+export function parseMinisig(minisig: string): ReleaseSignature | undefined {
+  const blobs: string[] = [];
+  const comments: string[] = [];
   for (const rawLine of minisig.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (
-      !line ||
-      line.startsWith("untrusted comment:") ||
-      line.startsWith("trusted comment:")
-    ) {
+    if (!rawLine.trim() || rawLine.startsWith("untrusted comment:")) {
       continue;
     }
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(line)) {
-      return undefined;
+    if (rawLine.startsWith(trustedCommentLine)) {
+      comments.push(rawLine.slice(trustedCommentLine.length));
+      continue;
     }
-    const blob = Buffer.from(line, "base64");
-    if (blob.length !== 74 || blob.subarray(0, 2).toString("latin1") !== "ED") {
-      return undefined;
-    }
-    return blob.subarray(10, 74);
+    blobs.push(rawLine.trim());
   }
-  return undefined;
+  const [signatureLine, globalSignatureLine] = blobs;
+  const [trustedComment] = comments;
+  if (
+    blobs.length !== 2 ||
+    comments.length !== 1 ||
+    signatureLine === undefined ||
+    globalSignatureLine === undefined ||
+    trustedComment === undefined
+  ) {
+    return undefined;
+  }
+  const blob = decodeSignatureLine(signatureLine);
+  const globalSignature = decodeSignatureLine(globalSignatureLine);
+  if (
+    !blob ||
+    blob.length !== 74 ||
+    blob.subarray(0, 2).toString("latin1") !== "ED" ||
+    !globalSignature ||
+    globalSignature.length !== 64
+  ) {
+    return undefined;
+  }
+  return {
+    signature: blob.subarray(10, 74),
+    trustedComment,
+    globalSignature,
+  };
+}
+
+/** The 64 file-signature bytes from a .minisig file, or undefined. */
+export function parseMinisigSignature(minisig: string): Buffer | undefined {
+  return parseMinisig(minisig)?.signature;
+}
+
+/** `frameos-<version>-<target><extension>` for a release tag ("v2026.9.19"). */
+export function releaseAssetName(
+  releaseTag: string | undefined,
+  targetAndExtension: string,
+): string | undefined {
+  const version = (releaseTag ?? "").replace(/^v/, "");
+  if (!/^\d+(\.\d+)*$/.test(version)) {
+    return undefined;
+  }
+  return `frameos-${version}-${targetAndExtension}`;
+}
+
+/**
+ * Whether `minisig` was made for `assetName`: the trusted comment is signed by
+ * the release key (the global signature) and is exactly `frameos <assetName>`.
+ *
+ * The file signature alone only proves the bytes were released once. Which
+ * version and target they are comes from GitHub metadata, so anyone with
+ * release-upload rights — no signing key — could attach an older or
+ * other-board signed image under a new tag; this is what refuses it
+ * (docs/security-todo.md). Needs no asset bytes, so it runs before a
+ * gigabyte is hashed. Never throws.
+ */
+export function verifyReleaseBinding(
+  minisig: string,
+  assetName: string | undefined,
+  publicKeyBase64?: string,
+): boolean {
+  const parsed = parseMinisig(minisig);
+  if (!parsed || !assetName || parsed.trustedComment !== trustedCommentPrefix + assetName) {
+    return false;
+  }
+  try {
+    return verifySignature(
+      null,
+      Buffer.concat([parsed.signature, Buffer.from(parsed.trustedComment, "utf8")]),
+      releasePublicKey(publicKeyBase64),
+      parsed.globalSignature,
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** A BLAKE2b-512 hasher: feed it the release bytes, then pass `.digest()` to
@@ -79,16 +169,21 @@ export function createReleaseDigest() {
 
 /**
  * Whether `digest` (BLAKE2b-512 of the whole asset) was signed by the release
- * key. Same check the device runtimes make before installing an OTA. Never
- * throws on bad input — an unparseable signature is simply not valid.
+ * key AS `assetName` (verifyReleaseBinding). Same check the device runtimes
+ * make before installing an OTA. Never throws on bad input — an unparseable
+ * signature is simply not valid.
  */
 export function verifyReleaseDigest(
   digest: Uint8Array,
   minisig: string,
+  assetName: string | undefined,
   publicKeyBase64?: string,
 ): boolean {
   const signature = parseMinisigSignature(minisig);
   if (!signature || digest.length !== 64) {
+    return false;
+  }
+  if (!verifyReleaseBinding(minisig, assetName, publicKeyBase64)) {
     return false;
   }
   try {
@@ -102,11 +197,13 @@ export function verifyReleaseDigest(
 export function verifyReleaseBytes(
   bytes: Uint8Array,
   minisig: string,
+  assetName: string | undefined,
   publicKeyBase64?: string,
 ): boolean {
   return verifyReleaseDigest(
     createReleaseDigest().update(bytes).digest(),
     minisig,
+    assetName,
     publicKeyBase64,
   );
 }

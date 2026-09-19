@@ -372,13 +372,34 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
         s_ota_allow_downgrade = 0;
     }
 
-    /* base64(ED + keyid8 + sig64); trusted-comment lines are ignored, the
-     * device trusts only the key (fos_minisig.c, host-tested). */
+    /* base64(ED + keyid8 + sig64) over the image bytes (fos_minisig.c,
+     * host-tested); checked against the download in ota_download_verify. */
     const char *sig_why = NULL;
     if (!fos_minisig_parse(minisig->valuestring, FOS_OTA_SIGNING_KEY_ID, out->sig, &sig_why)) {
         ESP_LOGW(TAG, "ota (%s): signature rejected: %s", src->plane, sig_why ? sig_why : "invalid");
         cJSON_Delete(root);
         ota_log(src, "error", "bad-signature-format");
+        return ESP_FAIL;
+    }
+    /* The signature above says "FrameOS released these bytes", not as which
+     * version or for which flash layout — and the version this manifest
+     * claims (the one the downgrade check just trusted) is only what the
+     * control plane, or whoever uploaded the release asset, says. The
+     * trusted comment names the asset the image was SIGNED as and the global
+     * signature covers sig || comment, so: verify that with the release key,
+     * then require the comment to name this version and this device's own
+     * platform (fos_minisig_verify_binding, host-tested against a real
+     * release signature). Decided before a byte of the image is downloaded. */
+    char signed_as[FOS_MINISIG_COMMENT_MAX];
+    if (!fos_minisig_verify_binding(minisig->valuestring, out->sig, FOS_OTA_SIGNING_PUBKEY,
+                                    out->version, fos_ota_platform(), signed_as, &sig_why)) {
+        ESP_LOGE(TAG, "ota (%s): signature is not for %s on %s: %s%s%s — refused", src->plane,
+                 out->version, fos_ota_platform(), sig_why ? sig_why : "invalid",
+                 signed_as[0] ? ", signed as " : "", signed_as);
+        cJSON_Delete(root);
+        ota_log(src, "error", sig_why && strcmp(sig_why, "signed-for-another-release") == 0
+                                  ? "signature-for-another-release"
+                                  : "signature-rejected");
         return ESP_FAIL;
     }
     if (download->valuestring[0] == '/') {
