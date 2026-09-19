@@ -228,11 +228,27 @@ export const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
   pwr: -1,
 }
 
-// Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py,
-// limited to the eight ESP32-vocabulary keys Esp32PinLayout carries. BUSY sits
-// behind the Inky shift register (sr_* keys, consumed by the pico firmware
-// only), so it is -1 here.
-export const PIMORONI_INKY_FRAME_PIN_LAYOUT: Esp32PinLayout = {
+// The Inky Frame carrier's wiring beyond the eight ESP32-vocabulary keys: BUSY
+// and the five front buttons sit behind a shift register (clock/latch/data,
+// BUSY on bit 7), and HOLD_VSYS keeps the regulator on while running from
+// battery. Only the pico firmware reads them.
+export type InkyFrameExtraPinKey = 'sr_clock' | 'sr_latch' | 'sr_data' | 'busy_bit' | 'hold_vsys'
+export type InkyFrameExtraPins = Record<InkyFrameExtraPinKey, number>
+
+export const INKY_FRAME_EXTRA_PIN_FIELDS: { key: InkyFrameExtraPinKey; label: string }[] = [
+  { key: 'sr_clock', label: 'SR CLOCK' },
+  { key: 'sr_latch', label: 'SR LATCH' },
+  { key: 'sr_data', label: 'SR DATA' },
+  { key: 'busy_bit', label: 'BUSY bit' },
+  { key: 'hold_vsys', label: 'HOLD VSYS' },
+]
+
+// Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py
+// (and INKY_FRAME_PINS in NewFrame.tsx), extras included: a layout that left
+// them out made a trip through Frame settings strip the shift-register wiring
+// the backend had stored in device_config.pins. BUSY sits behind that shift
+// register, so the GPIO is -1 here.
+export const PIMORONI_INKY_FRAME_PIN_LAYOUT: Esp32PinLayout & InkyFrameExtraPins = {
   rst: 27,
   dc: 28,
   cs: 17,
@@ -241,6 +257,11 @@ export const PIMORONI_INKY_FRAME_PIN_LAYOUT: Esp32PinLayout = {
   sck: 18,
   mosi: 19,
   pwr: -1,
+  sr_clock: 8,
+  sr_latch: 9,
+  sr_data: 10,
+  busy_bit: 7,
+  hold_vsys: 2,
 }
 
 export const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
@@ -277,7 +298,9 @@ export interface Esp32HardwarePresetConfig {
   device: string
   flashSize: FrameEmbeddedFlashSize
   psramMB: number
-  pins: Esp32PinLayout
+  /** The Inky Frame presets carry their shift-register keys here too; every
+   * copy below is a spread, so they survive into device_config.pins. */
+  pins: Esp32PinLayout & Partial<InkyFrameExtraPins>
   sdCardAssets?: Esp32SdCardAssets
 }
 
@@ -566,16 +589,40 @@ export function esp32SdCardPinsForPreset(preset: string): Esp32SdCardPinLayout {
   return { ...ESP32_SD_CARD_EMPTY_PIN_LAYOUT }
 }
 
+const ESP32_PIN_LAYOUT_KEYS: ReadonlySet<string> = new Set([...ESP32_PIN_FIELDS.map(({ key }) => key), 'sclk'])
+
+/**
+ * Whatever a stored pin map carries beyond the eight keys the ESP32 form
+ * edits (and `sclk`, the old spelling of `sck`): today the Inky Frame's
+ * shift-register wiring. Kept as found — the form does not own these keys, so
+ * it must not be the thing that deletes them.
+ */
+export function esp32ExtraPins(value: Esp32Pins | undefined): Partial<InkyFrameExtraPins> {
+  const extras: Record<string, unknown> = {}
+  if (value && typeof value === 'object') {
+    for (const [key, pin] of Object.entries(value)) {
+      if (!ESP32_PIN_LAYOUT_KEYS.has(key)) {
+        extras[key] = pin
+      }
+    }
+  }
+  return extras as Partial<InkyFrameExtraPins>
+}
+
 export function normalizeEsp32PinLayout(
   value: Esp32Pins | undefined,
   device?: string,
   hardwarePreset?: FrameEmbeddedHardwarePreset | string
-): Esp32PinLayout {
+): Esp32PinLayout & Partial<InkyFrameExtraPins> {
   const recommended = esp32RecommendedPinLayout(device, hardwarePreset)
   if (!value || typeof value !== 'object') {
     return recommended
   }
   return {
+    // Extra keys ride along untouched; an Inky Frame preset also restores the
+    // ones an earlier save of this form stripped.
+    ...esp32ExtraPins(recommended),
+    ...esp32ExtraPins(value),
     rst: normalizeEsp32PinNumber(value.rst, recommended.rst),
     dc: normalizeEsp32PinNumber(value.dc, recommended.dc),
     cs: normalizeEsp32PinNumber(value.cs, recommended.cs),

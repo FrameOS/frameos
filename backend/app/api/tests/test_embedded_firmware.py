@@ -1196,7 +1196,99 @@ def test_provisioning_plan_never_needs_a_listing_for_the_generic_layouts():
     assert plan["releaseFlashSize"] == "8MB"
 
 
+def test_provisioning_plan_for_a_pico_inky_frame_is_the_release_uf2():
+    """The release publishes a generic UF2 per pico chip. A Pico 2 W's 4MB of
+    flash must not read as the ESP32 4MB layout (a partition table, a no-OTA
+    esp32 image), and a board that never has OTA is not warned about it."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "pimoroni_inky_frame_7_3_spectra"}, server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    for published in (None, set(), {"pico-2w", "esp32-s3-4mb", "esp32-c3-generic"}):
+        plan = embedded_provisioning_plan(frame, published_assets=published)
+        assert plan["supported"] is True
+        assert plan["platform"] == "pico-2w"
+        assert plan["releasePlatform"] == "pico-2w"
+        assert plan["releaseFlashSize"] == "4MB"
+        assert plan["releaseFormat"] == "uf2"
+        assert plan["blockers"] == []
+        assert plan["warnings"] == []
+        # The preset first: the panel and wiring after it override its bundle.
+        assert plan["settings"][0] == {"key": "hardware", "value": "pimoroni_inky_frame_7_3_spectra", "secret": False}
+    settings = _provisioned(plan)
+    assert settings["panel"] == "EPD_7in3e"
+    assert settings["render_mode"] == "remote"
+    # The pins line carries the Inky Frame's shift register and power latch
+    # after the keys every board shares: `set pins` must not leave a board
+    # that reads BUSY through the register waiting on a GPIO that is not there.
+    assert settings["pins"] == (
+        "rst=27,dc=28,cs=17,cs2=-1,busy=-1,sck=18,mosi=19,pwr=-1,"
+        "sr_clock=8,sr_latch=9,sr_data=10,busy_bit=7,hold_vsys=2"
+    )
+    # An ESP32's pins line is unchanged: those keys are the Pico firmware's.
+    s3 = Frame(id=9, device="waveshare.EPD_7in5_V2", server_host="host", server_api_key="key")
+    ensure_embedded_frame_defaults(s3)
+    assert "sr_clock" not in _provisioned(embedded_provisioning_plan(s3))["pins"]
+    # A bare Pico wired straight to a panel has none of them to send, and a
+    # custom board's own wiring is sent as the frame holds it.
+    bare = Frame(id=9, embedded={"platform": "pico-2w"}, device="waveshare.EPD_7in3e", server_host="host",
+                 server_api_key="key")
+    ensure_embedded_frame_defaults(bare)
+    assert "sr_clock" not in _provisioned(embedded_provisioning_plan(bare))["pins"]
+    bare.device_config = {**(bare.device_config or {}), "pins": {
+        **(bare.device_config or {}).get("pins", {}), "sr_clock": 12, "busy_bit": 9, "hold_vsys": 99}}
+    custom_pins = _provisioned(embedded_provisioning_plan(bare))["pins"]
+    assert "sr_clock=12" in custom_pins
+    assert "busy_bit" not in custom_pins   # a shift register has bits 0-7
+    assert "hold_vsys" not in custom_pins  # past the chip's last GPIO
+
+    # Whatever the frame claims about its flash, there is one UF2 per chip and
+    # no partition layout for it to mismatch.
+    frame.embedded = {**frame.embedded, "flashSize": "16MB"}
+    plan = embedded_provisioning_plan(frame, published_assets={"esp32-s3-16mb", "esp32-c3-16mb"})
+    assert plan["releasePlatform"] == "pico-2w"
+    assert plan["warnings"] == []
+    assert embedded_ota_supported_for_frame(frame) is False
+
+    original = Frame(id=9, embedded={"hardwarePreset": "pimoroni_inky_frame_4"}, server_host="host",
+                     server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(original)
+    plan = embedded_provisioning_plan(original)
+    assert (plan["releasePlatform"], plan["releaseFlashSize"], plan["releaseFormat"]) == ("pico-w", "2MB", "uf2")
+    # The ESP32 plans name their format too.
+    esp32 = Frame(id=9, device="waveshare.EPD_7in5_V2", server_host="host", server_api_key="key")
+    ensure_embedded_frame_defaults(esp32)
+    assert embedded_provisioning_plan(esp32)["releaseFormat"] == "bin"
+
+
+def test_firmware_layout_for_a_pico_frame_has_no_partition_rows():
+    """EMBEDDED_FLASH_PROFILES["4MB"] is the ESP32 4MB layout; a Pico 2 W is
+    4MB too, and used to come back with partitions_4mb.csv's rows."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "pimoroni_inky_frame_7_3_spectra"})
+    ensure_embedded_frame_defaults(frame)
+
+    layout = embedded_firmware_layout_for_frame(frame)
+
+    assert layout["flash"]["flashSize"] == "4MB"
+    assert layout["flash"]["flashBytes"] == 4 * 1024 * 1024
+    assert layout["flash"]["partitionTable"] is None
+    assert layout["flash"]["otaSupported"] is False
+    assert layout["flash"]["partitions"] == []
+    assert layout["ram"]["renderMode"] == "remote"
+    assert (layout["ram"]["width"], layout["ram"]["height"]) == (800, 480)
+    assert layout["ram"]["packedBufferBytes"] == 192_000
+    assert embedded_firmware_module.embedded_flash_profile_for_frame(frame)["releaseAssets"] == {}
+
+    # The same size on an ESP32 keeps its table.
+    esp32 = Frame(mode="embedded", device="waveshare.EPD_7in5_V2", embedded={"platform": "esp32-c3", "flashSize": "4MB"})
+    esp32_layout = embedded_firmware_layout_for_frame(esp32)
+    assert esp32_layout["flash"]["partitionTable"] == "partitions_4mb.csv"
+    assert any(partition["name"] == "factory" for partition in esp32_layout["flash"]["partitions"])
+
+
 def test_release_asset_names_cover_every_flash_layout_once():
+    # The pico UF2s are a separate set: no .bin, no OTA image beside them.
+    assert embedded_release_asset_names("uf2") == ["pico-w", "pico-2w"]
     names = embedded_release_asset_names()
     # Generic first: they are the fallback and what the cloud flasher ships.
     assert names[:2] == ["esp32-s3-generic", "esp32-c3-generic"]

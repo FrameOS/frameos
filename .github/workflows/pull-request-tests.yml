@@ -1088,6 +1088,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # The portable half of the firmware (parsers, the log ring, the hotspot's
+      # DHCP/DNS, the flash state log, the status screen…) runs on the host
+      # under ASan + UBSan: no SDK, no board.
+      - name: Pico firmware host tests
+        run: make -C embedded/pico/tests
+
       - name: Install pico toolchain
         run: |
           sudo apt-get update

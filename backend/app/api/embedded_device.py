@@ -47,9 +47,10 @@ from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
 from app.redis import get_redis
-from app.utils.embedded_render import RenderQueueFull, render_scene_rgba
+from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
+    EMBEDDED_IMAGE_FORMAT_BIN,
     FOS_PIXEL_1BPP,
     FOS_PIXEL_2BPP_BWYR,
     FOS_PIXEL_2BPP_GRAY,
@@ -280,6 +281,37 @@ def pack_image_for_panel(image, pixel_format: int) -> bytes:
     raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
 
 
+def embedded_scene_dimensions(frame: Frame, width: int, height: int) -> tuple[int, int]:
+    """The size the scene renders at for a panel of ``width`` x ``height``.
+
+    A frame hung in portrait (``rotate`` 90 or 270) runs its scenes on the
+    swapped canvas, exactly as the on-device runtime does (runner.nim); the
+    result is turned back to the panel's native orientation before packing.
+    """
+    if int(frame.rotate or 0) % 360 in (90, 270):
+        return height, width
+    return width, height
+
+
+def rotate_for_panel(image, rotate: int):
+    """Turn a rendered scene to the panel's native orientation.
+
+    Same direction as ``rotateDegrees`` in frameos/utils/image.nim, which a
+    frame with its own renderer applies last: clockwise by ``rotate``. A thin
+    client has no pixels of its own to turn, so the control plane does it.
+    """
+    from PIL import Image
+
+    rotate = int(rotate or 0) % 360
+    if rotate == 90:
+        return image.transpose(Image.Transpose.ROTATE_270)  # PIL counts counter-clockwise
+    if rotate == 180:
+        return image.transpose(Image.Transpose.ROTATE_180)
+    if rotate == 270:
+        return image.transpose(Image.Transpose.ROTATE_90)
+    return image
+
+
 def fosb_payload(width: int, height: int, pixel_format: int, packed: bytes) -> bytes:
     header = b"FOSB" + struct.pack("<BBHHH", 1, pixel_format, width, height, 0)
     return header + packed
@@ -317,6 +349,7 @@ async def api_embedded_device_render(
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
     width, height = embedded_render_dimensions(frame)
+    scene_width, scene_height = embedded_scene_dimensions(frame, width, height)
     pixel_format = embedded_pixel_format_for_panel(embedded_panel_for_frame(frame))
 
     # Thin-client scene render: the frame's scenes run inside the wasm scene
@@ -324,14 +357,28 @@ async def api_embedded_device_render(
     # Node subprocess. Any failure — no scenes, no node/wasm toolchain, scene
     # error, timeout — falls back to the diagnostic bitmap below, so the
     # device always gets a valid frame.
+    #
+    # A thin client keeps no scene state — every pass is a fresh wasm process
+    # — so the backend is the memory, exactly as for virtual frames and in
+    # the same redis store: seed the renderer with it, keep what comes back.
+    # Without this a slideshow never advances. (Imported here: virtual_frame
+    # imports this module.)
+    from .virtual_frame import get_virtual_scene_states, store_rendered_scene_state
+
     packed: bytes | None = None
     try:
-        rgba = await render_scene_rgba(
+        scene_states = await get_virtual_scene_states(redis, frame)
+    except Exception:
+        # Same tolerance as _active_scene_id: no redis, no memory, still a frame.
+        scene_states = {}
+    try:
+        rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
             frame,
-            width,
-            height,
+            scene_width,
+            scene_height,
             scene_id=await _active_scene_id(redis, frame),
             settings=embedded_settings_payload(db, frame),
+            scene_states=scene_states,
         )
     except RenderQueueFull as exc:
         # Not a render failure but a full queue: the device keeps what it
@@ -343,14 +390,28 @@ async def api_embedded_device_render(
             detail="Render queue is full, retry later",
             headers={"Retry-After": str(exc.retry_after)},
         )
+    # Stored under the scene the renderer says it showed. A render whose
+    # state seeding failed (old wasm bundle without the set_scene_state
+    # export) reads back bare scene defaults, which must not clobber the store.
+    state = rendered_state.get("state") if rendered_state is not None else None
+    if rendered_state is not None and isinstance(state, dict) and rendered_state.get("seeded", True):
+        try:
+            await store_rendered_scene_state(redis, frame, rendered_state.get("sceneId"), state)
+        except Exception:
+            # A state that could not be saved must not cost the device its frame.
+            pass
     if rgba is not None:
         from PIL import Image
 
-        image = Image.frombytes("RGBA", (width, height), rgba).convert("RGB")
-        packed = pack_image_for_panel(image, pixel_format)
+        image = Image.frombytes("RGBA", (scene_width, scene_height), rgba).convert("RGB")
+        packed = pack_image_for_panel(rotate_for_panel(image, frame.rotate), pixel_format)
 
     if packed is None:
-        packed = render_embedded_diagnostic_bitmap(frame, width, height, pixel_format)
+        # Drawn upright for the viewer too, then turned like a scene.
+        packed = pack_image_for_panel(
+            rotate_for_panel(embedded_diagnostic_image(frame, scene_width, scene_height), frame.rotate),
+            pixel_format,
+        )
     expected = embedded_buffer_size(width, height, pixel_format)
     if len(packed) != expected:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -566,10 +627,20 @@ def _embedded_ota_platform(frame: Frame, platform: str | None) -> str:
     """The release image family the device asks for. Firmware since the
     signed release OTA names its own flash layout (fos_ota_platform);
     older firmware sends nothing and gets the frame's configured layout —
-    which, for a board it was flashed to match, is the same answer."""
+    which, for a board it was flashed to match, is the same answer.
+
+    A frame whose release image is not an ESP32 one (the pico family's UF2
+    is provisioning-only) has no OTA image under any name."""
+    try:
+        release = embedded_release_firmware_for_frame(frame)
+    except ValueError:
+        # Malformed platform/flash metadata: the layout the device names
+        # itself still stands.
+        release = None
+    if release is not None and release["format"] != EMBEDDED_IMAGE_FORMAT_BIN:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="ota_image_not_published")
     if platform:
         return platform
-    release = embedded_release_firmware_for_frame(frame)
     if release is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="ota_image_not_published")
     return str(release["asset"])

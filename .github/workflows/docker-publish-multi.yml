@@ -1002,7 +1002,7 @@ jobs:
           fi
           shopt -s nullglob
           archives=()
-          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz; do
+          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz release-assets/frameos-*.uf2; do
             [ -f "$asset.minisig" ] || archives+=("$asset")
           done
           if [ ${#archives[@]} -eq 0 ]; then
@@ -1024,7 +1024,7 @@ jobs:
           # failure would only show up on devices.
           # Every signable asset must now carry a signature — the ones signed
           # here and the ones a GitHub-hosted firmware job signed before upload.
-          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz; do
+          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz release-assets/frameos-*.uf2; do
             [ -f "$asset.minisig" ] || { echo "::error::$asset is unsigned"; exit 1; }
             python3 tools/sign_firmware.py verify \
               --public release-assets/firmware-signing.pub "$asset"

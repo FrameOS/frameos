@@ -7,6 +7,7 @@ import {
   isEmbeddedUsbLogStreamOpen,
   runEmbeddedUsbApiCommand,
   startEmbeddedUsbLogStream,
+  usbBootsel,
   usbFactoryReset,
   usbProvisionWifi,
   usbRestart,
@@ -22,7 +23,21 @@ import {
   skippedSettingsNotice,
   type EmbeddedProvisioningPlan,
 } from './EmbeddedReleaseFlasher'
-import { fetchReleaseFirmwareListing, hasReleaseFirmwarePlatform } from './EmbeddedUsbFirmwareUpdate'
+import {
+  fetchReleaseFirmwareListing,
+  hasReleaseFirmwarePlatform,
+  saveReleaseFirmwareFile,
+  type ReleaseFirmwareAsset,
+  type ReleaseFirmwareListing,
+} from './EmbeddedUsbFirmwareUpdate'
+import {
+  bootselDriveName,
+  isUf2Release,
+  pickUf2Asset,
+  usbBoardFamilyMismatch,
+  usbCardAffordances,
+  type UsbCardAffordances,
+} from './picoFirmware'
 import {
   classifyUsbBoard,
   isUsbSilenceError,
@@ -44,6 +59,11 @@ import { confirmDialog } from '../../utils/confirmDialogLogic'
 // nothing of ours is running, or each step of an action would re-read the
 // board. Actions that change what the board IS (settings, Wi-Fi, restart,
 // reset) probe again explicitly when they finish.
+//
+// The Pico family (picoFirmware.ts) shares all of it except flashing: `uf2`
+// turns every esptool affordance off, and the firmware card above this one
+// (PicoFirmwareCard.tsx) reads the release listing and the download state from
+// here, so the two cards of one frame never fetch the same thing twice.
 
 const PROBE_TIMEOUT_MS = 8000
 
@@ -60,21 +80,31 @@ function errorDetail(error: unknown): string {
 export interface embeddedUsbConnectLogicValues {
   usbLogStreamStatesByFrameId: Record<FrameId, EmbeddedUsbLogStreamState> // embeddedUsbLogsModel
   actionBusy: boolean
+  affordances: UsbCardAffordances
   applyBusy: boolean
+  boardMismatch: string | null
   boardRunsFrameOS: boolean
+  bootselBusy: boolean
+  bootselDrive: string
   busy: boolean
   canProvision: boolean
   cloudManaged: boolean
   connected: boolean
   copied: boolean
   deviceVersion: string | null
+  downloadBusy: boolean
   error: string | null
   expectedBackendUrl: string | null
   factoryResetBusy: boolean
+  firmwareNotice: {
+    isError: boolean
+    text: string
+  } | null
   firmwareOutdated: boolean
   flasherBusy: boolean
   flowBusy: boolean
   frameName: string
+  framePlatform: string
   identity: UsbBoardIdentity | null
   identityKnown: boolean
   latestRelease: string | null
@@ -87,6 +117,8 @@ export interface embeddedUsbConnectLogicValues {
   probed: boolean
   probing: boolean
   releaseAvailable: boolean
+  releaseListing: ReleaseFirmwareListing | null
+  releaseListingFailed: boolean
   restartBusy: boolean
   scanBusy: boolean
   settingsBusy: boolean
@@ -94,6 +126,10 @@ export interface embeddedUsbConnectLogicValues {
   status: EmbeddedUsbStatus | null
   streamBusy: boolean
   streaming: boolean
+  uf2: boolean
+  uf2Asset: ReleaseFirmwareAsset | null
+  uf2DownloadAvailable: boolean
+  uf2Platform: string
   updateBusy: boolean
   usbLogStreamOpen: boolean
   usbLogStreamState: EmbeddedUsbLogStreamState | undefined
@@ -122,6 +158,9 @@ export interface embeddedUsbConnectLogicActions {
   disconnectUsb: () => {
     value: true
   }
+  downloadFirmware: () => {
+    value: true
+  }
   factoryReset: () => {
     value: true
   }
@@ -143,6 +182,9 @@ export interface embeddedUsbConnectLogicActions {
   probeSuccess: (identity: UsbBoardIdentity) => {
     identity: UsbBoardIdentity
   }
+  rebootIntoBootsel: () => {
+    value: true
+  }
   recheck: () => {
     value: true
   }
@@ -161,11 +203,24 @@ export interface embeddedUsbConnectLogicActions {
   setApplyBusy: (busy: boolean) => {
     busy: boolean
   }
+  setBootselBusy: (busy: boolean) => {
+    busy: boolean
+  }
+  setDownloadBusy: (busy: boolean) => {
+    busy: boolean
+  }
   setError: (error: string | null) => {
     error: string | null
   }
   setFactoryResetBusy: (busy: boolean) => {
     busy: boolean
+  }
+  setFirmwareNotice: (
+    notice: string | null,
+    isError?: boolean
+  ) => {
+    isError: boolean
+    notice: string | null
   }
   setFlasherBusy: (busy: boolean) => {
     busy: boolean
@@ -184,6 +239,12 @@ export interface embeddedUsbConnectLogicActions {
   }
   setPlan: (plan: EmbeddedProvisioningPlan | null) => {
     plan: EmbeddedProvisioningPlan | null
+  }
+  setReleaseListing: (listing: ReleaseFirmwareListing | null) => {
+    listing: ReleaseFirmwareListing | null
+  }
+  setReleaseListingFailed: (failed: boolean) => {
+    failed: boolean
   }
   setRestartBusy: (busy: boolean) => {
     busy: boolean
@@ -210,6 +271,13 @@ export interface embeddedUsbConnectLogicMeta {
     frameName: (frame: FrameType) => string
     canProvision: (cloudManaged: boolean, mode: WorkspaceMode) => boolean
     releaseAvailable: (mode: WorkspaceMode, frame: FrameType) => boolean
+    framePlatform: (frame: FrameType) => string
+    uf2: (plan: EmbeddedProvisioningPlan | null, framePlatform: string) => boolean
+    affordances: (uf2: boolean) => UsbCardAffordances
+    uf2DownloadAvailable: (uf2: boolean, mode: WorkspaceMode) => boolean
+    uf2Platform: (plan: EmbeddedProvisioningPlan | null, framePlatform: string) => string
+    uf2Asset: (releaseListing: ReleaseFirmwareListing | null, uf2Platform: string) => ReleaseFirmwareAsset | null
+    bootselDrive: (uf2Platform: string) => string
     usbLogStreamState: (
       usbLogStreamStatesByFrameId: Record<FrameId, EmbeddedUsbLogStreamState>,
       frameId: FrameId
@@ -223,12 +291,14 @@ export interface embeddedUsbConnectLogicMeta {
       restartBusy: boolean,
       factoryResetBusy: boolean,
       scanBusy: boolean,
-      applyBusy: boolean
+      applyBusy: boolean,
+      bootselBusy: boolean
     ) => boolean
     busy: (flowBusy: boolean, actionBusy: boolean, probing: boolean) => boolean
     connected: (usbLogStreamOpen: boolean, flowBusy: boolean) => boolean
     expectedBackendUrl: (plan: EmbeddedProvisioningPlan | null) => string | null
     status: (identity: UsbBoardIdentity | null) => EmbeddedUsbStatus | null
+    boardMismatch: (framePlatform: string, status: EmbeddedUsbStatus | null) => string | null
     deviceVersion: (status: EmbeddedUsbStatus | null) => string | null
     firmwareOutdated: (deviceVersion: string | null, latestRelease: string | null) => boolean
     wifiConfigured: (status: EmbeddedUsbStatus | null) => boolean
@@ -259,6 +329,13 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
     setPlan: (plan: EmbeddedProvisioningPlan | null) => ({ plan }),
     loadLatestRelease: true,
     setLatestRelease: (release: string | null) => ({ release }),
+    setReleaseListing: (listing: ReleaseFirmwareListing | null) => ({ listing }),
+    setReleaseListingFailed: (failed: boolean) => ({ failed }),
+    downloadFirmware: true,
+    setDownloadBusy: (busy: boolean) => ({ busy }),
+    setFirmwareNotice: (notice: string | null, isError: boolean = false) => ({ notice, isError }),
+    rebootIntoBootsel: true,
+    setBootselBusy: (busy: boolean) => ({ busy }),
     connectUsb: true,
     disconnectUsb: true,
     probe: true,
@@ -289,7 +366,31 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
   }),
   reducers({
     plan: [null as EmbeddedProvisioningPlan | null, { setPlan: (_, { plan }) => plan }],
-    latestRelease: [null as string | null, { setLatestRelease: (_, { release }) => release }],
+    latestRelease: [
+      null as string | null,
+      {
+        setLatestRelease: (_, { release }) => release,
+        setReleaseListing: (_, { listing }) => normalizedFirmwareVersion(listing?.release),
+      },
+    ],
+    // The whole listing, for the Pico firmware card: which .uf2 to offer, and
+    // how big it is. null until it has loaded.
+    releaseListing: [null as ReleaseFirmwareListing | null, { setReleaseListing: (_, { listing }) => listing }],
+    releaseListingFailed: [
+      false,
+      {
+        setReleaseListingFailed: (_, { failed }) => failed,
+        setReleaseListing: () => false,
+      },
+    ],
+    downloadBusy: [false, { setDownloadBusy: (_, { busy }) => busy }],
+    firmwareNotice: [
+      null as { text: string; isError: boolean } | null,
+      {
+        setFirmwareNotice: (_, { notice, isError }) => (notice ? { text: notice, isError } : null),
+        downloadFirmware: () => null,
+      },
+    ],
     identity: [
       null as UsbBoardIdentity | null,
       {
@@ -356,6 +457,7 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         scanNetworks: () => null,
         applyWifi: () => null,
         restartDevice: () => null,
+        rebootIntoBootsel: () => null,
         factoryReset: () => null,
         connectUsb: () => null,
         selectNetwork: () => null,
@@ -369,6 +471,7 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         scanNetworks: () => null,
         applyWifi: () => null,
         restartDevice: () => null,
+        rebootIntoBootsel: () => null,
         factoryReset: () => null,
         connectUsb: () => null,
         selectNetwork: () => null,
@@ -379,6 +482,7 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
     updateBusy: [false, { setUpdateBusy: (_, { busy }) => busy }],
     settingsBusy: [false, { setSettingsBusy: (_, { busy }) => busy }],
     restartBusy: [false, { setRestartBusy: (_, { busy }) => busy }],
+    bootselBusy: [false, { setBootselBusy: (_, { busy }) => busy }],
     factoryResetBusy: [false, { setFactoryResetBusy: (_, { busy }) => busy }],
     scanBusy: [false, { setScanBusy: (_, { busy }) => busy }],
     applyBusy: [false, { setApplyBusy: (_, { busy }) => busy }],
@@ -400,6 +504,36 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
       (s, p) => [s.mode, p.frame],
       (mode: WorkspaceMode, frame: FrameType): boolean => mode !== 'frameAdmin' && hasReleaseFirmwarePlatform(frame),
     ],
+    // Configured on a backend frame, reported at enrollment on a cloud one.
+    framePlatform: [
+      (_, p) => [p.frame],
+      (frame: FrameType): string => frame.embedded?.platform || frame.hardware?.platform || '',
+    ],
+    // A Pico: its release is a .uf2 a person copies onto the BOOTSEL drive, so
+    // nothing here may offer to flash it. The plan says so once it has loaded;
+    // until then (and wherever there is no plan) the platform name does.
+    uf2: [
+      (s) => [s.plan, s.framePlatform],
+      (plan: EmbeddedProvisioningPlan | null, framePlatform: string): boolean =>
+        isUf2Release(plan?.releaseFormat, framePlatform),
+    ],
+    affordances: [(s) => [s.uf2], (uf2: boolean): UsbCardAffordances => usbCardAffordances(uf2)],
+    // The Pico firmware card is a self-hosted affair: the cloud publishes no
+    // pico assets, and a device's own admin bundle serves no listing at all.
+    uf2DownloadAvailable: [
+      (s) => [s.uf2, s.mode],
+      (uf2: boolean, mode: WorkspaceMode): boolean => uf2 && mode === 'backend',
+    ],
+    uf2Platform: [
+      (s) => [s.plan, s.framePlatform],
+      (plan: EmbeddedProvisioningPlan | null, framePlatform: string): string => plan?.releasePlatform || framePlatform,
+    ],
+    uf2Asset: [
+      (s) => [s.releaseListing, s.uf2Platform],
+      (listing: ReleaseFirmwareListing | null, uf2Platform: string): ReleaseFirmwareAsset | null =>
+        pickUf2Asset(listing?.assets, uf2Platform),
+    ],
+    bootselDrive: [(s) => [s.uf2Platform], (uf2Platform: string): string => bootselDriveName(uf2Platform)],
     usbLogStreamState: [
       (s, p) => [s.usbLogStreamStatesByFrameId, p.frameId],
       (
@@ -422,8 +556,8 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
     ],
     flowBusy: [(s) => [s.flasherBusy, s.updateBusy], (a: boolean, b: boolean): boolean => a || b],
     actionBusy: [
-      (s) => [s.settingsBusy, s.restartBusy, s.factoryResetBusy, s.scanBusy, s.applyBusy],
-      (a: boolean, b: boolean, c: boolean, d: boolean, e: boolean): boolean => a || b || c || d || e,
+      (s) => [s.settingsBusy, s.restartBusy, s.factoryResetBusy, s.scanBusy, s.applyBusy, s.bootselBusy],
+      (a: boolean, b: boolean, c: boolean, d: boolean, e: boolean, f: boolean): boolean => a || b || c || d || e || f,
     ],
     busy: [
       (s) => [s.flowBusy, s.actionBusy, s.probing],
@@ -444,6 +578,13 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
       (s) => [s.identity],
       (identity: UsbBoardIdentity | null): EmbeddedUsbStatus | null =>
         identity && identity.kind !== 'silent' ? identity.status : null,
+    ],
+    // A Pico on the cable of an ESP32 frame, or the other way round: nothing
+    // we would send it is meant for it.
+    boardMismatch: [
+      (s) => [s.framePlatform, s.status],
+      (framePlatform: string, status: EmbeddedUsbStatus | null): string | null =>
+        usbBoardFamilyMismatch(framePlatform, status?.board?.target),
     ],
     deviceVersion: [
       (s) => [s.status],
@@ -491,14 +632,30 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
       }
     },
     loadLatestRelease: async () => {
-      if (!values.releaseAvailable) {
+      if (!values.releaseAvailable && !values.uf2DownloadAvailable) {
         return
       }
       try {
-        const listing = await fetchReleaseFirmwareListing()
-        actions.setLatestRelease(normalizedFirmwareVersion(listing.release))
+        actions.setReleaseListing(await fetchReleaseFirmwareListing())
       } catch {
-        // Without it the status line just omits "latest".
+        // Without it the status line just omits "latest"; the Pico firmware
+        // card says it could not look the release up and links to GitHub.
+        actions.setReleaseListingFailed(true)
+      }
+    },
+    downloadFirmware: async () => {
+      const asset = values.uf2Asset
+      if (!asset || values.downloadBusy) {
+        return
+      }
+      actions.setDownloadBusy(true)
+      try {
+        const fileName = await saveReleaseFirmwareFile(asset)
+        actions.setFirmwareNotice(`Saved ${fileName} to your downloads. Copy it onto the ${values.bootselDrive} drive.`)
+      } catch (downloadError) {
+        actions.setFirmwareNotice(errorDetail(downloadError), true)
+      } finally {
+        actions.setDownloadBusy(false)
       }
     },
     connectUsb: async () => {
@@ -587,11 +744,22 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         }
         const { skipped } = await provisionOverUsb(props.frameId, plan, null, actions.setMessage)
         const sent = plan.settings.length - skipped.length
-        actions.setMessage(`Sent ${sent} settings to the board; restarting it to apply them.`)
-        await usbRestart(props.frameId)
+        // A Pico is never flashed from here, so this button is its whole
+        // provisioning: the frame's Wi-Fi rides along, the way it does at the
+        // end of the ESP32 browser flash (EmbeddedReleaseFlasher).
+        const wifi = values.uf2 ? plan.wifi : null
+        if (wifi) {
+          actions.setMessage(`Sent ${sent} settings to the board; joining ${wifi.ssid} and restarting it.`)
+          await usbProvisionWifi(props.frameId, wifi.ssid, wifi.password)
+        } else {
+          actions.setMessage(`Sent ${sent} settings to the board; restarting it to apply them.`)
+          await usbRestart(props.frameId)
+        }
         const notice = skippedSettingsNotice(skipped)
         actions.setMessage(
-          `Sent ${sent} settings to the board. It rebooted and is applying them.${notice ? ` ${notice}` : ''}`
+          `Sent ${sent} settings to the board. It rebooted and is ${wifi ? `joining ${wifi.ssid}` : 'applying them'}.${
+            notice ? ` ${notice}` : ''
+          }`
         )
         actions.recheck()
       } catch (settingsError) {
@@ -640,6 +808,21 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         actions.setError(`Restart failed: ${errorDetail(restartError)}`)
       } finally {
         actions.setRestartBusy(false)
+      }
+    },
+    rebootIntoBootsel: async () => {
+      actions.setBootselBusy(true)
+      try {
+        // The board does not come back as a serial port, so there is nothing
+        // to re-read: the USB session ends and the card returns to "Connect".
+        await usbBootsel(props.frameId)
+        actions.setMessage(
+          `The board rebooted into its bootloader. A drive named ${values.bootselDrive} should appear on this computer: copy the .uf2 onto it, wait for the board to restart, then connect again.`
+        )
+      } catch (bootselError) {
+        actions.setError(`Rebooting into BOOTSEL failed: ${errorDetail(bootselError)}`)
+      } finally {
+        actions.setBootselBusy(false)
       }
     },
     factoryReset: async () => {

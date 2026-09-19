@@ -70,6 +70,12 @@ export interface EmbeddedUsbApiCommandOptions {
   // the flasher's reconnect flow (resolveLiveSerialPort) instead of
   // surfacing the dead port as a read error.
   expectReboot?: boolean
+  // The command acks OK and then the board leaves the serial bus for good:
+  // `bootsel` reboots a Pico into its UF2 bootloader, where it enumerates as
+  // a USB drive, not a serial port. Resolve on the OK marker, close the port
+  // and end the USB session — there is nothing to reconnect to until a new
+  // firmware has been copied onto that drive.
+  expectDisconnect?: boolean
   // A liveness probe repeated until the board answers (e.g. while it boots
   // after a flash). Its attempts are not events a person needs to see, and
   // its failures are the expected case, so keep them out of the log — the
@@ -775,6 +781,22 @@ async function reconnectAfterExpectedUsbReboot(
   }
 }
 
+// After an expected disconnect (expectDisconnect) the port we hold is dead and
+// no replacement will enumerate: forget it, so the next USB action asks for a
+// port again instead of failing to open this one.
+async function endUsbSessionAfterExpectedDisconnect(frameId: FrameId, port: SerialPort): Promise<void> {
+  await closePort(port)
+  if (lastPorts.get(frameId) === port) {
+    lastPorts.delete(frameId)
+  }
+  appendUsbLine(frameId, '[USB API] the board left the USB serial bus; the USB session has ended')
+  embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+    message: null,
+    status: 'idle',
+    stoppedAt: new Date().toISOString(),
+  })
+}
+
 export async function runEmbeddedUsbApiCommand(
   frameId: FrameId,
   command: string,
@@ -841,6 +863,7 @@ async function runEmbeddedUsbApiCommandLocked(
     }
   }
   let rebootAcknowledged = false
+  let disconnectAcknowledged = false
   try {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
       message: `Sending USB command: ${command}`,
@@ -886,6 +909,7 @@ async function runEmbeddedUsbApiCommandLocked(
       appendUsbLine(frameId, `[USB API] ${label} complete`)
     }
     rebootAcknowledged = options?.expectReboot === true
+    disconnectAcknowledged = options?.expectDisconnect === true
     return result
   } catch (error) {
     flushCommandLogText()
@@ -894,7 +918,9 @@ async function runEmbeddedUsbApiCommandLocked(
     }
     throw error
   } finally {
-    if (rebootAcknowledged) {
+    if (disconnectAcknowledged) {
+      await endUsbSessionAfterExpectedDisconnect(frameId, port)
+    } else if (rebootAcknowledged) {
       await reconnectAfterExpectedUsbReboot(frameId, port, hadLogStream)
     } else if (hadLogStream) {
       await startEmbeddedUsbLogStream(frameId, port)
@@ -1226,6 +1252,8 @@ export interface EmbeddedUsbStatus {
   app?: string
   version?: string
   uptimeSec?: number
+  /** `target` is the chip family the image was built for ("esp32-s3", "pico-2w", …). */
+  board?: { target?: string; module?: string; display?: string }
   wifi?: { state?: number; ip?: string; rssi?: number; timeSynced?: boolean }
   cloud?: { state?: string; url?: string; frameId?: string; wsConnected?: boolean; error?: string }
   config?: {
@@ -1335,6 +1363,23 @@ export async function usbRestart(frameId: FrameId, options?: EmbeddedUsbApiComma
   await runEmbeddedUsbApiCommand(frameId, 'restart', {
     timeoutMs: USB_REBOOT_COMMAND_TIMEOUT_MS,
     expectReboot: true,
+    ...options,
+  })
+}
+
+/**
+ * `usb_api bootsel` — Pico family only: acks OK, then reboots into the UF2
+ * bootloader. The board does NOT come back as a serial port — it enumerates
+ * as a USB drive (RP2350 on a Pico 2 W, RPI-RP2 on a Pico W) and stays there
+ * until a .uf2 is copied onto it — so this ends the USB session instead of
+ * waiting for a reconnect. It is the Pico's "update firmware" path: there is
+ * no OTA and no esptool-style serial flashing for these boards. ESP32
+ * firmware answers ESP_ERR_NOT_SUPPORTED.
+ */
+export async function usbBootsel(frameId: FrameId, options?: EmbeddedUsbApiCommandOptions): Promise<void> {
+  await runEmbeddedUsbApiCommand(frameId, 'bootsel', {
+    timeoutMs: USB_REBOOT_COMMAND_TIMEOUT_MS,
+    expectDisconnect: true,
     ...options,
   })
 }

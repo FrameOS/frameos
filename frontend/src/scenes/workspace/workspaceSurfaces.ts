@@ -402,6 +402,33 @@ function isEsp32Platform(platform: unknown): boolean {
   return typeof platform === 'string' && platform.toLowerCase().startsWith('esp32')
 }
 
+/** 'pico-w' / 'pico-2w' (devices.ts EMBEDDED_PICO_*); prefix-matched like the
+ * esp32 probe above, so a future 'pico-2w-…' variant gates too. */
+export function isPicoPlatform(platform: unknown): boolean {
+  return typeof platform === 'string' && platform.toLowerCase().startsWith('pico')
+}
+
+/**
+ * A backend-managed Raspberry Pi Pico W / Pico 2 W thin client (the Pimoroni
+ * Inky Frame family). Self-hosted only: FrameOS Cloud cannot render for a
+ * thin client yet and publishes no pico firmware, so there is no cloud
+ * counterpart of this probe (docs/convergence-todo.md §3).
+ */
+export function isPicoFrame(frame?: FrameCapabilityInput | null): boolean {
+  return isPicoPlatform(frame?.embedded?.platform)
+}
+
+/**
+ * Whether the board's USB console answers the verbs that belong to an
+ * on-device renderer: `upload-scenes`, `scene-payload`, `image` readback. A
+ * Pico renders nothing itself — the backend does — and answers all three
+ * ESP_ERR_NOT_SUPPORTED, so callers with an open USB session skip the USB
+ * shortcut and go straight to the backend instead of logging a refusal first.
+ */
+export function frameUsbConsoleHasRendererVerbs(frame?: FrameCapabilityInput | null): boolean {
+  return !isPicoFrame(frame)
+}
+
 /** A cloud-managed frame whose enrollment hardware report says esp32. */
 export function isEsp32CloudFrame(frame?: FrameCapabilityInput | null, mode: WorkspaceMode = workspaceMode()): boolean {
   return mode === 'cloud' && isEsp32Platform(frame?.hardware?.platform)
@@ -725,15 +752,19 @@ export function frameMenuActionDisabledReason(
  * Whether the workspace should offer streaming this frame's USB serial
  * console into the Logs panel (WebSerial). True for cloud-managed ESP32
  * frames: a board that never joins WiFi can still be debugged from the
- * browser over its USB console. The backend/on-device planes have their own
- * probe (frame.mode === 'embedded' in Logs.tsx); callers must additionally
- * feature-detect WebSerial before showing anything.
+ * browser over its USB console. True as well for a Pico thin client on the
+ * self-hosted backend — its firmware speaks the same `usb_api` console, and a
+ * Pico is provisioned over that cable, so it is the log source that exists
+ * before the board has ever been online. (Never on the cloud: there are no
+ * pico frames there.) For ESP32 frames the backend/on-device planes have
+ * their own probe (frame.mode === 'embedded' in Logs.tsx); callers must
+ * additionally feature-detect WebSerial before showing anything.
  */
 export function frameSupportsUsbSerialConsole(
   frame?: FrameCapabilityInput | null,
   mode: WorkspaceMode = workspaceMode()
 ): boolean {
-  return isEsp32CloudFrame(frame, mode)
+  return isEsp32CloudFrame(frame, mode) || (mode === 'backend' && isPicoFrame(frame))
 }
 
 /**
@@ -755,6 +786,10 @@ const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-powe
  * pushed settings on the cloud, `device_config` on the backend — see
  * PowerSettingsFields). Virtual frames are embedded mode too and have no
  * battery, so they are excluded.
+ *
+ * A self-hosted Pico thin client renders Power as well, cut down to the one
+ * control its firmware implements (deep sleep: always / on battery / never —
+ * see embeddedPowerProfileFor in frameSettingsSurface.ts).
  */
 const esp32OnlyFrameSettingsSections: readonly string[] = ['frame-settings-power']
 
@@ -794,9 +829,14 @@ export function frameSettingsSectionIsAllowed(
     if (!esp32CloudFrameSettingsSections.includes(sectionId)) {
       return false
     }
-  } else if (esp32OnlyFrameSettingsSections.includes(sectionId) && !isEsp32Platform(frame?.embedded?.platform)) {
+  } else if (
+    esp32OnlyFrameSettingsSections.includes(sectionId) &&
+    !isEsp32Platform(frame?.embedded?.platform) &&
+    !(mode === 'backend' && isPicoFrame(frame))
+  ) {
     // A backend-managed ESP32 renders Power too — it just stores the values
-    // in device_config instead of pushing them as settings.
+    // in device_config instead of pushing them as settings. So does a Pico,
+    // on the only plane that has them.
     return false
   }
   if (

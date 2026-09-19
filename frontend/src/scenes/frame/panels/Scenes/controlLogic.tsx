@@ -12,6 +12,7 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { activeSceneFromLastState } from '../../../../utils/cloudFrameScenes'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
+import { frameUsbConsoleHasRendererVerbs } from '../../../workspace/workspaceSurfaces'
 import { sceneIdsRefer } from '../../../../utils/systemScenes'
 import { SCENE_ACTIVATION_TIMEOUT_MS } from '../../../../utils/sceneActivation'
 import type { TemplateType } from '../../../../types'
@@ -334,7 +335,11 @@ export const controlLogic = kea<controlLogicType>([
       actions.sceneActivationStarted(sceneId)
       try {
         let usbSucceeded = false
-        if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
+        if (
+          (values.frame?.mode ?? 'rpios') === 'embedded' &&
+          frameUsbConsoleHasRendererVerbs(values.frame) &&
+          embeddedUsbApiCanUse(props.frameId)
+        ) {
           try {
             await runEmbeddedUsbApiCommand(props.frameId, 'scene-payload', { payload: sceneId, timeoutMs: 10000 })
             usbSucceeded = true
