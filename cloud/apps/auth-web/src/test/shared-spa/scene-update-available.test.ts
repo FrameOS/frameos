@@ -23,8 +23,14 @@ vi.mock("../../../../../../frontend/src/utils/apiFetch", async (importOriginal) 
   return { ...actual, apiFetch: (input: string, init?: RequestInit) => apiFetchMock(input, init) };
 });
 // The dialog has no host in this harness and would fall back to
-// window.confirm; the question itself is asserted through the mock.
-const confirmMock = vi.hoisted(() => vi.fn<(request: { message: string }) => Promise<boolean>>());
+// window.confirm; the question itself is asserted through the mock. Like the
+// real dialog, a "yes" runs the request's `onConfirm` and only then resolves.
+type ConfirmRequest = { message: string; onConfirm?: () => Promise<void> | void };
+const confirmMock = vi.hoisted(() => vi.fn<(request: ConfirmRequest) => Promise<boolean>>());
+const confirmYes = async (request: ConfirmRequest): Promise<boolean> => {
+  await request.onConfirm?.();
+  return true;
+};
 vi.mock("../../../../../../frontend/src/utils/confirmDialogLogic", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, confirmDialog: confirmMock };
@@ -71,7 +77,7 @@ beforeEach(() => {
   testWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true;
   apiFetchMock.mockReset();
   confirmMock.mockReset();
-  confirmMock.mockResolvedValue(true);
+  confirmMock.mockImplementation(confirmYes);
 });
 
 afterEach(() => {
@@ -143,8 +149,23 @@ describe("cloud: a store scene the frame holds an older version of", () => {
     logic.mount();
     await waitFor(() => expect(logic.values.sceneUpdateVersions).toEqual({ "rt-1": "5" }));
 
+    // The dialog is the progress indicator: it holds (spinning) on the update,
+    // and by the time it lets go the workspace must already show the new
+    // version — not a few seconds later, which read as "nothing happened".
+    let versionsWhenDialogClosed: Record<string, string> | null = null;
+    let updatingWhileDialogOpen: Record<string, boolean> | null = null;
+    confirmMock.mockImplementation(async (request) => {
+      const done = request.onConfirm?.();
+      updatingWhileDialogOpen = logic.values.updatingSceneIds;
+      await done;
+      versionsWhenDialogClosed = logic.values.sceneUpdateVersions;
+      return true;
+    });
+
     logic.actions.confirmSceneUpdate("rt-1");
-    await waitFor(() => expect(logic.values.sceneUpdateVersions).toEqual({}));
+    await waitFor(() => expect(versionsWhenDialogClosed).toEqual({}));
+    expect(updatingWhileDialogOpen).toEqual({ "rt-1": true });
+    await waitFor(() => expect(logic.values.updatingSceneIds).toEqual({}));
 
     expect(confirmMock).toHaveBeenCalledTimes(1);
     expect(confirmMock.mock.calls[0]![0].message).toContain("deployed right away");

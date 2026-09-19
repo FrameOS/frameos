@@ -1127,8 +1127,11 @@ was last sent, from the per-scene deploy ledger; null only on a frame that
 predates the ledger and follows the latest), `latest_version`, and
 `update_available` — the store is ahead of the frame AND the account can still
 install the scene (not pulled, not taken private by its publisher). The
-workspace shows the *assigned* version's content, lays "Update available" over
-the scene's image and offers "Update to latest" in the scene menu; both call
+workspace shows the *assigned* version's content, lays an "Update" flag over
+the scene's image and offers "Update to latest" in the scene menu; both ask
+first, and the dialog stays up (its button spinning, the flag reading
+"Updating…") until the call below has answered and the scenes are re-listed.
+Both call
 
 ```http
 POST {provider}/api/frames/{id}/scenes/update

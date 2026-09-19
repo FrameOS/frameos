@@ -484,9 +484,10 @@ function FrameSceneTile({
   const { hideForm } = useActions(newFrameForm)
   // sceneUpdatesLogic and not scenesLogic: these tiles render on the frames
   // home, and scenesLogic would mount controlLogic, which fetches frame state.
-  const { sceneUpdateVersions } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
+  const { sceneUpdateVersions, updatingSceneIds } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
   const compiled = sceneIsCompiled(scene, frame.mode)
-  const updateVersion = sceneUpdateVersions[scene.id]
+  // Also while the update runs: the banner is what spins until it has landed.
+  const updateVersion = sceneUpdateVersions[scene.id] || updatingSceneIds[scene.id]
   const hasChildScenes = (childSceneCount ?? 0) > 0
 
   const handleTileClick = (): void => {
@@ -557,6 +558,10 @@ function FrameSceneTile({
       ) : null}
       {compiled || active || updateVersion ? (
         <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
+          {/* First: the one flag here that asks for something. */}
+          {updateVersion && !multiSelectEnabled ? (
+            <SceneUpdateBanner frameId={frame.id} sceneId={scene.id} size="small" />
+          ) : null}
           {compiled ? (
             <div className="pointer-events-auto">
               <CompiledSceneTag
@@ -570,9 +575,6 @@ function FrameSceneTile({
             <div className="frameos-primary-fill rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
               Active
             </div>
-          ) : null}
-          {updateVersion && !multiSelectEnabled ? (
-            <SceneUpdateBanner frameId={frame.id} sceneId={scene.id} size="small" />
           ) : null}
         </div>
       ) : null}

@@ -149,6 +149,28 @@ const cloudSceneJsonCache = new Map<string, FrameScene[]>()
 const cloudFrameSceneHydrationsInFlight = new Set<FrameId>()
 const cloudFrameScenesHydratedAt = new Map<FrameId, number>()
 const CLOUD_FRAME_SCENES_REFRESH_MS = 60_000
+// A forced pass asked for while another was in flight. That one may have
+// listed the assignments BEFORE the change the caller wants to see (an
+// update, an install), so it is followed by a fresh pass instead of standing
+// in for it — dropping the request left the old state up for a minute.
+const cloudFrameSceneRehydrationsQueued = new Set<FrameId>()
+const cloudFrameSceneHydrationWaiters = new Map<FrameId, Array<() => void>>()
+
+/**
+ * Re-list a cloud frame's scenes now and resolve once a pass that STARTED
+ * after this call has finished (successfully or not) — what a flow awaits to
+ * keep its spinner up until the workspace really shows the new state.
+ */
+export function rehydrateCloudFrameScenes(frameId: FrameId): Promise<void> {
+  const model = framesModel.findMounted()
+  if (!isCloudMode() || !model) {
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve) => {
+    cloudFrameSceneHydrationWaiters.set(frameId, [...(cloudFrameSceneHydrationWaiters.get(frameId) ?? []), resolve])
+    model.actions.hydrateCloudFrameScenes(frameId, true)
+  })
+}
 
 /**
  * Drop cached scenes.json bodies for one store scene (all pinned versions and
@@ -1558,7 +1580,13 @@ export const framesModel = kea<framesModelType>([
       }
     },
     hydrateCloudFrameScenes: async ({ id, force }) => {
-      if (!isCloudMode() || cloudFrameSceneHydrationsInFlight.has(id)) {
+      if (!isCloudMode()) {
+        return
+      }
+      if (cloudFrameSceneHydrationsInFlight.has(id)) {
+        if (force) {
+          cloudFrameSceneRehydrationsQueued.add(id)
+        }
         return
       }
       const hydratedAt = cloudFrameScenesHydratedAt.get(id) ?? 0
@@ -1570,6 +1598,9 @@ export const framesModel = kea<framesModelType>([
         return
       }
       cloudFrameSceneHydrationsInFlight.add(id)
+      // Only those already waiting: whoever asks mid-pass gets the next one.
+      const waiters = cloudFrameSceneHydrationWaiters.get(id) ?? []
+      cloudFrameSceneHydrationWaiters.delete(id)
       try {
         const { scenes, sources } = await fetchCloudFrameScenes(id)
         cloudFrameScenesHydratedAt.set(id, Date.now())
@@ -1593,6 +1624,10 @@ export const framesModel = kea<framesModelType>([
       } finally {
         cloudFrameSceneHydrationsInFlight.delete(id)
         actions.cloudFrameScenesSettled(id)
+        waiters.forEach((resolve) => resolve())
+        if (cloudFrameSceneRehydrationsQueued.delete(id)) {
+          actions.hydrateCloudFrameScenes(id, true)
+        }
       }
     },
     loadFrameSuccess: ({ frames }) => {

@@ -46,6 +46,40 @@ describe("confirmDialog", () => {
     await expect(declined).resolves.toBe(false);
   });
 
+  it("stays up, busy, while the confirmed work runs, and closes when it settles", async () => {
+    confirmDialogLogic.actions.hostMounted();
+    let finishWork = (): void => {};
+    const onConfirm = vi.fn(() => new Promise<void>((resolve) => (finishWork = resolve)));
+    let answered: boolean | null = null;
+    void confirmDialog({ message: "Update?", onConfirm }).then((confirmed) => (answered = confirmed));
+
+    confirmDialogLogic.actions.confirm();
+    expect(onConfirm).toHaveBeenCalledOnce();
+    expect(confirmDialogLogic.values.busy).toBe(true);
+    expect(confirmDialogLogic.values.pending?.message).toBe("Update?");
+    await Promise.resolve();
+    expect(answered).toBeNull();
+
+    finishWork();
+    await vi.waitFor(() => expect(answered).toBe(true));
+    expect(confirmDialogLogic.values.busy).toBe(false);
+    expect(confirmDialogLogic.values.pending).toBeNull();
+  });
+
+  it("never runs the work on a no, and runs it under the browser prompt's yes", async () => {
+    const onConfirm = vi.fn();
+    confirmDialogLogic.actions.hostMounted();
+    const declined = confirmDialog({ message: "Update?", onConfirm });
+    confirmDialogLogic.actions.answer(false);
+    await expect(declined).resolves.toBe(false);
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    confirmDialogLogic.actions.hostUnmounted();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await expect(confirmDialog({ message: "Update?", onConfirm })).resolves.toBe(true);
+    expect(onConfirm).toHaveBeenCalledOnce();
+  });
+
   it("cancels a request that a newer one displaces", async () => {
     confirmDialogLogic.actions.hostMounted();
     const first = confirmDialog("First?");
