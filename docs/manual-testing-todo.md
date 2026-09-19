@@ -9,44 +9,53 @@ empty. Last refreshed 2026-09-13 (the whole non-ESP32 side closed: on-device
 admin round three PASSED on 2026.9.15 and its "crash" explained, the adopted
 card PASSED with one empty-drawer bug found and fixed, the
 generic-image/Remote box closed as obsolete since remote lite). The ESP32
-bench and the HyperPixel 4.0 one (added 2026-09-19 with the driver) are
-left, and every box there needs hardware that was not to hand.
+bench and the HyperPixel 4.0 one (added 2026-09-19 with the driver; its Pi 5
+half passed the same day) are left, and every box there needs hardware that
+was not to hand.
 
 ## Open
 
 ### HyperPixel 4.0 bench
 
-Written from Pimoroni's and the kernel's sources (init streams, DPI timings,
-touch nodes); none of it has met a panel. `driver:hyperPixel4` in the frame's
-log says which way the clock pin went (`"clock": "gpiomem"` is the expected
-answer on a Pi Zero–4).
+Two display paths, picked on the device (`driver:hyperPixel4` logs
+`"path"`): **`kms`** on a Pi 5 — the firmware cannot drive DPI there, so setup
+enables the kernel's `vc4-kms-dpi-hyperpixel4*` overlay and the driver only
+writes fb0 — and **`firmware-dpi`** on a Pi 0–4, where the driver inits the
+panel over GPIO itself like the 2.1" Round. The firmware path is written from
+Pimoroni's and the kernel's sources and **has not met a panel**; its log also
+says which way the clock pin went (`"clock": "gpiomem"` is the expected
+answer).
 
-- [ ] **HyperPixel 4.0, no touch (`pimoroni.hyperpixel4`):** first deploy
-  writes the DPI block (`dpi_timings=480 0 10 16 59 800 …`), reboots once, and
-  the panel shows the scene in its native 480x800 portrait; `rotate: 90` /
-  `270` gives the 800x480 landscape. "Turn display off / on" drops and
-  restores the backlight without the next render waking it.
-- [ ] **HyperPixel 4.0 Touch (`pimoroni.hyperpixel4_touch`):**
+- [ ] **Pi 0–4, HyperPixel 4.0, no touch (`pimoroni.hyperpixel4`):** first
+  deploy writes the DPI block (`dpi_timings=480 0 10 16 59 800 …`), reboots
+  once, and the panel shows the scene in its native 480x800 portrait;
+  `rotate: 90` / `270` gives the 800x480 landscape. "Turn display off / on"
+  drops and restores the backlight without the next render waking it.
+- [ ] **Pi 0–4, HyperPixel 4.0 Touch (`pimoroni.hyperpixel4_touch`):**
   `/boot/firmware/overlays/frameos-hyperpixel4-touch.dtbo` exists,
   `dtoverlay=frameos-hyperpixel4-touch` is in config.txt, `dmesg | grep -i
   goodix` shows the controller bound at 0x14 or 0x5d, and `driver:evdev`
-  lists it. A tap in each corner arrives as `mouseMove` near (0,0),
-  (w,0), (0,h), (w,h) **of the scene** at `rotate` 0 and 90 — if the axes
-  come out mirrored or swapped, the fix is the `touchscreen-inverted-*` /
-  `touchscreen-swapped-x-y` properties in
-  `frameos/src/drivers/hyperPixel4/overlays/*.dts` (rebuild the `.dtbo` with
-  the `dtc` line in its header). Touch must survive "Turn display off / on":
-  that path borrows GPIO 27, the touch interrupt, for the init clock.
+  lists it. A tap on a square painted at fb0's origin (`cat raw > /dev/fb0`)
+  must read near (0,0), as it does on the Pi 5 (see Done); if not, the fix is
+  the `touchscreen-inverted-*` / `touchscreen-swapped-x-y`
+  properties in `frameos/src/drivers/hyperPixel4/overlays/*.dts` (rebuild the
+  `.dtbo` with the `dtc` line in its header). Touch must survive "Turn display
+  off / on": that path borrows GPIO 27, the touch interrupt, for the init
+  clock.
 - [ ] **HyperPixel 4.0 Square, with and without touch
-  (`pimoroni.hyperpixel4sq`, `…_touch`):** same two checks at 720x720, with
-  `edt_ft5x06` at 0x48 in `dmesg`. Pimoroni's legacy overlay inverts both
-  touch axes where the kernel's does not; ours follows the kernel's, so the
-  corner test is the one that settles it.
-- [ ] **Moving a card between HyperPixels:** change the device 4.0 → Square →
-  2.1" Round and back; after each deploy + reboot config.txt holds exactly one
-  `dpi_timings=` line and at most one `dtoverlay=frameos-hyperpixel4*` line.
-- [ ] **Buildroot image:** the overlay lands in `/boot/overlays/` on the
-  read-only card, and the goodix / edt-ft5x06 / i2c-gpio modules load.
+  (`pimoroni.hyperpixel4sq`, `…_touch`), either board:** the same checks at
+  720x720, with `edt_ft5x06` at 0x48 in `dmesg`. Pimoroni's legacy overlay
+  inverts both touch axes where the kernel's does not; ours follows the
+  kernel's, so a corner-tap test is the one that settles it.
+- [ ] **Touch coordinates reach a scene where the finger is**, at `rotate` 0
+  and 90: a tap in each corner arrives as `mouseMove` near (0,0), (w,0),
+  (0,h), (w,h) of the scene.
+- [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
+  driver). The write the driver makes was run by hand as uid 990 — see Done.
+- [ ] **Moving a card between HyperPixels and boards:** change the device
+  4.0 → Square → 2.1" Round and back; after each deploy + reboot config.txt
+  holds exactly one `dpi_timings=` line and at most one HyperPixel
+  `dtoverlay=` line.
 
 ### ESP32 bench
 
@@ -102,6 +111,33 @@ answer on a Pi Zero–4).
   yet" and finishes instead of stopping there.
 
 ## Done
+
+### HyperPixel 4.0 bench
+
+- [x] **Pi 5 + HyperPixel 4.0 Touch, Buildroot cloud frame (Cloud-5,
+  `pimoroni.hyperpixel4_touch`) — PASSED 2026-09-19** on a cross-built
+  `2026.9.19` from the `hyperpixel4` branch dropped in as a release dir.
+  `frameos setup` on the stock card wrote `dtparam=i2c_arm=off`,
+  `dtparam=spi=off`, `dtoverlay=vc4-kms-dpi-hyperpixel4` after the image's
+  `dtoverlay=vc4-kms-v3d` and asked for a reboot; after it `fbset` says
+  480x800-32, `card1-DPI-1` is connected, `driver:hyperPixel4` logs
+  `"path":"kms"`, the scene is on the glass and the cloud screenshot is
+  480x800. `Goodix-TS 13-005d: ID 911` bound (0x14 answered -6 first — the
+  overlay lists both for that reason) and evdev listens to it. `echo 1 >
+  /sys/class/graphics/fb0/blank` **as uid 990** took `bl_power` 0 → 4 and
+  DPMS On → Off, `echo 0` brought both back. Two things learned the hard
+  **Touch orientation:** with the kernel overlay's defaults the four corners
+  read (0,0) (780,25) (750,479) (20,475) — a landscape 800x480 frame over a
+  portrait fb0 — and a tap on a white square painted at fb (0..160, 0..160)
+  read (114, 65): X and Y swapped, Y inversion already right. With
+  `,touchscreen-swapped-x-y` (a toggle: it takes the swap out) the square
+  reads (65, 63) and the opposite corner (451, 704), fb0's own frame, which
+  is what setup now writes and what `frameos-hyperpixel4-touch.dts` was
+  changed to match. Things learned the hard
+  way: `dtparam=i2c_arm=on` (GPIO 2/3 are DPI pins) makes `drm-rp1-dpi` fail
+  with "Error applying setting, reverse things back" and no fb0 — hence the
+  two `=off` lines; and a later `dtoverlay=i2c-gpio` silently re-points the
+  touch bus at GPIO 23/24.
 
 ### Browser only — cloud auth
 

@@ -606,9 +606,9 @@ proc setupStepsForDevice(device: string): seq[string] =
   if device == "pimoroni.hyperpixel2r":
     return @["Write the DPI display block into boot config.", "Use the native HyperPixel 2.1 Round driver."]
   if device in hyperPixel4Devices:
-    result = @["Write the DPI display block into boot config.", "Use the native HyperPixel 4.0 driver."]
+    result = @["Write the display block for this board into boot config (the kernel's HyperPixel overlay on a Pi 5, firmware DPI otherwise).", "Use the native HyperPixel 4.0 driver."]
     if device.endsWith("_touch"):
-      result.add("Install the touch overlay and read touches as pointer events.")
+      result.add("Enable the touch controller and read touches as pointer events.")
     return
   if isNativeInkyDevice(device):
     result = @["Enable SPI.", "Add dtoverlay=spi0-0cs to boot config.", "Use the native Pimoroni Inky driver."]

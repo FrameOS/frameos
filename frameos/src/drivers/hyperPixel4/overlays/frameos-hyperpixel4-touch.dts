@@ -6,8 +6,12 @@
  * Pimoroni's hyperpixel4 overlay this one claims no DPI pin and no GPIO 19.
  * The touch nodes are the kernel overlay's: a Goodix GT911 on a bit-banged
  * I2C bus (SDA 10, SCL 11), interrupt on GPIO 27, at whichever of its two
- * addresses the controller latched at power-on. Coordinates are reported in
- * the panel's native 480x800 portrait space.
+ * addresses the controller latched at power-on.
+ *
+ * Coordinates are reported in fb0's own 480x800 portrait frame: Y inverted,
+ * X and Y NOT swapped. The kernel overlay swaps them (a landscape frame for
+ * desktops); a bench with that overlay on a Pi 5 (2026-09-19) read a tap at
+ * fb (65, 114) as (114, 65) with the swap and (65, 63) without it.
  *
  * Build: dtc -@ -I dts -O dtb -o frameos-hyperpixel4-touch.dtbo frameos-hyperpixel4-touch.dts
  */
@@ -39,7 +43,6 @@
 					touchscreen-x-mm = <51>;
 					touchscreen-y-mm = <85>;
 					touchscreen-inverted-y;
-					touchscreen-swapped-x-y;
 				};
 
 				touch@5d {
@@ -52,7 +55,6 @@
 					touchscreen-x-mm = <51>;
 					touchscreen-y-mm = <85>;
 					touchscreen-inverted-y;
-					touchscreen-swapped-x-y;
 				};
 			};
 		};

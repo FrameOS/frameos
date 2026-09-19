@@ -1,7 +1,7 @@
 ## What the hyperPixel4 driver knows about its panels, kept free of GPIO so
-## it compiles (and is tested) anywhere: which panel a device id means, the
-## init stream its controller is sent, and what setup leaves on the boot
-## partition for it.
+## it compiles (and is tested) anywhere: which panel a device id means, which
+## of the two ways to drive it this board has, the init stream its controller
+## is sent, and what setup leaves on the boot partition for it.
 
 import std/strutils
 
@@ -16,6 +16,17 @@ type
     kind*: PanelKind
     touch*: bool
     width*, height*: int
+
+  DisplayPath* = enum
+    ## Pi 0-4: the firmware scans DPI out into /dev/fb0 and the driver inits
+    ## the panel over GPIO itself, as on the 2.1" Round.
+    dpFirmware
+    ## Pi 5 family (BCM2712): DPI lives in RP1, which the firmware never
+    ## drives — `enable_dpi_lcd` does nothing there. Only the kernel's
+    ## drm-rp1-dpi can, so its vc4-kms-dpi-hyperpixel4* overlay owns the
+    ## whole panel (init, backlight, touch) and the driver just writes the
+    ## fb0 that KMS emulates. Bench-verified on a Pi 5, 2026-09-19.
+    dpKms
 
 const
   InitWait* = -1 ## in an init stream: pause InitWaitMs before the next word
@@ -122,6 +133,41 @@ proc panelForDevice*(device: string): PanelSpec =
   else:
     PanelSpec(kind: pkRectangular, touch: touch, width: 480, height: 800)
 
+proc displayPathForCompatible*(compatible: string): DisplayPath =
+  ## `compatible` is the device tree root's, e.g. "raspberrypi,5-model-b\0brcm,bcm2712\0".
+  if "brcm,bcm2712" in compatible: dpKms else: dpFirmware
+
+proc detectDisplayPath*(): DisplayPath =
+  try:
+    result = displayPathForCompatible(readFile("/proc/device-tree/compatible"))
+  except CatchableError:
+    result = dpFirmware
+
+const
+  # Every form of the kernel's overlay line this driver has written, plus the
+  # bare one a person would: whichever is not wanted is removed by name.
+  KmsOverlayLines* = [
+    "dtoverlay=vc4-kms-dpi-hyperpixel4",
+    "dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y",
+    "dtoverlay=vc4-kms-dpi-hyperpixel4,disable-touch",
+    "dtoverlay=vc4-kms-dpi-hyperpixel4sq",
+    "dtoverlay=vc4-kms-dpi-hyperpixel4sq,disable-touch",
+  ]
+
+proc kmsOverlayLine*(kind: PanelKind, touch: bool): string =
+  ## The kernel's overlay brings the touch controller with it unless told not
+  ## to. On the 4.0 it reports X and Y swapped by default — a landscape frame
+  ## over a portrait fb0 — and `touchscreen-swapped-x-y` is a toggle that
+  ## takes the swap back out (bench 2026-09-19: a tap at fb (65, 114) read
+  ## (114, 65) before, (65, 63)/(451, 704) corner to corner after). FrameOS
+  ## wants touch in fb0's own frame; the frame's `rotate` is applied on top.
+  if not touch:
+    "dtoverlay=vc4-kms-dpi-hyperpixel4" & (if kind == pkSquare: "sq" else: "") & ",disable-touch"
+  elif kind == pkSquare:
+    "dtoverlay=vc4-kms-dpi-hyperpixel4sq"
+  else:
+    "dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y"
+
 proc touchOverlayName*(panel: PanelSpec): string =
   if panel.kind == pkSquare: TouchOverlaySquare else: TouchOverlayRectangular
 
@@ -139,38 +185,64 @@ proc initFrames*(words: openArray[int]): seq[seq[int]] =
     else:
       result[^1].add(word)
 
-proc bootConfigLines*(panel: PanelSpec): seq[string] =
-  ## Firmware DPI carries the pixels into /dev/fb0; the driver owns the init
-  ## bus and the backlight. A leading `#` removes a line (setupBootConfig):
-  ## Pimoroni's installer overlay, the kernel's KMS ones and the KMS/FKMS
-  ## display drivers all claim the DPI pins or GPIO 19 ahead of us, and the
-  ## other HyperPixels' blocks would fight this one.
-  let square = panel.kind == pkSquare
-  result = @[
-    "#dtoverlay=hyperpixel4",
-    "#dtoverlay=hyperpixel2r",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel4",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel4sq",
-    "#dtoverlay=vc4-kms-dpi-hyperpixel2r",
-    "#dtoverlay=vc4-kms-v3d",
-    "#dtoverlay=vc4-fkms-v3d",
-    "#" & DpiTimingsRound,
-    "#" & (if square: DpiTimingsRectangular else: DpiTimingsSquare),
-    "#" & (if square: DpiOutputFormatRectangular else: DpiOutputFormatSquare),
-    "#dtoverlay=" & (if square: TouchOverlayRectangular else: TouchOverlaySquare),
-    "dtparam=i2c_arm=off",
-    "dtparam=spi=off",
+const
+  # Every line the firmware-DPI path writes that is the same for both panels.
+  FirmwareDpiLines = [
     "enable_dpi_lcd=1",
     "display_default_lcd=1",
     "dpi_group=2",
     "dpi_mode=87",
-    if square: DpiOutputFormatSquare else: DpiOutputFormatRectangular,
-    if square: DpiTimingsSquare else: DpiTimingsRectangular,
     "gpio=0-9=a2,np",
     "gpio=12-17=a2,np",
     "gpio=20-25=a2,np",
     "gpio=19=op,dh",
   ]
+
+proc bootConfigLines*(panel: PanelSpec, path: DisplayPath): seq[string] =
+  ## A leading `#` removes a line (setupBootConfig). Whatever this panel on
+  ## this board does not want is removed by name: Pimoroni's installer
+  ## overlays, the other HyperPixels' blocks, and the other display path's —
+  ## config.txt lets the last dpi_timings win and setup only ever appends, so
+  ## a card that changes panel or board must not keep the old block.
+  let square = panel.kind == pkSquare
+  let kmsLine = kmsOverlayLine(panel.kind, panel.touch)
+  result = @[
+    "#dtoverlay=hyperpixel4",
+    "#dtoverlay=hyperpixel2r",
+    "#dtoverlay=vc4-kms-dpi-hyperpixel2r",
+    "#dtoverlay=vc4-fkms-v3d",
+    "#" & DpiTimingsRound,
+  ]
+  for line in KmsOverlayLines:
+    if path == dpFirmware or line != kmsLine:
+      result.add("#" & line)
+  # The header's I2C and SPI ports sit on DPI pins.
+  result.add("dtparam=i2c_arm=off")
+  result.add("dtparam=spi=off")
+
+  if path == dpKms:
+    for line in FirmwareDpiLines:
+      result.add("#" & line)
+    result.add("#" & DpiTimingsRectangular)
+    result.add("#" & DpiTimingsSquare)
+    result.add("#" & DpiOutputFormatRectangular)
+    result.add("#" & DpiOutputFormatSquare)
+    result.add("#gpio=27=ip,pu")
+    result.add("#dtoverlay=" & TouchOverlayRectangular)
+    result.add("#dtoverlay=" & TouchOverlaySquare)
+    result.add("dtoverlay=vc4-kms-v3d")
+    result.add(kmsLine)
+    return
+
+  # The KMS display driver claims the DPI pins and GPIO 19 ahead of us.
+  result.add("#dtoverlay=vc4-kms-v3d")
+  result.add("#" & (if square: DpiTimingsRectangular else: DpiTimingsSquare))
+  result.add("#" & (if square: DpiOutputFormatRectangular else: DpiOutputFormatSquare))
+  result.add("#dtoverlay=" & (if square: TouchOverlayRectangular else: TouchOverlaySquare))
+  for line in FirmwareDpiLines:
+    result.add(line)
+  result.add(if square: DpiOutputFormatSquare else: DpiOutputFormatRectangular)
+  result.add(if square: DpiTimingsSquare else: DpiTimingsRectangular)
   # GPIO 27 is the touch controller's interrupt (and, during init, our clock).
   if panel.touch:
     result.add("gpio=27=ip,pu")
@@ -179,9 +251,11 @@ proc bootConfigLines*(panel: PanelSpec): seq[string] =
     result.add("#gpio=27=ip,pu")
     result.add("#dtoverlay=" & panel.touchOverlayName)
 
-proc setupPanel*(device: string): SetupResult =
+proc setupPanel*(device: string, path = detectDisplayPath()): SetupResult =
   let panel = panelForDevice(device)
-  if panel.touch:
+  # The kernel's overlay carries its own touch nodes; ours is for the path
+  # where nothing else brings the touch controller up.
+  if panel.touch and path == dpFirmware:
     let dtbo = if panel.kind == pkSquare: TouchOverlaySquareDtbo else: TouchOverlayRectangularDtbo
     addSetupResult(result, setupBootOverlay(panel.touchOverlayName, dtbo))
-  addSetupResult(result, setupBootConfig(panel.bootConfigLines()))
+  addSetupResult(result, setupBootConfig(panel.bootConfigLines(path)))

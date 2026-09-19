@@ -60,10 +60,13 @@ DRIVERS = {
         can_render=True,
         can_turn_on_off=True,
     ),
-    # The HyperPixel 4.0 and 4.0 Square, touch or not: the same split as the
-    # Round (firmware DPI + init over GPIO), with an ILI9806E behind it. Touch
-    # is the kernel's driver, loaded by an overlay the driver's setup installs
-    # beside config.txt, and arrives through evdev.
+    # The HyperPixel 4.0 and 4.0 Square, touch or not. On a Pi 0-4 the same
+    # split as the Round (firmware DPI + init over GPIO), with an ILI9806E
+    # behind it and touch loaded by an overlay the driver's setup installs
+    # beside config.txt. On a Pi 5, which has no firmware DPI, setup enables
+    # the kernel's vc4-kms-dpi-hyperpixel4* overlay instead and the driver
+    # only writes fb0. The board is detected on the device, so nothing here
+    # differs. Touch arrives through evdev either way.
     "hyperPixel4": Driver(
         name="hyperPixel4",
         import_path="hyperPixel4/hyperPixel4",

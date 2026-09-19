@@ -20,10 +20,10 @@ const
   # installer overlay (`hyperpixel2r`), the kernel's (`vc4-kms-dpi-…`, which
   # the 2026-09-07..12 "legacy fb" driver wrote) and the KMS/FKMS display
   # drivers, all of which claim the DPI pins or GPIO 19 ahead of us. The
-  # next five are what the hyperPixel4 driver writes for the 4.0 and the 4.0
-  # Square (drivers/hyperPixel4/panel.nim), for a card that moves between
-  # panels: config.txt lets the last dpi_timings line win, and setup only
-  # ever appends.
+  # rest of the removals are what the hyperPixel4 driver writes for the 4.0
+  # and the 4.0 Square (drivers/hyperPixel4/panel.nim), for a card that moves
+  # between panels: config.txt lets the last dpi_timings line win, and setup
+  # only ever appends.
   HyperPixelBootConfigLines* = @[
     "#dtoverlay=hyperpixel2r",
     "#dtoverlay=vc4-kms-dpi-hyperpixel2r",
@@ -34,6 +34,12 @@ const
     "#dpi_output_format=0x7f226",
     "#dtoverlay=frameos-hyperpixel4-touch",
     "#dtoverlay=frameos-hyperpixel4sq-touch",
+    "#gpio=27=ip,pu",
+    "#dtoverlay=vc4-kms-dpi-hyperpixel4",
+    "#dtoverlay=vc4-kms-dpi-hyperpixel4,touchscreen-swapped-x-y",
+    "#dtoverlay=vc4-kms-dpi-hyperpixel4,disable-touch",
+    "#dtoverlay=vc4-kms-dpi-hyperpixel4sq",
+    "#dtoverlay=vc4-kms-dpi-hyperpixel4sq,disable-touch",
     "dtparam=i2c_arm=off",
     "dtparam=spi=off",
     "enable_dpi_lcd=1",

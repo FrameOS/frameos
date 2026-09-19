@@ -1,4 +1,4 @@
-import json, pixie, strformat, strutils, posix
+import json, pixie, strformat, posix
 import std/volatile
 
 import lib/lgpio
@@ -8,15 +8,23 @@ import frameos/device_setup
 import drivers/frameBuffer/frameBuffer as frameBuffer
 import ./panel
 
-## The Pimoroni HyperPixel 4.0 and 4.0 Square, with or without touch. Same
-## split as the 2.1" Round (inkyHyperPixel2r): firmware DPI carries the pixels
-## into /dev/fb0 (setup writes the dpi_* block into config.txt), and this
-## driver sends the ILI9806E its init stream over a bit-banged 3-wire bus and
-## owns the backlight. No Pimoroni or KMS overlay, vendor tree or Python.
+## The Pimoroni HyperPixel 4.0 and 4.0 Square, with or without touch, driven
+## one of two ways (panel.DisplayPath), picked by the board:
 ##
-## Touch is the kernel's own driver (Goodix on the 4.0, FT5x06 on the Square),
-## loaded by a small overlay setup installs, and read through evdev like any
-## other pointer. It is also why the clock pin below is special.
+## Pi 0-4, the same split as the 2.1" Round (inkyHyperPixel2r): firmware DPI
+## carries the pixels into /dev/fb0 (setup writes the dpi_* block into
+## config.txt), and this driver sends the ILI9806E its init stream over a
+## bit-banged 3-wire bus and owns the backlight. No Pimoroni or KMS overlay,
+## vendor tree or Python. Touch is the kernel's own driver (Goodix on the 4.0,
+## FT5x06 on the Square), loaded by a small overlay setup installs. It is
+## also why the clock pin below is special.
+##
+## Pi 5: the firmware cannot drive DPI at all, so setup enables the kernel's
+## vc4-kms-dpi-hyperpixel4* overlay, which inits the panel, owns the
+## backlight and brings touch up. This driver then touches no GPIO: it writes
+## the fb0 KMS emulates, and powers the panel by blanking it.
+##
+## Either way touch is read through evdev like any other pointer.
 
 const
   GpioClk = 27
@@ -34,14 +42,15 @@ const
 type Driver* = ref object of frameBuffer.Driver
   mode*: string
   panel: PanelSpec
+  path: DisplayPath
   gpioHandle: cint
   # GPIO 27 is the init bus clock AND the touch controller's interrupt line.
   # On a touch board the kernel holds it as an IRQ, and gpiolib refuses to
   # hand an IRQ line out as an output, so the clock is driven the way
   # Pimoroni's own init does it: straight through the GPIO registers, and
   # given back as an input the moment a burst ends. Non-touch boards take the
-  # same path so there is one to test. nil = no usable /dev/gpiomem (Pi 5, a
-  # kernel without it): the clock is then an ordinary lgpio claim, which works
+  # same path so there is one to test. nil = no usable /dev/gpiomem (a kernel
+  # without it): the clock is then an ordinary lgpio claim, which works
   # wherever nothing else holds the pin.
   gpioMem: ptr UncheckedArray[uint32]
   clkClaimed: bool
@@ -54,13 +63,6 @@ type Driver* = ref object of frameBuffer.Driver
 proc log(self: Driver; payload: JsonNode) =
   if not self.isNil and not self.logger.isNil and not self.logger.log.isNil:
     self.logger.log(payload)
-
-proc isRaspberryPi5(): bool =
-  try:
-    return readFile("/proc/cpuinfo").contains("Raspberry Pi 5")
-  except CatchableError:
-    discard
-  false
 
 proc delaySeconds(seconds: float) =
   if seconds > 0:
@@ -78,10 +80,9 @@ proc claimOutput(self: Driver; pin: int; level: int) =
     raise newException(OSError, &"Unable to claim GPIO {pin} for HyperPixel 4: {$lguErrorText(res)}")
 
 proc openGpioMem(): ptr UncheckedArray[uint32] =
-  # The register layout below is the BCM283x/BCM2711 one; the Pi 5's GPIO
-  # lives behind RP1 and must never be poked with it.
-  if isRaspberryPi5():
-    return nil
+  # The register layout below is the BCM283x/BCM2711 one. Only the firmware
+  # path gets here, and the Pi 5 (GPIO behind RP1, /dev/gpiomem0..4 instead)
+  # never takes that path.
   let fd = posix.open(GpioMemPath, O_RDWR or O_SYNC)
   if fd < 0:
     return nil
@@ -95,7 +96,7 @@ proc ensureGpio(self: Driver) =
   if self.gpioHandle >= 0:
     return
 
-  let gpioChip: cint = if isRaspberryPi5(): 4 else: 0
+  let gpioChip: cint = 0
   self.gpioHandle = lgGpiochipOpen(gpioChip)
   if self.gpioHandle < 0:
     raise newException(OSError, &"Unable to open gpiochip{gpioChip}: {$lguErrorText(self.gpioHandle)}")
@@ -171,7 +172,8 @@ proc sendWords(self: Driver; words: openArray[int]) =
     self.writePin(GpioCs, LG_HIGH)
 
 proc initializePanel(self: Driver) =
-  if self.panelInitialized:
+  # Under KMS the kernel's panel driver already did this, on pins it holds.
+  if self.panelInitialized or self.path == dpKms:
     return
 
   self.log(%*{"event": "driver:hyperPixel4", "init": "panel-start", "panel": $self.panel.kind})
@@ -198,8 +200,11 @@ proc init*(frameOS: DriverContext): Driver =
     probeRetrySeconds: fbDriver.probeRetrySeconds,
     mode: frameOS.frameConfig.mode,
     panel: panel,
+    path: detectDisplayPath(),
     gpioHandle: cint(-1),
   )
+  result.log(%*{"event": "driver:hyperPixel4", "panel": $panel.kind, "touch": panel.touch,
+    "path": (if result.path == dpKms: "kms" else: "firmware-dpi")})
   try:
     result.initializePanel()
   except Exception as e:
@@ -215,15 +220,27 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
   setupPanel(device)
 
 proc render*(self: Driver, image: Image) =
-  if not self.panelInitialized and not self.displayOff:
+  if self.path == dpFirmware and not self.panelInitialized and not self.displayOff:
     try:
       self.initializePanel()
     except Exception as e:
       self.log(%*{"event": "driver:hyperPixel4", "error": "Panel init failed before render", "exception": e.msg})
   frameBuffer.render(self, image)
 
+proc setKmsPower(self: Driver; on: bool) =
+  # Blanking the emulated fb0 is a DPMS off: the kernel's panel driver sends
+  # display-off and drops the backlight, and the way back re-inits the panel.
+  # Writes into fb0 while it is blanked do not wake it.
+  let status = frameBuffer.runPrivilegedDisplayShell(
+    "echo " & (if on: "0" else: "1") & " > /sys/class/graphics/fb0/blank")
+  if status != 0:
+    self.log(%*{"event": "driver:hyperPixel4", "error": "Failed to blank/unblank fb0", "on": on})
+
 proc turnOn*(self: Driver) =
   self.displayOff = false
+  if self.path == dpKms:
+    self.setKmsPower(true)
+    return
   try:
     if not self.panelInitialized:
       # Never came up (init failed at boot): the sleep-out below would wake
@@ -239,6 +256,9 @@ proc turnOn*(self: Driver) =
 
 proc turnOff*(self: Driver) =
   self.displayOff = true
+  if self.path == dpKms:
+    self.setKmsPower(false)
+    return
   try:
     self.ensureGpio()
     self.writePin(GpioBacklight, LG_LOW)
