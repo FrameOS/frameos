@@ -21,6 +21,11 @@ scenes are untouched: they render whole, on the top scene's interval.
   instance is due at `now + nextSleep` if it set one, else at
   `start + its refreshInterval`. `logic/nextSleepDuration` inside a child means
   "this child next runs in N seconds"; nothing a child sets reaches its parent.
+- A child's `refreshInterval` is the state field every scene has
+  (`refresh_interval.nim`): the scene's own default, or what the split panel's
+  options set on it — the runtime reads it back out of state after every run,
+  so a panel option, a `setSceneState` or the scene's own code moves the
+  child's next due time the same way.
 - The top scene keeps its own rule (its `nextSleep`, else its interval) — except
   a scene the split drawer generated (`settings.splitScreenLayout`): it draws
   nothing of its own, so it is **never due by itself** and follows its children.

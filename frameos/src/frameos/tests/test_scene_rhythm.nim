@@ -52,6 +52,9 @@ proc colorChild(name, hex: string, interval: float, nextSleep = -1.0): ExportedI
     edges.add(edge(2, 2, "next", 3, "prev"))
   ExportedInterpretedScene(name: name, backgroundColor: parseHtmlColor("#000000"),
     refreshInterval: interval, publicStateFields: @[], nodes: nodes, edges: edges, apps: %*{},
+    # What the loader adds to every scene (refresh_interval.nim): the interval
+    # is a state field, seeded from the setting.
+    refreshIntervalKey: "refreshInterval", refreshIntervalDefault: interval, refreshIntervalImplicit: true,
     init: init, render: render, runEvent: runEvent)
 
 proc mutatingChild(name, hex: string, interval: float): ExportedInterpretedScene =
@@ -121,6 +124,7 @@ let
   innerId = "tests/rhythm/inner".SceneId
   sharedId = "tests/rhythm/shared".SceneId
   mutatingId = "tests/rhythm/mutating".SceneId
+  overrideSplitId = "tests/rhythm/override-split".SceneId
   mutatingSplitId = "tests/rhythm/mutating-split".SceneId
   nestedOuterId = "tests/rhythm/nested-outer".SceneId
 
@@ -129,6 +133,22 @@ uploaded[clockId] = colorChild("Clock", "#ff0000", 1.0)
 uploaded[photoId] = colorChild("Photo", "#0000ff", 600.0)
 uploaded[pacedId] = colorChild("Paced", "#00ff00", 3600.0, nextSleep = 42.0)
 uploaded[splitId] = splitOf("Split", clockId.string, photoId.string, followsChildren = true)
+# A panel's option override: the split seeds the photo with refreshInterval 7.
+uploaded[overrideSplitId] = ExportedInterpretedScene(name: "Override split",
+  backgroundColor: parseHtmlColor("#101010"), refreshInterval: 300.0, refreshFollowsChildren: true,
+  publicStateFields: @[],
+  nodes: @[
+    node(1, "event", %*{"keyword": "render"}),
+    node(2, "app", %*{"keyword": "render/split", "config": {"rows": 1, "columns": 2, "margin": "0", "gap": "0"}}),
+    node(3, "scene", %*{"keyword": clockId.string, "config": {}}),
+    node(4, "scene", %*{"keyword": photoId.string, "config": {"refreshInterval": 7}}),
+  ],
+  edges: @[
+    edge(1, 1, "next", 2, "prev"),
+    edge(2, 2, "field/render_functions[1][1]", 3, "prev"),
+    edge(3, 2, "field/render_functions[1][2]", 4, "prev"),
+  ],
+  apps: %*{}, init: init, render: render, runEvent: runEvent)
 uploaded[mutatingId] = mutatingChild("Mutating photo", "#0000ff", 600.0)
 uploaded[mutatingSplitId] = splitOf("Mutating split", clockId.string, mutatingId.string, followsChildren = true)
 uploaded[plainSplitId] = splitOf("Plain split", clockId.string, photoId.string,
@@ -208,6 +228,20 @@ suite "scene rhythm":
     check abs(children[4.NodeId].rhythm.dueAt - 1001.0) < 0.001   # its refreshInterval
     # The loop wakes for the soonest of them.
     check abs(rhythmNextWakeSeconds(scene) - 1.0) < 0.001
+
+  test "a panel's refresh interval option sets that panel's rhythm":
+    # The interval is a state field every scene has (refresh_interval.nim); a
+    # split panel's option lands in the child's state, and that is its rhythm.
+    let scene = newScene(overrideSplitId)
+    discard renderRhythmPass(scene, newImage(W, H), rfRedraw)
+    let children = InterpretedFrameScene(scene).sceneNodes
+    check abs(children[4.NodeId].rhythm.dueAt - 1007.0) < 0.001
+    check abs(children[3.NodeId].rhythm.dueAt - 1001.0) < 0.001
+    # Setting it on the running child moves the next due time too.
+    children[4.NodeId].state["refreshInterval"] = %3
+    rhythmNowOverride = 1007.0
+    discard renderRhythmPass(scene, newImage(W, H), rfRedraw)
+    check abs(children[4.NodeId].rhythm.dueAt - 1010.0) < 0.001
 
   test "a split follows its children; a partial pass runs only what is due":
     let scene = newScene(splitId)

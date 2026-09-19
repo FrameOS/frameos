@@ -18,17 +18,14 @@ const clock = {
   settings: { refreshInterval: 0.2 },
 } as unknown as FrameScene;
 
-// The stock photo scenes: render → … → logic/nextSleepDuration ← state field.
+// A scene that declares its own interval field (the role, as the 23 stock
+// scenes now do), and a panel that overrides it.
 const photo = {
   id: "photo",
   name: "Photo",
-  nodes: [
-    { id: "r", type: "event", data: { keyword: "render" } },
-    { id: "sleep", type: "app", data: { keyword: "logic/nextSleepDuration", config: {} } },
-    { id: "seconds", type: "state", data: { keyword: "secondsBetweenImages" } },
-  ],
-  edges: [{ id: "e", source: "seconds", sourceHandle: "stateOutput", target: "sleep", targetHandle: "fieldInput/duration" }],
-  fields: [{ name: "secondsBetweenImages", type: "float", value: "600" }],
+  nodes: [{ id: "r", type: "event", data: { keyword: "render" } }],
+  edges: [],
+  fields: [{ name: "secondsBetweenImages", type: "float", value: "600", role: "refreshInterval" }],
   settings: { refreshInterval: 3600 },
 } as unknown as FrameScene;
 
@@ -46,15 +43,18 @@ const split = {
 describe("sceneRhythm", () => {
   it("reads a plain scene's refresh interval", () => {
     expect(sceneRhythm(clock)).toEqual({ seconds: 0.2, source: "interval" });
+    // No setting at all: the interval field's own default, like every surface.
     expect(sceneRhythm({ ...clock, settings: {} } as FrameScene, {}, [], 900)).toEqual({
-      seconds: 900,
+      seconds: 300,
       source: "interval",
     });
   });
 
-  it("prefers the scene's own nextSleepDuration, from the field default or the panel's override", () => {
-    expect(sceneRhythm(photo)).toEqual({ seconds: 600, source: "nextSleep" });
-    expect(sceneRhythm(photo, { secondsBetweenImages: "90" })).toEqual({ seconds: 90, source: "nextSleep" });
+  it("reads a declared interval field, from its default or the panel's override", () => {
+    expect(sceneRhythm(photo)).toEqual({ seconds: 600, source: "interval" });
+    expect(sceneRhythm(photo, { secondsBetweenImages: "90" })).toEqual({ seconds: 90, source: "interval" });
+    // The implicit field every other scene has works the same way.
+    expect(sceneRhythm(clock, { refreshInterval: 5 })).toEqual({ seconds: 5, source: "interval" });
   });
 
   it("gives a split the rhythm of its fastest panel, not its own interval", () => {
@@ -71,7 +71,7 @@ describe("sceneRhythm", () => {
     expect(describeRhythmSeconds(600)).toBe("every 10 min");
     expect(describeRhythmSeconds(5400)).toBe("every 1.5 h");
     expect(describeRhythmSeconds(86400)).toBe("every day");
-    expect(describeSceneRhythm({ seconds: null, source: "runtime" })).toBe("paces itself");
+    expect(describeSceneRhythm({ seconds: null, source: "children" })).toBe("when its panels are due");
     expect(describeSceneRhythm({ seconds: 60, source: "children" })).toBe("every 1 min (its fastest panel)");
   });
 });

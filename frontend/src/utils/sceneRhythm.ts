@@ -1,19 +1,20 @@
 import { FrameScene } from '../types'
+import { sceneRefreshSeconds } from './refreshInterval'
 
 /**
  * Scene rhythm, as the editor can know it before a deploy.
  *
- * On a frame every embedded scene renders when IT is due (docs/scene-rhythm.md):
- * its own `logic/nextSleepDuration` if it has one, else its refresh interval.
- * A scene the split drawer generated draws nothing itself, so it has no
- * interval of its own — it follows its cells.
+ * On a frame every embedded scene renders when IT is due (docs/scene-rhythm.md),
+ * on the refresh interval its state holds (utils/refreshInterval.ts). A scene
+ * the split drawer generated draws nothing itself, so it has no interval of
+ * its own — it follows its cells.
  */
 
 export interface SceneRhythm {
-  /** Seconds between renders; null when the scene decides while it runs. */
+  /** Seconds between renders; null when nothing says. */
   seconds: number | null
-  /** Where the number came from. */
-  source: 'interval' | 'nextSleep' | 'children' | 'runtime'
+  /** Where the number came from: the scene's own interval, or its fastest panel. */
+  source: 'interval' | 'children'
 }
 
 /** True for scenes that render when their embedded scenes do (generated splits). */
@@ -22,15 +23,10 @@ export function sceneFollowsChildren(scene: Pick<FrameScene, 'settings'> | null 
   return !!layout && typeof layout === 'object'
 }
 
-function toSeconds(value: unknown): number | null {
-  const seconds = typeof value === 'number' ? value : typeof value === 'string' ? parseFloat(value) : NaN
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
-}
-
 /**
  * How often `scene` renders when embedded with `state` (the scene node's
- * config — a split cell's option overrides). `scenes` resolves the scenes a
- * split embeds; `fallbackInterval` is the frame's.
+ * config — a split cell's option overrides, the refresh interval among them).
+ * `scenes` resolves the scenes a split embeds; `fallbackInterval` is the frame's.
  */
 export function sceneRhythm(
   scene: FrameScene,
@@ -39,39 +35,10 @@ export function sceneRhythm(
   fallbackInterval = 300,
   depth = 0
 ): SceneRhythm {
-  const nodes = scene.nodes ?? []
-  const edges = scene.edges ?? []
-
-  // A scene that paces itself: logic/nextSleepDuration, with the duration
-  // either set on the node or wired from a state field ("secondsBetweenImages").
-  for (const node of nodes) {
-    const data = node.data as { keyword?: string; config?: Record<string, any> } | undefined
-    if (node.type !== 'app' || data?.keyword !== 'logic/nextSleepDuration') {
-      continue
-    }
-    const wired = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'fieldInput/duration')
-    if (!wired) {
-      const seconds = toSeconds(data?.config?.duration)
-      return seconds === null ? { seconds: null, source: 'runtime' } : { seconds, source: 'nextSleep' }
-    }
-    const source = nodes.find((candidate) => candidate.id === wired.source)
-    const fieldName = source?.type === 'state' ? (source.data as { keyword?: string })?.keyword : undefined
-    if (fieldName) {
-      const field = (scene.fields ?? []).find((candidate) => candidate.name === fieldName)
-      const seconds = toSeconds(state[fieldName] ?? field?.value)
-      if (seconds !== null) {
-        return { seconds, source: 'nextSleep' }
-      }
-    }
-    // Computed by a code node: only the frame knows.
-    return { seconds: null, source: 'runtime' }
-  }
-
   if (sceneFollowsChildren(scene) && depth < 8) {
     const lookup = scenes instanceof Map ? scenes : new Map(scenes.map((candidate) => [candidate.id, candidate]))
     let soonest: number | null = null
-    let unknown = false
-    for (const node of nodes) {
+    for (const node of scene.nodes ?? []) {
       if (node.type !== 'scene') {
         continue
       }
@@ -81,21 +48,18 @@ export function sceneRhythm(
         continue
       }
       const rhythm = sceneRhythm(child, data.config ?? {}, lookup, fallbackInterval, depth + 1)
-      if (rhythm.seconds === null) {
-        unknown = true
-      } else {
+      if (rhythm.seconds !== null) {
         soonest = soonest === null ? rhythm.seconds : Math.min(soonest, rhythm.seconds)
       }
     }
     if (soonest !== null) {
       return { seconds: soonest, source: 'children' }
     }
-    if (unknown) {
-      return { seconds: null, source: 'runtime' }
-    }
   }
-
-  return { seconds: toSeconds(scene.settings?.refreshInterval) ?? fallbackInterval, source: 'interval' }
+  // The interval is a state field every scene has (utils/refreshInterval.ts):
+  // the panel's override if it set one, else the scene's own default.
+  const seconds = sceneRefreshSeconds(scene, state)
+  return { seconds: seconds > 0 ? seconds : fallbackInterval, source: 'interval' }
 }
 
 /** "every 10 min", "every 0.2 s", "5× a second". */
@@ -123,7 +87,7 @@ export function describeRhythmSeconds(seconds: number): string {
 
 export function describeSceneRhythm(rhythm: SceneRhythm): string {
   if (rhythm.seconds === null) {
-    return 'paces itself'
+    return 'when its panels are due'
   }
   const text = describeRhythmSeconds(rhythm.seconds)
   return rhythm.source === 'children' ? `${text} (its fastest panel)` : text
