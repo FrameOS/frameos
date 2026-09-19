@@ -25,6 +25,9 @@ import { Tooltip } from './Tooltip'
  * Values are plain props, not form bindings: the cloud reads them from
  * top-level frame settings and the backend from `device_config`, so the
  * component cannot own where they live.
+ *
+ * The Pico thin-client firmware (embedded/pico, backend only) reads the first
+ * two of the six by the BACKEND route and ignores the rest — see `profile`.
  */
 export interface PowerSettingsValues {
   deepSleep: boolean
@@ -39,6 +42,16 @@ export interface PowerSettingsValues {
 export interface PowerSettingsFieldsProps {
   value: PowerSettingsValues
   onChange: (patch: Partial<PowerSettingsValues>) => void
+  /**
+   * Which firmware reads these. 'esp32' (the default) renders every control.
+   * 'pico' — a Pico W / Pico 2 W thin client on the self-hosted backend, i.e.
+   * a Pimoroni Inky Frame — renders "Between renders" alone: its firmware
+   * implements deepSleep and deepSleepOnBattery (it senses USB power itself)
+   * and nothing else, so a wake-check interval or a battery ADC pin would be
+   * a field that saves and does nothing. The values it cannot use are left
+   * untouched in the frame, never cleared.
+   */
+  profile?: 'esp32' | 'pico'
   /** Control-plane-specific note under the fields (how the values travel). */
   footnote?: ReactNode
   /**
@@ -64,12 +77,49 @@ const wakeCheckChoices = [
 export function PowerSettingsFields({
   value,
   onChange,
+  profile = 'esp32',
   footnote,
   batteryEnablePinDisabledReason,
   className,
 }: PowerSettingsFieldsProps): JSX.Element {
   const wakeCheckValue = String(value.wakeCheckSeconds ?? 0)
   const sleeps = value.deepSleep || value.deepSleepOnBattery
+
+  if (profile === 'pico') {
+    return (
+      <div className={clsx('space-y-2', className)}>
+        <PowerField
+          label="Between renders"
+          tooltip={
+            <>
+              On an Inky Frame, deep sleep switches the board off completely between renders: the firmware sets the
+              on-board clock&apos;s alarm for the next render and cuts its own power, drawing about 20 µA. It wakes on
+              that alarm or on a press of any of the front buttons, fetches the picture, refreshes the panel and powers
+              off again. While off it is offline, so changes made here land on the next wake. On USB power the board
+              cannot cut its power, so it simply waits out the interval instead — which is also what "on battery" means
+              here: the firmware checks for USB power itself, no battery sense pin involved.
+            </>
+          }
+        >
+          <Select
+            value={value.deepSleep ? 'always' : value.deepSleepOnBattery ? 'battery' : 'connected'}
+            onChange={(mode) => onChange({ deepSleep: mode === 'always', deepSleepOnBattery: mode === 'battery' })}
+            options={[
+              { value: 'connected', label: 'Stay powered (default)' },
+              { value: 'battery', label: 'Power off between renders when on battery' },
+              { value: 'always', label: 'Always power off between renders' },
+            ]}
+          />
+        </PowerField>
+        <p className="frameos-muted text-sm">
+          {sleeps
+            ? 'The board powers off between renders and wakes on the refresh interval or any front button. Plugged into USB it stays on and waits instead.'
+            : 'The board stays on and connected between renders — fine on USB power, quick to drain a battery pack.'}
+        </p>
+        {footnote ? <p className="frameos-muted text-sm">{footnote}</p> : null}
+      </div>
+    )
+  }
 
   return (
     <div className={clsx('space-y-2', className)}>

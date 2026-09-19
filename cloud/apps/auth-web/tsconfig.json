@@ -48,6 +48,15 @@
     // them out.
     "src/test/shared-spa/usb-board-identity.test.ts",
     "src/test/shared-spa/scene-execution-fixtures.test.ts",
+    // Same story: `usb_api bootsel` runs through embeddedUsbLogsModel itself,
+    // and the Inky Frame pin tables live in esp32Hardware.ts, which reaches
+    // components/Select.tsx through devices.ts (see device-catalog-mirror
+    // below); the card test mounts the USB connect card the way
+    // embedded-release-flasher mounts the flasher. Vitest still runs all
+    // three; only tsc leaves them out.
+    "src/test/shared-spa/pico-usb-bootsel.test.ts",
+    "src/test/shared-spa/pico-inky-frame-pins.test.ts",
+    "src/test/shared-spa/pico-firmware-card.test.tsx",
     // Same story: imports frameLogic, whose graph reaches the legacy
     // workspace (FrameConnectionDot's bare JSX namespace). Vitest still
     // runs it; only tsc leaves it out.

@@ -2,7 +2,7 @@ import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path,
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
-import { workspaceMode } from '../../../workspace/workspaceSurfaces'
+import { frameUsbConsoleHasRendererVerbs, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { appsModel } from '../../../../models/appsModel'
 import { sceneUpdatesLogic } from './sceneUpdatesLogic'
 import { forms } from 'kea-forms'
@@ -1159,7 +1159,11 @@ export const scenesLogic = kea<scenesLogicType>([
           ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
         }
         let usbSucceeded = false
-        if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
+        if (
+          (values.frame?.mode ?? 'rpios') === 'embedded' &&
+          frameUsbConsoleHasRendererVerbs(values.frame) &&
+          embeddedUsbApiCanUse(props.frameId)
+        ) {
           try {
             const payloadBytes = new TextEncoder().encode(JSON.stringify(payload))
             await runEmbeddedUsbApiCommand(props.frameId, 'upload-scenes', {

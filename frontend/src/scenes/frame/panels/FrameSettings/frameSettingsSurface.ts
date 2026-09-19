@@ -2,6 +2,7 @@ import type { FrameType } from '../../../../types'
 import {
   allowedFrameSettingsSections,
   isEsp32CloudFrame,
+  isPicoPlatform,
   workspaceMode,
   type WorkspaceMode,
 } from '../../../workspace/workspaceSurfaces'
@@ -223,7 +224,8 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'Power',
     anchor: 'frame-settings-power',
     surfaces: ['backend'],
-    conditions: 'Real ESP32 boards only: not virtual frames, not the pico family.',
+    conditions:
+      'Real boards only, never virtual frames. The pico family gets the deep-sleep control alone (embeddedPowerProfileFor below): its firmware has no wake-check interval and no battery ADC.',
   },
   {
     key: 'cloud-ssh-keys',
@@ -386,6 +388,30 @@ export function frameSettingsNavDrift(mode: WorkspaceMode): { missing: string[];
     missing: [...expected].filter((anchor) => !declared.has(anchor)),
     extra: [...declared].filter((anchor) => !expected.has(anchor)),
   }
+}
+
+/**
+ * Which set of Power controls a backend-managed embedded frame gets, by its
+ * `embedded.platform`:
+ *
+ *  - 'esp32': all of them (deep sleep, the wake-check interval, the battery
+ *    ADC pin, divider and enable pin).
+ *  - 'pico': deep sleep only — always, or only while no USB power is present.
+ *    The Pico firmware cuts the board's power through the Inky Frame's RTC
+ *    between renders and implements nothing else: no wake schedule, no
+ *    wake-check interval, no battery ADC.
+ *  - null: no Power section at all. A virtual frame has no battery and never
+ *    sleeps.
+ *
+ * An embedded frame with no platform stored is an ESP32-S3, the default.
+ */
+export type EmbeddedPowerProfile = 'esp32' | 'pico'
+
+export function embeddedPowerProfileFor(platform: string | null | undefined): EmbeddedPowerProfile | null {
+  if (platform === 'virtual') {
+    return null
+  }
+  return isPicoPlatform(platform) ? 'pico' : 'esp32'
 }
 
 /** Convenience for callers that hold a full frame rather than the capability shape. */

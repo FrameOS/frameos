@@ -1,9 +1,10 @@
 // Persistent configuration for the FrameOS Pico thin client.
 //
 // One fixed-size struct in the last 4KB flash sector — the Pico has no NVS,
-// and a versioned struct with a CRC is enough for a dozen settings. A
+// and a versioned struct with a CRC is enough for two dozen settings. A
 // factory reset erases the sector; an unreadable or mismatched blob falls
-// back to defaults (unprovisioned).
+// back to defaults (unprovisioned). The struct itself and everything that
+// edits it (pk_config_keys.c) is portable; only pk_config.c touches flash.
 #ifndef PK_CONFIG_H
 #define PK_CONFIG_H
 
@@ -12,6 +13,10 @@
 
 #define PK_STR_LEN 96
 #define PK_URL_LEN 160
+#define PK_NAME_LEN 64
+
+#define PK_INTERVAL_MIN_SECONDS 15
+#define PK_INTERVAL_DEFAULT_SECONDS 300
 
 typedef struct {
     int8_t sck;
@@ -45,9 +50,22 @@ typedef struct {
     // Battery mode: after each render, power off via the RTC + HOLD_VSYS
     // latch and cold-boot on the next interval (Inky Frame ~20uA).
     uint8_t deep_sleep;
+    // --- v3 ---
+    // Same power-cut, but only while no USB power is present (VBUS sense).
+    uint8_t deep_sleep_on_battery;
+    uint8_t send_logs;            // upload the log ring to the backend
+    uint8_t admin_auth;           // HTTP Basic login for the device's own pages
+    uint8_t debug;
+    uint8_t reserved[3];
+    char hostname[PK_NAME_LEN];   // DHCP + mDNS name ("frame42" → frame42.local)
+    char name[PK_NAME_LEN];       // display name, from the settings pull
+    char admin_user[PK_NAME_LEN];
+    char admin_pass[PK_STR_LEN];
+    char ap_psk[PK_NAME_LEN];     // setup hotspot passphrase, minted on first use
 } pk_config_t;
 
 pk_config_t *pk_config(void);
+void pk_config_defaults(pk_config_t *config);
 void pk_config_load(void);
 bool pk_config_save(void);
 void pk_config_factory_reset(void);

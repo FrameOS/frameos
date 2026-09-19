@@ -13,11 +13,27 @@
 static volatile long long s_epoch = 0;
 static absolute_time_t s_epoch_set_at;
 static bool s_sntp_started = false;
+static volatile bool s_sntp_update = false;
 
 void pk_time_set(unsigned long epoch_seconds)
 {
     s_epoch = (long long)epoch_seconds;
     s_epoch_set_at = get_absolute_time();
+    s_sntp_update = true;
+}
+
+void pk_time_seed(unsigned long epoch_seconds)
+{
+    if (s_epoch != 0 || epoch_seconds == 0) return;
+    s_epoch = (long long)epoch_seconds;
+    s_epoch_set_at = get_absolute_time();
+}
+
+bool pk_time_take_sntp_update(void)
+{
+    bool update = s_sntp_update;
+    s_sntp_update = false;
+    return update;
 }
 
 bool pk_time_synced(void)

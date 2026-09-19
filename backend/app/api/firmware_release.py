@@ -17,11 +17,16 @@ the firmware.
 
 Two shapes, mirroring the cloud:
   GET /api/frames/firmware
-    -> { "release": "vX.Y.Z", "assets": [{ name, platform, size }] }
+    -> { "release": "vX.Y.Z", "assets": [{ name, platform, size, format }] }
   GET /api/frames/firmware?platform=esp32-s3-generic
     -> the merged .bin bytes, streamed.
+  GET /api/frames/firmware?platform=pico-2w
+    -> the pico family's .uf2, streamed as a named attachment: a person
+       saves it and drops it onto the BOOTSEL drive, nothing flashes it.
 
 Documented divergences from the cloud route:
+  - ``format`` ("bin" | "uf2" | "img.gz") and the pico .uf2 assets are this
+    backend's; the cloud lists neither yet.
   - Auth is the backend's normal project-scoped session auth (router-level
     get_current_project dependency on api_project), not the cloud session
     cookie; there is no separate per-route rate limit — the GitHub budget is
@@ -35,6 +40,7 @@ Documented divergences from the cloud route:
 """
 
 import os
+import re
 import time
 from http import HTTPStatus
 from typing import Any, Optional
@@ -44,7 +50,11 @@ import httpx
 from fastapi import HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from app.tasks.embedded_firmware import embedded_release_asset_names
+from app.tasks.embedded_firmware import (
+    EMBEDDED_IMAGE_FORMAT_BIN,
+    EMBEDDED_IMAGE_FORMAT_UF2,
+    embedded_release_asset_names,
+)
 
 from . import api_project
 
@@ -59,19 +69,33 @@ RELEASE_API_URL = "https://api.github.com/repos/FrameOS/frameos/releases/latest"
 # .github/workflows/docker-publish-multi.yml publish all of them. These are
 # the MERGED provisioning images (bootloader at 0x0, partition table, blank
 # otadata, app) — what a flasher writes to a board, not the bare OTA app image.
+#
+# ``format`` says what to do with the file, and rides the listing so the SPA
+# need not guess from a name: "bin" is esptool-flashed from the browser, "uf2"
+# (the pico family, the `build-pico-firmware` job) is saved and dropped onto
+# the board's BOOTSEL drive, "img.gz" is an SD card image.
 PROVISIONING_ASSETS: list[dict[str, str]] = [
-    *({"platform": asset, "suffix": f"-{asset}.bin"} for asset in embedded_release_asset_names()),
-    {"platform": "esp32-s3-epd7in5v2", "suffix": "-esp32-s3-epd7in5v2.bin"},
-    {"platform": "raspberry-pi-32", "suffix": "-raspberry-pi-32-buildroot.img.gz"},
-    {"platform": "raspberry-pi-64", "suffix": "-raspberry-pi-64-buildroot.img.gz"},
-    {"platform": "raspberry-pi-5", "suffix": "-raspberry-pi-5-buildroot.img.gz"},
+    *(
+        {"platform": asset, "suffix": f"-{asset}.bin", "format": EMBEDDED_IMAGE_FORMAT_BIN}
+        for asset in embedded_release_asset_names()
+    ),
+    {"platform": "esp32-s3-epd7in5v2", "suffix": "-esp32-s3-epd7in5v2.bin", "format": EMBEDDED_IMAGE_FORMAT_BIN},
+    *(
+        {"platform": asset, "suffix": f"-{asset}.uf2", "format": EMBEDDED_IMAGE_FORMAT_UF2}
+        for asset in embedded_release_asset_names(EMBEDDED_IMAGE_FORMAT_UF2)
+    ),
+    {"platform": "raspberry-pi-32", "suffix": "-raspberry-pi-32-buildroot.img.gz", "format": "img.gz"},
+    {"platform": "raspberry-pi-64", "suffix": "-raspberry-pi-64-buildroot.img.gz", "format": "img.gz"},
+    {"platform": "raspberry-pi-5", "suffix": "-raspberry-pi-5-buildroot.img.gz", "format": "img.gz"},
 ]
 
-# Only the ESP32 firmware (a few MB) is ever streamed from here; the
-# gigabyte-sized buildroot SD images appear in the listing but are not
-# streamable through this route.
+# Only microcontroller firmware (a few MB at most) is ever streamed from
+# here; the gigabyte-sized buildroot SD images appear in the listing but are
+# not streamable through this route.
 STREAMABLE_PLATFORMS = {
-    entry["platform"] for entry in PROVISIONING_ASSETS if entry["platform"].startswith("esp32-")
+    entry["platform"]
+    for entry in PROVISIONING_ASSETS
+    if entry["format"] in (EMBEDDED_IMAGE_FORMAT_BIN, EMBEDDED_IMAGE_FORMAT_UF2)
 }
 
 # OTA images. NOT the same file as the provisioning image, and the difference
@@ -81,7 +105,8 @@ STREAMABLE_PLATFORMS = {
 # app image: esp_ota_write/esp_ota_end validate an esp_app_desc at offset
 # 0x20, and the merged image has the BOOTLOADER there. The release publishes
 # both (`-app.bin` beside every `.bin`); the device-authed manifest/download
-# routes serve this one, for the flash layout the device names.
+# routes serve this one, for the flash layout the device names. The pico
+# UF2s are provisioning-only and deliberately absent: a Pico has no OTA.
 OTA_ASSETS: dict[str, str] = {asset: f"-{asset}-app.bin" for asset in embedded_release_asset_names()}
 
 # A minisign signature file is a comment line plus two short base64 lines —
@@ -276,15 +301,24 @@ def _pinned_asset_url(asset: dict[str, Any]) -> Optional[str]:
     return url
 
 
+def _attachment_filename(asset: dict[str, Any]) -> str:
+    """The asset's own name, reduced to what is safe inside a quoted header
+    value — it comes from the GitHub API, not from us."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", str(asset.get("name") or "")) or "firmware"
+
+
 async def _stream_release_asset(
-    asset: dict[str, Any], release_tag: str, range_header: Optional[str] = None
+    asset: dict[str, Any], release_tag: str, range_header: Optional[str] = None, attachment: bool = False
 ) -> StreamingResponse:
     """Pipe one release asset straight through — the bytes are never buffered.
 
     A ``Range`` header is forwarded and a 206 relayed as-is: firmware from
     before the signed release OTA (esp_https_ota with partial downloads)
     resumes its download in 512 KB ranges, and it must keep updating — that
-    is how such a board reaches the release image at all."""
+    is how such a board reaches the release image at all.
+
+    ``attachment`` names the download for a browser that saves it to disk
+    (the pico .uf2); the flasher's fetch() reads x-frameos-image-name."""
     url = _pinned_asset_url(asset)
     if not url:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="release_lookup_failed")
@@ -307,6 +341,8 @@ async def _stream_release_asset(
         "x-frameos-image-name": str(asset.get("name") or ""),
         "x-frameos-release": release_tag,
     }
+    if attachment:
+        headers["content-disposition"] = f'attachment; filename="{_attachment_filename(asset)}"'
     for name in ("content-length", "content-range"):
         value = upstream.headers.get(name)
         if value:
@@ -347,12 +383,14 @@ async def api_frames_firmware_release(platform: Optional[str] = Query(None)):
                     "name": asset.get("name"),
                     "platform": entry["platform"],
                     "size": asset.get("size"),
+                    "format": entry["format"],
                 })
         if local and not any(asset["platform"] == "esp32-s3-generic" for asset in assets):
             assets.insert(0, {
                 "name": local["name"],
                 "platform": "esp32-s3-generic",
                 "size": local["size"],
+                "format": EMBEDDED_IMAGE_FORMAT_BIN,
             })
         return JSONResponse(
             {"assets": assets, "release": release_tag},
@@ -373,4 +411,6 @@ async def api_frames_firmware_release(platform: Optional[str] = Query(None)):
         )
     if asset is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="firmware_not_published")
-    return await _stream_release_asset(asset, release_tag)
+    return await _stream_release_asset(
+        asset, release_tag, attachment=bool(entry and entry["format"] == EMBEDDED_IMAGE_FORMAT_UF2)
+    )

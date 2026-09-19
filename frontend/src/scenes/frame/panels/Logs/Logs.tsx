@@ -372,7 +372,9 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   // Two roads to a USB console: a backend/on-device embedded frame, or a
   // cloud-managed esp32 frame (hardware.platform from enrollment). The cloud
   // case matters most for a board that never joins WiFi — its serial console
-  // is the only log source there is.
+  // is the only log source there is. frameSupportsUsbSerialConsole also
+  // answers for a self-hosted Pico thin client, which speaks the same
+  // `usb_api` console.
   const isEsp32Frame =
     (frame?.mode === 'embedded' && (frame.embedded?.platform || EMBEDDED_ESP32_S3) === EMBEDDED_ESP32_S3) ||
     frameSupportsUsbSerialConsole(frame)

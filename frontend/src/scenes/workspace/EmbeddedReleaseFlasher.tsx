@@ -75,6 +75,10 @@ export interface EmbeddedProvisioningPlan {
   platform: string
   releasePlatform: string | null
   releaseFlashSize: string | null
+  /** "bin" = esptool-flash the merged image, "uf2" = copy it onto a Pico's
+   * BOOTSEL drive; null when nothing is published for the platform. Absent
+   * on a backend that predates the field. */
+  releaseFormat?: 'bin' | 'uf2' | null
   blockers: string[]
   warnings: string[]
   settings: EmbeddedProvisioningSetting[]
@@ -459,9 +463,11 @@ export function EmbeddedReleaseFlasher({
     }
   }
 
-  // Nothing published for this chip (pico, virtual): the card says so on its
+  // Nothing published for this chip (virtual), or nothing esptool can write
+  // (the pico family's .uf2 goes onto a BOOTSEL drive by hand — the card
+  // mounts PicoFirmwareCard instead and never this): the card says so on its
   // own, and an explanation nobody asked for is just noise.
-  if (plan && !plan.releasePlatform) {
+  if (plan && (!plan.releasePlatform || plan.releaseFormat === 'uf2')) {
     return null
   }
   if (!webSerialSupported) {

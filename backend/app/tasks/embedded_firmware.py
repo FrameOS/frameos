@@ -100,6 +100,10 @@ EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
+# Wiring only the Pico firmware knows (embedded/pico/src/pk_config_keys.c): the
+# Inky Frame reads BUSY and its buttons through a shift register and holds its
+# own power latch. Absent on a bare Pico wired straight to a panel.
+EMBEDDED_PICO_EXTRA_PIN_KEYS = ("sr_clock", "sr_latch", "sr_data", "busy_bit", "hold_vsys")
 EMBEDDED_DEFAULT_PINS = {
     "rst": 5,
     "dc": 4,
@@ -593,6 +597,10 @@ EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
 # 4MB (C3) layouts, so those entries name them. The same names come back
 # from the device as the ``platform`` of its OTA manifest request
 # (fos_ota_platform in embedded/esp32/main/fos_ota.c).
+#
+# The table is ESP32-shaped and keyed by size alone, so read a FRAME's profile
+# through embedded_flash_profile_for_frame: a Pico 2 W also has 4MB of flash,
+# and must not come back with an ESP-IDF partition table or esp32 images.
 EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
     # Pico W (RP2040). Informational only: pico-family firmware is a generic
     # UF2 flashed over BOOTSEL; there is no partition table to report.
@@ -638,15 +646,31 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
 # (embedded_provisioning_plan). These are the fallback when a release predates
 # the per-layout assets above, and what the cloud flasher ships. Keep in sync
 # with PROVISIONING_ASSETS in app/api/firmware_release.py.
+#
+# ``format`` is what kind of file the asset is, which is also how it reaches
+# the board: "bin" is the ESP32 merged flash image (esptool writes it at 0x0,
+# and an `-app.bin` OTA image is published beside it); "uf2" is the pico
+# family's image (embedded/pico), dropped onto the BOOTSEL drive. A UF2 is
+# provisioning-only: the release carries no OTA image for it.
+EMBEDDED_IMAGE_FORMAT_BIN = "bin"
+EMBEDDED_IMAGE_FORMAT_UF2 = "uf2"
 EMBEDDED_RELEASE_FIRMWARE: dict[str, dict[str, str]] = {
-    "esp32-s3": {"asset": "esp32-s3-generic", "flashSize": "8MB"},
-    "esp32-c3": {"asset": "esp32-c3-generic", "flashSize": "4MB"},
+    "esp32-s3": {"asset": "esp32-s3-generic", "flashSize": "8MB", "format": EMBEDDED_IMAGE_FORMAT_BIN},
+    "esp32-c3": {"asset": "esp32-c3-generic", "flashSize": "4MB", "format": EMBEDDED_IMAGE_FORMAT_BIN},
+    "pico-w": {"asset": "pico-w", "flashSize": "2MB", "format": EMBEDDED_IMAGE_FORMAT_UF2},
+    "pico-2w": {"asset": "pico-2w", "flashSize": "4MB", "format": EMBEDDED_IMAGE_FORMAT_UF2},
 }
 
 
-def embedded_release_asset_names() -> list[str]:
-    """Every release asset the flash profiles name, generic ones first."""
-    names = [release["asset"] for release in EMBEDDED_RELEASE_FIRMWARE.values()]
+def embedded_release_asset_names(image_format: str = EMBEDDED_IMAGE_FORMAT_BIN) -> list[str]:
+    """Every release asset of one image format, generic ones first. The
+    default is the ESP32 set — the only ones the flash profiles name, and the
+    only ones with an OTA image beside them; "uf2" is the pico pair."""
+    names = [
+        release["asset"] for release in EMBEDDED_RELEASE_FIRMWARE.values() if release["format"] == image_format
+    ]
+    if image_format != EMBEDDED_IMAGE_FORMAT_BIN:
+        return names
     for profile in EMBEDDED_FLASH_PROFILES.values():
         for asset in profile["releaseAssets"].values():
             if asset not in names:
@@ -671,11 +695,19 @@ def embedded_release_firmware_for_frame(
     generic = EMBEDDED_RELEASE_FIRMWARE.get(platform)
     if generic is None:
         return None
+    if generic["format"] != EMBEDDED_IMAGE_FORMAT_BIN:
+        # One UF2 per chip, whatever the frame says about its flash size.
+        return {**generic, "otaSupported": False}
     flash_size = embedded_flash_size_for_frame(frame)
     profile = EMBEDDED_FLASH_PROFILES[flash_size]
     asset = profile["releaseAssets"].get(platform)
     if asset and (asset == generic["asset"] or (published_assets is not None and asset in published_assets)):
-        return {"asset": asset, "flashSize": flash_size, "otaSupported": bool(profile["otaSupported"])}
+        return {
+            "asset": asset,
+            "flashSize": flash_size,
+            "format": generic["format"],
+            "otaSupported": bool(profile["otaSupported"]),
+        }
     generic_profile = EMBEDDED_FLASH_PROFILES[generic["flashSize"]]
     return {**generic, "otaSupported": bool(generic_profile["otaSupported"])}
 # Memory guardrail (M4): the on-device renderer composites into a pixie canvas
@@ -784,7 +816,12 @@ def embedded_flash_size_for_frame(frame: Frame) -> str:
 
 
 def embedded_flash_profile_for_frame(frame: Frame) -> dict[str, Any]:
-    return EMBEDDED_FLASH_PROFILES[embedded_flash_size_for_frame(frame)]
+    profile = EMBEDDED_FLASH_PROFILES[embedded_flash_size_for_frame(frame)]
+    if embedded_platform_spec_for_frame(frame)["family"] == "pico":
+        # Only the size carries over: no ESP-IDF partition table, no OTA
+        # slots, and none of the esp32 images built for that layout.
+        return {**profile, "partitionTable": None, "otaSupported": False, "releaseAssets": {}}
+    return profile
 
 
 def embedded_ota_supported_for_frame(frame: Frame) -> bool:
@@ -845,6 +882,17 @@ def embedded_render_mode_for_frame(frame: Frame) -> int:
             elif isinstance(value, int) and not isinstance(value, bool):
                 return EMBEDDED_RENDER_REMOTE if value == EMBEDDED_RENDER_REMOTE else EMBEDDED_RENDER_LOCAL
     return EMBEDDED_RENDER_LOCAL
+
+
+def is_thin_client_frame(frame: Frame) -> bool:
+    """A physical board the backend renders for (/embedded/render). Like a
+    virtual frame it keeps no scene state itself: the backend is the memory."""
+    if (frame.mode or "rpios") != "embedded" or is_virtual_frame(frame):
+        return False
+    try:
+        return embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    except ValueError:
+        return False
 
 
 def embedded_device_config(frame: Frame) -> dict[str, Any]:
@@ -972,6 +1020,13 @@ def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
             raw_value = raw_pins.get("sclk")
         if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= max_gpio:
             pins[key] = raw_value
+    if embedded_platform_spec_for_frame(frame).get("family") == "pico":
+        for key in EMBEDDED_PICO_EXTRA_PIN_KEYS:
+            raw_value = raw_pins.get(key)
+            # busy_bit is a bit of the shift register, not a GPIO.
+            limit = 7 if key == "busy_bit" else max_gpio
+            if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= limit:
+                pins[key] = raw_value
     return pins
 
 
@@ -1148,6 +1203,10 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
             "usedBytes": None,
         },
     ]
+    if embedded_platform_spec_for_frame(frame)["family"] == "pico":
+        # A UF2 is one flat image: nothing sits at the ESP32 bootloader and
+        # partition-table offsets above, so there are no rows to draw.
+        partitions = []
     app_slot_names = {"factory"} if not flash_profile["otaSupported"] else {"ota_0", "ota_1"}
     for partition in _embedded_partition_table_rows(flash_profile["partitionTable"]):
         if partition["name"] in app_slot_names:
@@ -1381,7 +1440,8 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
             warnings.append(f"{exc} Until then the board renders as a thin client.")
 
     pins = embedded_pins_for_frame(frame)
-    settings.append(_provisioning_setting("pins", ",".join(f"{key}={pins[key]}" for key in EMBEDDED_PIN_KEYS)))
+    pin_keys = EMBEDDED_PIN_KEYS + tuple(key for key in EMBEDDED_PICO_EXTRA_PIN_KEYS if key in pins)
+    settings.append(_provisioning_setting("pins", ",".join(f"{key}={pins[key]}" for key in pin_keys)))
 
     # The console takes the newline-separated button spec with commas instead.
     buttons = embedded_gpio_buttons_config(frame).replace("\n", ",")
@@ -1475,7 +1535,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
             "which delivers the certificate and key; the board answers over plain HTTP until then."
         )
 
-    if release is not None:
+    # Both are about ESP32 partition layouts; a UF2 has neither a layout to
+    # mismatch nor an OTA slot to be missing.
+    if release is not None and release["format"] == EMBEDDED_IMAGE_FORMAT_BIN:
         frame_flash_size = embedded_flash_size_for_frame(frame)
         if frame_flash_size != release["flashSize"]:
             warnings.append(
@@ -1498,6 +1560,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
         "platform": platform,
         "releasePlatform": release["asset"] if release else None,
         "releaseFlashSize": release["flashSize"] if release else None,
+        # "bin" = esptool-flash the merged image; "uf2" = drop it on the
+        # BOOTSEL drive. Either way the console settings below follow.
+        "releaseFormat": release["format"] if release else None,
         "blockers": blockers,
         "warnings": warnings,
         "settings": settings,

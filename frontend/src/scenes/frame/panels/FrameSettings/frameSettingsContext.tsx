@@ -38,7 +38,12 @@ import {
   esp32HardwarePresetConfig,
   normalizeEsp32HardwarePreset,
 } from './esp32Hardware'
-import { frameSettingsSurfaceFor, type FrameSettingsSurface } from './frameSettingsSurface'
+import {
+  embeddedPowerProfileFor,
+  frameSettingsSurfaceFor,
+  type EmbeddedPowerProfile,
+  type FrameSettingsSurface,
+} from './frameSettingsSurface'
 import { newMountpoint } from './frameSettingsHelpers'
 
 export interface FrameSettingsProps {
@@ -132,6 +137,8 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   embeddedPowerSettings: PowerSettingsValues
   setEmbeddedPowerSettings: (patch: Partial<PowerSettingsValues>) => void
   /** Real ESP32 hardware on the backend plane: not virtual, not a pico. */
+  /** Which Power controls this board's firmware implements; null = none. */
+  embeddedPowerProfile: EmbeddedPowerProfile | null
   showEmbeddedPowerSection: boolean
 
   virtualViewToken: string
@@ -356,6 +363,7 @@ export function FrameSettingsProvider({
   // backend accepts both — a device provisioned over its USB console writes
   // snake_case.
   const powerDeviceConfig = frameForm.device_config ?? frame.device_config ?? {}
+  const embeddedPowerProfile = embeddedPowerProfileFor(frameForm.embedded?.platform ?? frame.embedded?.platform)
   const setCloudPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
     setFrameFormValues({
       ...('batteryDivider' in patch ? { battery_divider: patch.batteryDivider } : {}),
@@ -529,14 +537,14 @@ export function FrameSettingsProvider({
       wakeCheckSeconds: powerDeviceConfig.wakeCheckSeconds ?? powerDeviceConfig.wake_check_seconds,
     },
     setEmbeddedPowerSettings,
-    // Backend/on-device planes: real ESP32 hardware only. A virtual frame has
-    // no battery and never sleeps, and the Pico family runs a firmware that
-    // implements none of this.
+    // Backend/on-device planes: real hardware only — a virtual frame has no
+    // battery and never sleeps. The profile picks the controls: every knob on
+    // an ESP32, deep sleep alone on a Pico (all its firmware implements).
+    embeddedPowerProfile,
     showEmbeddedPowerSection:
       !cloudProfile &&
       isEmbeddedMode &&
-      !isVirtualPlatform &&
-      !(frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico') &&
+      embeddedPowerProfile !== null &&
       frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-power', frame),
 
     virtualViewToken,

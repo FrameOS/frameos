@@ -168,6 +168,7 @@ from app.tasks.embedded_firmware import (
     normalize_embedded_platform,
     embedded_provisioning_plan,
     ensure_embedded_frame_defaults,
+    is_thin_client_frame,
     is_virtual_frame,
     request_embedded_firmware_update,
 )
@@ -1518,6 +1519,20 @@ async def api_frame_event(
             db, redis, frame, scenes_override=upload, scene_id=scene_id
         )
         return "OK"
+    # A thin client (ESP32-C3, Pico) renders nothing itself and keeps no scene
+    # state: the posted state goes into the backend store its next render pull
+    # is seeded from, BEFORE the forward — the device re-renders on any
+    # /event/*, and that pull must already see it.
+    if is_thin_client_frame(frame) and event in {"setCurrentScene", "setSceneState"} and isinstance(body, dict):
+        from .virtual_frame import apply_virtual_scene_state, resolve_virtual_scene_id
+
+        state = body.get("state")
+        if isinstance(state, dict) and state:
+            scene_id = body.get("sceneId")
+            target_scene = await resolve_virtual_scene_id(
+                redis, frame, scene_id if isinstance(scene_id, str) else None
+            )
+            await apply_virtual_scene_state(redis, frame, target_scene, state)
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body

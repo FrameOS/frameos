@@ -525,9 +525,13 @@ export function VirtualFrameSection(): JSX.Element | null {
  * over set_settings, stored in device_config here: USB provisioning sends them
  * once and the device's settings poll re-reads them, so a change takes effect
  * without a reflash.
+ *
+ * A Pico thin client gets the same section with the one control its firmware
+ * implements (deep sleep), same storage, same two routes to the board.
  */
 export function EmbeddedPowerSection(): JSX.Element | null {
-  const { showEmbeddedPowerSection, embeddedPowerSettings, setEmbeddedPowerSettings } = useFrameSettings()
+  const { showEmbeddedPowerSection, embeddedPowerProfile, embeddedPowerSettings, setEmbeddedPowerSettings } =
+    useFrameSettings()
   if (!showEmbeddedPowerSection) {
     return null
   }
@@ -538,9 +542,14 @@ export function EmbeddedPowerSection(): JSX.Element | null {
       </SectionHeading>
       <SectionBody className="">
         <PowerSettingsFields
+          profile={embeddedPowerProfile ?? 'esp32'}
           value={embeddedPowerSettings}
           onChange={setEmbeddedPowerSettings}
-          footnote="These reach the board on its next settings poll (firmware from 2026.8.21 on applies them live) and are sent over USB when a board is provisioned."
+          footnote={
+            embeddedPowerProfile === 'pico'
+              ? 'This reaches the board on its next settings poll and is sent over USB when a board is provisioned.'
+              : 'These reach the board on its next settings poll (firmware from 2026.8.21 on applies them live) and are sent over USB when a board is provisioned.'
+          }
         />
       </SectionBody>
     </>

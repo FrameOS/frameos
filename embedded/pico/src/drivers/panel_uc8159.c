@@ -43,7 +43,7 @@ static bool uc8159_begin(const pk_panel_t *panel, const pk_pins_t *pins)
     pk_epd_reset(pins);
     if (!panel_wait_idle(pins, 5000)) return false;
     panel_run_sequence(pins, panel->width == 600 ? seq_5in65f_init : seq_4in01f_init);
-    sleep_ms(100);
+    pk_wait_ms(100);
     // Re-assert VCOM/data interval, then resolution, then start pixel data.
     pk_epd_command(pins, 0x50);
     pk_epd_data_byte(pins, 0x37);
@@ -61,17 +61,23 @@ static void uc8159_write(const uint8_t *data, size_t len)
     pk_epd_data(s_pins, data, len);
 }
 
-static bool uc8159_end(const pk_pins_t *pins)
+static bool uc8159_end(const pk_pins_t *pins, bool refresh)
 {
-    pk_epd_command(pins, 0x04); // power on
-    if (!panel_wait_idle(pins, 15000)) return false;
-    pk_epd_command(pins, 0x12); // refresh
-    if (!panel_wait_idle(pins, 45000)) return false;
+    bool ok = true;
+    if (refresh) {
+        pk_epd_command(pins, 0x04); // power on
+        ok = panel_wait_idle(pins, 15000);
+        if (ok) {
+            pk_epd_command(pins, 0x12); // refresh
+            ok = panel_wait_idle(pins, 45000);
+        }
+    }
+    // Also after a timeout: the booster must not stay on.
     pk_epd_command(pins, 0x02); // power off
-    sleep_ms(200);
+    pk_wait_ms(200);
     pk_epd_command(pins, 0x07); // deep sleep
     pk_epd_data_byte(pins, 0xA5);
-    return true;
+    return ok;
 }
 
 const pk_panel_t pk_panel_uc8159_600x448 = {

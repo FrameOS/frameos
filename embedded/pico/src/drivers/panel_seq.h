@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "../pk_display.h"
+#include "../pk_platform.h"
 #include "../pk_shiftreg.h"
 #include "pico/stdlib.h"
 

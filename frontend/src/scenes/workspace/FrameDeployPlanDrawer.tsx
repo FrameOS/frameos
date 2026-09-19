@@ -98,6 +98,8 @@ import { registeredFramePanel } from './addFramePanelRegistry'
 import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
 import { EmbeddedUsbConnect } from './EmbeddedUsbConnect'
 import { EmbeddedUsbConnectionButton } from './embeddedFlashShared'
+import { PicoFirmwareCard } from './PicoFirmwareCard'
+import { picoBoardLabel } from './picoFirmware'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { framePendingCommandsLogic, pendingCommandLabel, type FramePendingCommand } from './framePendingCommandsLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -105,6 +107,7 @@ import {
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
   isEsp32CloudFrame,
+  isPicoPlatform,
   workspaceMode,
 } from './workspaceSurfaces'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -2322,8 +2325,13 @@ function EmbeddedFirmwareSection({
   const releaseFlashBusy = false
   // Pico-family boards flash a generic UF2 release asset over BOOTSEL and are
   // provisioned over the USB serial console: no esptool, no browser flashing,
-  // no OTA. Hide all of those controls.
-  const isPicoPlatform = platformLabel.startsWith('pico')
+  // no OTA. Hide all of those controls; on the self-hosted backend the two
+  // Pico cards take their place (download the .uf2, then the same USB
+  // provisioning an ESP32 gets). The cloud publishes no pico firmware and a
+  // frame's own admin bundle serves neither the listing nor a plan, so those
+  // keep the pointer to the release page.
+  const isPicoFrame = isPicoPlatform(platformLabel)
+  const picoCardsAvailable = isPicoFrame && workspaceMode() === 'backend'
   // Virtual frames have no hardware at all: the backend renders them, so
   // instead of firmware the section shows the image and kiosk page URLs.
   const isVirtualPlatform = platformLabel === EMBEDDED_VIRTUAL
@@ -2376,7 +2384,14 @@ function EmbeddedFirmwareSection({
               Nothing to flash: the backend renders this frame. Point any browser, tablet, or signage player at the
               kiosk page URL, or fetch the image URL for a PNG.
             </>
-          ) : isPicoPlatform ? (
+          ) : picoCardsAvailable ? (
+            <>
+              This {picoBoardLabel(platformLabel)} is a thin client: this backend renders its scenes and the board
+              fetches the picture. Installing it takes two short steps — copy the FrameOS firmware onto the board, then
+              connect over USB so the browser can tell it which frame it is. Later firmware updates go the same way; a
+              Pico has no over-the-air update.
+            </>
+          ) : isPicoFrame ? (
             <>
               This {platformLabel} board runs the generic FrameOS UF2 firmware: copy the release asset onto the board
               over BOOTSEL drag-and-drop and provision it over the USB serial console.{' '}
@@ -2406,7 +2421,12 @@ function EmbeddedFirmwareSection({
             </span>
           </div>
         </div>
-      ) : isPicoPlatform ? null : (
+      ) : picoCardsAvailable ? (
+        <>
+          <PicoFirmwareCard frame={frame} />
+          <EmbeddedUsbConnect frame={frame} />
+        </>
+      ) : isPicoFrame ? null : (
         <>
           <div className="frame-tool-muted text-sm leading-5">
             Every ESP32 board runs the same signed FrameOS release image. Over USB the browser flashes it and tells the
@@ -3540,7 +3560,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const embeddedFullDeploySupported =
     isEmbeddedFrame &&
     embeddedPlatform !== EMBEDDED_VIRTUAL &&
-    !embeddedPlatform.startsWith('pico') &&
+    !isPicoPlatform(embeddedPlatform) &&
     embeddedOtaSupported(frame)
   const hasSuccessfulDeploy = Boolean(
     frame.last_successful_deploy_at || frame.last_successful_deploy || embeddedFastDeployReady

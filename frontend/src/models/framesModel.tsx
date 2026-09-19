@@ -43,7 +43,7 @@ import {
   runEmbeddedUsbApiCommand,
   usbRestart,
 } from './embeddedUsbLogsModel'
-import { frameSupportsUsbSerialConsole } from '../scenes/workspace/workspaceSurfaces'
+import { frameSupportsUsbSerialConsole, frameUsbConsoleHasRendererVerbs } from '../scenes/workspace/workspaceSurfaces'
 import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../utils/systemScenes'
 import type { FrameEmbeddedFlashSize } from '../types'
 
@@ -1628,6 +1628,11 @@ export const framesModel = kea<framesModelType>([
       }
     },
     [embeddedUsbLogsModel.actionTypes.appendUsbLog]: ({ log }) => {
+      // A Pico thin client has no `usb_api image` to read the panel back with;
+      // its picture is the backend's own render.
+      if (!frameUsbConsoleHasRendererVerbs(values.frames[log.frame_id])) {
+        return
+      }
       if (log.type === 'usb' && usbLogLineIndicatesImageReady(log.line)) {
         scheduleEmbeddedUsbFrameImageRefresh(log.frame_id)
       }

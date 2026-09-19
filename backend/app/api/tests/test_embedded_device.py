@@ -1,3 +1,4 @@
+import json
 import struct
 
 import httpx
@@ -110,6 +111,34 @@ def auth(frame: Frame) -> dict:
     return {'Authorization': f'Bearer {frame.server_api_key}'}
 
 
+async def pico_spectra_frame(async_client, db) -> Frame:
+    """A Pimoroni Inky Frame 7.3" Spectra: Pico 2 W, thin client only."""
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'Inky Frame',
+        'frame_host': '',
+        'server_host': 'localhost',
+        'mode': 'embedded',
+        'platform': 'pico-2w',
+        'device_config': {'hardwarePreset': 'pimoroni_inky_frame_7_3_spectra'},
+    })
+    assert response.status_code == 200, response.text
+    frame = db.get(Frame, response.json()['frame']['id'])
+    assert frame.device == 'waveshare.EPD_7in3e'
+    assert frame.embedded['platform'] == 'pico-2w'
+    assert frame.server_api_key
+    return frame
+
+
+def scene_renderer(calls: list, rgba_pixel=(0, 0, 0, 255), state=None):
+    """Stands in for the node + wasm render: records what the route passed
+    and answers one flat-colour frame plus the state the scene ended with."""
+    async def fake_render(frame_arg, width, height, **kwargs):
+        calls.append(kwargs)
+        return bytes(rgba_pixel) * (width * height), state, None
+
+    return fake_render
+
+
 @pytest.mark.asyncio
 async def test_render_requires_device_auth(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
@@ -177,12 +206,9 @@ async def test_render_uses_wasm_scene_render_when_available(async_client, no_aut
     db.add(frame)
     db.commit()
 
-    async def fake_render(frame_arg, width, height, **kwargs):
-        # Solid black RGBA → the 1bpp packing must come out all zeros,
-        # which the (mostly white) diagnostic card never does.
-        return bytes([0, 0, 0, 255]) * (width * height)
-
-    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', fake_render)
+    # Solid black RGBA → the 1bpp packing must come out all zeros, which the
+    # (mostly white) diagnostic card never does.
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', scene_renderer([]))
 
     response = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
@@ -227,9 +253,9 @@ async def test_render_falls_back_to_diagnostic_when_scene_render_fails(
     db.commit()
 
     async def failing_render(frame_arg, width, height, **kwargs):
-        return None
+        return None, None, None
 
-    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', failing_render)
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', failing_render)
 
     response = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
@@ -239,6 +265,227 @@ async def test_render_falls_back_to_diagnostic_when_scene_render_fails(
     # The diagnostic card has a white background: 1bpp packing is mostly 0xFF.
     payload = body[12:]
     assert payload.count(0xFF) > len(payload) // 2
+
+
+@pytest.mark.asyncio
+async def test_render_for_a_pico_inky_frame_is_a_spectra6_fosb(async_client, no_auth_client, db, monkeypatch):
+    """What embedded/pico pulls: a 12-byte FOSB header and the 800x480
+    Spectra 6 payload, two pixels per byte."""
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'White', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    calls: list = []
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        scene_renderer(calls, rgba_pixel=(255, 255, 255, 255)))
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    assert response.headers['content-type'] == 'application/octet-stream'
+    body = response.content
+    assert body[:4] == b'FOSB'
+    assert struct.unpack('<BBHHH', body[4:12]) == (1, FOS_PIXEL_4BPP_SPECTRA6, 800, 480, 0)
+    assert FOS_PIXEL_4BPP_SPECTRA6 == 7
+    assert len(body) == 12 + 192000
+    # Flat white is Spectra palette index 1 in both nibbles, all the way down.
+    assert body[12:] == b'\x11' * 192000
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_render_for_a_portrait_thin_client_is_rendered_upright_and_turned(
+    async_client, no_auth_client, db, monkeypatch
+):
+    """A thin client cannot rotate anything itself: a frame hung in portrait
+    gets its scene rendered on the swapped canvas and turned clockwise to the
+    panel's native 800x480, the way runner.nim + rotateDegrees do on a frame
+    with its own renderer."""
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'Corner', 'nodes': [], 'edges': []}]
+    frame.rotate = 90
+    db.add(frame)
+    db.commit()
+
+    sizes: list = []
+
+    async def corner_render(frame_arg, width, height, **kwargs):
+        sizes.append((width, height))
+        # Black top-left quadrant on white, in the scene's own orientation.
+        rows = []
+        for y in range(height):
+            black = b'\x00\x00\x00\xff' * (width // 2) if y < height // 2 else b''
+            rows.append(black + b'\xff\xff\xff\xff' * (width - len(black) // 4))
+        return b''.join(rows), None, None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', corner_render)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    assert sizes == [(480, 800)]
+    body = response.content
+    # The payload is still the panel's native shape.
+    assert struct.unpack('<BBHHH', body[4:12]) == (1, FOS_PIXEL_4BPP_SPECTRA6, 800, 480, 0)
+    assert len(body) == 12 + 192000
+    payload = body[12:]
+
+    def index_at(x: int, y: int) -> int:
+        byte = payload[y * 400 + x // 2]
+        return byte >> 4 if x % 2 == 0 else byte & 0x0F
+
+    # Clockwise by 90: the scene's top-left lands in the panel's top-right.
+    assert index_at(799, 0) == 0
+    assert index_at(0, 0) == 1
+    assert index_at(799, 479) == 1
+    assert index_at(0, 479) == 1
+    assert index_at(401, 239) == 0
+    assert index_at(399, 239) == 1
+
+
+def _slideshow_scene() -> dict:
+    return {
+        'id': 'slides',
+        'name': 'Slides',
+        'nodes': [],
+        'edges': [],
+        'fields': [
+            {'name': 'index', 'type': 'integer', 'access': 'public', 'value': '0'},
+            {'name': 'cursor', 'type': 'string', 'access': 'private', 'persist': 'disk'},
+            {'name': 'scratch', 'type': 'string', 'access': 'private'},
+        ],
+    }
+
+
+def _states_key(frame: Frame) -> str:
+    # The store virtual frames use; thin clients share it, key and all.
+    return f'frame:{frame.id}:virtual:scene_states'
+
+
+@pytest.mark.asyncio
+async def test_render_seeds_the_stored_scene_state_and_keeps_what_comes_back(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """A thin client's renderer is a fresh wasm process every poll, so the
+    backend is the scene's memory — without it a slideshow never advances."""
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [_slideshow_scene()]
+    db.add(frame)
+    db.commit()
+    await redis.set(_states_key(frame), json.dumps({'slides': {'index': 2}}))
+
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', scene_renderer(calls, state={
+        'sceneId': 'slides',
+        'state': {'index': 3, 'cursor': 'page-2', 'scratch': 'gone', 'undeclared': 'gone'},
+    }))
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    assert calls[0]['scene_states'] == {'slides': {'index': 2}}
+    # Stored under the scene the renderer showed: public fields and the
+    # persist=disk ones, the same contract as a virtual frame.
+    assert json.loads(await redis.get(_states_key(frame))) == {'slides': {'index': 3, 'cursor': 'page-2'}}
+
+    # The next poll starts where this one ended.
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert calls[1]['scene_states'] == {'slides': {'index': 3, 'cursor': 'page-2'}}
+
+
+@pytest.mark.asyncio
+async def test_render_keeps_the_stored_state_when_seeding_failed(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    # An old wasm bundle without the set_scene_state export reads back bare
+    # scene defaults; they must not replace what the store holds.
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [_slideshow_scene()]
+    db.add(frame)
+    db.commit()
+    await redis.set(_states_key(frame), json.dumps({'slides': {'index': 2}}))
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', scene_renderer([], state={
+        'sceneId': 'slides', 'seeded': False, 'state': {'index': 0},
+    }))
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    assert json.loads(await redis.get(_states_key(frame))) == {'slides': {'index': 2}}
+
+
+@pytest.mark.asyncio
+async def test_scene_state_event_reaches_the_store_before_the_thin_client(async_client, db, redis):
+    """The device re-renders on any /event/*; the render it pulls must
+    already carry the state that event posted."""
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [_slideshow_scene()]
+    db.add(frame)
+    db.commit()
+
+    stored_when_forwarded: list = []
+
+    async def forward(frame_arg, redis_arg, **kwargs):
+        stored_when_forwarded.append((kwargs['path'], await redis.get(_states_key(frame))))
+        return 'OK'
+
+    with patch('app.api.frames._forward_frame_request', side_effect=forward):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/setSceneState',
+            json={'sceneId': 'slides', 'render': True, 'state': {'index': 5, 'scratch': 'nope'}},
+            headers={'content-type': 'application/json'})
+
+    assert response.status_code == 200, response.text
+    assert [path for path, _ in stored_when_forwarded] == ['/event/setSceneState']
+    assert json.loads(stored_when_forwarded[0][1]) == {'slides': {'index': 5}}
+
+
+@pytest.mark.asyncio
+async def test_scene_state_event_for_a_local_render_frame_is_only_forwarded(async_client, db, redis):
+    # An ESP32-S3 rendering on-device holds its own state; the backend store
+    # is not its memory.
+    frame = await device_frame(async_client, db)
+    frame.scenes = [_slideshow_scene()]
+    db.add(frame)
+    db.commit()
+
+    with patch('app.api.frames._forward_frame_request', new_callable=AsyncMock, return_value='OK') as forward:
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/setSceneState',
+            json={'sceneId': 'slides', 'state': {'index': 5}},
+            headers={'content-type': 'application/json'})
+
+    assert response.status_code == 200, response.text
+    forward.assert_awaited_once()
+    assert await redis.get(_states_key(frame)) is None
+
+
+@pytest.mark.asyncio
+async def test_ota_manifest_404_for_a_pico_frame(async_client, no_auth_client, db):
+    """The pico UF2 is provisioning-only. Listing it as the frame's release
+    image must not make an OTA image appear — whatever platform is named."""
+    frame = await pico_spectra_frame(async_client, db)
+    release = release_with('esp32-s3-generic')
+    release['assets'].append(release_asset('frameos-2026.9.2-pico-2w.uf2', 800_000))
+    listing, text = patch_release(release)
+
+    with listing, text:
+        for query in ('', '?platform=pico-2w', '?platform=esp32-s3-generic'):
+            response = await no_auth_client.get(
+                f'/api/frames/{frame.id}/embedded/ota/manifest{query}', headers=auth(frame))
+            assert response.status_code == 404, response.text
+            assert response.json()['detail'] == 'ota_image_not_published'
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'ota_image_not_published'
 
 
 @pytest.mark.asyncio
@@ -432,7 +679,7 @@ async def test_render_answers_503_with_retry_after_when_the_queue_is_full(
     async def queue_full(frame_arg, width, height, **kwargs):
         raise RenderQueueFull()
 
-    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', queue_full)
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', queue_full)
 
     response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
     assert response.status_code == 503, response.text

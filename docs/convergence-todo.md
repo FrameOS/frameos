@@ -132,7 +132,10 @@ none on the free tier. What is left is code:
   `400 interval_below_plan_floor`). `/api/account/usage` reports the pool.
   C3 boards can go back into the cloud flasher once the hub actually
   renders for them — the entitlement no longer blocks that, the missing
-  renderer does.
+  renderer does. The same renderer is what a Pico needs before it can link
+  to the cloud at all: on the self-hosted backend the Pico is a complete thin
+  client as of 2026-09-19 (`embedded/pico/README.md`), on the cloud it has
+  nothing to show.
 - [ ] Then: the capability line is data, not per-board fights. New boards
   declare PSRAM and get a renderer assigned; the fat path stops being
   re-earned 8 MB board by 8 MB board.

@@ -40,6 +40,14 @@ export const esp32ReleasePlatforms = [
 // path are never taken from user input, so this cannot be steered into an SSRF.
 // esp32-s3-epd7in5v2 is the older single-panel build kept so deployments
 // running this code against an old release still flash something.
+//
+// Deliberately absent: the release's `-pico-w.uf2` / `-pico-2w.uf2`, which
+// the self-hosted backend does list (PROVISIONING_ASSETS in
+// backend/app/api/firmware_release.py). A Pico is a thin client with no
+// cloud link — the hub does not render for thin clients yet
+// (docs/convergence-todo.md §3) — so offering its firmware here would hand
+// people a board the cloud cannot put a picture on. It joins this list with
+// that renderer, as the ESP32-C3 rejoins the cloud flasher.
 export const provisioningAssets = [
   ...esp32ReleasePlatforms.map((platform) => ({ platform, suffix: `-${platform}.bin` })),
   { platform: "esp32-s3-epd7in5v2", suffix: "-esp32-s3-epd7in5v2.bin" },

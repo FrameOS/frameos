@@ -47,17 +47,21 @@ static void ac073_write(const uint8_t *data, size_t len)
     pk_epd_data(s_pins, data, len);
 }
 
-static bool ac073_end(const pk_pins_t *pins)
+static bool ac073_end(const pk_pins_t *pins, bool refresh)
 {
-    pk_epd_command(pins, 0x12); // refresh
-    pk_epd_data_byte(pins, 0x00);
-    if (!panel_wait_idle(pins, 45000)) return false;
+    bool ok = true;
+    if (refresh) {
+        pk_epd_command(pins, 0x12); // refresh
+        pk_epd_data_byte(pins, 0x00);
+        ok = panel_wait_idle(pins, 45000);
+    }
+    // Also after a timeout: the booster must not stay on.
     pk_epd_command(pins, 0x02); // power off
     pk_epd_data_byte(pins, 0x00);
-    sleep_ms(200);
+    pk_wait_ms(200);
     pk_epd_command(pins, 0x07); // deep sleep
     pk_epd_data_byte(pins, 0xA5);
-    return true;
+    return ok;
 }
 
 const pk_panel_t pk_panel_ac073tc1a_800x480 = {

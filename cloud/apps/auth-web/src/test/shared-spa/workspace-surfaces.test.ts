@@ -18,6 +18,7 @@ import {
   frameMenuActionIsAllowed,
   frameSettingsSectionIsAllowed,
   frameSupportsUsbSerialConsole,
+  frameUsbConsoleHasRendererVerbs,
   deviceSupportsDisplayPower,
   displayPowerDevices,
   frameDisplayDevice,
@@ -26,6 +27,7 @@ import {
   isAdminApiOnlyFrame,
   isEmbeddedHardwareFrame,
   isEsp32CloudFrame,
+  isPicoFrame,
   isVirtualFrame,
   sceneToolPanelDisabledReason,
   sceneToolPanelIsAllowed,
@@ -458,6 +460,24 @@ describe("the esp32 cloud device profile", () => {
     expect(frameSupportsUsbSerialConsole(esp32Frame, "backend")).toBe(false);
     expect(frameSupportsUsbSerialConsole(undefined, "cloud")).toBe(false);
   });
+
+  it("offers it to a Pico thin client on the self-hosted backend, and nowhere else", () => {
+    // The Pico firmware speaks the same `usb_api` console and is provisioned
+    // over that cable, so USB is the log source that exists before the board
+    // has ever been online. The cloud has no pico frames (it cannot render for
+    // a thin client yet), and a Pico has no on-device admin panel.
+    for (const platform of ["pico-w", "pico-2w"]) {
+      const picoFrame = { embedded: { platform } };
+      expect(isPicoFrame(picoFrame)).toBe(true);
+      expect(frameSupportsUsbSerialConsole(picoFrame, "backend")).toBe(true);
+      expect(frameSupportsUsbSerialConsole(picoFrame, "cloud")).toBe(false);
+      expect(frameSupportsUsbSerialConsole(picoFrame, "frameAdmin")).toBe(false);
+    }
+    expect(isPicoFrame({ embedded: { platform: "esp32-s3" } })).toBe(false);
+    expect(isPicoFrame({ embedded: { platform: "virtual" } })).toBe(false);
+    expect(isPicoFrame({ hardware: { platform: "esp32" } })).toBe(false);
+    expect(isPicoFrame(undefined)).toBe(false);
+  });
 });
 
 // Embedded-hardware frames (backend-managed ESP32/Pico boards, i.e.
@@ -561,6 +581,31 @@ describe("embedded-hardware frames on the backend control plane", () => {
       expect(frameMenuActionIsAllowed("backend", action, esp32Frame)).toBe(true);
       expect(frameMenuActionDisabledReason("backend", action, esp32Frame)).toBeNull();
     }
+  });
+
+  it("links Power for ESP32 and Pico boards, not for virtual frames", () => {
+    // Both store the values in device_config. A Pico renders the section cut
+    // down to deep sleep (embeddedPowerProfileFor); the nav link exists either
+    // way. Only on the backend: there is no pico frame on the cloud.
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-power", esp32Frame)).toBe(true);
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-power", esp32c3Frame)).toBe(true);
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-power", picoFrame)).toBe(true);
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-power", { embedded: { platform: "pico-2w" } })).toBe(
+      true,
+    );
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-power", virtualFrame)).toBe(false);
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-power", picoFrame)).toBe(false);
+    expect(frameSettingsSectionIsAllowed("frameAdmin", "frame-settings-power", picoFrame)).toBe(false);
+  });
+
+  it("skips the USB shortcuts a thin-client Pico cannot answer", () => {
+    // upload-scenes, scene-payload and image readback belong to an on-device
+    // renderer; the Pico answers ESP_ERR_NOT_SUPPORTED, so callers go straight
+    // to the backend.
+    expect(frameUsbConsoleHasRendererVerbs(esp32Frame)).toBe(true);
+    expect(frameUsbConsoleHasRendererVerbs(esp32c3Frame)).toBe(true);
+    expect(frameUsbConsoleHasRendererVerbs(picoFrame)).toBe(false);
+    expect(frameUsbConsoleHasRendererVerbs(undefined)).toBe(true);
   });
 
   it("leaves virtual frames to the stricter virtual gating", () => {
