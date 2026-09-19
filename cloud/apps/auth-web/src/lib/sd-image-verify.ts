@@ -4,7 +4,11 @@
 // export HTTP handlers and config.
 
 import type { ReleaseAsset } from "./firmware-release";
-import { createReleaseDigest, verifyReleaseDigest } from "./release-signing";
+import {
+  createReleaseDigest,
+  verifyReleaseBinding,
+  verifyReleaseDigest,
+} from "./release-signing";
 
 // What the verification pass saw, so the streaming pass can insist on the
 // same bytes: GitHub's etag for the object and the exact length hashed.
@@ -36,11 +40,18 @@ export function forgetSdImageVerdict(asset: ReleaseAsset) {
 }
 
 // One pass over the image: BLAKE2b-512 of the stream, then Ed25519 against
-// the release key. Nothing is kept but the digest.
+// the release key. Nothing is kept but the digest. `assetName` is what the
+// signature must have been made for (this release's image for this board —
+// release-signing.ts, verifyReleaseBinding); a signature for anything else is
+// refused before the gigabyte is fetched.
 async function verifyAsset(
   assetUrl: URL,
   minisig: string,
+  assetName: string | undefined,
 ): Promise<SdImageVerdict> {
+  if (!verifyReleaseBinding(minisig, assetName)) {
+    return { ok: false, at: Date.now() };
+  }
   const upstream = await fetch(assetUrl, { redirect: "follow" });
   if (!upstream.ok || !upstream.body) {
     return { ok: false, at: Date.now() };
@@ -56,7 +67,7 @@ async function verifyAsset(
     hash.update(value);
     byteLength += value.byteLength;
   }
-  if (!verifyReleaseDigest(hash.digest(), minisig)) {
+  if (!verifyReleaseDigest(hash.digest(), minisig, assetName)) {
     return { ok: false, at: Date.now() };
   }
   return {
@@ -74,6 +85,7 @@ export async function verifiedSdImage(
   asset: ReleaseAsset,
   assetUrl: URL,
   minisig: string,
+  assetName: string | undefined,
 ): Promise<SdImageVerdict> {
   const key = verdictKey(asset);
   const cached = verdicts.get(key);
@@ -84,7 +96,7 @@ export async function verifiedSdImage(
   if (pending) {
     return pending;
   }
-  const attempt = verifyAsset(assetUrl, minisig)
+  const attempt = verifyAsset(assetUrl, minisig, assetName)
     .catch((): SdImageVerdict => ({ ok: false, at: Date.now() }))
     .then((verdict) => {
       verdicts.set(key, verdict);

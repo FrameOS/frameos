@@ -32,12 +32,15 @@ batch after the third one; residue is in the medium / low list).
 
 ### Self-hosted backend
 
-- **The precompiled Buildroot SD image is unverified server-side** (the
-  base image is sha256-checked; the FrameOS runtime and Remote archives are
-  minisign-verified on download and on every cache hit, and the cache is
-  pinned to the version it claims since 2026-09-09). The release workflow's
-  "a signature would be decoration" rationale is stale now that the backend
-  and the browser flasher fetch the image automatically — sign it.
+- Closed (pointer): the precompiled Buildroot SD image is signed and
+  verified by everything that fetches it. The release job signs every
+  `.img.gz` (`docker-publish-multi.yml`, "Sign release archives and
+  firmware" — v2026.9.19 is the first release carrying them), the backend
+  verifies on download and on every cache hit (`app/tasks/buildroot_image.py`),
+  the cloud's `api/frames/sd-image` route before it streams a byte and the
+  browser flasher before it commits the file (#461). Since 2026-09-19 each
+  of them also requires the signature to have been made FOR that release's
+  image for that board (see "OTA signature binds archive bytes only" below).
 - Smaller, what is left: a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).
@@ -65,8 +68,8 @@ batch after the third one; residue is in the medium / low list).
   store scene gets the account's keys (2026-09-08); the LAN-egress deny is
   armed on all three runtimes for store-origin scenes (device planes
   2026-09-06, the backend's headless renderer 2026-09-09); ESP32 OTA
-  refuses downgrades (`fos_version.c`) — signing `version || image` is
-  still the fuller fix (below).
+  refuses downgrades (`fos_version.c`), and since 2026-09-19 the version it
+  compares is the one the signature names (below).
 - **`POST /setup` on the Pi hotspot is unauthenticated while it is up**,
   and the hotspot keeps its well-known default PSK (`frame1234`) — decided
   2026-09-03: security is layered, the default still deters some, and a Pi
@@ -90,10 +93,26 @@ batch after the third one; residue is in the medium / low list).
   store-origin scenes unless the admin allows shell apps on the panel
   (`frameos/spawn_guard.nim`, 2026-09-07); `localImage.path` reads anywhere
   on disk remain — the `scene` asset sandbox is the answer and is opt-in.
-- **OTA signature binds archive bytes only**: version and target come from
-  GitHub metadata, so anyone with release-upload rights (no signing key) can
-  attach an older or other-arch signed archive under a new tag. Verify the
-  global signature / trusted comment naming version + target.
+- Closed 2026-09-19 (pointer): "OTA signature binds archive bytes only" —
+  version and target came from GitHub metadata, so release-upload rights (no
+  signing key) were enough to serve an older or other-arch signed archive
+  under a new tag. Every `.minisig` already carried `trusted comment: frameos
+  <asset file name>` plus minisign's global signature (`tools/sign_firmware.py`);
+  nothing read them. Now every verifier checks the global signature and that
+  the comment names the asset it worked out for itself, and refuses a
+  signature with no signed comment: `upgrade.nim`
+  (`verifyReleaseSignatureBinding`, unprivileged and again as root — which
+  also makes the door's "strictly newer" check bind to what is installed),
+  ESP32 before any download (`fos_minisig_verify_binding`, manifest version +
+  `fos_ota_platform()`), the backend's release cache and SD-image builder
+  (`app/utils/release_signing.py`), both install scripts (openssl), the
+  cloud SD-image route, the browser flasher, the wasm-runtime fetch and the
+  release job's own `sign_firmware.py verify`. Tests in every language are
+  held to a real v2026.9.19 signature under the production key. Left: a
+  frame only gains the check once it runs a release that has it, and the
+  ESP32 does not compare the image's own `esp_app_desc` version with the
+  signed name (a release that mis-stamps its version would re-flash daily,
+  which `ci_build_image.sh` already refuses to build).
 - Closed (pointer): interpreter robustness — per-run wall-clock deadline,
   per-scene JS heap ceiling, dispatch budget (2026-09-06;
   `docs/js-apps-and-code-nodes.md`, "What the runtime will not let a scene

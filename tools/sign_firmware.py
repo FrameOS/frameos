@@ -13,13 +13,28 @@ deliberately not minisign's scrypt-encrypted container, so CI can hold it as
 a plain secret (FRAMEOS_FIRMWARE_SIGNING_KEY). The PUBLIC side and the
 .minisig files are bit-compatible with minisign, so `minisign -V` works.
 
+What a signature says: the file signature covers the BYTES; the trusted
+comment — `frameos <asset name>`, e.g. `frameos frameos-2026.9.19-debian-
+bookworm-arm64.tar.gz` — names the VERSION and TARGET those bytes were
+released as, and minisign's global signature (Ed25519 over signature ||
+trusted comment) binds the two together. Every verifier checks all three:
+the bytes, the global signature, and that the comment names the asset it
+asked for. Without that last step a valid signature only proves "FrameOS
+released these bytes once", and an old or other-architecture archive could be
+re-served under a new tag by anyone who can upload release assets (or answer
+for GitHub) without ever touching the key. A file must therefore be signed
+under its release name — or with --name when it lives under another one.
+
 Usage:
   sign_firmware.py keygen --secret-out KEYFILE --public-out PUBFILE \
       [--key-id HEX16]
-  sign_firmware.py sign --secret KEYFILE_OR_ENV file.bin [file2.bin ...]
+  sign_firmware.py sign --secret KEYFILE_OR_ENV [--name ASSET] file.bin [...]
       (writes file.bin.minisig next to each input; secret may be a path or
-       the literal name of an environment variable holding the base64 seed)
-  sign_firmware.py verify --public PUBFILE file.bin
+       the literal name of an environment variable holding the base64 seed;
+       --name signs ONE file as the named release asset instead of as its
+       own basename)
+  sign_firmware.py verify --public PUBFILE [--name ASSET] file.bin
+      (bytes, global signature and the asset name in the trusted comment)
   sign_firmware.py c-header --public PUBFILE
       (prints the pubkey + key id as C initializers for the firmware)
 """
@@ -41,6 +56,20 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.hazmat.primitives import serialization
 
 SIG_ALG_PREHASHED = b"ED"  # minisign: Ed25519 over BLAKE2b-512(file)
+
+# The trusted comment of every FrameOS release signature is this prefix plus
+# the asset's release file name. Verifiers compare the whole line, so the
+# format is part of the contract with every frame already in the field:
+# frameos/src/frameos/upgrade.nim, embedded/esp32/main/fos_minisig.c,
+# backend/app/utils/release_signing.py, scripts/frameos-setup.sh and the two
+# cloud release-signing.ts files all build the same string.
+TRUSTED_COMMENT_PREFIX = "frameos "
+
+
+def trusted_comment_for(asset_name: str) -> str:
+    if not asset_name or any(c in asset_name for c in "\r\n/") or asset_name != asset_name.strip():
+        raise SystemExit(f"not a usable release asset name: {asset_name!r}")
+    return TRUSTED_COMMENT_PREFIX + asset_name
 
 
 def blake2b_digest(path: str) -> bytes:
@@ -103,9 +132,12 @@ def cmd_keygen(args: argparse.Namespace) -> None:
 
 
 def cmd_sign(args: argparse.Namespace) -> None:
+    if args.name and len(args.files) != 1:
+        raise SystemExit("--name names one asset, so it takes exactly one file")
     seed, key_id = read_secret(args.secret)
     private = Ed25519PrivateKey.from_private_bytes(seed)
     for path in args.files:
+        comment = trusted_comment_for(args.name or os.path.basename(path))
         digest = blake2b_digest(path)
         signature = private.sign(digest)
         blob = SIG_ALG_PREHASHED + key_id + signature
@@ -113,13 +145,12 @@ def cmd_sign(args: argparse.Namespace) -> None:
         with open(out, "w", encoding="utf-8") as f:
             f.write(f"untrusted comment: signature from FrameOS firmware key\n")
             f.write(base64.b64encode(blob).decode() + "\n")
-            # trusted comment + global signature (minisign appends these; the
-            # device ignores them, minisign -V validates them)
-            trusted = f"trusted comment: frameos {os.path.basename(path)}\n"
-            global_sig = private.sign(signature + trusted.split(": ", 1)[1].strip().encode())
-            f.write(trusted)
+            # trusted comment + global signature: what binds these bytes to
+            # the version and target in the asset name (module docstring).
+            global_sig = private.sign(signature + comment.encode())
+            f.write(f"trusted comment: {comment}\n")
             f.write(base64.b64encode(global_sig).decode() + "\n")
-        print(f"signed {path} -> {out}")
+        print(f"signed {path} -> {out} ({comment})")
 
 
 def verify_blob(public_pem: bytes, key_id: bytes, sig_blob: bytes, digest: bytes) -> None:
@@ -132,10 +163,24 @@ def verify_blob(public_pem: bytes, key_id: bytes, sig_blob: bytes, digest: bytes
 
 def cmd_verify(args: argparse.Namespace) -> None:
     public, key_id = read_public(args.public)
-    sig_lines = [line.strip() for line in open(args.file + ".minisig", encoding="utf-8")
+    lines = [line.rstrip("\r\n") for line in open(args.file + ".minisig", encoding="utf-8")]
+    sig_lines = [line.strip() for line in lines
                  if line.strip() and not line.startswith(("untrusted comment:", "trusted comment:"))]
-    verify_blob(public, key_id, base64.b64decode(sig_lines[0]), blake2b_digest(args.file))
-    print(f"{args.file}: signature OK")
+    comments = [line[len("trusted comment: "):] for line in lines
+                if line.startswith("trusted comment: ")]
+    if len(sig_lines) != 2 or len(comments) != 1:
+        raise SystemExit(f"{args.file}.minisig: expected a signature, one trusted comment "
+                         "and a global signature")
+    sig_blob = base64.b64decode(sig_lines[0])
+    verify_blob(public, key_id, sig_blob, blake2b_digest(args.file))
+    # The global signature is what makes the comment trustworthy; the name
+    # check is what makes it mean something (module docstring).
+    Ed25519PublicKey.from_public_bytes(public).verify(
+        base64.b64decode(sig_lines[1]), sig_blob[10:74] + comments[0].encode())
+    expected = trusted_comment_for(args.name or os.path.basename(args.file))
+    if comments[0] != expected:
+        raise SystemExit(f"{args.file}: signed as {comments[0]!r}, expected {expected!r}")
+    print(f"{args.file}: signature OK ({comments[0]})")
 
 
 def cmd_c_header(args: argparse.Namespace) -> None:
@@ -179,11 +224,13 @@ def main() -> None:
 
     sign = sub.add_parser("sign")
     sign.add_argument("--secret", required=True)
+    sign.add_argument("--name", help="release asset name to sign ONE file as (default: its basename)")
     sign.add_argument("files", nargs="+")
     sign.set_defaults(func=cmd_sign)
 
     verify = sub.add_parser("verify")
     verify.add_argument("--public", required=True)
+    verify.add_argument("--name", help="release asset name the file must be signed as (default: its basename)")
     verify.add_argument("file")
     verify.set_defaults(func=cmd_verify)
 

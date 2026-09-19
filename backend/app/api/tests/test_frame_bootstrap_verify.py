@@ -33,10 +33,27 @@ def _openssl() -> str | None:
 OPENSSL = _openssl()
 
 
-def _minisig(private_key: ed25519.Ed25519PrivateKey, archive: bytes, key_id: bytes = b"\x01" * 8) -> str:
+ASSET = "frameos-2026.9.20-debian-bookworm-arm64.tar.gz"
+
+
+def _minisig(
+    private_key: ed25519.Ed25519PrivateKey,
+    archive: bytes,
+    key_id: bytes = b"\x01" * 8,
+    asset: str = ASSET,
+) -> str:
+    """What tools/sign_firmware.py writes: the file signature, then the
+    trusted comment naming the asset and the global signature over both."""
     digest = hashlib.blake2b(archive, digest_size=64).digest()
-    blob = b"ED" + key_id + private_key.sign(digest)
-    return "untrusted comment: signature from test key\n" + base64.b64encode(blob).decode() + "\ntrusted comment: test\n" + base64.b64encode(b"x" * 64).decode() + "\n"
+    signature = private_key.sign(digest)
+    comment = f"frameos {asset}"
+    return (
+        "untrusted comment: signature from test key\n"
+        + base64.b64encode(b"ED" + key_id + signature).decode()
+        + f"\ntrusted comment: {comment}\n"
+        + base64.b64encode(private_key.sign(signature + comment.encode())).decode()
+        + "\n"
+    )
 
 
 def _spki(public_key: ed25519.Ed25519PublicKey) -> str:
@@ -44,7 +61,9 @@ def _spki(public_key: ed25519.Ed25519PublicKey) -> str:
     return base64.b64encode(der).decode()
 
 
-def _run(tmp_path: Path, archive: bytes, minisig: str, spki: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path, archive: bytes, minisig: str, spki: str, asset: str = ASSET
+) -> subprocess.CompletedProcess[str]:
     (tmp_path / "frameos.tar.gz").write_bytes(archive)
     (tmp_path / "frameos.tar.gz.minisig").write_text(minisig)
     script = (
@@ -52,7 +71,7 @@ def _run(tmp_path: Path, archive: bytes, minisig: str, spki: str) -> subprocess.
         f"work_dir={tmp_path}\n"
         f"FRAMEOS_RELEASE_SIGNING_KEY_SPKI={spki}\n"
         + VERIFY_RELEASE_SIGNATURE_SH
-        + f'\nverify_release_signature "{tmp_path}/frameos.tar.gz" "{tmp_path}/frameos.tar.gz.minisig"\n'
+        + f'\nverify_release_signature "{tmp_path}/frameos.tar.gz" "{tmp_path}/frameos.tar.gz.minisig" "{asset}"\n'
     )
     env = dict(os.environ)
     env["PATH"] = str(Path(OPENSSL).parent) + os.pathsep + env.get("PATH", "")
@@ -113,6 +132,73 @@ def test_non_prehashed_or_malformed_signature_is_refused(tmp_path: Path):
     assert "wrong length" in result.stderr
 
 
+def _assert_binding_is_enforced(run, tmp_path: Path) -> None:
+    """docs/security-todo.md, "OTA signature binds archive bytes only": a
+    genuine signature is good for the asset it names and nothing else."""
+    key = ed25519.Ed25519PrivateKey.generate()
+    archive = os.urandom(4096)
+    spki = _spki(key.public_key())
+    genuine = _minisig(key, archive)
+    assert run(tmp_path, archive, genuine, spki).returncode == 0
+
+    # The same signed archive offered as a newer version, or another target.
+    for other in (
+        "frameos-2026.9.21-debian-bookworm-arm64.tar.gz",
+        "frameos-2026.9.20-debian-bookworm-armhf.tar.gz",
+        "",
+    ):
+        result = run(tmp_path, archive, genuine, spki, asset=other)
+        assert result.returncode != 0, other
+        assert "refusing a signed archive offered as a different version or target" in result.stderr
+
+    # Rewriting the comment to match breaks the global signature.
+    rewritten = genuine.replace("2026.9.20", "2026.9.21")
+    result = run(tmp_path, archive, rewritten, spki, asset="frameos-2026.9.21-debian-bookworm-arm64.tar.gz")
+    assert result.returncode != 0
+    assert "trusted comment is not signed" in result.stderr
+
+    # A comment signed by someone else's key, under the genuine file signature.
+    other_key = ed25519.Ed25519PrivateKey.generate()
+    lines = genuine.splitlines()
+    signature = base64.b64decode(lines[1])[10:]
+    lines[3] = base64.b64encode(other_key.sign(signature + lines[2][len("trusted comment: "):].encode())).decode()
+    result = run(tmp_path, archive, "\n".join(lines) + "\n", spki)
+    assert result.returncode != 0
+    assert "trusted comment is not signed" in result.stderr
+
+    # No comment, two comments, no / short global signature: refused, not legacy.
+    lines = genuine.splitlines()
+    result = run(tmp_path, archive, "\n".join(lines[:2]) + "\n", spki)
+    assert result.returncode != 0
+    assert "does not say which release" in result.stderr
+    result = run(tmp_path, archive, "\n".join(lines[:3] + [lines[2], lines[3]]) + "\n", spki)
+    assert result.returncode != 0
+    assert "does not say which release" in result.stderr
+    result = run(tmp_path, archive, "\n".join(lines[:3]) + "\n", spki)
+    assert result.returncode != 0
+    assert "no valid global signature" in result.stderr
+    result = run(tmp_path, archive, "\n".join(lines[:3] + ["AAAA"]) + "\n", spki)
+    assert result.returncode != 0
+    assert "no valid global signature" in result.stderr
+
+    # CRLF line endings are line endings, not signed bytes.
+    assert run(tmp_path, archive, genuine.replace("\n", "\r\n"), spki).returncode == 0
+
+
+@pytest.mark.skipif(OPENSSL is None, reason="no OpenSSL 3 binary available")
+def test_signature_is_bound_to_the_asset_it_names(tmp_path: Path):
+    _assert_binding_is_enforced(_run, tmp_path)
+
+
+def test_bootstrap_script_names_the_asset_it_verifies():
+    import inspect
+
+    from app.api import frame_bootstrap
+
+    source = inspect.getsource(frame_bootstrap._frame_bootstrap_script)
+    assert '"$work_dir/frameos.tar.gz.minisig" "${{archive_url##*/}}"' in source
+
+
 # The standalone installer (scripts/frameos-setup.sh, served as frameos.net/setup.sh
 # and by the cloud as /install.sh) carries its own copy of the function with
 # the release key pinned as a constant. It is the install path most
@@ -147,7 +233,9 @@ def test_standalone_installer_pins_the_release_key():
     assert download < minisig < verify < extract
 
 
-def _run_standalone(tmp_path: Path, archive: bytes, minisig: str, spki: str) -> subprocess.CompletedProcess[str]:
+def _run_standalone(
+    tmp_path: Path, archive: bytes, minisig: str, spki: str, asset: str = ASSET
+) -> subprocess.CompletedProcess[str]:
     (tmp_path / "frameos.tar.gz").write_bytes(archive)
     (tmp_path / "frameos.tar.gz.minisig").write_text(minisig)
     script = (
@@ -157,7 +245,7 @@ def _run_standalone(tmp_path: Path, archive: bytes, minisig: str, spki: str) -> 
         f"work_dir={tmp_path}\n"
         f"FRAMEOS_RELEASE_SIGNING_KEY_SPKI={spki}\n"
         + _standalone_verify_function()
-        + f'\nverify_release_signature "{tmp_path}/frameos.tar.gz" "{tmp_path}/frameos.tar.gz.minisig"\n'
+        + f'\nverify_release_signature "{tmp_path}/frameos.tar.gz" "{tmp_path}/frameos.tar.gz.minisig" "{asset}"\n'
     )
     env = dict(os.environ)
     env["PATH"] = str(Path(OPENSSL).parent) + os.pathsep + env.get("PATH", "")
@@ -183,3 +271,10 @@ def test_standalone_installer_verifies_and_refuses(tmp_path: Path):
     result = _run_standalone(tmp_path, archive, _minisig(key, archive), _spki(other.public_key()))
     assert result.returncode != 0
     assert "does not verify" in result.stderr
+
+
+@pytest.mark.skipif(OPENSSL is None, reason="no OpenSSL 3 binary available")
+def test_standalone_installer_binds_the_signature_to_the_asset(tmp_path: Path):
+    _assert_binding_is_enforced(_run_standalone, tmp_path)
+    script = STANDALONE_INSTALLER.read_text()
+    assert '"$work_dir/frameos.tar.gz.minisig" "${archive_url##*/}"' in script

@@ -559,20 +559,26 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         if not private_pem.exists():
             subprocess.run([self.openssl, "genpkey", "-algorithm", "ed25519", "-out", str(private_pem)], check=True)
             subprocess.run([self.openssl, "pkey", "-in", str(private_pem), "-pubout", "-out", str(public_pem)], check=True)
-        digest = hashlib.blake2b(archive_path.read_bytes(), digest_size=64).digest()
-        digest_path = keys / "digest.bin"
-        digest_path.write_bytes(digest)
-        signature = subprocess.run(
-            [self.openssl, "pkeyutl", "-sign", "-inkey", str(private_pem), "-rawin", "-in", str(digest_path)],
-            check=True,
-            capture_output=True,
-        ).stdout
+        def sign(message: bytes) -> bytes:
+            message_path = keys / "message.bin"
+            message_path.write_bytes(message)
+            return subprocess.run(
+                [self.openssl, "pkeyutl", "-sign", "-inkey", str(private_pem), "-rawin", "-in", str(message_path)],
+                check=True,
+                capture_output=True,
+            ).stdout
+
+        signature = sign(hashlib.blake2b(archive_path.read_bytes(), digest_size=64).digest())
         blob = b"ED" + b"\x01" * 8 + signature
+        # The trusted comment names the asset and the global signature covers
+        # signature || comment (tools/sign_firmware.py): the installer refuses
+        # an archive that was not signed AS the one it asked for.
+        comment = f"frameos {archive_path.name}"
         (archive_path.parent / (archive_path.name + ".minisig")).write_text(
             "untrusted comment: signature from the test key\n"
             + base64.b64encode(blob).decode("ascii")
-            + "\ntrusted comment: test\n"
-            + base64.b64encode(b"x" * 64).decode("ascii")
+            + f"\ntrusted comment: {comment}\n"
+            + base64.b64encode(sign(signature + comment.encode())).decode("ascii")
             + "\n",
             encoding="utf-8",
         )

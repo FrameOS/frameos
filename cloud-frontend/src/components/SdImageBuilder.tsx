@@ -13,7 +13,13 @@ import {
   SdImagePatchError,
   patchCloudConfig,
 } from '../lib/sd-image-patch'
-import { Blake2b512, ReleaseSignatureError, hashingTransform, verifyReleaseDigest } from '../lib/release-signing'
+import {
+  Blake2b512,
+  ReleaseSignatureError,
+  hashingTransform,
+  sdImageAssetName,
+  verifyReleaseDigest,
+} from '../lib/release-signing'
 import { useValues } from 'kea'
 import { SshKeysSection } from '../../../frontend/src/components/sshKeys/SshKeysSection'
 import { sshKeysLogic } from '../../../frontend/src/components/sshKeys/sshKeysLogic'
@@ -608,6 +614,10 @@ export function SdImageBuilder({
       // abort discards the file). The route hands out the release's .minisig
       // for the same platform with `signature=1`.
       const minisig = await fetchReleaseSignature(board.platform)
+      // …and the signature must have been made for THIS release's image for
+      // THIS board: the name is built here from the release the download
+      // names and the board picked, never read off the signature.
+      const expectedImageName = sdImageAssetName(response.headers.get('x-frameos-release'), board.platform)
       const hasher = new Blake2b512()
       const decompressed = response.body
         .pipeThrough(hashingTransform(hasher))
@@ -676,7 +686,7 @@ export function SdImageBuilder({
       await drain
       setProgressBytes(written)
       setStatus('Verifying the release signature…')
-      await verifyReleaseDigest(hasher.digest(), minisig)
+      await verifyReleaseDigest(hasher.digest(), minisig, expectedImageName)
       if (writable) {
         await writable.close()
         writable = undefined

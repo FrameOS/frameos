@@ -40,7 +40,11 @@ export function releaseSigningPublicKeyBase64(): string {
 export class ReleaseSignatureError extends Error {
   constructor(
     message: string,
-    public readonly code: 'malformed_signature' | 'signature_mismatch' | 'signature_unavailable'
+    public readonly code:
+      | 'malformed_signature'
+      | 'signature_mismatch'
+      | 'signature_unavailable'
+      | 'signature_for_another_release'
   ) {
     super(message)
     this.name = 'ReleaseSignatureError'
@@ -56,58 +60,151 @@ function decodeBase64(text: string): Uint8Array {
   return bytes
 }
 
+/** A .minisig, taken apart. */
+export interface ReleaseSignature {
+  /** Ed25519 over BLAKE2b-512 of the asset. */
+  signature: Uint8Array
+  /** The text after `trusted comment: `, byte for byte — it is signed. */
+  trustedComment: string
+  /** Ed25519 over signature || trustedComment. */
+  globalSignature: Uint8Array
+}
+
+// tools/sign_firmware.py writes `trusted comment: frameos <asset name>`.
+const TRUSTED_COMMENT_PREFIX = 'frameos '
+const TRUSTED_COMMENT_LINE = 'trusted comment: '
+
+function decodeSignatureLine(line: string): Uint8Array {
+  try {
+    return decodeBase64(line)
+  } catch {
+    throw new ReleaseSignatureError('Release signature is not valid base64', 'malformed_signature')
+  }
+}
+
 /**
- * The 64 signature bytes from a .minisig file (or from just its signature
- * line).
+ * The parts of a .minisig file.
  *
- * The first non-comment line is base64(ED || keyid8 || sig64): "ED" marks
- * minisign's prehashed mode. The trusted-comment line and its global
- * signature are ignored on purpose — a KEY is trusted, not a comment —
- * mirroring parse_minisig_signature in the backend, parseMinisigSignature in
- * frameos/src/frameos/upgrade.nim and parse_minisig in fos_ota.c.
+ * Four lines: an untrusted comment, base64(ED || keyid8 || sig64) — "ED"
+ * marks minisign's prehashed mode — then `trusted comment: …` and the global
+ * signature over sig64 || comment. The first signature says "FrameOS released
+ * these bytes"; the comment says AS WHAT, and the global signature makes that
+ * the signer's word. All of it is required: a file with no comment half is
+ * refused rather than treated as an older format. Mirrors parse_minisig in
+ * the backend, parseMinisig in frameos/src/frameos/upgrade.nim,
+ * fos_minisig.c and the cloud's src/lib/release-signing.ts.
  */
-export function parseMinisigSignature(minisig: string): Uint8Array {
+export function parseMinisig(minisig: string): ReleaseSignature {
+  const blobs: string[] = []
+  const comments: string[] = []
   for (const rawLine of minisig.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('untrusted comment:') || line.startsWith('trusted comment:')) {
+    if (!rawLine.trim() || rawLine.startsWith('untrusted comment:')) {
       continue
     }
-    let blob: Uint8Array
-    try {
-      blob = decodeBase64(line)
-    } catch {
-      throw new ReleaseSignatureError('Release signature is not valid base64', 'malformed_signature')
+    if (rawLine.startsWith(TRUSTED_COMMENT_LINE)) {
+      comments.push(rawLine.slice(TRUSTED_COMMENT_LINE.length))
+      continue
     }
-    if (blob.length !== 74) {
-      throw new ReleaseSignatureError(
-        `Release signature blob has the wrong length (${blob.length}, expected 74)`,
-        'malformed_signature'
-      )
-    }
-    if (blob[0] !== 0x45 || blob[1] !== 0x44) {
-      throw new ReleaseSignatureError(
-        'Release signature is not the prehashed Ed25519 form FrameOS uses',
-        'malformed_signature'
-      )
-    }
-    return blob.slice(10, 74)
+    blobs.push(rawLine.trim())
   }
-  throw new ReleaseSignatureError('Release signature file contained no signature line', 'malformed_signature')
+  const [signatureLine, globalSignatureLine] = blobs
+  if (signatureLine === undefined) {
+    throw new ReleaseSignatureError('Release signature file contained no signature line', 'malformed_signature')
+  }
+  const blob = decodeSignatureLine(signatureLine)
+  if (blob.length !== 74) {
+    throw new ReleaseSignatureError(
+      `Release signature blob has the wrong length (${blob.length}, expected 74)`,
+      'malformed_signature'
+    )
+  }
+  if (blob[0] !== 0x45 || blob[1] !== 0x44) {
+    throw new ReleaseSignatureError(
+      'Release signature is not the prehashed Ed25519 form FrameOS uses',
+      'malformed_signature'
+    )
+  }
+  const [trustedComment] = comments
+  if (blobs.length !== 2 || comments.length !== 1 || globalSignatureLine === undefined || trustedComment === undefined) {
+    throw new ReleaseSignatureError(
+      'Release signature does not say which release it is for (no trusted comment and global signature)',
+      'malformed_signature'
+    )
+  }
+  const globalSignature = decodeSignatureLine(globalSignatureLine)
+  if (globalSignature.length !== 64) {
+    throw new ReleaseSignatureError(
+      `Release global signature has the wrong length (${globalSignature.length}, expected 64)`,
+      'malformed_signature'
+    )
+  }
+  return { signature: blob.slice(10, 74), trustedComment, globalSignature }
+}
+
+/** The 64 file-signature bytes from a .minisig file. */
+export function parseMinisigSignature(minisig: string): Uint8Array {
+  return parseMinisig(minisig).signature
+}
+
+/** `frameos-<version>-<platform>-buildroot.img.gz` for a release tag ("v2026.9.19"). */
+export function sdImageAssetName(releaseTag: string | null | undefined, platform: string): string {
+  const version = (releaseTag ?? '').replace(/^v/, '')
+  if (!/^\d+(\.\d+)*$/.test(version)) {
+    throw new ReleaseSignatureError(
+      'The image download did not say which release it is — refusing to write an unverified image.',
+      'signature_unavailable'
+    )
+  }
+  return `frameos-${version}-${platform}-buildroot.img.gz`
+}
+
+async function releaseKey(): Promise<CryptoKey> {
+  const rawKey = decodeBase64(releaseSigningPublicKeyBase64())
+  if (rawKey.length !== 32) {
+    throw new ReleaseSignatureError('Release signing key is not a 32-byte Ed25519 key', 'malformed_signature')
+  }
+  return await crypto.subtle.importKey('raw', rawKey as BufferSource, { name: 'Ed25519' }, false, ['verify'])
 }
 
 /**
  * Check a BLAKE2b-512 digest of a release asset against its .minisig. Throws
  * ReleaseSignatureError; resolves when the asset was signed by the release
- * key.
+ * key AS `assetName`.
+ *
+ * The file signature alone only proves the bytes were released once. Which
+ * release and which board they are comes from GitHub metadata, so an older or
+ * another board's signed image attached under a new tag — release-upload
+ * rights, no signing key — would otherwise be written to the card with a
+ * valid signature. The trusted comment names the asset and the global
+ * signature makes it the signer's word, so both are checked here too.
  */
-export async function verifyReleaseDigest(digest: Uint8Array, minisig: string): Promise<void> {
-  const signature = parseMinisigSignature(minisig)
-  const rawKey = decodeBase64(releaseSigningPublicKeyBase64())
-  if (rawKey.length !== 32) {
-    throw new ReleaseSignatureError('Release signing key is not a 32-byte Ed25519 key', 'malformed_signature')
+export async function verifyReleaseDigest(digest: Uint8Array, minisig: string, assetName: string): Promise<void> {
+  const parsed = parseMinisig(minisig)
+  const key = await releaseKey()
+  const comment = new TextEncoder().encode(parsed.trustedComment)
+  const signedComment = new Uint8Array(64 + comment.length)
+  signedComment.set(parsed.signature, 0)
+  signedComment.set(comment, 64)
+  const commentOk = await crypto.subtle.verify(
+    { name: 'Ed25519' },
+    key,
+    parsed.globalSignature as BufferSource,
+    signedComment as BufferSource
+  )
+  if (!commentOk) {
+    throw new ReleaseSignatureError(
+      "The release signature's trusted comment is not signed by the FrameOS release key — refusing to write the image.",
+      'signature_mismatch'
+    )
   }
-  const key = await crypto.subtle.importKey('raw', rawKey as BufferSource, { name: 'Ed25519' }, false, ['verify'])
-  const ok = await crypto.subtle.verify({ name: 'Ed25519' }, key, signature as BufferSource, digest as BufferSource)
+  if (!assetName || parsed.trustedComment !== TRUSTED_COMMENT_PREFIX + assetName) {
+    throw new ReleaseSignatureError(
+      `The release signature is for "${parsed.trustedComment}", not for ${assetName} — ` +
+        'refusing a signed image offered as a different release or board.',
+      'signature_for_another_release'
+    )
+  }
+  const ok = await crypto.subtle.verify({ name: 'Ed25519' }, key, parsed.signature as BufferSource, digest as BufferSource)
   if (!ok) {
     throw new ReleaseSignatureError(
       'The downloaded image does not match the FrameOS release signature — refusing to write it. ' +

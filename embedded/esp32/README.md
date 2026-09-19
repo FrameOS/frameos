@@ -26,7 +26,7 @@ main/                     boot orchestration + platform modules
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_url_guard.c         provider URL rules: local-host exception for plain http/ws, ws_url
                           override guard, origin comparison for the OTA bearer (host-tested)
-  fos_minisig.c           minisign .minisig parser gating every OTA image (host-tested)
+  fos_minisig.c           minisign .minisig parser + "signed as which release?" check gating every OTA image (host-tested)
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
@@ -771,8 +771,13 @@ relayed, never a binary the control plane built — and the device streams the
 image into the inactive slot, BLAKE2b-hashes it as it goes and verifies the
 minisign signature against the release key baked into every image
 (`fos_ota_pubkey.h`, from `release-assets/firmware-signing.pub`) before it
-switches the boot slot. `fos_ota_platform()` names the layout this image was
-built for, so a 16 MB board asks for the 16 MB image. Progress is logged as
+switches the boot slot. Before it downloads anything it also checks what the
+image was signed AS: the `.minisig`'s trusted comment (covered by minisign's
+global signature) must be `frameos frameos-<manifest version>-<this image's
+platform>-app.bin`, so an older or other-layout image that was genuinely
+signed once cannot be served as a new version (`fos_minisig_verify_binding`;
+the log says `signature-for-another-release`). `fos_ota_platform()` names the
+layout this image was built for, so a 16 MB board asks for the 16 MB image. Progress is logged as
 `ota:backend` / `ota:cloud` lines; three failures on one version stop the
 retries until a newer release or a power cycle. The 4MB profile has no OTA
 partition, so firmware updates must be flashed over USB.

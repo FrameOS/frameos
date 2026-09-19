@@ -14,6 +14,10 @@ import {
   forgetSdImageVerdict,
   verifiedSdImage,
 } from "../../../../src/lib/sd-image-verify";
+import {
+  releaseAssetName,
+  verifyReleaseBinding,
+} from "../../../../src/lib/release-signing";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -43,6 +47,11 @@ export const runtime = "nodejs";
 //     -> the .img.gz, verified (502 release_signature_invalid otherwise)
 //   GET /api/frames/sd-image?platform=raspberry-pi-64&signature=1
 //     -> the release's .minisig text, for the browser to verify with too
+//
+// The signature must also have been made FOR this release's image for this
+// board (its signed trusted comment names the asset): an older or other-board
+// signed image attached under a new tag is answered 502
+// release_signature_invalid on both calls, before any image byte is fetched.
 //
 // A release whose image has no .minisig is answered 409 unsigned_release:
 // the flasher must never be offered an image nobody could verify.
@@ -115,6 +124,21 @@ export async function GET(request: NextRequest) {
     return jsonError("release_lookup_failed", 502);
   }
 
+  // What the signature must have been made for: THIS release's image for
+  // THIS board, built from the tag and the platform rather than read off the
+  // asset — an older (or another board's) signed image attached under a new
+  // tag verifies byte for byte and is still not this release.
+  const expectedName = releaseAssetName(
+    release.tag_name,
+    `${platform}-buildroot.img.gz`,
+  );
+  if (!verifyReleaseBinding(minisig, expectedName)) {
+    return jsonError("release_signature_invalid", 502, {
+      platform,
+      release: release.tag_name ?? null,
+    });
+  }
+
   const wantsSignature = request.nextUrl.searchParams.get("signature");
   if (wantsSignature === "1" || wantsSignature === "true") {
     return new NextResponse(minisig, {
@@ -128,7 +152,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const verdict = await verifiedSdImage(asset, assetUrl, minisig);
+  const verdict = await verifiedSdImage(asset, assetUrl, minisig, expectedName);
   if (!verdict.ok) {
     return jsonError("release_signature_invalid", 502, {
       platform,

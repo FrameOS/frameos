@@ -1024,6 +1024,12 @@ jobs:
           # failure would only show up on devices.
           # Every signable asset must now carry a signature — the ones signed
           # here and the ones a GitHub-hosted firmware job signed before upload.
+          # `verify` also checks what each asset was signed AS: the trusted
+          # comment (covered by the global signature) must name the file
+          # exactly as it is about to be published. Devices, the backend and
+          # the cloud refuse an asset whose signature names another version
+          # or target (docs/security-todo.md, closed 2026-09-19), so an asset
+          # renamed after signing has to fail HERE, not on every frame.
           for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz; do
             [ -f "$asset.minisig" ] || { echo "::error::$asset is unsigned"; exit 1; }
             python3 tools/sign_firmware.py verify \

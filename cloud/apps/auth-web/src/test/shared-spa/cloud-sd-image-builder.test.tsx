@@ -89,7 +89,11 @@ const firmwarePayload = {
 
 // The image itself comes from the provider's same-origin route (GitHub's
 // release redirect sends no CORS headers), so that is what the build path
-// fetches; the board listing comes from the firmware route.
+// fetches; the board listing comes from the firmware route. The route names
+// the release it served: with the board picked, that is the asset the
+// signature must have been made for (fixtures/releaseSigning.ts signs as
+// testAssetName — this release, raspberry-pi-64).
+const imageReleaseHeaders = { "x-frameos-release": "v2026.9.20" };
 // The account's settings the builder reads its SSH keys from (the shared
 // settingsLogic fetches them on mount).
 let accountSettings: Record<string, unknown> = {};
@@ -116,7 +120,7 @@ function mockReleaseAndImage() {
     if (url.startsWith("/api/frames/sd-image")) {
       return Promise.resolve(
         new Response(gzippedImage.slice(), {
-          headers: { "content-type": "application/gzip" },
+          headers: { "content-type": "application/gzip", ...imageReleaseHeaders },
         }),
       );
     }
@@ -926,7 +930,7 @@ describe("SdImageBuilder", () => {
       if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
         return Promise.resolve(new Response(signer.minisigFor(large)));
       }
-      return Promise.resolve(new Response(large.slice()));
+      return Promise.resolve(new Response(large.slice(), { headers: imageReleaseHeaders }));
     });
     stubFailingSaveFilePicker("The target volume is full.");
     render(
@@ -998,7 +1002,7 @@ describe("SdImageBuilder", () => {
         // not the ones this download returns.
         return Promise.resolve(new Response(signer.minisigFor(gzippedImage)));
       }
-      return Promise.resolve(new Response(forged.slice()));
+      return Promise.resolve(new Response(forged.slice(), { headers: imageReleaseHeaders }));
     });
     const saved = stubSaveFilePicker();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
@@ -1023,9 +1027,55 @@ describe("SdImageBuilder", () => {
     expect(saved.closed).toBe(false);
     // Under the pinned production key the same download is refused too —
     // the throwaway key is a test convenience, not a bypass.
+    // (It fails one step earlier there: the trusted comment is not the
+    // production key's word either.)
     overrideReleaseSigningKeyForTests(undefined);
     fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
-    await screen.findByText(/does not match the FrameOS release signature/, undefined, { timeout: 5000 });
+    await screen.findByText(/not signed by the FrameOS release key/, undefined, { timeout: 5000 });
+  });
+
+  // docs/security-todo.md, "OTA signature binds archive bytes only": an older
+  // release's image (or another board's), attached under the new tag WITH the
+  // genuine signature it was published with, verifies byte for byte. Only the
+  // signed trusted comment says what it really is.
+  it("refuses a genuinely signed image of another release, discarding the file", async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith("/api/settings") || url.startsWith("/api/fonts") || url.startsWith("/api/frames?")) {
+        return Promise.resolve(Response.json(url.startsWith("/api/settings") ? accountSettings : {}));
+      }
+      if (url.startsWith("/api/frames/firmware")) {
+        return Promise.resolve(Response.json(firmwarePayload));
+      }
+      if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
+        return Promise.resolve(
+          new Response(
+            signer.minisigFor(gzippedImage, {
+              signedAs: "frameos-2026.9.1-raspberry-pi-64-buildroot.img.gz",
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(new Response(gzippedImage.slice(), { headers: imageReleaseHeaders }));
+    });
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={vi.fn(() => Promise.resolve("FRCT_multi"))}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+
+    nameFrame();
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
+
+    await screen.findByText(/offered as a different release or board/, undefined, { timeout: 5000 });
+    expect(screen.queryByTestId("sd-image-done")).toBeNull();
+    expect(saved.aborted).toBe(true);
+    expect(saved.closed).toBe(false);
   });
 
   it("refuses to write an image whose signature cannot be fetched", async () => {
@@ -1040,7 +1090,7 @@ describe("SdImageBuilder", () => {
       if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
         return Promise.resolve(new Response("not found", { status: 404 }));
       }
-      return Promise.resolve(new Response(gzippedImage.slice()));
+      return Promise.resolve(new Response(gzippedImage.slice(), { headers: imageReleaseHeaders }));
     });
     const saved = stubSaveFilePicker();
     render(
@@ -1072,7 +1122,7 @@ describe("SdImageBuilder", () => {
       if (url.startsWith("/api/frames/sd-image") && url.includes("signature=1")) {
         return Promise.resolve(new Response(signer.minisigFor(gzipped)));
       }
-      return Promise.resolve(new Response(gzipped.slice()));
+      return Promise.resolve(new Response(gzipped.slice(), { headers: imageReleaseHeaders }));
     });
     stubSaveFilePicker();
     render(
