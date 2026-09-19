@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  embeddedPowerProfileFor,
   frameSettingsNavAnchorsForMode,
   frameSettingsNavDrift,
   frameSettingsSectionRenders,
@@ -158,6 +159,36 @@ describe("what each surface may render", () => {
     for (const mode of modes) {
       const sections: readonly string[] = allowedFrameSettingsSections[mode];
       expect(sections.includes("frame-settings-lan-access"), mode).toBe(mode === "cloud");
+    }
+  });
+});
+
+describe("which Power controls an embedded board gets", () => {
+  it("gives an ESP32 every control, and an embedded frame with no platform is one", () => {
+    expect(embeddedPowerProfileFor("esp32-s3")).toBe("esp32");
+    expect(embeddedPowerProfileFor("esp32-c3")).toBe("esp32");
+    expect(embeddedPowerProfileFor(undefined)).toBe("esp32");
+    expect(embeddedPowerProfileFor("")).toBe("esp32");
+  });
+
+  it("gives a Pico deep sleep alone", () => {
+    // The Pico firmware cuts the board's power between renders (always, or
+    // only with no USB power present) and implements nothing else: no
+    // wake-check interval, no battery ADC pin, divider or enable pin. The
+    // section used to be hidden for the whole family on the grounds that the
+    // firmware "implements none of this".
+    expect(embeddedPowerProfileFor("pico-w")).toBe("pico");
+    expect(embeddedPowerProfileFor("pico-2w")).toBe("pico");
+  });
+
+  it("gives a virtual frame no Power section", () => {
+    expect(embeddedPowerProfileFor("virtual")).toBeNull();
+  });
+
+  it("is a backend-only section", () => {
+    expect(frameSettingsSectionRenders("embedded-power", "backend")).toBe(true);
+    for (const surface of ["frameAdmin", "cloudLinux", "cloudEsp32"] as const) {
+      expect(frameSettingsSectionRenders("embedded-power", surface)).toBe(false);
     }
   });
 });

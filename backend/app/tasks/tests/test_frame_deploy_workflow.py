@@ -2034,6 +2034,48 @@ async def test_execute_embedded_fast_pushes_directly_to_firmware_before_the_queu
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["ok", "asleep"])
+async def test_execute_embedded_fast_only_nudges_a_pico(monkeypatch: pytest.MonkeyPatch, answer: str):
+    """A Pico pulls no command queue and keeps no scenes: the backend renders
+    the saved ones, so the deploy uploads nothing and asks the board to render
+    now. A board asleep on battery shows them on its next wake, which is not
+    a failed deploy."""
+    frame = _embedded_workflow_frame(
+        device="waveshare.EPD_7in3e",
+        embedded={"platform": "pico-2w", "lastBoot": {"frameosVersion": "2026.10.18"}},
+    )
+    workflow = _embedded_workflow(frame)
+    calls: list[str] = []
+    logs: list[str] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, _type, message):
+        logs.append(message)
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, **kwargs):
+        calls.append(kwargs.get("path"))
+        if answer == "asleep":
+            raise RuntimeError("Timeout")
+        return 200, b"OK", {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+    queued = _patch_embedded_queue(monkeypatch, nudged=True, settled=True)
+
+    await workflow._execute_embedded_fast(_embedded_fast_plan(frame))
+
+    assert queued == []
+    assert calls == ["/reload"]
+    assert frame.status == "starting"
+    assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
+    if answer == "asleep":
+        assert any("on its next render" in message for message in logs)
+
+
+@pytest.mark.asyncio
 async def test_execute_embedded_fast_reports_queued_when_the_frame_does_not_answer(
     monkeypatch: pytest.MonkeyPatch,
 ):

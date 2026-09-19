@@ -1006,7 +1006,7 @@ jobs:
           fi
           shopt -s nullglob
           archives=()
-          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz; do
+          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz release-assets/frameos-*.uf2; do
             [ -f "$asset.minisig" ] || archives+=("$asset")
           done
           if [ ${#archives[@]} -eq 0 ]; then
@@ -1034,7 +1034,7 @@ jobs:
           # the cloud refuse an asset whose signature names another version
           # or target (docs/security-todo.md, closed 2026-09-19), so an asset
           # renamed after signing has to fail HERE, not on every frame.
-          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz; do
+          for asset in release-assets/frameos-*.tar.gz release-assets/frameos-*.bin release-assets/frameos-*.img.gz release-assets/frameos-*.uf2; do
             [ -f "$asset.minisig" ] || { echo "::error::$asset is unsigned"; exit 1; }
             python3 tools/sign_firmware.py verify \
               --public release-assets/firmware-signing.pub "$asset"

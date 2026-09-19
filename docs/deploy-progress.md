@@ -160,7 +160,10 @@ it.
 → receiving ([command:acked:set_scenes / set_settings]) → rendering
 ([commands:settled]) → done ([render:done]). Firmware before the command
 queue (< 2026.10.5) gets the scenes over its own HTTP server: waiting is
-skipped and receiving / rendering are plane steps.
+skipped and receiving / rendering are plane steps. A Pico pulls no queue at
+any version and keeps no scenes (the backend renders them for it), so its
+deploy is the same direct path with only a "render now" nudge in receiving;
+its own `render:done` line ends it.
 
 **Firmware update only** (`firmware`, the OTA card's "Update over the air",
 `POST /frames/{id}/embedded/firmware/ota`): queued → waiting (the frame is
@@ -212,7 +215,6 @@ gating says, whichever wrote first.
   own toasts cover it.
 - A freshly built SD card's first boot: `buildroot.sdImage` already tracks it,
   and nothing happens until someone flashes the card.
-- Pico W thin clients: they send no log lines.
 
 ## Adding a kind or a signal
 

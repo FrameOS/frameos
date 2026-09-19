@@ -6,6 +6,7 @@
 #include "hardware/spi.h"
 #include "pico/stdlib.h"
 
+#include "pk_platform.h"
 #include "pk_shiftreg.h"
 
 // The panel table lives in the driver files.
@@ -38,6 +39,33 @@ const pk_panel_t *pk_display_panels(size_t *count)
     return s_panels[0];
 }
 
+bool pk_display_panel_known(const char *panel_key)
+{
+    return pk_display_find(panel_key) != NULL;
+}
+
+const pk_panel_t *pk_display_current(void)
+{
+    return pk_display_find(pk_config()->panel);
+}
+
+bool pk_display_show_rows(const pk_panel_t *panel, const pk_pins_t *pins,
+                          pk_display_row_fn row_fn, void *ctx)
+{
+    static uint8_t row[512]; // widest packed row any driver here takes: 800px at 4bpp = 400
+    size_t row_bytes = pk_fosb_row_bytes(panel->format, panel->width);
+    if (row_bytes == 0 || row_bytes > sizeof(row)) return false;
+    if (!panel->begin(panel, pins)) {
+        panel->end(pins, false);
+        return false;
+    }
+    for (int y = 0; y < panel->height; y++) {
+        row_fn(ctx, y, row);
+        panel->write(row, row_bytes);
+    }
+    return panel->end(pins, true);
+}
+
 // ---------------------------------------------------------------- SPI HAL
 
 static spi_inst_t *spi_for_pin(int8_t sck)
@@ -55,7 +83,10 @@ static spi_inst_t *s_spi = NULL;
 
 void pk_epd_spi_init(const pk_pins_t *pins)
 {
-    if (s_spi != NULL) return;
+    if (s_spi != NULL) {
+        spi_set_baudrate(s_spi, 20 * 1000 * 1000); // a driver may have lowered it
+        return;
+    }
     s_spi = spi_for_pin(pins->sck);
     spi_init(s_spi, 20 * 1000 * 1000);
     gpio_set_function(pins->sck, GPIO_FUNC_SPI);
@@ -106,11 +137,11 @@ void pk_epd_reset(const pk_pins_t *pins)
 {
     if (pins->rst < 0) return;
     gpio_put(pins->rst, 1);
-    sleep_ms(20);
+    pk_wait_ms(20);
     gpio_put(pins->rst, 0);
-    sleep_ms(10);
+    pk_wait_ms(10);
     gpio_put(pins->rst, 1);
-    sleep_ms(50);
+    pk_wait_ms(50);
 }
 
 bool pk_epd_wait_idle(const pk_pins_t *pins, uint32_t timeout_ms)
@@ -120,7 +151,9 @@ bool pk_epd_wait_idle(const pk_pins_t *pins, uint32_t timeout_ms)
         if (absolute_time_diff_us(get_absolute_time(), deadline) < 0) {
             return false;
         }
-        sleep_ms(10);
+        // A refresh is 25 s on the colour panels: the network and the USB
+        // console keep turning while the panel works.
+        pk_wait_ms(10);
     }
     return true;
 }

@@ -17,6 +17,7 @@ import {
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import { downloadBlob } from '../../utils/objectUrl'
 import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
 import {
   POST_FLASH_BOOT_WAIT_MS,
@@ -42,6 +43,7 @@ import {
   type Esp32Partition,
   type FirmwareUpdateWritePlan,
 } from './embeddedFlashImage'
+import { firmwareDownloadFileName } from './picoFirmware'
 import { workspaceLogic } from './workspaceLogic'
 
 // USB firmware update for a frame that is ALREADY enrolled — the counterpart
@@ -83,6 +85,10 @@ export interface ReleaseFirmwareAsset {
   name: string
   platform: string
   size: number
+  /** What to do with the file: "bin" is esptool-flashed from the browser,
+   * "uf2" is copied onto a Pico's BOOTSEL drive, "img.gz" is an SD image.
+   * The self-hosted backend sends it; FrameOS Cloud's listing does not. */
+  format?: string
 }
 
 export interface ReleaseFirmwareListing {
@@ -147,6 +153,28 @@ export async function downloadReleaseFirmware(
     throw new Error('Could not download the firmware image.')
   }
   return { bytes: new Uint8Array(await response.arrayBuffer()), name: asset.name, release: listing.release ?? '' }
+}
+
+/**
+ * Save a release asset to the person's disk instead of flashing it — the Pico
+ * family's .uf2, which no browser can write to the board itself. Same release
+ * pipe (and so the same auth and base path) as the flashers above; the
+ * backend names the file in its response headers.
+ */
+export async function saveReleaseFirmwareFile(asset: ReleaseFirmwareAsset): Promise<string> {
+  const response = await apiFetch(`${firmwareListingUrl}?platform=${encodeURIComponent(asset.platform)}`, {
+    cache: 'no-store',
+  })
+  if (!response.ok) {
+    throw new Error(
+      response.status === 404
+        ? `The latest release does not publish ${asset.name}.`
+        : 'Could not download the firmware file.'
+    )
+  }
+  const fileName = firmwareDownloadFileName(response.headers, asset.name)
+  downloadBlob(await response.blob(), fileName)
+  return fileName
 }
 
 /**

@@ -179,6 +179,7 @@ from app.tasks.embedded_firmware import (
     normalize_embedded_platform,
     embedded_provisioning_plan,
     ensure_embedded_frame_defaults,
+    is_thin_client_frame,
     is_virtual_frame,
     request_embedded_firmware_update,
 )
@@ -1649,6 +1650,36 @@ async def api_frame_event(
             db, redis, frame, scenes_override=upload, scene_id=scene_id
         )
         return "OK"
+    # A thin client (ESP32-C3, Pico) renders nothing itself and keeps no scene
+    # state: the backend is its runtime, as for a virtual frame. The scene
+    # choice and its state go into the store the next render pull is seeded
+    # from BEFORE the event reaches the device (queued or pushed): the device
+    # re-renders on it, and that pull must already see them.
+    if is_thin_client_frame(frame) and event in {"setCurrentScene", "setSceneState"} and isinstance(body, dict):
+        from .virtual_frame import apply_virtual_scene_state, resolve_virtual_scene_id
+
+        scene_id = body.get("sceneId")
+        scene_id = scene_id if isinstance(scene_id, str) and scene_id else None
+        state = body.get("state")
+        if isinstance(state, dict) and state:
+            target_scene = await resolve_virtual_scene_id(redis, frame, scene_id)
+            await apply_virtual_scene_state(redis, frame, target_scene, state)
+        if event == "setCurrentScene" and scene_id:
+            await redis.set(f"frame:{frame.id}:active_scene", scene_id)
+    if is_thin_client_frame(frame) and not is_queued_embedded_frame(frame) and isinstance(body, dict):
+        # Nothing is queued for a board that pulls no queue (the Pico): a
+        # preview is what its render pull runs until a deploy or a switch.
+        from .embedded_device import clear_thin_client_preview, set_thin_client_preview
+
+        if event == "uploadScenes":
+            preview_scene_id = body.get("sceneId")
+            preview_scene_id = preview_scene_id if isinstance(preview_scene_id, str) and preview_scene_id else None
+            preview_state = body.get("state")
+            await set_thin_client_preview(
+                redis, frame, scenes or [], preview_scene_id, preview_state if isinstance(preview_state, dict) else None
+            )
+        elif event == "setCurrentScene":
+            await clear_thin_client_preview(redis, frame)
     # An ESP32 is a fresh boot on every wake and cannot be pushed to while
     # it sleeps: the event goes on its command queue, the cloud way, and the
     # answer says whether the frame has already taken it or still will.
@@ -4410,6 +4441,28 @@ async def api_frame_set_next_scene(
         await _mark_frame_states_cache_stale(redis, frame, scene_id=data.sceneId)
         await refresh_virtual_frame_image(db, redis, frame, scene_id=data.sceneId)
         await mark_virtual_frame_deployed(db, redis, frame)
+        return {"message": "Scene applied"}
+
+    if is_thin_client_frame(frame) and not is_queued_embedded_frame(frame):
+        # A thin client without the command queue (the Pico) keeps no scenes
+        # and no state: the backend renders for it, so the switch is the
+        # store its next render pull reads, and the deploy job asks the board
+        # to pull now (a sleeping one shows it on its next wake).
+        from .embedded_device import clear_thin_client_preview
+        from .virtual_frame import apply_virtual_scene_state
+
+        if isinstance(data.state, dict) and data.state:
+            await apply_virtual_scene_state(redis, frame, data.sceneId, data.state)
+        await clear_thin_client_preview(redis, frame)
+        await _mark_frame_states_cache_stale(redis, frame, scene_id=data.sceneId)
+        try:
+            from app.tasks import fast_deploy_frame
+
+            await _begin_deploy_progress_for(db, redis, frame, "fast", None)
+            await fast_deploy_frame(id, redis)
+        except Exception as e:
+            await _fail_deploy_progress_for(db, redis, frame, str(e))
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
         return {"message": "Scene applied"}
 
     if is_queued_embedded_frame(frame):
