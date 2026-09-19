@@ -15,13 +15,20 @@ def _png_bytes(color: tuple[int, int, int] = (10, 20, 30), size: tuple[int, int]
     return buffer.getvalue()
 
 
-def _fake_httpx(monkeypatch, responses: dict[str, tuple[int, bytes]], seen: list[str] | None = None):
-    """Stand in for the outbound cover fetch, recording every URL requested."""
+def _fake_httpx(
+    monkeypatch,
+    responses: dict[str, tuple[int, bytes] | tuple[int, bytes, dict[str, str]]],
+    seen: list[str] | None = None,
+    seen_headers: list[dict] | None = None,
+):
+    """Stand in for the outbound cover fetch, recording every URL requested.
+    A response is (status, body) or (status, body, headers)."""
 
     class FakeResponse:
-        def __init__(self, status_code: int, content: bytes):
+        def __init__(self, status_code: int, content: bytes, headers: dict[str, str] | None = None):
             self.status_code = status_code
             self.content = content
+            self.headers = headers or {}
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -36,6 +43,9 @@ def _fake_httpx(monkeypatch, responses: dict[str, tuple[int, bytes]], seen: list
         async def get(self, url, headers=None, timeout=None):
             if seen is not None:
                 seen.append(url)
+            if seen_headers is not None:
+                seen_headers.append(dict(headers or {}))
+            assert self.kwargs.get("follow_redirects") is False  # hops are ours to check
             if url not in responses:
                 raise AssertionError(f"unexpected URL fetched: {url}")
             return FakeResponse(*responses[url])
@@ -105,13 +115,10 @@ async def test_copy_scene_image_rejects_url_outside_known_repositories(async_cli
     assert db.query(SceneImage).filter_by(frame_id=frame.id, scene_id='scene-1').first() is None
 
 
-@pytest.mark.asyncio
-async def test_copy_scene_image_does_not_follow_redirects(async_client, db, redis, monkeypatch):
-    frame = await new_frame(db, redis, 'CoverFrame', 'localhost', 'localhost')
-    image_url = "https://scenes.example.com/api/store/scenes/abc/image"
+def _store_with_cover(db, project_id: int, image_url: str) -> None:
     db.add(
         Repository(
-            project_id=async_client.project_id,
+            project_id=project_id,
             name="Store",
             url="https://cloud.example.com/api/store/repository.json",
             templates=[{"image": image_url}],
@@ -119,34 +126,91 @@ async def test_copy_scene_image_does_not_follow_redirects(async_client, db, redi
     )
     db.commit()
 
-    captured: dict = {}
 
-    class FakeResponse:
-        status_code = 302
-        content = b""
+def _resolve_hosts(monkeypatch, addresses: dict[str, str]) -> None:
+    """Pin what the SSRF guard resolves each host to (no DNS in tests)."""
+    import ipaddress
 
-    class FakeClient:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
+    import app.utils.network as network_module
 
-        async def __aenter__(self):
-            return self
+    async def fake_resolve(host: str):
+        return [ipaddress.ip_address(addresses[host])]
 
-        async def __aexit__(self, *args):
-            return None
+    monkeypatch.setattr(network_module, "resolve_target", fake_resolve)
 
-        async def get(self, url, headers=None, timeout=None):
-            return FakeResponse()
 
-    import app.api.scene_images as scene_images_module
+@pytest.mark.asyncio
+async def test_copy_scene_image_follows_the_store_redirect_to_its_cdn(async_client, db, redis, monkeypatch):
+    """The cloud store answers a public cover with a 307 to its CDN. Every
+    store install used to end in "unexpected status 307" and a blank tile."""
+    frame = await new_frame(db, redis, 'CoverFrame', 'localhost', 'localhost')
+    image_url = "https://cloud.example.com/api/store/scenes/abc/image?v=4"
+    cdn_url = "https://cdn.example.net/blobs/ab/cdef.png"
+    _store_with_cover(db, async_client.project_id, image_url)
+    _resolve_hosts(monkeypatch, {"cloud.example.com": "93.184.216.34", "cdn.example.net": "93.184.216.35"})
 
-    monkeypatch.setattr(scene_images_module.httpx, "AsyncClient", FakeClient)
+    fetched: list[str] = []
+    _fake_httpx(
+        monkeypatch,
+        {image_url: (307, b"", {"location": cdn_url}), cdn_url: (200, _png_bytes((9, 8, 7), (32, 24)))},
+        fetched,
+    )
 
     response = await async_client.post(
         f'/api/frames/{frame.id}/scene_images/scene-1/copy', json={"url": image_url}
     )
-    assert captured.get("follow_redirects") is False
+    assert response.status_code == 201, response.text
+    assert fetched == [image_url, cdn_url]
+    assert response.json()["width"] == 32
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location, address",
+    [
+        ("http://169.254.169.254/latest/meta-data/", "169.254.169.254"),  # cloud metadata
+        ("http://localhost:6379/", "127.0.0.1"),  # the backend's own redis
+        ("http://nas.lan/secret.png", "192.168.1.20"),  # somebody's LAN, via another host
+        ("file:///etc/passwd", ""),
+        ("", ""),
+    ],
+)
+async def test_copy_scene_image_refuses_unsafe_redirects(async_client, db, redis, monkeypatch, location, address):
+    frame = await new_frame(db, redis, 'CoverFrame', 'localhost', 'localhost')
+    image_url = "https://scenes.example.com/api/store/scenes/abc/image"
+    _store_with_cover(db, async_client.project_id, image_url)
+    addresses = {"scenes.example.com": "93.184.216.34"}
+    for host in ("169.254.169.254", "localhost", "nas.lan"):
+        addresses[host] = address or "93.184.216.34"
+    _resolve_hosts(monkeypatch, addresses)
+
+    fetched: list[str] = []
+    _fake_httpx(monkeypatch, {image_url: (302, b"", {"location": location})}, fetched)
+
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/scene_images/scene-1/copy', json={"url": image_url}
+    )
+    assert response.status_code in (403, 502), response.text
+    assert fetched == [image_url]  # the hop was never requested
+    assert db.query(SceneImage).filter_by(frame_id=frame.id, scene_id='scene-1').first() is None
+
+
+@pytest.mark.asyncio
+async def test_copy_scene_image_gives_up_on_a_redirect_loop(async_client, db, redis, monkeypatch):
+    frame = await new_frame(db, redis, 'CoverFrame', 'localhost', 'localhost')
+    image_url = "https://scenes.example.com/api/store/scenes/abc/image"
+    _store_with_cover(db, async_client.project_id, image_url)
+    _resolve_hosts(monkeypatch, {"scenes.example.com": "93.184.216.34"})
+
+    fetched: list[str] = []
+    _fake_httpx(monkeypatch, {image_url: (307, b"", {"location": image_url})}, fetched)
+
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/scene_images/scene-1/copy', json={"url": image_url}
+    )
     assert response.status_code == 502
+    assert "too many redirects" in response.json()["detail"]
+    assert len(fetched) == 4
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime
 from http import HTTPStatus
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from arq import ArqRedis as Redis
@@ -21,7 +21,7 @@ from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame, frame_has_shell_access
 from app.models.template import Template
 from . import api_open, api_project
-from app.utils.network import assert_target_allowed, is_safe_host
+from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, is_safe_host
 from app.utils.upload_limits import read_body_limited
 from app.api.auth import get_current_user_from_request
 from app.tenancy import current_project_id, get_user_project
@@ -33,6 +33,7 @@ SCENE_IMAGE_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
 # something we want to hold in memory, thumbnail, and store per scene.
 MAX_COPIED_IMAGE_BYTES = 16 * 1024 * 1024
 COPIED_IMAGE_TIMEOUT_SECONDS = 15
+MAX_COPIED_IMAGE_REDIRECTS = 3
 
 SYSTEM_TEMPLATE_IMAGE_PATH = re.compile(
     r"^/api/repositories/system/([^/]+)/templates/([^/]+)/image$"
@@ -402,6 +403,29 @@ def repository_template_image_urls(db: Session, project_id: int) -> set[str]:
     return urls
 
 
+async def _checked_redirect_target(from_url: str, location: str | None) -> str:
+    """The next hop of a cover fetch, or an HTTPException when it must not be
+    followed. See the comment at the call site for the policy."""
+    if not location:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY, detail="Could not fetch the image: redirect without a location"
+        )
+    target = urljoin(from_url, location)
+    parsed = urlparse(target)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or not is_safe_host(parsed.hostname):
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Could not fetch the image: unsupported redirect")
+    same_host = parsed.hostname.lower() == (urlparse(from_url).hostname or "").lower()
+    try:
+        # Off-host, loopback is refused outright — also where a development
+        # setup allows loopback frames (FRAMEOS_ALLOW_LOOPBACK_TARGETS).
+        await check_target_host(
+            parsed.hostname, allow_private=same_host, allow_loopback=None if same_host else False
+        )
+    except TargetBlocked as exc:
+        raise HTTPException(status_code=403, detail=f"Image redirect host is not allowed: {exc}") from exc
+    return target
+
+
 async def _fetch_repository_image(db: Session, project_id: int, url: str) -> bytes:
     system_match = SYSTEM_TEMPLATE_IMAGE_PATH.match(url)
     if system_match:
@@ -421,15 +445,33 @@ async def _fetch_repository_image(db: Session, project_id: int, url: str) -> byt
     from app.utils.cloud_backup import cloud_headers_for_url
 
     try:
-        # No redirect following: the allowlist covers the URL we were given,
-        # not wherever it might bounce us (link-local metadata services and
-        # friends).
+        # httpx never follows a redirect for us: the allowlist covers the URL
+        # we were given, not wherever it might bounce us (link-local metadata
+        # services and friends). But the cloud store answers a public cover
+        # with a 307 to its CDN, so refusing every redirect left each store
+        # install without an image. Hops are followed here instead, one at a
+        # time, each through the same guard as any other outbound target —
+        # and stricter than the first URL: a hop to ANOTHER host must resolve
+        # to public addresses only (a LAN repository may serve its own covers;
+        # nothing gets to point us at somebody else's LAN), and the link token
+        # goes to the provider's own URLs only (cloud_headers_for_url).
         async with httpx.AsyncClient(follow_redirects=False) as client:
-            response = await client.get(
-                url,
-                headers=cloud_headers_for_url(db, url),
-                timeout=COPIED_IMAGE_TIMEOUT_SECONDS,
-            )
+            current_url = url
+            for _ in range(MAX_COPIED_IMAGE_REDIRECTS + 1):
+                response = await client.get(
+                    current_url,
+                    headers=cloud_headers_for_url(db, current_url),
+                    timeout=COPIED_IMAGE_TIMEOUT_SECONDS,
+                )
+                if response.status_code not in (301, 302, 303, 307, 308):
+                    break
+                current_url = await _checked_redirect_target(current_url, response.headers.get("location"))
+            else:
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_GATEWAY, detail="Could not fetch the image: too many redirects"
+                )
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 — the repository host is out of our control
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Could not fetch the image: {exc}") from exc
 
