@@ -35,9 +35,8 @@ answer).
   `/boot/firmware/overlays/frameos-hyperpixel4-touch.dtbo` exists,
   `dtoverlay=frameos-hyperpixel4-touch` is in config.txt, `dmesg | grep -i
   goodix` shows the controller bound at 0x14 or 0x5d, and `driver:evdev`
-  lists it. A tap on a square painted at fb0's origin (`cat raw > /dev/fb0`)
-  must read near (0,0), as it does on the Pi 5 (see Done); if not, the fix is
-  the `touchscreen-inverted-*` / `touchscreen-swapped-x-y`
+  lists it. A touch-test scene (see Done) must put its dot under the finger
+  at an OFF-diagonal point, as it does on the Pi 5; if not, the fix is the `touchscreen-inverted-*` / `touchscreen-swapped-x-y`
   properties in `frameos/src/drivers/hyperPixel4/overlays/*.dts` (rebuild the
   `.dtbo` with the `dtc` line in its header). Touch must survive "Turn display
   off / on": that path borrows GPIO 27, the touch interrupt, for the init
@@ -47,9 +46,8 @@ answer).
   720x720, with `edt_ft5x06` at 0x48 in `dmesg`. Pimoroni's legacy overlay
   inverts both touch axes where the kernel's does not; ours follows the
   kernel's, so a corner-tap test is the one that settles it.
-- [ ] **Touch coordinates reach a scene where the finger is**, at `rotate` 0
-  and 90: a tap in each corner arrives as `mouseMove` near (0,0), (w,0),
-  (0,h), (w,h) of the scene.
+- [ ] **Touch on a rotated frame:** at `rotate` 90 / 270 the touch-test dot
+  is still under the finger (rotate 0 passed on the Pi 5, see Done).
 - [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
   driver). The write the driver makes was run by hand as uid 990 — see Done.
 - [ ] **Moving a card between HyperPixels and boards:** change the device
@@ -125,15 +123,19 @@ answer).
   480x800. `Goodix-TS 13-005d: ID 911` bound (0x14 answered -6 first — the
   overlay lists both for that reason) and evdev listens to it. `echo 1 >
   /sys/class/graphics/fb0/blank` **as uid 990** took `bl_power` 0 → 4 and
-  DPMS On → Off, `echo 0` brought both back. Two things learned the hard
-  **Touch orientation:** with the kernel overlay's defaults the four corners
-  read (0,0) (780,25) (750,479) (20,475) — a landscape 800x480 frame over a
-  portrait fb0 — and a tap on a white square painted at fb (0..160, 0..160)
-  read (114, 65): X and Y swapped, Y inversion already right. With
-  `,touchscreen-swapped-x-y` (a toggle: it takes the swap out) the square
-  reads (65, 63) and the opposite corner (451, 704), fb0's own frame, which
-  is what setup now writes and what `frameos-hyperpixel4-touch.dts` was
-  changed to match. Things learned the hard
+  DPMS On → Off, `echo 0` brought both back.
+  **Touch, end to end:** with the kernel overlay as it ships, a private
+  "Touch test" scene (mouseMove → state, mouseUp → redraw a dot) puts the dot
+  under the finger everywhere on the glass — finger → goodix → evdev (scaled
+  by each axis's own range) → runner → scene. The overlay's ranges look
+  transposed (ABS_X 0..799, ABS_Y 0..479 over a 480x800 fb0), and for an hour
+  this entry said `,touchscreen-swapped-x-y` was the fix: it was "verified"
+  with a square at fb0's origin and the opposite corner, **both on the
+  diagonal, where a transpose is invisible**. With the swap toggled out every
+  off-diagonal tap landed at its transpose. Orientation tests use an
+  off-diagonal point. (The same scene first showed x=-1 y=-1: its generated
+  apps exported `get()` where a flow node is run through `run()`, which the
+  runtime skips silently.) Two things learned the hard
   way: `dtparam=i2c_arm=on` (GPIO 2/3 are DPI pins) makes `drm-rp1-dpi` fail
   with "Error applying setting, reverse things back" and no fb0 — hence the
   two `=off` lines; and a later `dtoverlay=i2c-gpio` silently re-points the
