@@ -1,6 +1,7 @@
 // The refresh interval is a state field (frontend/src/utils/refreshInterval.ts):
-// every surface that lists a scene's fields ends with "Refresh interval
-// (seconds)", whether the scene declared one (by role or by name) or not. The
+// a scene that declares none gets an implicit "Refresh interval (seconds)" as
+// its last control; one that declares its own (by role, or a numeric field by
+// name) keeps it where the author put it. The
 // runtime applies the same rules (frameos/src/frameos/refresh_interval.nim,
 // pinned by test_refresh_interval.nim); the cases here mirror those.
 
@@ -59,15 +60,28 @@ describe("resolveRefreshInterval", () => {
     expect(resolveRefreshInterval({ fields: [], settings: {} }).defaultSeconds).toBe(300);
   });
 
-  it("takes over a field literally named refreshInterval, keeps its label, and moves it last", () => {
+  it("takes over a numeric field named refreshInterval where the scene put it", () => {
     const resolved = resolveRefreshInterval({
       fields: [field("refreshInterval", { type: "float", value: "120", label: "Every" }), field("search")],
       settings: { refreshInterval: 900 },
     });
     expect(resolved.implicit).toBe(false);
     expect(resolved.defaultSeconds).toBe(120);
-    expect(resolved.fields.map((f) => f.name)).toEqual(["search", "refreshInterval"]);
-    expect(resolved.fields.at(-1)?.label).toBe("Every");
+    // Where the control goes is the author's call; only the implicit one is last.
+    expect(resolved.fields.map((f) => f.name)).toEqual(["refreshInterval", "search"]);
+    expect(resolved.fields[0]).toMatchObject({ label: "Every", role: "refreshInterval" });
+  });
+
+  it("leaves a refreshInterval field of another type alone, with no implicit twin", () => {
+    for (const type of ["string", "select", "boolean"] as const) {
+      const fields = [field("refreshInterval", { type, value: "hourly" }), field("search")];
+      const resolved = resolveRefreshInterval({ fields, settings: { refreshInterval: 555 } });
+      expect(resolved).toEqual({ fields, key: "", defaultSeconds: 555, implicit: false });
+      expect(sceneRefreshSeconds({ fields, settings: { refreshInterval: 555 } }, { refreshInterval: 60 })).toBe(555);
+    }
+    expect(
+      resolveRefreshInterval({ fields: [field("refreshInterval", { type: "integer", value: "60" })] }).key
+    ).toBe("refreshInterval");
   });
 
   it("lets an explicit role beat the name", () => {
@@ -80,7 +94,7 @@ describe("resolveRefreshInterval", () => {
     });
     expect(resolved.key).toBe("seconds");
     expect(resolved.defaultSeconds).toBe(3600);
-    expect(resolved.fields.map((f) => f.name)).toEqual(["refreshInterval", "search", "seconds"]);
+    expect(resolved.fields.map((f) => f.name)).toEqual(["refreshInterval", "seconds", "search"]);
   });
 
   it("uses settings.refreshInterval when the declared field has no usable default", () => {
@@ -92,9 +106,10 @@ describe("resolveRefreshInterval", () => {
   });
 
   it("does not mutate the scene's own fields", () => {
-    const fields = [field("refreshInterval"), field("search")];
-    sceneStateFields({ fields });
-    expect(fields.map((f) => f.name)).toEqual(["refreshInterval", "search"]);
+    const fields = [field("refreshInterval", { type: "float" }), field("search")];
+    const snapshot = JSON.stringify(fields);
+    expect(sceneStateFields({ fields })[0]?.role).toBe("refreshInterval");
+    expect(JSON.stringify(fields)).toBe(snapshot);
   });
 });
 
@@ -107,7 +122,7 @@ describe("scenePublicStateFields", () => {
     ).toEqual(["search", "refreshInterval"]);
     expect(
       scenePublicStateFields({
-        fields: [field("refreshInterval", { access: "private", value: "45" }), field("search")],
+        fields: [field("refreshInterval", { access: "private", type: "float", value: "45" }), field("search")],
       }).map((f) => f.name)
     ).toEqual(["search"]);
   });

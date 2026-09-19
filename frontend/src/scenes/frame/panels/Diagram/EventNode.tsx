@@ -168,7 +168,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
           <div className="flex items-center gap-2">
             <div className="flex-1">Refresh interval</div>
             <Tooltip
-              title="The default number of seconds between automatic re-renders of this scene. Can be a large number (3600 seconds = 1 hour), or a very small number for real-time rendering (0.04s = 25fps). Anyone controlling the scene can change it: it is the last of the scene's options."
+              title="The default number of seconds between automatic re-renders of this scene. Can be a large number (3600 seconds = 1 hour), or a very small number for real-time rendering (0.04s = 25fps). Anyone controlling the scene can change it from the scene's options."
               containerClassName="ml-1 inline-block align-sub"
               label="About the render interval"
             >

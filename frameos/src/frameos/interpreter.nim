@@ -1234,14 +1234,6 @@ proc setNodeFieldFromEdge*(scene: InterpretedFrameScene, edge: DiagramEdge) =
 # Scene lifecycle
 # -------------------------
 
-proc syncRefreshInterval*(scene: InterpretedFrameScene) =
-  ## `FrameScene.refreshInterval` is what every host's render loop reads; the
-  ## scene's state is where it is set. Copy one into the other.
-  if scene.refreshIntervalKey.len == 0:
-    return
-  scene.refreshInterval = refreshIntervalFromState(
-    scene.state, scene.refreshIntervalKey, scene.refreshIntervalDefault)
-
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     persistedState: JsonNode): FrameScene =
   if TRACING:
@@ -1698,7 +1690,7 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   finally:
     # The run may have moved the interval: a setSceneState from a control
     # panel, or the scene's own code assigning `state.refreshInterval`.
-    InterpretedFrameScene(self).syncRefreshInterval()
+    self.syncRefreshInterval()
     if armedHere:
       disarmRenderDeadline()
       setDispatchBudget(0)
@@ -1832,7 +1824,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
   let settingsInterval = if scene.settings != nil: scene.settings.refreshInterval else: 0.0
   let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
   # The refresh interval is a state field: the scene's own (by role or by
-  # name) or an implicit public one, and always the last field listed.
+  # name), where the scene put it, or an implicit public one added last.
   let refresh = resolveRefreshInterval(scene.fields, settingsInterval)
   ExportedInterpretedScene(
     name: scene.name,

@@ -23,8 +23,8 @@ const sceneSettingsFieldClass = 'scene-settings-field frame-tool-row rounded-xl 
 const sceneSettingsEmbeddedFieldClass = 'scene-settings-field @md:items-center @md:gap-4'
 
 const refreshIntervalTooltip =
-  'The default number of seconds between renders. Anyone controlling the scene can change it: it is the last control ' +
-  'wherever the scene\'s options are shown. Use a large number like "60" or more for e-ink frames. A number below 1 ' +
+  "The default number of seconds between renders. Anyone controlling the scene can change it from the scene's " +
+  'options. Use a large number like "60" or more for e-ink frames. A number below 1 ' +
   'activates realtime mode (0.041s = 24fps, 0.016s = 60fps): only if your hardware supports it.'
 
 function SceneSettingsLabel({ children }: { children: string }): JSX.Element {

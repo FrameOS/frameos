@@ -343,7 +343,8 @@ def test_refresh_interval_is_an_implicit_public_state_field():
     assert source.index('StateField(name: "search"') < source.index('StateField(name: "refreshInterval"')
     assert 'label: "Refresh interval (seconds)"' in source
     assert '"refreshInterval": %*(900.0)' in source
-    assert 'refreshIntervalFromState(self.state, "refreshInterval", 900.0)' in source
+    assert 'refreshIntervalKey: "refreshInterval", refreshIntervalDefault: 900.0, backgroundColor' in source
+    assert "self.syncRefreshInterval()" in source
     assert 'refreshIntervalKey: "refreshInterval"' in source
     assert "refreshIntervalImplicit: true" in source
     assert 'PERSISTED_STATE_KEYS*: seq[string] = @["refreshInterval"]' in source
@@ -370,12 +371,11 @@ def test_refresh_interval_role_takes_over_an_existing_field():
     )
 
     assert 'StateField(name: "refreshInterval"' not in source
-    # Moved last, keeps its label, and its own default beats settings.refreshInterval
-    assert source.index('StateField(name: "search"') < source.index('StateField(name: "seconds"')
+    # Stays where the scene put it, keeps its label, and its own default beats settings.refreshInterval
+    assert source.index('StateField(name: "seconds"') < source.index('StateField(name: "search"')
     assert 'label: "Seconds per image"' in source
     assert 'role: "refreshInterval"' in source
-    assert 'refreshIntervalFromState(self.state, "seconds", 600.0)' in source
-    assert "refreshInterval: 600.0, backgroundColor" in source
+    assert 'refreshInterval: 600.0, refreshIntervalKey: "seconds", refreshIntervalDefault: 600.0' in source
     assert "refreshIntervalImplicit: false" in source
 
 

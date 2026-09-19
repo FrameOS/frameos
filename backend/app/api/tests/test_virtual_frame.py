@@ -380,9 +380,10 @@ async def test_virtual_state_accepts_the_refresh_interval(async_client, db, redi
 
     response = await async_client.get(f'/api/frames/{frame.id}/states')
     states = response.json()['states']
-    assert states['scene-a'] == {'refreshInterval': 60}
+    assert states['scene-a']['refreshInterval'] == 60
     # Once a field has the role, `refreshInterval` is just an undeclared key.
-    assert states['scene-b'] == {'seconds': 30}
+    assert states['scene-b']['seconds'] == 30
+    assert 'refreshInterval' not in states['scene-b']
 
 
 @pytest.mark.asyncio

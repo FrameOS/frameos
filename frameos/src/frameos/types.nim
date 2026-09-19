@@ -313,6 +313,11 @@ type
     logger*: Logger
     state*: JsonNode
     refreshInterval*: float
+    ## The interval is a state field (refresh_interval.nim): the key it is
+    ## read back from after every run, and what applies when the state holds
+    ## no usable number. "" = the scene has no such field.
+    refreshIntervalKey*: string
+    refreshIntervalDefault*: float
     backgroundColor*: Color
     execNode*: proc(nodeId: NodeId, context: ExecutionContext)
     getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
@@ -421,8 +426,6 @@ type
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
     sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
     publicStateFields*: seq[StateField]
-    refreshIntervalKey*: string     # state key read back into `refreshInterval` after every run
-    refreshIntervalDefault*: float  # used when the state holds no usable number
     js*: QuickJS
     jsReady*: bool
     jsFuncNameByNode*: Table[NodeId, string]                                   # code-node -> function name

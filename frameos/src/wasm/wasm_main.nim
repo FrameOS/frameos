@@ -427,7 +427,9 @@ proc frameos_wasm_render_requested(): bool {.exportc, cdecl.} =
 
 proc frameos_wasm_next_sleep(): cdouble {.exportc, cdecl.} =
   ## Seconds the scene asked to sleep before the next render
-  ## (logic/nextSleepDuration); -1 when the scene didn't override it.
+  ## (frameos.setNextSleep(), or logic/nextSleepDuration in an embedded scene —
+  ## at the top level that app sets the scene's refresh interval instead);
+  ## -1 when the scene didn't override it.
   lastNextSleep.cdouble
 
 proc frameos_wasm_scene_interval(): cdouble {.exportc, cdecl.} =

@@ -603,7 +603,9 @@ var lastNextSleep: float = -1
 
 proc sceneNextSleepSeconds*(): float =
   ## Per-render sleep override the scene's last render set through
-  ## logic/nextSleepDuration (context.nextSleep on the Pi runner);
+  ## frameos.setNextSleep() or an embedded scene's logic/nextSleepDuration
+  ## (context.nextSleep on the Pi runner; at the top level that app sets the
+  ## scene's refresh interval instead);
   ## negative = no override, use the interval logic.
   lastNextSleep
 

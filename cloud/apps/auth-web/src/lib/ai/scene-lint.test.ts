@@ -220,6 +220,24 @@ describe("lintScenes", () => {
     ).toEqual([expect.stringContaining('unknown role "timeout"')]);
   });
 
+  it("warns when a field named refreshInterval is not numeric", () => {
+    const named = { name: "refreshInterval", type: "string", value: "hourly" };
+    expect(messages([scene({ fields: [named] })])).toEqual({
+      errors: [],
+      warnings: [expect.stringContaining("is not used as the refresh interval")],
+    });
+    expect(messages([scene({ fields: [{ ...named, type: "integer", value: "60" }] })])).toEqual({
+      errors: [],
+      warnings: [],
+    });
+    // Another field has the role: the name is free for whatever the scene wants
+    expect(
+      messages([
+        scene({ fields: [named, { name: "seconds", role: "refreshInterval", type: "float", value: "600" }] }),
+      ]),
+    ).toEqual({ errors: [], warnings: [] });
+  });
+
   it("lets a state node read the implicit refreshInterval field", () => {
     const withStateNode = scene({
       edges: [

@@ -588,7 +588,8 @@ proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
     0.cdouble
 
 proc fos_nim_next_sleep_impl(): cdouble {.exportc, cdecl.} =
-  ## Sleep override set by the just-finished render (logic/nextSleepDuration);
+  ## Sleep override set by the just-finished render (frameos.setNextSleep(),
+  ## or logic/nextSleepDuration inside an embedded scene);
   ## negative means "no override" and the interval logic applies.
   try:
     sceneNextSleepSeconds().cdouble

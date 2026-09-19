@@ -152,15 +152,15 @@ scene can change it without opening the editor:
 - Every scene has a public state field **`refreshInterval`**, labelled
   "Refresh interval (seconds)" and listed **last** wherever the scene's options
   are shown: the frame's own control panel (`/c`), the admin UI, the backend,
-  the cloud, schedules and the live preview. A scene does not declare it; its
+  the cloud, schedules, split-screen panel options and the live preview. A scene does not declare it; its
   default is `settings.refreshInterval`.
 - Read it as `state.refreshInterval` (code nodes, state nodes) or
   `app.state.refreshInterval` (JS apps). Write it like any other state —
   `frameos.setState("refreshInterval", 60)` or a `logic/setAsState` node — and
   the next sleep uses the new value. A `setSceneState` / `setCurrentScene`
   payload, a schedule's state and a control panel all do the same thing.
-- A scene that wants its own wording marks **one** numeric field with
-  `"role": "refreshInterval"`:
+- A scene that wants its own wording, or its own place in the list, marks
+  **one** numeric field with `"role": "refreshInterval"`:
 
   ```json
   { "name": "seconds", "label": "Seconds per image", "type": "float", "value": "600",
@@ -168,17 +168,25 @@ scene can change it without opening the editor:
   ```
 
   That field then *is* the interval (its `value` is the scene's default and
-  wins over `settings.refreshInterval`), it moves to the end of the list, and
-  no implicit `refreshInterval` field is added. A field literally named
-  `refreshInterval` is taken over the same way without a role. Make the field
-  `"access": "private"` to keep the interval out of people's hands.
+  wins over `settings.refreshInterval`) and no implicit `refreshInterval`
+  field is added. It stays where the scene put it: declaring the field is how
+  an author decides where the control goes and what it is called, and with
+  `"access": "private"` that people get no control at all. A `float` or
+  `integer` field literally named `refreshInterval` is taken over the same way
+  without a role. (A `refreshInterval` field of any other type is left alone —
+  the scene is using the name for something else — and then there is no
+  interval control; the linter warns.)
 - Anything that is not a positive number falls back to the scene's default.
   A customized implicit interval is persisted; one still on the default is
   not, so editing `settings.refreshInterval` keeps working after a redeploy.
 
 There is no need to wire a state node into `logic/nextSleepDuration` to make
-the cadence configurable. That app (and `frameos.setNextSleep()`) remains for
-what it is good at: a one-off override of the pause after *this* render.
+the cadence configurable. That app still works and goes through the same
+flow: it writes its duration into the scene's refresh interval field, exactly
+as a control panel would, so the number it sets is the number every surface
+shows. (Inside an embedded scene — a split-screen panel — it also still tells
+the host scene's render cycle, as it always did.) `frameos.setNextSleep()`
+remains the raw one-off override of the pause after *this* render.
 
 The rules live in `frameos/src/frameos/refresh_interval.nim` (runtime),
 `frontend/src/utils/refreshInterval.ts` (every control surface),

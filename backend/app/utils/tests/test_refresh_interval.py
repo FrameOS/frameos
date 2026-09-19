@@ -42,14 +42,15 @@ def test_missing_settings_fall_back_to_300():
     assert resolve_refresh_interval([], "nonsense").default_seconds == 300.0
 
 
-def test_named_field_is_taken_over_and_moved_last():
+def test_named_field_is_taken_over_where_it_is():
     resolved = resolve_refresh_interval(
         [{"name": "refreshInterval", "type": "float", "value": "120", "label": "Every"}, {"name": "search"}], 900
     )
     assert not resolved.implicit
     assert resolved.default_seconds == 120.0
-    assert [f["name"] for f in resolved.fields] == ["search", "refreshInterval"]
-    assert resolved.fields[-1]["label"] == "Every"
+    # Where the control goes is the author's call; only the implicit one is last
+    assert [f["name"] for f in resolved.fields] == ["refreshInterval", "search"]
+    assert resolved.fields[0]["label"] == "Every"
 
 
 def test_role_beats_the_name():
@@ -63,7 +64,24 @@ def test_role_beats_the_name():
     )
     assert resolved.key == "seconds"
     assert resolved.default_seconds == 3600.0
-    assert [f["name"] for f in resolved.fields] == ["refreshInterval", "search", "seconds"]
+    assert [f["name"] for f in resolved.fields] == ["refreshInterval", "seconds", "search"]
+
+
+def test_non_numeric_refresh_interval_field_is_left_alone():
+    # The scene uses the name for something else: no takeover, no implicit
+    # field on top of it, settings.refreshInterval is all there is.
+    for field_type in ("string", "select", None):
+        field = {"name": "refreshInterval", "value": "hourly"}
+        if field_type:
+            field["type"] = field_type
+        resolved = resolve_refresh_interval([field], 555)
+        assert resolved.key == ""
+        assert not resolved.implicit
+        assert resolved.default_seconds == 555.0
+        assert resolved.fields == [field]
+    assert resolve_refresh_interval([{"name": "refreshInterval", "type": "integer", "value": "60"}], 555).key == (
+        "refreshInterval"
+    )
 
 
 def test_empty_declared_default_uses_settings():

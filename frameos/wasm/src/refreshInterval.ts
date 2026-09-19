@@ -2,9 +2,11 @@ import type { FrameOSScene, StateField } from './types'
 
 /**
  * The scene's refresh interval as a state field: the field with
- * `role: 'refreshInterval'` (first wins), else a field literally named
- * `refreshInterval`, else an implicit public one seeded from
- * `settings.refreshInterval`. It is always listed last. The runtime applies
+ * `role: 'refreshInterval'` (first wins), else a float or integer field
+ * literally named `refreshInterval`, else an implicit public one seeded from
+ * `settings.refreshInterval` and appended after the scene's own fields. A
+ * declared field stays where the scene put it; a `refreshInterval` field of
+ * another type is left alone and gets no implicit twin. The runtime applies
  * the same rules (frameos/src/frameos/refresh_interval.nim), so the implicit
  * field listed here is one the loaded scene really has.
  */
@@ -26,32 +28,43 @@ export function parseRefreshSeconds(value: unknown): number {
   return Number.isFinite(seconds) && seconds > 0 ? seconds : 0
 }
 
-/** Index of the field that carries the refresh interval; -1 when the scene declares none. */
+/**
+ * Index of the field that carries the refresh interval; -1 when the scene
+ * declares none. A role beats the name, and the name only counts on a numeric field.
+ */
 export function refreshIntervalFieldIndex(fields: StateField[] | null | undefined): number {
   const list = fields ?? []
   const byRole = list.findIndex((field) => field?.role === REFRESH_INTERVAL_ROLE)
-  return byRole >= 0 ? byRole : list.findIndex((field) => field?.name === REFRESH_INTERVAL_FIELD_NAME)
+  if (byRole >= 0) {
+    return byRole
+  }
+  return list.findIndex(
+    (field) => field?.name === REFRESH_INTERVAL_FIELD_NAME && (field.type === 'float' || field.type === 'integer')
+  )
 }
 
-/** Every state field of the scene, with the refresh interval (declared or implicit) last. */
+/** Every state field of the scene in its own order, plus the implicit refresh interval last when it has none. */
 export function sceneStateFields(scene: Pick<FrameOSScene, 'fields' | 'settings'> | null | undefined): StateField[] {
   const fields = (scene?.fields ?? []).filter((field): field is StateField => !!field && typeof field === 'object')
   const index = refreshIntervalFieldIndex(fields)
-  const declared = index >= 0 ? fields[index] : undefined
-  if (!declared) {
-    const seconds = parseRefreshSeconds(scene?.settings?.refreshInterval) || DEFAULT_REFRESH_INTERVAL_SECONDS
-    return [
-      ...fields,
-      {
-        name: REFRESH_INTERVAL_FIELD_NAME,
-        label: REFRESH_INTERVAL_LABEL,
-        type: 'float',
-        value: String(seconds),
-        persist: 'disk',
-        access: 'public',
-        role: REFRESH_INTERVAL_ROLE,
-      },
-    ]
+  if (index >= 0) {
+    return fields.map((field, i) => (i === index ? { ...field, role: REFRESH_INTERVAL_ROLE } : field))
   }
-  return [...fields.filter((_, i) => i !== index), { ...declared, role: REFRESH_INTERVAL_ROLE }]
+  if (fields.some((field) => field.name === REFRESH_INTERVAL_FIELD_NAME)) {
+    // The name is taken by a field of another type: no implicit twin.
+    return fields
+  }
+  const seconds = parseRefreshSeconds(scene?.settings?.refreshInterval) || DEFAULT_REFRESH_INTERVAL_SECONDS
+  return [
+    ...fields,
+    {
+      name: REFRESH_INTERVAL_FIELD_NAME,
+      label: REFRESH_INTERVAL_LABEL,
+      type: 'float',
+      value: String(seconds),
+      persist: 'disk',
+      access: 'public',
+      role: REFRESH_INTERVAL_ROLE,
+    },
+  ]
 }

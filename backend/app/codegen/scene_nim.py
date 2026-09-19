@@ -1244,7 +1244,7 @@ class SceneWriter:
         if refresh_interval < 0.001:
             refresh_interval = 0.001
         # The refresh interval is a state field: the scene's own (by role or by
-        # name) or an implicit public one, always listed last. The interpreter
+        # name), where the scene put it, or an implicit public one added last. The interpreter
         # does the same for interpreted scenes (frameos/refresh_interval.nim).
         refresh = resolve_refresh_interval(self.scene.get("fields", []), refresh_interval)
         for field in refresh.fields:
@@ -1376,12 +1376,10 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
 
-proc syncRefreshInterval(self: FrameScene) =
-  self.refreshInterval = refreshIntervalFromState(self.state, "{refresh_interval_key}", {scene_refresh_interval})
-
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   runEvent(Scene(self), context)
-  syncRefreshInterval(self)
+  # The interval is a state field: read it back after every run
+  self.syncRefreshInterval()
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)
@@ -1392,7 +1390,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_refresh_interval}, backgroundColor: {scene_background_color})
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_refresh_interval}, refreshIntervalKey: "{refresh_interval_key}", refreshIntervalDefault: {scene_refresh_interval}, backgroundColor: {scene_background_color})
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
@@ -1401,7 +1399,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   {(newline + "  ").join(self.init_apps)}
   runEvent(self, context)
   {open_event_in_init}
-  syncRefreshInterval(scene)
+  scene.syncRefreshInterval()
 {{.pop.}}
 
 var exportedScene* = ExportedScene(

@@ -6,8 +6,9 @@ import ../types
 # The refresh interval is a state field (refresh_interval.nim):
 # - a scene with no such field gets an implicit public `refreshInterval`,
 #   seeded from settings.refreshInterval and listed last
-# - a field named `refreshInterval`, or one with role "refreshInterval", is
-#   taken over instead (the role wins), and moved last
+# - a numeric field named `refreshInterval`, or one with role
+#   "refreshInterval", is taken over instead (the role wins) and stays where
+#   the scene put it
 # - the runtime reads the interval back from state after every run
 
 proc testConfig(): FrameConfig =
@@ -46,6 +47,13 @@ let scenesJson = "[" & [
   sceneJson("tests/empty-default",
     """{"name": "seconds", "type": "float", "value": "", "access": "public", "role": "refreshInterval"}""",
     refreshInterval = "777"),
+  sceneJson("tests/other-type",
+    """{"name": "refreshInterval", "type": "string", "value": "hourly", "access": "public"}""",
+    refreshInterval = "555"),
+  sceneJson("tests/sleep-app",
+    "",
+    nodes = """,{"id": "s1", "type": "app", "data": {"keyword": "logic/nextSleepDuration", "config": {"duration": 77}}}""",
+    edges = """{"id": "x1", "source": "e1", "sourceHandle": "next", "target": "s1", "targetHandle": "prev"}"""),
   sceneJson("tests/code",
     "",
     nodes = """,{"id": "c1", "type": "app", "data": {"keyword": "logic/setAsState",
@@ -54,7 +62,7 @@ let scenesJson = "[" & [
 ].join(",") & "]"
 
 let inputs = parseInterpretedSceneInputs(scenesJson)
-doAssert inputs.len == 6
+doAssert inputs.len == 8
 let exports = buildInterpretedScenes(inputs)
 
 proc initScene(id: string, persisted: JsonNode = %*{}): InterpretedFrameScene =
@@ -92,17 +100,18 @@ block test_implicit_field_is_appended:
   doAssert exported.refreshIntervalDefault == 900.0
   doAssert "refreshInterval" in exported.persistedStateKeys
 
-block test_named_field_is_taken_over_and_moved_last:
+block test_named_field_is_taken_over_where_it_is:
   let exported = exports["tests/named".SceneId]
-  doAssert exported.publicStateFields.mapIt(it.name) == @["search", "refreshInterval"]
+  # Where the control goes is the author's call; only the implicit one is last
+  doAssert exported.publicStateFields.mapIt(it.name) == @["refreshInterval", "search"]
   # The scene's own label survives: it knows what its interval means
-  doAssert exported.publicStateFields[^1].label == "Every"
+  doAssert exported.publicStateFields[0].label == "Every"
   doAssert not exported.refreshIntervalImplicit
   doAssert exported.refreshIntervalDefault == 120.0
 
 block test_role_beats_the_name:
   let exported = exports["tests/role".SceneId]
-  doAssert exported.publicStateFields.mapIt(it.name) == @["refreshInterval", "search", "seconds"]
+  doAssert exported.publicStateFields.mapIt(it.name) == @["refreshInterval", "seconds", "search"]
   doAssert exported.refreshIntervalKey == "seconds"
   doAssert exported.refreshIntervalDefault == 3600.0
 
@@ -110,6 +119,16 @@ block test_private_field_is_not_offered:
   let exported = exports["tests/private".SceneId]
   doAssert exported.publicStateFields.len == 0
   doAssert exported.refreshIntervalKey == "refreshInterval"
+
+block test_a_non_numeric_refreshInterval_field_is_left_alone:
+  # The scene uses the name for something else: no takeover, and no implicit
+  # field on top of it either. settings.refreshInterval is all there is.
+  let exported = exports["tests/other-type".SceneId]
+  doAssert exported.publicStateFields.mapIt(it.name) == @["refreshInterval"]
+  doAssert exported.publicStateFields[0].fieldType == "string"
+  doAssert exported.refreshIntervalKey == ""
+  doAssert not exported.refreshIntervalImplicit
+  doAssert exported.refreshIntervalDefault == 555.0
 
 block test_runtime_follows_state:
   setUploadedInterpretedScenes(exports)
@@ -148,6 +167,26 @@ block test_runtime_follows_state:
   # An empty declared default falls back to settings.refreshInterval
   doAssert initScene("tests/empty-default").refreshInterval == 777.0
 
+  # A string field that happens to be called refreshInterval is just state
+  let otherType = initScene("tests/other-type")
+  doAssert otherType.refreshInterval == 555.0
+  otherType.setState(%*{"refreshInterval": "60"})
+  doAssert otherType.state{"refreshInterval"}.getStr() == "60"
+  doAssert otherType.refreshInterval == 555.0
+
+  setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+block test_next_sleep_duration_goes_through_the_state_field:
+  setUploadedInterpretedScenes(exports)
+  resetInterpretedScenes()
+  let scene = initScene("tests/sleep-app")
+  doAssert scene.refreshInterval == 300.0
+  var context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+  discard render(scene, context)
+  doAssert scene.state{"refreshInterval"}.getFloat() == 77.0
+  doAssert scene.refreshInterval == 77.0
+  doAssert context.nextSleep == -1
   setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
 block test_scene_sets_its_own_interval:

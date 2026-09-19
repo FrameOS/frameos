@@ -547,8 +547,21 @@ export function lintScene(
   // Every scene has an implicit public "refreshInterval" float field unless
   // it declares one (frameos/src/frameos/refresh_interval.nim), so a state
   // node may read it without a `fields` entry.
-  if (!declaredFields.has(REFRESH_INTERVAL_FIELD_NAME)) {
+  const namedRefreshField = declaredFields.get(REFRESH_INTERVAL_FIELD_NAME);
+  if (!namedRefreshField) {
     declaredFields.set(REFRESH_INTERVAL_FIELD_NAME, { name: REFRESH_INTERVAL_FIELD_NAME, type: "float" });
+  } else if (
+    !refreshIntervalRoleField &&
+    str(namedRefreshField.type) !== "float" &&
+    str(namedRefreshField.type) !== "integer"
+  ) {
+    // The runtime only takes the name over on a numeric field, and cannot
+    // add its implicit field next to this one: the scene has no interval
+    // control at all.
+    push(
+      "warning",
+      `Scene field "${REFRESH_INTERVAL_FIELD_NAME}" has type "${str(namedRefreshField.type) ?? ""}", so it is not used as the refresh interval and the scene gets no refresh interval control. Make it float or integer, or rename it.`,
+    );
   }
 
   // --- scene-local JS apps --------------------------------------------------

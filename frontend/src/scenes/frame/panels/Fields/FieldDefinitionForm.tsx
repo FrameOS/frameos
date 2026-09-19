@@ -25,9 +25,9 @@ export function codenameToLabel(codename: string): string {
 }
 
 /**
- * "Use as refresh interval": at most one state field carries the role. A field
- * literally named `refreshInterval` has it by name (unless another field took
- * the role), so its switch is on and locked.
+ * "Use as refresh interval": at most one state field carries the role. A
+ * float or integer field literally named `refreshInterval` has it by name
+ * (unless another field took the role), so its switch is on and locked.
  */
 function RefreshIntervalRoleField<T extends AppConfigField>({
   fields,
@@ -47,9 +47,10 @@ function RefreshIntervalRoleField<T extends AppConfigField>({
       label="Use as refresh interval"
       tooltip={
         <>
-          The value of this field is how many seconds the scene waits between renders. It is shown last, in place of the
-          default "{REFRESH_INTERVAL_LABEL}" control. Only one field per scene can have this role; a field named{' '}
-          <code>refreshInterval</code> has it automatically.
+          The value of this field is how many seconds the scene waits between renders, replacing the "
+          {REFRESH_INTERVAL_LABEL}" control every scene otherwise gets as its last option. The field stays where you put
+          it; make it private to keep the interval out of people's hands. Only one field per scene can have this role,
+          and a float or integer field named <code>refreshInterval</code> has it automatically.
         </>
       }
     >
