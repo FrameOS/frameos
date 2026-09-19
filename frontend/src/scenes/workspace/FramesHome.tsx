@@ -67,6 +67,7 @@ import { templatesModel } from '../../models/templatesModel'
 import { FrameDashboardSurface, livePreviewSceneId } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameImageOverlayControls } from './FrameImageOverlayControls'
+import { SceneUpdateBanner } from './SceneUpdateBanner'
 import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
@@ -1403,6 +1404,9 @@ function SceneControlPanelContent({
                   <div className="absolute left-2 top-2 z-10 rounded-full bg-orange-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
                     Not saved
                   </div>
+                ) : null}
+                {saved ? (
+                  <SceneUpdateBanner frameId={frame.id} sceneId={scene.id} className="absolute bottom-2 left-2 z-10" />
                 ) : null}
               </div>
               {saved || sceneIsEditable ? (

@@ -225,7 +225,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "The scenes assigned to a frame, in order, with the pinned version (null = follow latest), the store's latest version, and whether the device currently holds this exact set (assigned_checksum vs scenes_checksum).",
+        "The scenes assigned to a frame, in order, with the pinned version (null = follow latest), the version the frame was last sent (assigned_version), the store's latest version, update_available (the store is ahead of the frame — frame_scene_update takes it there), and whether the device currently holds this exact set (assigned_checksum vs scenes_checksum).",
       inputSchema: { frame_id: frameId },
     },
     async ({ frame_id }) =>
@@ -318,6 +318,27 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
           ...(activated ? { activate: activated } : {}),
         });
       }),
+  );
+
+  server.registerTool(
+    "frame_scene_update",
+    {
+      description:
+        "Update ONE installed scene to the newest published version of its store scene and push it — for a row of frame_scenes_list with update_available: true (latest_version is ahead of assigned_version, the version the frame was last sent). Requires confirm=true (it deploys to the device). A pinned scene is re-pinned at the latest version; the other scenes, their order and every settings_groups grant are kept, and a version that newly declares a service key is not granted it. Answers status \"up_to_date\" without pushing when there is nothing newer.",
+      inputSchema: {
+        confirm: confirmed("deploys the scene's newest version to the frame"),
+        frame_id: frameId,
+        scene_id: uuid().describe("The STORE scene id, as listed by frame_scenes_list."),
+      },
+    },
+    async ({ frame_id, scene_id }) =>
+      run(async () =>
+        text(
+          await api.json("POST", `/api/frames/${frame_id}/scenes/update`, {
+            body: { scene_id },
+          }),
+        ),
+      ),
   );
 
   server.registerTool(

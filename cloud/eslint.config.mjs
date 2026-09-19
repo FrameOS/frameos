@@ -97,6 +97,9 @@ export default tseslint.config(
       // bare `JSX` namespace; out of the tsconfig for the same reason.
       "**/src/test/shared-spa/frame-upgrade-card-labels.test.ts",
       "**/src/test/shared-spa/flow-bridging.test.ts",
+      // Mounts sceneUpdatesLogic (→ frameLogic); out of the tsconfig too.
+      "**/src/test/shared-spa/scene-update-available.test.ts",
+      "**/src/test/shared-spa/scene-update-banner.test.tsx",
     ],
   },
   js.configs.recommended,

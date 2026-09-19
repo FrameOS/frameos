@@ -28,7 +28,9 @@ import {
 import {
   activeSceneFromLastState,
   cloudSceneCacheKey,
+  cloudSceneHeldVersion,
   cloudSceneStub,
+  cloudSceneUpdateVersion,
   scenesFromStoreSceneJson,
 } from '../utils/cloudFrameScenes'
 import { entityImagesModel } from './entityImagesModel'
@@ -176,9 +178,13 @@ async function fetchCloudFrameScenes(
     let sceneJson = cloudSceneJsonCache.get(cacheKey)
     if (!sceneJson) {
       try {
-        // A pinned assignment shows the pinned version's content — the
-        // device runs that one, not the store's latest.
-        const version = row.scene_version ? `?version=${row.scene_version}` : ''
+        // The workspace shows the version the frame was sent (the pin, or
+        // what "latest" meant at the last push) — the device runs that one,
+        // not the store's latest, and the difference is the "Update
+        // available" banner. Only a frame with no record of it falls back to
+        // the latest.
+        const held = cloudSceneHeldVersion(row)
+        const version = held ? `?version=${held}` : ''
         const response = await apiFetch(`/api/store/scenes/${row.scene_id}/scenes.json${version}`)
         const parsed = response.ok ? scenesFromStoreSceneJson(await response.json()) : null
         if (parsed) {
@@ -192,7 +198,12 @@ async function fetchCloudFrameScenes(
     }
     const rowScenes = sceneJson ?? [cloudSceneStub(row)]
     for (const scene of rowScenes) {
-      sources[scene.id] = { scene_id: row.scene_id, scene_version: row.scene_version ?? null }
+      sources[scene.id] = {
+        scene_id: row.scene_id,
+        scene_version: row.scene_version ?? null,
+        held_version: cloudSceneHeldVersion(row),
+        update_version: cloudSceneUpdateVersion(row),
+      }
     }
     scenes.push(...rowScenes)
   }

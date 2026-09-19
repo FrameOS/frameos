@@ -21,8 +21,18 @@ const frameId = "frame-1" as unknown as FrameId;
 
 // A tiny in-memory store: assignments per frame, scenes.json per store scene.
 type Store = {
-  assignments: { scene_id: string; scene_version?: number | null; name?: string }[];
-  scenes: Map<string, { scenes: FrameScene[]; owned: boolean; version: number }>;
+  assignments: {
+    scene_id: string;
+    scene_version?: number | null;
+    assigned_version?: number | null;
+    latest_version?: number | null;
+    name?: string;
+  }[];
+  // `scenes` is the newest version; `history` holds older ones by number.
+  scenes: Map<
+    string,
+    { scenes: FrameScene[]; owned: boolean; version: number; history?: Record<number, FrameScene[]> }
+  >;
   created: string[];
   updated: string[];
   pushes: unknown[];
@@ -61,7 +71,9 @@ function installFetch(store: Store, options: { scenesJsonStatus?: (storeSceneId:
         return new Response("{}", { status });
       }
       const entry = store.scenes.get(match[1]!);
-      return entry ? Response.json(entry.scenes) : new Response("{}", { status: 404 });
+      const asked = Number(url.searchParams.get("version") ?? 0);
+      const served = asked && asked !== entry?.version ? entry?.history?.[asked] : entry?.scenes;
+      return served ? Response.json(served) : new Response("{}", { status: 404 });
     }
     if ((match = url.pathname.match(/^\/api\/account\/scenes\/([^/]+)\/content$/))) {
       const entry = store.scenes.get(match[1]!);
@@ -140,6 +152,43 @@ describe("cloud scene persistence", () => {
     expect(store.updated).toEqual([]);
     expect(outcome.changedStoreSceneIds).toEqual([]);
     expect(store.assignments.map((row) => row.scene_id)).toEqual(["public-1", "mine-1"]);
+  });
+
+  it("compares the form with the version the frame HOLDS, not the store's latest", async () => {
+    // The frame was sent v3; the publisher has since shipped v5 (the
+    // workspace shows "Update available"). The form holds v3's content, so a
+    // comparison against v5 read every such scene as edited: a save forked
+    // the public install and republished the owned scene's OLD content on
+    // top of its newer version.
+    const store = fakeStore();
+    const v5 = storedScene("rt-1", "Abstract Architecture");
+    v5.nodes = [...v5.nodes, { id: "new-in-v5", type: "app", data: {} } as never];
+    store.scenes.set("public-1", {
+      history: { 3: [storedScene("rt-1", "Abstract Architecture")] },
+      owned: false,
+      scenes: [v5],
+      version: 5,
+    });
+    const mineV2 = storedScene("rt-2", "Clock");
+    mineV2.nodes = [];
+    store.scenes.set("mine-1", { history: { 1: [storedScene("rt-2", "Clock")] }, owned: true, scenes: [mineV2], version: 2 });
+    store.assignments = [
+      { assigned_version: 3, latest_version: 5, scene_id: "public-1" },
+      { assigned_version: 1, latest_version: 2, scene_id: "mine-1", scene_version: 1 },
+    ];
+    installFetch(store);
+
+    const form = [sanitizedCopy(storedScene("rt-1", "Abstract Architecture")), sanitizedCopy(storedScene("rt-2", "Clock"))];
+    const outcome = await persistAndPushCloudFrameScenes(frameId, form, null, { sceneUnchanged: workspaceEquality });
+
+    expect(store.created).toEqual([]);
+    expect(store.updated).toEqual([]);
+    expect(outcome.changedStoreSceneIds).toEqual([]);
+    // Pins stay where they were: the save is not an update.
+    expect(store.assignments).toEqual([
+      { scene_id: "public-1", scene_version: null },
+      { scene_id: "mine-1", scene_version: 1 },
+    ]);
   });
 
   it("without the workspace's equality the raw comparison forks — which is exactly the bug", async () => {

@@ -129,6 +129,11 @@
     "src/test/shared-spa/frame-upgrade-card-labels.test.ts",
     // Imports frontend/src/types via the diagram's flowBridging helper; the
     // legacy workspace's types predate this package's compiler options.
-    "src/test/shared-spa/flow-bridging.test.ts"
+    "src/test/shared-spa/flow-bridging.test.ts",
+    // Mounts sceneUpdatesLogic (→ frameLogic, framesModel): the legacy
+    // workspace's types predate this package's compiler options. Vitest
+    // still runs it; only tsc leaves it out.
+    "src/test/shared-spa/scene-update-available.test.ts",
+    "src/test/shared-spa/scene-update-banner.test.tsx"
   ]
 }

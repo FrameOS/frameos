@@ -3,7 +3,7 @@ import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 
 import { CloudBackupItem, CloudBackupKey, CloudStatus } from '../../types'
-import { apiFetch } from '../../utils/apiFetch'
+import { apiFetch, hasNoBackend } from '../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { getCurrentProjectId } from '../../utils/projectApi'
@@ -849,6 +849,13 @@ export const cloudLogic = kea<cloudLogicType>([
     },
   })),
   afterMount(({ actions }) => {
+    // The scene-update logic reads the private cloud scenes through
+    // cloudDriveLogic, so this mounts in the standalone embedded editor too —
+    // where there is no backend to ask and the failed load would be reported
+    // as a real error on every scene-store page.
+    if (hasNoBackend()) {
+      return
+    }
     actions.loadCloudStatus()
   }),
 ])

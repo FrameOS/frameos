@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activeSceneFromLastState,
   cloudSceneCacheKey,
+  cloudSceneHeldVersion,
   cloudSceneStub,
+  cloudSceneUpdateVersion,
   scenesFromStoreSceneJson,
 } from "../../../../../../frontend/src/utils/cloudFrameScenes";
 
@@ -59,6 +61,30 @@ describe("cloud frame scene hydration helpers", () => {
     expect(cloudSceneCacheKey({ scene_id: "s1", scene_version: 3 })).toBe("s1@3");
     expect(cloudSceneCacheKey({ scene_id: "s1", scene_version: null })).toBe("s1@latest");
     expect(cloudSceneCacheKey({ scene_id: "s1" })).toBe("s1@latest");
+  });
+
+  // "Update available": an assignment that follows the latest is NOT at the
+  // latest — it only moves on a push — so the workspace shows the version the
+  // frame was last sent and offers the newer one.
+  it("holds the version the frame was sent, and hydrates by it", () => {
+    expect(cloudSceneHeldVersion({ scene_id: "s1", scene_version: null, assigned_version: 3, latest_version: 5 })).toBe(3);
+    expect(cloudSceneHeldVersion({ scene_id: "s1", scene_version: 2 })).toBe(2);
+    expect(cloudSceneHeldVersion({ scene_id: "s1" })).toBeNull();
+    expect(cloudSceneCacheKey({ scene_id: "s1", scene_version: null, assigned_version: 3 })).toBe("s1@3");
+    expect(cloudSceneStub({ scene_id: "s1", assigned_version: 3, latest_version: 5 }).origin?.version).toBe("3");
+  });
+
+  it("offers an update only when the store is ahead of what the frame holds", () => {
+    expect(cloudSceneUpdateVersion({ scene_id: "s1", assigned_version: 3, latest_version: 5, update_available: true })).toBe(5);
+    // A pinned assignment is offered the update too; taking it re-pins.
+    expect(cloudSceneUpdateVersion({ scene_id: "s1", scene_version: 3, latest_version: 5 })).toBe(5);
+    expect(cloudSceneUpdateVersion({ scene_id: "s1", assigned_version: 5, latest_version: 5 })).toBeNull();
+    // The newest version was yanked: the store is BEHIND the frame.
+    expect(cloudSceneUpdateVersion({ scene_id: "s1", assigned_version: 5, latest_version: 4 })).toBeNull();
+    // Nothing records what the frame holds (pre-ledger, follows latest).
+    expect(cloudSceneUpdateVersion({ scene_id: "s1", latest_version: 5 })).toBeNull();
+    // The server knows the account can no longer install it (pulled / private).
+    expect(cloudSceneUpdateVersion({ scene_id: "s1", assigned_version: 3, latest_version: 5, update_available: false })).toBeNull();
   });
 
   // sanitizeFrameForStore lights the Active badge via exactly this mapping:

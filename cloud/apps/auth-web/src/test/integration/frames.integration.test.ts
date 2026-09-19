@@ -31,6 +31,7 @@ import {
   GET as getFrameScenes,
   POST as assignFrameScenes,
 } from "../../../app/api/frames/[frameId]/scenes/route";
+import { POST as updateFrameScene } from "../../../app/api/frames/[frameId]/scenes/update/route";
 import { POST as pushFrameSchedule } from "../../../app/api/frames/[frameId]/schedule/route";
 import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/settings/route";
 import {
@@ -3450,5 +3451,169 @@ describe("frame management API", () => {
       routeParams(frame_id),
     );
     expect(detail.status).toBe(404);
+  });
+});
+
+describe("scene updates: a newer store version of an assigned scene", () => {
+  type SceneRow = {
+    assigned_version: number | null;
+    latest_version: number;
+    scene_id: string;
+    scene_version: number | null;
+    update_available: boolean;
+  };
+
+  async function sceneRows(frameId: string): Promise<SceneRow[]> {
+    const response = await getFrameScenes(
+      getRequest(`/api/frames/${frameId}/scenes`),
+      routeParams(frameId),
+    );
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { scenes: SceneRow[] }).scenes;
+  }
+
+  async function confirmedFrame() {
+    const enrolled = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${enrolled.frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(enrolled.frame_id),
+    );
+    return enrolled;
+  }
+
+  function update(frameId: string, body: Record<string, unknown>) {
+    return updateFrameScene(
+      postJson(`/api/frames/${frameId}/scenes/update`, body, { origin: baseUrl }),
+      routeParams(frameId),
+    );
+  }
+
+  async function setScenesCommands(frameId: string) {
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frameId));
+    return commands.filter((command) => command.type === "set_scenes");
+  }
+
+  it("reports the version the frame was SENT, and offers the newer one", async () => {
+    // An assignment that follows the latest is not AT the latest: it moves
+    // only on a push. Before this the listing had no way to say so.
+    const { accountId, frame_id } = await confirmedFrame();
+    const following = await createStoreScene(accountId, { name: "Following" });
+    const pinned = await createStoreScene(accountId, { name: "Pinned" });
+    const assigned = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: following.id }, { scene_id: pinned.id, scene_version: 1 }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assigned.status).toBe(200);
+    expect((await sceneRows(frame_id)).map((row) => row.update_available)).toEqual([false, false]);
+
+    await publishSceneVersion(following.id, 2);
+    await publishSceneVersion(pinned.id, 2);
+
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 1, latest_version: 2, scene_id: following.id, scene_version: null, update_available: true },
+      { assigned_version: 1, latest_version: 2, scene_id: pinned.id, scene_version: 1, update_available: true },
+    ]);
+  });
+
+  it("updates one scene: a pin moves to the latest and stays a pin, and the push carries the new bytes", async () => {
+    const { accountId, frame_id } = await confirmedFrame();
+    const pinned = await createStoreScene(accountId, { name: "Pinned update" });
+    const other = await createStoreScene(accountId, { name: "Bystander" });
+    await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: pinned.id, scene_version: 1 }, { scene_id: other.id, scene_version: 1 }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    await publishSceneVersion(pinned.id, 2);
+    await publishSceneVersion(other.id, 2);
+
+    const response = await update(frame_id, { scene_id: pinned.id, active_scene_id: "runtime-active" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ previous_version: 1, scene_version: 2, status: "queued" });
+
+    // Only the scene that was asked for moved; the other pin is untouched
+    // and still offers its own update.
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 2, scene_id: pinned.id, scene_version: 2, update_available: false },
+      { assigned_version: 1, scene_id: other.id, scene_version: 1, update_available: true },
+    ]);
+    const pending = (await setScenesCommands(frame_id)).filter((command) => command.status === "pending");
+    expect(pending).toHaveLength(1);
+    const payload = pending[0]?.payload as { scene_id?: string; scenes: { id: string }[] };
+    expect(payload.scenes.map((scene) => scene.id)).toEqual([`${pinned.id}-v2`, other.id]);
+    // The workspace's active scene rides along so the display is not yanked.
+    expect(payload.scene_id).toBe("runtime-active");
+  });
+
+  it("updates a scene that follows the latest without pinning it", async () => {
+    const { accountId, frame_id } = await confirmedFrame();
+    const scene = await createStoreScene(accountId, { name: "Follower update" });
+    await assignFrameScenes(
+      postJson(`/api/frames/${frame_id}/scenes`, { scenes: [{ scene_id: scene.id }] }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    await publishSceneVersion(scene.id, 2);
+
+    const response = await update(frame_id, { scene_id: scene.id });
+    expect(response.status).toBe(200);
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 2, scene_version: null, update_available: false },
+    ]);
+  });
+
+  it("does not wake the frame when it was already sent the newest version", async () => {
+    const { accountId, frame_id } = await confirmedFrame();
+    const scene = await createStoreScene(accountId, { name: "Already current" });
+    await assignFrameScenes(
+      postJson(`/api/frames/${frame_id}/scenes`, { scenes: [{ scene_id: scene.id }] }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const before = (await setScenesCommands(frame_id)).length;
+
+    const response = await update(frame_id, { scene_id: scene.id });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ command_id: null, scene_version: 1, status: "up_to_date" });
+    expect(await setScenesCommands(frame_id)).toHaveLength(before);
+  });
+
+  it("refuses a scene that is not on the frame, a malformed id and another account's frame", async () => {
+    const { accountId, frame_id } = await confirmedFrame();
+    const stray = await createStoreScene(accountId, { name: "Not assigned" });
+
+    const notAssigned = await update(frame_id, { scene_id: stray.id });
+    expect(notAssigned.status).toBe(404);
+    expect(((await notAssigned.json()) as { error: string }).error).toBe("scene_not_assigned");
+
+    expect((await update(frame_id, { scene_id: "nope" })).status).toBe(400);
+
+    await signIn(); // a different account
+    expect((await update(frame_id, { scene_id: stray.id })).status).toBe(404);
+  });
+
+  it("offers no update for a scene its publisher took private", async () => {
+    const publisher = await signIn();
+    const { frame_id } = await confirmedFrame(); // signs in as the frame's owner
+    const scene = await createStoreScene(publisher, { name: "Was public", visibility: "public" });
+    await assignFrameScenes(
+      postJson(`/api/frames/${frame_id}/scenes`, { scenes: [{ scene_id: scene.id }] }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    await publishSceneVersion(scene.id, 2);
+    expect((await sceneRows(frame_id))[0]?.update_available).toBe(true);
+
+    await db.update(storeScenes).set({ visibility: "private" }).where(eq(storeScenes.id, scene.id));
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 1, latest_version: 2, update_available: false },
+    ]);
   });
 });

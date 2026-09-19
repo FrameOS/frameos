@@ -284,6 +284,7 @@ describe("frameos-cloud MCP server", () => {
     // that can change, remove or reflash something must carry the literal.
     const frameChanging = [
       "frame_scene_install",
+      "frame_scene_update",
       "frame_scenes_set",
       "frame_scene_activate",
       "frame_scene_remove",
@@ -319,6 +320,7 @@ describe("frameos-cloud MCP server", () => {
     const client = await connect();
     for (const [name, args] of [
       ["frame_scene_install", { frame_id: frameId, scene_id: sceneId }],
+      ["frame_scene_update", { frame_id: frameId, scene_id: sceneId }],
       ["frame_scenes_set", { frame_id: frameId, scenes: [{ scene_id: sceneId }] }],
       ["frame_settings_update", { frame_id: frameId, settings: { interval: 60 } }],
       ["frame_service_settings_enable", { enabled: true, frame_id: frameId }],

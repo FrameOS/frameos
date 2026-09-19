@@ -237,6 +237,14 @@ export function cloudSceneDeployErrorMessage(code: string | null | undefined, st
       return `A cloud deploy pushes between 1 and ${cloudSceneUploadLimit} scenes`
     case 'frame_not_active':
       return 'This frame is still pending — confirm it on its dashboard before deploying to it'
+    case 'scene_not_assigned':
+      return 'This scene is no longer on the frame'
+    case 'invalid_scene':
+    case 'scene_private':
+    case 'scene_pulled':
+      return 'This scene is no longer available in the store'
+    case 'scene_version_missing':
+      return 'The store has no published version of this scene to update to'
     default:
       return code ? `Failed to deploy the scenes (${code})` : `Failed to deploy the scenes (HTTP ${status})`
   }
@@ -370,14 +378,69 @@ export async function installCloudFrameStoreScene(
   }
 }
 
+/** POST /api/frames/{frameId}/scenes/update. */
+export interface CloudSceneUpdateResult {
+  /** False: the frame had already been sent the newest version; nothing was pushed. */
+  updated: boolean
+  /** The version the frame is on after the call. */
+  sceneVersion: number | null
+  /** Whether the device is online to take the push now (battery frames take it on their next wake). */
+  connected: boolean
+}
+
+/**
+ * "Update to latest" for one store scene on a cloud frame: the server moves
+ * the assignment to the newest published version (a pinned one is re-pinned
+ * there) and pushes. Every other scene, the order and the service-key grants
+ * stay as they are. `activeSceneId` is the RUNTIME scene the push should
+ * leave on screen.
+ */
+export async function updateCloudFrameStoreScene(
+  frameId: FrameId,
+  storeSceneId: string,
+  activeSceneId?: string | null
+): Promise<CloudSceneUpdateResult> {
+  const response = await apiFetch(`/api/frames/${frameId}/scenes/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      scene_id: storeSceneId,
+      ...(activeSceneId ? { active_scene_id: activeSceneId } : {}),
+    }),
+  })
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))) as { error?: string; detail?: string }
+    throw new Error(
+      typeof detail.detail === 'string' && detail.detail
+        ? detail.detail
+        : cloudSceneDeployErrorMessage(detail.error, response.status)
+    )
+  }
+  const result = (await response.json().catch(() => ({}))) as {
+    status?: string
+    scene_version?: number | null
+    connected?: boolean
+  }
+  return {
+    updated: result.status !== 'up_to_date',
+    sceneVersion: result.scene_version ?? null,
+    connected: result.connected !== false,
+  }
+}
+
 /**
  * The scenes.json body of a store scene — the exact payload the device
  * receives over set_scenes, carrying the runtime scene ids. Null when the
  * scene is unreadable (pulled, network) so callers can leave it untouched.
  */
-export async function fetchStoreSceneScenesJson(storeSceneId: string): Promise<FrameScene[] | null> {
+export async function fetchStoreSceneScenesJson(
+  storeSceneId: string,
+  /** A specific version; omitted = the newest published one. */
+  version?: number | null
+): Promise<FrameScene[] | null> {
   try {
-    const response = await apiFetch(`/api/store/scenes/${storeSceneId}/scenes.json`)
+    const query = version ? `?version=${version}` : ''
+    const response = await apiFetch(`/api/store/scenes/${storeSceneId}/scenes.json${query}`)
     if (!response.ok) {
       return null
     }

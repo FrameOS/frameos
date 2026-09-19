@@ -35,7 +35,8 @@ export function wasmPreviewDimensions(frame: Pick<FrameType, 'width' | 'height' 
  * 15s fleet poll keeps hitting the cache.
  */
 export function wasmPreviewCacheKey(frame: PreviewFrame, sceneId: string): string {
-  const version = frame.cloud_scene_sources?.[sceneId]?.scene_version ?? 'latest'
+  const source = frame.cloud_scene_sources?.[sceneId]
+  const version = source?.held_version ?? source?.scene_version ?? 'latest'
   const { width, height } = wasmPreviewDimensions(frame)
   return `${frame.id}:${sceneId}:${version}:${width}x${height}`
 }
