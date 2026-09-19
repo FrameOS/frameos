@@ -536,15 +536,23 @@ const adminApiOnlyHiddenFrameSettingsSections: readonly string[] = ['frame-setti
  * "Turn display off / on" in the frame's "…" menu sends (the runtime's
  * `turnOff` / `turnOn` events, drivers.turnOff() / turnOn()).
  *
- * Only the two that DO something. The framebuffer driver runs `vcgencmd
- * display_power`, falling back to blanking fb0; the HyperPixel 2.1" Round
- * puts its ST7701 to sleep and drops the backlight GPIO. The waveshare driver
+ * Only the ones that DO something. The framebuffer driver runs `vcgencmd
+ * display_power`, falling back to blanking fb0; the HyperPixels put their
+ * controller (ST7701 on the 2.1" Round, ILI9806E on the 4.0 and 4.0 Square)
+ * to sleep and drop the backlight GPIO. The waveshare driver
  * is declared `can_turn_on_off` in backend/app/drivers/drivers.py — the
  * codegen flag that emits the calls — but its turnOn/turnOff are empty procs,
  * so listing it here would be a menu entry that does nothing; e-paper holds
  * its image unpowered anyway, so there is nothing to switch.
  */
-export const displayPowerDevices: readonly string[] = ['framebuffer', 'pimoroni.hyperpixel2r']
+export const displayPowerDevices: readonly string[] = [
+  'framebuffer',
+  'pimoroni.hyperpixel2r',
+  'pimoroni.hyperpixel4',
+  'pimoroni.hyperpixel4_touch',
+  'pimoroni.hyperpixel4sq',
+  'pimoroni.hyperpixel4sq_touch',
+]
 
 export function deviceSupportsDisplayPower(device?: string | null): boolean {
   return typeof device === 'string' && displayPowerDevices.includes(device)

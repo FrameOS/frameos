@@ -50,6 +50,29 @@ def test_hyperpixel_round_uses_the_native_gpio_driver():
     assert not any("LegacyFb" in name for name in DRIVERS)
 
 
+def test_hyperpixel4_panels_share_one_native_driver_with_or_without_touch():
+    """The 4.0 and the 4.0 Square, each sold with and without a touchscreen:
+    one driver picks the panel (and whether to install the touch overlay) from
+    the device id. Touch is the kernel's driver read through evdev, so the
+    touch ids need nothing the plain ones do not."""
+    expected = {
+        "pimoroni.hyperpixel4": (480, 800),
+        "pimoroni.hyperpixel4_touch": (480, 800),
+        "pimoroni.hyperpixel4sq": (720, 720),
+        "pimoroni.hyperpixel4sq_touch": (720, 720),
+    }
+    for device, dimensions in expected.items():
+        drivers = drivers_for_frame(frame(device))
+
+        assert set(drivers) == {"hyperPixel4", "evdev"}, device
+        assert drivers["hyperPixel4"].setup_import_path == "hyperPixel4/hyperPixel4"
+        assert drivers["hyperPixel4"].can_turn_on_off is True
+        assert drivers["hyperPixel4"].vendor_folder is None
+        assert device_dimensions(device) == dimensions
+    # The Round keeps its own driver: a different controller on different pins.
+    assert "hyperPixel4" not in drivers_for_frame(frame("pimoroni.hyperpixel2r"))
+
+
 def test_waveshare_epd10in3_uses_boot_config_without_generic_spi_setup():
     drivers = drivers_for_frame(frame("waveshare.EPD_10in3"))
 

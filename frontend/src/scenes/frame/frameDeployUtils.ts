@@ -154,6 +154,13 @@ const INKY_BUTTON_DEVICES = new Set([
   'pimoroni.inky_impression_13',
   'pimoroni.inky_impression_13_2025',
 ])
+const hyperPixel4Devices = new Set([
+  'pimoroni.hyperpixel4',
+  'pimoroni.hyperpixel4_touch',
+  'pimoroni.hyperpixel4sq',
+  'pimoroni.hyperpixel4sq_touch',
+])
+
 const INKY_NATIVE_DEVICES = new Set([
   'pimoroni.inky_impression_7_3',
   'pimoroni.inky_impression_7_color',
@@ -241,6 +248,8 @@ function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
     }
   } else if (device === 'pimoroni.hyperpixel2r') {
     drivers.add('inkyHyperPixel2r')
+  } else if (hyperPixel4Devices.has(device)) {
+    drivers.add('hyperPixel4')
   } else if (device === 'framebuffer') {
     drivers.add('frameBuffer')
   } else if (device === 'http.upload') {

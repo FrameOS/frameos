@@ -342,10 +342,11 @@ suite "system/index scene":
       eink.paceRefresh(0.05, epoch = 90.0)
       check eink.refreshInterval == 300.0
 
-      config.device = "inkyHyperPixel2r"
-      let lcd = makeIndexScene(config)
-      lcd.paceRefresh(0.05, epoch = 90.0)   # 30 s past the minute -> wake at the next one
-      check abs(lcd.refreshInterval - 30.0) < 1e-6
+      for device in ["pimoroni.hyperpixel2r", "pimoroni.hyperpixel4", "pimoroni.hyperpixel4sq_touch"]:
+        config.device = device
+        let lcd = makeIndexScene(config)
+        lcd.paceRefresh(0.05, epoch = 90.0)   # 30 s past the minute -> wake at the next one
+        check abs(lcd.refreshInterval - 30.0) < 1e-6
 
       config.device = "framebuffer"
       let hdmi = makeIndexScene(config)

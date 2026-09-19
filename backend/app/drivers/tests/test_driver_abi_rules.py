@@ -61,7 +61,7 @@ def driver_sources() -> list[Path]:
 def test_driver_sources_are_present():
     # A rename that empties the glob would make every check below vacuous.
     names = {path.name for path in driver_sources()}
-    assert {"frameBuffer.nim", "inky.nim", "waveshare.nim", "inkyHyperPixel2r.nim"} <= names
+    assert {"frameBuffer.nim", "inky.nim", "waveshare.nim", "inkyHyperPixel2r.nim", "hyperPixel4.nim"} <= names
 
 
 def test_no_driver_stores_an_image_or_the_host_context():

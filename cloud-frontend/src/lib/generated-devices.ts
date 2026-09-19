@@ -178,6 +178,30 @@ export const piDeviceGroups: DeviceGroup[] = [
         "label": "Pimoroni HyperPixel 2.1\" Round",
         "width": 480,
         "height": 480
+      },
+      {
+        "value": "pimoroni.hyperpixel4",
+        "label": "Pimoroni HyperPixel 4.0\"",
+        "width": 480,
+        "height": 800
+      },
+      {
+        "value": "pimoroni.hyperpixel4_touch",
+        "label": "Pimoroni HyperPixel 4.0\" Touch",
+        "width": 480,
+        "height": 800
+      },
+      {
+        "value": "pimoroni.hyperpixel4sq",
+        "label": "Pimoroni HyperPixel 4.0\" Square",
+        "width": 720,
+        "height": 720
+      },
+      {
+        "value": "pimoroni.hyperpixel4sq_touch",
+        "label": "Pimoroni HyperPixel 4.0\" Square Touch",
+        "width": 720,
+        "height": 720
       }
     ]
   },

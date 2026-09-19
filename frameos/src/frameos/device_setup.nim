@@ -412,6 +412,29 @@ proc setupBootConfig*(requestedLines: seq[string], bootConfigPath = ""): SetupRe
   writePrivilegedFile(path, applied.content)
   result.rebootRequired = true
 
+proc setupBootOverlay*(name: string, dtbo: string, bootConfigPath = ""): SetupResult =
+  ## Installs a compiled device-tree overlay next to the firmware's own, in
+  ## `overlays/` beside config.txt, so a `dtoverlay=<name>` line can load it.
+  ## For hardware whose stock overlay also claims pins a FrameOS driver owns.
+  let configPath = if bootConfigPath.len > 0: bootConfigPath else: detectBootConfigPath()
+  let overlaysDir = parentDir(configPath) / "overlays"
+  let path = overlaysDir / (name & ".dtbo")
+  try:
+    if fileExists(path) and readFile(path) == dtbo:
+      setupLog("FrameOS setup: boot overlay: already up to date (" & path & ")")
+      return
+  except CatchableError:
+    discard
+  setupLog("FrameOS setup: boot overlay: writing " & path)
+  if not dirExists(overlaysDir):
+    withWritableMount(overlaysDir):
+      try:
+        createDir(overlaysDir)
+      except CatchableError:
+        discard runSetupCommand(privilegedShell("mkdir -p " & shellQuote(overlaysDir)))
+  writePrivilegedFile(path, dtbo)
+  result.rebootRequired = true
+
 proc setupPythonVendor*(vendorFolder: string) =
   let vendorPath = "/srv/frameos/vendor" / vendorFolder
   discard runSetupCommand(

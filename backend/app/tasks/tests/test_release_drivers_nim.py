@@ -23,6 +23,8 @@ def test_release_driver_specs_include_base_drivers_and_waveshare_variants():
     assert drivers["inky"].can_png is True
     assert "inkyHyperPixel2r" in drivers
     assert "inkyHyperPixel2rLegacyFb" not in drivers
+    assert "hyperPixel4" in drivers
+    assert drivers["hyperPixel4"].can_turn_on_off is True
     assert "inkyPython" in drivers
     assert drivers["inkyPython"].can_png is True
     assert "waveshare_EPD_7in3e" in drivers
@@ -60,6 +62,14 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert 'of "inkyHyperPixel2r":' in source
     assert 'device == "pimoroni.hyperpixel2r"' in source
     assert "hyperpixel2r_native" not in source
+    assert 'of "hyperPixel4":' in source
+    for device in (
+        "pimoroni.hyperpixel4",
+        "pimoroni.hyperpixel4_touch",
+        "pimoroni.hyperpixel4sq",
+        "pimoroni.hyperpixel4sq_touch",
+    ):
+        assert f'"{device}"' in source
     assert "LegacyFb" not in source
     assert 'of "inky":' in source
     assert "proc evdevEnabledDevice(device: string): bool" in source

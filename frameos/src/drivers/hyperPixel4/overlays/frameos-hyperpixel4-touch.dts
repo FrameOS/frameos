@@ -1,0 +1,65 @@
+/*
+ * Touch for the Pimoroni HyperPixel 4.0 (rectangular), and nothing else.
+ *
+ * The FrameOS hyperPixel4 driver owns the display side (firmware DPI, the
+ * panel init bus, the backlight), so unlike vc4-kms-dpi-hyperpixel4 or
+ * Pimoroni's hyperpixel4 overlay this one claims no DPI pin and no GPIO 19.
+ * The touch nodes are the kernel overlay's: a Goodix GT911 on a bit-banged
+ * I2C bus (SDA 10, SCL 11), interrupt on GPIO 27, at whichever of its two
+ * addresses the controller latched at power-on.
+ *
+ * The touch properties are the kernel overlay's, verbatim, swap included:
+ * the axis ranges they produce (X 0..799, Y 0..479) look transposed over a
+ * 480x800 fb0, but evdev scales each axis by its own range and X does run
+ * along fb0's x. A Pi 5 bench with the kernel overlay (2026-09-19) had every
+ * tap under the finger with these, and at its transpose without the swap.
+ *
+ * Build: dtc -@ -I dts -O dtb -o frameos-hyperpixel4-touch.dtbo frameos-hyperpixel4-touch.dts
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			frameos_hyperpixel4_i2c: i2c@0 {
+				compatible = "i2c-gpio";
+				gpios = <&gpio 10 6 /* sda, open drain */
+					 &gpio 11 6>; /* scl, open drain */
+				i2c-gpio,delay-us = <4>; /* ~100 kHz */
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				touch@14 {
+					compatible = "goodix,gt911";
+					reg = <0x14>;
+					interrupt-parent = <&gpio>;
+					interrupts = <27 2>;
+					touchscreen-size-x = <480>;
+					touchscreen-size-y = <800>;
+					touchscreen-x-mm = <51>;
+					touchscreen-y-mm = <85>;
+					touchscreen-inverted-y;
+					touchscreen-swapped-x-y;
+				};
+
+				touch@5d {
+					compatible = "goodix,gt911";
+					reg = <0x5d>;
+					interrupt-parent = <&gpio>;
+					interrupts = <27 2>;
+					touchscreen-size-x = <480>;
+					touchscreen-size-y = <800>;
+					touchscreen-x-mm = <51>;
+					touchscreen-y-mm = <85>;
+					touchscreen-inverted-y;
+					touchscreen-swapped-x-y;
+				};
+			};
+		};
+	};
+};
