@@ -41,7 +41,16 @@ const
   # Plain framebuffer / LCD writes: cheap enough to redraw once a minute for
   # the clock. Everything else (e-ink) keeps the 5-minute refresh and shows
   # the time without seconds — a panel flash a minute is not worth a clock.
-  cheapRedrawDevices = ["framebuffer", "inkyHyperPixel2r"]
+  # These are device ids (frame.json's `device`), not driver names: the list
+  # used to say "inkyHyperPixel2r", which no frame's device ever is.
+  cheapRedrawDevices = [
+    "framebuffer",
+    "pimoroni.hyperpixel2r",
+    "pimoroni.hyperpixel4",
+    "pimoroni.hyperpixel4_touch",
+    "pimoroni.hyperpixel4sq",
+    "pimoroni.hyperpixel4sq_touch",
+  ]
   markCycleSeconds = 6.0
   staticRefreshSeconds = 300.0
   # How long this screen may keep the facts it has to leave the process to

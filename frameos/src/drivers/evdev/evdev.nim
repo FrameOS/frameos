@@ -3,6 +3,7 @@ import json, posix, strformat, os, options
 
 import ./libevdev
 import ./linuxInput
+import ./pointer
 
 import frameos/driver_context
 import frameos/channels
@@ -14,6 +15,12 @@ type DevState = object
   evdev: ptr libevdev
   lastX, lastY: int
   hasX, hasY, moved: bool
+  minX, maxX, minY, maxY: int
+  # Key and button events of the input frame being read, held until its
+  # SYN_REPORT so they follow the frame's position. A touchscreen reports
+  # BTN_TOUCH ahead of the coordinates it belongs to; sent as it arrived, the
+  # press would land wherever the previous touch ended.
+  pending: seq[(string, JsonNode)]
 
 var thread: Thread[void]
 
@@ -59,7 +66,15 @@ proc startThread*() {.thread.} =
         else:
           log(%*{"event": "driver:evdev", "device": device,
               "listening": true})
-          openDevices.add(DevState(path: device, evdev: listener.get()))
+          let evdev = listener.get()
+          openDevices.add(DevState(
+            path: device,
+            evdev: evdev,
+            minX: libevdev_get_abs_minimum(evdev, ABS_X).int,
+            maxX: libevdev_get_abs_maximum(evdev, ABS_X).int,
+            minY: libevdev_get_abs_minimum(evdev, ABS_Y).int,
+            maxY: libevdev_get_abs_maximum(evdev, ABS_Y).int,
+          ))
       except Exception as e:
         log(%*{"event": "driver:evdev", "device": device,
             "error": e.msg})
@@ -112,9 +127,14 @@ proc startThread*() {.thread.} =
                 if openDevices[deviceIndex].moved and
                     openDevices[deviceIndex].hasX and openDevices[deviceIndex].hasY:
                   sendEvent("mouseMove", %*{
-                    "x": openDevices[deviceIndex].lastX,
-                    "y": openDevices[deviceIndex].lastY})
+                    "x": scalePointerAxis(openDevices[deviceIndex].lastX,
+                        openDevices[deviceIndex].minX, openDevices[deviceIndex].maxX),
+                    "y": scalePointerAxis(openDevices[deviceIndex].lastY,
+                        openDevices[deviceIndex].minY, openDevices[deviceIndex].maxY)})
                 openDevices[deviceIndex].moved = false
+                for (name, payload) in openDevices[deviceIndex].pending:
+                  sendEvent(name, payload)
+                openDevices[deviceIndex].pending.setLen(0)
                 continue
               if ev.ev_type == EV_MSC:
                 continue
@@ -129,22 +149,16 @@ proc startThread*() {.thread.} =
                     of BTN_FORWARD: 5
                     of BTN_BACK: 6
                     of BTN_TASK: 7
+                    of BTN_TOUCH: 0 # a finger down is the primary button
                     else: -1
-                  if ev.value == 1:
-                    sendEvent("mouseDown", %*{"button": button})
-                  else:
-                    sendEvent("mouseUp", %*{"button": button})
+                  let name = if ev.value == 1: "mouseDown" else: "mouseUp"
+                  openDevices[deviceIndex].pending.add((name, %*{"button": button}))
                 else:
-                  if ev.value == 1:
-                    sendEvent("keyDown", %*{
-                      "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
-                      "code": ev.code
-                    })
-                  else:
-                    sendEvent("keyUp", %*{
-                      "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
-                      "code": ev.code
-                    })
+                  let name = if ev.value == 1: "keyDown" else: "keyUp"
+                  openDevices[deviceIndex].pending.add((name, %*{
+                    "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
+                    "code": ev.code
+                  }))
               elif ev.ev_type == EV_ABS:
                 if ev.code == ABS_X:
                   openDevices[deviceIndex].lastX = ev.value

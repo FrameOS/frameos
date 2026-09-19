@@ -1317,8 +1317,9 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     discard ctx.sendEventFn("restart", %*{})
   of "set_display_power":
     # Powers the panel itself down or back up, for the drivers that can
-    # (frameBuffer, inkyHyperPixel2r); the rest generate a turnOn/turnOff that
-    # does nothing, which is why the provider only offers it for those two.
+    # (frameBuffer, inkyHyperPixel2r, hyperPixel4); the rest generate a
+    # turnOn/turnOff that does nothing, which is why the provider only offers
+    # it for those.
     # The runtime keeps rendering either way — this is the panel, not the
     # service. `on` is required: a missing flag would have to mean one of the
     # two, and guessing which is how a display ends up off overnight.

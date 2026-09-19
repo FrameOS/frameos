@@ -60,6 +60,17 @@ DRIVERS = {
         can_render=True,
         can_turn_on_off=True,
     ),
+    # The HyperPixel 4.0 and 4.0 Square, touch or not: the same split as the
+    # Round (firmware DPI + init over GPIO), with an ILI9806E behind it. Touch
+    # is the kernel's driver, loaded by an overlay the driver's setup installs
+    # beside config.txt, and arrives through evdev.
+    "hyperPixel4": Driver(
+        name="hyperPixel4",
+        import_path="hyperPixel4/hyperPixel4",
+        setup_import_path="hyperPixel4/hyperPixel4",
+        can_render=True,
+        can_turn_on_off=True,
+    ),
     "httpUpload": Driver(
         name="httpUpload",
         import_path="httpUpload/httpUpload",

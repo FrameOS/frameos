@@ -234,6 +234,20 @@ suite "image helpers":
     var unchanged = testImage()
     check unchanged.previewTransform(0, "unknown").pixelsEqual(original)
 
+  test "panelToScenePoint undoes what a render does on its way to the panel":
+    # Every pixel of a 3x2 scene, pushed through flip + rotateDegrees exactly
+    # as the runner does, must map back to where the scene drew it.
+    for rotate in [0, 90, 180, 270]:
+      for flip in ["", "horizontal", "vertical", "both"]:
+        let scene = testImage(3, 2)
+        var flipped = scene.copy()
+        flipped.applyFlip(flip)
+        let panel = flipped.rotateDegrees(rotate)
+        for y in 0 ..< panel.height:
+          for x in 0 ..< panel.width:
+            let point = panelToScenePoint(x, y, panel.width, panel.height, rotate, flip)
+            check pixel(scene, point.x, point.y).r == pixel(panel, x, y).r
+
   test "previewTransform handles inverse rotation before preview flip":
     let original = testImage(2, 3)
     var deviceInput = testImage(2, 3)

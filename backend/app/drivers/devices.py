@@ -154,7 +154,21 @@ NATIVE_DEVICE_DIMENSIONS = {
     "pimoroni.inky_what_ssd1683_red": (400, 300),
     "pimoroni.inky_what_ssd1683_yellow": (400, 300),
     "pimoroni.hyperpixel2r": (480, 480),
+    # The 4.0 scans portrait; landscape is the frame's rotate setting.
+    "pimoroni.hyperpixel4": (480, 800),
+    "pimoroni.hyperpixel4_touch": (480, 800),
+    "pimoroni.hyperpixel4sq": (720, 720),
+    "pimoroni.hyperpixel4sq_touch": (720, 720),
 }
+
+HYPERPIXEL4_DEVICES = frozenset(
+    {
+        "pimoroni.hyperpixel4",
+        "pimoroni.hyperpixel4_touch",
+        "pimoroni.hyperpixel4sq",
+        "pimoroni.hyperpixel4sq_touch",
+    }
+)
 
 
 def waveshare_variant_for_device(device: str | None) -> str | None:
@@ -288,6 +302,8 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
             device_drivers["gpioButton"] = DRIVERS["gpioButton"]
     elif device == "pimoroni.hyperpixel2r":
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
+    elif device in HYPERPIXEL4_DEVICES:
+        device_drivers = {"hyperPixel4": DRIVERS["hyperPixel4"]}
     elif device == "framebuffer":
         device_drivers = {"frameBuffer": DRIVERS["frameBuffer"]}
     elif device == "http.upload":

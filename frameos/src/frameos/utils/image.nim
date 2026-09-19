@@ -1356,6 +1356,32 @@ proc previewSourceIndex*(x, y, width, height, rotate: int, flip: string): int =
 
   sourceY * width + sourceX
 
+proc panelToScenePoint*(x, y, width, height, rotate: int, flip: string): tuple[x: int, y: int] =
+  ## Where a point on the panel (`width` x `height`, as the driver sees it)
+  ## sits on the canvas a scene drew: the inverse of what a render goes
+  ## through on its way out, flip and then rotateDegrees. A touch arrives in
+  ## panel space; a scene on a rotated frame thinks in its own.
+  var sceneX, sceneY: int
+  case (rotate + 1080) mod 360
+  of 90:
+    sceneX = y
+    sceneY = width - x - 1
+  of 180:
+    sceneX = width - x - 1
+    sceneY = height - y - 1
+  of 270:
+    sceneX = height - y - 1
+    sceneY = x
+  else:
+    sceneX = x
+    sceneY = y
+  let scene = previewDimensions(width, height, rotate)
+  if flip in ["horizontal", "both"]:
+    sceneX = scene.width - sceneX - 1
+  if flip in ["vertical", "both"]:
+    sceneY = scene.height - sceneY - 1
+  (sceneX, sceneY)
+
 when defined(frameosEmbedded):
   proc fillPixelRect(image: Image, x, y, w, h: int, color: ColorRGBX) =
     let x0 = max(0, x)

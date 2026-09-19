@@ -470,6 +470,13 @@ proc normalizedWaveshareVariant(device: string): string =
   elif result == "epd2in13_V3":
     result = "EPD_2in13_V3"
 
+const hyperPixel4Devices = [
+  "pimoroni.hyperpixel4",
+  "pimoroni.hyperpixel4_touch",
+  "pimoroni.hyperpixel4sq",
+  "pimoroni.hyperpixel4sq_touch",
+]
+
 proc driverNameForDevice(device: string): string =
   if device == "framebuffer":
     return "frameBuffer"
@@ -477,6 +484,8 @@ proc driverNameForDevice(device: string): string =
     return "httpUpload"
   if device == "pimoroni.hyperpixel2r":
     return "inkyHyperPixel2r"
+  if device in hyperPixel4Devices:
+    return "hyperPixel4"
   if device in ["pimoroni.inky_impression", "pimoroni.inky_python"]:
     return "inkyPython"
   if device.startsWith("pimoroni.inky_"):
@@ -596,6 +605,11 @@ proc setupStepsForDevice(device: string): seq[string] =
     return @["Upload rendered PNG images to an HTTP endpoint."]
   if device == "pimoroni.hyperpixel2r":
     return @["Write the DPI display block into boot config.", "Use the native HyperPixel 2.1 Round driver."]
+  if device in hyperPixel4Devices:
+    result = @["Write the DPI display block into boot config.", "Use the native HyperPixel 4.0 driver."]
+    if device.endsWith("_touch"):
+      result.add("Install the touch overlay and read touches as pointer events.")
+    return
   if isNativeInkyDevice(device):
     result = @["Enable SPI.", "Add dtoverlay=spi0-0cs to boot config.", "Use the native Pimoroni Inky driver."]
     if isInkyButtonDevice(device):
@@ -651,6 +665,10 @@ proc nativeDeviceDimensions(device: string): tuple[width: int, height: int] =
     (width: 400, height: 300)
   of "pimoroni.hyperpixel2r":
     (width: 480, height: 480)
+  of "pimoroni.hyperpixel4", "pimoroni.hyperpixel4_touch":
+    (width: 480, height: 800)
+  of "pimoroni.hyperpixel4sq", "pimoroni.hyperpixel4sq_touch":
+    (width: 720, height: 720)
   of "waveshare.rpi_zero_photopainter_7in3e":
     (width: 800, height: 480)
   else:
@@ -668,6 +686,14 @@ proc labelForDevice(device: string): string =
     "Pimoroni Inky other (Python driver)"
   of "pimoroni.hyperpixel2r":
     "Pimoroni HyperPixel 2.1 Round"
+  of "pimoroni.hyperpixel4":
+    "Pimoroni HyperPixel 4.0"
+  of "pimoroni.hyperpixel4_touch":
+    "Pimoroni HyperPixel 4.0 Touch"
+  of "pimoroni.hyperpixel4sq":
+    "Pimoroni HyperPixel 4.0 Square"
+  of "pimoroni.hyperpixel4sq_touch":
+    "Pimoroni HyperPixel 4.0 Square Touch"
   of "waveshare.rpi_zero_photopainter_7in3e":
     "Waveshare RPi Zero PhotoPainter - 7.3\""
   else:
@@ -714,6 +740,10 @@ proc setupDisplayOptions*(frameOS: FrameOS): seq[SetupDisplayOption] =
 
   if "inkyHyperPixel2r" in drivers:
     result.addDisplayOption(makeDisplayOption("pimoroni.hyperpixel2r", "inkyHyperPixel2r"))
+
+  if "hyperPixel4" in drivers:
+    for device in hyperPixel4Devices:
+      result.addDisplayOption(makeDisplayOption(device, "hyperPixel4"))
 
   if "inkyPython" in drivers:
     for device in ["pimoroni.inky_impression", "pimoroni.inky_python"]:

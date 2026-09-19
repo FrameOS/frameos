@@ -8,10 +8,45 @@ Done section with the date and what was seen; delete the file when Open is
 empty. Last refreshed 2026-09-13 (the whole non-ESP32 side closed: on-device
 admin round three PASSED on 2026.9.15 and its "crash" explained, the adopted
 card PASSED with one empty-drawer bug found and fixed, the
-generic-image/Remote box closed as obsolete since remote lite). Only the
-ESP32 bench is left, and every box there needs hardware that was not to hand.
+generic-image/Remote box closed as obsolete since remote lite). The ESP32
+bench and the HyperPixel 4.0 one (added 2026-09-19 with the driver) are
+left, and every box there needs hardware that was not to hand.
 
 ## Open
+
+### HyperPixel 4.0 bench
+
+Written from Pimoroni's and the kernel's sources (init streams, DPI timings,
+touch nodes); none of it has met a panel. `driver:hyperPixel4` in the frame's
+log says which way the clock pin went (`"clock": "gpiomem"` is the expected
+answer on a Pi Zero–4).
+
+- [ ] **HyperPixel 4.0, no touch (`pimoroni.hyperpixel4`):** first deploy
+  writes the DPI block (`dpi_timings=480 0 10 16 59 800 …`), reboots once, and
+  the panel shows the scene in its native 480x800 portrait; `rotate: 90` /
+  `270` gives the 800x480 landscape. "Turn display off / on" drops and
+  restores the backlight without the next render waking it.
+- [ ] **HyperPixel 4.0 Touch (`pimoroni.hyperpixel4_touch`):**
+  `/boot/firmware/overlays/frameos-hyperpixel4-touch.dtbo` exists,
+  `dtoverlay=frameos-hyperpixel4-touch` is in config.txt, `dmesg | grep -i
+  goodix` shows the controller bound at 0x14 or 0x5d, and `driver:evdev`
+  lists it. A tap in each corner arrives as `mouseMove` near (0,0),
+  (w,0), (0,h), (w,h) **of the scene** at `rotate` 0 and 90 — if the axes
+  come out mirrored or swapped, the fix is the `touchscreen-inverted-*` /
+  `touchscreen-swapped-x-y` properties in
+  `frameos/src/drivers/hyperPixel4/overlays/*.dts` (rebuild the `.dtbo` with
+  the `dtc` line in its header). Touch must survive "Turn display off / on":
+  that path borrows GPIO 27, the touch interrupt, for the init clock.
+- [ ] **HyperPixel 4.0 Square, with and without touch
+  (`pimoroni.hyperpixel4sq`, `…_touch`):** same two checks at 720x720, with
+  `edt_ft5x06` at 0x48 in `dmesg`. Pimoroni's legacy overlay inverts both
+  touch axes where the kernel's does not; ours follows the kernel's, so the
+  corner test is the one that settles it.
+- [ ] **Moving a card between HyperPixels:** change the device 4.0 → Square →
+  2.1" Round and back; after each deploy + reboot config.txt holds exactly one
+  `dpi_timings=` line and at most one `dtoverlay=frameos-hyperpixel4*` line.
+- [ ] **Buildroot image:** the overlay lands in `/boot/overlays/` on the
+  read-only card, and the goodix / edt-ft5x06 / i2c-gpio modules load.
 
 ### ESP32 bench
 

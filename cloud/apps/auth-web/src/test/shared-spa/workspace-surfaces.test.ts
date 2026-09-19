@@ -440,7 +440,14 @@ describe("the esp32 cloud device profile", () => {
     expect(frameDisplayDevice(undefined)).toBeNull();
     expect(deviceSupportsDisplayPower(undefined)).toBe(false);
     expect(deviceSupportsDisplayPower(null)).toBe(false);
-    expect([...displayPowerDevices].sort()).toEqual(["framebuffer", "pimoroni.hyperpixel2r"]);
+    expect([...displayPowerDevices].sort()).toEqual([
+      "framebuffer",
+      "pimoroni.hyperpixel2r",
+      "pimoroni.hyperpixel4",
+      "pimoroni.hyperpixel4_touch",
+      "pimoroni.hyperpixel4sq",
+      "pimoroni.hyperpixel4sq_touch",
+    ]);
   });
 
   it("offers the USB serial console only to esp32 cloud frames", () => {
