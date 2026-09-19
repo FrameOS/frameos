@@ -576,25 +576,16 @@ describe("lintScenes", () => {
   });
 
   // Every shipped example must lint clean — the linter is only useful if it
-  // does not reject the scenes the catalog itself ships. Three legacy values
-  // in old samples are known (and real: the runtime falls back on them);
-  // anything beyond that list is a regression in the linter.
-  it("lints every bundled example scene without unexpected errors", () => {
-    const knownLegacy = new Set([
-      "samples/Github stars",
-      "samples/MiniGPT",
-      "samples/Ken Burns slideshow",
-    ]);
+  // does not reject the scenes the catalog itself ships, and a sample that
+  // fails it teaches the scene AI a value the editor will not offer.
+  it("lints every bundled example scene without errors", () => {
     const unexpected: string[] = [];
     let totalWarnings = 0;
     for (const example of exampleScenes()) {
       const result = lintScenes(example.scenes);
       totalWarnings += result.warnings.length;
-      if (result.errors.length > 0 && !knownLegacy.has(example.slug)) {
+      if (result.errors.length > 0) {
         unexpected.push(`${example.slug}: ${formatLintIssues(result.errors).join(" | ")}`);
-      }
-      if (knownLegacy.has(example.slug)) {
-        expect(result.errors).toHaveLength(1);
       }
     }
     expect(unexpected).toEqual([]);
