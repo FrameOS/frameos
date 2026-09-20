@@ -17,7 +17,7 @@
     "prettier": "prettier --write src",
     "preview": "vite preview",
     "schema": "npm run schema:build:config_json",
-    "schema:build:config_json": "ts-json-schema-generator -f tsconfig.json --path 'src/types.ts' --type 'AppConfig' --no-type-check > schema/config_json.json && prettier --write schema/config_json.json",
+    "schema:build:config_json": "ts-json-schema-generator -f tsconfig.json --path 'src/types.ts' --type 'AppConfig' --no-type-check > schema/config_json.tmp.json && prettier --write schema/config_json.tmp.json && mv schema/config_json.tmp.json schema/config_json.json",
     "bundle:analyze": "vite-bundle-visualizer"
   },
   "dependencies": {

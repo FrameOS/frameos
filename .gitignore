@@ -93,6 +93,9 @@ build/prebuilt-deps/
 frameos/.nimcache*
 .tmp-cache/
 .tmp/
+# rename-into-place temporaries of the frontend generators, left only by a failed build
+frontend/schema/*.tmp.json
+frontend/src/generated/*.tmp
 e2e/frontend-visual/playwright-report/
 e2e/frontend-visual/test-results/
 frameos/.tmp-home/
