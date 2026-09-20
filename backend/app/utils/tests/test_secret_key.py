@@ -64,3 +64,25 @@ def test_production_config_warns_once_about_a_generated_key(monkeypatch, tmp_pat
     assert (config.SECRET_KEY, config.SECRET_KEY_SOURCE) == ("configured", "env")
     assert "SECRET_KEY is not set" not in capsys.readouterr().out
     assert app_config.Config.SECRET_KEY == ""  # nothing baked in at import time
+
+
+def test_dev_env_append_never_glues_onto_an_unterminated_last_line(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("REDIS_URL=redis://localhost:6379/0")  # no trailing newline
+
+    app_config.append_env_line(str(env), "SECRET_KEY=abc", header="# header")
+
+    # The existing value survives intact, and the header is for new files only.
+    assert env.read_text() == "REDIS_URL=redis://localhost:6379/0\nSECRET_KEY=abc\n"
+
+
+def test_dev_env_append_creates_a_private_file_with_the_header(tmp_path):
+    env = tmp_path / ".env"
+
+    app_config.append_env_line(str(env), "SECRET_KEY=abc", header="# header")
+
+    assert env.read_text() == "# header\nSECRET_KEY=abc\n"
+    assert stat.S_IMODE(env.stat().st_mode) == 0o600
+
+    app_config.append_env_line(str(env), "OTHER=1", header="# header")
+    assert env.read_text() == "# header\nSECRET_KEY=abc\nOTHER=1\n"

@@ -82,9 +82,15 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
+      # Not the runner's system Python: the lock pins pip and setuptools (hash
+      # mode needs every dependency in the file), and those belong in a
+      # toolcache interpreter, not on top of the distro's packages.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: Install backend dependencies
         run: |
-          pip install -r backend/requirements.txt
+          pip install --require-hashes -r backend/requirements.txt
       - name: Install Nim (prebuilt)
         env:
           NIM_VERSION: 2.2.4
@@ -99,7 +105,7 @@ jobs:
             *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
           esac
           nim_slug="${distro}-${version}-${host_arch}"
-          echo $nim_slug
+          echo "$nim_slug"
           # The archive digest must be on the committed list or the runner
           # refuses it: the CDN alone is not a trust anchor (recipe for a new
           # Nim at the top of .github/nim-prebuilt.sha256).
@@ -113,7 +119,7 @@ jobs:
           echo "${expected}  /tmp/nim.tar.gz" | sha256sum -c -
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
           rm -rf "$HOME/.nim/nim-2.2.4/nim/bin"
-          mv $HOME/.nim/nim-2.2.4/nim/* "$HOME/.nim/nim-2.2.4/"
+          mv "$HOME"/.nim/nim-2.2.4/nim/* "$HOME/.nim/nim-2.2.4/"
           echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
           nim --version
@@ -164,9 +170,15 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
+      # Not the runner's system Python: the lock pins pip and setuptools (hash
+      # mode needs every dependency in the file), and those belong in a
+      # toolcache interpreter, not on top of the distro's packages.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: Install backend dependencies
         run: |
-          pip install -r backend/requirements.txt
+          pip install --require-hashes -r backend/requirements.txt
       - name: Install Nim (prebuilt)
         env:
           NIM_VERSION: 2.2.4
@@ -209,4 +221,4 @@ jobs:
         run: |
           cd frameos
           cat frame.json
-          make cross-${TARGET_SLUG}
+          make "cross-${TARGET_SLUG}"

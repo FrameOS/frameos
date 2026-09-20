@@ -75,8 +75,13 @@ gh workflow run buildroot-base-image.yml --ref your-branch -f runner_label=your-
 The workflow picks the platform's default runner (`ubuntu-24.04-arm` for the
 64-bit platforms, x86_64 `ubuntu-24.04` for 32-bit ARM platforms so the prebuilt
 Bootlin toolchain applies) and can be dispatched with a custom runner label
-when a larger/self-hosted runner is available. It builds the base image,
-uploads it to R2, and verifies the refreshed manifest.
+when a larger/self-hosted runner is available. Each platform is two jobs:
+`build` compiles the base image on that runner and hands it over as a run
+artifact; `publish` — always GitHub-hosted — uploads it to R2 and verifies the
+refreshed manifest. The split is a trust boundary, not tidiness: the
+self-hosted pool shares one `/mnt/cache` across every job and runs hours of
+third-party build scripts, so the R2 write credentials (which cover all of
+`archive.frameos.net`) are never in a job that runs there.
 
 The manifest is then mirrored back into git by a single `commit-manifest` job
 that waits for every platform to finish, so a `platform=all` run produces **one**
@@ -85,7 +90,8 @@ racing to push the same file. `platform=all` is the default; the manifest keeps
 one entry per platform. If one platform fails, the others are still committed
 and the run is marked failed.
 
-Repository secrets required by the upload step:
+Repository secrets required by the `publish` and `commit-manifest` jobs (the
+`build` job gets none):
 
 ```bash
 R2_ACCESS_KEY_ID

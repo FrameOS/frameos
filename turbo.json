@@ -1,6 +1,6 @@
 {
   "$schema": "https://turborepo.com/schema.json",
-  "envMode": "loose",
+  "envMode": "strict",
   "tasks": {
     "build": {
       "dependsOn": ["^build"]
@@ -27,6 +27,7 @@
       "outputs": ["dist/**"]
     },
     "frameos-wasm#build": {
+      "env": ["FRAMEOS_WASM_REQUIRE_RUNTIME"],
       "inputs": [
         "src/**",
         "scripts/**",
@@ -37,6 +38,8 @@
       "outputs": ["dist/**"]
     },
     "frameos-wasm#build:runtime": {
+      "env": ["FRAMEOS_WASM_COMMIT"],
+      "passThroughEnv": ["EMSDK", "EMSDK_NODE", "EMSDK_PYTHON", "EM_CONFIG", "EM_CACHE", "NIMBLE_DIR"],
       "inputs": [
         "../src/wasm/**",
         "../src/frameos/**",
