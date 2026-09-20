@@ -76,10 +76,16 @@ proc listenForLogThread(connectionsState: ConnectionsState) {.thread.} =
   while true:
     let (success, payload) = logBroadcastChannel.tryRecv()
     if success:
-      let uiLog = toUiLog(payload)
-      storeUiLog(uiLog)
-      if hasConnections(connectionsState):
-        sendToAll(connectionsState, $(%*{"event": "new_log", "data": uiLog}))
+      var uiLog = toUiLog(payload)
+      # Serialise for the admin sockets BEFORE the store: storeUiLog hands the
+      # node to the deque the HTTP workers read, and from then on this thread
+      # has no business with it (state.nim).
+      let message =
+        if hasConnections(connectionsState): $(%*{"event": "new_log", "data": uiLog})
+        else: ""
+      storeUiLog(move(uiLog))
+      if message.len > 0:
+        sendToAll(connectionsState, message)
     else:
       sleep(10)
 

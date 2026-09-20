@@ -101,7 +101,7 @@ proc addAdminApiRoutes*(router: var Router) =
       except ValueError as error:
         jsonResponse(request, Http400, %*{"detail": error.msg})
       except CatchableError as error:
-        jsonResponse(request, Http500, %*{"detail": error.msg})
+        respondInternalError(request, "settings:update:error", error, "Failed to save the settings")
   )
 
   # ---- private-network elevation (local-presence ceremony) -----------------
@@ -139,7 +139,7 @@ proc addAdminApiRoutes*(router: var Router) =
           "expiresInSeconds": LocalAccessChallengeTtlSeconds,
         })
       except CatchableError as error:
-        jsonResponse(request, Http500, %*{"detail": error.msg})
+        respondInternalError(request, "network:local-access:error", error, "Failed to start the challenge")
   )
 
   router.post("/api/network/local-access", proc(request: Request) {.gcsafe.} =
@@ -178,7 +178,7 @@ proc addAdminApiRoutes*(router: var Router) =
         sendEvent("render", %*{})
         jsonResponse(request, Http200, updated)
       except CatchableError as error:
-        jsonResponse(request, Http500, %*{"detail": error.msg})
+        respondInternalError(request, "network:local-access:error", error, "Failed to apply the change")
   )
 
   router.get("/api/upgrade/status", proc(request: Request) {.gcsafe.} =
@@ -210,7 +210,7 @@ proc addAdminApiRoutes*(router: var Router) =
       except ValueError as error:
         jsonResponse(request, Http400, %*{"detail": error.msg})
       except CatchableError as error:
-        jsonResponse(request, Http500, %*{"detail": error.msg})
+        respondInternalError(request, "upgrade:error", error, "Failed to start the upgrade")
   )
 
   addAdminApiAssetRoutes(router)
@@ -224,8 +224,13 @@ proc addAdminApiRoutes*(router: var Router) =
         request.respond(Http404, body = "Not found!")
       else:
         log(%*{"event": "http", "post": request.path})
-        let payload = parseJson(if request.body == "": "{}" else: request.body)
-        sendEvent(request.pathParams["name"], payload)
+        var payload =
+          try:
+            parseJson(if request.body == "": "{}" else: request.body)
+          except JsonParsingError:
+            jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+            return
+        sendEventOwned(request.pathParams["name"], move(payload))
         jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
@@ -237,13 +242,22 @@ proc addAdminApiRoutes*(router: var Router) =
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
       else:
-        let payload = parseJson(if request.body == "": "{}" else: request.body)
+        let payload =
+          try:
+            parseJson(if request.body == "": "{}" else: request.body)
+          except JsonParsingError:
+            jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+            return
         let eventName = payload{"event"}.getStr("")
         if eventName.len == 0:
           jsonResponse(request, Http400, %*{"detail": "Missing event"})
         else:
+          # `{}` answers nil for a missing key (and for a body that is not an
+          # object at all): `.kind` on that was a nil dereference, so
+          # `{"event": "render"}` with no payload took the whole runtime down
+          # with a SIGSEGV instead of rendering.
           let eventPayload = payload{"payload"}
           log(%*{"event": "http", "post": request.path, "eventName": eventName})
-          sendEvent(eventName, if eventPayload.kind == JNull: %*{} else: eventPayload)
+          sendEvent(eventName, if eventPayload.isNil or eventPayload.kind == JNull: %*{} else: eventPayload)
           jsonResponse(request, Http200, %*{"status": "ok"})
   )

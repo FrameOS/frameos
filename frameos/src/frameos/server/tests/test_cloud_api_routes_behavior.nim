@@ -9,6 +9,7 @@ import std/[json, os, strutils, times, unittest]
 import ../../channels
 import ../rate_limit
 import ./helpers/http_harness
+from ../routes/cloud_api_routes import safeCloudErrorCode
 
 let workDir = getTempDir() / ("frameos-test-cloud-routes-" & $(epochTime().int64) & "-" & $getCurrentProcessId())
 createDir(workDir)
@@ -338,3 +339,15 @@ suite "the two cloud switches on the admin page":
 # worker threads are torn down by process exit (an explicit close from the
 # main thread races the workers), and the temp workDir lives under the OS
 # temp root.
+
+suite "cloud sign-in callback error codes":
+  test "only an OAuth-shaped error code reaches the Location header":
+    # The query parameter arrives URL-decoded: %0d%0a is a real CR LF here,
+    # and it used to be appended to the redirect as it came.
+    check safeCloudErrorCode("access_denied") == "access_denied"
+    check safeCloudErrorCode("invalid_redirect_uri") == "invalid_redirect_uri"
+    check safeCloudErrorCode("x\r\nSet-Cookie: frame_admin_session=evil") == "exchange_failed"
+    check safeCloudErrorCode("a b") == "exchange_failed"
+    check safeCloudErrorCode("a&next=//evil.example") == "exchange_failed"
+    check safeCloudErrorCode("") == "exchange_failed"
+    check safeCloudErrorCode(newString(65)) == "exchange_failed"

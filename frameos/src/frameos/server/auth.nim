@@ -1,6 +1,6 @@
 import checksums/sha2
 import json
-import std/[locks, os, random, strutils, tables]
+import std/[locks, os, strutils, sysrand, tables]
 import times
 import mummy
 import frameos/types
@@ -24,6 +24,11 @@ type
     signature: string
 
 proc secureRandomBytes(byteCount: int): string =
+  ## Kernel randomness or nothing. The fallback here used to be
+  ## `randomize(); rand(255)` — std/random seeded from the clock — so a frame
+  ## that could not open /dev/urandom would have minted its session salt,
+  ## session nonces and cloud-login states from a guessable stream, silently.
+  ## An exception is a 500 on one login; a predictable salt is every session.
   result = newString(max(byteCount, 0))
   if result.len == 0:
     return
@@ -35,9 +40,12 @@ proc secureRandomBytes(byteCount: int): string =
     if bytesRead == result.len:
       return
 
-  randomize()
+  # getrandom(2) / getentropy: no file descriptor needed.
+  var buffer = newSeq[byte](result.len)
+  if not urandom(buffer):
+    raise newException(OSError, "No secure random source available")
   for i in 0 ..< result.len:
-    result[i] = char(rand(255))
+    result[i] = char(buffer[i])
 
 proc secureRandomToken*(byteCount = 32): string =
   let bytes = secureRandomBytes(byteCount)
@@ -248,7 +256,12 @@ proc adminSessionCredentialFingerprint(): string =
 proc adminSessionSignature(expiresAt: int64, nonce: string): string =
   sha256Hex(adminSessionSalt() & ":" & adminSessionCredentialFingerprint() & ":" & $expiresAt & ":" & nonce)
 
-proc constantTimeEquals(first, second: string): bool =
+proc constantTimeEquals*(first, second: string): bool =
+  ## Every secret this server compares goes through here — the admin login,
+  ## the session signature, the serverApiKey bearer and the frame access key
+  ## (`?k=`, the cookie, the bearer). `==` on strings stops at the first
+  ## differing byte, which tells a caller who can time it how long a correct
+  ## prefix is. The length still leaks; the keys are fixed-length tokens.
   if first.len != second.len:
     return false
   var diff = 0
@@ -335,12 +348,12 @@ template hasAccess*(request: Request, accessType: AccessType): bool =
         let accessKey = frameAccessKeyValue()
         if accessKey == "":
           false
-        elif request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
+        elif request.queryParams.contains("k") and constantTimeEquals(request.queryParams["k"], accessKey):
           true
-        elif getCookieValue(request, ACCESS_COOKIE) == accessKey:
+        elif constantTimeEquals(getCookieValue(request, ACCESS_COOKIE), accessKey):
           true
         elif request.httpMethod == "POST":
-          getHeaderValue(request, AUTH_HEADER) == AUTH_TYPE & " " & accessKey
+          constantTimeEquals(getHeaderValue(request, AUTH_HEADER), AUTH_TYPE & " " & accessKey)
         else:
           false
 
@@ -389,7 +402,9 @@ proc shouldUseSecureCookie*(request: Request): bool {.gcsafe.} =
   "proto=https" in forwarded
 
 proc accessCookieHeader*(request: Request, accessKey: string): string {.gcsafe.} =
-  ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax" &
+  # HttpOnly: no page script reads this cookie (the viewer page and the admin
+  # SPA only ever send it), and it IS the frame access key in clear.
+  ACCESS_COOKIE & "=" & accessKey & "; Path=/; HttpOnly; SameSite=Lax" &
     (if shouldUseSecureCookie(request): "; Secure" else: "")
 
 proc adminSessionCookieHeader*(request: Request, token: string, maxAge = ADMIN_SESSION_TTL_SECONDS): string {.gcsafe.} =

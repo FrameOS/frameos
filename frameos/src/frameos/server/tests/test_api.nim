@@ -7,6 +7,7 @@ import tables
 import json
 import zippy
 import locks
+import jsony
 
 import ../api
 import ../state
@@ -57,6 +58,20 @@ proc baseConfig(assetsPath = ""): FrameConfig =
       showErrorRetrySeconds: 20,
     ),
   )
+
+
+proc writeFrameJson(path: string, config: FrameConfig, extra: JsonNode = nil) =
+  ## frame.json as the runtime would have loaded `config` from. The admin API
+  ## describes the file (requestFrameConfig): a live config that differs from
+  ## it is not a state a frame can be in, so the tests do not build one.
+  var complete = FrameConfig()
+  complete[] = config[]
+  setConfigDefaults(complete)
+  let node = parseJson(complete.toJson())
+  if extra != nil:
+    for key, value in extra:
+      node[key] = value
+  writeFile(path, $node)
 
 suite "Server API helpers":
   test "a save that never saw the secrets keeps them (blank = unchanged)":
@@ -124,18 +139,18 @@ suite "Server API helpers":
     let tempRoot = getTempDir() / "frameos-api-frame-payload"
     createDir(tempRoot)
     let configPath = tempRoot / "frame.json"
-    writeFile(configPath, """{
+    globalFrameConfig = baseConfig(tempRoot)
+    writeFrameJson(configPath, globalFrameConfig, %*{
       "interval": 42,
       "backgroundColor": "#123456",
       "color": "#ffffff"
-    }""")
+    })
     putEnv("FRAMEOS_CONFIG", configPath)
 
     let scenesGzPath = tempRoot / "scenes.json.gz"
     writeFile(scenesGzPath, compress("""[{"id":"scene/a"}]""", dataFormat = dfGzip))
     putEnv("FRAMEOS_SCENES_JSON", scenesGzPath)
 
-    globalFrameConfig = baseConfig(tempRoot)
     let state = initConnectionsState()
     withLock state.lock:
       state.items.add(default(WebSocket))
@@ -414,7 +429,6 @@ suite "the frame payload round-trips what the device stores":
     let tempRoot = getTempDir() / "frameos-api-typed-device-config"
     createDir(tempRoot)
     let configPath = tempRoot / "frame.json"
-    writeFile(configPath, "{}")
     putEnv("FRAMEOS_CONFIG", configPath)
     var config = baseConfig(tempRoot)
     setConfigDefaults(config)
@@ -423,6 +437,8 @@ suite "the frame payload round-trips what the device stores":
     config.palette = PaletteConfig(colors: @[(255, 0, 0)])
     config.controlCode.enabled = true
     globalFrameConfig = config
+    # A frame.json that does not exist yet: the typed view is all there is.
+    removeFile(configPath)
     let payload = frameApiPayload(initConnectionsState(), exposeSecrets = true)
     check payload{"device_config"}{"pins"} == %*{"rst": 5}
     check payload{"device_config"}{"uploadUrl"}.getStr() == "http://upload.local"
@@ -437,7 +453,6 @@ suite "the frame payload round-trips what the device stores":
   test "hotspot and agent secrets stay off the unprivileged payload":
     let tempRoot = getTempDir() / "frameos-api-secrets"
     createDir(tempRoot)
-    writeFile(tempRoot / "frame.json", "{}")
     putEnv("FRAMEOS_CONFIG", tempRoot / "frame.json")
     var config = baseConfig(tempRoot)
     setConfigDefaults(config)
@@ -445,6 +460,7 @@ suite "the frame payload round-trips what the device stores":
     config.network.wifiHotspotPassword = "hotspot-secret"
     config.agent = AgentConfig(agentEnabled: true, agentSharedSecret: "agent-secret")
     globalFrameConfig = config
+    writeFrameJson(tempRoot / "frame.json", config)
     let state = initConnectionsState()
     let public = frameApiPayload(state)
     check public{"network"}{"wifiHotspotPassword"}.getStr() == ""

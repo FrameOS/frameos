@@ -57,9 +57,86 @@ for sceneId, scene in compiledScenes:
 
 var exportedScenes*: Table[SceneId, ExportedScene] = buildExportedScenesTable(interpretedScenes, uploadedScenes)
 
+# The public state fields of every exported scene as PLAIN VALUES, for readers
+# on other threads (the HTTP workers' `/image`, `/state`, `/c`; the hub client).
+#
+# An ExportedScene and its StateFields are refs the runner owns. Handing one
+# to a mummy worker — findExportedScene's `some(scene)`, or a copy of
+# `publicStateFields` — makes two threads move the same refcounts, which ORC
+# does not do atomically, and registers the scene (a cyclic type: it carries
+# closures) in the WORKER's cycle roots, where the runner's final decref
+# cannot find it. Four threads calling getLastPublicState() segfaulted within
+# a second (test_public_state_threads.nim); on a frame that is two browser
+# tabs on the admin page. Same class as the auth cache (docs/todo.md, "refs
+# shared across HTTP worker threads"): the registry keeps values for them,
+# rebuilt by whoever publishes a new scene table, and each reader builds its
+# own StateFields from its own copy.
+# Single-task builds (ESP32, wasm: --threads:off) have no other thread to
+# protect, and the ESP32 has no heap to spend on a second copy.
+const keepPublicStateFieldValues = compileOption("threads")
+
+type PublicStateFieldValues = object
+  name, label, fieldType, placeholder, persist, access, role: string
+  valueJson, showIfJson: string ## "" when the node is nil
+  options: seq[StateFieldOption]
+  required, secret: bool
+
+var publicStateFieldValues = initTable[SceneId, seq[PublicStateFieldValues]]()
+
+proc jsonOrEmpty(node: JsonNode): string =
+  if node.isNil: "" else: $node
+
+proc nodeOrNil(text: string): JsonNode =
+  if text.len == 0: nil else: parseJson(text)
+
+proc snapshotPublicStateFields(scenes: Table[SceneId, ExportedScene]) =
+  ## Called with sceneRegistryLock held (or at module init), by the thread
+  ## that built `scenes`.
+  when not keepPublicStateFieldValues:
+    return
+  var next = initTable[SceneId, seq[PublicStateFieldValues]]()
+  for sceneId, scene in scenes:
+    if scene.isNil or scene.publicStateFields.len == 0:
+      continue
+    var values: seq[PublicStateFieldValues] = @[]
+    for field in scene.publicStateFields:
+      if field.isNil:
+        continue
+      values.add(PublicStateFieldValues(
+        name: field.name, label: field.label, fieldType: field.fieldType,
+        placeholder: field.placeholder, persist: field.persist, access: field.access,
+        role: field.role, valueJson: jsonOrEmpty(field.value), showIfJson: jsonOrEmpty(field.showIf),
+        options: field.options, required: field.required, secret: field.secret,
+      ))
+    next[sceneId] = values
+  publicStateFieldValues = next
+
+snapshotPublicStateFields(exportedScenes)
+
+proc publicStateFieldsCopy*(sceneId: SceneId): seq[StateField] =
+  ## Fresh StateFields owned by the caller — safe from any thread.
+  when not keepPublicStateFieldValues:
+    withLock sceneRegistryLock:
+      if exportedScenes.hasKey(sceneId):
+        return exportedScenes[sceneId].publicStateFields
+    return @[]
+  var values: seq[PublicStateFieldValues]
+  {.gcsafe.}:
+    withLock sceneRegistryLock:
+      if publicStateFieldValues.hasKey(sceneId):
+        values = publicStateFieldValues[sceneId]
+  for value in values:
+    result.add(StateField(
+      name: value.name, label: value.label, fieldType: value.fieldType,
+      placeholder: value.placeholder, persist: value.persist, access: value.access,
+      role: value.role, value: nodeOrNil(value.valueJson), showIf: nodeOrNil(value.showIfJson),
+      options: value.options, required: value.required, secret: value.secret,
+    ))
+
 proc refreshExportedScenes*() =
   withLock sceneRegistryLock:
     exportedScenes = buildExportedScenesTable(interpretedScenes, uploadedScenes)
+    snapshotPublicStateFields(exportedScenes)
 
 proc currentExportedScenesGeneration*(): int =
   withLock sceneRegistryLock:
@@ -132,6 +209,7 @@ proc publishExportedScenes(
   ))
   inc exportedScenesGeneration
   exportedScenes = nextExportedScenes
+  snapshotPublicStateFields(exportedScenes)
   if logger != nil:
     logger.log(%*{
       "event": "reload:step",
@@ -538,7 +616,10 @@ proc saveSceneImagePng*(assetsPath: string, sceneId: string, png: string): Scene
 proc saveLastSceneImagePng*(assetsPath: string, sceneId: SceneId): SceneImageSaveResult =
   saveSceneImagePng(assetsPath, sceneId.string, getLastImagePng())
 
-proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
+proc getLastPublicSceneState*(): (SceneId, JsonNode, float) =
+  ## The scene on the panel, a copy of its public state and when that last
+  ## changed — for callers on other threads that do not need the field
+  ## definitions (`/image` only wants the id and the timestamp).
   {.gcsafe.}:
     var sceneId = "".SceneId
     var state = %*{}
@@ -549,13 +630,14 @@ proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
         state = lastPublicStates[sceneId.string].copy()
       if lastPublicStateUpdates.hasKey(sceneId):
         lastUpdate = lastPublicStateUpdates[sceneId]
-    let sceneExport = findExportedScene(sceneId)
-    let publicStateFields =
-      if sceneExport.isSome:
-        sceneExport.get().publicStateFields
-      else:
-        @[]
-    return (sceneId, state, publicStateFields, lastUpdate)
+    return (sceneId, state, lastUpdate)
+
+proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
+  ## Everything handed back is the caller's own: the state is copied under its
+  ## lock and the fields are rebuilt from the registry's value snapshot. This
+  ## must never return the runner's StateField refs (see publicStateFieldValues).
+  let (sceneId, state, lastUpdate) = getLastPublicSceneState()
+  return (sceneId, state, publicStateFieldsCopy(sceneId), lastUpdate)
 
 proc getAllPublicStates*(): (SceneId, JsonNode) =
   {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change

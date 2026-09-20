@@ -129,11 +129,25 @@ batch after the third one; residue is in the medium / low list).
   bytes, plus a missing `--` before the path (not on Buildroot); the cloud
   link-code overlay is still drawn into the
   stored render (the local-presence code no longer is).
-- **Not reviewed on the device**: the HTTP-server lane (`server/*.nim`,
-  routes, admin session mechanics, control-mode whitelist) did not complete;
-  the prior second-pass fixes there (login rate limits, constant-time admin
-  compare, `frame.json` memoisation, `/login/options`) were not re-verified.
-  Worth a focused pass.
+- Closed 2026-09-19 (pointer): the device HTTP-server lane (`server/*.nim`
+  and its routes) got its focused pass, together with the shared-ref audit
+  in `docs/todo.md`. The earlier fixes hold — admin login and the three open
+  cloud-login routes are rate-limited before any work, the admin compare is
+  constant-time, `frameAdminAuth` is memoised on mtime + size as plain
+  values, `/login/options` tells an anonymous caller only whether to draw
+  the button, the same-origin guard covers every state-changing method and
+  both WebSockets, asset paths are NUL-, lexically- and realpath-checked.
+  Fixed in that pass: the frame access key was compared with `==` on all
+  three carriers (`?k=`, cookie, bearer) while the admin password was not;
+  its cookie lacked `HttpOnly`; `secureRandomBytes` fell back to a
+  clock-seeded `std/random` if `/dev/urandom` would not open (it raises
+  now); the cloud sign-in callback put the URL-decoded `error` parameter
+  into a `Location` header as it came (CR LF included); `POST
+  /api/frames/1/event` without a `payload` key dereferenced nil and took the
+  runtime down (admin session required); the open `GET /wifi` ran one root
+  Wi-Fi scan per request on a server with one to four workers (one scan at
+  a time now, answer shared for five seconds); admin 500s echoed exception
+  text. Residue is in the medium / low list.
 
 ### Frontends, wasm preview, CI
 
@@ -229,6 +243,21 @@ from any https host; `download_count` inflates on anonymous requests;
 starve fleets behind one NAT; `replayEnrollment` binds by account not by
 frame; model choice is client-controlled on the shared key; `@posthog/mcp`
 would capture tool arguments if a token were ever set.
+
+Device HTTP server, left by the 2026-09-19 pass: admin sessions are
+stateless signed cookies, so logout clears the browser's copy but a cookie
+someone kept stays good for its 24 h (changing the admin password is what
+revokes — the fingerprint is in the signature); the signature is
+`sha256(salt ‖ …)` rather than an HMAC — length extension only reaches the
+nonce, under the same expiry, so nothing is gained, but HMAC is the right
+primitive; unfinished uploads sit under `getTempDir()/frameos-upload-chunks`
+with predictable names (local users only, and a frame has one); login
+throttling is per source address in a 512-entry table (the listeners are
+IPv4-only, so no /64 rotation); DNS rebinding is still open, as `origin.nim`
+says — it needs a Host allow-list the runtime has no source for; the
+cover-copy route fetches an admin-supplied URL from the frame (through the
+LAN-egress deny on a managed frame, and only a decoded PNG or an error
+string comes back).
 
 Backend: `scene_module_suffix` collisions; no artifact cleanup for SD
 images and firmware; the resolver-based target guard (`app/utils/network.py`)

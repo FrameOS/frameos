@@ -51,6 +51,51 @@ suite "frameos channels":
     check direct[1] == "jump"
     check direct[2]["target"].getStr() == "x"
 
+  test "the runner's payload is not the sender's node":
+    # A Channel MOVES its message under ORC, so the node that is sent is the
+    # node the runner reads — on another thread. sendEvent therefore sends a
+    # copy: the sender keeps using (and releasing) its own tree.
+    let payload = %*{"value": 1, "nested": {"list": [1, 2, 3]}}
+    sendEvent("refresh", payload)
+    payload["value"] = %2
+    payload["nested"]["list"].add(%4)
+    let (ok, received) = eventChannel.tryRecv()
+    check ok
+    check received[2]["value"].getInt() == 1
+    check received[2]["nested"]["list"].len == 3
+    check cast[pointer](received[2]) != cast[pointer](payload)
+
+    check trySendEvent("queued", payload)
+    let (okQueued, queued) = eventChannel.tryRecv()
+    check okQueued
+    check queued[1] == "queued"
+    check cast[pointer](queued[2]) != cast[pointer](payload)
+
+    # A nil payload stays nil instead of crashing the copy.
+    sendEvent("nothing", nil)
+    let (okNil, nothing) = eventChannel.tryRecv()
+    check okNil
+    check nothing[2].isNil
+
+    # The owned variant hands over the very tree it was given.
+    var big = %*{"scenes": [{"id": "a"}]}
+    let address = cast[pointer](big)
+    sendEventOwned("uploadScenes", move(big))
+    check big.isNil
+    let (okOwned, owned) = eventChannel.tryRecv()
+    check okOwned
+    check cast[pointer](owned[2]) == address
+    check owned[2]["scenes"][0]["id"].getStr() == "a"
+
+  test "trySendEvent reports a full channel":
+    discard eventsDroppedCounter.exchange(0)
+    while eventChannel.trySend((none(SceneId), "filler", %*{})):
+      discard
+    check not trySendEvent("overflow", %*{})
+    check eventsDroppedCounter.load() == 1
+    drainEventChannel()
+    discard eventsDroppedCounter.exchange(0)
+
   test "sendEvent drops and counts when the channel is full":
     discard eventsDroppedCounter.exchange(0)
     var sent = 0

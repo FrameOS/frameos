@@ -23,11 +23,12 @@ import frameos/config
 import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
 from frameos/logger import LoggerSettings, postLogLinesOnce
-from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
-    getDynamicSceneOptions
+from frameos/scenes import getLastImagePng, getLastPublicState, getLastPublicSceneState, getAllPublicStates,
+    getUploadedScenePayload, getDynamicSceneOptions
 from scenes/scenes import sceneOptions
 import ./embedded_assets
 import ./state
+from ./auth import frameAdminAuthSnapshot
 
 proc h*(message: string): string =
   message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#039;")
@@ -169,6 +170,14 @@ proc writeTextFileAtomically(path: string, body: string) =
   ensureParentDir(path)
   writePrivateFile(path, body)
 
+# frame.json now has two writers: the local admin API (mummy worker threads) and
+# the cloud hub client's own thread applying set_settings. Both read-modify-write
+# the whole file, so without this lock a concurrent admin save and cloud push
+# lose one of the two edits — the individual writes are atomic, the sequence is
+# not.
+var frameConfigWriteLock*: Lock
+initLock(frameConfigWriteLock)
+
 const frameAdminEditableSettingsFields = [
   ("frameOS", "apiKey"),
   ("openAI", "apiKey"),
@@ -181,12 +190,23 @@ const frameAdminEditableSettingsFields = [
 ]
 
 proc frameAdminSettingsSource(configJson: JsonNode): JsonNode =
+  ## frame.json's `settings`, and only frame.json's: this runs on the HTTP
+  ## workers and the hub client's thread, and the live config's `settings`
+  ## node belongs to the render thread (docs/todo.md, "refs shared across HTTP
+  ## worker threads"). The file is what the runtime loaded it from anyway.
   if configJson != nil and configJson.kind == JObject and configJson{"settings"} != nil and
       configJson{"settings"}.kind == JObject:
     return copy(configJson["settings"])
-  if globalFrameConfig != nil and globalFrameConfig.settings != nil and globalFrameConfig.settings.kind == JObject:
-    return copy(globalFrameConfig.settings)
   %*{}
+
+proc publishLiveSettings(settings: JsonNode) =
+  ## The saved service keys, into the running config. globalFrameOS.frameConfig
+  ## is the same object as globalFrameConfig on a frame; tests build them apart.
+  if globalFrameConfig != nil:
+    replaceFrameConfigSettings(globalFrameConfig, copy(settings))
+  if globalFrameOS != nil and globalFrameOS.frameConfig != nil and
+      cast[pointer](globalFrameOS.frameConfig) != cast[pointer](globalFrameConfig):
+    replaceFrameConfigSettings(globalFrameOS.frameConfig, copy(settings))
 
 proc frameAdminEditableSettingsPayload*(settings: JsonNode = nil): JsonNode =
   let source =
@@ -206,26 +226,27 @@ proc persistFrameAdminSettingsUpdate*(payload: JsonNode): JsonNode =
   if payload == nil or payload.kind != JObject:
     raise newException(ValueError, "Settings payload must be an object")
 
-  let configPath = getConfigFilename()
-  var configJson = loadConfigJson()
-  if configJson == nil or configJson.kind != JObject:
-    configJson = %*{}
+  # A read-modify-write of the whole file, like every other frame.json
+  # writer: without the lock a service-key save racing a frame save (another
+  # worker) or a cloud settings pull (the hub thread) loses one of the edits.
+  var settings: JsonNode
+  withLock frameConfigWriteLock:
+    let configPath = getConfigFilename()
+    var configJson = loadConfigJson()
+    if configJson == nil or configJson.kind != JObject:
+      configJson = %*{}
 
-  var settings = frameAdminSettingsSource(configJson)
-  for (section, field) in frameAdminEditableSettingsFields:
-    let sectionPayload = payload{section}
-    if sectionPayload != nil and sectionPayload.kind == JObject and sectionPayload.hasKey(field):
-      if settings{section} == nil or settings{section}.kind != JObject:
-        settings[section] = %*{}
-      settings[section][field] = copy(sectionPayload[field])
+    settings = frameAdminSettingsSource(configJson)
+    for (section, field) in frameAdminEditableSettingsFields:
+      let sectionPayload = payload{section}
+      if sectionPayload != nil and sectionPayload.kind == JObject and sectionPayload.hasKey(field):
+        if settings{section} == nil or settings{section}.kind != JObject:
+          settings[section] = %*{}
+        settings[section][field] = copy(sectionPayload[field])
 
-  configJson["settings"] = settings
-  writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
-
-  if globalFrameConfig != nil:
-    globalFrameConfig.settings = copy(settings)
-  if globalFrameOS != nil and globalFrameOS.frameConfig != nil:
-    globalFrameOS.frameConfig.settings = copy(settings)
+    configJson["settings"] = settings
+    writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
+    publishLiveSettings(settings)
 
   frameAdminEditableSettingsPayload(settings)
 
@@ -440,14 +461,6 @@ proc persistScenesPayload*(scenes: JsonNode) =
   let body = if target.compressed: compress(prettyScenes, dataFormat = dfGzip) else: prettyScenes
   writeTextFileAtomically(target.path, body)
 
-# frame.json now has two writers: the local admin API (mummy worker threads) and
-# the cloud hub client's own thread applying set_settings. Both read-modify-write
-# the whole file, so without this lock a concurrent admin save and cloud push
-# lose one of the two edits — the individual writes are atomic, the sequence is
-# not.
-var frameConfigWriteLock*: Lock
-initLock(frameConfigWriteLock)
-
 # The settings groups a cloud provider owns on a cloud-managed frame
 # (docs/cloud-frames.md, "Service settings"): exactly the sections of
 # frameAdminEditableSettingsFields, which the static block below pins. Every
@@ -518,10 +531,7 @@ proc persistCloudServiceSettingsUpdate*(settings: JsonNode): bool {.discardable.
 
     configJson["settings"] = current
     writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
-    if globalFrameConfig != nil:
-      globalFrameConfig.settings = copy(current)
-    if globalFrameOS != nil and globalFrameOS.frameConfig != nil:
-      globalFrameOS.frameConfig.settings = copy(current)
+    publishLiveSettings(current)
     result = true
 
 proc configuredServerAddress(config: JsonNode): tuple[host: string, port: int, scheme: string] =
@@ -797,10 +807,11 @@ proc storedFrameAdminAuthValue(configJson: JsonNode, storedFrameApi: JsonNode, e
       storedFrameApi["frame_admin_auth"]
     elif configJson.kind == JObject and configJson{"frameAdminAuth"} != nil and configJson{"frameAdminAuth"}.kind == JObject:
       configJson["frameAdminAuth"]
-    elif globalFrameConfig != nil and globalFrameConfig.frameAdminAuth != nil:
-      globalFrameConfig.frameAdminAuth
     else:
-      %*{}
+      # The runtime's own copy (set by the portal before frame.json has an
+      # admin block), as a node of this thread's: auth.nim reads the shared
+      # one under its lock and hands back plain values.
+      frameAdminAuthSnapshot()
 
   result = %*{
     "enabled": source{"enabled"}.getBool(false),
@@ -824,17 +835,44 @@ proc dumpHook*(s: var string, v: PaletteConfig) =
   s.add("]}")
 
 proc frameConfigJson(config: FrameConfig): JsonNode =
-  ## The live config in frame.json's own spelling (camelCase, defaults
-  ## applied), via jsony — no per-section hand serializers. Defaults are
-  ## applied on a copy so a hand-built config (tests, embedded builds) reads
-  ## back exactly like a loaded one; loadConfig already did this for the
-  ## runtime's own.
+  ## A config in frame.json's own spelling (camelCase, defaults applied), via
+  ## jsony — no per-section hand serializers. Defaults are applied on a copy
+  ## so a hand-built config (tests, embedded builds) reads back exactly like
+  ## a loaded one; loadConfig already did this for the runtime's own.
   if config == nil:
     return %*{}
   var complete = FrameConfig()
   complete[] = config[]
   setConfigDefaults(complete)
   parseJson(complete.toJson())
+
+proc requestFrameConfig*(): FrameConfig =
+  ## The frame's config for ONE request on a mummy worker: this thread's own
+  ## parse of frame.json (readConfig: defaults, `--debug`, the stored
+  ## private-network elevation — what the runtime holds after its next
+  ## reload). Anything that needs more of the config than a scalar field
+  ## (the admin API's frame payload, the status screen drawn on request)
+  ## works on this, never on globalFrameConfig.
+  ##
+  ## The payload used to be frameConfigJson(globalFrameConfig), and that
+  ## shallow copy took a reference to every nested object of the live config
+  ## — httpsProxy, network, agent, schedule, settings, … — on a worker, on
+  ## every `GET /api/frames/1`, while three other workers and the runner did
+  ## the same. ORC refcounts are not atomic: that is the auth-cache crash
+  ## again (docs/todo.md, "refs shared across HTTP worker threads"). The live
+  ## object only stands in when there is no readable frame.json, which on a
+  ## frame means never (the runtime could not have started) and in the tests
+  ## means a config built by hand on the test's own thread.
+  try:
+    result = readConfig()
+  except CatchableError:
+    result = FrameConfig()
+    if globalFrameConfig != nil:
+      result[] = globalFrameConfig[]
+    setConfigDefaults(result)
+
+proc typedFrameConfigJson(): JsonNode =
+  frameConfigJson(requestFrameConfig())
 
 proc apiHttpsProxy(node: JsonNode, exposeSecrets: bool): JsonNode =
   let proxy = objectNodeOrEmpty(node)
@@ -895,7 +933,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   let configPath = getConfigFilename()
   let configJson = loadConfigJson()
   let storedFrameApi = storedFrameApiPayload(configJson)
-  let live = frameConfigJson(globalFrameConfig)
+  let live = typedFrameConfigJson()
   let scenesSource = activeScenesJsonPath()
   var activeConnections = 0
   withLock connectionsState.lock:
@@ -971,7 +1009,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   # The backend's row carries the scene the frame last reported; the panel
   # marks that tile "Active" on load. Here the runtime IS the source, and
   # without this the badge waited for the next scene change.
-  let (activeSceneId, _, _, _) = getLastPublicState()
+  let (activeSceneId, _, _) = getLastPublicSceneState()
   if activeSceneId.string.len > 0:
     result["active_scene_id"] = %activeSceneId.string
   # The last payload the admin saved wins for admins: what they typed is what
@@ -1061,7 +1099,7 @@ proc frameImageHeaders(sceneId: SceneId, lastUpdate: float): mummy.HttpHeaders =
 
 proc buildFrameImageHeadResponse*(request: Request): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
   ## HEAD /image: the GET's headers without encoding anything.
-  let (sceneId, _, _, lastUpdate) = getLastPublicState()
+  let (sceneId, _, lastUpdate) = getLastPublicSceneState()
   if shouldReturnNotModified(request.headers, lastUpdate):
     var headers: mummy.HttpHeaders
     headers["X-Scene-Id"] = $sceneId
@@ -1073,7 +1111,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   let startedAt = epochTime()
   let logImageRequest = globalFrameConfig.debug
   let memoryBefore = if logImageRequest: defaultProcessMemoryUsage() else: newJObject()
-  let (sceneId, _, _, lastUpdate) = getLastPublicState()
+  let (sceneId, _, lastUpdate) = getLastPublicSceneState()
   if shouldReturnNotModified(request.headers, lastUpdate):
     var headers: mummy.HttpHeaders
     headers["X-Scene-Id"] = $sceneId
@@ -1279,7 +1317,7 @@ proc appsPayload*(): string =
   appsAsset.getAppsJson()
 
 proc frameStatePayload*(): tuple[sceneId: SceneId, state: JsonNode] =
-  let (sceneId, state, _, _) = getLastPublicState()
+  let (sceneId, state, _) = getLastPublicSceneState()
   (sceneId: sceneId, state: state)
 
 proc frameStatesPayload*(): tuple[sceneId: SceneId, states: JsonNode] =

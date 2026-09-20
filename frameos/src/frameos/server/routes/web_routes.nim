@@ -1,7 +1,10 @@
 import json
+import locks
+import std/monotimes
 import strutils
 import tables
 import threadpool
+import times
 import mummy
 import mummy/routers
 import httpcore
@@ -106,6 +109,41 @@ proc captivePortalRedirect*(request: Request): bool {.gcsafe.} =
     request.respond(Http302, headers)
     return true
 
+# `GET /wifi` is open while the setup hotspot is up, and every call used to
+# be a Wi-Fi scan — `iw scan` / `nmcli` as root, seconds each — on the mummy
+# worker that took it. The frame has one to four workers: a phone's worth of
+# requests held the whole server, setup form included. One scan at a time,
+# and its answer serves everyone for a few seconds. An empty list is not
+# kept: the first scan after the hotspot comes up often is, and the setup
+# page asks again after one second for exactly that reason. Plain values
+# under a lock, copied out — never a node (docs/todo.md, "refs shared across
+# HTTP worker threads").
+const WifiScanCacheSeconds = 5
+var
+  wifiScanLock: Lock
+  wifiScanCached: seq[string]
+  wifiScanCachedAt: MonoTime
+  wifiScanCacheValid = false
+initLock(wifiScanLock)
+
+proc resetWifiScanCacheForTest*() =
+  withLock wifiScanLock:
+    wifiScanCacheValid = false
+    wifiScanCached = @[]
+
+proc cachedAvailableNetworks*(scan: proc(): seq[string] {.gcsafe.}): seq[string] {.gcsafe.} =
+  {.gcsafe.}:
+    # Held across the scan on purpose: the callers that pile up behind it
+    # would each have run their own, and they leave with this one's answer.
+    withLock wifiScanLock:
+      if wifiScanCacheValid and
+          (getMonoTime() - wifiScanCachedAt).inSeconds < WifiScanCacheSeconds:
+        return wifiScanCached
+      result = scan()
+      wifiScanCacheValid = result.len > 0
+      wifiScanCached = result
+      wifiScanCachedAt = getMonoTime()
+
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
   router.get("/", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
@@ -114,7 +152,8 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
       else:
         let accessKey = frameAccessKeyValue()
-        if accessKey != "" and request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
+        if accessKey != "" and request.queryParams.contains("k") and
+            constantTimeEquals(request.queryParams["k"], accessKey):
           var headers: mummy.HttpHeaders
           headers["Location"] = "/"
           headers["Set-Cookie"] = accessCookieHeader(request, accessKey)
@@ -259,7 +298,9 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       else:
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = "application/json"
-        let nets = netportal.availableNetworks(globalFrameOS)
+        let nets = cachedAvailableNetworks(proc(): seq[string] {.gcsafe.} =
+          {.gcsafe.}:
+            netportal.availableNetworks(globalFrameOS))
         request.respond(Http200, headers, $(%*{"networks": nets}))
   )
 
@@ -345,8 +386,15 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "post": request.path})
-    let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent(eventName, payload)
+    var payload =
+      try:
+        parseJson(if request.body == "": "{}" else: request.body)
+      except JsonParsingError:
+        jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+        return
+    # `uploadScenes` arrives here too (the backend's deploy), megabytes at a
+    # time: hand the parse over rather than copy it.
+    sendEventOwned(eventName, move(payload))
     jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
@@ -355,8 +403,13 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "post": request.path})
-    let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent("uploadScenes", payload)
+    var payload =
+      try:
+        parseJson(if request.body == "": "{}" else: request.body)
+      except JsonParsingError:
+        jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+        return
+    sendEventOwned("uploadScenes", move(payload))
     jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
@@ -370,8 +423,10 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         # frame.json). The shared FrameConfig is mutated exclusively by the
         # runner thread's "reload" handler: reassigning ~35 ref fields of an
         # object other threads are reading is a use-after-free waiting to
-        # happen under ORC.
-        discard loadConfig()
+        # happen under ORC. readConfig, not loadConfig: the latter also
+        # rewrites the global path pixie resolves SVG fonts against, under
+        # the render thread.
+        discard readConfig()
       sendEvent("reload", %*{})
       jsonResponse(request, Http200, %*{"status": "ok"})
     except CatchableError as e:
