@@ -198,10 +198,6 @@ def _frame_bootstrap_scenes_json(frame: Frame) -> str:
     return json.dumps(scenes, indent=2) + "\n"
 
 
-def _frame_bootstrap_all_scenes_json(frame: Frame) -> str:
-    return json.dumps(list(frame.scenes or []), indent=2) + "\n"
-
-
 # The shell half of release verification, embedded verbatim into the bootstrap
 # script (and exercised on its own by test_frame_bootstrap_verify.py with a key
 # minted for the test). Reads FRAMEOS_RELEASE_SIGNING_KEY_SPKI and work_dir
@@ -291,7 +287,6 @@ def _frame_bootstrap_script(db: Session, frame: Frame) -> str:
 
     config_json = _frame_bootstrap_config_json(db, frame)
     scenes_json = _frame_bootstrap_scenes_json(frame)
-    all_scenes_json = _frame_bootstrap_all_scenes_json(frame)
     compiled_scene_count = frame_compiled_scene_count(frame)
     frameos_service_after = "After=network.target"
     frameos_service_conflicts = ""
@@ -521,10 +516,6 @@ cp "$frameos_release_dir/frame.json" "$remote_release_dir/frame.json"
 cat > "$work_dir/scenes.json" <<'FRAMEOS_SCENES_JSON'
 {scenes_json}FRAMEOS_SCENES_JSON
 gzip -c "$work_dir/scenes.json" > "$frameos_release_dir/scenes.json.gz"
-
-cat > "$work_dir/all_scenes.json" <<'FRAMEOS_ALL_SCENES_JSON'
-{all_scenes_json}FRAMEOS_ALL_SCENES_JSON
-gzip -c "$work_dir/all_scenes.json" > "$frameos_release_dir/all_scenes.json.gz"
 
 # Memory caps for frameos.service: everything except a small OS reserve, so a
 # leak OOM-kills frameos instead of swap-thrashing the device. Computed from

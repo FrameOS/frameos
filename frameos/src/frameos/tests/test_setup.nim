@@ -58,22 +58,25 @@ block test_app_apt_packages_from_scene_nodes:
     "source-pkg",
   ]
 
-block test_load_all_scenes_prefers_full_scene_payload:
+block test_load_scenes_ignores_a_leftover_all_scenes_payload:
+  # Releases used to carry all_scenes.json.gz next to scenes.json.gz, and
+  # nothing rewrote it on a scene save: a leftover must not outrank the
+  # scenes the frame actually runs.
   let tempRoot = getTempDir() / ("frameos-all-scenes-" & $epochTime().int64)
   createDir(tempRoot)
-  let setupPath = tempRoot / "all_scenes.json.gz"
-  let fallbackPath = tempRoot / "scenes.json"
-  writeFile(setupPath, compress("""[{"id":"all-scenes","nodes":[]}]""", dataFormat = dfGzip))
-  writeFile(fallbackPath, """[{"id":"fallback-scenes","nodes":[]}]""")
-  putEnv("FRAMEOS_ALL_SCENES_JSON", setupPath)
-  putEnv("FRAMEOS_SCENES_JSON", fallbackPath)
+  let previousDir = getCurrentDir()
+  writeFile(tempRoot / "all_scenes.json.gz", compress("""[{"id":"all-scenes","nodes":[]}]""", dataFormat = dfGzip))
+  writeFile(tempRoot / "scenes.json.gz", compress("""[{"id":"scenes","nodes":[]}]""", dataFormat = dfGzip))
+  putEnv("FRAMEOS_ALL_SCENES_JSON", tempRoot / "all_scenes.json.gz")
+  delEnv("FRAMEOS_SCENES_JSON")
+  setCurrentDir(tempRoot)
   try:
-    let payload = loadAllScenesPayload()
+    let payload = loadScenesPayload()
     doAssert payload.kind == JArray
-    doAssert payload[0]{"id"}.getStr() == "all-scenes"
+    doAssert payload[0]{"id"}.getStr() == "scenes"
   finally:
+    setCurrentDir(previousDir)
     delEnv("FRAMEOS_ALL_SCENES_JSON")
-    delEnv("FRAMEOS_SCENES_JSON")
     removeDir(tempRoot)
 
 block test_timezone_keeps_etc_timezone_in_step:
@@ -398,13 +401,12 @@ block test_write_setup_release_payload_updates_remote_frame_config:
     doAssert getFilePermissions(remoteCurrent / "frame.json") == {fpUserRead, fpUserWrite}
     let runtimeConfig = parseJson(runtimeConfigJson)
     let remoteConfig = parseJson(remoteConfigJson)
-    let allScenes = parseJson(uncompress(readFile(frameosCurrent / "all_scenes.json.gz"), dataFormat = dfGzip))
     let interpretedScenes = parseJson(uncompress(readFile(frameosCurrent / "scenes.json.gz"), dataFormat = dfGzip))
 
     doAssert runtimeConfig{"serverHost"}.getStr() == "backend.frameos.local"
     doAssert remoteConfig{"serverHost"}.getStr() == "backend.frameos.local"
     doAssert remoteConfig{"serverPort"}.getInt() == 443
-    doAssert allScenes.len == 2
+    doAssert not fileExists(frameosCurrent / "all_scenes.json.gz")
     doAssert interpretedScenes.len == 1
     doAssert interpretedScenes[0]{"id"}.getStr() == "interpreted-scene"
   finally:

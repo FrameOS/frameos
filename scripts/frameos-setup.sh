@@ -809,14 +809,6 @@ copy_scene_payloads() {
   old_dir="$2"
   mkdir -p "$release_dir"
 
-  if [ -n "$old_dir" ] && [ -f "$old_dir/all_scenes.json.gz" ]; then
-    cp "$old_dir/all_scenes.json.gz" "$release_dir/all_scenes.json.gz"
-  elif [ -n "$old_dir" ] && [ -f "$old_dir/all_scenes.json" ]; then
-    gzip -c "$old_dir/all_scenes.json" > "$release_dir/all_scenes.json.gz"
-  else
-    printf '[]\n' | gzip -c > "$release_dir/all_scenes.json.gz"
-  fi
-
   if [ -n "$old_dir" ] && [ -f "$old_dir/scenes.json.gz" ]; then
     cp "$old_dir/scenes.json.gz" "$release_dir/scenes.json.gz"
   elif [ -n "$old_dir" ] && [ -f "$old_dir/scenes.json" ]; then

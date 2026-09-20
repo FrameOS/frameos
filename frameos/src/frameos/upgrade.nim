@@ -755,7 +755,6 @@ proc copyCompressedPayload(releaseDir, oldDir, compressedName, plainName: string
     writeFile(releaseDir / compressedName, compress("[]\n", dataFormat = dfGzip))
 
 proc copyScenePayloads(releaseDir, oldDir: string) =
-  copyCompressedPayload(releaseDir, oldDir, "all_scenes.json.gz", "all_scenes.json")
   copyCompressedPayload(releaseDir, oldDir, "scenes.json.gz", "scenes.json")
 
 proc copyAdminSessionSaltForUpgrade*(releaseDir: string) =

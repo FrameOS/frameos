@@ -109,15 +109,10 @@ proc readJsonFile(path: string): JsonNode =
       encoded
   result = parseJson(decoded)
 
-proc loadAllScenesPayload*(): JsonNode =
-  let configuredPath = getEnv("FRAMEOS_ALL_SCENES_JSON")
-  if configuredPath.len > 0 and fileExists(configuredPath):
-    return readJsonFile(configuredPath)
-
-  for path in ["./all_scenes.json.gz", "./all_scenes.json"]:
-    if fileExists(path):
-      return readJsonFile(path)
-
+proc loadScenesPayload*(): JsonNode =
+  ## The release's scenes.json. An all_scenes.json(.gz) next to it is a
+  ## leftover from releases that also shipped the compiled scenes' JSON for
+  ## this step; it is never read, so it cannot outrank a newer scenes.json.
   let scenesPath = getEnv("FRAMEOS_SCENES_JSON")
   if scenesPath.len > 0 and fileExists(scenesPath):
     return readJsonFile(scenesPath)
@@ -866,7 +861,7 @@ proc startFrameOSSystemdServices*(configPath = "") =
   discard runSetupCommand(privilegedCommand("systemctl --no-block start " & names.join(" ")))
 
 proc setupAppAptPackages*(): SetupResult =
-  setupAptPackages(appAptPackagesFromScenes(loadAllScenesPayload(), loadAppsPayload()))
+  setupAptPackages(appAptPackagesFromScenes(loadScenesPayload(), loadAppsPayload()))
 
 proc updateFrameConfigDimensions*(payload: JsonNode, frameConfig: FrameConfig): bool =
   if payload == nil or payload.kind != JObject or frameConfig == nil or frameConfig.width <= 0 or frameConfig.height <= 0:
@@ -1007,8 +1002,6 @@ proc writeSetupReleasePayload*(
   if dirExists(remoteCurrentDir):
     writePrivateFile(remoteCurrentDir / "frame.json", frameJson)
 
-  let allScenes = if payload{"scenes"} != nil and payload{"scenes"}.kind == JArray: payload{"scenes"} else: newJArray()
-  writeFile(frameosCurrentDir / "all_scenes.json.gz", compress(pretty(allScenes, indent = 4) & "\n", dataFormat = dfGzip))
   writeFile(frameosCurrentDir / "scenes.json.gz", compress(pretty(setupExportScenes(payload), indent = 4) & "\n", dataFormat = dfGzip))
 
   # This runs as root AFTER setupFrameOS's "privilege separation ownership"

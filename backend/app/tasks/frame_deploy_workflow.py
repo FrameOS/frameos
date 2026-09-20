@@ -1246,7 +1246,18 @@ class FrameDeployWorkflow:
         try:
             await self.deployer._upload_frame_json_atomically("/srv/frameos/current/frame.json")
             await self.deployer._upload_scenes_json_atomically("/srv/frameos/current/scenes.json.gz", gzip=True)
-            await self.deployer._upload_all_scenes_json_atomically("/srv/frameos/current/all_scenes.json.gz", gzip=True)
+            # all_scenes.json is no longer uploaded, but a runtime from before
+            # it was dropped still prefers one over scenes.json when `frameos
+            # setup` (below) picks the apps' apt packages — and a fast deploy
+            # never replaces the release directory an older deploy left it in.
+            # Best effort: a copy first-boot setup wrote as root in Buildroot's
+            # sticky release directory is not ours to remove.
+            await self.deployer.exec_command(
+                "rm -f /srv/frameos/current/all_scenes.json.gz /srv/frameos/current/all_scenes.json",
+                raise_on_error=False,
+                log_command=False,
+                log_output=False,
+            )
             # A fast deploy rewrites the live release in place, so there is no
             # older release to fall back to: get these on the card before the
             # frame is asked to read them. The temp-plus-rename above makes the
@@ -1579,7 +1590,6 @@ class FrameDeployWorkflow:
 
     async def _upload_release_metadata(self, build_id: str) -> None:
         await self.deployer._upload_scenes_json(f"{self._release_dir(build_id)}/scenes.json.gz", gzip=True)
-        await self.deployer._upload_all_scenes_json(f"{self._release_dir(build_id)}/all_scenes.json.gz", gzip=True)
         await self.deployer._upload_frame_json(f"{self._release_dir(build_id)}/frame.json")
 
     async def _sync_vendor_dependencies(
