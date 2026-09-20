@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-total_shards="${FRAMEOS_TEST_TOTAL_SHARDS:-8}"
+# CI's matrix (.github/workflows/pull-request-tests.yml, job `nim`) lists
+# exactly this many shards: change both, or the tail never runs.
+total_shards="${FRAMEOS_TEST_TOTAL_SHARDS:-4}"
 
 usage() {
   cat <<EOF

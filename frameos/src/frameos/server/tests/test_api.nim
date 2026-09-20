@@ -205,16 +205,13 @@ suite "the scenes a frame reports to a provider (scenes_get)":
     putEnv("FRAMEOS_SCENES_JSON", scenesPath)
     setUploadedScenePayload($(%*[{"id": "clock", "name": "Clock (uploaded)"}]))
     try:
-      let allScenes = %*[{"id": "clock"}, {"id": "photos"}, {"id": "legacy"}, {"id": "nimOnly"}]
-      let payload = deviceScenesPayload(allScenes)
+      let payload = deviceScenesPayload()
       check payload{"scenes"}.len == 2
       # The uploaded copy wins an id both stores hold.
       check payload{"scenes"}[0]{"name"}.getStr() == "Clock (uploaded)"
       check payload{"scenes"}[1]{"id"}.getStr() == "photos"
-      # `legacy` says so itself; `nimOnly` is in the deploy's full list and in
-      # no interpreted store.
-      check payload{"skipped_compiled"}.getInt() == 2
-      check deviceScenesPayload(){"skipped_compiled"}.getInt() == 1
+      # `legacy` says so itself.
+      check payload{"skipped_compiled"}.getInt() == 1
     finally:
       setUploadedScenePayload("")
       delEnv("FRAMEOS_SCENES_JSON")

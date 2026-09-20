@@ -82,5 +82,21 @@ function renderModule({ configs, sources }) {
   ].join('\n')}`
 }
 
+// Several builds run this generator at the same time (turbo runs the frontend,
+// cloud-frontend and frame-frontend builds in parallel) while esbuild is
+// reading the output, and a plain writeFile truncates first: a reader can see
+// an empty file. Skip the write when nothing changed, rename into place
+// otherwise. Inlined, not shared: deploys copy this script on its own
+// (frameos/tools/prepare_assets.py).
+async function writeFileAtomic(filePath, contents) {
+  const existing = await fs.readFile(filePath, 'utf8').catch(() => null)
+  if (existing === contents) {
+    return
+  }
+  const tempPath = `${filePath}.${process.pid}.tmp`
+  await fs.writeFile(tempPath, contents)
+  await fs.rename(tempPath, filePath)
+}
+
 await fs.mkdir(path.dirname(outputPath), { recursive: true })
-await fs.writeFile(outputPath, renderModule(await buildEmbeddedRepoApps()))
+await writeFileAtomic(outputPath, renderModule(await buildEmbeddedRepoApps()))

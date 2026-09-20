@@ -7,7 +7,7 @@ CI, which is the one rule that matters when you touch them (below).
 | Suite | What it covers | CI job (`.github/workflows/`) | Baselines |
 | --- | --- | --- | --- |
 | Scene renderer snapshots (`./run`) | The Nim runtime rendering every fixture scene (`e2e/scenes`) with every built-in app, compared pixel-for-pixel | `pull-request-tests.yml` → "Visual Regression Tests (n/2)" | `e2e/snapshots/` |
-| Frontend E2E + visual (`e2e/frontend-visual`) | Playwright against the real backend-served SPA — routing, drawers, settings, logs, terminal, auth, responsive layouts — plus the cloud `/frames` workspace served from `cloud-frontend/dist` (`visual-cloud-*.spec.ts`) | `pull-request-tests.yml` → "Frontend E2E + Visual Regression Tests (n/8)" | `e2e/frontend-visual/snapshots/` |
+| Frontend E2E + visual (`e2e/frontend-visual`) | Playwright against the real backend-served SPA — routing, drawers, settings, logs, terminal, auth, responsive layouts — plus the cloud `/frames` workspace served from `cloud-frontend/dist` (`visual-cloud-*.spec.ts`) | `pull-request-tests.yml` → "Frontend E2E + Visual Regression Tests (n/4)" | `e2e/frontend-visual/snapshots/` |
 | Real SSH deploy (`e2e/deploy`) | A full backend deploy over real SSH/SCP to a disposable target (`/srv/frameos`, the systemd unit) | `pull-request-tests.yml` → "Deploy E2E SSH" | none (assertions only) |
 | Docker + ESP32 images | The backend image boots and answers `/api/signup`; the ESP32 firmware builds on every flash layout, boots in QEMU, and the IDF-free modules pass their host tests | `e2e-docker.yml` → "Build Docker Image", "Build and boot ESP32 firmware image" | none |
 
@@ -76,7 +76,7 @@ time:
   Anything rendered per frame on that page must not mount `controlLogic`
   or `scenesLogic` (they fetch states on mount); use a lightweight logic.
 
-CI runs eight shards. Same-repo pull requests run with `--update-snapshots`
+CI runs four shards. Same-repo pull requests run with `--update-snapshots`
 and "Commit Frontend Visual Snapshots" pushes changed PNGs to the PR branch
 as "FrameOS Bot"; forked PRs and pushes to `main` only compare. So **a
 visual job failing on CI is never a pixel diff**: read the log for the

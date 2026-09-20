@@ -636,12 +636,7 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
             AssetReadResult(error: "no_image"),
       getScenesFn: proc(): JsonNode {.gcsafe.} =
         {.gcsafe.}:
-          var allScenes: JsonNode = nil
-          try:
-            allScenes = frameSetup.loadAllScenesPayload()
-          except CatchableError:
-            allScenes = nil
-          deviceScenesPayload(allScenes),
+          deviceScenesPayload(),
       refreshServiceSettingsFn: proc() {.gcsafe.} =
         requestServiceSettingsPull(),
       requestUpgradeFn: proc() {.gcsafe.} =

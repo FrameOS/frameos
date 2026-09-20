@@ -69,5 +69,5 @@ test:
 	nimble test
 
 test-shard:
-	@test -n "$(SHARD)" || (echo "SHARD is required, e.g. make test-shard SHARD=1..5" >&2; exit 1)
+	@test -n "$(SHARD)" || (echo "SHARD is required, e.g. make test-shard SHARD=1..4" >&2; exit 1)
 	bash ./tools/run_test_shard.sh "$(SHARD)"
