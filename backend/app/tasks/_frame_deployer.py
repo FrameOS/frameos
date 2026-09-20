@@ -282,13 +282,6 @@ class FrameDeployer:
             json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
 
-    async def _upload_all_scenes_json(self, path: str, gzip: bool = False) -> None:
-        """Upload the full scene payload for deploy-time metadata checks."""
-        json_data = json.dumps(list(self.frame.scenes or []), indent=4).encode() + b"\n"
-        if gzip:
-            json_data = compress(json_data)
-        await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
-
     async def _upload_frame_json_atomically(self, path: str) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_frame_json(temp_path)
@@ -297,11 +290,6 @@ class FrameDeployer:
     async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_scenes_json(temp_path, gzip=gzip)
-        await rename_path(self.db, self.redis, self.frame, temp_path, path, transport=self.remote_transport)
-
-    async def _upload_all_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
-        temp_path = f"{path}.tmp-{self.build_id}"
-        await self._upload_all_scenes_json(temp_path, gzip=gzip)
         await rename_path(self.db, self.redis, self.frame, temp_path, path, transport=self.remote_transport)
 
     async def get_hostname(self) -> str:

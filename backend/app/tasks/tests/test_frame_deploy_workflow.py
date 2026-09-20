@@ -114,9 +114,6 @@ class RecordingDeployer(FakeDeployer):
     async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
         self.atomic_uploads.append((path, gzip))
 
-    async def _upload_all_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
-        self.atomic_uploads.append((path, gzip))
-
 
 class FakeBinaryBuilder:
     async def plan_build(self, **_kwargs) -> FrameBinaryPlan:
@@ -1907,8 +1904,12 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
     assert deployer.atomic_uploads == [
         ("/srv/frameos/current/frame.json", False),
         ("/srv/frameos/current/scenes.json.gz", True),
-        ("/srv/frameos/current/all_scenes.json.gz", True),
     ]
+    # A stale all_scenes.json would outrank the fresh scenes.json in an older
+    # runtime's `frameos setup`, so it goes before setup runs.
+    assert deployer.commands.index(
+        "rm -f /srv/frameos/current/all_scenes.json.gz /srv/frameos/current/all_scenes.json"
+    ) < deployer.commands.index("cd /srv/frameos/current && sudo -n ./frameos setup")
     # The live release is rewritten in place, so the payload has to reach the
     # card before the frame is restarted onto it.
     assert deployer.commands.index("sync") < deployer.commands.index(

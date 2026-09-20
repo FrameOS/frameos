@@ -2080,12 +2080,6 @@ class BuildrootImageBuilder:
                 mtime=0,
             )
         )
-        (release_dir / "all_scenes.json.gz").write_bytes(
-            gzip.compress(
-                json.dumps(list(getattr(self.frame, "scenes", []) or []), indent=4).encode("utf-8") + b"\n",
-                mtime=0,
-            )
-        )
         # Byte-identical to the unit staged into /etc/systemd/system (see
         # stage_buildroot_frameos_service). It must be: `frameos setup` copies
         # the release directory's unit over the installed one on every upgrade,

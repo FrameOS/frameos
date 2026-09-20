@@ -2327,9 +2327,8 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     assert setup_payload["scenes"] == frame.scenes
     release_dir = overlay_dir / "srv" / "frameos" / "releases" / "release_build123"
     scenes_payload = json.loads(gzip.decompress((release_dir / "scenes.json.gz").read_bytes()).decode("utf-8"))
-    all_scenes_payload = json.loads(gzip.decompress((release_dir / "all_scenes.json.gz").read_bytes()).decode("utf-8"))
     assert scenes_payload == [frame.scenes[0]]
-    assert all_scenes_payload == frame.scenes
+    assert not (release_dir / "all_scenes.json.gz").exists()
     assert (overlay_dir / "boot" / "frameos-hostname").read_text(encoding="utf-8") == "frame-one\n"
     # Consumer routers that strip RRSIGs must not take DNS down for the boot
     # network check; DNSSEC is off on frames.
