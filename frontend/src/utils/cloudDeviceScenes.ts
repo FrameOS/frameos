@@ -29,6 +29,8 @@ export interface CloudDeviceSceneOutcome {
   version: number
   assigned: boolean
   not_assigned_reason?: string
+  /** Service-key groups the scene declares. An import grants NONE of them — what a scene declares is the device's say. */
+  needs_settings_groups?: string[]
 }
 
 /** POST /api/frames/{frameId}/device-scenes. */
@@ -117,6 +119,19 @@ export function deviceScenesImportSummary(result: CloudDeviceScenesImportResult)
     if (!scene.assigned && scene.not_assigned_reason) {
       lines.push(`“${scene.name}” is not on the frame: ${deviceSceneSkipReason(scene.not_assigned_reason)}.`)
     }
+  }
+  const needsKeys = [...result.imported, ...result.reused].filter(
+    (scene) => scene.assigned && (scene.needs_settings_groups?.length ?? 0) > 0
+  )
+  if (needsKeys.length > 0) {
+    const groups = [...new Set(needsKeys.flatMap((scene) => scene.needs_settings_groups ?? []))].sort()
+    lines.push(
+      `${quoted(needsKeys.map((scene) => scene.name))} ${needsKeys.length === 1 ? 'uses' : 'use'} your ${groups.join(
+        ', '
+      )} ${
+        groups.length === 1 ? 'key' : 'keys'
+      }. Importing shares no keys with a frame: allow them per scene in the frame's settings, under Service settings.`
+    )
   }
   for (const scene of result.skipped) {
     lines.push(`“${scene.name}” was left out: ${deviceSceneSkipReason(scene.reason)}.`)

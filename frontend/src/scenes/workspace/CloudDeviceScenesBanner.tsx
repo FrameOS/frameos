@@ -54,7 +54,8 @@ export function CloudDeviceScenesBanner({ frame }: { frame: FrameType }): JSX.El
             {deviceScenesOffer(deviceScenes)}{' '}
             <span className="font-normal">
               Import them to see, edit and schedule them here. They become private scenes in your account and are sent
-              back to the frame; the copies on the frame itself are left alone.
+              back to the frame; the copies on the frame itself are left alone, and none of your service keys are shared
+              with it.
             </span>
           </p>
         ) : null}

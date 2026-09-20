@@ -37,6 +37,20 @@ describe("parseDeviceScenesDocument", () => {
     expect(parseDeviceScenesDocument(doc({ scenes: "clock" }))).toBeUndefined();
   });
 
+  it("drops a scene nested deeper than any real one, without overflowing the stack", () => {
+    // 200k levels in well under the 8 MiB cap: what a hostile device can send.
+    const bomb = `{"scenes":[{"id":"bomb","nodes":${"[".repeat(200_000)}${"]".repeat(200_000)}},{"id":"clock"}]}`;
+    const parsed = parseDeviceScenesDocument(Buffer.from(bomb));
+    expect(parsed?.scenes.map((scene) => scene.id)).toEqual(["clock"]);
+    // And the digest survives depth on content that did not come through the
+    // parser (a store version's own scenes).
+    let deep: unknown = "leaf";
+    for (let level = 0; level < 500; level += 1) {
+      deep = { child: deep };
+    }
+    expect(deviceSceneContentSha256({ id: "deep", nodes: deep })).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it("bounds the list and ignores a nonsense count or active scene", () => {
     const parsed = parseDeviceScenesDocument(
       doc({

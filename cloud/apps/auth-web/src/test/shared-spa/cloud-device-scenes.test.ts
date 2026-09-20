@@ -132,6 +132,27 @@ describe("what the import banner says", () => {
         }),
       )[0],
     ).toBe("No scenes could be imported.");
+    // An import shares no keys — a scene that uses one must say so, or it
+    // just renders "please provide an API key" with no explanation.
+    expect(
+      deviceScenesImportSummary(
+        outcome({
+          imported: [
+            {
+              assigned: true,
+              device_scene_id: "art",
+              name: "Art",
+              needs_settings_groups: ["unsplash", "openAI"],
+              scene_id: "s1",
+              version: 1,
+            },
+          ],
+        }),
+      ),
+    ).toEqual([
+      "1 imported as private drafts. The frame is taking them over now.",
+      "“Art” uses your openAI, unsplash keys. Importing shares no keys with a frame: allow them per scene in the frame's settings, under Service settings.",
+    ]);
     // A code the SPA has no words for is shown, not swallowed.
     expect(deviceSceneSkipReason("some_new_refusal")).toBe("some new refusal");
   });

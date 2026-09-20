@@ -253,6 +253,77 @@ describe("importing a frame's own scenes", () => {
     expect(mine.result.imported[0]!.scene_id).not.toBe(theirs.result.imported[0]!.scene_id);
   });
 
+  it("grants an imported scene NO service keys, whatever the device made it declare", async () => {
+    // Claim-token enrolments hold settings:services by default, and what a
+    // scene declares is the device's say. If importing granted "what the
+    // scenes declare", a frame that is not the owner's could declare every
+    // group and pull the account's keys on one click of a banner that never
+    // mentions them.
+    const accountId = await account();
+    const frame = await frameRow(accountId);
+    const greedy = {
+      edges: [],
+      id: "greedy",
+      name: "Greedy",
+      nodes: [
+        { data: { config: {}, keyword: "data/unsplash" }, id: "u1", type: "app" },
+        { data: { config: {}, keyword: "data/openaiImage" }, id: "o1", type: "app" },
+      ],
+    };
+    await storeFrameDeviceScenes(db, frame.id, report([greedy], "greedy"));
+    const outcome = await importFor(accountId, frame.id);
+    if (!outcome.ok) {
+      throw new Error(outcome.failure.code);
+    }
+    // Told, not granted: the owner grants in the frame's settings.
+    expect(outcome.result.imported[0]?.needs_settings_groups?.sort()).toEqual(["openAI", "unsplash"]);
+    const [assignment] = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.id));
+    expect(assignment?.grantedSettingsGroups).toEqual([]);
+    expect((assignment?.declaredSettingsGroups as string[]).sort()).toEqual(["openAI", "unsplash"]);
+    const [after] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    // The union the device's key pull is answered from.
+    expect(after?.serviceSettingGroups).toEqual([]);
+  });
+
+  it("an account at its daily limit is refused before anything is minted", async () => {
+    const accountId = await account();
+    await db.insert(storeScenes).values(
+      Array.from({ length: 19 }, (_, index) => ({
+        accountId,
+        latestVersion: 1,
+        name: `Filler ${index}`,
+        slug: `device-import-filler-${accountId}-${index}`,
+        status: "active",
+      })),
+    );
+    const frame = await frameRow(accountId);
+    await storeFrameDeviceScenes(db, frame.id, report([clock, photos], "clock"));
+
+    // One slot left today: the first scene lands, the second never starts —
+    // no draft, and so no moderation or classifier call spent on it.
+    const outcome = await importFor(accountId, frame.id);
+    if (!outcome.ok) {
+      throw new Error(outcome.failure.code);
+    }
+    expect(outcome.result.status).toBe("partial");
+    expect(outcome.result.imported.map((scene) => scene.name)).toEqual(["Clock"]);
+    expect(outcome.result.skipped).toEqual([
+      { device_scene_id: "photos", name: "Photos", reason: "daily_scene_limit_exceeded" },
+    ]);
+    const mine = await db.select().from(storeScenes).where(eq(storeScenes.accountId, accountId));
+    expect(mine).toHaveLength(20);
+    // The report keeps waiting, so "Import the rest" works tomorrow.
+    const [snapshot] = await db
+      .select()
+      .from(frameDeviceScenes)
+      .where(eq(frameDeviceScenes.frameId, frame.id));
+    expect(snapshot?.status).toBe("ready");
+    expect(snapshot?.payload).not.toBeNull();
+  });
+
   it("refuses a pending frame, an empty snapshot and a second import at once", async () => {
     const accountId = await account();
     const pending = await frameRow(accountId, "pending");

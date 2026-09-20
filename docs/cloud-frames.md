@@ -547,10 +547,29 @@ while the provider, which has assigned it nothing, would list an empty frame.
   cloud.frameos.net offers it ("This frame is running 3 scenes of its own…")
   and does nothing until asked. Each reported scene becomes a private draft
   through the ordinary publish path (validation, moderation, quotas, audit),
-  is added after whatever the frame is already assigned, granted the
-  service-settings groups it declares, and the set is pushed as an ordinary
+  is added after whatever the frame is already assigned, and the set is
+  pushed as an ordinary
   `set_scenes` with `scene_id` = the reported `active_scene`, so the scene on
   screen stays on screen.
+- **An import grants no service keys.** What a scene declares is the
+  DEVICE's say, and claim-token enrolments hold `settings:services` by
+  default: granting "what the imported scenes declare" would let a frame that
+  is not the owner's — a leaked multi-use claim code, a confirm, one click on
+  a banner about scenes — declare every group and pull the account's keys.
+  An imported scene is a new assignment like any other, granted nothing; the
+  answer's `needs_settings_groups` names what it asks for and the owner grants
+  it where grants are always made. Until then a frame whose link holds
+  `settings:services` renders such a scene without its key — the local copy
+  of a cloud-owned group is removed by the first service-settings pull.
+- **Everything in the report is untrusted.** It is parsed defensively and
+  bounded (8 MiB, 200 scenes, 64 levels of nesting — checked iteratively,
+  since the digest recurses), names reach the UI and the audit log as text,
+  and the scene bodies are code: imported drafts are private, pass the store's
+  moderation and risk classification, never go onto a frame when shell-risk,
+  and — being served with a store `origin` like every cloud scene — still go
+  through the preview key-consent gate in the browser. Drafts are only minted
+  within the account's remaining scene budget, settled BEFORE any moderation
+  or classifier call, so a long report cannot be used to spend model calls.
 - **Dedupe: re-enrolment must not fork a library.** A frame that is deleted
   and enrolled again, or a second frame flashed from the same card, reports
   the same scenes. In order: a scene whose `origin.storeSceneId` names a store
@@ -1238,7 +1257,9 @@ POST {provider}/api/frames/{id}/device-scenes
 
 Import runs the dedupe and publish steps under "Scenes the frame already
 had" and answers per scene: `imported` and `reused` (each `{device_scene_id,
-name, scene_id, version, assigned, not_assigned_reason?}` — a draft that could
+name, scene_id, version, assigned, not_assigned_reason?, needs_settings_groups?}`
+— the last names the service-key groups the scene declares, none of which an
+import grants; a draft that could
 not go onto the frame says `frame_full` or `scene_not_allowed`, the
 shell-risk refusal every cloud push carries), `skipped` (`{device_scene_id,
 name, reason}` with the store's own refusal code — `scene_requires_compilation`,

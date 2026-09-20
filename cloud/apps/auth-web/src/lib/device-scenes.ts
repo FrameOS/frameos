@@ -50,6 +50,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Iterative on purpose — this is the check that protects the recursive code
+// (the digest, JSON.stringify) from a device that sends 8 MiB of `[[[[…`.
+const maxDeviceSceneDepth = 64;
+function nestedDeeperThan(root: unknown, limit: number): boolean {
+  const stack: { depth: number; value: unknown }[] = [{ depth: 1, value: root }];
+  while (stack.length > 0) {
+    const { depth, value } = stack.pop()!;
+    if (typeof value !== "object" || value === null) {
+      continue;
+    }
+    if (depth > limit) {
+      return true;
+    }
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      if (typeof child === "object" && child !== null) {
+        stack.push({ depth: depth + 1, value: child });
+      }
+    }
+  }
+  return false;
+}
+
 /** The display name of one device scene: its own, else its id. */
 export function deviceSceneName(scene: DeviceScene): string {
   const name = typeof scene.name === "string" ? scene.name.trim() : "";
@@ -101,6 +123,11 @@ export function parseDeviceScenesDocument(
       skippedCompiled += 1;
       continue;
     }
+    // No real scene nests like this; one that does is an attack on whatever
+    // walks it next.
+    if (nestedDeeperThan(entry, maxDeviceSceneDepth)) {
+      continue;
+    }
     seen.add(id);
     scenes.push(entry as DeviceScene);
   }
@@ -115,15 +142,25 @@ export function parseDeviceScenesDocument(
 
 // Keys sorted at every depth, so two serializations of one scene digest the
 // same whatever order the device, the editor or Postgres put them in.
-function canonicalJson(value: unknown): string {
+//
+// Depth-bounded: the input is device-supplied, 8 MiB of `[[[[…` is tens of
+// thousands of levels, and this recursion would answer with a stack overflow
+// in the middle of an import. A real scene is a dozen levels deep; past the
+// bound the subtree is digested as its plain serialization (still
+// deterministic for identical bytes, which is all the dedupe needs).
+const maxCanonicalDepth = 64;
+function canonicalJson(value: unknown, depth = 0): string {
+  if (depth >= maxCanonicalDepth) {
+    return JSON.stringify(value) ?? "null";
+  }
   if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
+    return `[${value.map((entry) => canonicalJson(entry, depth + 1)).join(",")}]`;
   }
   if (isRecord(value)) {
     return `{${Object.keys(value)
       .sort()
       .filter((key) => value[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key], depth + 1)}`)
       .join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";

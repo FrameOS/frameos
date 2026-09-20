@@ -23,7 +23,7 @@
 // content and becomes a new draft — silently overwriting either copy would
 // lose work.
 
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import {
   createDb,
   frameDeviceScenes,
@@ -42,16 +42,16 @@ import {
   withoutDeviceSceneOrigin,
   type DeviceScene,
 } from "./device-scenes";
-import { deviceDeliverableFields } from "./frame-service-settings";
 import {
   assignScenesToFrame,
   currentSceneAssignments,
   maxScenesPerFrame,
   type RequestedScene,
 } from "./frame-scenes";
-import { pinnedSceneVersion } from "./frames";
+import { declaredServiceSettingGroups, pinnedSceneVersion } from "./frames";
 import { reportError } from "./log";
 import { extractScenesFromZip } from "./scene-title";
+import { maxNewScenesPerDay, maxScenesPerAccount } from "./store";
 import type { PublishActor } from "./store-publish";
 
 type Database = ReturnType<typeof createDb>;
@@ -83,6 +83,9 @@ export type ImportedDeviceScene = {
   assigned: boolean;
   device_scene_id: string;
   name: string;
+  // Service-key groups the scene declares and was NOT granted (an import
+  // grants none): names only, for "this scene needs your OpenAI key".
+  needs_settings_groups?: string[];
   not_assigned_reason?: string;
   scene_id: string;
   version: number;
@@ -381,6 +384,35 @@ export async function importDeviceScenes(
       entries.push({ digest, resolved, reused: resolved !== undefined, scene });
     }
 
+    // The store checks its quotas AFTER moderation and classification (both
+    // model calls, the classifier on the operator's key), so an account at
+    // its daily limit would still cost a batch of calls on every retry — and
+    // the report is device-supplied, i.e. as long as its sender likes. Settle
+    // the budget first, with the same counts publishStoreScene uses, and
+    // never start a draft it would refuse.
+    const [counts] = await db
+      .select({
+        recent: sql<number>`count(*) filter (where ${storeScenes.createdAt} > now() - interval '24 hours')::int`,
+        total: sql<number>`count(*)::int`,
+      })
+      .from(storeScenes)
+      .where(eq(storeScenes.accountId, accountId));
+    const dailyLeft = maxNewScenesPerDay - (counts?.recent ?? 0);
+    const accountLeft = maxScenesPerAccount - (counts?.total ?? 0);
+    let budget = Math.max(0, Math.min(dailyLeft, accountLeft));
+    const overBudget =
+      accountLeft <= dailyLeft ? "scene_quota_exceeded" : "daily_scene_limit_exceeded";
+    for (const entry of entries) {
+      if (entry.resolved || entry.skipped) {
+        continue;
+      }
+      if (budget > 0) {
+        budget -= 1;
+      } else {
+        entry.skipped = overBudget;
+      }
+    }
+
     // Tier 3, a few at a time. Once one draft is refused for a reason that
     // will refuse the rest too (the daily budget, a full account), stop
     // asking: the remaining scenes are skipped with that same reason.
@@ -418,10 +450,15 @@ export async function importDeviceScenes(
     const assignedIds = new Set(existing.map((entry) => entry.sceneId));
     const requested: RequestedScene[] = [...existing];
     const notAssigned = new Map<string, string>();
-    // The owner is importing their own frame's scenes, which were already
-    // running with the frame's keys: grant each the groups it declares
-    // (assignScenesToFrame narrows this list to the declared ones).
-    const settingsGroups = [...deviceDeliverableFields.keys()];
+    // NO service-key grant rides an import. What a scene declares is the
+    // DEVICE's say — and claim-token enrolments hold `settings:services` by
+    // default — so granting "whatever the imported scenes declare" would let
+    // a frame that is not the owner's (a leaked multi-use claim code, then
+    // one click on a banner that never mentions keys) declare all six groups
+    // and pull the account's OpenAI / Home Assistant / Immich keys. An
+    // imported scene is assigned like any NEW assignment: granted nothing,
+    // until the owner grants it in the frame's settings, where the groups
+    // are named. The answer says which scenes are waiting for that.
     for (const entry of entries) {
       const resolved = entry.resolved;
       if (!resolved || assignedIds.has(resolved.sceneId)) {
@@ -440,7 +477,7 @@ export async function importDeviceScenes(
       requested.push({
         sceneId: resolved.sceneId,
         sceneVersion: resolved.pin ? resolved.version : null,
-        settingsGroups,
+        settingsGroups: [],
       });
     }
 
@@ -468,10 +505,12 @@ export async function importDeviceScenes(
     const describe = (entry: Entry): ImportedDeviceScene => {
       const resolved = entry.resolved as Resolved;
       const reason = notAssigned.get(resolved.sceneId);
+      const needs = reason === undefined ? declaredServiceSettingGroups([entry.scene]) : [];
       return {
         assigned: reason === undefined,
         device_scene_id: entry.scene.id,
         name: deviceSceneName(entry.scene),
+        ...(needs.length > 0 ? { needs_settings_groups: needs } : {}),
         ...(reason ? { not_assigned_reason: reason } : {}),
         scene_id: resolved.sceneId,
         version: resolved.version,
