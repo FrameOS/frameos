@@ -494,9 +494,9 @@ need) and is written down once.
   Linux code as `linuxCode` for the alias window.
 - `key` = the layout-mapped value (`"a"`, `"A"`, `"Enter"`). Start with a
   built-in US table plus a frame setting `keyboardLayout` and a handful of
-  generated tables; do not take an xkbcommon dependency for the first cut
-  (Buildroot images, static link, ESP32 parity). Compose/dead keys can come
-  with xkbcommon later, behind the same payload.
+  generated tables; no xkbcommon dependency (Buildroot images, static link,
+  ESP32 parity — §6). Compose/dead keys wait until somebody needs them, behind
+  the same payload.
 - `repeat: true` for `value == 2` — and the bug in §3.5 #2 dies with it.
 - `EVIOCGRAB` keyboards while a scene is running (setting, default on), so the
   VT never sees Ctrl+Alt+Del; release the grab when the runtime stops so a
@@ -627,24 +627,28 @@ shared SPA. P3's frame settings (`keyboardLayout`, button roles, grab) need the
 usual frame-key plumbing on both, including
 `FRAME_KEY_INTRODUCED_FRAMEOS_VERSION`.
 
-## 6. Open questions
+## 6. Decisions
 
-1. **Aliases forever, or a deprecation window?** Store scenes are versioned
-   and immutable; "forever, at zero runtime cost via the generated alias
-   table" is probably the honest answer.
-2. **Does `dispatch` to a *named* scene become a feature?** The transport has
-   carried `Option[SceneId]` since the beginning and nothing uses it. With
-   routing (§4.6) the natural form is "dispatch to a child scene node", not to
-   a global id.
-3. **xkbcommon**: acceptable as an optional dependency on Pi OS images only,
-   with the built-in tables as the floor everywhere else?
-4. **ESP32 input beyond buttons.** No board in the tree has touch today. The
-   contract's `hosts` column makes "not on ESP32" explicit for now; USB-host
-   HID on the S3 is possible but is a firmware-size question
-   (`docs/esp32-image-size.md`), not an event-layer one.
-5. **Should a schedule be able to fire custom scene events?** Today it can, by
-   accident (any string ≤63 chars). Under §4.2 it would be an explicit
-   `origins: ["schedule"]` on the custom event's declaration.
+The open questions of the first draft, as answered on 2026-09-21.
+
+1. **Aliases are forever.** Store scenes are versioned and immutable, so an old
+   event name never stops working; the generated alias table makes that free
+   at run time. There is no deprecation window to manage.
+2. **`dispatch` to a named scene: not as a global id.** The transport has
+   carried `Option[SceneId]` since the beginning and nothing uses it. If this
+   becomes a feature it arrives with routing (§4.6), as "dispatch to a child
+   scene node". No commitment either way before that.
+3. **No xkbcommon.** Buildroot images are the target that matters most, and
+   they are where a new shared-library dependency costs the most. The built-in
+   layout tables (§4.5) are the plan, not the floor under an optional
+   dependency; compose and dead keys wait until somebody needs them.
+4. **ESP32 input beyond buttons: standardize, do not implement.** The contract
+   describes pointer and keyboard events for every host and marks them
+   `hosts.esp32: false`. No board in the tree has touch, and nothing is built
+   for hardware that is not there.
+5. **A schedule may fire custom scene events — explicitly.** Today it can by
+   accident (any string ≤63 chars). Under §4.2 it is `origins: ["schedule"]` on
+   the custom event's declaration.
 
 ## Appendix: file map
 
