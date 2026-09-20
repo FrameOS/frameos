@@ -28,3 +28,34 @@ export function sceneIdsRefer(first: string | null | undefined, second: string |
   const b = publicSceneId(second)
   return a.length > 0 && a === b
 }
+
+/**
+ * Is the frame showing some OTHER scene than the one the editor has open?
+ *
+ * The device reports a scene it was handed ad hoc — every "Preview on frame",
+ * and every interpreted scene it loaded from disk — as `uploaded/<id>`, so a
+ * plain `!==` would call the editor's own scene a stranger the moment it is
+ * previewed. An unknown live scene is not a mismatch: nothing is claimed
+ * until the frame has said what it shows.
+ */
+export function otherSceneIsLive(liveSceneId: string | null | undefined, sceneId: string): boolean {
+  return !!liveSceneId && !sceneIdsRefer(liveSceneId, sceneId)
+}
+
+/** What to call the live scene in the notice, or null when nothing names it. */
+export function liveSceneLabel(
+  liveSceneId: string | null | undefined,
+  scenes: ReadonlyArray<{ id: string; name?: string }>
+): string | null {
+  if (!liveSceneId) {
+    return null
+  }
+  if (liveSceneId === STATUS_SCREEN_SCENE_ID) {
+    return STATUS_SCREEN_SCENE_NAME
+  }
+  if (isSystemSceneId(liveSceneId)) {
+    return 'A system screen'
+  }
+  const id = publicSceneId(liveSceneId)
+  return scenes.find((scene) => scene.id === id)?.name || null
+}

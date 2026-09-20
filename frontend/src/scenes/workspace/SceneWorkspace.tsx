@@ -29,7 +29,7 @@ import { parseRouteFrameId } from '../../utils/frameId'
 import { FrameosShell } from './FrameosShell'
 import { TemplateDrawer } from './FramesHome'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
-import { FrameSidebarPreview } from './FrameSidebarPreview'
+import { SceneLivePreview } from './SceneLivePreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
@@ -207,48 +207,43 @@ function SceneSelector({
 
   return (
     <div className="@container space-y-2">
-      <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
-        <FrameSidebarPreview
-          frame={frame}
-          className="order-3 @xs:order-1 @xs:h-full"
-          mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
-        />
-        <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          {!inFrameAdminMode ? (
-            <div>
-              <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
-              <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
-                <div className="relative min-w-0 flex-1">
-                  <select
-                    value={frame.id}
-                    onChange={(event) => navigateToSceneFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
-                    className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-                  >
-                    {frameGroups.map((group) => (
-                      <optgroup key={group.key} label={group.label}>
-                        {group.frames.map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>
-                            {candidate.name || frameHost(candidate)}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <FrameMetricAlertIndicator
-                    frame={frame}
-                    containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
-                  />
-                </div>
-                <FrameBatteryIndicator frame={frame} className="shrink-0" />
-                <FrameActionsMenu
+      {/* No live picture here: it sits on top of the Preview drawer
+          (SceneLivePreview), next to the scene it may or may not belong to. */}
+      <div className="min-w-0 space-y-2">
+        {!inFrameAdminMode ? (
+          <div>
+            <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
+            <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
+              <div className="relative min-w-0 flex-1">
+                <select
+                  value={frame.id}
+                  onChange={(event) => navigateToSceneFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
+                  className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+                >
+                  {frameGroups.map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.frames.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name || frameHost(candidate)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <FrameMetricAlertIndicator
                   frame={frame}
-                  className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
                 />
               </div>
+              <FrameBatteryIndicator frame={frame} className="shrink-0" />
+              <FrameActionsMenu
+                frame={frame}
+                className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              />
             </div>
-          ) : null}
-          {sidebarActions}
-        </div>
+          </div>
+        ) : null}
+        {sidebarActions}
       </div>
       <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -711,9 +706,6 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
           ))}
         </div>
       </div>
-      <div className="frameos-skeleton-surface h-32 overflow-hidden rounded-2xl">
-        <div className="frameos-skeleton-media h-full animate-pulse" />
-      </div>
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scenes</div>
@@ -752,7 +744,13 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
 }
 
 function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
-  return <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
+  const { frame } = useValues(frameLogic({ frameId }))
+  return (
+    <div className="space-y-4">
+      {frame ? <SceneLivePreview frame={frame} sceneId={scene.id} /> : null}
+      <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
+    </div>
+  )
 }
 
 function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
