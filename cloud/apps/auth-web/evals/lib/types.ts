@@ -19,7 +19,10 @@ export type Check =
   | { type: "public_fields_min"; min: number }
   | { type: "refresh_interval"; min?: number; max?: number }
   | { type: "node_count"; min?: number; max?: number }
+  /** Custom code the scene computes with: code nodes AND scene-local JS app nodes. */
   | { type: "code_nodes_min"; min: number }
+  /** The scene draws with SVG, by any route; `orApps` lists apps that satisfy the request just as well. */
+  | { type: "draws_svg"; orApps?: string[] }
   | { type: "scene_count"; min?: number; max?: number }
   | { type: "json_matches"; pattern: string; flags?: string }
   | { type: "json_not_matches"; pattern: string; flags?: string }

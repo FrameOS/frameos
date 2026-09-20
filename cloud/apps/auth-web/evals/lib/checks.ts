@@ -64,6 +64,51 @@ function appKeywordsUsed(scenes: unknown[]): string[] {
   return keywords;
 }
 
+// Scene-local JS apps: app nodes whose keyword names an entry of the scene's
+// own "apps" map that carries sources. The prompt's JS app contract makes this
+// the usual home of a scene's logic, so it counts as code wherever a code
+// node does.
+function sceneLocalAppNodes(scenes: unknown[]): { keyword: string; sources: JsonObject }[] {
+  const found: { keyword: string; sources: JsonObject }[] = [];
+  for (const scene of scenes) {
+    const apps = obj(obj(scene)?.apps) ?? {};
+    for (const node of nodesOf([scene])) {
+      const keyword = obj(node.data)?.keyword;
+      const sources = typeof keyword === "string" ? obj(obj(apps[keyword])?.sources) : undefined;
+      if (node.type === "app" && typeof keyword === "string" && sources) {
+        found.push({ keyword, sources });
+      }
+    }
+  }
+  return found;
+}
+
+// frameos.svg(...) is the JS app route, a literal <svg the code node one.
+const SVG_SOURCE = /frameos\.svg\s*\(|<svg[\s>]/;
+
+// How the scene draws SVG, or null. There are three routes and a request for
+// "an SVG clock" is met by any of them: the render/svg app (fed by a code
+// node), the jsSvg repo template, or a scene-local JS app returning
+// frameos.svg(...) into render/image — which is what the prompt prescribes.
+function svgRoute(scenes: unknown[]): string | null {
+  const keywords = appKeywordsUsed(scenes);
+  const app = ["render/svg", "repo/apps/code/jsSvg", "jsSvg"].find((keyword) => keywords.includes(keyword));
+  if (app) {
+    return app;
+  }
+  for (const { keyword, sources } of sceneLocalAppNodes(scenes)) {
+    const file = Object.keys(sources).find((name) => typeof sources[name] === "string" && SVG_SOURCE.test(sources[name] as string));
+    if (file) {
+      return `scene-local app ${keyword} (${file})`;
+    }
+  }
+  const codeNode = nodesOf(scenes).find((node) => {
+    const code = obj(node.data)?.codeJS;
+    return node.type === "code" && typeof code === "string" && SVG_SOURCE.test(code);
+  });
+  return codeNode ? `code node ${String(codeNode.id)}` : null;
+}
+
 function regex(pattern: string, flags?: string): RegExp {
   return new RegExp(pattern, flags ?? "i");
 }
@@ -152,8 +197,21 @@ export function runCheck(check: Check, input: CheckInput): CheckResult {
       return pass(`${count} nodes`);
     }
     case "code_nodes_min": {
-      const count = nodesOf(scenes).filter((node) => node.type === "code").length;
-      return count >= check.min ? pass(`${count} code nodes`) : fail(`${count} code nodes < ${check.min}`);
+      const codeNodes = nodesOf(scenes).filter((node) => node.type === "code").length;
+      const jsApps = sceneLocalAppNodes(scenes).length;
+      const detail = `${codeNodes} code nodes + ${jsApps} scene-local JS apps`;
+      return codeNodes + jsApps >= check.min ? pass(detail) : fail(`${detail} < ${check.min}`);
+    }
+    case "draws_svg": {
+      const route = svgRoute(scenes);
+      if (route) {
+        return pass(`draws SVG via ${route}`);
+      }
+      const used = appKeywordsUsed(scenes);
+      const alternative = (check.orApps ?? []).find((keyword) => used.includes(keyword));
+      return alternative
+        ? pass(`uses ${alternative}`)
+        : fail(`no SVG drawn: no render/svg or jsSvg app, no frameos.svg(...) or <svg in a JS app or code node (has: ${[...new Set(used)].join(", ") || "none"})`);
     }
     case "scene_count": {
       const count = scenes.length;
