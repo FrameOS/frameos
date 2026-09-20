@@ -665,12 +665,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             if self.frameConfig.width > 0 and self.frameConfig.height > 0:
               # 0..32767 on the panel -> panel pixels -> the scene's canvas,
               # which a rotated or flipped frame draws the other way around.
-              let width = self.frameConfig.width
-              let height = self.frameConfig.height
-              let point = panelToScenePoint(
-                min(width - 1, (width.float * payload["x"].getInt().float / 32767.0).int),
-                min(height - 1, (height.float * payload["y"].getInt().float / 32767.0).int),
-                width, height, self.frameConfig.rotate, self.frameConfig.flip)
+              let point = pointerToScenePoint(payload["x"].getInt(), payload["y"].getInt(),
+                self.frameConfig.width, self.frameConfig.height,
+                self.frameConfig.rotate, self.frameConfig.flip)
               payload["x"] = %*point.x
               payload["y"] = %*point.y
           of "setCurrentScene":

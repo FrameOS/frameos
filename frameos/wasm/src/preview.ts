@@ -4,6 +4,7 @@
 // a canvas, and exposes events/state as callbacks.
 import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
+import { attachPointerInput } from './pointer'
 import type {
   FrameOSScene,
   PreviewAssetEntry,
@@ -107,7 +108,7 @@ export class FrameOSPreview {
   /** How the runtime's /srv/assets is backed (set once `ready` fires). */
   assetsInfo: PreviewAssetsInfo | null = null
   /** Which FrameOS version the runtime is (set once `ready` fires). */
-  runtimeInfo: PreviewRuntimeInfo = { version: null }
+  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
@@ -157,7 +158,10 @@ export class FrameOSPreview {
         if (this.sceneInfo?.currentSceneId) {
           this.currentSceneId = this.sceneInfo.currentSceneId
         }
-        this.runtimeInfo = { version: typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null }
+        this.runtimeInfo = {
+          version: typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null,
+          pointerEvents: msg.pointerEvents === true,
+        }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
       case 'frame':
@@ -268,6 +272,20 @@ export class FrameOSPreview {
   /** Dispatch a scene event (a custom event node's keyword, "button", ...). */
   sendEvent(name: string, payload: Record<string, unknown> = {}): void {
     this.worker?.postMessage({ type: 'event', name, payload })
+  }
+
+  /**
+   * Pass the pointer over `canvas` on to the scene as `mouseMove` /
+   * `mouseDown` / `mouseUp`, the events a frame's mouse or touchscreen sends
+   * (see ./pointer). Any canvas showing the frame will do — the one frames are
+   * painted onto, or a mirror of it. Nothing is forwarded to a runtime bundle
+   * that predates pointer input (`runtimeInfo.pointerEvents`). Returns the
+   * detach function; `destroy()` does not need it called first.
+   */
+  attachPointerInput(canvas: HTMLCanvasElement): () => void {
+    return attachPointerInput(canvas, (name, payload) => this.sendEvent(name, payload), {
+      enabled: () => !this.destroyed && this.runtimeInfo.pointerEvents,
+    })
   }
 
   /** Update the current scene's state fields; renders by default. */

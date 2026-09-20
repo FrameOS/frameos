@@ -91,6 +91,10 @@ export interface PreviewRuntimeInfo {
    * export. The preview renders with this interpreter; a frame renders with
    * its own firmware, and the two can differ between releases. */
   version: string | null
+  /** Whether the bundle takes pointer input (`mouseMove` as 0..32767, no
+   * render per move — see ./pointer). False for a bundle from before it,
+   * which a page must not forward pointers to. */
+  pointerEvents: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */
@@ -115,6 +119,10 @@ export interface SceneEventButton {
 /** Events every scene handles on its own; not useful as interactive buttons. */
 export const LIFECYCLE_EVENTS = new Set(['render', 'init', 'open', 'close', 'setSceneState', 'setCurrentScene'])
 
+/** Pointer input: the canvas sends these itself, with a position (see
+ * ./pointer). A button could only send one without. */
+export const POINTER_EVENTS = new Set(['mouseMove', 'mouseDown', 'mouseUp'])
+
 /** The custom event nodes of a scene, deduplicated — render these as buttons. */
 export function sceneEventButtons(scene: FrameOSScene | undefined | null): SceneEventButton[] {
   if (!scene) {
@@ -128,7 +136,7 @@ export function sceneEventButtons(scene: FrameOSScene | undefined | null): Scene
     }
     const data = (node.data ?? {}) as Record<string, unknown> & { config?: Record<string, unknown> }
     const keyword = String(data.keyword ?? '')
-    if (!keyword || LIFECYCLE_EVENTS.has(keyword)) {
+    if (!keyword || LIFECYCLE_EVENTS.has(keyword) || POINTER_EVENTS.has(keyword)) {
       continue
     }
     const label = (data.config?.label ?? data.label ?? null) as string | null

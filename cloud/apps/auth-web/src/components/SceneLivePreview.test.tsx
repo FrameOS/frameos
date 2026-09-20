@@ -238,21 +238,22 @@ function stubCanvas() {
 }
 
 describe("SceneLivePreviewPanel lightbox", () => {
-  it("opens the frame at full size on a canvas click, toggles fit/1:1, and closes on Esc", async () => {
+  it("opens the frame at full size from the Expand button, zooms from the bar, and closes on Esc", async () => {
     render(<SceneLivePreviewPanel height={600} sceneId="scene-1" scenes={[clockScene]} width={800} />);
     await waitFor(() => expect(previews).toHaveLength(1));
     const canvas = document.querySelector("canvas.live-preview__canvas") as HTMLCanvasElement;
-    // Nothing to zoom into before the first frame.
-    expect(canvas.classList.contains("live-preview__canvas--zoomable")).toBe(false);
-    expect(canvas.getAttribute("role")).toBeNull();
+    const expand = screen.getByRole("button", { name: "Expand" }) as HTMLButtonElement;
+    // Nothing to expand before the first frame.
+    expect(expand.disabled).toBe(true);
     stubCanvas();
+
+    act(() => previews[0]!.options.onFrame!({ height: 600, renderMs: 4, width: 800 }));
+    expect(expand.disabled).toBe(false);
+    // The canvas is the scene's: a click on it opens nothing.
     fireEvent.click(canvas);
     expect(screen.queryByRole("dialog", { name: "Preview frame" })).toBeNull();
 
-    act(() => previews[0]!.options.onFrame!({ height: 600, renderMs: 4, width: 800 }));
-    expect(canvas.classList.contains("live-preview__canvas--zoomable")).toBe(true);
-    expect(canvas.getAttribute("role")).toBe("button");
-    fireEvent.click(canvas);
+    fireEvent.click(expand);
     const dialog = screen.getByRole("dialog", { name: "Preview frame" });
     // On <body>, outside the panel (the editor frame's transform would trap
     // a fixed overlay inside the column).
@@ -266,21 +267,104 @@ describe("SceneLivePreviewPanel lightbox", () => {
     expect(context.drawImage.mock.calls.length).toBeGreaterThan(paintsBefore);
     expect(image.classList.contains("lightbox__image--fit")).toBe(true);
 
+    // A click on the picture neither zooms nor closes: it is the scene's.
     fireEvent.click(image);
+    expect(image.classList.contains("lightbox__image--fit")).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Preview frame" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show at actual size" }));
     expect(image.classList.contains("lightbox__image--fit")).toBe(false);
     expect(screen.getByRole("dialog", { name: "Preview frame" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Fit to the window" }));
+    expect(image.classList.contains("lightbox__image--fit")).toBe(true);
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Preview frame" })).toBeNull();
 
     // The × and the backdrop close it too.
-    fireEvent.click(canvas);
+    fireEvent.click(expand);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Preview frame" })).toBeNull();
-    fireEvent.click(canvas);
+    fireEvent.click(expand);
     fireEvent.click(screen.getByRole("dialog", { name: "Preview frame" }));
     expect(screen.queryByRole("dialog", { name: "Preview frame" })).toBeNull();
     vi.restoreAllMocks();
+  });
+});
+
+describe("SceneLivePreviewPanel pointer input", () => {
+  function firePointer(
+    target: Element,
+    type: string,
+    init: { clientX?: number; clientY?: number; button?: number; buttons?: number },
+  ) {
+    // jsdom has no PointerEvent: a MouseEvent under the pointer event's name
+    // carries the same clientX/clientY/button the forwarder reads.
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+    Object.defineProperty(event, "pointerId", { value: 1 });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+  }
+
+  function placeAt(canvas: HTMLCanvasElement, rect: { left: number; top: number; width: number; height: number }) {
+    canvas.getBoundingClientRect = () =>
+      ({
+        ...rect,
+        bottom: rect.top + rect.height,
+        right: rect.left + rect.width,
+        toJSON: () => rect,
+        x: rect.left,
+        y: rect.top,
+      }) as DOMRect;
+  }
+
+  it("sends the pointer over the canvas as the evdev events, once the runtime says it takes them", async () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    render(<SceneLivePreviewPanel height={600} sceneId="scene-1" scenes={[clockScene]} width={800} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    const preview = previews[0]! as unknown as {
+      sendEvent: ReturnType<typeof vi.fn>;
+      runtimeInfo: { version: string | null; pointerEvents: boolean };
+      options: { onReady: (info: unknown, assets: unknown, runtime: unknown) => void };
+    };
+    const canvas = document.querySelector("canvas.live-preview__canvas") as HTMLCanvasElement;
+    // Shown at half size, 100px in from the left and 50px down.
+    placeAt(canvas, { height: 300, left: 100, top: 50, width: 400 });
+
+    // A bundle from before pointer input would mishandle it: nothing is sent.
+    firePointer(canvas, "pointerdown", { button: 0, buttons: 1, clientX: 300, clientY: 200 });
+    expect(preview.sendEvent).not.toHaveBeenCalled();
+    expect(canvas.classList.contains("live-preview__canvas--interactive")).toBe(false);
+
+    preview.runtimeInfo = { pointerEvents: true, version: "2026.9.21" };
+    act(() => preview.options.onReady({ currentSceneId: "scene-runtime-1" }, null, preview.runtimeInfo));
+    expect(canvas.classList.contains("live-preview__canvas--interactive")).toBe(true);
+
+    // The position first (0..32767 across the picture), then the press.
+    firePointer(canvas, "pointerdown", { button: 0, buttons: 1, clientX: 300, clientY: 200 });
+    expect(preview.sendEvent.mock.calls).toEqual([
+      ["mouseMove", { x: 16384, y: 16384 }],
+      ["mouseDown", { button: 0 }],
+    ]);
+    preview.sendEvent.mockClear();
+
+    // A drag past the edge stays on the edge; the DOM's right button (2) is
+    // the driver's button 1.
+    firePointer(canvas, "pointermove", { button: -1, buttons: 1, clientX: 900, clientY: 50 });
+    firePointer(canvas, "pointerup", { button: 0, clientX: 900, clientY: 50 });
+    firePointer(canvas, "pointerdown", { button: 2, buttons: 2, clientX: 100, clientY: 350 });
+    expect(preview.sendEvent.mock.calls).toEqual([
+      ["mouseMove", { x: 32767, y: 0 }],
+      ["mouseMove", { x: 32767, y: 0 }],
+      ["mouseUp", { button: 0 }],
+      ["mouseMove", { x: 0, y: 32767 }],
+      ["mouseDown", { button: 1 }],
+    ]);
   });
 });
 
