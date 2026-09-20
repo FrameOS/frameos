@@ -1,7 +1,9 @@
 ## Pointer arithmetic for the evdev driver, kept apart from libevdev so it is
 ## testable on a machine without it.
 
-const PointerRange* = 32767
+import frameos/events_gen
+
+const PointerRange* = PointerWireMax
   ## The host's contract for a `mouseMove` payload (frameos/runner scales it
   ## to the panel): 0..32767 on both axes, whatever the device reports.
 

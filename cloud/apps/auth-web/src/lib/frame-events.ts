@@ -3,8 +3,31 @@
 // route so they can be tested without a database.
 
 import type { ContractProfile } from "./cloud-frames-contract";
+import { cloudEventRouteVerbs } from "./events-contract.gen";
 
 const maxSceneIdChars = 256;
+
+/**
+ * The hub verb a frame event becomes, or undefined when the cloud cannot send
+ * it to this frame: the event is not one the contract gives the `cloud` origin
+ * (docs/events-contract.json — input, lifecycle, custom events), or its verb
+ * has no such device profile.
+ */
+export function cloudEventVerb(
+  eventName: string,
+  profile: ContractProfile,
+): { verb: string } | undefined {
+  const routed = Object.prototype.hasOwnProperty.call(
+    cloudEventRouteVerbs,
+    eventName,
+  )
+    ? cloudEventRouteVerbs[eventName]
+    : undefined;
+  if (!routed || (routed.profiles && !routed.profiles.includes(profile))) {
+    return undefined;
+  }
+  return { verb: routed.verb };
+}
 
 export type SceneStateCommand =
   | { ok: true; payload: { scene_id: string; state: Record<string, unknown> } }

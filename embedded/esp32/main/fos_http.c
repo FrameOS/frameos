@@ -28,6 +28,7 @@
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_cloud_contract_gen.h"
+#include "fos_events_gen.h"
 #include "fos_upload_limits.h"
 #include "fos_battery.h"
 #include "fos_board.h"
@@ -1914,15 +1915,15 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
     log_http_command(req, event_name, body ? strlen(body) : 0);
 
     bool ok = true;
-    if (strcmp(event_name, "render") == 0) {
+    if (strcmp(event_name, FOS_EVENT_RENDER) == 0) {
         if (s_render_cb) s_render_cb();
-    } else if (strcmp(event_name, "reload") == 0) {
+    } else if (strcmp(event_name, FOS_EVENT_RELOAD) == 0) {
         fos_scenes_request_sync();
         if (s_render_cb) s_render_cb();
-    } else if (strcmp(event_name, "uploadScenes") == 0) {
+    } else if (strcmp(event_name, FOS_EVENT_UPLOAD_SCENES) == 0) {
         ok = fos_http_store_uploaded_scenes_payload(payload, strlen(payload)) == ESP_OK;
         if (ok && s_render_cb) s_render_cb();
-    } else if (strcmp(event_name, "setCurrentScene") == 0) {
+    } else if (strcmp(event_name, FOS_EVENT_SET_CURRENT_SCENE) == 0) {
         char scene_id[128];
         if (json_string_value(payload, "sceneId", scene_id, sizeof(scene_id)) ||
             json_string_value(payload, "scene_id", scene_id, sizeof(scene_id))) {

@@ -10,6 +10,7 @@ import frameos/channels
 import frameos/config
 import frameos/device_setup
 import frameos/event_log
+import frameos/events
 import frameos/display_detect
 import frameos/driver_render_hint
 import frameos/render_stats
@@ -660,15 +661,17 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     else:
       (success, msg) = eventChannel.tryRecv()
     var (sceneId, event, payload) = msg
-    if success and event == "mouseMove":
-      # Touch drags queue hundreds of mouse moves while a render blocks this
-      # loop; replaying each one is pointless. Keep only the newest, and stash
-      # the first other event so nothing is reordered or lost.
+    if success and eventCoalescesLatest(event):
+      # The contract's `coalesce: latest` (mouseMove): touch drags queue
+      # hundreds of moves while a render blocks this loop; replaying each one
+      # is pointless. Keep only the newest, and stash the first other event so
+      # nothing is reordered or lost.
+      let coalesced = event
       while true:
         let (nextOk, nextMsg) = eventChannel.tryRecv()
         if not nextOk:
           break
-        if nextMsg[1] == "mouseMove":
+        if nextMsg[1] == coalesced:
           (sceneId, event, payload) = nextMsg
         else:
           pendingEvent = some(nextMsg)

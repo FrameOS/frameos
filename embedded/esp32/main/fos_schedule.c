@@ -19,6 +19,7 @@
 
 #include "cJSON.h"
 #include "fos_client.h"
+#include "fos_events_gen.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
@@ -29,7 +30,8 @@ static const char *TAG = "fos_schedule";
 #define SCHEDULE_TMP_PATH "/state/schedule.json.tmp"
 #define SCHEDULE_MAX_BYTES (32 * 1024)
 #define SCHEDULE_MAX_EVENTS 64
-#define SCHEDULE_EVENT_NAME_LEN 64
+/* The longest event name of the contract (docs/events-contract.json), NUL included. */
+#define SCHEDULE_EVENT_NAME_LEN (FOS_CUSTOM_EVENT_MAX_NAME_LENGTH + 1)
 #define SCHEDULE_PAYLOAD_LEN 512
 
 typedef struct {
@@ -286,12 +288,24 @@ static bool weekday_matches(int event_weekday, int today)
 static void fire_event(const schedule_event_t *event)
 {
     char line[256];
+    /* What a schedule may fire is the contract's (docs/events-contract.json,
+     * the `schedule` origin) — the same answer scheduler.nim gives on a Pi.
+     * A schedule is data nobody validated: it may switch, render and reboot,
+     * it may not replace the installed scenes. */
+    if (!fos_event_origin_may_emit(FOS_ORIGIN_SCHEDULE, event->event)) {
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"schedule:refused\",\"source\":\"esp32\","
+                 "\"name\":\"%s\",\"reason\":\"runtime-only event is not schedulable\"}",
+                 event->event);
+        frameos_nim_log_hook(line);
+        return;
+    }
     snprintf(line, sizeof(line),
              "{\"event\":\"schedule:fire\",\"source\":\"esp32\","
              "\"name\":\"%s\",\"hour\":%d,\"minute\":%d}",
              event->event, event->hour, event->minute);
     frameos_nim_log_hook(line);
-    if (strcmp(event->event, "setCurrentScene") == 0) {
+    if (strcmp(event->event, FOS_EVENT_SET_CURRENT_SCENE) == 0) {
         cJSON *payload = cJSON_Parse(event->payload);
         const cJSON *scene = payload ? cJSON_GetObjectItem(payload, "sceneId") : NULL;
         if (!cJSON_IsString(scene)) {
@@ -305,9 +319,10 @@ static void fire_event(const schedule_event_t *event)
             }
         }
         cJSON_Delete(payload);
-    } else if (strcmp(event->event, "render") == 0) {
+    } else if (strcmp(event->event, FOS_EVENT_RENDER) == 0) {
         fos_client_render_now();
-    } else if (strcmp(event->event, "restart") == 0 || strcmp(event->event, "reboot") == 0) {
+    } else if (fos_event_spec(event->event)->ends_runtime) {
+        /* `restart` and `reboot` (the contract's schedule.endsRuntime). */
         /* The cloud-safe "automatic reboot": a schedule entry, not a cron
          * line. One process here, so restarting the runtime and rebooting
          * the board are the same thing. The log line above is what the owner

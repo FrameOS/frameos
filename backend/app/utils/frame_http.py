@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from app.models.frame import Frame, normalize_https_proxy
 from app.utils.env import get_env_float, get_env_int
+from app.utils.events_contract_gen import REFUSED_BY_ORIGIN
 from app.utils.network import assert_target_allowed, is_safe_host
 from app.utils.remote_exec import _use_remote
 from app.ws.remote_ws import http_get_on_frame
@@ -216,10 +217,12 @@ def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
 
 
 # Verbs the frame treats as control-plane work rather than scene events.
-# The runtime (server/auth.nim `ControlEvents`) refuses the frame access key
+# The runtime (server/auth.nim `isControlEvent`) refuses the frame access key
 # — the QR-printed viewer credential — on these and wants an admin session or
 # the frame's serverApiKey, the secret only the backend and the frame share.
-_CONTROL_EVENT_NAMES = frozenset({"reboot", "restart", "reload", "uploadScenes"})
+# Which ones is the event contract's (docs/events-contract.json): what the
+# `http:write` origin may not emit.
+_CONTROL_EVENT_NAMES = REFUSED_BY_ORIGIN["http:write"]
 
 
 def _is_control_path(path: str) -> bool:

@@ -9,6 +9,7 @@ import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isCloudMode } from '../../../../utils/cloudMode'
+import { logEventIsSceneStateChange } from '../../../../utils/eventsContract'
 import { activeSceneFromLastState } from '../../../../utils/cloudFrameScenes'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
@@ -437,11 +438,7 @@ export const controlLogic = kea<controlLogicType>([
           } else {
             actions.currentSceneChanged(sceneId)
           }
-        } else if (
-          event === 'event:setSceneState' ||
-          event === 'event:setCurrentScene' ||
-          event === 'event:uploadScenes'
-        ) {
+        } else if (logEventIsSceneStateChange(event)) {
           if (!values.stateRecordLoading) {
             actions.sync()
           }

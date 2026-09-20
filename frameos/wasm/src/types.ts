@@ -2,6 +2,8 @@
 // mirror the FrameOS backend/frontend definitions (frontend/src/types.tsx and
 // frameos/src/frameos/types.nim) for the parts a browser preview needs.
 
+import { HOST_EVENT_NAMES, POINTER_EVENT_NAMES } from './events.gen'
+
 /** One showIf condition: compare a (state) field's value against `value`. */
 export interface ConfigFieldCondition {
   field?: string
@@ -116,13 +118,15 @@ export interface SceneEventButton {
   label: string | null
 }
 
-/** Events every scene handles on its own; not useful as interactive buttons. */
-export const LIFECYCLE_EVENTS = new Set(['render', 'init', 'open', 'close', 'setSceneState', 'setCurrentScene'])
+/** Events the host sends on its own — lifecycle events and scene commands
+ * (docs/events-contract.json, generated into ./events.gen); not useful as
+ * interactive buttons. */
+export const LIFECYCLE_EVENTS = new Set(HOST_EVENT_NAMES)
 
 /** Pointer input: the canvas sends the mouse events itself, with a position
  * (see ./pointer). A button could only send one without — and a `wheel`
  * without its deltas, which only a frame's mouse produces. */
-export const POINTER_EVENTS = new Set(['mouseMove', 'mouseDown', 'mouseUp', 'wheel'])
+export const POINTER_EVENTS = new Set(POINTER_EVENT_NAMES)
 
 /** The custom event nodes of a scene, deduplicated — render these as buttons. */
 export function sceneEventButtons(scene: FrameOSScene | undefined | null): SceneEventButton[] {

@@ -12,9 +12,12 @@
 // cloud's shared-spa test `preview-pointer.test.ts` runs one script of pointer
 // events through both and fails when they disagree.
 
+import { POINTER_WIRE_MAX } from './eventsContract.gen'
+
 /** Both axes of a `mouseMove` run 0..POINTER_AXIS_MAX, whatever the size of
- * the picture (evdev's `PointerRange`, image.nim's `PointerAxisMax`). */
-export const POINTER_AXIS_MAX = 32767
+ * the picture: the contract's `pointer.wireMax` (docs/events-contract.json),
+ * which the evdev driver and the runner read from the same place. */
+export const POINTER_AXIS_MAX = POINTER_WIRE_MAX
 
 export interface PointerRect {
   left: number

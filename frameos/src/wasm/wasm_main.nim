@@ -14,6 +14,7 @@ import pixie
 
 import frameos/types
 import frameos/channels
+import frameos/events
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -251,7 +252,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
         # Pointer input (mouseMove/mouseDown/mouseUp) comes from the page in
         # the first place and arrives many times a second: like runner.nim,
         # which keeps it out of the frame log, it is not echoed back.
-        let pointerEvent = event.startsWith("mouse") or event == "wheel"
+        let pointerEvent = eventPolicy(event).device == edPointer
         if not pointerEvent:
           jsEventHook(event.cstring, (if payload.isNil: "{}" else: $payload).cstring)
         if event == "render":

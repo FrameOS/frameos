@@ -29,9 +29,11 @@ from app.ha import HA_SYNC_CHANNEL, HA_SYNC_REQUEST_KEY
 from app.ha import discovery
 from app.ha.client import MqttConfig, RestConfig, fire_ha_event, resolve_mqtt_config, resolve_rest_config
 from app.redis import get_shared_redis
+from app.utils.events_contract_gen import SCENE_CHANGED_LOG_EVENTS
 
 BROADCAST_CHANNEL = "broadcast_channel"
-SCENE_CHANGE_EVENTS = ("render:scene", "render:sceneChange", "event:setCurrentScene")
+# Log lines that mean "the frame now shows this scene" (docs/events-contract.json `logEvents`).
+SCENE_CHANGE_EVENTS = SCENE_CHANGED_LOG_EVENTS
 # Renders can double-fire (new_scene_image + frame_rendered); skip repeats.
 IMAGE_PUBLISH_MIN_INTERVAL = 2.0
 

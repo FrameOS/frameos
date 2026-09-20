@@ -1,4 +1,5 @@
 import type { AppConfig, AppConfigField, AppConfigFieldType, MarkdownField } from '../types'
+import { appContextMembers, eventTypeDeclarations } from './eventsContract.gen'
 import { selectFieldValues } from './selectOptions'
 
 const fieldTypeToTsType: Record<AppConfigFieldType, string> = {
@@ -119,17 +120,9 @@ interface FrameOSApp {
   [key: string]: any;
 }
 
+${eventTypeDeclarations}
 interface FrameOSContext {
-  event: string;
-  hasImage: boolean;
-  payload: any;
-  loopIndex: number;
-  loopKey: string;
-  nextSleep: number;
-  image?: FrameOSImageRef;
-  imageWidth?: number;
-  imageHeight?: number;
-  [key: string]: any;
+${appContextMembers}  [key: string]: any;
 }
 
 declare const frameos: {

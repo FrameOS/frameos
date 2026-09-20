@@ -1,0 +1,1263 @@
+{
+ "$comment": "Conformance corpus of the scene event contract (docs/events-contract.json, prose in docs/events.md). Add a case here first; a runner that disagrees is the bug. Runners: frameos/src/frameos/tests/test_event_fixtures.nim (the Nim runtime every host compiles: allow-list, log policy, and what the interpreter does with a delivered event), embedded/esp32/main/tests/test_fos_events.c through backend/app/tasks/tests/test_esp32_events_contract.py (the firmware's C tables), backend/app/utils/tests/test_events_contract.py (the backend), cloud/apps/auth-web/src/test/events-contract.test.ts (the cloud's event route and schedule validator) and cloud/apps/auth-web/src/test/shared-spa/events-contract.test.ts (the shared SPA and the frameos-wasm package).",
+ "version": 1,
+ "origins": {
+  "$comment": "May `origin` emit `event`? Only the origins a host can tell apart today are asked (contract `enforcedOrigins`, plus http:admin as the control).",
+  "cases": [
+   {
+    "origin": "scene",
+    "event": "metrics",
+    "allowed": true
+   },
+   {
+    "origin": "schedule",
+    "event": "metrics",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "metrics",
+    "allowed": true
+   },
+   {
+    "origin": "http:admin",
+    "event": "metrics",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "reload",
+    "allowed": false,
+    "why": "Same, for a reload of every scene."
+   },
+   {
+    "origin": "schedule",
+    "event": "reload",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "reload",
+    "allowed": false,
+    "why": "The frame access key must not be able to reboot-loop the device."
+   },
+   {
+    "origin": "http:admin",
+    "event": "reload",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "restart",
+    "allowed": false,
+    "why": "A scene that restarts the runtime on every render is a boot loop anyone can publish."
+   },
+   {
+    "origin": "schedule",
+    "event": "restart",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "restart",
+    "allowed": false,
+    "why": "The frame access key must not be able to reboot-loop the device."
+   },
+   {
+    "origin": "http:admin",
+    "event": "restart",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "reboot",
+    "allowed": false,
+    "why": "Same, for the whole device."
+   },
+   {
+    "origin": "schedule",
+    "event": "reboot",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "reboot",
+    "allowed": false,
+    "why": "The frame access key must not be able to reboot-loop the device."
+   },
+   {
+    "origin": "http:admin",
+    "event": "reboot",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "uploadScenes",
+    "allowed": false,
+    "why": "Scene code is untrusted: it must not replace the installed scenes past the guards of the push path."
+   },
+   {
+    "origin": "schedule",
+    "event": "uploadScenes",
+    "allowed": false,
+    "why": "A schedule entry carries no origin stamp, so it would smuggle scenes past the guards of the push path."
+   },
+   {
+    "origin": "http:write",
+    "event": "uploadScenes",
+    "allowed": false,
+    "why": "The frame access key is printed on the frame's QR code; it picks scenes, it does not replace them."
+   },
+   {
+    "origin": "http:admin",
+    "event": "uploadScenes",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "render",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "setCurrentScene",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "setSceneState",
+    "allowed": true
+   },
+   {
+    "origin": "schedule",
+    "event": "setCurrentScene",
+    "allowed": true
+   },
+   {
+    "origin": "schedule",
+    "event": "render",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "setCurrentScene",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "button",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "mouseMove",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "myCustomEvent",
+    "allowed": true
+   },
+   {
+    "origin": "schedule",
+    "event": "myCustomEvent",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "myCustomEvent",
+    "allowed": true
+   },
+   {
+    "origin": "http:admin",
+    "event": "myCustomEvent",
+    "allowed": true
+   }
+  ]
+ },
+ "cloudEventRoute": {
+  "$comment": "POST /api/frames/<id>/event/<event> on the cloud: the hub verb the event becomes, on which device profiles; verb null = 404 unsupported_event.",
+  "cases": [
+   {
+    "event": "render",
+    "verb": "render",
+    "profiles": [
+     "linux",
+     "esp32"
+    ]
+   },
+   {
+    "event": "turnOn",
+    "verb": "set_display_power",
+    "profiles": [
+     "linux"
+    ]
+   },
+   {
+    "event": "turnOff",
+    "verb": "set_display_power",
+    "profiles": [
+     "linux"
+    ]
+   },
+   {
+    "event": "setSceneState",
+    "verb": "set_current_scene",
+    "profiles": [
+     "linux"
+    ]
+   },
+   {
+    "event": "setCurrentScene",
+    "verb": "set_current_scene",
+    "profiles": [
+     "linux",
+     "esp32"
+    ]
+   },
+   {
+    "event": "metrics",
+    "verb": "get_metrics",
+    "profiles": [
+     "linux",
+     "esp32"
+    ]
+   },
+   {
+    "event": "uploadScenes",
+    "verb": "set_scenes",
+    "profiles": [
+     "linux",
+     "esp32"
+    ]
+   },
+   {
+    "event": "keyDown",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   },
+   {
+    "event": "button",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   },
+   {
+    "event": "mouseMove",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   },
+   {
+    "event": "init",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   },
+   {
+    "event": "open",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   },
+   {
+    "event": "close",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   },
+   {
+    "event": "restart",
+    "verb": null,
+    "why": "A hub verb of its own (the frame menu), not an event: 404 unsupported_event on this route."
+   },
+   {
+    "event": "reboot",
+    "verb": null,
+    "why": "A hub verb of its own (the frame menu), not an event: 404 unsupported_event on this route."
+   },
+   {
+    "event": "reload",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   },
+   {
+    "event": "myCustomEvent",
+    "verb": null,
+    "why": "Not an event the cloud can send: 404 unsupported_event."
+   }
+  ]
+ },
+ "log": {
+  "$comment": "What the frame log says when a host drains `event` with `payload`: null = no line at all; without `payload` = the name only.",
+  "cases": [
+   {
+    "event": "keyDown",
+    "payload": {
+     "key": "KEY_P",
+     "code": 25
+    },
+    "logged": {
+     "event": "event:keyDown"
+    },
+    "why": "A key is logged by name only: the log is stored by the control plane and may be sent to the cloud."
+   },
+   {
+    "event": "keyUp",
+    "payload": {
+     "key": "KEY_P",
+     "code": 25
+    },
+    "logged": {
+     "event": "event:keyUp"
+    }
+   },
+   {
+    "event": "mouseMove",
+    "payload": {
+     "x": 1,
+     "y": 2
+    },
+    "logged": null,
+    "why": "One per motion report: not logged at all."
+   },
+   {
+    "event": "mouseDown",
+    "payload": {
+     "button": 1
+    },
+    "logged": null
+   },
+   {
+    "event": "mouseUp",
+    "payload": {
+     "button": 1
+    },
+    "logged": null
+   },
+   {
+    "event": "wheel",
+    "payload": {
+     "deltaX": 0,
+     "deltaY": 1
+    },
+    "logged": null
+   },
+   {
+    "event": "button",
+    "payload": {
+     "pin": 5,
+     "label": "A",
+     "level": 0
+    },
+    "logged": {
+     "event": "event:button",
+     "payload": {
+      "pin": 5,
+      "label": "A",
+      "level": 0
+     }
+    }
+   },
+   {
+    "event": "setCurrentScene",
+    "payload": {
+     "sceneId": "abc"
+    },
+    "logged": {
+     "event": "event:setCurrentScene",
+     "payload": {
+      "sceneId": "abc"
+     }
+    }
+   },
+   {
+    "event": "myCustomEvent",
+    "payload": {
+     "n": 1
+    },
+    "logged": {
+     "event": "event:myCustomEvent",
+     "payload": {
+      "n": 1
+     }
+    }
+   },
+   {
+    "event": "render",
+    "payload": null,
+    "logged": {
+     "event": "event:render",
+     "payload": null
+    }
+   }
+  ]
+ },
+ "sequences": {
+  "$comment": "A scene, then events delivered to it one by one. Per step: `listenersRun` = how many event nodes ran; `state` = a subset of the scene's state afterwards (null = not set); `queued` = what the scene dispatched, in order — exact, so [] means nothing; `logged` = log lines that must appear (subset match); `notLogged` = strings that must not appear in any log line of the step.",
+  "cases": [
+   {
+    "name": "a listener runs for its event and no other",
+    "why": "Delivery is by name: every event node whose keyword matches runs, nothing else does.",
+    "scenes": [
+     {
+      "id": "fixtures/events/byName",
+      "name": "byName",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "gotButton",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "keyDown"
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "gotKey",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/events/byName",
+    "steps": [
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 5,
+        "label": "A",
+        "level": 0
+       }
+      },
+      "listenersRun": 1,
+      "state": {
+       "gotButton": true,
+       "gotKey": null
+      }
+     },
+     {
+      "send": {
+       "event": "keyDown",
+       "payload": {
+        "key": "KEY_A",
+        "code": 30
+       }
+      },
+      "listenersRun": 1,
+      "state": {
+       "gotKey": true
+      }
+     },
+     {
+      "send": {
+       "event": "mouseDown",
+       "payload": {
+        "button": 1
+       }
+      },
+      "listenersRun": 0
+     }
+    ]
+   },
+   {
+    "name": "every matching listener runs",
+    "why": "There is no `handled`: two listeners for one event both run (routing is docs/event-system-analysis.md §4.6).",
+    "scenes": [
+     {
+      "id": "fixtures/events/everyListener",
+      "name": "everyListener",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "first",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "second",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/events/everyListener",
+    "steps": [
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 5,
+        "label": "A",
+        "level": 0
+       }
+      },
+      "listenersRun": 2,
+      "state": {
+       "first": true,
+       "second": true
+      }
+     }
+    ]
+   },
+   {
+    "name": "a filter is string equality on top-level payload keys",
+    "why": "An integer payload value matches its decimal spelling; a filtered-out event runs nothing and is reported once.",
+    "scenes": [
+     {
+      "id": "fixtures/events/filter",
+      "name": "filter",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button",
+         "config": {
+          "label": "A"
+         }
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "gotA",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "button",
+         "config": {
+          "pin": "6"
+         }
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "gotPin6",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e3",
+        "type": "event",
+        "data": {
+         "keyword": "keyDown",
+         "config": {
+          "key": "KEY_A"
+         }
+        }
+       },
+       {
+        "id": "a3",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "gotKeyA",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x3",
+        "source": "e3",
+        "sourceHandle": "next",
+        "target": "a3",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/events/filter",
+    "steps": [
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 5,
+        "label": "A",
+        "level": 0
+       }
+      },
+      "listenersRun": 1,
+      "state": {
+       "gotA": true,
+       "gotPin6": null
+      }
+     },
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0
+       }
+      },
+      "listenersRun": 1,
+      "state": {
+       "gotPin6": true
+      }
+     },
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 7,
+        "label": "C",
+        "level": 0
+       }
+      },
+      "listenersRun": 0,
+      "logged": [
+       {
+        "event": "runEvent:noListenerMatched"
+       }
+      ]
+     },
+     {
+      "send": {
+       "event": "keyDown",
+       "payload": {
+        "key": "KEY_P",
+        "code": 25
+       }
+      },
+      "listenersRun": 0,
+      "logged": [
+       {
+        "event": "runEvent:noListenerMatched"
+       }
+      ],
+      "notLogged": [
+       "KEY_P"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "the legacy button label filter still matches",
+    "why": "Scenes from before `data.config` keep their `data.label` filter on a button listener: aliases are forever.",
+    "scenes": [
+     {
+      "id": "fixtures/events/legacyLabel",
+      "name": "legacyLabel",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button",
+         "label": "A"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "gotLegacyA",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/events/legacyLabel",
+    "steps": [
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0
+       }
+      },
+      "listenersRun": 0
+     },
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 5,
+        "label": "A",
+        "level": 0
+       }
+      },
+      "listenersRun": 1,
+      "state": {
+       "gotLegacyA": true
+      }
+     }
+    ]
+   },
+   {
+    "name": "setSceneState applies public state and asks for a render only when told to",
+    "why": "`state` lands on the scene's state; `render` in the payload queues one render event.",
+    "scenes": [
+     {
+      "id": "fixtures/events/setSceneState",
+      "name": "setSceneState",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": [],
+      "fields": [
+       {
+        "name": "title",
+        "label": "Title",
+        "type": "string",
+        "value": "before",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/events/setSceneState",
+    "steps": [
+     {
+      "send": {
+       "event": "setSceneState",
+       "payload": {
+        "state": {
+         "title": "after"
+        }
+       }
+      },
+      "state": {
+       "title": "after"
+      },
+      "queued": []
+     },
+     {
+      "send": {
+       "event": "setSceneState",
+       "payload": {
+        "state": {
+         "title": "again"
+        },
+        "render": true
+       }
+      },
+      "state": {
+       "title": "again"
+      },
+      "queued": [
+       {
+        "event": "render"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a custom event reaches its listener, from a dispatch node too",
+    "why": "A name that is not in the contract is a custom scene event: delivered by name, and a scene may dispatch it.",
+    "scenes": [
+     {
+      "id": "fixtures/events/custom",
+      "name": "custom",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "nextPage"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "gotNextPage",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d2",
+        "type": "dispatch",
+        "data": {
+         "keyword": "nextPage",
+         "config": {}
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "d2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": [],
+      "customEvents": [
+       {
+        "name": "nextPage",
+        "description": "Turn the page",
+        "fields": []
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/events/custom",
+    "steps": [
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 5,
+        "label": "A",
+        "level": 0
+       }
+      },
+      "listenersRun": 1,
+      "queued": [
+       {
+        "event": "nextPage"
+       }
+      ],
+      "state": {
+       "gotNextPage": null
+      }
+     },
+     {
+      "send": {
+       "event": "nextPage",
+       "payload": {}
+      },
+      "listenersRun": 1,
+      "state": {
+       "gotNextPage": true
+      }
+     }
+    ]
+   },
+   {
+    "name": "a dispatch is queued, never run inside the handler",
+    "why": "What a handler dispatches is delivered after the run that dispatched it. At this level every host agrees; how each host drains the queue is where they differ today (docs/events.md, \"Known host differences\").",
+    "scenes": [
+     {
+      "id": "fixtures/events/queued",
+      "name": "queued",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d1",
+        "type": "dispatch",
+        "data": {
+         "keyword": "render",
+         "config": {}
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "d1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/events/queued",
+    "steps": [
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 5,
+        "label": "A",
+        "level": 0
+       }
+      },
+      "listenersRun": 1,
+      "queued": [
+       {
+        "event": "render"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a scene may not dispatch a device command",
+    "why": "The `scene` origin is on no device command but `metrics`: the dispatch is dropped and says so.",
+    "scenes": [
+     {
+      "id": "fixtures/events/refused",
+      "name": "refused",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d1",
+        "type": "dispatch",
+        "data": {
+         "keyword": "reboot",
+         "config": {}
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d2",
+        "type": "dispatch",
+        "data": {
+         "keyword": "uploadScenes",
+         "config": {}
+        }
+       },
+       {
+        "id": "e3",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d3",
+        "type": "dispatch",
+        "data": {
+         "keyword": "restart",
+         "config": {}
+        }
+       },
+       {
+        "id": "e4",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d4",
+        "type": "dispatch",
+        "data": {
+         "keyword": "reload",
+         "config": {}
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "d1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "d2",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x3",
+        "source": "e3",
+        "sourceHandle": "next",
+        "target": "d3",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x4",
+        "source": "e4",
+        "sourceHandle": "next",
+        "target": "d4",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/events/refused",
+    "steps": [
+     {
+      "send": {
+       "event": "button",
+       "payload": {
+        "pin": 5,
+        "label": "A",
+        "level": 0
+       }
+      },
+      "listenersRun": 4,
+      "queued": [],
+      "logged": [
+       {
+        "event": "interpreter:dispatch:ignored",
+        "eventName": "reboot",
+        "reason": "runtimeVerb"
+       },
+       {
+        "event": "interpreter:dispatch:ignored",
+        "eventName": "uploadScenes",
+        "reason": "runtimeVerb"
+       },
+       {
+        "event": "interpreter:dispatch:ignored",
+        "eventName": "restart",
+        "reason": "runtimeVerb"
+       },
+       {
+        "event": "interpreter:dispatch:ignored",
+        "eventName": "reload",
+        "reason": "runtimeVerb"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "render dispatched while rendering is ignored",
+    "why": "A render that asks for a render is a loop; every host drops it.",
+    "scenes": [
+     {
+      "id": "fixtures/events/renderInRender",
+      "name": "renderInRender",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "render"
+        }
+       },
+       {
+        "id": "d1",
+        "type": "dispatch",
+        "data": {
+         "keyword": "render",
+         "config": {}
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "d1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/events/renderInRender",
+    "steps": [
+     {
+      "send": {
+       "event": "render",
+       "payload": {}
+      },
+      "queued": [],
+      "logged": [
+       {
+        "event": "interpreter:dispatch:ignored",
+        "eventName": "render",
+        "reason": "renderSelfDispatch"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

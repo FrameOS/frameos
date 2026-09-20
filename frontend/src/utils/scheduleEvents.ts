@@ -1,14 +1,17 @@
 // What a schedule entry can do, shared by the Schedule panel, the workspace
 // cards and the dashboard so a non-scene entry never renders as "Unknown
-// scene". Deliberately import-free (no types barrel): the shape below is the
+// scene". Deliberately free of the types barrel: the shape below is the
 // subset of ScheduledEvent these helpers need.
 //
-// The device fires whatever event name an entry carries onto its runtime
-// event queue (frameos/scheduler.nim, embedded/esp32/main/fos_schedule.c),
-// so the list here is a UI allowlist, not a protocol one: `setCurrentScene`
-// is handled by the runner, `restart` exits the runtime (systemd brings it
-// back), `reboot` runs the device's privileged reboot. On the ESP32 the last
-// two are the same esp_restart().
+// Which events the panel offers, under which label, is the event contract's
+// `schedule` block (docs/events-contract.json): `setCurrentScene` is handled
+// by the runner, `restart` exits the runtime (systemd brings it back),
+// `reboot` runs the device's privileged reboot. On the ESP32 the last two are
+// the same esp_restart(). What a device *accepts* from a schedule is wider —
+// every event whose `origins` list "schedule", and any custom scene event —
+// so this is still a UI list, only no longer a second one.
+
+import { schedulableContractEvents } from './eventsContract'
 
 export type ScheduledEventName = 'setCurrentScene' | 'restart' | 'reboot'
 export type ScheduledSystemEventName = Exclude<ScheduledEventName, 'setCurrentScene'>
@@ -18,23 +21,19 @@ export interface ScheduledEventLike {
   payload?: { sceneId?: string | null } | null
 }
 
-export const scheduledSystemEvents: { value: ScheduledSystemEventName; label: string; description: string }[] = [
-  {
-    value: 'restart',
-    label: 'Restart FrameOS',
-    description: 'Exit and relaunch the FrameOS runtime. A few seconds of downtime; the device stays up.',
-  },
-  {
-    value: 'reboot',
-    label: 'Reboot device',
-    description: 'Reboot the whole device. Use this for the nightly reboot some panels and Wi-Fi chips like.',
-  },
-]
+/** Schedulable events that are not a scene change: they end the runtime. */
+export const scheduledSystemEvents: { value: ScheduledSystemEventName; label: string; description: string }[] =
+  schedulableContractEvents()
+    .filter(({ spec }) => spec.schedule?.endsRuntime)
+    .map(({ name, spec }) => ({
+      value: name as ScheduledSystemEventName,
+      label: spec.schedule?.label ?? name,
+      description: spec.schedule?.description ?? '',
+    }))
 
-export const scheduledEventOptions: { value: ScheduledEventName; label: string }[] = [
-  { value: 'setCurrentScene', label: 'Show a scene' },
-  ...scheduledSystemEvents.map(({ value, label }) => ({ value, label })),
-]
+export const scheduledEventOptions: { value: ScheduledEventName; label: string }[] = schedulableContractEvents().map(
+  ({ name, spec }) => ({ value: name as ScheduledEventName, label: spec.schedule?.label ?? name })
+)
 
 /**
  * Cloud-managed frames: firmware from here on runs scheduled `restart` and
@@ -44,10 +43,11 @@ export const scheduledEventOptions: { value: ScheduledEventName; label: string }
  * a reason instead of hiding them — the same convention as the settings
  * batches in cloudFrameSettings.ts.
  */
-export const scheduledSystemEventsMinVersion = '2026.8.32'
+export const scheduledSystemEventsMinVersion =
+  schedulableContractEvents().find(({ spec }) => spec.schedule?.endsRuntime)?.spec.schedule?.since ?? ''
 
 export function isScheduledSystemEvent(event: string | null | undefined): event is ScheduledSystemEventName {
-  return event === 'restart' || event === 'reboot'
+  return scheduledSystemEvents.some((option) => option.value === event)
 }
 
 export function scheduledEventIsSceneChange(event: ScheduledEventLike): boolean {
