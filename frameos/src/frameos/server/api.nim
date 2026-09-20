@@ -1329,7 +1329,7 @@ proc uploadedScenesPayload*(): JsonNode =
 proc sceneJsonIsCompiled(scene: JsonNode): bool =
   scene{"settings"}{"execution"}.getStr("") == "compiled"
 
-proc deviceScenesPayload*(allScenes: JsonNode = nil): JsonNode =
+proc deviceScenesPayload*(): JsonNode =
   ## Every interpreted scene this frame holds, as the JSON its owner would
   ## export: the answer to the cloud's `scenes_get` (docs/cloud-frames.md).
   ## `{"scenes": [...], "skipped_compiled": N}`, scene ids PUBLIC (no
@@ -1340,9 +1340,9 @@ proc deviceScenesPayload*(allScenes: JsonNode = nil): JsonNode =
   ## the frame was last handed (a local upload, or a provider's push), and on a
   ## frame a provider already manages the copy on disk is the older one.
   ## Compiled scenes are counted, never sent: their behaviour is in the binary,
-  ## and a provider only takes interpreted node graphs. `allScenes` is the
-  ## deploy's all_scenes.json when there is one — scenes.json itself only ever
-  ## lists the interpreted ones, so that file is where the compiled are seen.
+  ## and a provider only takes interpreted node graphs. Only the ones a scene
+  ## store lists are seen: a deploy writes scenes.json as the interpreted
+  ## subset, and the all_scenes.json that listed the rest is gone (#505).
   var scenes = newJArray()
   var seen: seq[string] = @[]
   var compiledIds: seq[string] = @[]
@@ -1364,14 +1364,4 @@ proc deviceScenesPayload*(allScenes: JsonNode = nil): JsonNode =
       consider(scene)
   for scene in loadScenePayload():
     consider(scene)
-  if allScenes != nil and allScenes.kind == JArray:
-    # Whatever the deploy listed that the interpreted stores above do not
-    # hold is a compiled scene (setup writes scenes.json as exactly the
-    # interpreted subset, and reads a missing `execution` as compiled).
-    for scene in allScenes:
-      if scene == nil or scene.kind != JObject:
-        continue
-      let sceneId = scene{"id"}.getStr("")
-      if sceneId.len > 0 and sceneId notin seen and sceneId notin compiledIds:
-        compiledIds.add(sceneId)
   result = %*{"scenes": scenes, "skipped_compiled": compiledIds.len}
