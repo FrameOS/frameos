@@ -216,7 +216,7 @@ jobs:
           tmp=$(mktemp)
           jq --arg device "${{ matrix.device }}" '.device = $device' frameos/frame.json > "$tmp"
           mv "$tmp" frameos/frame.json
-          cat frameos/frame.json | jq '.device'
+          jq '.device' frameos/frame.json
       - name: Cross compile ${{ env.TARGET_SLUG }} (${{ matrix.label }})
         run: |
           cd frameos
