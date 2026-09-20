@@ -33,11 +33,15 @@ Runners carry labels `self-hosted,monster,epyc-32|epyc-8|epyc-4,linux,x64`.
 | --- | --- | --- | --- |
 | big, big-b..d (4) | epyc-32 | 32 vCPU, 32 G, 120 G disk | Buildroot base images ("all" = 3 legs at once), release SD image |
 | mid-a..j (10) | epyc-8 | 8 vCPU, 16 G, 60 G disk | 6 cross legs per frameos/** push and per release, ESP32 firmware, Deploy E2E SSH |
-| small-a..ab (28) | epyc-4 | 4 vCPU, 8 G, 40 G disk | the 18 per-PR jobs: 8 Nim shards, 2 pixie visual shards, 8 Playwright shards |
+| small-a..ab (28) | epyc-4 | 4 vCPU, 8 G, 40 G disk | the 10 per-PR jobs: 4 Nim shards, 2 pixie visual shards, 4 Playwright shards |
 
 42 slots, 336 vCPU nominal on 96 threads, 512 G nominal memory on 251 G.
-One pull request fans out 18 epyc-4 + 1 epyc-8 and runs fully parallel; a
-second run overlapping it queues only its tail. vCPUs are overcommitted on
+One run of the test workflow fans out 10 epyc-4 + 1 epyc-8 (18 until
+2026-09-20, when the Nim and Playwright matrices went from eight shards to
+four), so two overlapping runs — a pull request next to a push to main — fit
+the 28 small slots at once and a third queues only its tail. With 18, the
+second run waited for the first's whole batch: shards of one run finish
+together. vCPUs are overcommitted on
 purpose (most slots idle most of the time); memory is the budget, and the
 nominal sum is not the real one — read on.
 

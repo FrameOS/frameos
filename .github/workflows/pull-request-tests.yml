@@ -25,7 +25,7 @@ jobs:
     name: FrameOS Nim Tests (shard ${{ matrix.shard }})
     # Self-hosted 4-core slots (ephemeral Incus VMs on the monster host; see
     # tools/gha-runners/README.md): same 4-vcpu shape as ubuntu-latest,
-    # faster cores, and the eight shards skip the account-wide GitHub-hosted
+    # faster cores, and the shards skip the account-wide GitHub-hosted
     # queue. Pure compute — no browser rendering. The visual-regression jobs
     # stay on GitHub-hosted runners on purpose: their auto-committed
     # Playwright/snapshot baselines must keep rendering on the image that
@@ -36,10 +36,16 @@ jobs:
     # what ends up in every release SD image. Same-repo PRs and main keep
     # the pool.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
+    # Four shards, not eight: a shard's fixed cost (VM boot, toolchain, the
+    # nimcache copy) was three quarters of its four minutes, and 18 epyc-4
+    # jobs per run meant two overlapping runs (a PR next to a push to main)
+    # did not fit the 28 slots — the second queued behind the whole first
+    # batch. Four keeps the job under Deploy E2E, the run's long pole.
+    # tools/run_test_shard.sh defaults to the same count.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     steps:
       # Anonymous git over HTTP/2 is throttled by GitHub from the runner
       # pool's address (the git-upload-pack POST answers 401 while the
@@ -441,7 +447,7 @@ jobs:
             default_author: github_actions
 
   frontend-visual-regression:
-    name: Frontend E2E + Visual Regression Tests (${{ matrix.shard }}/8)
+    name: Frontend E2E + Visual Regression Tests (${{ matrix.shard }}/4)
     # Chromium screenshots depend on the fonts and libraries of the machine
     # that rendered them, which used to pin this job to GitHub's ubuntu-latest
     # image. The official Playwright container (tag = the @playwright/test
@@ -458,10 +464,14 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.60.0-noble
     permissions:
       contents: read
+    # Four shards, not eight, for the reason given on the Nim job: container
+    # pull, apt, pip, pnpm and three frontend builds were 270 s of a 400 s
+    # shard, the tests 125 s. The count also lives in the two --shard
+    # arguments, the artifact names and e2e/README.md.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     steps:
       # Anonymous git over HTTP/2 is throttled by GitHub from the runner
       # pool's address (the git-upload-pack POST answers 401 while the
@@ -549,7 +559,7 @@ jobs:
           REDIS_URL: redis://localhost:6379/15
         run: |
           source backend/.venv/bin/activate
-          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --shard=${{ matrix.shard }}/8
+          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --shard=${{ matrix.shard }}/4
 
       - name: Update frontend visual snapshots
         shell: bash
@@ -561,14 +571,14 @@ jobs:
           REDIS_URL: redis://localhost:6379/15
         run: |
           source backend/.venv/bin/activate
-          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --update-snapshots --shard=${{ matrix.shard }}/8
+          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --update-snapshots --shard=${{ matrix.shard }}/4
           git status --short e2e/frontend-visual/snapshots
 
       - name: Collect frontend visual snapshot changes
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           mkdir -p .tmp/frontend-visual-snapshot-artifact
-          printf 'frontend visual snapshot shard %s/8\n' '${{ matrix.shard }}' > ".tmp/frontend-visual-snapshot-artifact/SHARD-${{ matrix.shard }}.txt"
+          printf 'frontend visual snapshot shard %s/4\n' '${{ matrix.shard }}' > ".tmp/frontend-visual-snapshot-artifact/SHARD-${{ matrix.shard }}.txt"
           git diff --name-only -- e2e/frontend-visual/snapshots > .tmp/frontend-visual-snapshot-files.txt
           git ls-files --others --exclude-standard -- e2e/frontend-visual/snapshots >> .tmp/frontend-visual-snapshot-files.txt
           sort -u .tmp/frontend-visual-snapshot-files.txt -o .tmp/frontend-visual-snapshot-files.txt
@@ -592,7 +602,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-visual-report-${{ matrix.shard }}-of-8
+          name: frontend-visual-report-${{ matrix.shard }}-of-4
           path: |
             e2e/frontend-visual/playwright-report
             e2e/frontend-visual/test-results
