@@ -60,6 +60,12 @@ jobs:
       # setup scripts need. Node is only needed when the compiled-assets cache
       # misses and prepare_assets.py has to rebuild the frame frontend, so its
       # ~35 s of setup (mostly the pnpm store restore) is skipped on a hit.
+      # The key must hash every input prepare_assets.py fingerprints
+      # (FRONTEND_SOURCE_FILES + REPO_ROOT_FILES there). With one missing, a
+      # change to it is a cache HIT — so no Node — followed by
+      # prepare_assets.py deciding to rebuild anyway: "pnpm or corepack is
+      # required", every shard red (frontend/scripts/generateRepoApps.mjs and
+      # frontend/package.json, 2026-09-20).
       - name: Cache compiled assets
         id: cache_assets
         uses: actions/cache@v4
@@ -67,7 +73,7 @@ jobs:
           path: |
             frameos/assets/compiled
             frameos/src/assets
-          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'repo/**', 'pnpm-lock.yaml', 'versions.json') }}
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'frontend/scripts/generateRepoApps.mjs', 'frontend/package.json', 'repo/**', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'versions.json') }}
 
       - uses: pnpm/action-setup@v4
         if: steps.cache_assets.outputs.cache-hit != 'true'
