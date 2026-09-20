@@ -8,6 +8,7 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
+import { sceneStateCommand } from "../../../../../../src/lib/frame-events";
 import {
   enqueueFrameCommand,
   frameContractProfile,
@@ -49,6 +50,8 @@ const maxScenesPerUpload = 20;
 //
 //   render          → render
 //   setCurrentScene → set_current_scene {scene_id, state?}
+//   setSceneState   → set_current_scene {scene_id: <the scene showing>, state}
+//                     (linux profile only — src/lib/frame-events.ts says why)
 //   uploadScenes    → set_scenes {scenes, checksum, scene_id?, state?}
 //   turnOn/turnOff  → set_display_power {on}
 //
@@ -59,8 +62,8 @@ const maxScenesPerUpload = 20;
 // assignment push, though (assignScenesToFrame): a scene the store would
 // flag `shell` and a legacy compiled scene are refused here too, so the
 // ad-hoc route is not a way around the gates on the assigned one. Anything
-// else the backend accepts as an event (metrics, custom scene events) has no
-// cloud verb yet and 404s honestly.
+// else the backend accepts as an event (custom scene events) has no cloud
+// verb yet and 404s honestly.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string; eventName: string }> },
@@ -190,6 +193,19 @@ export async function POST(
       }
       type = "set_current_scene";
       payload = { scene_id: deviceSceneId, ...(state ? { state } : {}) };
+      break;
+    }
+    case "setSceneState": {
+      const command = sceneStateCommand({
+        lastState: frame.lastState,
+        profile: frameContractProfile(frame),
+        state,
+      });
+      if (!command.ok) {
+        return jsonError(command.error, command.status);
+      }
+      type = "set_current_scene";
+      payload = command.payload;
       break;
     }
     case "uploadScenes": {

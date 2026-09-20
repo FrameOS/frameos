@@ -42,6 +42,7 @@
 static const char *TAG = "fos_client";
 
 #define RENDER_NOW_BIT BIT0
+#define INPUT_EVENTS_BIT BIT1
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
 
@@ -442,6 +443,13 @@ void fos_client_render_now(void)
 {
     if (s_events) {
         xEventGroupSetBits(s_events, RENDER_NOW_BIT);
+    }
+}
+
+void fos_client_wake_for_events(void)
+{
+    if (s_events) {
+        xEventGroupSetBits(s_events, INPUT_EVENTS_BIT);
     }
 }
 
@@ -1562,12 +1570,19 @@ static void client_task(void *arg)
         uint32_t remaining_ms = sleep_s * 1000;
         while (remaining_ms > 0) {
             uint32_t slice = remaining_ms > 1000 ? 1000 : remaining_ms;
-            EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT, pdTRUE,
-                                                   pdFALSE, pdMS_TO_TICKS(slice));
+            int64_t slice_start_us = esp_timer_get_time();
+            EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT,
+                                                   pdTRUE, pdFALSE, pdMS_TO_TICKS(slice));
             if (bits & RENDER_NOW_BIT) {
                 force_render = true;
                 break;
             }
+            /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
+             * press is delivered just below, and the render-requested check
+             * after it decides whether a frame follows. Only the time that
+             * actually passed comes off the wait. */
+            uint32_t waited_ms = (uint32_t)((esp_timer_get_time() - slice_start_us) / 1000);
+            if (waited_ms < slice) slice = waited_ms;
             if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
                 fos_buttons_process_events();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —

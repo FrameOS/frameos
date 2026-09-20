@@ -11,7 +11,7 @@ import * as frontendPointer from "../../../../../../frontend/src/utils/previewPo
 // a scene the events a frame's evdev driver sends — `mouseMove` 0..32767, then
 // `mouseDown` / `mouseUp` with the DRIVER's button numbers — so they are one
 // file kept twice. This holds them together, and holds both to the numbers
-// frameos/src/drivers/evdev/evdev.nim uses.
+// frameos/src/drivers/evdev/translate.nim uses.
 
 const repoFile = (path: string) =>
   readFileSync(fileURLToPath(new URL(`../../../../../../${path}`, import.meta.url)), "utf8");
@@ -103,7 +103,7 @@ describe("preview pointer input, package and frontend", () => {
   });
 
   it("uses the evdev driver's button numbers and range", () => {
-    const driver = repoFile("frameos/src/drivers/evdev/evdev.nim");
+    const driver = repoFile("frameos/src/drivers/evdev/translate.nim");
     for (const [name, button] of [
       ["BTN_LEFT", 0],
       ["BTN_RIGHT", 1],

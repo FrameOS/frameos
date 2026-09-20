@@ -420,6 +420,14 @@ sample carries `wakeCause` (`timer` / `button` / `power_on` / `restart` /
 what actually woke the frame. The pure pin arithmetic is `fos_wake.c`, host
 tested by `main/tests/test_fos_wake.c`.
 
+**A press while awake.** The press cuts the render task's wait short
+(`fos_client_wake_for_events`) so the scene hears the `button` event within a
+poll, and a frame is drawn only when a scene listener took it or the scene
+dispatched `render` — not for every press, which on a Spectra panel was half a
+minute of refresh for a button nothing listens to. A scene's own
+`setCurrentScene` dispatch switches scenes through the same queue the HTTP,
+schedule and cloud paths use (`frameos_nim_set_scene_select_hook`).
+
 **What a deep-sleep wake costs, and what 2026.8.42 trimmed.** Measured on a
 reTerminal E1004 (1200×1600 Spectra 6) on battery with a 15-minute weather
 scene: a few seconds of boot + Wi-Fi + cloud session, ~23 s scene render,

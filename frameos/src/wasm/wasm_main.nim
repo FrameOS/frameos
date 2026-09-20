@@ -101,12 +101,35 @@ proc dropCurrentScene() =
 
 # ------------------------------------------------------------------- scenes
 
+proc runSceneEvent(event: string, payload: JsonNode) =
+  if currentScene.isNil:
+    return
+  let context = ExecutionContext(scene: currentScene, event: event,
+      payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
+  runEvent(currentScene, context)
+
+proc runLifecycleEvent(event: string, payload: JsonNode) =
+  ## "open" and "close", which the host sends the way runner.nim does: "open"
+  ## when a scene becomes the current one, "close" when the preview switches
+  ## away from it. ("init" is the interpreter's own, fired by its init.) They
+  ## count as handling an event, so a listener that dispatches does not recurse.
+  let wasHandling = handlingEvent
+  handlingEvent = true
+  try:
+    runSceneEvent(event, payload)
+  except Exception as e:
+    setLastError("event " & event & " failed: " & e.msg)
+  finally:
+    handlingEvent = wasHandling
+
 proc selectSceneById(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
   let scenes = getInterpretedScenes()
   if not scenes.hasKey(sceneId):
     setLastError("scene not found: " & sceneIdText)
     return false
+  if currentSceneId.isSome and currentSceneId.get() != sceneId:
+    runLifecycleEvent("close", %*{})
   dropCurrentScene()
   currentSceneId = some(sceneId)
   renderRequested = true
@@ -128,14 +151,8 @@ proc ensureScene(): bool =
     else: %*{}
   currentScene = interpreter.init(sceneId, frameConfig, logger, persisted)
   log(&"scene \"{currentSceneName()}\" initialized")
+  runLifecycleEvent("open", %*{"sceneId": sceneId.string})
   true
-
-proc runSceneEvent(event: string, payload: JsonNode) =
-  if currentScene.isNil:
-    return
-  let context = ExecutionContext(scene: currentScene, event: event,
-      payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
-  runEvent(currentScene, context)
 
 # ------------------------------------------------------------------- setup
 
@@ -234,7 +251,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
         # Pointer input (mouseMove/mouseDown/mouseUp) comes from the page in
         # the first place and arrives many times a second: like runner.nim,
         # which keeps it out of the frame log, it is not echoed back.
-        let pointerEvent = event.startsWith("mouse")
+        let pointerEvent = event.startsWith("mouse") or event == "wheel"
         if not pointerEvent:
           jsEventHook(event.cstring, (if payload.isNil: "{}" else: $payload).cstring)
         if event == "render":

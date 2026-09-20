@@ -538,6 +538,9 @@ type
     isRendering*: bool = false
     triggerRenderNext*: bool = false
     forceSceneReload*: bool = false
+    ## Compiled scenes initialized since their last "open": the generated init
+    ## fires "open" itself, so the runner must not fire it a second time.
+    openedByInit*: seq[SceneId]
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
     localAccessRender*: AppRoot

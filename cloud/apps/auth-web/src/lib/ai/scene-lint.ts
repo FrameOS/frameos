@@ -620,6 +620,19 @@ export function lintScene(
   const nodeById = new Map<string, JsonObject>();
   const appByNode = new Map<string, ResolvedApp>();
   const events = knownEventNames();
+  // Events the scene declares itself (`customEvents`, the editor's Events
+  // panel). They are fired from outside the scene — a schedule entry, the
+  // frame's /event/<name> route, another scene — so "nothing here dispatches
+  // it" is exactly what a declared one looks like, not a mistake.
+  const declaredEvents = new Set<string>();
+  if (Array.isArray(scene.customEvents)) {
+    for (const event of scene.customEvents) {
+      const name = str(obj(event)?.name)?.trim();
+      if (name) {
+        declaredEvents.add(name);
+      }
+    }
+  }
   const dispatchedKeywords = new Set<string>();
   let renderEvents = 0;
   for (const node of nodes) {
@@ -787,10 +800,10 @@ export function lintScene(
       const keyword = str(data.keyword);
       if (!keyword) {
         push("error", "Event node has no keyword.", id);
-      } else if (!events.has(keyword) && !dispatchedKeywords.has(keyword)) {
+      } else if (!events.has(keyword) && !declaredEvents.has(keyword) && !dispatchedKeywords.has(keyword)) {
         push(
           "warning",
-          `Event node listens for "${keyword}", which is not a built-in event (${[...events].join(", ")}) and nothing in this scene dispatches it.`,
+          `Event node listens for "${keyword}", which is not a built-in event (${[...events].join(", ")}), is not declared in the scene's "customEvents" and nothing in this scene dispatches it.`,
           id,
         );
       }

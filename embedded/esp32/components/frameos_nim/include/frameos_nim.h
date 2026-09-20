@@ -51,6 +51,11 @@ const char *frameos_nim_info(void);
  * at boot; the render task releases it through the same pair. */
 void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
                                          void (*release)(void *ptr));
+/* Scene-switch hook. A scene's own `setCurrentScene` dispatch reaches the Nim
+ * runtime, but switching is the firmware's: the scene may have to be read off
+ * flash and the choice is persisted. main/ installs fos_scenes_select, which
+ * only queues — the render task applies it on its next pass. */
+void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id));
 const char *frameos_nim_scene_info_json(void);
 /* Same, but gives up after timeout_ms (-1 = wait forever, 0 = try once).
  * NULL means exactly one thing: the wait timed out because the runtime is

@@ -37,6 +37,11 @@ stable. Consolidated tracker: `docs/todo.md` at the repo root.
    names an ASSIGNED scene re-pushes the assigned set with that scene
    active (`type: "set_scenes"` in the response) instead of queuing a
    `set_current_scene` the device would answer with `apply-failed`.
+   setSceneState (linux profile only) becomes a `set_current_scene` aimed
+   at the scene the frame last reported, with the state attached — the
+   full runtime applies that as "set state and render" without switching;
+   the ESP32's verb drops `state`, so it 404s there until the generic
+   scene-event verb exists (`src/lib/frame-events.ts`).
 5. **`GET /api/cloud/status`** — handled by `cloudEmptyCatalogs`.
 6. **FrameOS updates (OTA), both halves** — `notify_update_available`
    triggers a signed cloud OTA on-device. ESP32: `main/fos_ota.c` (fetch

@@ -3,7 +3,7 @@ import json, posix, strformat, os, options
 
 import ./libevdev
 import ./linuxInput
-import ./pointer
+import ./translate
 
 import frameos/driver_context
 import frameos/channels
@@ -13,16 +13,11 @@ type Driver* = ref object of FrameOSDriver
 type DevState = object
   path: string
   evdev: ptr libevdev
-  lastX, lastY: int
-  hasX, hasY, moved: bool
-  minX, maxX, minY, maxY: int
-  # Key and button events of the input frame being read, held until its
-  # SYN_REPORT so they follow the frame's position. A touchscreen reports
-  # BTN_TOUCH ahead of the coordinates it belongs to; sent as it arrived, the
-  # press would land wherever the previous touch ended.
-  pending: seq[(string, JsonNode)]
+  # Everything that decides what an input_event means lives in translate.nim,
+  # where it is tested; this file only reads devices and sends what comes out.
+  translator: DeviceTranslator
 
-var thread: Thread[void]
+var thread: Thread[(int, int)]
 
 proc getListener*(device: string): Option[ptr libevdev] =
   var evdev: ptr libevdev
@@ -53,8 +48,29 @@ proc closeDevice(evdev: ptr libevdev) =
   if fd >= 0:
     discard close(fd)
 
-proc startThread*() {.thread.} =
+proc send(event: InputEvent) =
+  case event.kind
+  of iekMouseMove:
+    sendEvent("mouseMove", %*{"x": event.x, "y": event.y})
+  of iekMouseDown:
+    sendEvent("mouseDown", %*{"button": event.button})
+  of iekMouseUp:
+    sendEvent("mouseUp", %*{"button": event.button})
+  of iekWheel:
+    sendEvent("wheel", %*{"deltaX": event.deltaX, "deltaY": event.deltaY})
+  of iekKeyDown, iekKeyUp:
+    sendEvent(if event.kind == iekKeyDown: "keyDown" else: "keyUp", %*{
+      "key": $libevdev_event_code_get_name(EV_KEY.cuint, event.code.cuint),
+      "code": event.code
+    })
+
+proc startThread*(panel: (int, int)) {.thread.} =
   try:
+    # The pointer a relative mouse moves, shared by every device this thread
+    # reads. The panel size arrives as two ints: a thread gets values, never
+    # the host's config ref.
+    var cursor = initPointerCursor(panel[0], panel[1])
+    var translated: seq[InputEvent] = @[]
     var openDevices: seq[DevState] = @[]
     for device in walkPattern("/dev/input/event*"):
       # One unreadable or malformed device must not disable the others.
@@ -70,10 +86,11 @@ proc startThread*() {.thread.} =
           openDevices.add(DevState(
             path: device,
             evdev: evdev,
-            minX: libevdev_get_abs_minimum(evdev, ABS_X).int,
-            maxX: libevdev_get_abs_maximum(evdev, ABS_X).int,
-            minY: libevdev_get_abs_minimum(evdev, ABS_Y).int,
-            maxY: libevdev_get_abs_maximum(evdev, ABS_Y).int,
+            translator: initDeviceTranslator(
+              minX = libevdev_get_abs_minimum(evdev, ABS_X).int,
+              maxX = libevdev_get_abs_maximum(evdev, ABS_X).int,
+              minY = libevdev_get_abs_minimum(evdev, ABS_Y).int,
+              maxY = libevdev_get_abs_maximum(evdev, ABS_Y).int),
           ))
       except Exception as e:
         log(%*{"event": "driver:evdev", "device": device,
@@ -119,65 +136,21 @@ proc startThread*() {.thread.} =
               break nextdevice
             if rc == cint(LIBEVDEV_READ_STATUS_SUCCESS):
               foundSome = true
-              if ev.ev_type == EV_SYN:
-                # Emit one mouseMove per input frame, using the latest absolute
-                # X/Y for THIS device. Tracking per-device coordinates (keyed on
-                # ABS_X/ABS_Y) avoids mixing pressure/multitouch axes or another
-                # device's values into the position.
-                if openDevices[deviceIndex].moved and
-                    openDevices[deviceIndex].hasX and openDevices[deviceIndex].hasY:
-                  sendEvent("mouseMove", %*{
-                    "x": scalePointerAxis(openDevices[deviceIndex].lastX,
-                        openDevices[deviceIndex].minX, openDevices[deviceIndex].maxX),
-                    "y": scalePointerAxis(openDevices[deviceIndex].lastY,
-                        openDevices[deviceIndex].minY, openDevices[deviceIndex].maxY)})
-                openDevices[deviceIndex].moved = false
-                for (name, payload) in openDevices[deviceIndex].pending:
-                  sendEvent(name, payload)
-                openDevices[deviceIndex].pending.setLen(0)
-                continue
-              if ev.ev_type == EV_MSC:
-                continue
-              if ev.ev_type == EV_KEY:
-                if ev.code >= BTN_MISC and ev.code <= BTN_GEAR_UP:
-                  let button: int = case ev.code:
-                    of BTN_LEFT: 0
-                    of BTN_RIGHT: 1
-                    of BTN_MIDDLE: 2
-                    of BTN_SIDE: 3
-                    of BTN_EXTRA: 4
-                    of BTN_FORWARD: 5
-                    of BTN_BACK: 6
-                    of BTN_TASK: 7
-                    of BTN_TOUCH: 0 # a finger down is the primary button
-                    else: -1
-                  let name = if ev.value == 1: "mouseDown" else: "mouseUp"
-                  openDevices[deviceIndex].pending.add((name, %*{"button": button}))
-                else:
-                  let name = if ev.value == 1: "keyDown" else: "keyUp"
-                  openDevices[deviceIndex].pending.add((name, %*{
-                    "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
-                    "code": ev.code
-                  }))
-              elif ev.ev_type == EV_ABS:
-                if ev.code == ABS_X:
-                  openDevices[deviceIndex].lastX = ev.value
-                  openDevices[deviceIndex].hasX = true
-                  openDevices[deviceIndex].moved = true
-                elif ev.code == ABS_Y:
-                  openDevices[deviceIndex].lastY = ev.value
-                  openDevices[deviceIndex].hasY = true
-                  openDevices[deviceIndex].moved = true
-              else:
-                log(%*{"event": "event:unknown",
-                    "eventName": $libevdev_event_type_get_name(ev.ev_type),
-                    "eventCode": $libevdev_event_code_get_name(ev.ev_type,
-                        ev.code),
-                    "eventValue": $ev.value,
-                    "type": ev.ev_type,
-                    "code": ev.code,
-                    "value": ev.value,
-                })
+              translated.setLen(0)
+              let outcome = translate(openDevices[deviceIndex].translator, cursor,
+                ev.ev_type.int, ev.code.int, ev.value.int, translated)
+              for event in translated:
+                send(event)
+              if outcome == trUnknownType:
+                # Once per device and type. This used to be a line per event,
+                # and EV_REL landed here: a USB mouse wrote hundreds of log
+                # lines a second into a log that is shipped to the backend.
+                log(%*{"event": "driver:evdev", "device": device,
+                    "info": "ignoring an event type this driver does not handle",
+                    "eventType": $libevdev_event_type_get_name(ev.ev_type),
+                    "firstCode": $libevdev_event_code_get_name(ev.ev_type, ev.code),
+                    "type": ev.ev_type.int,
+                    "code": ev.code.int})
       for removeIndex in countdown(deadDevices.len - 1, 0):
         let index = deadDevices[removeIndex]
         closeDevice(openDevices[index].evdev)
@@ -195,5 +168,5 @@ proc startThread*() {.thread.} =
         "stack": e.getStackTrace()})
 
 proc init*(frameOS: DriverContext): Driver =
-  createThread(thread, startThread)
+  createThread(thread, startThread, (frameOS.frameConfig.width, frameOS.frameConfig.height))
   result = Driver(name: "evdev")

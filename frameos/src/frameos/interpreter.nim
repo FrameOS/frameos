@@ -12,6 +12,7 @@ import frameos/channels
 import frameos/cloud/scene_guard
 import frameos/js_runtime/run_budget
 import frameos/node_config
+import frameos/event_log
 import frameos/planner
 import frameos/refresh_interval
 import frameos/runtime_diagnostics
@@ -21,6 +22,11 @@ import apps/apps
 # Runtime verbs a scene's dispatch node must not reach. Keep in step with
 # schedulerRefusedEvents in scheduler.nim.
 const sceneRefusedDispatchEvents* = ["uploadScenes", "reboot", "restart", "reload"]
+
+var eventListenersRun* {.threadvar.}: int
+  ## Counts every event listener a run has started, so a host can ask "did
+  ## anything handle that?" by comparing it across a `runEvent` (the ESP32
+  ## renders after a button press only when something did).
 
 const TRACING = false
 when defined(frameosEmbedded):
@@ -1040,7 +1046,6 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         })
 
       var exportedChild: ExportedScene
-      var needsInitEvent = false
 
       if self.sceneExportByNodeId.hasKey(currentNodeId):
         exportedChild = self.sceneExportByNodeId[currentNodeId]
@@ -1048,7 +1053,6 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         if loadedScenes.hasKey(childSceneId):
           let interpretedExport = loadedScenes[childSceneId]
           exportedChild = ExportedScene(interpretedExport)
-          needsInitEvent = true
         elif compiledSceneExports.hasKey(childSceneId):
           exportedChild = compiledSceneExports[childSceneId]
         elif uploadedScenes.hasKey(childSceneId):
@@ -1056,7 +1060,6 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           # we should implement isloated scopes/applications later, but this will do for now
           let interpretedExport = uploadedScenes[childSceneId]
           exportedChild = ExportedScene(interpretedExport)
-          needsInitEvent = true
         else:
           raise newException(Exception,
             "Scene node references unknown scene id: " & childSceneId.string)
@@ -1066,13 +1069,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         var persisted = %*{}
         if currentNode.data.hasKey("config") and currentNode.data["config"].kind == JObject:
           persisted = currentNode.data["config"]
+        # The child's own init fires its "init" event, interpreted or compiled.
         let child = exportedChild.init(childSceneId, self.frameConfig, self.logger, persisted)
         self.sceneNodes[currentNodeId] = child
-        if needsInitEvent:
-          var initCtx = ExecutionContext(scene: child, event: "init",
-                                        payload: child.state, hasImage: false,
-                                        loopIndex: 0, loopKey: ".")
-          exportedChild.runEvent(child, initCtx)
 
       let childScene = self.sceneNodes[currentNodeId]
 
@@ -1499,18 +1498,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         "execution": if isInterpretedChild: "interpreted" else: "compiled"
       })
 
-      if isInterpretedChild:
-        # Fire child's init event once (compiled scenes do this inside their init)
-        var initCtx = ExecutionContext(
-          scene: child,
-          event: "init",
-          payload: child.state,
-          hasImage: false,
-          loopIndex: 0,
-          loopKey: "."
-        )
-        exportedChild.runEvent(child, initCtx)
-
 
   ## Pass 4: negotiate what each image edge may skip materializing. Runs after
   ## the apps exist, because a node whose behaviour comes from scene JSON (a
@@ -1526,6 +1513,15 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len,
       "imageFusionPlans": scene.imageFusionPlans.len,
       "imageBoundsPlans": scene.imageBoundsPlans.len})
+
+  # "init" fires here, once per scene instance and after its apps exist, the
+  # way a compiled scene's generated init does it. It used to be the parent's
+  # job and only child scenes had a parent, so a top-level interpreted scene —
+  # the default execution mode, on every host — never heard it.
+  if scene.eventListeners.hasKey("init"):
+    var initContext = ExecutionContext(scene: scene, event: "init", payload: scene.state,
+      hasImage: false, loopIndex: 0, loopKey: ".")
+    runEvent(scene, initContext)
 
   return scene
 
@@ -1643,6 +1639,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
           continue
         try:
           matched += 1
+          inc eventListenersRun
           discard scene.runNode(nextNode, context)
         except Exception as e:
           self.logger.log(%*{
@@ -1656,15 +1653,16 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
       else:
         listenersFiltered += 1
     if listenersFiltered > 0 and matched == 0:
-      self.logger.log(%*{
+      # A key event's payload stays out of the log (event_log.nim): a listener
+      # filtered on one key would otherwise log every other key pressed.
+      self.logger.log(withEventPayload(%*{
         "event": "runEvent:noListenerMatched",
         "sceneId": self.id,
         "contextEvent": context.event,
-        "payload": context.payload,
         "expected": expectedFilters,
         "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
           (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
-      })
+      }, context.event, context.payload))
 
 proc resolvedRenderDeadlineMs(frameConfig: FrameConfig): int =
   if frameConfig != nil and frameConfig.js != nil and frameConfig.js.renderDeadlineMs >= 0:

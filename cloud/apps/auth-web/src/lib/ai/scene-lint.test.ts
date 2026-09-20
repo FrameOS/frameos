@@ -575,6 +575,33 @@ describe("lintScenes", () => {
     expect(errors).toEqual([expect.stringContaining('redeclares its argument "lat"')]);
   });
 
+  // A scene's own `customEvents` are fired from outside it (a schedule entry,
+  // the frame's event route, another scene), so nothing inside dispatches them.
+  it("accepts a listener for an event the scene declares in customEvents", () => {
+    const listener = { data: { keyword: "nextPhoto" }, id: "custom", type: "event" };
+    const edges = [
+      { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+    ];
+    const nodes = [...(scene().nodes as JsonObject[]), listener];
+    const undeclared = messages([scene({ edges, nodes })]).warnings;
+    expect(undeclared).toEqual(
+      expect.arrayContaining([expect.stringContaining('listens for "nextPhoto"')]),
+    );
+    expect(undeclared.join("\n")).toContain("customEvents");
+
+    const declared = messages([
+      scene({ customEvents: [{ fields: [], name: "nextPhoto" }], edges, nodes }),
+    ]).warnings;
+    expect(declared.filter((warning) => warning.includes('listens for "nextPhoto"'))).toEqual([]);
+
+    // A declaration of some OTHER event does not cover it, and junk entries
+    // are skipped rather than thrown on.
+    const other = messages([
+      scene({ customEvents: [{ name: "prevPhoto" }, null, { name: 7 }, "nextPhoto"], edges, nodes }),
+    ]).warnings;
+    expect(other).toEqual(expect.arrayContaining([expect.stringContaining('listens for "nextPhoto"')]));
+  });
+
   // Every shipped example must lint clean — the linter is only useful if it
   // does not reject the scenes the catalog itself ships, and a sample that
   // fails it teaches the scene AI a value the editor will not offer.
