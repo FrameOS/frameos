@@ -87,8 +87,9 @@ batch after the third one; residue is in the medium / low list).
   drops its error text once the hotspot is down (2026-09-09). Require a panel-shown code
   for the control-plane/admin fields (a headless frame then needs the
   local admin password instead); strip current config from the
-  unauthenticated setup page; cache the root `iw scan` / `nmcli` Wi-Fi
-  scans behind a rate limit.
+  unauthenticated setup page. (The root `iw scan` / `nmcli` Wi-Fi scans
+  behind `GET /wifi` are single-flight and cached for five seconds since
+  2026-09-19, `cachedAvailableNetworks`.)
 - Closed (pointer): `chromiumScreenshot` / `rstpSnapshot` are refused for
   store-origin scenes unless the admin allows shell apps on the panel
   (`frameos/spawn_guard.nim`, 2026-09-07); `localImage.path` reads anywhere
