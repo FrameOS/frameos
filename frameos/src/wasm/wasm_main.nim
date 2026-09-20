@@ -231,7 +231,12 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string,
         payload: JsonNode) {.gcsafe.} =
       {.cast(gcsafe).}:
-        jsEventHook(event.cstring, (if payload.isNil: "{}" else: $payload).cstring)
+        # Pointer input (mouseMove/mouseDown/mouseUp) comes from the page in
+        # the first place and arrives many times a second: like runner.nim,
+        # which keeps it out of the frame log, it is not echoed back.
+        let pointerEvent = event.startsWith("mouse")
+        if not pointerEvent:
+          jsEventHook(event.cstring, (if payload.isNil: "{}" else: $payload).cstring)
         if event == "render":
           renderRequested = true
         elif not currentScene.isNil and not handlingEvent:
@@ -246,14 +251,30 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
             if nextId.len > 0 and (currentSceneId.isNone or currentSceneId.get().string != nextId):
               discard selectSceneById(nextId)
               return
+          # Pointer input arrives the way drivers/evdev sends it — `mouseMove`
+          # as 0..32767 across the panel, `mouseDown`/`mouseUp` with a button
+          # — and reaches the scene the way runner.nim delivers it: in the
+          # scene's own pixels.
+          var scenePayload = payload
+          if event == "mouseMove" and payload != nil and payload.kind == JObject and
+              frameConfig.width > 0 and frameConfig.height > 0:
+            let point = pointerToScenePoint(payload{"x"}.getInt(), payload{"y"}.getInt(),
+              frameConfig.width, frameConfig.height, frameConfig.rotate, frameConfig.flip)
+            scenePayload = copy(payload)
+            scenePayload["x"] = %point.x
+            scenePayload["y"] = %point.y
           handlingEvent = true
           try:
-            runSceneEvent(event, payload)
+            runSceneEvent(event, scenePayload)
           except Exception as e:
             setLastError("event " & event & " failed: " & e.msg)
           finally:
             handlingEvent = false
-          renderRequested = true
+          # A frame does not render because a finger moved: a scene that wants
+          # a new picture dispatches "render" itself, and gets one here too.
+          # Every other event keeps the preview's render-after-event habit.
+          if not pointerEvent:
+            renderRequested = true
     result = true
   except Exception as e:
     setLastError("init failed: " & e.msg)

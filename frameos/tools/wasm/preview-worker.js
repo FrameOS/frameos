@@ -9,12 +9,20 @@
 //   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl,
 //    fastMode?, saveAssets?, browserAssets?}
 //   {type: 'render'}                       force a render now
-//   {type: 'event', name, payload}         dispatch a scene event
+//   {type: 'event', name, payload}         dispatch a scene event. Pointer input is three of them, shaped the way
+//                                          frameos/src/drivers/evdev sends it on a frame: 'mouseMove' {x, y} with
+//                                          both axes 0..32767 across the picture, 'mouseDown' / 'mouseUp' {button}
+//                                          (0 left or touch, 1 right, 2 middle). The runtime hands the scene its own
+//                                          pixel coordinates, like the runner does, and renders only when the scene
+//                                          asks for it.
 //   {type: 'selectScene', sceneId}
 //   {type: 'setFastMode', enabled}         lift (or restore) the 1 fps throttle
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 // Messages out:
-//   {type: 'ready', sceneInfo, browserAssets, runtimeVersion}   runtimeVersion: FrameOS version of the bundle (null on older bundles)
+//   {type: 'ready', sceneInfo, browserAssets, runtimeVersion, pointerEvents}
+//        runtimeVersion: FrameOS version of the bundle (null on older bundles)
+//        pointerEvents: true when this bundle takes pointer input as described above. A bundle without it would hand
+//        the scene raw 0..32767 coordinates and render on every move, so a page must not forward pointers to it.
 //   {type: 'frame', width, height, buffer, renderMs}   buffer: transferred ArrayBuffer (RGBA)
 //   {type: 'state', state}
 //   {type: 'log', message}
@@ -758,11 +766,64 @@ async function init(msg) {
     }
     lastPostedState = null
     const sceneInfo = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
-    post({ type: 'ready', sceneInfo, browserAssets: browserAssetsInfo(), runtimeVersion: runtimeVersion() })
+    post({
+      type: 'ready',
+      sceneInfo,
+      browserAssets: browserAssetsInfo(),
+      runtimeVersion: runtimeVersion(),
+      pointerEvents: true,
+    })
     renderNow()
   } catch (e) {
     post({ type: 'error', message: String(e && e.message ? e.message : e) })
   }
+}
+
+// ----------------------------------------------------------------- events
+
+function dispatchEvent(name, payload) {
+  if (!Module) {
+    return
+  }
+  try {
+    call('frameos_wasm_event', 'boolean', ['string', 'string'], [name, JSON.stringify(payload || {})])
+  } catch (e) {
+    post({ type: 'error', message: 'event failed: ' + e })
+  }
+  renderSoonIfRequested()
+}
+
+// A drag posts a mouseMove per animation frame, and they pile up behind a
+// render that takes longer than that. Replaying each one is pointless, so only
+// the newest of a burst reaches the scene — what runner.nim does with the
+// moves its evdev thread queued. The move is held for one turn of the event
+// loop (the queued messages behind it arrive first) and flushed ahead of any
+// other event, so a mouseDown still lands where the pointer is.
+let pendingMove = null
+let pendingMoveTimer = null
+
+function flushPendingMove() {
+  if (pendingMoveTimer) {
+    clearTimeout(pendingMoveTimer)
+    pendingMoveTimer = null
+  }
+  if (pendingMove) {
+    const payload = pendingMove
+    pendingMove = null
+    dispatchEvent('mouseMove', payload)
+  }
+}
+
+function handleEvent(name, payload) {
+  if (name === 'mouseMove') {
+    pendingMove = payload || {}
+    if (!pendingMoveTimer) {
+      pendingMoveTimer = setTimeout(flushPendingMove, 0)
+    }
+    return
+  }
+  flushPendingMove()
+  dispatchEvent(name, payload)
 }
 
 self.onmessage = (ev) => {
@@ -775,19 +836,7 @@ self.onmessage = (ev) => {
       renderNow()
       break
     case 'event':
-      if (Module) {
-        try {
-          call(
-            'frameos_wasm_event',
-            'boolean',
-            ['string', 'string'],
-            [msg.name, JSON.stringify(msg.payload || {})]
-          )
-        } catch (e) {
-          post({ type: 'error', message: 'event failed: ' + e })
-        }
-        renderSoonIfRequested()
-      }
+      handleEvent(msg.name, msg.payload)
       break
     case 'selectScene':
       if (Module) {

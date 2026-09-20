@@ -1,7 +1,13 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CameraIcon, CursorArrowRaysIcon, KeyIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowTopRightOnSquareIcon,
+  CameraIcon,
+  CursorArrowRaysIcon,
+  KeyIcon,
+  PencilSquareIcon,
+} from '@heroicons/react/24/outline'
 
 import { Button } from '../components/Button'
 import { Checkbox } from '../components/Checkbox'
@@ -15,12 +21,7 @@ import { appsModel } from '../models/appsModel'
 import { collectSecretSettingsFromScenes, settingsDetails } from '../scenes/frame/panels/secretSettings'
 import { collectScenePreviewPayloadScenes } from '../scenes/frame/panels/Scenes/scenesLogic'
 import { livePreviewLogic } from '../scenes/frame/panels/Scenes/livePreviewLogic'
-import {
-  formatTimestamp,
-  logLineColor,
-  openCanvasImageInNewTab,
-  renderLogLine,
-} from '../scenes/frame/panels/Scenes/LivePreviewModal'
+import { formatTimestamp, logLineColor, renderLogLine } from '../scenes/frame/panels/Scenes/LivePreviewModal'
 import { StateFieldEdit } from '../scenes/frame/panels/Scenes/StateFieldEdit'
 import type { FrameId } from '../types'
 import { hostMessageTarget, isHostReply } from './embedOrigins'
@@ -66,6 +67,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     registerCanvas,
     dispatchPreviewEvent,
     forcePreviewRender,
+    openPreviewImage,
     setPreviewSettings,
   } = useActions(livePreviewLogic({ frameId }))
   const { apps } = useValues(appsModel)
@@ -249,11 +251,12 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
           }}
           width={previewDimensions.width}
           height={previewDimensions.height}
-          className="max-h-[40vh] max-w-full cursor-zoom-in rounded-lg border border-slate-500/20"
-          title="Open image in a new tab"
-          onClick={(event) => openCanvasImageInNewTab(event.currentTarget)}
+          className="max-h-[40vh] max-w-full rounded-lg border border-slate-500/20"
           style={{
             imageRendering: 'pixelated',
+            // Taps and sideways drags are the scene's; a vertical swipe still
+            // scrolls the page on a phone.
+            touchAction: 'pan-y pinch-zoom',
             aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}`,
           }}
         />
@@ -338,6 +341,15 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <Button size="small" color="secondary" onClick={forcePreviewRender}>
           Re-render
+        </Button>
+        <Button
+          size="small"
+          color="secondary"
+          aria-label="Open image in a new tab"
+          title="Open image in a new tab"
+          onClick={openPreviewImage}
+        >
+          <ArrowTopRightOnSquareIcon className="h-4 w-4" />
         </Button>
         <Button
           size="small"

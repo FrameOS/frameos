@@ -2004,11 +2004,14 @@ a.tag-pill:hover {
   background: #fff;
 }
 
-.live-preview__canvas--zoomable {
-  cursor: zoom-in;
+/* The pointer over the canvas is the scene's (mouseMove / mouseDown /
+   mouseUp). A vertical swipe still scrolls the page on a phone; taps and
+   sideways drags reach the scene. */
+.live-preview__canvas--interactive {
+  touch-action: pan-y pinch-zoom;
 }
 
-/* The rendered frame over the whole page (a click on the preview canvas):
+/* The rendered frame over the whole page (the preview's expand button):
    fitted to the viewport, or 1:1 with the body scrolling. */
 .lightbox {
   position: fixed;
@@ -2020,11 +2023,16 @@ a.tag-pill:hover {
   color: #e6e8ec;
 }
 
-.lightbox__close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 1;
+.lightbox__bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 8px 16px;
+}
+
+.lightbox__button {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2037,13 +2045,13 @@ a.tag-pill:hover {
   cursor: pointer;
 }
 
-.lightbox__close:hover {
+.lightbox__button:hover {
   background: rgba(255, 255, 255, 0.16);
 }
 
 .lightbox__hint {
-  flex-shrink: 0;
-  padding: 16px 64px 8px 16px;
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   color: rgba(230, 232, 236, 0.7);
 }
@@ -2070,14 +2078,17 @@ a.tag-pill:hover {
   height: auto;
   max-width: none;
   background: #fff;
-  cursor: zoom-out;
 }
 
 .lightbox__image--fit {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  cursor: zoom-in;
+}
+
+/* A running scene: drags and taps go to the scene, not to the page. */
+canvas.lightbox__image {
+  touch-action: none;
 }
 
 .live-preview__status {

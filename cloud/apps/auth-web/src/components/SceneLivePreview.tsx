@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  attachPointerInput,
   coerceStateFieldValue,
   describeDeviceLimits,
   deviceLimitsFor,
@@ -22,6 +23,7 @@ import {
   FolderOpen,
   ImageDown,
   KeyRound,
+  Maximize2,
   Play,
   RectangleHorizontal,
   RectangleVertical,
@@ -36,6 +38,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   gatedServicesForScenes,
@@ -135,6 +138,21 @@ export function measureFps(arrivals: readonly number[]): number | null {
   }
   return ((arrivals.length - 1) * 1000) / (last - first);
 }
+// The pointer over a canvas showing the frame — the panel's own, or the
+// lightbox's mirror — goes to the scene as mouseMove / mouseDown / mouseUp,
+// what a frame's mouse or touchscreen sends. Through the ref, so a runtime
+// that restarted under an open lightbox keeps its pointer.
+function forwardPointer(
+  canvas: HTMLCanvasElement,
+  previewRef: RefObject<FrameOSPreview | null>,
+): () => void {
+  return attachPointerInput(
+    canvas,
+    (name, payload) => previewRef.current?.sendEvent(name, payload),
+    { enabled: () => previewRef.current?.runtimeInfo?.pointerEvents === true },
+  );
+}
+
 // Runs a scene in the browser through the frameos-wasm runtime: canvas,
 // showIf-aware state fields, event buttons, and logs — no frame needed. The
 // runtime assets are copied into /frameos-wasm by scripts/copy-wasm-assets.mjs.
@@ -159,6 +177,7 @@ export function SceneLivePreviewPanel({
   // slideshow or clock keeps moving at full size.
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const lightboxCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lightboxPointerDetachRef = useRef<(() => void) | null>(null);
 
   // A notice ("Screenshot downloaded.") is transient: it goes away on its
   // own, or sooner with its × button.
@@ -371,6 +390,10 @@ export function SceneLivePreviewPanel({
   // a release, so this is the last release's interpreter — a frame on newer
   // or older firmware can render a scene differently.
   const [runtimeVersion, setRuntimeVersion] = useState<string | null>(null);
+  // Whether the runtime takes pointer input. The bundle is the last
+  // release's: one from before pointer input would hand a scene raw 0..32767
+  // coordinates and render on every move, so nothing is forwarded to it.
+  const [pointerInput, setPointerInput] = useState(false);
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [runtimeState, setRuntimeState] = useState<Record<string, unknown>>({});
   // State-field values edited in the form, overriding the runtime's reported
@@ -573,6 +596,7 @@ export function SceneLivePreviewPanel({
           }
           setSceneInfo(info ?? null);
           setRuntimeVersion(runtime?.version ?? null);
+          setPointerInput(runtime?.pointerEvents === true);
           setStatus("");
           // Show the scene being edited, not the default one, when the
           // editor has several.
@@ -660,6 +684,11 @@ export function SceneLivePreviewPanel({
     // fastMode reaches a running runtime through setFastMode below; only a
     // fresh runtime reads it from the options, so it is no dependency here.
   }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    return canvas ? forwardPointer(canvas, previewRef) : undefined;
+  }, []);
 
   // A new runtime starts with a clean heap.
   useEffect(() => {
@@ -980,6 +1009,20 @@ export function SceneLivePreviewPanel({
             <ImageDown aria-hidden size={16} />
           </button>
           <button
+            aria-label="Expand"
+            className="button button--subtle button--small"
+            disabled={!hasPaintedFrame}
+            onClick={openLightbox}
+            title={
+              hasPaintedFrame
+                ? "Expand: show the frame over the whole window"
+                : "Available after the preview renders its first frame"
+            }
+            type="button"
+          >
+            <Maximize2 aria-hidden size={16} />
+          </button>
+          <button
             className="button button--subtle button--small"
             onClick={() => setAssetsOpen(true)}
             title="Manage the browser-only asset folder the preview mounts at /srv/assets"
@@ -1154,20 +1197,11 @@ export function SceneLivePreviewPanel({
         ) : null}
         <div className="live-preview__stage" hidden={previewGated}>
           <canvas
-            aria-label={hasPaintedFrame ? "Show the frame at full size" : undefined}
-            className={`live-preview__canvas${hasPaintedFrame ? " live-preview__canvas--zoomable" : ""}`}
+            aria-label="Scene preview"
+            className={`live-preview__canvas${pointerInput ? " live-preview__canvas--interactive" : ""}`}
             height={viewport.height}
-            onClick={openLightbox}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                openLightbox();
-              }
-            }}
             ref={canvasRef}
-            role={hasPaintedFrame ? "button" : undefined}
-            tabIndex={hasPaintedFrame ? 0 : undefined}
-            title={hasPaintedFrame ? "Click to view at full size" : undefined}
+            role="img"
             width={viewport.width}
           />
         </div>
@@ -1373,6 +1407,8 @@ export function SceneLivePreviewPanel({
           height={viewport.height}
           label="Preview frame"
           liveCanvasRef={(canvas) => {
+            lightboxPointerDetachRef.current?.();
+            lightboxPointerDetachRef.current = canvas ? forwardPointer(canvas, previewRef) : null;
             lightboxCanvasRef.current = canvas;
             // First paint on mount; every later frame repaints via onFrame.
             paintLightbox();

@@ -1382,6 +1382,20 @@ proc panelToScenePoint*(x, y, width, height, rotate: int, flip: string): tuple[x
     sceneY = scene.height - sceneY - 1
   (sceneX, sceneY)
 
+const PointerAxisMax* = 32767
+  ## A `mouseMove` payload runs 0..PointerAxisMax on both axes, whatever the
+  ## input device reports (drivers/evdev/pointer.nim scales to it) — and
+  ## whatever the browser preview's canvas measures.
+
+proc pointerToScenePoint*(pointerX, pointerY, width, height, rotate: int, flip: string): tuple[x: int, y: int] =
+  ## A `mouseMove` position (0..PointerAxisMax across the `width` x `height`
+  ## panel) as a pixel on the scene's canvas. The runner and the wasm preview
+  ## both hand scenes their pointer through this, so a scene that hit-tests
+  ## `context.payload.x/y` sees the same numbers on a frame and in a browser.
+  proc toPixel(value, size: int): int =
+    max(0, min(size - 1, (size.float * value.float / PointerAxisMax.float).int))
+  panelToScenePoint(toPixel(pointerX, width), toPixel(pointerY, height), width, height, rotate, flip)
+
 when defined(frameosEmbedded):
   proc fillPixelRect(image: Image, x, y, w, h: int, color: ColorRGBX) =
     let x0 = max(0, x)
