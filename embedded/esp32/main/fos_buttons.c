@@ -79,10 +79,14 @@ static void enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
         frameos_nim_log_hook(dropped);
         return;
     }
-    /* A live press asks for a render pass. The replayed wake press does not:
-     * the boot's first pass renders anyway (fos_buttons_woke_by_button), and
-     * a stale RENDER_NOW would replay the same frame right after it. */
-    if (!wake) fos_client_render_now();
+    /* A live press wakes the render task so the scene hears it now, not at the
+     * end of a wait slice — and that is all. Whether a frame is drawn is the
+     * runtime's call: it asks for one when a listener took the press or the
+     * scene dispatched "render" (frameos_nim_render_requested). This used to be
+     * fos_client_render_now(), which refreshed the panel for every press,
+     * heard or not. The replayed wake press needs no nudge: the boot's first
+     * pass processes the queue anyway (fos_buttons_woke_by_button). */
+    if (!wake) fos_client_wake_for_events();
 }
 
 static void enqueue_press(const fos_gpio_button_t *button, int level)

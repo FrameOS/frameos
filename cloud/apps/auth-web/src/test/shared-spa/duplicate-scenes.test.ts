@@ -60,6 +60,45 @@ describe("remapSceneIds", () => {
     expect(out!.customEvents[0].fields[0].value).toBe("scene-a-copy");
   });
 
+  // An event node's config is its filter. `open` filtered on a scene id kept
+  // the ORIGINAL's id in the copy, so the listener never matched again.
+  it("rewrites scene ids in dispatch payloads and in event-node filters", () => {
+    const [out] = remap([
+      scene([
+        { id: "n1", type: "event", data: { keyword: "open", config: { sceneId: "scene-a" } } },
+        { id: "n2", type: "dispatch", data: { keyword: "setCurrentScene", config: { sceneId: "scene-b" } } },
+        // Not scene-typed: a button label that happens to equal a scene id.
+        { id: "n3", type: "event", data: { keyword: "button", config: { label: "scene-a" } } },
+        // No filter at all, and the legacy label-only shape.
+        { id: "n4", type: "event", data: { keyword: "open" } },
+        { id: "n5", type: "event", data: { keyword: "button", label: "A" } },
+      ]),
+    ]);
+    expect(out!.nodes[0]!.data).toEqual({ keyword: "open", config: { sceneId: "scene-a-copy" } });
+    expect(out!.nodes[1]!.data).toEqual({ keyword: "setCurrentScene", config: { sceneId: "scene-b-copy" } });
+    expect(out!.nodes[2]!.data).toEqual({ keyword: "button", config: { label: "scene-a" } });
+    expect(out!.nodes[3]!.data).toEqual({ keyword: "open" });
+    expect(out!.nodes[4]!.data).toEqual({ keyword: "button", label: "A" });
+  });
+
+  it("rewrites a scene-typed field of a custom event an event node filters on", () => {
+    const [out] = remap([
+      {
+        ...scene([{ id: "n1", type: "event", data: { keyword: "go", config: { to: "scene-b", note: "scene-b" } } }]),
+        customEvents: [
+          {
+            name: "go",
+            fields: [
+              { name: "to", type: "scene" },
+              { name: "note", type: "string" },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(out!.nodes[0]!.data).toEqual({ keyword: "go", config: { to: "scene-b-copy", note: "scene-b" } });
+  });
+
   it("copies a node type it does not know instead of throwing", () => {
     const unknown: AnyNode = { id: "n2", type: "widget", data: { anything: 1 } };
     const [out] = remap([scene([unknown])]);

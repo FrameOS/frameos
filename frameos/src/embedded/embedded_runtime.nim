@@ -23,6 +23,9 @@ import frameos/js_runtime/app_runtime
 # ------------------------------------------------------------------ C hooks
 
 proc espLog(msg: cstring) {.importc: "frameos_nim_log_hook", cdecl.}
+proc requestSceneSelect(sceneId: cstring): bool {.importc: "frameos_nim_request_scene_select", cdecl.}
+  ## Queues a scene switch with the firmware (fos_scenes_select), which owns
+  ## it: the scene may have to come off flash, and the choice is persisted.
 
 proc log*(msg: string) =
   espLog(msg.cstring)
@@ -40,6 +43,10 @@ var
   renderRequested = false
   # Nesting of synchronously dispatched scene events (see the event hook).
   embeddedEventDepth = 0
+  # The payload of a scene-dispatched `setCurrentScene` that carried `state`,
+  # held until the firmware has made that scene the current one.
+  pendingSceneSwitchId = ""
+  pendingSceneSwitchPayload: JsonNode = nil
 
 const MaxEmbeddedEventDepth = 4
 
@@ -262,6 +269,21 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
       # difference between the two runtimes that scene authors could not see.
       if event == "render":
         renderRequested = true
+      elif event == "setCurrentScene" and not payload.isNil and payload.kind == JObject and
+          payload{"sceneId"}.getStr().len > 0 and
+          (currentSceneId.isNone or currentSceneId.get().string != payload{"sceneId"}.getStr()):
+        # A scene's own dispatch node switching scenes. The HTTP, schedule and
+        # cloud paths never get here (the firmware selects the scene itself),
+        # so until now this fell through to the branch below and applied the
+        # payload's state to the CURRENT scene instead of switching.
+        let nextId = payload{"sceneId"}.getStr()
+        if requestSceneSelect(nextId.cstring):
+          if payload{"state"}.kind == JObject:
+            pendingSceneSwitchId = nextId
+            pendingSceneSwitchPayload = copy(payload)
+          renderRequested = true
+        else:
+          log("setCurrentScene: scene not selectable: " & nextId)
       elif not currentScene.isNil:
         # Events run synchronously here (one task, no queue), so a handler that
         # dispatches its own event recurses on the render task's stack. The
@@ -272,14 +294,36 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
               " events deep — a scene is re-dispatching its own event")
         else:
           inc embeddedEventDepth
+          let listenersBefore = eventListenersRun
           try:
             let context = ExecutionContext(scene: currentScene, event: event,
                 payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
             runEvent(currentScene, context)
+            # A press draws a new frame only when a listener took it. The
+            # firmware used to ask for a render on every press, heard or not —
+            # on a Spectra panel, half a minute of refresh for nothing.
+            if event == "button" and eventListenersRun != listenersBefore:
+              renderRequested = true
           except Exception as e:
             log("event " & event & " failed: " & e.msg)
           finally:
             dec embeddedEventDepth
+
+proc runLifecycleEvent(event: string, payload: JsonNode) =
+  ## The events the host sends around a scene switch, the way runner.nim sends
+  ## them: "close" to the scene being left, "open" to the one that became
+  ## current. ("init" is the interpreter's own, fired by its init.)
+  if currentScene.isNil:
+    return
+  inc embeddedEventDepth
+  try:
+    let context = ExecutionContext(scene: currentScene, event: event, payload: payload,
+        loopIndex: 0, loopKey: ".")
+    runEvent(currentScene, context)
+  except Exception as e:
+    log("event " & event & " failed: " & e.msg)
+  finally:
+    dec embeddedEventDepth
 
 proc cleanupScene(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
@@ -458,6 +502,8 @@ proc selectScene*(sceneIdText: string): bool =
     if not catalogHas(sceneIdText):
       log("selectScene: scene not found: " & sceneIdText)
       return false
+    if currentSceneId.isSome and currentSceneId.get() != sceneId:
+      runLifecycleEvent("close", %*{})
     currentSceneId = some(sceneId)
     renderRequested = true
     log("selectScene: " & sceneIdText & " (pending load from flash)")
@@ -466,6 +512,8 @@ proc selectScene*(sceneIdText: string): bool =
     log("selectScene: scene not found: " & sceneIdText)
     return false
 
+  if currentSceneId.isSome and currentSceneId.get() != sceneId:
+    runLifecycleEvent("close", %*{})
   if not currentScene.isNil:
     cleanupScene(currentScene)
     currentScene = nil
@@ -491,6 +539,13 @@ proc ensureScene(): bool =
   currentScene = interpreter.init(sceneId, frameConfig, logger, %*{})
   when defined(memProbe): memProbe("  ensureScene: init done")
   log(&"scene \"{currentSceneName()}\" initialized")
+  # The order runner.nim keeps: the switch's state is applied (public fields
+  # only, by the scene's own `setCurrentScene` handling), then "open".
+  if pendingSceneSwitchId == sceneId.string and not pendingSceneSwitchPayload.isNil:
+    runLifecycleEvent("setCurrentScene", pendingSceneSwitchPayload)
+  pendingSceneSwitchId = ""
+  pendingSceneSwitchPayload = nil
+  runLifecycleEvent("open", %*{"sceneId": sceneId.string})
   true
 
 proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =

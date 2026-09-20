@@ -9,6 +9,7 @@ import frameos/apps
 import frameos/channels
 import frameos/config
 import frameos/device_setup
+import frameos/event_log
 import frameos/display_detect
 import frameos/driver_render_hint
 import frameos/render_stats
@@ -271,6 +272,31 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   # log pause; it's the highest-frequency event and would otherwise flood logs.
   self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
 
+proc noteSceneInit(self: RunnerThread, exportedScene: ExportedScene, sceneId: SceneId) =
+  ## A compiled scene's generated init fires "init" and then "open" itself; an
+  ## interpreted scene's init fires "init" only, and "open" is the runner's.
+  if not (exportedScene of ExportedInterpretedScene) and sceneId notin self.openedByInit:
+    self.openedByInit.add(sceneId)
+
+proc dispatchOpen(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene) =
+  ## "open": the scene became the frame's current scene — at boot, on a switch
+  ## (back to a scene that is still in memory included) and after a reload. It
+  ## runs before the scene's next render, so what a listener sets is drawn.
+  let alreadyOpened = self.openedByInit.find(scene.id)
+  if alreadyOpened >= 0:
+    self.openedByInit.del(alreadyOpened)
+    return
+  var context = ExecutionContext(scene: scene, event: "open", payload: %*{"sceneId": scene.id.string},
+    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+  markRuntimeStart("event", scene.id.string, "open")
+  try:
+    exportedScene.runEvent(scene, context)
+  except Exception as e:
+    self.logSignal(%*{"event": "event:error", "contextEvent": "open", "sceneId": scene.id.string,
+        "error": $e.msg, "stacktrace": e.getStackTrace()})
+  finally:
+    markRuntimeDone()
+
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
   var timer = getMonoTime()
@@ -327,6 +353,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           try:
             currentScene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
             self.scenes[sceneId] = currentScene
+            self.noteSceneInit(exportedScene.get(), sceneId)
             currentScene.updateLastPublicState()
           except Exception as e:
             sceneInitialized = false
@@ -336,6 +363,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
 
         if sceneInitialized:
           lastSceneId = sceneId
+          self.dispatchOpen(exportedScene.get(), currentScene)
         else:
           lastSceneId = "".SceneId
         setLastPublicSceneId(sceneId)
@@ -568,13 +596,13 @@ proc triggerRender*(self: RunnerThread): void =
 proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
   let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
   if not self.scenes.hasKey(targetSceneId):
-    self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
-        "sceneId": targetSceneId.string, "event": event, "payload": payload})
+    self.logSignal(withEventPayload(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
+        "sceneId": targetSceneId.string, "contextEvent": event}, event, payload))
     return
   let exportedScene = findExportedScene(targetSceneId)
   if exportedScene.isNone:
-    self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not exported",
-        "sceneId": targetSceneId.string, "event": event, "payload": payload})
+    self.logSignal(withEventPayload(%*{"event": "dispatchEvent:error", "error": "Scene not exported",
+        "sceneId": targetSceneId.string, "contextEvent": event}, event, payload))
     return
   let scene = self.scenes[targetSceneId]
   var context = ExecutionContext(
@@ -647,8 +675,8 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
           break
     if success:
       waitTime = 1
-      if not event.startsWith("mouse"):
-        self.logSignal(%*{"event": "event:" & event, "payload": payload})
+      if eventIsLogged(event):
+        self.logSignal(withEventPayload(%*{"event": "event:" & event}, event, payload))
       try:
         case event:
           of "render":
@@ -700,13 +728,19 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
                 payload["sceneId"] = %sceneId.string
             if exportedScene.isNone:
               self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
-                  "event": event, "payload": payload})
+                  "contextEvent": event, "payload": payload})
               continue
             if sceneId != self.currentSceneId:
-              self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
+              # "close" carries nothing: it used to be handed this payload,
+              # which names the NEXT scene and holds that scene's state. The
+              # new scene's "open" follows from the render loop, once it is
+              # the one being drawn.
+              if self.scenes.hasKey(self.currentSceneId):
+                self.dispatchSceneEvent(some(self.currentSceneId), "close", %*{})
               if not self.scenes.hasKey(sceneId):
                 let scene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
                 self.scenes[sceneId] = scene
+                self.noteSceneInit(exportedScene.get(), sceneId)
                 scene.updateLastPublicState()
               self.currentSceneId = sceneId
               self.triggerRenderNext = true

@@ -6,6 +6,7 @@
 
 bool frameos_nim_available(void) { return false; }
 void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len), void (*release)(void *ptr)) { (void)acquire; (void)release; }
+void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id)) { (void)select; }
 bool frameos_nim_reserve_canvas(size_t len) { (void)len; return false; }
 void *frameos_nim_canvas_buffer(size_t len) { (void)len; return NULL; }
 size_t frameos_nim_canvas_reserved(void) { return 0; }

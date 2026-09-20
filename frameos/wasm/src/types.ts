@@ -119,9 +119,10 @@ export interface SceneEventButton {
 /** Events every scene handles on its own; not useful as interactive buttons. */
 export const LIFECYCLE_EVENTS = new Set(['render', 'init', 'open', 'close', 'setSceneState', 'setCurrentScene'])
 
-/** Pointer input: the canvas sends these itself, with a position (see
- * ./pointer). A button could only send one without. */
-export const POINTER_EVENTS = new Set(['mouseMove', 'mouseDown', 'mouseUp'])
+/** Pointer input: the canvas sends the mouse events itself, with a position
+ * (see ./pointer). A button could only send one without — and a `wheel`
+ * without its deltas, which only a frame's mouse produces. */
+export const POINTER_EVENTS = new Set(['mouseMove', 'mouseDown', 'mouseUp', 'wheel'])
 
 /** The custom event nodes of a scene, deduplicated — render these as buttons. */
 export function sceneEventButtons(scene: FrameOSScene | undefined | null): SceneEventButton[] {

@@ -1,4 +1,4 @@
-import { AppConfig, AppNodeData, DispatchNodeData, FrameScene, SceneNodeData } from '../types'
+import { AppConfig, AppNodeData, DispatchNodeData, EventNodeData, FrameScene, SceneNodeData } from '../types'
 import { v4 as uuidv4 } from 'uuid'
 import { frameEventsForScene } from './frameEvents'
 
@@ -47,17 +47,21 @@ export function remapSceneIds(newScenes: FrameScene[], getNewSceneId: (id: strin
       ...scene,
       id,
       nodes: scene.nodes.map((node) => {
-        if (node.type === 'code' || node.type === 'state' || node.type === 'event' || node.type === 'app') {
+        if (node.type === 'code' || node.type === 'state' || node.type === 'app') {
           return node
-        } else if (node.type === 'dispatch') {
-          const data = node.data as DispatchNodeData
+        } else if (node.type === 'dispatch' || node.type === 'event') {
+          // A dispatch node's config is the payload it sends; an event node's
+          // is the filter it listens with (`open` where sceneId is …). Both
+          // name scenes through the event's scene-typed fields, and a filter
+          // left on the old id never matches in the copy.
+          const data = node.data as DispatchNodeData | EventNodeData
           const { keyword, config } = data
           const frameEvent = frameEventsForScene(scene).find((event) => event.name === keyword)
-          if (!frameEvent?.fields?.find((field) => field.type === 'scene')) {
+          if (!config || !frameEvent?.fields?.find((field) => field.type === 'scene')) {
             return node
           }
           const newConfig = { ...config }
-          for (const field of frameEvent?.fields) {
+          for (const field of frameEvent.fields) {
             if (field.type === 'scene' && newConfig[field.name]) {
               newConfig[field.name] = getNewSceneId(String(newConfig[field.name]))
             }

@@ -1144,11 +1144,22 @@ static esp_err_t write_file_replace(const char *path, const char *tmp_path,
     return err;
 }
 
+/* A scene's own `setCurrentScene` dispatch, handed over by the Nim runtime.
+ * Runs on the render task under the runtime lock: queue only, like every
+ * other caller — fos_scenes_apply_pending_selection does the work. */
+static bool select_scene_from_runtime(const char *scene_id)
+{
+    return fos_scenes_select(scene_id) == ESP_OK;
+}
+
 esp_err_t fos_scenes_init(void)
 {
     if (s_scene_file_lock == NULL) {
         s_scene_file_lock = xSemaphoreCreateMutex();
     }
+    /* Before the mount: a frame whose /state failed still holds its bundled
+     * scenes, and a dispatch node switches between those too. */
+    frameos_nim_set_scene_select_hook(select_scene_from_runtime);
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
     load_etag();

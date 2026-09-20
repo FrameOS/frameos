@@ -544,6 +544,102 @@ suite "runner loop safety":
     finally:
       resetSetupCommandRunnerForTest()
 
+  test "a scene hears open every time it becomes current, and close carries nothing":
+    # The catalog always offered "open" and "close"; for an interpreted scene
+    # the runner never sent the first, and sent the second holding the NEXT
+    # scene's setCurrentScene payload.
+    clearEventChannel()
+    let sceneA = "tests/runner/lifecycle-a".SceneId
+    let sceneB = "tests/runner/lifecycle-b".SceneId
+    var heard: seq[(string, string, string)] = @[]
+    let record = proc (self: FrameScene, context: ExecutionContext): void =
+      if context.event in ["open", "close", "setCurrentScene"]:
+        heard.add((self.id.string, context.event, $context.payload))
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      for sceneId in [sceneA, sceneB]:
+        uploaded[sceneId] = ExportedInterpretedScene(
+          name: sceneId.string,
+          publicStateFields: @[],
+          persistedStateKeys: @[],
+          init: fastInit,
+          render: fastRender,
+          runEvent: record
+        )
+      updateUploadedScenes(uploaded)
+
+      var config = loadConfig()
+      config.controlCode = ControlCode(enabled: false, position: "center",
+        qrCodeColor: parseHtmlColor("#000000"), backgroundColor: parseHtmlColor("#ffffff"))
+      let store = LogStore(entries: @[])
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: sceneA,
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        logger: testLogger(config, store)
+      )
+
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 12)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 400)
+      let opens = proc (sceneId: SceneId): int =
+        heard.countIt(it[0] == sceneId.string and it[1] == "open")
+
+      check waitUntil(proc(): bool = opens(sceneA) == 1)
+      sendEvent("setCurrentScene", %*{"sceneId": sceneB.string, "state": {"secret": "for B"}})
+      check waitUntil(proc(): bool = opens(sceneB) == 1)
+      # Back to a scene that is still in memory: no init, but it is open again.
+      sendEvent("setCurrentScene", %*{"sceneId": sceneA.string})
+      check waitUntil(proc(): bool = opens(sceneA) == 2)
+      waitFor renderLoop
+      waitFor messageLoop
+
+      check heard == @[
+        (sceneA.string, "open", $(%*{"sceneId": sceneA.string})),
+        (sceneA.string, "close", "{}"),
+        (sceneB.string, "setCurrentScene", $(%*{"sceneId": sceneB.string, "state": {"secret": "for B"}})),
+        (sceneB.string, "open", $(%*{"sceneId": sceneB.string})),
+        (sceneB.string, "close", "{}"),
+        (sceneA.string, "setCurrentScene", $(%*{"sceneId": sceneA.string})),
+        (sceneA.string, "open", $(%*{"sceneId": sceneA.string})),
+      ]
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a key event is logged by name, never with what was typed":
+    clearEventChannel()
+    var config = loadConfig()
+    let store = LogStore(entries: @[])
+    var runnerThread = RunnerThread(
+      frameConfig: config,
+      scenes: initTable[SceneId, FrameScene](),
+      currentSceneId: getFirstSceneId(),
+      lastRenderAt: 0.0,
+      sleepFuture: none(Future[void]),
+      isRendering: false,
+      triggerRenderNext: false,
+      logger: testLogger(config, store)
+    )
+    let messageLoop = runnerThread.startMessageLoop(maxIterations = 6)
+    sendEvent("keyDown", %*{"key": "KEY_P", "code": 25})
+    sendEvent("keyUp", %*{"key": "KEY_P", "code": 25})
+    sendEvent("wheel", %*{"deltaX": 0, "deltaY": 1})
+    sendEvent("button", %*{"pin": 5, "label": "A", "level": 0})
+    waitFor messageLoop
+
+    check hasEvent(store, "event:keyDown")
+    check hasEvent(store, "event:keyUp")
+    check not hasEvent(store, "event:wheel")
+    for entry in store.entries:
+      if entry{"event"}.getStr().startsWith("event:key"):
+        check not entry.hasKey("payload")
+      check "KEY_P" notin $entry
+    # Everything else keeps its payload: a dead button is debugged from it.
+    check store.entries.anyIt(it{"event"}.getStr() == "event:button" and it{"payload"}{"pin"}.getInt() == 5)
+
   test "scene changes are logged while render logging is paused":
     let sceneId = "tests/runner/paused-scene-change".SceneId
     try:

@@ -5,6 +5,15 @@ Written 2026-09-20 against local `main` (`111a7103a`) plus `origin/main`
 from those trees. Everything under "Findings" was read out of the code; nothing
 here was bench-tested, and the items that need hardware to confirm say so.
 
+**Status.** The P0 bug list (§5) shipped together with this document, so §2–§3
+describe the tree *before* it. Fixed since: §3.3's `close` payload, the ESP32's
+scene-dispatched `setCurrentScene` and its render-on-every-press; §3.4's first
+and third bullets (`init`/`open` now reach top-level interpreted scenes on all
+three hosts, `close` too, with no payload); §3.5 #1–#3, #9 and #12 (relative
+mice, key repeat, tool buttons, key payloads in the log, a tested translator);
+and the small catalog/linter/duplicate items at the end of §3.1. `wheel` is a
+new event. Everything else stands.
+
 Scope: the scene event layer on every host that runs scenes — the Linux runtime
 (Raspberry Pi), the ESP32 firmware, the browser wasm preview — and the control
 planes and editor that feed it. The Pico thin client runs no scenes and has no
@@ -575,24 +584,23 @@ nodes into it.
 
 ## 5. Order of work
 
-**P0 — bugs, no design needed (each is a small PR with a test).**
-1. evdev: `value == 2` is repeat, not `keyUp`. Until the payload grows a
-   `repeat` flag, drop repeats rather than lie.
-2. evdev: stop logging `EV_REL`/unknown per event (log once per device/type);
-   then handle `EV_REL` motion and wheel properly (needs the host cursor, so
-   the log fix lands first).
-3. evdev: only `BTN_LEFT..BTN_TASK` and `BTN_TOUCH` are pointer buttons; ignore
-   `BTN_TOOL_*`; do not emit `button: -1`.
-4. runner: do not log key payloads (`event:keyDown` with the name only).
-5. Fire `init` and `open` for top-level interpreted scenes on all three hosts;
-   send `close` without the foreign payload.
-6. ESP32: a scene-dispatched `setCurrentScene` switches scenes; a button press
-   requests a render only if something handled it.
-7. Catalog: fix the `setCurrentScene` description; `button` says "pressed".
-   Cloud: `setSceneState` on the event route. Linter: honour `customEvents`.
-   `duplicateScenes`: remap scene ids in event-node filters.
-8. Pull the evdev translation into a pure proc with recorded-dump tests (it is
-   the prerequisite for 1–3 being regression-proof).
+**P0 — bugs, no design needed.** Shipped with this document. What it left
+for the later steps, on purpose:
+
+- The relative-mouse cursor lives in the evdev driver, in panel pixels, and is
+  not drawn. It does not know the frame's `rotate` (the driver context has no
+  such field), so on a rotated frame the mouse moves along the panel's axes.
+  The host-owned, drawn cursor is P3.
+- Key auto-repeat is dropped, not flagged; `repeat: true` is P3's payload.
+- "Handled" on the ESP32 means "a listener ran": a button press renders when
+  one did or when the scene dispatched `render`. The `renderAfter` rule is P2.
+- wasm still drops a dispatch made inside a handler (the `handlingEvent`
+  latch), a scene-dispatched `setCurrentScene` included. Queued delivery is P2.
+- The cloud's `setSceneState` rides on `set_current_scene` for the scene the
+  frame last reported, Linux profile only; the ESP32 verb drops `state`. The
+  `scene_event` verb (P2) replaces it.
+- No `close` on `reload` / `uploadScenes`, no `destroy`, no `reason` on `open`
+  (§4.4).
 
 **P1 — the spec.** `docs/events-contract.json`, the generators, `docs/events.md`,
 `docs/event-fixtures.json` with runners; replace the lists in §3.1. No

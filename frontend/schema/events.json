@@ -1,7 +1,7 @@
 [
   {
     "name": "init",
-    "description": "Triggered when the scene is first loaded.",
+    "description": "Once per scene, when it is first loaded and its apps are ready — before its first open and render.",
     "canListen": true,
     "fields": []
   },
@@ -14,7 +14,7 @@
   },
   {
     "name": "open",
-    "description": "Right after the scene is opened, either for the first time or after being closed and reopened.",
+    "description": "Every time the scene becomes the frame's current scene: at boot, and whenever the frame switches to it, including switching back.",
     "canListen": true,
     "fields": [
       {
@@ -27,7 +27,7 @@
   },
   {
     "name": "close",
-    "description": "Right before the scene is closed.",
+    "description": "When the frame switches away from the scene to another one. Carries no payload.",
     "canListen": true,
     "fields": []
   },
@@ -115,6 +115,25 @@
     ]
   },
   {
+    "name": "wheel",
+    "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. Linux frames only.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "deltaX",
+        "label": "Delta X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "deltaY",
+        "label": "Delta Y",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  {
     "name": "turnOn",
     "description": "Turn the screen on",
     "canListen": true,
@@ -130,7 +149,7 @@
   },
   {
     "name": "button",
-    "description": "When a GPIO button is pressed or released",
+    "description": "When a GPIO button is pressed",
     "canListen": true,
     "fields": [
       {
@@ -161,7 +180,7 @@
   },
   {
     "name": "setCurrentScene",
-    "description": "Set the scene's public state. This is not used for private state changes.",
+    "description": "Switch the frame to another scene. An optional `state` object is applied to that scene's public state.",
     "canDispatch": true,
     "fields": [
       {

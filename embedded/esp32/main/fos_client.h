@@ -26,6 +26,9 @@ void fos_client_render_recovery_boot(void);
 bool fos_client_render_paused(void);
 void fos_client_clear_render_pause(void);
 void fos_client_render_now(void);
+/* Cut the render task's wait short so queued input (button presses) reaches
+ * the scene promptly, WITHOUT asking for a render. */
+void fos_client_wake_for_events(void);
 /* Keep Wi-Fi/HTTP available briefly after a control request on deep-sleep frames. */
 void fos_client_keep_awake_ms(uint32_t ms);
 /* Stats for /status & console. */

@@ -183,6 +183,21 @@ void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
     s_render_buffer_release = release;
 }
 
+static bool (*s_scene_select)(const char *scene_id) = NULL;
+
+void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id))
+{
+    s_scene_select = select;
+}
+
+/* Called from Nim (embedded_runtime.nim), on the render task and under the
+ * runtime lock — so the hook must not call back into the runtime. */
+bool frameos_nim_request_scene_select(const char *scene_id)
+{
+    if (s_scene_select == NULL || scene_id == NULL || scene_id[0] == '\0') return false;
+    return s_scene_select(scene_id);
+}
+
 static void render_buffer_dispose(void *ptr)
 {
     if (ptr == NULL) return;

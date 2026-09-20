@@ -2877,6 +2877,53 @@ describe("frame management API", () => {
     expect(commands.some((command) => command.type === "set_display_power")).toBe(false);
   });
 
+  // setSceneState has no verb of its own yet; on the full runtime a
+  // set_current_scene that names the scene already showing IS "apply this
+  // state and render" (src/lib/frame-events.ts), so that is what is queued.
+  it("queues setSceneState as set_current_scene on the scene the frame is showing", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    // Nothing reported yet: no scene to aim at, and guessing would switch.
+    const unknown = await postFrameEvent(
+      postJson(`/api/frames/${frame_id}/event/setSceneState`, { state: { city: "Tartu" } }, { origin: baseUrl }),
+      { params: Promise.resolve({ eventName: "setSceneState", frameId: frame_id }) },
+    );
+    expect(unknown.status).toBe(409);
+    expect(await unknown.json()).toMatchObject({ error: "active_scene_unknown" });
+
+    await db
+      .update(frames)
+      .set({ lastState: { active_scene: "uploaded/clock" } })
+      .where(eq(frames.id, frame_id));
+
+    const missing = await postFrameEvent(
+      postJson(`/api/frames/${frame_id}/event/setSceneState`, {}, { origin: baseUrl }),
+      { params: Promise.resolve({ eventName: "setSceneState", frameId: frame_id }) },
+    );
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ error: "invalid_state" });
+
+    const response = await postFrameEvent(
+      postJson(
+        `/api/frames/${frame_id}/event/setSceneState`,
+        { render: true, state: { city: "Tartu" } },
+        { origin: baseUrl },
+      ),
+      { params: Promise.resolve({ eventName: "setSceneState", frameId: frame_id }) },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "queued", type: "set_current_scene" });
+    const commands = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame_id));
+    const queued = commands.filter((command) => command.type === "set_current_scene");
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.payload).toEqual({ scene_id: "uploaded/clock", state: { city: "Tartu" } });
+    expect(queued[0]?.expiresAt).not.toBeNull();
+  });
+
   // A scene the device does not hold cannot be selected: it answers
   // set_current_scene with `apply-failed` while the queue says delivered
   // (seen on an E1002 on 2026-08-27: a preview had replaced the device's
