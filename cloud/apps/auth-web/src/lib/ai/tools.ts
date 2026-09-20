@@ -411,7 +411,7 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
         },
         scene_version: {
           description:
-            "Pin this published version. Omit to track the latest version.",
+            "Pin this published version. Omit to install the newest version.",
           type: "integer",
         },
       },

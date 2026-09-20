@@ -1,0 +1,11 @@
+# What the R2-facing steps of buildroot-base-image.yml need on top of the
+# backend lock: the S3 client. Compiled against backend/requirements.txt so the
+# packages the two locks share (urllib3, python-dateutil, six…) stay at the
+# backend's pins and installing one after the other changes nothing.
+#
+# Refresh (after backend/bin/compile-requirements, or to bump boto3):
+#   uv pip compile tools/buildroot-images/requirements-upload.in \
+#     -c backend/requirements.txt --universal --python-version 3.12 \
+#     --generate-hashes --custom-compile-command "see requirements-upload.in" \
+#     -o tools/buildroot-images/requirements-upload.txt
+boto3

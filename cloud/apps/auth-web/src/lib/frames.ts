@@ -1129,8 +1129,8 @@ export async function computeAndStoreServiceSettingGroups(
 
 // Persist what a freshly assembled payload says each assignment declares
 // (grants untouched) and the frame row's granted union; returns the union.
-// Shared by the backfill above and by the re-push of an unpinned assignment
-// that may have moved to a newer version.
+// Shared by the backfill above and by the re-push of the current assignments
+// (where a yanked held version may have fallen through to a newer one).
 export async function storeDeclaredSettingsGroups(
   db: FramesDatabase,
   frameId: string,
@@ -1226,6 +1226,45 @@ export async function pinnedSceneVersion(
   return row;
 }
 
+// The version of a store scene the LAST assignment push to this frame carried
+// (frames.assigned_scene_state, written by every push). For a pinned
+// assignment that is the pin; for an unpinned one it is the version it was
+// installed or last updated at — the only record of which version the frame
+// was actually sent. Undefined on frames that predate the per-scene ledger.
+export function assignedSceneVersion(
+  frame: { assignedSceneState: unknown },
+  sceneId: string,
+): number | undefined {
+  const state = frame.assignedSceneState;
+  if (!state || typeof state !== "object") {
+    return undefined;
+  }
+  const version = (state as Record<string, { version?: unknown } | undefined>)[
+    sceneId
+  ]?.version;
+  return typeof version === "number" && Number.isInteger(version) && version > 0
+    ? version
+    : undefined;
+}
+
+// Which version of an assignment a push asks the store for: the pin; else,
+// for a scene that is not being moved to the latest, the version the frame
+// was last sent; else null — the newest one (a new install, an explicit
+// update, a frame from before the per-scene ledger).
+export function assignmentVersionToSend(
+  frame: { assignedSceneState: unknown },
+  assignment: { sceneId: string; sceneVersion: number | null | undefined },
+  latestSceneIds?: ReadonlySet<string> | undefined,
+): number | null {
+  if (assignment.sceneVersion !== null && assignment.sceneVersion !== undefined) {
+    return assignment.sceneVersion;
+  }
+  if (latestSceneIds?.has(assignment.sceneId)) {
+    return null;
+  }
+  return assignedSceneVersion(frame, assignment.sceneId) ?? null;
+}
+
 // One store scene's slice of an assignment push: the version that produced
 // the bytes and the checksum of just that scene's runtime scenes. Stored on
 // the frame as assigned_scene_state / deployed_scene_state so sync state can
@@ -1253,6 +1292,15 @@ export type AssignmentSettingsGroups = {
 export async function buildScenesPayloadForFrame(
   db: FramesDatabase,
   frameId: string,
+  {
+    latestSceneIds,
+  }: {
+    // Store scene ids whose UNPINNED assignment moves to the newest version
+    // on this build (an explicit update, a re-install, the workspace saving
+    // its own edit). Every other unpinned assignment holds the version the
+    // frame was last sent.
+    latestSceneIds?: ReadonlySet<string> | undefined;
+  } = {},
 ): Promise<
   | {
       scenes: unknown[];
@@ -1264,7 +1312,10 @@ export async function buildScenesPayloadForFrame(
   | { error: string }
 > {
   const [frameRow] = await db
-    .select({ accountId: frames.accountId })
+    .select({
+      accountId: frames.accountId,
+      assignedSceneState: frames.assignedSceneState,
+    })
     .from(frames)
     .where(eq(frames.id, frameId))
     .limit(1);
@@ -1308,27 +1359,40 @@ export async function buildScenesPayloadForFrame(
     ) {
       return { error: "scene_private" };
     }
-    const versionRows = await db
-      .select({
-        content: storeSceneVersions.content,
-        objectKey: storeSceneVersions.objectKey,
-        riskFlags: storeSceneVersions.riskFlags,
-        version: storeSceneVersions.version,
-      })
-      .from(storeSceneVersions)
-      .where(
-        and(
-          eq(storeSceneVersions.sceneId, assignment.sceneId),
-          isNull(storeSceneVersions.yankedAt),
-          ...(assignment.sceneVersion === null ||
-          assignment.sceneVersion === undefined
-            ? []
-            : [eq(storeSceneVersions.version, assignment.sceneVersion)]),
-        ),
-      )
-      .orderBy(desc(storeSceneVersions.version))
-      .limit(1);
-    const versionRow = versionRows[0];
+    const versionRowAt = async (version: number | null) => {
+      const [row] = await db
+        .select({
+          content: storeSceneVersions.content,
+          objectKey: storeSceneVersions.objectKey,
+          riskFlags: storeSceneVersions.riskFlags,
+          version: storeSceneVersions.version,
+        })
+        .from(storeSceneVersions)
+        .where(
+          and(
+            eq(storeSceneVersions.sceneId, assignment.sceneId),
+            isNull(storeSceneVersions.yankedAt),
+            ...(version === null
+              ? []
+              : [eq(storeSceneVersions.version, version)]),
+          ),
+        )
+        .orderBy(desc(storeSceneVersions.version))
+        .limit(1);
+      return row;
+    };
+    // An unpinned assignment is NOT "whatever is newest at this push": every
+    // push carries the whole set, so that moved every scene with a pending
+    // update whenever any one of them was updated, activated or saved. It
+    // holds what the frame was last sent; only a scene named in
+    // latestSceneIds moves. A held version that was yanked since falls
+    // through to the newest one.
+    const wanted = assignmentVersionToSend(frameRow, assignment, latestSceneIds);
+    const versionRow =
+      (await versionRowAt(wanted)) ??
+      (assignment.sceneVersion === null && wanted !== null
+        ? await versionRowAt(null)
+        : undefined);
     if (!versionRow) {
       return { error: "scene_version_missing" };
     }
@@ -2136,9 +2200,11 @@ export async function redeployAssignedScenesToFrame(
   if ("error" in built) {
     return { ok: false, error: built.error };
   }
-  // An unpinned assignment may have resolved to a newer version here. What
-  // it declares is refreshed; what it was granted is not widened — a version
-  // that starts asking for a new key does not get it until the owner says so.
+  // A re-push moves no scene: an unpinned assignment is sent at the version
+  // the frame already holds (only a held version that was yanked since falls
+  // through to a newer one). What that declares is refreshed; what it was
+  // granted is not widened — a version that starts asking for a new key does
+  // not get it until the owner says so.
   const serviceSettingGroups = await storeDeclaredSettingsGroups(
     db,
     frame.id,

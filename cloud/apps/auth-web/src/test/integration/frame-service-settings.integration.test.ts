@@ -27,6 +27,7 @@ import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/rou
 import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
 import { POST as addFrameScene } from "../../../app/api/frames/[frameId]/scenes/add/route";
+import { POST as updateFrameScene } from "../../../app/api/frames/[frameId]/scenes/update/route";
 import { POST as activateScene } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
 import {
   GET as listFrameScenes,
@@ -423,7 +424,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
     });
     await assignScene(frame.frame_id, scene.id, ["unsplash"]);
 
-    // v2 adds an OpenAI app. The assignment tracks the latest version.
+    // v2 adds an OpenAI app. The assignment is unpinned.
     await db.insert(storeSceneVersions).values({
       content: sceneZipWithKeywords(scene.id, ["data/unsplash", "data/openaiImage"]),
       contentType: "application/zip",
@@ -438,9 +439,9 @@ describe("service-settings delivery to a cloud-managed frame", () => {
       .set({ latestVersion: 2 })
       .where(eq(storeScenes.id, scene.id));
 
-    // Activating re-pushes the current assignments at their resolved
-    // versions (redeployAssignedScenesToFrame) and refreshes what they
-    // declare — but the owner never granted openAI.
+    // Activating re-pushes the current assignments
+    // (redeployAssignedScenesToFrame) at the versions the frame HOLDS: it is
+    // not an update, so nothing new is declared either.
     const activate = await activateScene(
       postJson(
         `/api/frames/${frame.frame_id}/event/setCurrentScene`,
@@ -450,6 +451,23 @@ describe("service-settings delivery to a cloud-managed frame", () => {
       { params: Promise.resolve({ eventName: "setCurrentScene", frameId: frame.frame_id }) },
     );
     expect(activate.status).toBe(200);
+    const [held] = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    expect(held?.declaredSettingsGroups).toEqual(["unsplash"]);
+
+    // The owner's "Update" moves it to v2, which declares more — but the
+    // owner never granted openAI.
+    const updated = await updateFrameScene(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes/update`,
+        { scene_id: scene.id },
+        { origin: baseUrl },
+      ),
+      { params: Promise.resolve({ frameId: frame.frame_id }) },
+    );
+    expect(updated.status).toBe(200);
     const [row] = await db
       .select()
       .from(frameSceneAssignments)

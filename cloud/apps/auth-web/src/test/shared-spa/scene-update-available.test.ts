@@ -169,6 +169,8 @@ describe("cloud: a store scene the frame holds an older version of", () => {
 
     expect(confirmMock).toHaveBeenCalledTimes(1);
     expect(confirmMock.mock.calls[0]![0].message).toContain("deployed right away");
+    // One scene with an update: nothing to offer beyond it.
+    expect(confirmMock.mock.calls[0]![0].extraAction).toBeUndefined();
     const update = apiFetchMock.mock.calls.find(([input]) => String(input).endsWith("/scenes/update"));
     // The active runtime scene rides along so the push does not switch scenes.
     expect(JSON.parse(String(update![1]!.body))).toEqual({ scene_id: storeSceneId, active_scene_id: "rt-1" });
@@ -203,6 +205,96 @@ describe("cloud: a store scene the frame holds an older version of", () => {
       expect(logic.values.installedScenes[0]?.nodes.map((node) => node.id)).toEqual(["render", "added-in-v5"]),
     );
     expect(logic.values.frameForm.name).toBe("Hallway (renamed, unsaved)");
+  });
+});
+
+describe("cloud: several scenes with an update", () => {
+  const otherStoreSceneId = "99999999-2222-4333-8444-555555555555";
+  let frameNumber = 0;
+  let frameId = "";
+  // Store scene id → the version the frame was sent.
+  let assigned: Record<string, number>;
+
+  beforeEach(() => {
+    frameNumber += 1;
+    frameId = `frame-upd-all-${frameNumber}`;
+    assigned = { [storeSceneId]: 3, [otherStoreSceneId]: 3 };
+    testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
+    apiFetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === `/api/frames/${frameId}/scenes/update` && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { scene_id?: string; scene_ids?: string[] };
+        const ids = body.scene_ids ?? [body.scene_id!];
+        ids.forEach((id) => (assigned[id] = 5));
+        return Response.json({
+          connected: true,
+          scene_version: 5,
+          scenes: ids.map((id) => ({ scene_id: id, scene_version: 5, updated: true })),
+          status: "queued",
+        });
+      }
+      if (url === `/api/frames/${frameId}/scenes`) {
+        return Response.json({
+          scenes: Object.entries(assigned).map(([scene_id, version]) => ({
+            assigned_version: version,
+            latest_version: 5,
+            scene_id,
+            scene_version: null,
+            update_available: version < 5,
+          })),
+        });
+      }
+      const scenesJson = url.match(/\/scenes\/([^/]+)\/scenes\.json(?:\?version=(\d+))?$/);
+      if (scenesJson) {
+        const [scene] = sceneJson(scenesJson[2] ? Number(scenesJson[2]) : 5) as Record<string, unknown>[];
+        const other = scenesJson[1] === otherStoreSceneId;
+        return Response.json([{ ...scene, ...(other ? { id: "rt-2", name: "Clock" } : {}) }]);
+      }
+      const frame = { id: frameId, name: "Hallway", mode: "embedded", last_state: { active_scene: "rt-1" } };
+      return url === "/api/frames" ? Response.json({ frames: [frame] }) : Response.json({ frame });
+    });
+    initKea();
+  });
+
+  it("offers \"Update all scenes (2)\" next to the one that was clicked, and sends them in one request", async () => {
+    framesModel.mount();
+    const logic = sceneUpdatesLogic({ frameId: frameId as unknown as FrameType["id"] });
+    logic.mount();
+    await waitFor(() => expect(logic.values.sceneUpdateVersions).toEqual({ "rt-1": "5", "rt-2": "5" }));
+
+    let updatingWhileDialogOpen: Record<string, boolean> | null = null;
+    confirmMock.mockImplementation(async (request) => {
+      expect(request.extraAction?.label).toBe("Update all scenes (2)");
+      const done = request.extraAction?.onConfirm();
+      updatingWhileDialogOpen = logic.values.updatingSceneIds;
+      await done;
+      return true;
+    });
+
+    logic.actions.confirmSceneUpdate("rt-1");
+    await waitFor(() => expect(logic.values.sceneUpdateVersions).toEqual({}));
+    expect(updatingWhileDialogOpen).toEqual({ "rt-1": true, "rt-2": true });
+    await waitFor(() => expect(logic.values.updatingSceneIds).toEqual({}));
+
+    const updates = apiFetchMock.mock.calls.filter(([input]) => String(input).endsWith("/scenes/update"));
+    expect(updates).toHaveLength(1);
+    expect(JSON.parse(String(updates[0]![1]!.body))).toEqual({
+      active_scene_id: "rt-1",
+      scene_ids: [storeSceneId, otherStoreSceneId],
+    });
+  });
+
+  it("the main button still updates only the scene that was clicked", async () => {
+    framesModel.mount();
+    const logic = sceneUpdatesLogic({ frameId: frameId as unknown as FrameType["id"] });
+    logic.mount();
+    await waitFor(() => expect(logic.values.sceneUpdateVersions).toEqual({ "rt-1": "5", "rt-2": "5" }));
+
+    logic.actions.confirmSceneUpdate("rt-2");
+    await waitFor(() => expect(logic.values.sceneUpdateVersions).toEqual({ "rt-1": "5" }));
+    const update = apiFetchMock.mock.calls.find(([input]) => String(input).endsWith("/scenes/update"));
+    expect(JSON.parse(String(update![1]!.body))).toEqual({ active_scene_id: "rt-1", scene_id: otherStoreSceneId });
   });
 });
 

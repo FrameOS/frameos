@@ -12,10 +12,22 @@ docker_pid=""
 mkdir -p db
 
 # Persist a stable local secret so sessions survive container recreation.
+# Appended, never truncated: the file is also where a developer keeps the
+# other variables they pass to the container (FRAMEOS_CLOUD_URL, REDIS_URL…),
+# and a missing SECRET_KEY line must not cost them the rest. It holds a
+# secret, so it is created 0600 and an existing looser file is tightened.
 if ! grep -q '^SECRET_KEY=' "$ENV_FILE" 2>/dev/null; then
   SECRET_KEY="$(openssl rand -base64 32 | tr -d '\n')"
-  printf 'SECRET_KEY=%s\n' "$SECRET_KEY" > "$ENV_FILE"
+  (
+    umask 077
+    # A last line without a newline would otherwise swallow the new key.
+    if [ -s "$ENV_FILE" ] && [ -n "$(tail -c 1 "$ENV_FILE")" ]; then
+      printf '\n' >> "$ENV_FILE"
+    fi
+    printf 'SECRET_KEY=%s\n' "$SECRET_KEY" >> "$ENV_FILE"
+  )
 fi
+chmod 600 "$ENV_FILE"
 
 docker build -t "$IMAGE_NAME" .
 

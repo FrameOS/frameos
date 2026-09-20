@@ -3555,6 +3555,121 @@ describe("scene updates: a newer store version of an assigned scene", () => {
     expect(payload.scene_id).toBe("runtime-active");
   });
 
+  it("updates ONE unpinned scene: the others stay at the version the frame holds", async () => {
+    // The push carries the whole set, and it used to resolve every unpinned
+    // assignment to its newest version: "Update" on one scene updated all of
+    // them, and the other "Update" flags vanished with it.
+    const { accountId, frame_id } = await confirmedFrame();
+    const target = await createStoreScene(accountId, { name: "Asked for" });
+    const bystander = await createStoreScene(accountId, { name: "Unpinned bystander" });
+    await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: target.id }, { scene_id: bystander.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    await publishSceneVersion(target.id, 2);
+    await publishSceneVersion(bystander.id, 2);
+
+    const response = await update(frame_id, { scene_id: target.id });
+    expect(response.status).toBe(200);
+
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 2, scene_id: target.id, scene_version: null, update_available: false },
+      { assigned_version: 1, scene_id: bystander.id, scene_version: null, update_available: true },
+    ]);
+    const pending = (await setScenesCommands(frame_id)).filter((command) => command.status === "pending");
+    expect(pending).toHaveLength(1);
+    const payload = pending[0]?.payload as { scenes: { id: string }[] };
+    expect(payload.scenes.map((scene) => scene.id)).toEqual([`${target.id}-v2`, bystander.id]);
+  });
+
+  it("updates several named scenes in ONE push, and still leaves the rest alone", async () => {
+    // The dialog's "Update all scenes (N)".
+    const { accountId, frame_id } = await confirmedFrame();
+    const unpinned = await createStoreScene(accountId, { name: "All: unpinned" });
+    const pinned = await createStoreScene(accountId, { name: "All: pinned" });
+    const current = await createStoreScene(accountId, { name: "All: already current" });
+    const notNamed = await createStoreScene(accountId, { name: "All: not named" });
+    await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        {
+          scenes: [
+            { scene_id: unpinned.id },
+            { scene_id: pinned.id, scene_version: 1 },
+            { scene_id: current.id },
+            { scene_id: notNamed.id },
+          ],
+        },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    await publishSceneVersion(unpinned.id, 2);
+    await publishSceneVersion(pinned.id, 2);
+    await publishSceneVersion(notNamed.id, 2);
+    const before = (await setScenesCommands(frame_id)).length;
+
+    const response = await update(frame_id, { scene_ids: [unpinned.id, pinned.id, current.id] });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      scenes: [
+        { previous_version: 1, scene_id: unpinned.id, scene_version: 2, updated: true },
+        { previous_version: 1, scene_id: pinned.id, scene_version: 2, updated: true },
+        { previous_version: 1, scene_id: current.id, scene_version: 1, updated: false },
+      ],
+      status: "queued",
+    });
+    expect(await setScenesCommands(frame_id)).toHaveLength(before + 1);
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 2, scene_id: unpinned.id, scene_version: null, update_available: false },
+      { assigned_version: 2, scene_id: pinned.id, scene_version: 2, update_available: false },
+      { assigned_version: 1, scene_id: current.id, update_available: false },
+      { assigned_version: 1, scene_id: notNamed.id, update_available: true },
+    ]);
+
+    // Nothing left to do for those three: no push.
+    const again = await update(frame_id, { scene_ids: [unpinned.id, pinned.id, current.id] });
+    expect(await again.json()).toMatchObject({ command_id: null, status: "up_to_date" });
+    expect(await setScenesCommands(frame_id)).toHaveLength(before + 1);
+
+    expect((await update(frame_id, { scene_ids: [] })).status).toBe(400);
+    expect((await update(frame_id, { scene_ids: [unpinned.id, "nope"] })).status).toBe(400);
+  });
+
+  it("re-posting the scene list moves no unpinned scene unless the entry says latest", async () => {
+    const { accountId, frame_id } = await confirmedFrame();
+    const edited = await createStoreScene(accountId, { name: "Edited in the workspace" });
+    const bystander = await createStoreScene(accountId, { name: "Held" });
+    const post = (scenes: Record<string, unknown>[]) =>
+      assignFrameScenes(
+        postJson(`/api/frames/${frame_id}/scenes`, { scenes }, { origin: baseUrl }),
+        routeParams(frame_id),
+      );
+    await post([{ scene_id: edited.id }, { scene_id: bystander.id }]);
+    await publishSceneVersion(edited.id, 2);
+    await publishSceneVersion(bystander.id, 2);
+
+    // A plain save (a grant change, a reorder): both stay where they are.
+    expect((await post([{ scene_id: bystander.id }, { scene_id: edited.id }])).status).toBe(200);
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 1, scene_id: bystander.id, update_available: true },
+      { assigned_version: 1, scene_id: edited.id, update_available: true },
+    ]);
+
+    // The workspace's Save names the scene it just published.
+    expect((await post([{ scene_id: bystander.id }, { latest: true, scene_id: edited.id }])).status).toBe(200);
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 1, scene_id: bystander.id, update_available: true },
+      { assigned_version: 2, scene_id: edited.id, scene_version: null, update_available: false },
+    ]);
+
+    expect((await post([{ latest: "yes", scene_id: edited.id }])).status).toBe(400);
+  });
+
   it("updates a scene that follows the latest without pinning it", async () => {
     const { accountId, frame_id } = await confirmedFrame();
     const scene = await createStoreScene(accountId, { name: "Follower update" });

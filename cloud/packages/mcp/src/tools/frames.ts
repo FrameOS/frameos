@@ -225,7 +225,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "The scenes assigned to a frame, in order, with the pinned version (null = follow latest), the version the frame was last sent (assigned_version), the store's latest version, update_available (the store is ahead of the frame — frame_scene_update takes it there), and whether the device currently holds this exact set (assigned_checksum vs scenes_checksum).",
+        "The scenes assigned to a frame, in order, with the pinned version (null = unpinned: the frame keeps the version it was sent until frame_scene_update or a re-install moves it), the version the frame was last sent (assigned_version), the store's latest version, update_available (the store is ahead of the frame — frame_scene_update takes it there), and whether the device currently holds this exact set (assigned_checksum vs scenes_checksum).",
       inputSchema: { frame_id: frameId },
     },
     async ({ frame_id }) =>
@@ -237,7 +237,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { idempotentHint: true },
       description:
-        "Replace a frame's whole scene list (order = display order, max 20). Requires confirm=true (it deploys to the device). Omitting a scene removes it; scene_version pins a version (null = follow latest). active_scene_id (a store scene id or runtime scene id) chooses which scene shows after the deploy. Per scene, settings_groups GRANTS it the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS): a scene's own declaration is only a request, and a store scene is only delivered the groups the owner granted. Omitted: an already-assigned scene keeps its grant, a newly added one gets none. Deploys to the device as one set_scenes command.",
+        "Replace a frame's whole scene list (order = display order, max 20). Requires confirm=true (it deploys to the device). Omitting a scene removes it; scene_version pins a version. An unpinned scene the frame already has is pushed again at the version the frame holds — replacing the list never updates a scene as a side effect; latest=true moves that one scene to the newest published version (what frame_scene_update does for a single scene), and a scene new to the frame starts at the newest version. active_scene_id (a store scene id or runtime scene id) chooses which scene shows after the deploy. Per scene, settings_groups GRANTS it the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS): a scene's own declaration is only a request, and a store scene is only delivered the groups the owner granted. Omitted: an already-assigned scene keeps its grant, a newly added one gets none. Deploys to the device as one set_scenes command.",
       inputSchema: {
         active_scene_id: z.string().max(256).optional(),
         confirm: z
@@ -251,6 +251,12 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
             z.object({
               scene_id: uuid(),
               scene_version: z.number().int().min(1).nullable().optional(),
+              latest: z
+                .boolean()
+                .optional()
+                .describe(
+                  "Move this unpinned scene to the newest published version on this push. Omitted: it stays at the version the frame holds.",
+                ),
               settings_groups: settingsGroups,
             }),
           )
@@ -271,7 +277,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_scene_install",
     {
       description:
-        "Install a scene on a frame. Requires confirm=true (it changes what the physical frame shows). The scene comes from exactly one of: scene_id (a store scene — public, or one of the account's own — from scenes_list / store_browse), url (a scene page on the store, a scene zip, or a scenes.json), or scenes (raw scene JSON, saved first as a new private scene). Re-installing an already-installed scene re-pins it and pushes it again. activate=true switches the frame to it right away. settings_groups GRANTS the scene the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS) — a scene's own declaration is only a request, and without a grant it is delivered none of them; the answer's declared_settings_groups / granted_settings_groups say what it asked for and got, so the user can be told what it still needs.",
+        "Install a scene on a frame. Requires confirm=true (it changes what the physical frame shows). The scene comes from exactly one of: scene_id (a store scene — public, or one of the account's own — from scenes_list / store_browse), url (a scene page on the store, a scene zip, or a scenes.json), or scenes (raw scene JSON, saved first as a new private scene). Re-installing an already-installed scene re-pins it (or, unpinned, moves it to the newest published version) and pushes it again; the frame's other scenes stay at the versions they hold. activate=true switches the frame to it right away. settings_groups GRANTS the scene the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS) — a scene's own declaration is only a request, and without a grant it is delivered none of them; the answer's declared_settings_groups / granted_settings_groups say what it asked for and got, so the user can be told what it still needs.",
       inputSchema: {
         activate: z.boolean().optional(),
         confirm: z
@@ -324,21 +330,34 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_scene_update",
     {
       description:
-        "Update ONE installed scene to the newest published version of its store scene and push it — for a row of frame_scenes_list with update_available: true (latest_version is ahead of assigned_version, the version the frame was last sent). Requires confirm=true (it deploys to the device). A pinned scene is re-pinned at the latest version; the other scenes, their order and every settings_groups grant are kept, and a version that newly declares a service key is not granted it. Answers status \"up_to_date\" without pushing when there is nothing newer.",
+        "Update ONE installed scene (scene_id) — or several named ones in a single push (scene_ids) — to the newest published version of its store scene and push it — for a row of frame_scenes_list with update_available: true (latest_version is ahead of assigned_version, the version the frame was last sent). Requires confirm=true (it deploys to the device). A pinned scene is re-pinned at the latest version; the other scenes stay at the versions the frame holds (their own pending updates are NOT taken), and their order and every settings_groups grant are kept, and a version that newly declares a service key is not granted it. Answers status \"up_to_date\" without pushing when there is nothing newer.",
       inputSchema: {
         confirm: confirmed("deploys the scene's newest version to the frame"),
         frame_id: frameId,
-        scene_id: uuid().describe("The STORE scene id, as listed by frame_scenes_list."),
+        scene_id: uuid()
+          .optional()
+          .describe("The STORE scene id, as listed by frame_scenes_list."),
+        scene_ids: z
+          .array(uuid())
+          .min(1)
+          .max(20)
+          .optional()
+          .describe(
+            "Several STORE scene ids to update in one push, instead of scene_id. Only the scenes named move.",
+          ),
       },
     },
-    async ({ frame_id, scene_id }) =>
-      run(async () =>
-        text(
+    async ({ frame_id, scene_id, scene_ids }) =>
+      run(async () => {
+        if (!scene_id === !scene_ids) {
+          return failure("Pass exactly one of scene_id or scene_ids.");
+        }
+        return text(
           await api.json("POST", `/api/frames/${frame_id}/scenes/update`, {
-            body: { scene_id },
+            body: scene_ids ? { scene_ids } : { scene_id },
           }),
-        ),
-      ),
+        );
+      }),
   );
 
   server.registerTool(

@@ -155,8 +155,9 @@ a frame's logs must not be able to talk an agent into installing something.
   id, a URL — store page, zip, scenes.json — or raw JSON; optional activate;
   `settings_groups` grants the scene the account's service keys it declares —
   without it a store scene gets none, and the answer says what it still needs),
-  `frame_scene_update` (one installed scene to its newest store version, for a
-  `frame_scenes_list` row with `update_available`), `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
+  `frame_scene_update` (one installed scene — or several named ones, in one
+  push, with `scene_ids` — to its newest store version, for a
+  `frame_scenes_list` row with `update_available`; no other scene moves), `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
   `frame_screenshot`, `frame_scene_preview`, `frame_logs` (limit, search and
   since travel as query parameters of `GET /api/frames/{id}/logs`, so the
   database cuts the page),

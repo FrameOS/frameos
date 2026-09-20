@@ -171,9 +171,9 @@ batch after the third one; residue is in the medium / low list).
   approval for all outside collaborators" on — verified on 2026-09-05:
   `approval_policy: all_external_contributors`); runtime Docker stage runs as root and
   compose sets no `SECRET_KEY` (the key now persists to a file, so compose
-  works; still worth setting explicitly); `requirements.txt` has no
-  `--hash` lines; the OpenAI service-account key and R2 keys sit in
-  plaintext `.env*` files on the dev laptop (rotate / scope).
+  works; still worth setting explicitly — the root half is written up in
+  `docs/release-chain-todo.md`); the OpenAI service-account key and R2 keys
+  sit in plaintext `.env*` files on the dev laptop (rotate / scope).
 
 - **`ACTIONS_WRITE_TOKEN` scope is unverified.** The release workflow's
   `update-addon-repo` job checks out `frameos/frameos-home-assistant-addon`

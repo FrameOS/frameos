@@ -98,6 +98,8 @@ export interface CloudScenePersistOptions {
 interface AssignmentPlan {
   scene_id: string
   scene_version?: number | null
+  /** Push the store's newest version of this (unpinned) scene, not the held one. */
+  latest?: boolean | undefined
   /** The grant this save posts for the scene; omitted = keep as is. */
   settings_groups?: string[] | undefined
 }
@@ -252,8 +254,10 @@ async function persistAndPushCloudFrameScenesNow(
       assignments.push({
         scene_id: row.scene_id,
         // A pinned assignment follows the edit it just made; an unpinned one
-        // keeps tracking latest (which now IS the edit).
+        // is moved to the latest (which now IS the edit) — the only scene of
+        // this push that moves, the rest stay at the version the frame holds.
         scene_version: row.scene_version ? (version ?? null) : null,
+        latest: true,
         settings_groups: keptGrant(row),
       })
     } catch (error) {

@@ -164,7 +164,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     "scene_update_content",
     {
       description:
-        "Save new scenes JSON to one of the account's scenes as a new immutable version (versions are never overwritten). `message` is the changelog note (max 200 chars). Frames following 'latest' pick the new version up on their next deploy (frame_scene_install re-deploys).",
+        "Save new scenes JSON to one of the account's scenes as a new immutable version (versions are never overwritten). `message` is the changelog note (max 200 chars). Frames that have the scene installed keep the version they hold until frame_scene_update (or a frame_scene_install re-install) moves them to the new one.",
       inputSchema: {
         message: z.string().max(200).optional(),
         scene_id: sceneId,

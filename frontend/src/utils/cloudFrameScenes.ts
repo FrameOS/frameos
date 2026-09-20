@@ -18,11 +18,12 @@ import type { FrameScene } from '../types'
 export interface CloudFrameSceneRow {
   /** STORE scene uuid — not the runtime scene id inside scenes.json. */
   scene_id: string
-  /** null/undefined = the assignment tracks the latest published version. */
+  /** null/undefined = unpinned: installed at the newest version, then held at
+   * the version the frame was sent until an update moves it. */
   scene_version?: number | null
-  /** The version the frame was last SENT: the pin, or what "latest" resolved
-   * to at the last push. Null when nothing records it (a frame from before
-   * the per-scene ledger that follows the latest). */
+  /** The version the frame was last SENT: the pin, or the version an unpinned
+   * scene was installed or last updated at. Null when nothing records it (an
+   * unpinned scene on a frame from before the per-scene ledger). */
   assigned_version?: number | null
   /** The store's newest version of this scene. */
   latest_version?: number | null

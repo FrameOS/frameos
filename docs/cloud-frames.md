@@ -1119,12 +1119,17 @@ scene that wants a key it does not have:
   over the frame it holds, so an absent field keeps its last known value.
 
 **Scene updates.** An assignment names a store scene and, optionally, a
-pinned version; one without a pin *follows the latest* — but only at push
-time, so a frame is never at "latest", it is at whatever version its last
-push carried. `GET /api/frames/{id}/scenes` says so per scene:
+pinned version. One without a pin starts at the newest published version and
+then *stays at the version the frame was sent*: every push carries the whole
+scene set, and each unpinned scene goes out again at the version the frame
+holds (`frames.assigned_scene_state`) unless that push moves it explicitly —
+the update below, a re-install (`POST …/scenes/add`), or an entry of
+`POST …/scenes` with `"latest": true` (the workspace's Save sets it on the
+scene it just edited). A held version that was yanked falls through to the
+newest one. `GET /api/frames/{id}/scenes` says where each scene is:
 `scene_version` (the pin, or null), `assigned_version` (the version the frame
-was last sent, from the per-scene deploy ledger; null only on a frame that
-predates the ledger and follows the latest), `latest_version`, and
+was last sent, from the per-scene deploy ledger; null only on an unpinned
+scene of a frame that predates the ledger), `latest_version`, and
 `update_available` — the store is ahead of the frame AND the account can still
 install the scene (not pulled, not taken private by its publisher). The
 workspace shows the *assigned* version's content, lays an "Update" flag over
@@ -1138,19 +1143,26 @@ POST {provider}/api/frames/{id}/scenes/update
 {"scene_id": "<store scene uuid>", "active_scene_id"?: "<runtime scene id>"}
 ```
 
-which moves that one scene to the newest published version and enqueues the
+— or `"scene_ids": ["<uuid>", …]` for the dialog's second button, "Update all
+scenes (N)", offered when more than one scene has an update: every named
+scene moves in ONE push, and the answer's `scenes` says per scene what
+happened (`scene_id`, `previous_version`, `scene_version`, `updated`). The
+call moves the named scenes to the newest published version and enqueues the
 `set_scenes` push: a pinned assignment is re-pinned there (it stays a pin),
-one that follows the latest needs no rewrite. Every other assignment, the
-order and every service-settings grant are kept — a version that newly
+an unpinned one is the only scene the push resolves to the newest version.
+Every other assignment stays at the version the frame holds (its own pending
+update is not taken), and the order and every service-settings grant are kept — a version that newly
 declares a group is not granted it. `active_scene_id` is the scene the push
 should leave on screen. The answer carries `scene_version`,
 `previous_version`, `command_id` and `status`: `queued`, or `up_to_date` with
 no push at all when the frame was already sent the newest version (a battery
 frame is not woken for nothing). `404 scene_not_assigned` when the scene is
 not on the frame; the assignment gates (`invalid_scene`, `scene_not_allowed`,
-`scene_version_missing`, `frame_not_active`) apply unchanged. Any other push
-— a Save, an activate on an out-of-sync frame, the hub's empty-store resync —
-still resolves a following assignment to the latest, as before.
+`scene_version_missing`, `frame_not_active`) apply unchanged. No other push
+— a Save, a grant change, an activate on an out-of-sync frame, the hub's
+empty-store resync — moves a scene: until 2026-09-20 they all resolved every
+unpinned assignment to the newest version, so "Update" on one scene updated
+every scene on the frame.
 
 The metrics routes return `{"metrics": [...], "reboots": [...]}`, matching the
 self-hosted backend. Markers are derived from the device's own

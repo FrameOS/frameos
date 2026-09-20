@@ -1,6 +1,7 @@
 # Runtime-only top-level backend dependencies for the Docker image.
-# Keep this as a subset of requirements.in. Docker constrains these packages
-# with requirements.txt, while Flox installs the full development lock.
+# Keep this as a subset of requirements.in. Docker installs these packages at
+# the versions AND hashes of requirements.txt (tools/hashed_subset.py), while
+# Flox installs the full development lock.
 aiofiles
 aiomqtt
 alembic
