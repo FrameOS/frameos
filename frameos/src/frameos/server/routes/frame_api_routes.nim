@@ -96,9 +96,15 @@ proc storedSceneImagePayload(sceneId: string, thumb = false): tuple[status: Http
 proc renderStatusScreenPng(): string =
   ## The status screen as it would render right now, on this frame's panel
   ## size — the same builder and painter the runner uses for `system/index`.
-  let frameConfig = globalFrameConfig
-  let logger = if globalFrameOS != nil: globalFrameOS.logger else: nil
-  let scene = indexScene.init(SceneId(StatusScreenSceneId), frameConfig, logger, %*{})
+  ##
+  ## On a config and a scene of this worker's own. The scene keeps the config
+  ## (and would keep the logger) it is given, and an owning copy of the
+  ## runtime's FrameConfig or Logger taken on a mummy worker races the
+  ## runner's refcounts on the same objects — the Logger carries closures, so
+  ## it would also land in this thread's cycle roots (docs/todo.md, "refs
+  ## shared across HTTP worker threads"). Drawing the screen logs nothing.
+  let frameConfig = requestFrameConfig()
+  let scene = indexScene.init(SceneId(StatusScreenSceneId), frameConfig, nil, %*{})
   let image = case frameConfig.rotate:
     of 90, 270: newImage(frameConfig.height, frameConfig.width)
     else: newImage(frameConfig.width, frameConfig.height)
@@ -127,8 +133,12 @@ proc sceneCoverPngFromBytes(content: string): string =
   ## Any image the decoder knows (PNG, JPEG, GIF, BMP, QOI, SVG) becomes the
   ## PNG the snapshot store serves, decoded at no more than the panel's size:
   ## a store cover is a picture of the scene, and a scene is the panel.
-  let frameConfig = globalFrameConfig
-  let image = decodeImageBounded(content, max(1, frameConfig.width), max(1, frameConfig.height))
+  var width, height: int
+  {.gcsafe.}:
+    # Scalar reads: no reference to the shared config is taken.
+    width = globalFrameConfig.width
+    height = globalFrameConfig.height
+  let image = decodeImageBounded(content, max(1, width), max(1, height))
   image.encodeImage(PngFormat)
 
 proc sceneCoverFromUrl(url: string): tuple[ok: bool, status: HttpCode, detail: string, png: string] =
@@ -189,7 +199,10 @@ proc copySceneImagePayload(sceneId: string, body: JsonNode): tuple[status: HttpC
 proc queueRuntimeControl(request: Request, action: string, eventName: string) {.gcsafe.} =
   try:
     {.gcsafe.}:
-      discard loadConfig()
+      # Validation only, and with readConfig: loadConfig also points pixie's
+      # SVG font lookup at the assets folder through a global string, which
+      # is the render thread's to write.
+      discard readConfig()
     sendEvent(eventName, %*{})
     jsonResponse(request, Http200, %*{"status": "ok", "action": action})
   except CatchableError as e:
@@ -573,12 +586,12 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
         return
-      let payload =
+      var payload =
         try:
           parseJson(if request.body.strip().len == 0: "{}" else: request.body)
         except JsonParsingError:
           jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
           return
-      sendEvent("uploadScenes", payload)
+      sendEventOwned("uploadScenes", move(payload))
       jsonResponse(request, Http200, %*{"status": "ok"})
   )

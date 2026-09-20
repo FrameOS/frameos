@@ -180,6 +180,19 @@ proc pruneLoginStates(state: JsonNode): bool {.discardable.} =
     state["login_states"].delete(byAge[i][1])
     result = true
 
+proc safeCloudErrorCode*(value: string): string =
+  ## The provider's `error` query parameter, as it may go back out in a
+  ## Location header. It arrives URL-DECODED, so `%0d%0a` is a real CR LF by
+  ## the time it gets here, and it used to be appended to the redirect as is:
+  ## a response header of the caller's choosing. OAuth error codes are
+  ## `[a-z_]`; anything else collapses to the generic one.
+  if value.len == 0 or value.len > 64:
+    return "exchange_failed"
+  for ch in value:
+    if ch notin {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '_', '-', '.'}:
+      return "exchange_failed"
+  value
+
 proc redirectResponse(request: Request, location: string) =
   var headers: mummy.HttpHeaders
   headers["Location"] = location
@@ -525,7 +538,7 @@ proc addCloudApiRoutes*(router: var Router) =
         ownerAccountId = state{"account_id"}.getStr("")
 
       if errorParam.len > 0:
-        redirectResponse(request, "/login?cloudError=" & errorParam)
+        redirectResponse(request, "/login?cloudError=" & safeCloudErrorCode(errorParam))
         return
       if code.len == 0 or not adminAuthEnabled():
         redirectResponse(request, "/login?cloudError=exchange_failed")

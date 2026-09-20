@@ -575,10 +575,9 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
         # Same bounded enqueue as channels.sendEvent, but the caller learns
         # whether the event actually made it: a dropped `uploadScenes` must not
         # be acked as a successful deploy (the provider would never re-push).
-        {.gcsafe.}:
-          result = eventChannel.trySend((none(SceneId), event, payload))
-          if not result:
-            atomicInc(eventsDroppedCounter),
+        # The runner gets its own copy of the payload: this thread goes on
+        # reading the command it came in (channels.nim, isolatedPayload).
+        trySendEvent(event, payload),
       persistSettingsFn: proc(payload: JsonNode) {.gcsafe.} =
         {.gcsafe.}:
           persistFrameApiUpdate(payload),

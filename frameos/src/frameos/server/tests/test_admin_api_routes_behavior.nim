@@ -186,6 +186,34 @@ suite "admin api route behavior":
     check eventPayload[1] == "unit:test"
     check eventPayload[2]["value"].getInt() == 7
 
+    # No "payload" key at all: `payload{"payload"}` is nil, and asking nil for
+    # its `.kind` was a segfault that took the whole runtime down.
+    let bare = httpRequest(
+      server.port,
+      "POST",
+      "/api/frames/1/event",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{"event": "unit:bare"}),
+    )
+    check bare.status == 200
+    let (bareReceived, barePayload) = eventChannel.tryRecv()
+    check bareReceived
+    check barePayload[1] == "unit:bare"
+    check barePayload[2].kind == JObject
+    check barePayload[2].len == 0
+
+    # A body that is not JSON is the caller's mistake, not a 500.
+    for path in ["/api/frames/1/event", "/api/frames/1/event/test"]:
+      let garbled = httpRequest(
+        server.port,
+        "POST",
+        path,
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = "{not json",
+      )
+      check garbled.status == 400
+    check not eventChannel.tryRecv()[0]
+
   test "admin asset endpoints upload rename delete and download within assets root":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{

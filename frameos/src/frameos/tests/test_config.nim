@@ -148,3 +148,32 @@ block test_error_behavior_legacy_silent_retry_minutes:
 
     doAssert config.mode == "silent_retry"
     doAssert config.silentWindowMinutes == 7
+
+block test_replace_settings_never_frees_the_outgoing_node:
+    # The service-key saves run on an HTTP worker and on the hub client's
+    # thread while an app on the render thread reads `frameConfig.settings`.
+    # The swap must leave the node a reader already holds alive and intact.
+    let config = parseFrameConfig($(%*{"settings": {"openAI": {"apiKey": "old"}}}))
+    let before {.cursor.} = config.settings
+    for round in 0 ..< 50:
+        replaceFrameConfigSettings(config, %*{"openAI": {"apiKey": "new-" & $round}})
+        # Allocation churn: a freed node's memory would be reused by now.
+        for i in 0 ..< 200:
+            discard parseJson("""{"a":[1,2,3],"b":{"c":"dddddddddddddddd"}}""")
+    doAssert before{"openAI"}{"apiKey"}.getStr() == "old"
+    doAssert config.settings{"openAI"}{"apiKey"}.getStr() == "new-49"
+    replaceFrameConfigSettings(config, nil)
+    doAssert config.settings.isNil
+    replaceFrameConfigSettings(nil, %*{})
+
+block test_read_config_has_no_side_effects_on_the_loaded_object:
+    withConfig($(%*{"name": "Read Me", "width": 640, "height": 400}), proc() =
+        let first = readConfig()
+        let second = readConfig()
+        doAssert first.name == "Read Me"
+        doAssert first.width == 640
+        # Each call is the caller's own object, nested sections included.
+        doAssert cast[pointer](first) != cast[pointer](second)
+        doAssert cast[pointer](first.network) != cast[pointer](second.network)
+        doAssert loadConfig().name == "Read Me"
+    )

@@ -112,15 +112,22 @@ proc metricsEntryFromLog(logEntry: JsonNode): JsonNode =
   except CatchableError:
     return nil
 
-proc storeUiLog*(logEntry: JsonNode) =
+proc storeUiLog*(logEntry: sink JsonNode) =
+  ## Takes the node over: once it is in the deque it belongs to whoever holds
+  ## globalRecentLogsLock, and the caller must not touch it again — not even
+  ## to serialise it. The log thread used to store the entry and THEN build
+  ## the WebSocket message from the same node, outside the lock, while the
+  ## workers copied it under the lock; two threads moving one node's
+  ## refcounts is the bug the readers below were already fixed for.
+  # Read for the metrics buffer while the entry is still this thread's alone.
+  var metricEntry = metricsEntryFromLog(logEntry)
   {.gcsafe.}:
     withLock globalRecentLogsLock:
       globalRecentLogs.addLast(logEntry)
       while globalRecentLogs.len > MAX_RECENT_LOGS:
         discard globalRecentLogs.popFirst()
-      let metricEntry = metricsEntryFromLog(logEntry)
       if metricEntry != nil:
-        globalRecentMetrics.addLast(metricEntry)
+        globalRecentMetrics.addLast(move(metricEntry))
         while globalRecentMetrics.len > MAX_RECENT_METRICS:
           discard globalRecentMetrics.popFirst()
 

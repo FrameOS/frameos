@@ -22,7 +22,7 @@
 ## needs to see them. Nothing else in the runtime should parse a config type
 ## from JSON — go through parseFrameConfig / loadConfig.
 
-import json, jsony, pixie, os, strutils, parseutils
+import json, jsony, pixie, os, strutils, parseutils, locks
 import zippy
 import frameos/hal/files
 import frameos/local_access
@@ -361,16 +361,19 @@ proc getConfigFilename*(overridePath = ""): string =
   if result == "":
     result = "./frame.json"
 
-proc loadConfig*(configPath = ""): FrameConfig =
+proc readConfig*(configPath = ""): FrameConfig =
+  ## frame.json as the runtime would load it, into an object only the caller
+  ## holds — and nothing else: no process-wide state is touched. This is the
+  ## one for any thread that is not the runtime's own (the HTTP workers
+  ## validating a save, answering the admin API, drawing the status screen):
+  ## the live FrameConfig's nested refs are the runner's, and a worker that
+  ## copies one races its refcounts (docs/todo.md, "refs shared across HTTP
+  ## worker threads").
   let path = getConfigFilename(configPath)
   let encoded = readTextFile(path)
   result = parseFrameConfig(if path.endsWith(".gz"): uncompress(encoded) else: encoded)
   if commandLineParams().contains("--debug"):
     result.debug = true
-  # SVG <text> resolves font-family names against the same fonts directory the
-  # text apps use. pixie asks through a global hook, so it has to be told where
-  # the assets live once, here, rather than per render.
-  setSvgFontAssetsPath(result.assetsPath)
   # The private-network elevation lives in state/, not here — a backend deploy
   # rewrites frame.json wholesale and would drop it. Fold the stored value in
   # on every load, including the reload after a deploy, so the in-memory config
@@ -379,9 +382,22 @@ proc loadConfig*(configPath = ""): FrameConfig =
   result.network.allowLocalNetworkAccess =
     resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
 
+proc loadConfig*(configPath = ""): FrameConfig =
+  ## readConfig for the runtime itself (boot, the runner's reload).
+  result = readConfig(configPath)
+  # SVG <text> resolves font-family names against the same fonts directory the
+  # text apps use. pixie asks through a global hook, so it has to be told where
+  # the assets live once, here, rather than per render. The hook's path is a
+  # plain global string: only the runtime's own thread may call this, which
+  # is why the HTTP routes validate a config with readConfig instead.
+  setSvgFontAssetsPath(result.assetsPath)
+
 # Every FrameConfig payload that has ever been live, kept for the life of the
 # process. See updateFrameConfigFrom.
 var retiredFrameConfigs: seq[FrameConfig] = @[]
+var retiredSettingsNodes: seq[JsonNode] = @[]
+var retiredConfigLock: Lock
+initLock(retiredConfigLock)
 
 proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   ## Reload in place: every holder of the FrameConfig ref (the runner, the
@@ -402,7 +418,40 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
     return
   {.gcsafe.}:
     let retired = FrameConfig()
-    copyMem(addr retired[], addr target[], sizeof(target[]))
-    copyMem(addr target[], addr source[], sizeof(target[]))
-    retiredFrameConfigs.add(retired)
-    retiredFrameConfigs.add(source)
+    withLock retiredConfigLock:
+      copyMem(addr retired[], addr target[], sizeof(target[]))
+      copyMem(addr target[], addr source[], sizeof(target[]))
+      retiredFrameConfigs.add(retired)
+      retiredFrameConfigs.add(source)
+
+proc replaceFrameConfigSettings*(target: FrameConfig, settings: sink JsonNode) =
+  ## `target.settings = settings` for a config other threads are reading.
+  ##
+  ## The service-key saves are not the runner's: the admin page's
+  ## `POST /api/settings` runs on a mummy worker and the cloud's settings pull
+  ## on the hub client's thread, while the render thread reads
+  ## `frameConfig.settings{"openAI"}{"apiKey"}` from inside an app. A plain
+  ## assignment drops the outgoing node's last reference and frees it under
+  ## that reader — updateFrameConfigFrom's problem, one field wide. Same
+  ## answer: swap the pointer without running a destructor and park both nodes
+  ## for the life of the process (a save is rare and the object is a few
+  ## hundred bytes). The caller hands over a node nothing else holds (`sink`:
+  ## a fresh `copy(...)` or `%*{...}` is moved in), so every refcount change
+  ## below happens before another thread can see the node and none after.
+  if target == nil:
+    return
+  {.gcsafe.}:
+    withLock retiredConfigLock:
+      var incoming = move(settings)
+      if incoming != nil:
+        # The list's own reference, taken before any other thread can see the
+        # node: racing readers then never hold the last one.
+        retiredSettingsNodes.add(incoming)
+      var outgoing: JsonNode
+      copyMem(addr outgoing, addr target.settings, sizeof(pointer))
+      copyMem(addr target.settings, addr incoming, sizeof(pointer))
+      # `incoming`'s reference now belongs to the field, the field's old one
+      # to `outgoing`.
+      wasMoved(incoming)
+      if outgoing != nil:
+        retiredSettingsNodes.add(move(outgoing))

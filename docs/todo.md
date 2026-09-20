@@ -128,15 +128,62 @@ the heap followed. Fixed by caching plain values (`AdminAuthValues`) and
 building a fresh node per call; `test_auth.nim` has a four-thread regression
 test that reproduces it on the old code under libc malloc.
 
-Left: audit the rest of `server/` for the same shape — `globalFrameConfig`'s
-nested refs read from handlers (`frameAdminAuth`, `httpsProxy`, `network`,
-`agent` — field reads of scalars are fine, copying a nested ref or calling
-`{}` on a shared JsonNode is not), `globalRecentLogs` / `globalRecentMetrics`
-(JsonNodes appended by the logger and read by `/api/admin/logs`: keep every
-read under `globalRecentLogsLock` and serialize there, never return a node),
-and any other `var … : JsonNode` at module level. Rule for new code: a
-global that crosses threads holds values or is only ever read under the same
-lock that writes it; hand out copies, not refs.
+The rest of `server/` was audited 2026-09-19. What it found, all fixed and
+pinned by tests (`test_public_state_threads.nim`, `test_state.nim`,
+`test_channels.nim`, `test_config.nim`):
+
+- **`getLastPublicState()` handed the runner's `StateField` refs to every
+  worker** and took an owning copy of the `ExportedScene` to reach them —
+  on every `/image`, `/state`, `/c` and `GET /api/frames/1`. Four threads
+  doing that segfault within a second under libc malloc, every run; one
+  thread passes. An ExportedScene carries closures, so ORC also filed it in
+  the *worker's* cycle roots, where the runner's final decref cannot find it.
+  The registry now keeps the public fields as plain values
+  (`publicStateFieldValues`) and readers build their own;
+  `getLastPublicSceneState()` is the cheap one for callers that only want
+  the id and the timestamp.
+- **The admin API's frame payload shallow-copied the live config**
+  (`complete[] = config[]`: a reference to every nested object, per request,
+  per worker). It, the status screen drawn on request and the `/reload`
+  validation now work on `requestFrameConfig()` / `readConfig()` — this
+  thread's own parse of frame.json, with no process-wide side effect
+  (`loadConfig` also rewrites the path pixie resolves SVG fonts against).
+- **`POST /api/settings` and the cloud settings pull assigned
+  `globalFrameConfig.settings`**, freeing the old node under an app reading
+  its API key on the render thread. `replaceFrameConfigSettings` swaps the
+  pointer and parks both nodes, like `updateFrameConfigFrom`; the admin save
+  also takes `frameConfigWriteLock` now (it was the one frame.json writer
+  that did not).
+- **Event payloads were shared with the runner.** A `Channel` MOVES its
+  message under ORC (the deep copy is refc's), so `sendEvent(name, payload)`
+  left the HTTP worker and the runner holding one JsonNode. `sendEvent`
+  sends a copy; `sendEventOwned(name, move(payload))` hands over a fresh
+  parse for the scene uploads that are too big to hold twice.
+- **The log thread serialised an entry after storing it**, outside the lock
+  the workers copy it under. `storeUiLog` takes the node over (`sink`).
+
+Rule for new code: a global that crosses threads holds values or is only ever
+read under the same lock that writes it; hand out copies, not refs; a worker
+never takes an owning copy (`let x = global.ref`) of something the runner
+owns — field reads of scalars are fine.
+
+Left, deliberately:
+
+- `portal.nim` as the HTTP workers call it on the setup path
+  (`persistPortalSetup` copies and mutates the live `frameConfig`,
+  `setupHtml` / `setupStatusJson` read it). Only reachable while the setup
+  hotspot is up, when nothing else is running; not audited line by line.
+- The cloud link routes pass `globalFrameConfig` to `startCloudHubClient` /
+  `enrollManagedFrame` / `pollDeviceFlow`, which keep it: one owning copy of
+  the ROOT per link, never freed (the globals hold it), no closures in the
+  type. The proper fix is for the hub client to work on values, as the
+  logger and metrics threads already do.
+- Workers still read scalar and string fields straight off the live config
+  (`frameAccess`, `frameAccessKey`, `serverApiKey`, `assetsPath`, `rotate`…).
+  `updateFrameConfigFrom` never frees a payload, so the read cannot land on
+  freed memory, but the swap is a `copyMem` and a string is two words: a
+  reload can in principle tear one. A values snapshot for `auth.nim` (what
+  `AdminAuthValues` is for the admin block) would close it.
 
 ---
 

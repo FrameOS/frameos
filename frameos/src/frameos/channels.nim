@@ -38,6 +38,9 @@ when defined(frameosDriverLibrary):
         payloadText.cstring,
       )
 
+  proc sendEventOwned*(event: string, payload: sink JsonNode) {.gcsafe.} =
+    sendEvent(event, payload)
+
   proc log*(event: JsonNode) {.gcsafe.} =
     if not sharedHostLogHook.isNil:
       let eventText = $event
@@ -73,6 +76,9 @@ elif defined(frameosEmbedded) or defined(frameosWasm):
   proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
     if not embeddedEventHook.isNil:
       embeddedEventHook(scene, event, payload)
+
+  proc sendEventOwned*(event: string, payload: sink JsonNode) {.gcsafe.} =
+    sendEvent(event, payload)
 
   proc log*(eventPayload: JsonNode) {.gcsafe.} =
     if not embeddedLogHook.isNil:
@@ -114,14 +120,39 @@ else:
   # resets it and reports the total when it catches up.
   var eventsDroppedCounter*: Atomic[int]
 
+  # The payload changes threads here, and under ORC a Channel MOVES its
+  # message — the deep copy in the channel docs is refc's (system/
+  # channels_builtin: `copyMem` when usesDestructors). Sending the caller's
+  # node would leave the HTTP worker (or the scheduler, the hub client, a
+  # touch driver) and the runner holding one JsonNode, each moving its
+  # refcounts without the other knowing: the sender's scope exit races the
+  # runner's first read. So the runner gets a tree nobody else has.
+  proc isolatedPayload(payload: JsonNode): JsonNode =
+    if payload.isNil: nil else: copy(payload)
+
   # Send an event to the current scene
   proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
-    if not eventChannel.trySend((none(SceneId), event, payload)):
+    if not eventChannel.trySend((none(SceneId), event, isolatedPayload(payload))):
       atomicInc(eventsDroppedCounter)
 
   # Send an event to a specific scene
   proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
-    if not eventChannel.trySend((scene, event, payload)):
+    if not eventChannel.trySend((scene, event, isolatedPayload(payload))):
+      atomicInc(eventsDroppedCounter)
+
+  proc trySendEvent*(event: string, payload: JsonNode): bool {.gcsafe.} =
+    ## sendEvent for a caller that has to know whether the event was queued
+    ## (the hub client must not ack a scene push the runner never saw).
+    result = eventChannel.trySend((none(SceneId), event, isolatedPayload(payload)))
+    if not result:
+      atomicInc(eventsDroppedCounter)
+
+  proc sendEventOwned*(event: string, payload: sink JsonNode) {.gcsafe.} =
+    ## sendEvent without the copy, for a payload too big to hold twice (a
+    ## scene upload is megabytes of JSON on a 512 MB frame). The caller gives
+    ## the tree up: pass a fresh parse with `move`, keep no reference to it or
+    ## to any node inside it.
+    if not eventChannel.trySend((none(SceneId), event, payload)):
       atomicInc(eventsDroppedCounter)
 
   # Log

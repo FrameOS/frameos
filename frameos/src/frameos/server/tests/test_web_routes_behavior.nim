@@ -5,6 +5,7 @@ import zippy
 import ../../[channels, types]
 import ./helpers/http_harness
 import ../[auth, state]
+from ../routes/web_routes import cachedAvailableNetworks, resetWifiScanCacheForTest
 
 var server = startRouterServer(19331)
 
@@ -604,3 +605,21 @@ suite "web route behavior":
     check hotspot.status == 200
     let payload = parseJson(hotspot.body)
     check payload.hasKey("networks")
+
+  test "the open wifi scan runs once for everyone who asks":
+    resetWifiScanCacheForTest()
+    var scans = 0
+    let scan = proc(): seq[string] {.gcsafe.} =
+      {.cast(gcsafe).}:
+        inc scans
+        if scans == 1: @[] else: @["Home", "Neighbour"]
+    # An empty answer is not kept (the first scan after the hotspot comes up).
+    check cachedAvailableNetworks(scan).len == 0
+    check cachedAvailableNetworks(scan) == @["Home", "Neighbour"]
+    for i in 0 ..< 20:
+      check cachedAvailableNetworks(scan) == @["Home", "Neighbour"]
+    check scans == 2
+    resetWifiScanCacheForTest()
+    check cachedAvailableNetworks(scan) == @["Home", "Neighbour"]
+    check scans == 3
+    resetWifiScanCacheForTest()
