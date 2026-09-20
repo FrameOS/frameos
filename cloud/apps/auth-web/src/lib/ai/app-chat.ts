@@ -128,6 +128,13 @@ Rules for edits:
 - The runtime is QuickJS, not Node: no npm packages, no require(), no filesystem, no DOM. Relative
   imports of the app's own files are fine (and you may add a file by writing it through the tool);
   JSX only in .tsx/.jsx. Use the ambient FrameOS helpers already visible in the app's own source.
+- The app may run on an ESP32 frame — a microcontroller whose few MB of RAM are shared by the canvas, the
+  JS heap and the network stack — so be clever about data structures and behaviour. Parsed objects cost
+  10-20x their JSON text: keep big tables as compact strings (SVG path "d" strings, delimited text), not
+  object/array literals. Keep only the fields you draw from a fetched payload, slice lists before mapping
+  them, build strings with one array + join(""), and never park whole responses in module variables or
+  app.state. An app that re-renders every second or faster sets its state up once in init() and updates
+  it in place: no per-frame objects, closures, fetches or JSON.parse, and capped particle counts.
 - Keep it TypeScript-shaped and readable; match the surrounding style.
 - If the request is ambiguous, ask one question instead of guessing at a rewrite.
 

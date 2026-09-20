@@ -77,6 +77,25 @@ Rules:
 - Write readable code: normal formatting, one statement per line, blank lines between functions, short
   comments where logic is not obvious, descriptive names. Never minify or pack code onto single lines —
   users open and edit this code in the scene editor.
+- Memory: the same scene may run on an ESP32 frame — a microcontroller whose few MB of RAM are shared by
+  the canvas, the JS heap, fonts and the network stack, where a Raspberry Pi has hundreds. Write every
+  code node and JS app as if for that device, and be clever about data structures and behaviour:
+  * Parsed objects cost 10-20x their JSON text (boxed numbers, nested arrays). Never embed big object or
+    array literals (GeoJSON, coordinate lists, lookup tables) — ship such data as compact strings, which
+    cost about 1x: precomputed SVG path "d" strings, delimited text you split on demand.
+  * Keep only what you draw: pull the few fields you need out of a fetched payload straight away, slice
+    lists to what fits on screen BEFORE mapping over them, ask an API for fewer rows and fields when it
+    lets you, and never park whole responses in module-level variables or app.state.
+  * Build output once: collect parts in one array and join("") at the end instead of growing strings in
+    nested loops or chaining map/filter/concat copies of a large array. Keep generated SVG small — round
+    coordinates to one decimal, thin polylines to what the pixel grid can show, scale a shape with one
+    <g transform="translate(x y) scale(s)"> instead of recomputing its points, and stay in the hundreds
+    of elements, not thousands.
+  * Scenes that re-render every second or faster: set state up once in init(), then update it in place —
+    flat arrays of numbers and fixed-size pools; no new objects, closures or big strings per frame, no
+    fetch or JSON.parse in the render path, and a hard cap on particle/sprite counts.
+  This is about what stays alive and how much is allocated, not about terse code — the readability rule
+  above still holds.
 - JS app contract: a scene-local app is category "data" (or "logic") and exports
   "export function get(app, context)" returning the value named in config.json "output" — a string/json,
   or frameos.svg(...) / frameos.image(...) for an image output. It is NOT part of the prev/next chain: wire

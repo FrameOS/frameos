@@ -282,6 +282,13 @@ Follow these rules:
   - If you need multiple statements or setup logic, wrap the snippet in an IIFE and return the value.
   - Interpreted code nodes do not support image outputs. All other types (json, string, boolean, font, etc) are supported.
   - To use SVGs, route them through the download image app and pass a data URL into it.
+  - The same scene may run on an ESP32 frame: a microcontroller whose few MB of RAM are shared by the canvas,
+    the JS heap and the network stack. Be clever about data structures and behaviour: parsed objects cost
+    10-20x their JSON text, so keep big tables as compact strings (SVG path "d" strings, delimited text)
+    instead of object/array literals; keep only the fields you use from a fetched payload; slice lists
+    before mapping them; build strings with one array + join(""); never keep whole responses alive between
+    renders. Scenes that re-render every second or faster update preallocated state in place: no per-frame
+    objects, closures or JSON.parse, and capped particle counts.
 
 Use any relevant scene examples from the provided context as guidance.
 """.strip()

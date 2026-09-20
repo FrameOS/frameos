@@ -249,6 +249,36 @@ keeps the build's default, `0` disables the ceiling.
 | `memoryLimitMb` | 256 (Pi), 8 (ESP32) | JS heap **per scene**, shared by the scene's code-node context and every JS app node's runtime. One node hoarding the heap fails with `out of memory`; the frame's other scenes are unaffected. |
 | `dispatchBudget` | 64 | Events a single render or event may fire through dispatch nodes. A handler that dispatches its own event is an unbounded chain; past the budget the run's dispatches are dropped, once with an `interpreter:dispatch:ignored` log line (`reason: dispatchBudget`). The ESP32, which runs events synchronously, also refuses events nested more than four deep. |
 
+## Write for the smallest frame
+
+The scene that runs on a Raspberry Pi with hundreds of MB also gets installed
+on an ESP32, where a few MB of PSRAM hold the canvas, the JS heap (the 8 MB
+`memoryLimitMb` above is a ceiling, not what is free), fonts and the network
+stack. A scene that ignores this renders in the preview and fails with
+`out of memory` on the device. What matters is what stays alive and how much a
+render allocates — not terse code:
+
+- **Parsed objects cost 10–20× their JSON text** (boxed numbers, nested
+  arrays); strings cost about 1×. Do not embed big object or array literals
+  (GeoJSON, coordinate lists, lookup tables). Ship such data as compact
+  strings — precomputed SVG path `d` strings, delimited text split on demand.
+  A world map as a 260 KB GeoJSON literal held 4.3 MB of heap and never
+  rendered; as 68 KB of path strings it renders in 3.5 s.
+- **Keep only what you draw.** Pull the fields you need out of a fetched
+  payload straight away, slice lists to what fits on screen *before* mapping
+  over them, ask the API for fewer rows and fields when it lets you, and do
+  not park whole responses in module-level variables or `app.state`.
+- **Build output once.** Collect parts in one array and `join("")` at the end
+  rather than growing strings in nested loops or chaining
+  `map`/`filter`/`concat` copies of a large array. Keep generated SVG small:
+  round coordinates to one decimal, thin polylines to what the pixel grid can
+  show, scale a shape with one `<g transform="translate(x y) scale(s)">`
+  instead of recomputing its points, and stay in the hundreds of elements.
+- **Scenes that re-render every second or faster** set their state up once in
+  `init()` and update it in place: flat arrays of numbers and fixed-size
+  pools, no new objects, closures or big strings per frame, no fetch or
+  `JSON.parse` in the render path, and a hard cap on particle counts.
+
 ## Checklist before shipping a scene
 
 - Every `data.config` key is a field of the app; select values are one of the options.
@@ -260,3 +290,4 @@ keeps the build's default, `0` disables the ceiling.
 - Time formatting uses `{hour/2}`-style tokens.
 - Scene-local JS apps are data apps exporting `get`, wired into `render/image`.
 - SVG uses only the supported tags; gradients are top-level `linearGradient` with `userSpaceOnUse`.
+- Nothing big is embedded as an object literal or kept alive between renders (see "Write for the smallest frame").

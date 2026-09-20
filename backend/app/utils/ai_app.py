@@ -22,6 +22,13 @@ You are editing a FrameOS app. Apps may be written in Nim or in QuickJS JavaScri
 For Nim apps, you have access to the Nim version 2.2 STL and the following nimble packages:
 pixie v6.1.0, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, QRGen 3.1.0, zippy 0.10.19, chroma 1.0.0, bumpy 1.1.3
 
+JavaScript/TypeScript apps may run on an ESP32 frame: a microcontroller whose few MB of RAM are shared by the
+canvas, the JS heap and the network stack. Be clever about data structures and behaviour: parsed objects cost
+10-20x their JSON text, so keep big tables as compact strings instead of object/array literals; keep only the
+fields you use from a fetched payload; slice lists before mapping them; build strings with one array + join("");
+never keep whole responses alive between renders. An app that re-renders every second or faster updates
+preallocated state in place: no per-frame objects, closures or JSON.parse, and capped particle counts.
+
 Return the modified files in full with the changes inlined. Only modify what is necessary.
 Return JSON only with:
 - reply: a brief summary of the changes.
