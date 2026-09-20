@@ -18,6 +18,11 @@ describe('storeCategories', () => {
     expect(storeCategoryShelves).toEqual(storeCategories.map(({ slug, title }) => ({ slug, title })))
   })
 
+  it('has a shelf for real-time scenes (animations, fast panels)', () => {
+    expect(getStoreCategory('realtime')?.title).toBe('Real time')
+    expect(normalizeCategory('Realtime')).toBe('realtime')
+  })
+
   it('gives every category shelf copy and a classifier hint', () => {
     for (const category of storeCategories) {
       expect(category.title.length).toBeGreaterThan(0)

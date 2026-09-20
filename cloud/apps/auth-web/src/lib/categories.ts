@@ -61,6 +61,13 @@ export const storeCategories: StoreCategory[] = [
     hint: "entertainment: comics, jokes, games, novelty content",
   },
   {
+    slug: "realtime",
+    title: "Real time",
+    description:
+      "Scenes that move: animations and live visuals redrawn many times a second, best on HDMI and LCD panels.",
+    hint: "animates continuously, re-rendering every second or faster (bouncing logos, moving clock hands, particle or physics animations, live visualisations); built for fast HDMI/LCD panels rather than e-ink",
+  },
+  {
     slug: "utilities",
     title: "Tools & utilities",
     description:
