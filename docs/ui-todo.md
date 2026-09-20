@@ -33,8 +33,11 @@ an LCD and merely current on Spectra 6.
 - **Partial-refresh scaffolding.** `driver_render_hint.nim` passes timing
   hints host↔driver; waveshare has `renderImagePartial` and per-panel
   `supportsPartialRefresh` (mostly `false` today).
-- **The wasm preview** runs interpreted scenes in the browser — the natural
-  place for instant UI iteration once clicks pass through.
+- **The wasm preview** runs interpreted scenes in the browser, and the pointer
+  over its canvas reaches the scene as the evdev events (`mouseMove` 0..32767,
+  `mouseDown`/`mouseUp`; `frameos/wasm/src/pointer.ts`, scaled by the same
+  `pointerToScenePoint` the runner uses) — the natural place for instant UI
+  iteration.
 
 ## Standing decisions
 
@@ -132,9 +135,10 @@ events itself.
    flip `supportsPartialRefresh` per verified panel; keep the
    partials-before-full bookkeeping honest. Spectra 6 stays full-refresh —
    the model still works, it just refreshes at panel speed.
-7. **Preview + editor.** Pass clicks/taps/keys from the wasm preview into the
-   scene (browser events → `dispatchSceneEvent` shim); focus simulation for
-   GPIO frames in the device picker; scene-store lint rules for the new
+7. **Preview + editor.** Pass keys from the wasm preview into the scene
+   (`keyDown`/`keyUp` with evdev key names; the pointer already passes);
+   focus simulation for GPIO frames in the device picker; scene-store lint
+   rules for the new
    vocabulary (`ai-scene.ts` and the field-type checklists apply).
 8. **ESP32.** Same Nim layout/painter compiles in; measure flash cost before
    merging (firmware-size CI catches it), keep the handler table inside the

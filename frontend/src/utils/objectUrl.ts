@@ -93,3 +93,19 @@ export function openBlobInNewTab(blob: Blob, win: Window | null): void {
   window.setTimeout(revoke, OPEN_IN_NEW_TAB_REVOKE_FALLBACK_MS)
   win.location.href = url
 }
+
+/**
+ * Open the image a canvas holds in a new tab. The window is opened
+ * synchronously so popup blockers count it as user-initiated; the blob URL is
+ * filled in once the canvas has been encoded.
+ */
+export function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
+  const win = window.open('', '_blank')
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      win?.close()
+      return
+    }
+    openBlobInNewTab(blob, win)
+  }, 'image/png')
+}

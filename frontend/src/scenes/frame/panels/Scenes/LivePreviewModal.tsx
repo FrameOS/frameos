@@ -2,6 +2,7 @@ import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { memo, useEffect, useRef, useState } from 'react'
 import {
+  ArrowTopRightOnSquareIcon,
   BoltIcon,
   CheckIcon,
   CursorArrowRaysIcon,
@@ -27,7 +28,6 @@ import { previewSkipsNimMessage } from '../../../../utils/sceneExecution'
 import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import type { FrameId } from '../../../../types'
-import { openBlobInNewTab } from '../../../../utils/objectUrl'
 import { sceneStateFields } from '../../../../utils/refreshInterval'
 
 // Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
@@ -50,20 +50,6 @@ export function formatTimestamp(isoTimestamp: string): string {
   }${date.getDate()} ${date.getHours() < 10 ? '0' : ''}${date.getHours()}:${
     date.getMinutes() < 10 ? '0' : ''
   }${date.getMinutes()}:${date.getSeconds() < 10 ? '0' : ''}${date.getSeconds()}`
-}
-
-// Open the current canvas image in a new tab. The window is opened
-// synchronously so popup blockers count it as user-initiated; the blob URL is
-// filled in once the canvas has been encoded.
-export function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
-  const win = window.open('', '_blank')
-  canvas.toBlob((blob) => {
-    if (!blob) {
-      win?.close()
-      return
-    }
-    openBlobInNewTab(blob, win)
-  }, 'image/png')
 }
 
 // Runtime log lines are mostly JSON like {"event":"debug","message":"..."}.
@@ -179,6 +165,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
   const {
     closeLivePreview,
     registerCanvas,
+    openPreviewImage,
     dispatchPreviewEvent,
     forcePreviewRender,
     setFastMode,
@@ -331,11 +318,12 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
               ref={registerCanvas}
               width={previewDimensions.width}
               height={previewDimensions.height}
-              className="max-h-[50vh] max-w-full cursor-zoom-in"
-              title="Open image in a new tab"
-              onClick={(event) => openCanvasImageInNewTab(event.currentTarget)}
+              className="max-h-[50vh] max-w-full"
               style={{
                 imageRendering: 'pixelated',
+                // Taps and sideways drags are the scene's; a vertical swipe
+                // still scrolls the dialog on a phone.
+                touchAction: 'pan-y pinch-zoom',
                 aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}`,
               }}
             />
@@ -410,6 +398,15 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button size="small" color="secondary" onClick={forcePreviewRender}>
               Re-render
+            </Button>
+            <Button
+              size="small"
+              color="secondary"
+              aria-label="Open image in a new tab"
+              title="Open image in a new tab"
+              onClick={openPreviewImage}
+            >
+              <ArrowTopRightOnSquareIcon className="h-4 w-4" />
             </Button>
             <Button
               size="small"

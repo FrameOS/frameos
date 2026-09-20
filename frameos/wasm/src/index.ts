@@ -28,6 +28,17 @@ export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } fro
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
 export { selectFieldOptions } from './options'
 export {
+  POINTER_AXIS_MAX,
+  attachPointerInput,
+  pointerAxis,
+  pointerButton,
+  pointerMovePayload,
+  pointerPictureRect,
+  type AttachPointerOptions,
+  type PointerEventSink,
+  type PointerRect,
+} from './pointer'
+export {
   REFRESH_INTERVAL_FIELD_NAME,
   REFRESH_INTERVAL_LABEL,
   REFRESH_INTERVAL_ROLE,
@@ -43,6 +54,7 @@ export {
 } from './showIf'
 export {
   LIFECYCLE_EVENTS,
+  POINTER_EVENTS,
   sceneEventButtons,
   type ConfigFieldCondition,
   type ConfigFieldConditionAnd,

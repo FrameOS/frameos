@@ -248,6 +248,15 @@ suite "image helpers":
             let point = panelToScenePoint(x, y, panel.width, panel.height, rotate, flip)
             check pixel(scene, point.x, point.y).r == pixel(panel, x, y).r
 
+  test "pointerToScenePoint scales a 0..32767 pointer onto the scene's canvas":
+    check pointerToScenePoint(0, 0, 800, 480, 0, "") == (x: 0, y: 0)
+    check pointerToScenePoint(PointerAxisMax, PointerAxisMax, 800, 480, 0, "") == (x: 799, y: 479)
+    check pointerToScenePoint(PointerAxisMax div 2, PointerAxisMax div 2, 800, 480, 0, "") == (x: 399, y: 239)
+    # Out-of-range input (a drag that left the canvas) stays on the canvas.
+    check pointerToScenePoint(-5, 40000, 800, 480, 0, "") == (x: 0, y: 479)
+    # A rotated frame: the panel's top-right corner is the scene's top-left.
+    check pointerToScenePoint(PointerAxisMax, 0, 480, 800, 90, "") == (x: 0, y: 0)
+
   test "previewTransform handles inverse rotation before preview flip":
     let original = testImage(2, 3)
     var deviceInput = testImage(2, 3)

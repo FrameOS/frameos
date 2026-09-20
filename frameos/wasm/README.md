@@ -52,6 +52,28 @@ preview.selectScene('sceneId')
 preview.destroy()
 ```
 
+### Pointer input
+
+```ts
+const detach = preview.attachPointerInput(canvas) // the painted canvas, or any mirror of it
+```
+
+The pointer over the canvas reaches the scene as the events a frame's mouse or touchscreen
+sends (`frameos/src/drivers/evdev`): `mouseMove` `{x, y}`, then `mouseDown` / `mouseUp`
+`{button}` — 0 left or a touch, 1 right, 2 middle. The page sends positions as 0..32767 across
+the picture and the runtime hands the scene its own pixels, exactly like the runner on a frame,
+so a scene that hit-tests `context.payload.x` behaves the same in both places. As on a frame,
+pointer events do not render by themselves: a scene that wants a new picture dispatches
+`render`. Moves are sent once per animation frame and coalesced again in the worker; a press
+captures the pointer, so a drag that leaves the canvas still ends with its `mouseUp`; the right
+button is a button, not the browser's menu. Give the canvas `touch-action: pan-y pinch-zoom`
+(or `none`) so a finger's drag is the scene's rather than a scroll.
+
+Nothing is forwarded to a runtime bundle from before pointer input
+(`preview.runtimeInfo.pointerEvents === false`): it would hand scenes the raw 0..32767 range
+and render on every move. `mountFrameOSManager` attaches this for you, and scene event buttons
+skip the three pointer events.
+
 ### Render pacing
 
 Renders are throttled to one per second. A scene that asks for more (a 24 fps slideshow with
