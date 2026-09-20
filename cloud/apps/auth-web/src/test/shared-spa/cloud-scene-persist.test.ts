@@ -224,6 +224,37 @@ describe("cloud scene persistence", () => {
     expect(outcome.notes).toEqual(['Saved the edited "Abstract Architecture" as a new private cloud scene']);
   });
 
+  it("marks only the scene it edited as `latest`: the push moves nothing else", async () => {
+    // The server re-sends an unpinned scene at the version the frame holds
+    // unless the entry says `latest` — so the edit has to say it, and a
+    // bystander with a pending update must not.
+    const store = fakeStore();
+    store.scenes.set("mine-1", { scenes: [storedScene("rt-1", "Clock")], owned: true, version: 1 });
+    store.scenes.set("public-1", {
+      history: { 3: [storedScene("rt-2", "Abstract Architecture")] },
+      owned: false,
+      scenes: [storedScene("rt-2", "Abstract Architecture v5")],
+      version: 5,
+    });
+    store.assignments = [{ scene_id: "mine-1" }, { assigned_version: 3, latest_version: 5, scene_id: "public-1" }];
+    installFetch(store);
+
+    const editedMine = sanitizedCopy(storedScene("rt-1", "Clock"));
+    editedMine.nodes = [];
+    await persistAndPushCloudFrameScenes(
+      frameId,
+      [editedMine, sanitizedCopy(storedScene("rt-2", "Abstract Architecture"))],
+      null,
+      { sceneUnchanged: workspaceEquality },
+    );
+
+    expect(store.updated).toEqual(["mine-1"]);
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([
+      { latest: true, scene_id: "mine-1" },
+      { scene_id: "public-1" },
+    ]);
+  });
+
   it("keeps a pack claimed when its scenes.json cannot be re-read (rate limit, blip)", async () => {
     const store = fakeStore();
     store.scenes.set("public-1", { scenes: [storedScene("rt-1", "Abstract Architecture")], owned: false, version: 3 });

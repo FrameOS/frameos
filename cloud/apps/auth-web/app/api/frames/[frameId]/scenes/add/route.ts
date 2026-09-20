@@ -26,7 +26,8 @@ export const runtime = "nodejs";
 // already there — the store's "Install on a frame" box. The sibling POST
 // /scenes replaces the whole list; this is the same merge the chat agent's
 // add_scene_to_frame tool does (src/lib/ai/tools.ts). Re-adding an assigned
-// scene re-deploys it at the requested version.
+// scene re-deploys it at the requested version (unpinned: the newest one);
+// the other scenes stay at the versions the frame holds.
 // Body: {"scene_id": "...", "scene_version"?: N, "settings_groups"?: [...]}
 // `settings_groups` grants the scene the named service-key groups on this
 // frame (∩ what it declares); omitted, a new install is granted none and a
@@ -90,6 +91,8 @@ export async function POST(
   const added = {
     sceneId,
     sceneVersion: pinned,
+    // Installing IS asking for the newest version, also on a re-install.
+    latest: true,
     ...(settingsGroups ? { settingsGroups } : {}),
   };
   const requested = alreadyAssigned

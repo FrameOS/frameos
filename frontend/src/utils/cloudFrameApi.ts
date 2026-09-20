@@ -323,12 +323,20 @@ export interface CloudSceneAssignmentInput {
   scene_id: string
   scene_version?: number | null
   settings_groups?: string[] | undefined
+  /**
+   * Move this UNPINNED scene to the store's newest version on this push.
+   * Without it a scene the frame already has is pushed again at the version
+   * the frame holds: replacing the list never updates a scene as a side
+   * effect ("Update" on one scene used to update all of them).
+   */
+  latest?: boolean | undefined
 }
 
 function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<string, unknown> {
   return {
     scene_id: scene.scene_id,
     ...(scene.scene_version ? { scene_version: scene.scene_version } : {}),
+    ...(scene.latest ? { latest: true } : {}),
     ...(scene.settings_groups ? { settings_groups: scene.settings_groups } : {}),
   }
 }
@@ -351,10 +359,13 @@ export async function installCloudFrameStoreScene(
   const entry = cloudSceneAssignmentEntry({
     scene_id: sceneId,
     scene_version: sceneVersion,
+    // Installing IS asking for the newest version, also on a re-install.
+    latest: true,
     settings_groups: settingsGroups,
   })
-  // Other rows keep their pin and their grant; the proposed scene takes the
-  // grant the card showed, in its current slot when it is already assigned.
+  // Other rows keep their pin, the version the frame holds and their grant;
+  // the proposed scene takes the grant the card showed, in its current slot
+  // when it is already assigned.
   const scenes = existing.map((scene) =>
     scene.scene_id === sceneId
       ? entry
@@ -538,7 +549,7 @@ export async function assignCloudFrameStoreScene(
         ...existing.map((scene) =>
           cloudSceneAssignmentEntry({
             scene_id: scene.scene_id,
-            // null/undefined = track the latest published version.
+            // null/undefined = unpinned: stays at the version the frame holds.
             scene_version: scene.scene_version ?? null,
             settings_groups: scene.granted_settings_groups ?? [],
           })

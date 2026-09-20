@@ -113,8 +113,13 @@ export async function GET(
 }
 
 // Replace the frame's scene assignments and enqueue a set_scenes push.
-// Body: {"scenes": [{"scene_id": "...", "scene_version"?: N,
+// Body: {"scenes": [{"scene_id": "...", "scene_version"?: N, "latest"?: true,
 // "settings_groups"?: ["unsplash", …]}, …]} in render order.
+// An unpinned scene (no scene_version) the frame already has is pushed again
+// at the version the frame HOLDS: replacing the list never updates a scene as
+// a side effect. `latest: true` moves that one scene to the newest version
+// (the workspace passes it for the scene it just edited); a scene new to the
+// frame starts at the newest version either way.
 // `settings_groups` is the owner's grant of the account's service keys to
 // that scene on this frame (docs/cloud-frames.md, "Service settings"):
 // stored ∩ what the version declares; omitted keeps an assigned scene's
@@ -182,7 +187,7 @@ export async function POST(
       return jsonError("invalid_scenes", 400);
     }
     // Versions start at 1; rejecting 0 and negatives here keeps "pinned" and
-    // "track the latest" unambiguous all the way down to the payload build.
+    // "unpinned" unambiguous all the way down to the payload build.
     if (
       sceneVersion !== undefined &&
       sceneVersion !== null &&
@@ -195,6 +200,10 @@ export async function POST(
     if (requested.some((r) => r.sceneId === sceneId)) {
       return jsonError("duplicate_scene", 400);
     }
+    const latest = (entry as Record<string, unknown>).latest;
+    if (latest !== undefined && typeof latest !== "boolean") {
+      return jsonError("invalid_scenes", 400);
+    }
     const settingsGroups = readSettingsGroupsField(
       (entry as Record<string, unknown>).settings_groups,
     );
@@ -204,6 +213,7 @@ export async function POST(
     requested.push({
       sceneId,
       sceneVersion: typeof sceneVersion === "number" ? sceneVersion : null,
+      ...(latest === true ? { latest } : {}),
       ...(settingsGroups ? { settingsGroups } : {}),
     });
   }

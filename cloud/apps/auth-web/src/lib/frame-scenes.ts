@@ -18,6 +18,8 @@ import {
 } from "@frameos-cloud/db";
 import { recordAuditEvent } from "./audit";
 import {
+  assignedSceneVersion,
+  assignmentVersionToSend,
   buildScenesPayloadForFrame,
   enqueueFrameCommand,
   enqueueServiceSettingsRefreshIfScoped,
@@ -43,6 +45,13 @@ export type RequestedScene = {
   // with what the assigned version actually declares. Omitted: an already
   // assigned scene keeps its current grant; a NEW assignment grants nothing.
   settingsGroups?: string[] | undefined;
+  // Move an UNPINNED assignment to the newest published version on this push:
+  // an explicit update, a re-install, the workspace saving its own edit.
+  // Without it an unpinned assignment the frame already has is sent again at
+  // the version the frame holds — every push carries the whole set, so
+  // anything else updates every scene whenever one of them changes. A scene
+  // new to the frame starts at the newest version either way.
+  latest?: boolean | undefined;
 };
 
 // The most groups one assignment may name. Six are deliverable today; the
@@ -165,7 +174,11 @@ export function frameHoldsAssignedScenes(frame: {
 // hub can call it too — a device whose scene store came up empty asks for its
 // assignments back in its hello. Re-exported here for the routes that grew up
 // around this module.
-export { redeployAssignedScenesToFrame, type RedeployOutcome } from "./frames";
+export {
+  assignedSceneVersion,
+  redeployAssignedScenesToFrame,
+  type RedeployOutcome,
+} from "./frames";
 
 export async function currentSceneAssignments(
   db: Database,
@@ -202,7 +215,9 @@ export async function currentSceneAssignments(
 async function checkScenesAssignable(
   db: Database,
   accountId: string,
+  frame: { assignedSceneState: unknown },
   requested: RequestedScene[],
+  latestSceneIds: ReadonlySet<string>,
 ): Promise<AssignScenesFailure | null> {
   if (requested.length === 0) {
     return null;
@@ -232,10 +247,21 @@ async function checkScenesAssignable(
     if (!accessible) {
       return { code: "invalid_scene", detail: { scene_id: sceneId }, status: 400 };
     }
-    // The version this push actually pins — not store_scenes.risk_flags,
-    // which is only the latest version's flags. Otherwise "publish shell
-    // v1, publish clean v2, pin v1" walks straight through this gate.
-    const version = await pinnedSceneVersion(db, sceneId, sceneVersion);
+    // The version this push actually carries (the pin, the held version of
+    // an unpinned assignment, else the newest — the same resolution as
+    // buildScenesPayloadForFrame) — not store_scenes.risk_flags, which is
+    // only the latest version's flags. Otherwise "publish shell v1, publish
+    // clean v2, pin v1" walks straight through this gate.
+    const wanted = assignmentVersionToSend(
+      frame,
+      { sceneId, sceneVersion },
+      latestSceneIds,
+    );
+    const version =
+      (await pinnedSceneVersion(db, sceneId, wanted)) ??
+      (sceneVersion === null && wanted !== null
+        ? await pinnedSceneVersion(db, sceneId, null)
+        : undefined);
     if (!version) {
       return {
         code: "scene_version_missing",
@@ -302,7 +328,16 @@ export async function assignScenesToFrame(
     seen.add(entry.sceneId);
   }
 
-  const notAssignable = await checkScenesAssignable(db, accountId, requested);
+  const latestSceneIds = new Set(
+    requested.filter((entry) => entry.latest).map((entry) => entry.sceneId),
+  );
+  const notAssignable = await checkScenesAssignable(
+    db,
+    accountId,
+    frame,
+    requested,
+    latestSceneIds,
+  );
   if (notAssignable) {
     return { ok: false, failure: notAssignable };
   }
@@ -345,7 +380,9 @@ export async function assignScenesToFrame(
           })),
         );
       }
-      const built = await buildScenesPayloadForFrame(tx, frame.id);
+      const built = await buildScenesPayloadForFrame(tx, frame.id, {
+        latestSceneIds,
+      });
       if ("error" in built) {
         throw new PayloadBuildError(built.error);
       }
@@ -484,27 +521,6 @@ export async function assignScenesToFrame(
   };
 }
 
-// The version of a store scene the LAST assignment push to this frame carried
-// (frames.assigned_scene_state, written by every push). For a pinned
-// assignment that is the pin; for one that follows the latest it is whatever
-// "latest" meant at that push — the only record of which version the frame
-// was actually sent. Undefined on frames that predate the per-scene ledger.
-export function assignedSceneVersion(
-  frame: { assignedSceneState: unknown },
-  sceneId: string,
-): number | undefined {
-  const state = frame.assignedSceneState;
-  if (!state || typeof state !== "object") {
-    return undefined;
-  }
-  const version = (state as Record<string, { version?: unknown } | undefined>)[
-    sceneId
-  ]?.version;
-  return typeof version === "number" && Number.isInteger(version) && version > 0
-    ? version
-    : undefined;
-}
-
 export type UpdateSceneOutcome =
   | {
       ok: true;
@@ -523,9 +539,12 @@ export type UpdateSceneOutcome =
 /**
  * "Update to latest" for ONE assigned store scene: move the frame to the
  * newest published version and push. A pinned assignment is re-pinned at that
- * version (it stays pinned — whoever pinned it asked for no surprises); one
- * that follows the latest needs no rewrite, the push itself resolves it. Every
- * other assignment, its order and every grant stay as they are. A version
+ * version (it stays pinned — whoever pinned it asked for no surprises); an
+ * unpinned one is the only entry the push resolves to the newest version.
+ * Every other assignment stays at the version the frame holds — the push
+ * carries the whole set, and it used to update every scene with a pending
+ * update along with the one that was asked for. Order and grants stay as
+ * they are too. A version
  * that newly declares a service-settings group is NOT granted it here: the
  * grant only ever narrows on an update, the owner widens it in the frame's
  * settings.
@@ -591,9 +610,11 @@ export async function updateAssignedSceneToLatest(
     actor,
     frame,
     requested: existing.map((entry) =>
-      entry.sceneId === sceneId && entry.sceneVersion !== null
-        ? { ...entry, sceneVersion: latest.version }
-        : entry,
+      entry.sceneId !== sceneId
+        ? entry
+        : entry.sceneVersion !== null
+          ? { ...entry, sceneVersion: latest.version }
+          : { ...entry, latest: true },
     ),
     via: "scene_update",
   });
