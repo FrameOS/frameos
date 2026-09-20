@@ -8,14 +8,32 @@ import requests
 def get_bool_env(key: str) -> bool:
     return os.environ.get(key, '0').lower() in ['true', '1', 'yes']
 
+
+def append_env_line(path: str, line: str, header: str = '') -> None:
+    """Append `line` to a dotenv file as a line of its own. The file is the
+    developer's: it may already hold variables, and its last line may lack a
+    newline — appending straight after it would glue `SECRET_KEY=` onto that
+    value and lose both. The header is only written into a new (empty) file,
+    which is created 0600 since what we append is a secret."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, 'r+') as f:
+        existing = f.read()
+        prefix = '' if not existing or existing.endswith('\n') else '\n'
+        if not existing and header:
+            prefix = f'{header}\n'
+        f.write(f'{prefix}{line}\n')
+
 # If in development mode, load .env variables as fallback
 if get_bool_env('DEBUG'):
     load_dotenv(override=False)
 
     if not os.environ.get('SECRET_KEY'):
         secret = secrets.token_urlsafe(32)
-        with open('.env', 'a') as f:
-            f.write(f'# Development environment variables. Don\'t commit this file.\nSECRET_KEY={secret}')
+        append_env_line(
+            '.env',
+            f'SECRET_KEY={secret}',
+            header="# Development environment variables. Don't commit this file.",
+        )
         os.environ['SECRET_KEY'] = secret
 
 

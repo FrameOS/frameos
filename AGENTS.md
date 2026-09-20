@@ -91,7 +91,7 @@
 - Background jobs run through `arq` with Redis: worker defined in `app/tasks/worker.py` loads tasks for deploying/resetting frames, building SD images, and controlling agents. Startup hooks share HTTP, Redis, and DB clients. Run via `arq app.tasks.worker.WorkerSettings`. 【F:backend/app/tasks/worker.py†L1-L64】
 - Tests rely on pytest + pytest-asyncio fixtures defined in `app/conftest.py`; there is broad coverage across API, websocket, and model layers under `app/api/tests` and `app/models/tests`. 【F:backend/app/conftest.py†L1-L65】【F:backend/app/api/tests/test_frames.py†L1-L183】
 - Common local workflows:
-  - Install dependencies: `pip install -r requirements.txt` (generated from `requirements.in`).
+  - Install dependencies: `pip install -r requirements.txt`. The lock carries a `--hash` for every file and is a *universal* resolution (it is compiled on macOS and installed on Linux); CI and the Docker image install it with `--require-hashes`. Regenerate it ONLY with `backend/bin/compile-requirements` (`--upgrade-package <name>` to bump one package) — a plain `pip-compile` drops the hashes and the Linux-only packages, and every CI install fails. After it, refresh `tools/buildroot-images/requirements-upload.txt` (recipe in its `.in`).
   - Run the web server: `uvicorn app.fastapi:app --reload` (ensuring `frontend/dist` exists or `TEST=1` to use source HTML).
   - Start worker: `arq app.tasks.worker.WorkerSettings`.
   - Execute tests: `pytest` (optionally via `backend/bin/tests` helper). 【F:backend/bin/tests†L1-L3】

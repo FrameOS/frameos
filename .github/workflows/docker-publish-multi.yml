@@ -88,9 +88,11 @@ jobs:
         id: release-ref
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
-          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "docker_version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_sha=$(git rev-parse HEAD)"
+            echo "docker_version=$VERSION"
+            echo "release_tag=v$VERSION"
+          } >> "$GITHUB_OUTPUT"
 
   publish-npm:
     name: Publish FrameOS npm packages
@@ -211,7 +213,7 @@ jobs:
 
       - name: Install backend dependencies
         run: |
-          pip install -r backend/requirements.txt
+          pip install --require-hashes -r backend/requirements.txt
 
       - name: Install Nim (prebuilt)
         env:
@@ -303,7 +305,7 @@ jobs:
 
       - name: Install backend dependencies
         run: |
-          pip install -r backend/requirements.txt
+          pip install --require-hashes -r backend/requirements.txt
 
       - name: Build Buildroot release images
         env:
@@ -792,8 +794,8 @@ jobs:
           mkdir -p release-assets
           cd embedded/pico
           for board in pico_w pico2_w; do
-            cmake -B "build-$board" -DPICO_BOARD=$board \
-              -DPICO_SDK_PATH=$HOME/pico-sdk \
+            cmake -B "build-$board" -DPICO_BOARD="$board" \
+              -DPICO_SDK_PATH="$HOME/pico-sdk" \
               -DFRAMEOS_VERSION="$DOCKER_VERSION" -G Ninja
             cmake --build "build-$board"
           done
@@ -840,19 +842,21 @@ jobs:
 
       - name: Extract branch name
         shell: bash
-        run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
+        run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
 
       - name: Short SHA
         shell: bash
-        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - name: Read Docker version tags
         shell: bash
         run: |
           DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
-          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
-          echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}" >> $GITHUB_ENV
-          echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}" >> $GITHUB_ENV
+          {
+            echo "DOCKER_VERSION=$DOCKER_VERSION"
+            echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}"
+            echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
@@ -900,7 +904,7 @@ jobs:
         shell: bash
         run: |
           DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('frameos/versions.json'))['docker'].split('+', 1)[0])")
-          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
+          echo "DOCKER_VERSION=$DOCKER_VERSION" >> "$GITHUB_ENV"
 
       - name: Update version in config.yaml
         run: |

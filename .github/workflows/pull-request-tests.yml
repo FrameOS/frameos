@@ -270,7 +270,7 @@ jobs:
           cd backend
           python -m pip install --upgrade uv
           uv venv
-          uv pip install -r requirements.txt
+          uv pip install --require-hashes -r requirements.txt
 
       - uses: pnpm/action-setup@v4
         with:
@@ -504,7 +504,7 @@ jobs:
           cd backend
           python -m pip install --upgrade uv
           uv venv
-          uv pip install -r requirements.txt
+          uv pip install --require-hashes -r requirements.txt
 
       - uses: pnpm/action-setup@v4
         with:
@@ -726,7 +726,7 @@ jobs:
           cd backend
           python -m pip install --upgrade uv
           uv venv
-          uv pip install -r requirements.txt
+          uv pip install --require-hashes -r requirements.txt
 
       # The suite builds its tables from the models; this runs the alembic
       # chain end to end against a throwaway database.
@@ -780,7 +780,7 @@ jobs:
           cd backend
           python -m pip install --upgrade uv
           uv venv
-          uv pip install -r requirements.txt
+          uv pip install --require-hashes -r requirements.txt
 
       # backend/ruff.toml is the rule set; every violation fails.
       - name: Ruff
@@ -796,6 +796,40 @@ jobs:
           cd backend
           source .venv/bin/activate
           python tools/mypy_gate.py
+
+  # The workflows are code that only ever runs on CI, so nothing else checks
+  # them: actionlint catches an unknown `runs-on` label (a job that queues
+  # forever — .github/actionlint.yaml declares the self-hosted pool's), a
+  # misspelt context or `needs`, and runs shellcheck over every `run:` block.
+  # The binary is pinned by sha256 like every other tool CI downloads.
+  workflow-lint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            -o /tmp/actionlint.tar.gz
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf /tmp/actionlint.tar.gz -C "$HOME/.local/bin" actionlint
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # shellcheck ships with the GitHub-hosted image; actionlint picks it up
+      # from PATH. -color keeps the annotated source lines readable in the log.
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          actionlint -color
 
   frameos-setup-script:
     name: Standalone setup script
@@ -928,7 +962,7 @@ jobs:
           cd backend
           python -m pip install --upgrade uv
           uv venv
-          uv pip install -r requirements.txt
+          uv pip install --require-hashes -r requirements.txt
 
       # The other two Nim jobs cache these; this one did not, so every run
       # re-cloned ~15 nimble dependencies and rebuilt QuickJS from scratch —
@@ -1112,13 +1146,13 @@ jobs:
       - name: Build Pico W firmware
         run: |
           cd embedded/pico
-          cmake -B build-pico-w -DPICO_BOARD=pico_w -DPICO_SDK_PATH=$HOME/pico-sdk -G Ninja
+          cmake -B build-pico-w -DPICO_BOARD=pico_w -DPICO_SDK_PATH="$HOME/pico-sdk" -G Ninja
           cmake --build build-pico-w
           test -f build-pico-w/frameos_pico.uf2
 
       - name: Build Pico 2 W firmware
         run: |
           cd embedded/pico
-          cmake -B build-pico2-w -DPICO_BOARD=pico2_w -DPICO_SDK_PATH=$HOME/pico-sdk -G Ninja
+          cmake -B build-pico2-w -DPICO_BOARD=pico2_w -DPICO_SDK_PATH="$HOME/pico-sdk" -G Ninja
           cmake --build build-pico2-w
           test -f build-pico2-w/frameos_pico.uf2

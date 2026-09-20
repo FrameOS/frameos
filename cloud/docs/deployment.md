@@ -837,6 +837,17 @@ never initialised and the consent banner does not render. turbo.json declares
 the variable as an env input of `@frameos-cloud/auth-web#build`, so a keyed
 build never replays a cached keyless one (or vice versa).
 
+turbo runs in **strict env mode** (`"envMode": "strict"`): a task sees only
+the variables its `env` / `passThroughEnv` entry names, plus turbo's own
+short passthrough list (`PATH`, `HOME`, `CI`, `NODE_OPTIONS`…) and, for the
+Next.js app, every `NEXT_PUBLIC_*`. So a build-time variable that is not
+declared in `turbo.json` is simply **unset** inside `turbo run build` — add
+it to the task's `env` (it then also keys the cache) rather than wondering
+why the bundle ignores it. This is deliberate: the deploy job builds with the
+production SSH key path in its environment, and a dev machine's shell once
+leaked a LAN `FRAME_HUB_PUBLIC_URL` into the production CSP header. `.env*`
+files are read by Next itself and are not affected.
+
 ## Legal Pages
 
 `/legal/terms`, `/legal/privacy` and `/legal/imprint` are served from the

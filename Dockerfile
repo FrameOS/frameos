@@ -125,8 +125,12 @@ ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
 # quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts)
 ARG QUICKJS_VERSION=2026-06-04-quickts.1
 ARG QUICKJS_SHA256=94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f
-# emscripten, for the wasm live-preview bundle served by the frontend
+# emscripten, for the wasm live-preview bundle served by the frontend.
+# EMSDK_COMMIT is the emsdk tag of the same name (`git ls-remote
+# https://github.com/emscripten-core/emsdk.git refs/tags/<version>`); bump the
+# two together, and the `version:` of the setup-emsdk steps in the workflows.
 ARG EMSCRIPTEN_VERSION=6.0.2
+ARG EMSDK_COMMIT=ca38f487f28b7c3c16f8f70cd0e012099ac4b7e2
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -175,8 +179,18 @@ WORKDIR /app
 # Emscripten SDK for the wasm live-preview bundle. Pinned by ARG only, so it
 # never depends on repository content: hoisted above the source COPYs, which
 # used to force a full re-download of the SDK on every source change.
+#
+# The emsdk checkout is fetched by commit, not from the branch tip: emsdk is
+# the installer AND the table mapping a version to the release it downloads
+# (emscripten-releases-tags.json), so a moving checkout meant the same
+# EMSCRIPTEN_VERSION could resolve to different bits from one build to the
+# next. The rev-parse is the check — a fetch by sha can only ever produce
+# that commit, and a typo fails here rather than in `emsdk install`.
 RUN set -eux; \
-    git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk; \
+    git init -q /opt/emsdk; \
+    git -C /opt/emsdk fetch -q --depth 1 https://github.com/emscripten-core/emsdk.git "${EMSDK_COMMIT}"; \
+    git -C /opt/emsdk checkout -q --detach FETCH_HEAD; \
+    test "$(git -C /opt/emsdk rev-parse HEAD)" = "${EMSDK_COMMIT}"; \
     /opt/emsdk/emsdk install "${EMSCRIPTEN_VERSION}"; \
     /opt/emsdk/emsdk activate "${EMSCRIPTEN_VERSION}"
 
@@ -322,11 +336,22 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# The image installs the runtime subset (requirements.docker.in) of the
+# development lock, and every file it installs is checked against a sha256
+# COMMITTED in requirements.txt: `uv pip compile` only resolves which pinned
+# packages the subset needs, hashed_subset.py cuts those entries — hashes and
+# all — out of the lock, and --require-hashes refuses anything else. A package
+# the lock does not carry fails the build rather than installing unhashed.
 COPY backend/requirements.txt backend/requirements.docker.in ./
+COPY backend/tools/hashed_subset.py tools/hashed_subset.py
 RUN pip install --no-cache-dir --upgrade uv \
     && uv venv \
-    && sed -E 's/^fastapi\[standard\]==/fastapi==/' requirements.txt > /tmp/requirements.constraints.txt \
-    && uv pip install --no-cache-dir -c /tmp/requirements.constraints.txt -r requirements.docker.in \
+    && uv pip compile --no-cache --quiet --no-header --no-annotate \
+         -c requirements.txt -o /tmp/requirements.resolved.txt requirements.docker.in \
+    && python tools/hashed_subset.py requirements.txt /tmp/requirements.resolved.txt \
+         > /tmp/requirements.runtime.txt \
+    && uv pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements.runtime.txt \
+    && uv pip check \
     && find "${VIRTUAL_ENV}" -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded {} + \
     && find "${VIRTUAL_ENV}" -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find "${VIRTUAL_ENV}" -type f -name '*.pyc' -delete

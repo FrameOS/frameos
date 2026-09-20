@@ -145,11 +145,18 @@ jobs:
           echo "Matrix: ${matrix}"
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
-  publish:
-    name: Build and publish ${{ matrix.platform }}
+  # The build and the upload are two jobs on purpose. The build runs on the
+  # self-hosted pool, whose /mnt/cache (Buildroot downloads, ccache, the source
+  # tree) is shared by every job that ever ran there, and it executes hours of
+  # third-party build scripts on top of it. The R2 write credentials — which
+  # can replace anything under archive.frameos.net, not just base images — must
+  # never be in that job's environment: `build` carries no secret at all and
+  # hands the image to `publish`, a GitHub-hosted job, as a run artifact.
+  build:
+    name: Build ${{ matrix.platform }}
     needs: resolve-matrix
     strategy:
-      # One platform failing must not cancel the others mid-publish.
+      # One platform failing must not cancel the others mid-build.
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
@@ -158,10 +165,6 @@ jobs:
       PLATFORM: ${{ matrix.platform }}
       R2_BUCKET: ${{ inputs.bucket }}
       R2_PREFIX: ${{ inputs.prefix }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       FRAMEOS_BUILDROOT_JLEVEL: ${{ inputs.buildroot_jlevel }}
       # Packages build concurrently (the serial default left the 32-core slot
       # at load ~1 through every configure phase). BR2_JLEVEL stays at nproc
@@ -173,10 +176,14 @@ jobs:
       # Pinned by resolve-matrix, not recomputed here — see the comment there.
       FRAMEOS_NEXT_VERSION: ${{ needs.resolve-matrix.outputs.version }}
     steps:
-      - name: Checkout branch
+      # The dispatched commit, not the branch tip: `publish` looks the image up
+      # under build/buildroot-images/<platform>/<versions.json version>, so
+      # both jobs of a leg have to read the same versions.json — and the three
+      # legs queue behind ONE epyc-32 slot, hours apart.
+      - name: Checkout dispatched commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -208,21 +215,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --upgrade pip
-          python3 -m pip install -r backend/requirements.txt boto3
+          python3 -m pip install --require-hashes -r backend/requirements.txt
 
       - name: Validate configuration
         env:
           BUILDROOT_DOCKER_IMAGE_OVERRIDE: ${{ inputs.buildroot_docker_image }}
         run: |
           set -euo pipefail
-          if [ -z "${R2_ACCESS_KEY_ID}" ] || [ -z "${R2_SECRET_ACCESS_KEY}" ]; then
-            echo "R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY repository secrets must be set."
-            exit 1
-          fi
-          if [ -z "${R2_ENDPOINT}" ] && [ -z "${R2_ACCOUNT_ID}" ]; then
-            echo "Set either R2_ENDPOINT or R2_ACCOUNT_ID as a repository secret."
-            exit 1
-          fi
           if ! [[ "${FRAMEOS_BUILDROOT_JLEVEL}" =~ ^[0-9]+$ ]]; then
             echo "buildroot_jlevel must be an integer."
             exit 1
@@ -254,6 +253,95 @@ jobs:
             --prefix "${R2_PREFIX}" \
             --cache-dir "${FRAMEOS_BUILDROOT_CACHE_DIR}" \
             build
+
+      # The hand-off to `publish`. The wildcard keeps the <version>/ directory
+      # in the artifact, which is where `upload` looks for the image. One day
+      # is plenty: the artifact only has to outlive this run (and a rerun of
+      # its failed jobs).
+      - name: Hand the image to the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildroot-image-${{ matrix.platform }}-${{ github.run_id }}
+          path: |
+            build/buildroot-images/${{ matrix.platform }}/*/base.img
+            build/buildroot-images/${{ matrix.platform }}/*/metadata.json
+          if-no-files-found: error
+          retention-days: 1
+          # A raw disk image: mostly zeroes and already-compressed squashfs.
+          compression-level: 1
+
+      - name: Upload build metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildroot-base-${{ matrix.platform }}-${{ github.run_id }}
+          path: build/buildroot-images/${{ matrix.platform }}/**/metadata.json
+          if-no-files-found: warn
+
+  publish:
+    name: Publish ${{ matrix.platform }}
+    needs: [resolve-matrix, build]
+    # `needs: build` waits for the WHOLE matrix and would skip every leg here
+    # if one platform failed to build. Run regardless: a leg whose platform
+    # did not build has no image artifact and fails at its download step,
+    # while the platforms that did build still publish.
+    if: ${{ !cancelled() && needs.resolve-matrix.result == 'success' }}
+    strategy:
+      # One platform failing must not cancel the others mid-publish.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve-matrix.outputs.matrix) }}
+    # GitHub-hosted, always — this is the job that holds the R2 credentials.
+    # The runner_label input only moves the build.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      R2_BUCKET: ${{ inputs.bucket }}
+      R2_PREFIX: ${{ inputs.prefix }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      # Pinned by resolve-matrix, not recomputed here — see the comment there.
+      FRAMEOS_NEXT_VERSION: ${{ needs.resolve-matrix.outputs.version }}
+    steps:
+      # Same commit as the build leg; see the comment on its checkout.
+      - name: Checkout dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [ -z "${R2_ACCESS_KEY_ID}" ] || [ -z "${R2_SECRET_ACCESS_KEY}" ]; then
+            echo "R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY repository secrets must be set."
+            exit 1
+          fi
+          if [ -z "${R2_ENDPOINT}" ] && [ -z "${R2_ACCOUNT_ID}" ]; then
+            echo "Set either R2_ENDPOINT or R2_ACCOUNT_ID as a repository secret."
+            exit 1
+          fi
+
+      - name: Download the built image
+        uses: actions/download-artifact@v4
+        with:
+          name: buildroot-image-${{ matrix.platform }}-${{ github.run_id }}
+          path: build/buildroot-images/${{ matrix.platform }}
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          # Both locks carry hashes (boto3's is compiled against the backend's
+          # pins): nothing unverified is installed next to the R2 credentials.
+          python3 -m pip install --require-hashes -r backend/requirements.txt
+          python3 -m pip install --require-hashes -r tools/buildroot-images/requirements-upload.txt
 
       - name: Upload Buildroot base image to R2
         env:
@@ -324,14 +412,12 @@ jobs:
           path: build/published/${{ matrix.platform }}
           if-no-files-found: error
 
-      - name: Upload build metadata
+      - name: Upload refreshed manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: buildroot-base-${{ matrix.platform }}-${{ github.run_id }}
-          path: |
-            build/buildroot-images/${{ matrix.platform }}/**/metadata.json
-            tools/buildroot-images/manifest.json
+          name: buildroot-manifest-${{ matrix.platform }}-${{ github.run_id }}
+          path: tools/buildroot-images/manifest.json
           if-no-files-found: warn
 
   # One commit for the whole run, after every platform has finished. Previously
@@ -380,12 +466,12 @@ jobs:
         id: published
         run: |
           set -euo pipefail
-          # mkdir, not `ls 2>/dev/null`: when every platform failed there are no
-          # marker artifacts, download-artifact creates nothing, and a failing
-          # `ls` at the head of a pipefail pipeline would abort the step before
-          # it could report the empty result.
+          # mkdir first: when every platform failed there are no marker
+          # artifacts, download-artifact creates nothing, and a failing `find`
+          # at the head of a pipefail pipeline would abort the step before it
+          # could report the empty result.
           mkdir -p build/published
-          platforms="$(ls build/published | tr '\n' ' ' | sed 's/ $//')"
+          platforms="$(find build/published -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | sort | tr '\n' ' ' | sed 's/ $//')"
           if [ -z "${platforms}" ]; then
             echo "No platform published successfully — nothing to mirror."
           else
@@ -398,7 +484,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --upgrade pip
-          python3 -m pip install -r backend/requirements.txt boto3
+          # Both locks carry hashes (boto3's is compiled against the backend's
+          # pins): nothing unverified is installed next to the R2 credentials.
+          python3 -m pip install --require-hashes -r backend/requirements.txt
+          python3 -m pip install --require-hashes -r tools/buildroot-images/requirements-upload.txt
 
       - name: Commit manifest changes
         if: steps.published.outputs.platforms != ''

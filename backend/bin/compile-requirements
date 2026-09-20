@@ -1,0 +1,29 @@
+#!/bin/bash
+# Regenerates backend/requirements.txt from requirements.in: every pinned
+# release with a --hash line for each of its files. Once one requirement
+# carries a hash, pip and uv refuse anything in the file that does not match
+# one, so a substituted or re-uploaded PyPI artifact fails the install instead
+# of running in the backend image or next to a CI secret.
+#
+#   backend/bin/compile-requirements                        # keep current pins
+#   backend/bin/compile-requirements --upgrade-package foo  # bump one package
+#   backend/bin/compile-requirements --upgrade              # bump everything
+#
+# --universal is load-bearing: the lock is compiled on a developer's Mac and
+# installed on Linux (CI, the Docker image). A platform-specific resolution
+# leaves out what only the other platform needs — SQLAlchemy's greenlet was
+# never in the macOS-compiled lock — and in hash-checking mode a dependency
+# missing from the file is a failed install, not an unpinned one. pip and
+# setuptools are pinned for the same reason (pip-tools depends on them).
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+uv pip compile requirements.in \
+  --output-file requirements.txt \
+  --universal \
+  --python-version 3.12 \
+  --generate-hashes \
+  --custom-compile-command "backend/bin/compile-requirements" \
+  --quiet \
+  "$@"
