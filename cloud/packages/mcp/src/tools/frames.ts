@@ -330,21 +330,34 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_scene_update",
     {
       description:
-        "Update ONE installed scene to the newest published version of its store scene and push it — for a row of frame_scenes_list with update_available: true (latest_version is ahead of assigned_version, the version the frame was last sent). Requires confirm=true (it deploys to the device). A pinned scene is re-pinned at the latest version; the other scenes stay at the versions the frame holds (their own pending updates are NOT taken), and their order and every settings_groups grant are kept, and a version that newly declares a service key is not granted it. Answers status \"up_to_date\" without pushing when there is nothing newer.",
+        "Update ONE installed scene (scene_id) — or several named ones in a single push (scene_ids) — to the newest published version of its store scene and push it — for a row of frame_scenes_list with update_available: true (latest_version is ahead of assigned_version, the version the frame was last sent). Requires confirm=true (it deploys to the device). A pinned scene is re-pinned at the latest version; the other scenes stay at the versions the frame holds (their own pending updates are NOT taken), and their order and every settings_groups grant are kept, and a version that newly declares a service key is not granted it. Answers status \"up_to_date\" without pushing when there is nothing newer.",
       inputSchema: {
         confirm: confirmed("deploys the scene's newest version to the frame"),
         frame_id: frameId,
-        scene_id: uuid().describe("The STORE scene id, as listed by frame_scenes_list."),
+        scene_id: uuid()
+          .optional()
+          .describe("The STORE scene id, as listed by frame_scenes_list."),
+        scene_ids: z
+          .array(uuid())
+          .min(1)
+          .max(20)
+          .optional()
+          .describe(
+            "Several STORE scene ids to update in one push, instead of scene_id. Only the scenes named move.",
+          ),
       },
     },
-    async ({ frame_id, scene_id }) =>
-      run(async () =>
-        text(
+    async ({ frame_id, scene_id, scene_ids }) =>
+      run(async () => {
+        if (!scene_id === !scene_ids) {
+          return failure("Pass exactly one of scene_id or scene_ids.");
+        }
+        return text(
           await api.json("POST", `/api/frames/${frame_id}/scenes/update`, {
-            body: { scene_id },
+            body: scene_ids ? { scene_ids } : { scene_id },
           }),
-        ),
-      ),
+        );
+      }),
   );
 
   server.registerTool(

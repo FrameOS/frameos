@@ -3586,6 +3586,60 @@ describe("scene updates: a newer store version of an assigned scene", () => {
     expect(payload.scenes.map((scene) => scene.id)).toEqual([`${target.id}-v2`, bystander.id]);
   });
 
+  it("updates several named scenes in ONE push, and still leaves the rest alone", async () => {
+    // The dialog's "Update all scenes (N)".
+    const { accountId, frame_id } = await confirmedFrame();
+    const unpinned = await createStoreScene(accountId, { name: "All: unpinned" });
+    const pinned = await createStoreScene(accountId, { name: "All: pinned" });
+    const current = await createStoreScene(accountId, { name: "All: already current" });
+    const notNamed = await createStoreScene(accountId, { name: "All: not named" });
+    await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        {
+          scenes: [
+            { scene_id: unpinned.id },
+            { scene_id: pinned.id, scene_version: 1 },
+            { scene_id: current.id },
+            { scene_id: notNamed.id },
+          ],
+        },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    await publishSceneVersion(unpinned.id, 2);
+    await publishSceneVersion(pinned.id, 2);
+    await publishSceneVersion(notNamed.id, 2);
+    const before = (await setScenesCommands(frame_id)).length;
+
+    const response = await update(frame_id, { scene_ids: [unpinned.id, pinned.id, current.id] });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      scenes: [
+        { previous_version: 1, scene_id: unpinned.id, scene_version: 2, updated: true },
+        { previous_version: 1, scene_id: pinned.id, scene_version: 2, updated: true },
+        { previous_version: 1, scene_id: current.id, scene_version: 1, updated: false },
+      ],
+      status: "queued",
+    });
+    expect(await setScenesCommands(frame_id)).toHaveLength(before + 1);
+    expect(await sceneRows(frame_id)).toMatchObject([
+      { assigned_version: 2, scene_id: unpinned.id, scene_version: null, update_available: false },
+      { assigned_version: 2, scene_id: pinned.id, scene_version: 2, update_available: false },
+      { assigned_version: 1, scene_id: current.id, update_available: false },
+      { assigned_version: 1, scene_id: notNamed.id, update_available: true },
+    ]);
+
+    // Nothing left to do for those three: no push.
+    const again = await update(frame_id, { scene_ids: [unpinned.id, pinned.id, current.id] });
+    expect(await again.json()).toMatchObject({ command_id: null, status: "up_to_date" });
+    expect(await setScenesCommands(frame_id)).toHaveLength(before + 1);
+
+    expect((await update(frame_id, { scene_ids: [] })).status).toBe(400);
+    expect((await update(frame_id, { scene_ids: [unpinned.id, "nope"] })).status).toBe(400);
+  });
+
   it("re-posting the scene list moves no unpinned scene unless the entry says latest", async () => {
     const { accountId, frame_id } = await confirmedFrame();
     const edited = await createStoreScene(accountId, { name: "Edited in the workspace" });

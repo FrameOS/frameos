@@ -66,6 +66,30 @@ describe("confirmDialog", () => {
     expect(confirmDialogLogic.values.pending).toBeNull();
   });
 
+  it("the extra action runs ITS work, not the main one's, with its own busy flag", async () => {
+    confirmDialogLogic.actions.hostMounted();
+    let finishWork = (): void => {};
+    const onConfirm = vi.fn();
+    const onExtra = vi.fn(() => new Promise<void>((resolve) => (finishWork = resolve)));
+    let answered: boolean | null = null;
+    void confirmDialog({
+      extraAction: { label: "Update all scenes (3)", onConfirm: onExtra },
+      message: "Update?",
+      onConfirm,
+    }).then((confirmed) => (answered = confirmed));
+
+    confirmDialogLogic.actions.confirmExtra();
+    expect(onExtra).toHaveBeenCalledOnce();
+    expect(confirmDialogLogic.values.busy).toBe(true);
+    expect(confirmDialogLogic.values.busyExtra).toBe(true);
+
+    finishWork();
+    await vi.waitFor(() => expect(answered).toBe(true));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(confirmDialogLogic.values.busy).toBe(false);
+    expect(confirmDialogLogic.values.busyExtra).toBe(false);
+  });
+
   it("never runs the work on a no, and runs it under the browser prompt's yes", async () => {
     const onConfirm = vi.fn();
     confirmDialogLogic.actions.hostMounted();

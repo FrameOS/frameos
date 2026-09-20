@@ -1143,7 +1143,11 @@ POST {provider}/api/frames/{id}/scenes/update
 {"scene_id": "<store scene uuid>", "active_scene_id"?: "<runtime scene id>"}
 ```
 
-which moves that one scene to the newest published version and enqueues the
+— or `"scene_ids": ["<uuid>", …]` for the dialog's second button, "Update all
+scenes (N)", offered when more than one scene has an update: every named
+scene moves in ONE push, and the answer's `scenes` says per scene what
+happened (`scene_id`, `previous_version`, `scene_version`, `updated`). The
+call moves the named scenes to the newest published version and enqueues the
 `set_scenes` push: a pinned assignment is re-pinned there (it stays a pin),
 an unpinned one is the only scene the push resolves to the newest version.
 Every other assignment stays at the version the frame holds (its own pending

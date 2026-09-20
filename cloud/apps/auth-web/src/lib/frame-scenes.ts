@@ -521,85 +521,108 @@ export async function assignScenesToFrame(
   };
 }
 
-export type UpdateSceneOutcome =
+export type UpdatedSceneResult = {
+  sceneId: string;
+  // False when the frame was already sent the newest version of this scene.
+  updated: boolean;
+  previousVersion: number | undefined;
+  sceneVersion: number;
+};
+
+export type UpdateScenesOutcome =
   | {
       ok: true;
       result: {
-        // False when the frame was already sent the newest version: nothing
-        // was pushed (a battery frame is not woken for a no-op).
+        // False when the frame was already sent the newest version of every
+        // scene asked for: nothing was pushed (a battery frame is not woken
+        // for a no-op).
         updated: boolean;
         assignedChecksum: string | null;
         commandId: string | undefined;
-        previousVersion: number | undefined;
-        sceneVersion: number;
+        // One entry per scene asked for, in the order asked.
+        scenes: UpdatedSceneResult[];
       };
     }
   | { ok: false; failure: AssignScenesFailure };
 
 /**
- * "Update to latest" for ONE assigned store scene: move the frame to the
- * newest published version and push. A pinned assignment is re-pinned at that
- * version (it stays pinned — whoever pinned it asked for no surprises); an
- * unpinned one is the only entry the push resolves to the newest version.
+ * "Update to latest" for the assigned store scenes the caller NAMES — one
+ * (the "Update" flag on a scene) or several ("Update all scenes") — in ONE
+ * push: move them to their newest published versions. A pinned assignment is
+ * re-pinned at that version (it stays pinned — whoever pinned it asked for no
+ * surprises); an unpinned one is resolved to the newest version by the push.
  * Every other assignment stays at the version the frame holds — the push
  * carries the whole set, and it used to update every scene with a pending
  * update along with the one that was asked for. Order and grants stay as
- * they are too. A version
- * that newly declares a service-settings group is NOT granted it here: the
- * grant only ever narrows on an update, the owner widens it in the frame's
- * settings.
+ * they are too. A version that newly declares a service-settings group is NOT
+ * granted it here: the grant only ever narrows on an update, the owner widens
+ * it in the frame's settings.
  */
-export async function updateAssignedSceneToLatest(
+export async function updateAssignedScenesToLatest(
   db: Database,
   {
     accountId,
     activeSceneId,
     actor,
     frame,
-    sceneId,
+    sceneIds,
   }: {
     accountId: string;
     activeSceneId?: string | undefined;
     actor: unknown;
     frame: FrameRow;
-    sceneId: string;
+    sceneIds: readonly string[];
   },
-): Promise<UpdateSceneOutcome> {
+): Promise<UpdateScenesOutcome> {
   const existing = await currentSceneAssignments(db, frame.id);
-  const current = existing.find((entry) => entry.sceneId === sceneId);
-  if (!current) {
-    return {
-      ok: false,
-      failure: {
-        code: "scene_not_assigned",
-        detail: { scene_id: sceneId },
-        status: 404,
-      },
-    };
+  // Store scene id → the version it moves to; only the scenes that move.
+  const moves = new Map<string, number>();
+  const scenes: UpdatedSceneResult[] = [];
+  for (const sceneId of new Set(sceneIds)) {
+    const current = existing.find((entry) => entry.sceneId === sceneId);
+    if (!current) {
+      return {
+        ok: false,
+        failure: {
+          code: "scene_not_assigned",
+          detail: { scene_id: sceneId },
+          status: 404,
+        },
+      };
+    }
+    const latest = await pinnedSceneVersion(db, sceneId, null);
+    if (!latest) {
+      return {
+        ok: false,
+        failure: {
+          code: "scene_version_missing",
+          detail: { scene_id: sceneId },
+          status: 400,
+        },
+      };
+    }
+    const previousVersion =
+      assignedSceneVersion(frame, sceneId) ?? current.sceneVersion ?? undefined;
+    const pinMoves =
+      current.sceneVersion !== null && current.sceneVersion !== latest.version;
+    const updated = previousVersion !== latest.version || pinMoves;
+    if (updated) {
+      moves.set(sceneId, latest.version);
+    }
+    scenes.push({
+      previousVersion,
+      sceneId,
+      sceneVersion: latest.version,
+      updated,
+    });
   }
-  const latest = await pinnedSceneVersion(db, sceneId, null);
-  if (!latest) {
-    return {
-      ok: false,
-      failure: {
-        code: "scene_version_missing",
-        detail: { scene_id: sceneId },
-        status: 400,
-      },
-    };
-  }
-  const previousVersion =
-    assignedSceneVersion(frame, sceneId) ?? current.sceneVersion ?? undefined;
-  const pinMoves =
-    current.sceneVersion !== null && current.sceneVersion !== latest.version;
-  if (previousVersion === latest.version && !pinMoves) {
+  if (moves.size === 0) {
     return {
       ok: true,
       result: {
         assignedChecksum: frame.assignedChecksum,
         commandId: undefined,
-        previousVersion,
-        sceneVersion: latest.version,
+        scenes,
         updated: false,
       },
     };
@@ -609,13 +632,14 @@ export async function updateAssignedSceneToLatest(
     ...(activeSceneId ? { activeSceneId } : {}),
     actor,
     frame,
-    requested: existing.map((entry) =>
-      entry.sceneId !== sceneId
+    requested: existing.map((entry) => {
+      const version = moves.get(entry.sceneId);
+      return version === undefined
         ? entry
         : entry.sceneVersion !== null
-          ? { ...entry, sceneVersion: latest.version }
-          : { ...entry, latest: true },
-    ),
+          ? { ...entry, sceneVersion: version }
+          : { ...entry, latest: true };
+    }),
     via: "scene_update",
   });
   if (!outcome.ok) {
@@ -626,8 +650,11 @@ export async function updateAssignedSceneToLatest(
     result: {
       assignedChecksum: outcome.result.assignedChecksum,
       commandId: outcome.result.commandId,
-      previousVersion,
-      sceneVersion: outcome.result.sceneVersions[sceneId] ?? latest.version,
+      scenes: scenes.map((scene) => ({
+        ...scene,
+        sceneVersion:
+          outcome.result.sceneVersions[scene.sceneId] ?? scene.sceneVersion,
+      })),
       updated: true,
     },
   };

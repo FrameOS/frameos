@@ -393,29 +393,32 @@ export async function installCloudFrameStoreScene(
 export interface CloudSceneUpdateResult {
   /** False: the frame had already been sent the newest version; nothing was pushed. */
   updated: boolean
-  /** The version the frame is on after the call. */
+  /** The version the frame is on after the call (the first scene's, when several were named). */
   sceneVersion: number | null
+  /** Store scene id → the version the frame is on after the call. */
+  sceneVersions: Record<string, number>
   /** Whether the device is online to take the push now (battery frames take it on their next wake). */
   connected: boolean
 }
 
 /**
- * "Update to latest" for one store scene on a cloud frame: the server moves
- * the assignment to the newest published version (a pinned one is re-pinned
- * there) and pushes. Every other scene, the order and the service-key grants
- * stay as they are. `activeSceneId` is the RUNTIME scene the push should
- * leave on screen.
+ * "Update to latest" for the named store scenes on a cloud frame — one, or
+ * several for "Update all scenes" — in ONE push: the server moves those
+ * assignments to the newest published version (a pinned one is re-pinned
+ * there) and pushes. Every other scene stays at the version the frame holds,
+ * and the order and the service-key grants stay as they are. `activeSceneId`
+ * is the RUNTIME scene the push should leave on screen.
  */
 export async function updateCloudFrameStoreScene(
   frameId: FrameId,
-  storeSceneId: string,
+  storeSceneId: string | readonly string[],
   activeSceneId?: string | null
 ): Promise<CloudSceneUpdateResult> {
   const response = await apiFetch(`/api/frames/${frameId}/scenes/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      scene_id: storeSceneId,
+      ...(typeof storeSceneId === 'string' ? { scene_id: storeSceneId } : { scene_ids: storeSceneId }),
       ...(activeSceneId ? { active_scene_id: activeSceneId } : {}),
     }),
   })
@@ -430,11 +433,22 @@ export async function updateCloudFrameStoreScene(
   const result = (await response.json().catch(() => ({}))) as {
     status?: string
     scene_version?: number | null
+    scenes?: { scene_id?: string; scene_version?: number | null }[]
     connected?: boolean
+  }
+  const sceneVersions: Record<string, number> = {}
+  for (const scene of result.scenes ?? []) {
+    if (scene.scene_id && scene.scene_version) {
+      sceneVersions[scene.scene_id] = scene.scene_version
+    }
+  }
+  if (typeof storeSceneId === 'string' && result.scene_version && !sceneVersions[storeSceneId]) {
+    sceneVersions[storeSceneId] = result.scene_version
   }
   return {
     updated: result.status !== 'up_to_date',
     sceneVersion: result.scene_version ?? null,
+    sceneVersions,
     connected: result.connected !== false,
   }
 }
