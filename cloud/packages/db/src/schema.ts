@@ -1190,6 +1190,71 @@ export const frameAssetFiles = pgTable(
   }),
 );
 
+// The latest answer to the `scenes_get` verb (migration 0055,
+// docs/cloud-frames.md): what a frame that joined the cloud was already
+// running. One row per frame; `payload` is the device's JSON document as sent
+// and is dropped once the owner imports or dismisses it.
+export const frameDeviceScenes = pgTable("frame_device_scenes", {
+  frameId: uuid("frame_id")
+    .primaryKey()
+    .references(() => frames.id, { onDelete: "cascade" }),
+  // ready | importing | imported | dismissed
+  status: text("status").default("ready").notNull(),
+  payload: bytea("payload"),
+  sizeBytes: integer("size_bytes").default(0).notNull(),
+  // [{id, name}…] for the banner, capped — never the scenes themselves.
+  scenes: jsonb("scenes").default(sql`'[]'::jsonb`).notNull(),
+  sceneCount: integer("scene_count").default(0).notNull(),
+  skippedCompiled: integer("skipped_compiled").default(0).notNull(),
+  activeScene: text("active_scene"),
+  result: jsonb("result"),
+  receivedAt: timestamp("received_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  // When the row entered its current status (an `importing` claim older
+  // than ten minutes is a crashed import).
+  statusAt: timestamp("status_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// The import dedupe ledger (migration 0055): one row per (account, scene
+// content) a device scene was imported as, so a re-enrolled frame is given
+// the drafts it already has instead of a second copy of each.
+export const storeSceneImports = pgTable(
+  "store_scene_imports",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    sceneId: uuid("scene_id")
+      .notNull()
+      .references(() => storeScenes.id, { onDelete: "cascade" }),
+    sceneVersion: integer("scene_version").notNull(),
+    deviceSceneId: text("device_scene_id").notNull(),
+    // sha256 of the scene's canonical JSON without its `origin` stamp.
+    contentSha256: text("content_sha256").notNull(),
+    frameId: uuid("frame_id").references(() => frames.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountContentUnique: uniqueIndex(
+      "store_scene_imports_account_content_unique",
+    ).on(table.accountId, table.contentSha256),
+    sceneIdx: index("store_scene_imports_scene_idx").on(table.sceneId),
+    frameIdx: index("store_scene_imports_frame_idx")
+      .on(table.frameId)
+      .where(sql`${table.frameId} is not null`),
+  }),
+);
+
 // Retained device logs (scope telemetry:logs). size_bytes is precomputed so
 // storage-usage sums stay cheap; retention is capped per frame on insert and
 // in db-cleanup.sh. Retained bytes count toward the account's storage usage.

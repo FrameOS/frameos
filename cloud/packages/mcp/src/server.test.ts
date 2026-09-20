@@ -285,6 +285,7 @@ describe("frameos-cloud MCP server", () => {
     const frameChanging = [
       "frame_scene_install",
       "frame_scene_update",
+      "frame_device_scenes_import",
       "frame_scenes_set",
       "frame_scene_activate",
       "frame_scene_remove",
@@ -321,6 +322,7 @@ describe("frameos-cloud MCP server", () => {
     for (const [name, args] of [
       ["frame_scene_install", { frame_id: frameId, scene_id: sceneId }],
       ["frame_scene_update", { frame_id: frameId, scene_id: sceneId }],
+      ["frame_device_scenes_import", { frame_id: frameId }],
       ["frame_scenes_set", { frame_id: frameId, scenes: [{ scene_id: sceneId }] }],
       ["frame_settings_update", { frame_id: frameId, settings: { interval: 60 } }],
       ["frame_service_settings_enable", { enabled: true, frame_id: frameId }],

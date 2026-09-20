@@ -225,7 +225,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "The scenes assigned to a frame, in order, with the pinned version (null = unpinned: the frame keeps the version it was sent until frame_scene_update or a re-install moves it), the version the frame was last sent (assigned_version), the store's latest version, update_available (the store is ahead of the frame — frame_scene_update takes it there), and whether the device currently holds this exact set (assigned_checksum vs scenes_checksum).",
+        "The scenes assigned to a frame, in order, with the pinned version (null = unpinned: the frame keeps the version it was sent until frame_scene_update or a re-install moves it), the version the frame was last sent (assigned_version), the store's latest version, update_available (the store is ahead of the frame — frame_scene_update takes it there), and whether the device currently holds this exact set (assigned_checksum vs scenes_checksum). device_scenes is what the frame was running on its own when it joined (names only; null when it reported nothing): status \"ready\" means frame_device_scenes_import can bring them into the account.",
       inputSchema: { frame_id: frameId },
     },
     async ({ frame_id }) =>
@@ -358,6 +358,30 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
           }),
         );
       }),
+  );
+
+  server.registerTool(
+    "frame_device_scenes_import",
+    {
+      description:
+        "Import the scenes a frame was ALREADY running when it joined the cloud. A frame that ran standalone first reports its own scenes (frame_scenes_list: device_scenes, status \"ready\", with their names); until they are imported the cloud lists the frame as empty while it keeps rendering them. Requires confirm=true (it deploys to the device). Each reported scene becomes a private draft in the account's library — one the account already has with exactly the same content is reused, never copied again — the drafts are added after the scenes the frame already has (max 20 on a frame), granted the service API keys they declare, and the set is pushed with the scene on screen kept. Answers per scene: imported, reused, or skipped with the reason; status \"partial\" means a quota or an outage refused some and the call can be repeated later. dismiss=true instead drops the report without importing anything. Scenes on the device are never deleted either way.",
+      inputSchema: {
+        confirm: confirmed("imports the frame's own scenes into the account and deploys them to the frame"),
+        dismiss: z
+          .boolean()
+          .optional()
+          .describe("Drop the frame's report instead of importing it; nothing is created or deployed."),
+        frame_id: frameId,
+      },
+    },
+    async ({ dismiss, frame_id }) =>
+      run(async () =>
+        text(
+          await api.json("POST", `/api/frames/${frame_id}/device-scenes`, {
+            body: { action: dismiss ? "dismiss" : "import" },
+          }),
+        ),
+      ),
   );
 
   server.registerTool(

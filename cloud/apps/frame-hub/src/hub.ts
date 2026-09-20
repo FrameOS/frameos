@@ -44,6 +44,7 @@ import {
   parseAssetEntries,
   redeployAssignedScenesToFrame,
   storeFrameAssetFile,
+  supersedePendingCommands,
   storeFrameAssetListing,
   storeFrameLogs,
   storeFrameMetrics,
@@ -57,6 +58,10 @@ import {
   queueImageGetIfIdle,
   sceneSnapshotAssetPath,
 } from "../../auth-web/src/lib/frame-asset-cache";
+import {
+  shouldRequestDeviceScenes,
+  storeFrameDeviceScenes,
+} from "../../auth-web/src/lib/device-scenes";
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
 import {
@@ -176,6 +181,9 @@ export const maxPayloadBytes = 4 * 1024 * 1024;
 // far beyond any plausible apply time and still inside the 5-minute TTL the
 // action commands (render/reboot/restart_runtime) carry.
 const commandRedeliverAfterMs = 180_000;
+// A `scenes_get` is only worth answering on the connection that asked: the
+// next one asks again, with the frame's scenes as they are then.
+const deviceScenesRequestTtlMs = 10 * 60 * 1000;
 
 // Per-frame log ingestion ceiling. The storage caps (200/batch, 8 KiB/line,
 // 5000 rows/frame) bound what is *kept*, not how often a device may make the
@@ -948,6 +956,7 @@ export async function startFrameHub(
     }
 
     await resyncEmptyStore(session, hello);
+    await requestDeviceScenes(session, hello);
     await expireStaleCommands(frameId);
     // A fresh session cannot have written anything yet, so every command
     // still in "sent" belongs to a socket that died before acking: requeue it
@@ -1062,6 +1071,53 @@ export async function startFrameHub(
     } catch (error) {
       logError("device.store_resync_failed", {
         error: error instanceof Error ? error.message : String(error),
+        frameId,
+      });
+    }
+  }
+
+  // A frame that joined the cloud already running scenes of its own says so
+  // with `scene_count` in its hello, and the cloud — which has assigned it
+  // nothing — would otherwise list an empty frame that visibly is not. Ask
+  // for them (`scenes_get`, docs/cloud-frames.md) ahead of the drain; the
+  // reply lands in frame_device_scenes and the workspace offers the import.
+  // Asked again on every connect while the owner has not decided, so the
+  // import never works from a snapshot older than the frame's last session;
+  // shouldRequestDeviceScenes stops it once they import or dismiss, or once
+  // the frame has assignments. Firmware without the verb sends no
+  // `scene_count` and is never asked.
+  async function requestDeviceScenes(
+    session: DeviceSession,
+    hello: Record<string, unknown>,
+  ) {
+    const frameId = session.frame.id;
+    try {
+      // An ask the last connection never answered is stale either way: this
+      // one asks afresh, or the owner has decided and nobody wants the reply.
+      // Left alone it would be redelivered below as if it were still wanted.
+      await supersedePendingCommands(db, frameId, "scenes_get");
+      const [row] = await db
+        .select({ assignedChecksum: frames.assignedChecksum, id: frames.id })
+        .from(frames)
+        .where(eq(frames.id, frameId))
+        .limit(1);
+      if (!row || !(await shouldRequestDeviceScenes(db, row, hello))) {
+        return;
+      }
+      const command = await enqueueFrameCommand(db, {
+        frameId,
+        // Only worth answering on this connection: the next one asks again.
+        ttlMs: deviceScenesRequestTtlMs,
+        type: "scenes_get",
+      });
+      logInfo("device.scenes_requested", {
+        commandId: command?.id,
+        frameId,
+        sceneCount: hello.scene_count,
+      });
+    } catch (error) {
+      logError("device.scenes_request_failed", {
+        error: errorField(error),
         frameId,
       });
     }
@@ -1727,11 +1783,32 @@ export async function startFrameHub(
         and(
           eq(frameCommands.id, commandId),
           eq(frameCommands.frameId, session.frame.id),
-          inArray(frameCommands.type, ["asset_get", "image_get"]),
+          inArray(frameCommands.type, ["asset_get", "image_get", "scenes_get"]),
         ),
       )
       .limit(1);
     if (!command) {
+      return;
+    }
+    if (command.type === "scenes_get") {
+      // Not an asset: the frame's own scenes, asked for by
+      // requestDeviceScenes. They go to their own table, parsed and bounded
+      // there, and never into the asset cache the app origin serves from.
+      const document = await storeFrameDeviceScenes(
+        db,
+        session.frame.id,
+        Buffer.concat(stream.chunks),
+      );
+      if (!document) {
+        logWarn("device.scenes_reply_invalid", { frameId: session.frame.id });
+        return;
+      }
+      logInfo("device.scenes_received", {
+        frameId: session.frame.id,
+        scenes: document.scenes.length,
+        skippedCompiled: document.skippedCompiled,
+      });
+      await broadcastFrameUpdate(session.frame.id);
       return;
     }
     const payload = isRecord(command.payload) ? command.payload : undefined;
@@ -1773,6 +1850,9 @@ export async function startFrameHub(
           ...(isRecord(msg.states) ? { states: msg.states } : {}),
           ...(typeof msg.scenes_checksum === "string"
             ? { scenes_checksum: msg.scenes_checksum }
+            : {}),
+          ...(typeof msg.scene_count === "number"
+            ? { scene_count: msg.scene_count }
             : {}),
           ...(isRecord(msg.hardware) ? { hardware: msg.hardware } : {}),
           ...(typeof msg.local_origin === "string"

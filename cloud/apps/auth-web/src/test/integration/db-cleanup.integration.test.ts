@@ -7,6 +7,9 @@ import {
   accounts,
   createDb,
   emailVerificationTokens,
+  frameDeviceScenes,
+  frames,
+  linkedClients,
   passwordResetTokens,
   sessions,
 } from "@frameos-cloud/db";
@@ -113,6 +116,54 @@ describe.skipIf(!hasPsql)("scripts/db-cleanup.sh", () => {
       "fresh-used",
       "live",
     ]);
+  });
+
+  it("drops a frame's unclaimed scene report once it is old, and keeps every verdict", async () => {
+    const owner = await account();
+    const frameIds: Record<string, string> = {};
+    for (const [label, status, ageDays] of [
+      ["stale-ready", "ready", 45],
+      ["fresh-ready", "ready", 2],
+      ["old-imported", "imported", 400],
+      ["old-dismissed", "dismissed", 400],
+    ] as const) {
+      const [client] = await db
+        .insert(linkedClients)
+        .values({
+          accountId: owner,
+          clientKind: "frame",
+          publicDisplayName: label,
+          tokenReference: `cleanup-device-scenes-${label}-${Date.now()}`,
+        })
+        .returning();
+      const [frame] = await db
+        .insert(frames)
+        .values({
+          accountId: owner,
+          linkedClientId: client!.id,
+          name: label,
+          publicKey: `cleanup-device-scenes-${label}-${Date.now()}`,
+        })
+        .returning();
+      frameIds[label] = frame!.id;
+      await db.insert(frameDeviceScenes).values({
+        frameId: frame!.id,
+        payload: status === "ready" ? Buffer.from("{}") : null,
+        receivedAt: new Date(Date.now() - ageDays * day),
+        status,
+      });
+    }
+
+    runCleanup();
+
+    const kept = await db.select().from(frameDeviceScenes);
+    const keptFrames = new Set(kept.map((row) => row.frameId));
+    // The hub asks the frame again on its next connect; the verdicts are what
+    // stop the asking, so they outlive any retention.
+    expect(keptFrames.has(frameIds["stale-ready"]!)).toBe(false);
+    expect(keptFrames.has(frameIds["fresh-ready"]!)).toBe(true);
+    expect(keptFrames.has(frameIds["old-imported"]!)).toBe(true);
+    expect(keptFrames.has(frameIds["old-dismissed"]!)).toBe(true);
   });
 
   it("refuses a retention that would delete rows still in their window", async () => {

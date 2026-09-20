@@ -294,6 +294,14 @@ proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
         return some(uploaded.name)
     return none(string)
 
+proc dynamicSceneCount*(): int =
+  ## How many interpreted scenes this frame holds (deployed + uploaded), for
+  ## the cloud hello's `scene_count`. Table lengths only: the hub thread calls
+  ## this, and iterating would copy the runner's scene refs on a foreign
+  ## thread (see publicStateFieldValues).
+  withLock sceneRegistryLock:
+    result = interpretedScenes.len + uploadedScenes.len
+
 proc getDynamicSceneOptions*(): seq[tuple[id: SceneId, name: string]] =
   withLock sceneRegistryLock:
     for sceneId, scene in interpretedScenes:

@@ -21,7 +21,9 @@ import { mergeBroadcastFrame } from '../utils/frameSecrets'
 import { isCloudMode } from '../utils/cloudMode'
 import {
   sendCloudFrameCommand,
-  listCloudFrameScenes,
+  dismissCloudFrameDeviceScenes,
+  getCloudFrameSceneListing,
+  importCloudFrameDeviceScenes,
   deployCloudFrameScenes,
   cloudDeployActiveSceneId,
 } from '../utils/cloudFrameApi'
@@ -33,6 +35,11 @@ import {
   cloudSceneUpdateVersion,
   scenesFromStoreSceneJson,
 } from '../utils/cloudFrameScenes'
+import {
+  deviceScenesImportSummary,
+  type CloudDeviceScenes,
+  type CloudDeviceScenesImportResult,
+} from '../utils/cloudDeviceScenes'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
@@ -185,10 +192,12 @@ export function clearCloudSceneJsonCache(storeSceneId: string): void {
   }
 }
 
-async function fetchCloudFrameScenes(
-  frameId: FrameId
-): Promise<{ scenes: FrameScene[]; sources: Record<string, CloudSceneSource> }> {
-  const rows = await listCloudFrameScenes(frameId)
+async function fetchCloudFrameScenes(frameId: FrameId): Promise<{
+  scenes: FrameScene[]
+  sources: Record<string, CloudSceneSource>
+  deviceScenes: CloudDeviceScenes | null
+}> {
+  const { scenes: rows, deviceScenes } = await getCloudFrameSceneListing(frameId)
   const scenes: FrameScene[] = []
   // Runtime scene id → the store-scene assignment it came from. This is the
   // only place both id spaces are visible at once, and the per-scene deploy
@@ -229,7 +238,7 @@ async function fetchCloudFrameScenes(
     }
     scenes.push(...rowScenes)
   }
-  return { scenes, sources }
+  return { scenes, sources, deviceScenes }
 }
 
 /**
@@ -245,6 +254,15 @@ function withStoredCloudScenes(next: FrameType, previous?: FrameType): FrameType
   // cloud_scene_sources is hydration-owned client state; a frameSummary
   // refetch never carries it, so keep it alongside the scenes it describes.
   return { ...next, scenes: previous.scenes, cloud_scene_sources: previous.cloud_scene_sources }
+}
+
+function withoutFrameKey<T>(state: Record<FrameId, T>, id: FrameId): Record<FrameId, T> {
+  if (!(id in state)) {
+    return state
+  }
+  const next = { ...state }
+  delete next[id]
+  return next
 }
 
 const pendingSdCardImageDownloads = new Set<FrameId>()
@@ -482,6 +500,15 @@ export interface framesModelValues {
   activeFramesList: FrameType[]
   archivedFramesExpanded: boolean
   archivedFramesList: FrameType[]
+  cloudDeviceScenes: Record<FrameId, CloudDeviceScenes | null>
+  cloudDeviceScenesBusy: Record<FrameId, string>
+  cloudDeviceScenesNotices: Record<
+    FrameId,
+    {
+      error: boolean
+      lines: string[]
+    }
+  >
   cloudFrameConfirmErrors: Record<FrameId, string>
   cloudFrameScenesLoaded: Record<FrameId, boolean>
   cloudFramesConfirming: Record<FrameId, boolean>
@@ -502,6 +529,16 @@ export interface framesModelActions {
     id: FrameId
   }
   cancelDeploy: (id: FrameId) => {
+    id: FrameId
+  }
+  clearCloudDeviceScenesNotice: (id: FrameId) => {
+    id: FrameId
+  }
+  cloudDeviceScenesFailure: (
+    id: FrameId,
+    error: string
+  ) => {
+    error: string
     id: FrameId
   }
   cloudFrameScenesSettled: (id: FrameId) => {
@@ -536,6 +573,9 @@ export interface framesModelActions {
     recompile: boolean
     transport: RemoteTaskTransport
   }
+  dismissCloudDeviceScenes: (id: FrameId) => {
+    id: FrameId
+  }
   downloadSdCardImage: (id: FrameId) => {
     id: FrameId
   }
@@ -545,6 +585,16 @@ export interface framesModelActions {
   ) => {
     force: boolean
     id: FrameId
+  }
+  importCloudDeviceScenes: (id: FrameId) => {
+    id: FrameId
+  }
+  importCloudDeviceScenesSuccess: (
+    id: FrameId,
+    result: CloudDeviceScenesImportResult
+  ) => {
+    id: FrameId
+    result: CloudDeviceScenesImportResult
   }
   loadFrame: (id: FrameId) => {
     id: FrameId
@@ -607,6 +657,13 @@ export interface framesModelActions {
   ) => {
     id: FrameId
     transport: RemoteTaskTransport
+  }
+  setCloudDeviceScenes: (
+    id: FrameId,
+    deviceScenes: CloudDeviceScenes | null
+  ) => {
+    deviceScenes: CloudDeviceScenes | null
+    id: FrameId
   }
   setCloudFrameScenes: (
     id: FrameId,
@@ -708,6 +765,15 @@ export const framesModel = kea<framesModelType>([
     // Until the first one does, an empty scene list means "not fetched yet",
     // not "this frame has none".
     cloudFrameScenesSettled: (id: FrameId) => ({ id }),
+    // Cloud only: what the frame was running on its own when it joined
+    // (utils/cloudDeviceScenes.ts). Arrives with the scene hydration; the
+    // dashboard's banner imports it into the account or dismisses it.
+    setCloudDeviceScenes: (id: FrameId, deviceScenes: CloudDeviceScenes | null) => ({ id, deviceScenes }),
+    importCloudDeviceScenes: (id: FrameId) => ({ id }),
+    importCloudDeviceScenesSuccess: (id: FrameId, result: CloudDeviceScenesImportResult) => ({ id, result }),
+    dismissCloudDeviceScenes: (id: FrameId) => ({ id }),
+    cloudDeviceScenesFailure: (id: FrameId, error: string) => ({ id, error }),
+    clearCloudDeviceScenesNotice: (id: FrameId) => ({ id }),
     setCloudFrameScenes: (id: FrameId, scenes: FrameScene[], sources?: Record<string, CloudSceneSource>) => ({
       id,
       scenes,
@@ -803,6 +869,37 @@ export const framesModel = kea<framesModelType>([
       {} as Record<FrameId, boolean>,
       {
         cloudFrameScenesSettled: (state, { id }) => (state[id] ? state : { ...state, [id]: true }),
+      },
+    ],
+    cloudDeviceScenes: [
+      {} as Record<FrameId, CloudDeviceScenes | null>,
+      {
+        setCloudDeviceScenes: (state, { id, deviceScenes }) => ({ ...state, [id]: deviceScenes }),
+      },
+    ],
+    // 'importing' | 'dismissing' while the banner's request is in flight.
+    cloudDeviceScenesBusy: [
+      {} as Record<FrameId, string>,
+      {
+        importCloudDeviceScenes: (state, { id }) => ({ ...state, [id]: 'importing' }),
+        dismissCloudDeviceScenes: (state, { id }) => ({ ...state, [id]: 'dismissing' }),
+        importCloudDeviceScenesSuccess: (state, { id }) => withoutFrameKey(state, id),
+        cloudDeviceScenesFailure: (state, { id }) => withoutFrameKey(state, id),
+        setCloudDeviceScenes: (state, { id }) => (state[id] === 'dismissing' ? withoutFrameKey(state, id) : state),
+      },
+    ],
+    // What the last import did, as the lines the banner shows until closed.
+    cloudDeviceScenesNotices: [
+      {} as Record<FrameId, { lines: string[]; error: boolean }>,
+      {
+        importCloudDeviceScenes: (state, { id }) => withoutFrameKey(state, id),
+        dismissCloudDeviceScenes: (state, { id }) => withoutFrameKey(state, id),
+        clearCloudDeviceScenesNotice: (state, { id }) => withoutFrameKey(state, id),
+        importCloudDeviceScenesSuccess: (state, { id, result }) => ({
+          ...state,
+          [id]: { lines: deviceScenesImportSummary(result), error: false },
+        }),
+        cloudDeviceScenesFailure: (state, { id, error }) => ({ ...state, [id]: { lines: [error], error: true } }),
       },
     ],
     cloudFrameConfirmErrors: [
@@ -1579,6 +1676,33 @@ export const framesModel = kea<framesModelType>([
         actions.confirmCloudFrameFailure(id, error instanceof Error ? error.message : 'Failed to confirm the frame')
       }
     },
+    importCloudDeviceScenes: async ({ id }) => {
+      try {
+        const result = await importCloudFrameDeviceScenes(id)
+        actions.importCloudDeviceScenesSuccess(id, result)
+      } catch (error) {
+        console.error(error)
+        actions.cloudDeviceScenesFailure(
+          id,
+          error instanceof Error ? error.message : 'Failed to import the scenes from this frame'
+        )
+      }
+      // Either way the listing is the truth now: the new assignments, and the
+      // report's own status (a request that timed out may still have landed).
+      actions.hydrateCloudFrameScenes(id, true)
+    },
+    dismissCloudDeviceScenes: async ({ id }) => {
+      try {
+        await dismissCloudFrameDeviceScenes(id)
+        actions.setCloudDeviceScenes(id, null)
+      } catch (error) {
+        console.error(error)
+        actions.cloudDeviceScenesFailure(
+          id,
+          error instanceof Error ? error.message : 'Failed to dismiss the scenes from this frame'
+        )
+      }
+    },
     hydrateCloudFrameScenes: async ({ id, force }) => {
       if (!isCloudMode()) {
         return
@@ -1602,11 +1726,14 @@ export const framesModel = kea<framesModelType>([
       const waiters = cloudFrameSceneHydrationWaiters.get(id) ?? []
       cloudFrameSceneHydrationWaiters.delete(id)
       try {
-        const { scenes, sources } = await fetchCloudFrameScenes(id)
+        const { scenes, sources, deviceScenes } = await fetchCloudFrameScenes(id)
         cloudFrameScenesHydratedAt.set(id, Date.now())
         const frame = values.frames[id]
         if (!frame) {
           return
+        }
+        if (JSON.stringify(values.cloudDeviceScenes[id] ?? null) !== JSON.stringify(deviceScenes)) {
+          actions.setCloudDeviceScenes(id, deviceScenes)
         }
         // Only dispatch real changes: every write replaces the frame object,
         // which cascades into frameLogic's `frame` subscription (frame form

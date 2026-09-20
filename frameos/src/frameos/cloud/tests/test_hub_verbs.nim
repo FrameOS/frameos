@@ -65,6 +65,12 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
         AssetReadResult(error: "no_image")
       else:
         AssetReadResult(data: "png-bytes", contentType: "image/png", mtime: 1700000002),
+    getScenesFn: proc(): JsonNode {.gcsafe.} =
+      if recorded.assetData == "scenes-fail":
+        raise newException(IOError, "disk went away")
+      %*{"scenes": [{"id": "sceneA", "name": "Clock", "nodes": [], "edges": []},
+                    {"id": "sceneB", "name": "Photos", "nodes": [], "edges": []}],
+         "skipped_compiled": 1},
     writeAssetFn: proc(path: string, data: string): JsonNode {.gcsafe.} =
       if path == "denied.bin":
         raise newException(ValueError, "Invalid asset path")
@@ -744,6 +750,39 @@ suite "cloud hub verb dispatcher":
     })
     check refused.ack{"error"}.getStr("") == "no_image"
     check refused.extra.len == 0
+
+  test "scenes_get streams the frame's scenes as one JSON document":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.getStateFn = proc(): JsonNode {.gcsafe.} =
+      %*{"frameos_version": "test", "states": {}, "active_scene": "uploaded/sceneB"}
+    let reply = handleCloudVerb(ctx, %*{"id": "s1", "type": "scenes_get"})
+    check reply.ack{"ok"}.getBool(false) == true
+    check reply.extra.len == 1
+    check reply.extra[0]{"type"}.getStr("") == "asset_chunk"
+    check reply.extra[0]{"id"}.getStr("") == "s1"
+    check reply.extra[0]{"done"}.getBool(false) == true
+    check reply.extra[0]{"content_type"}.getStr("") == "application/json"
+    let document = parseJson(decode(reply.extra[0]{"data"}.getStr("")))
+    check document{"scenes"}.len == 2
+    check document{"scenes"}[0]{"id"}.getStr("") == "sceneA"
+    check document{"skipped_compiled"}.getInt(-1) == 1
+    # The provider knows scenes by their public id, never by the runtime's
+    # "uploaded/" registration.
+    check document{"active_scene"}.getStr("") == "sceneB"
+    check auditedVerbs(recorded) == @["scenes_get"]
+
+  test "scenes_get answers read_failed, and unsupported_verb without a reader":
+    let failing = Recorded()
+    failing.assetData = "scenes-fail"
+    let failed = handleCloudVerb(makeContext(failing), %*{"id": "s2", "type": "scenes_get"})
+    check failed.ack{"error"}.getStr("") == "read_failed"
+    check failed.extra.len == 0
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.getScenesFn = nil
+    let refused = handleCloudVerb(ctx, %*{"id": "s3", "type": "scenes_get"})
+    check refused.ack{"error"}.getStr("") == "unsupported_verb"
 
   test "asset_put stores decoded bytes and acks the stored entry":
     let recorded = Recorded()
