@@ -107,6 +107,16 @@ WHERE status IN ('pending', 'sent')
   AND expires_at IS NOT NULL
   AND expires_at < now();
 
+-- A frame's report of its own scenes (`scenes_get`) that the owner never
+-- imported or dismissed: up to 8 MiB of scene JSON per frame, waiting on a
+-- banner nobody clicked. Only the bytes of an undecided report go — the hub
+-- asks the frame again on its next connect, so the offer comes back as fresh
+-- as the frame is. A verdict (imported / dismissed) holds no payload and is
+-- kept: it is what stops the asking.
+DELETE FROM frame_device_scenes
+WHERE status = 'ready'
+  AND received_at < now() - make_interval(days => :'log_retention_days'::int);
+
 -- Revoked frames themselves are deliberately NOT pruned here: the row is the
 -- owner's record of a device that existed, and deleting it takes its logs with
 -- it. The quota stops counting them after revokedFrameQuotaGraceMs, so they

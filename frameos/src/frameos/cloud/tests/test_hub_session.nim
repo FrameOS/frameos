@@ -182,6 +182,9 @@ suite "cloud hub session over a live socket":
       check recorded.hello{"frameos_version"}.getStr("") != ""
       check recorded.hello{"hardware"}{"width"}.getInt(0) == 320
       check recorded.hello{"scenes_checksum"}.getStr("") == "sum-0"
+      # What tells a provider this frame already holds scenes of its own
+      # (and that a scenes_get is worth asking): always sent, a number.
+      check recorded.hello{"scene_count"}.kind == JInt
       # The challenge nonce was signed with the enrolled device key.
       check recorded.signatureValid
       # Regression: the signature must cover the DECODED nonce bytes, not the

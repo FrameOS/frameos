@@ -132,7 +132,7 @@ Around 70 tools in five groups; every one documents its parameters. Read-only
 tools are annotated `readOnlyHint`, destructive ones `destructiveHint` and
 take `confirm: true` — as does every tool that changes what a physical frame
 does, shows or stores (`frame_scene_install`, `frame_scene_update`,
-`frame_scenes_set`, `frame_scene_activate`, `frame_scene_remove`,
+`frame_device_scenes_import`, `frame_scenes_set`, `frame_scene_activate`, `frame_scene_remove`,
 `frame_settings_update`,
 `frame_schedule_set`, `frame_command_send`, `frame_reboot`, `frame_restart`,
 the `frame_asset_*` writes, `frame_assets_sync_fonts`,
@@ -157,7 +157,11 @@ a frame's logs must not be able to talk an agent into installing something.
   without it a store scene gets none, and the answer says what it still needs),
   `frame_scene_update` (one installed scene — or several named ones, in one
   push, with `scene_ids` — to its newest store version, for a
-  `frame_scenes_list` row with `update_available`; no other scene moves), `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
+  `frame_scenes_list` row with `update_available`; no other scene moves),
+  `frame_device_scenes_import` (a frame that ran standalone before it joined
+  reports its own scenes — `device_scenes` on `frame_scenes_list`; this imports
+  them as private drafts, reusing the ones the account already has, and
+  deploys them, or drops the report with `dismiss`), `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
   `frame_screenshot`, `frame_scene_preview`, `frame_logs` (limit, search and
   since travel as query parameters of `GET /api/frames/{id}/logs`, so the
   database cuts the page),

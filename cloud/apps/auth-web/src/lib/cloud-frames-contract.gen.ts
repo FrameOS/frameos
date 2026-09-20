@@ -703,6 +703,14 @@ export const cloudFramesContract = {
         "linux",
         "esp32"
       ]
+    },
+    {
+      "type": "scenes_get",
+      "scope": null,
+      "content": false,
+      "profiles": [
+        "linux"
+      ]
     }
   ],
   "errors": {

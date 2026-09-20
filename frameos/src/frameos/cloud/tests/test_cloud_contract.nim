@@ -35,6 +35,7 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
     readAssetFn: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
       AssetReadResult(error: "not_found"),
     getImageFn: proc(): AssetReadResult {.gcsafe.} = AssetReadResult(error: "no_image"),
+    getScenesFn: proc(): JsonNode {.gcsafe.} = %*{"scenes": [], "skipped_compiled": 0},
     writeAssetFn: proc(path: string, data: string): JsonNode {.gcsafe.} = %*{},
     putAssetChunkFn: proc(uploadId: string, offset: BiggestInt, data: string,
                           finalPath: string): JsonNode {.gcsafe.} = %*{},

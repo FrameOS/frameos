@@ -1,5 +1,9 @@
 import { asc, eq } from "drizzle-orm";
-import { frameSceneAssignments, storeScenes } from "@frameos-cloud/db";
+import {
+  frameDeviceScenes,
+  frameSceneAssignments,
+  storeScenes,
+} from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
@@ -7,6 +11,7 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
+import { deviceScenesSummary } from "../../../../../src/lib/device-scenes";
 import {
   assignedSceneVersion,
   assignScenesToFrame,
@@ -66,8 +71,17 @@ export async function GET(
     .innerJoin(storeScenes, eq(storeScenes.id, frameSceneAssignments.sceneId))
     .where(eq(frameSceneAssignments.frameId, frame.id))
     .orderBy(asc(frameSceneAssignments.position));
+  // What the frame was already running when it joined (`scenes_get`), for
+  // the workspace's import banner: names and the verdict, never a scene body.
+  // null when the frame reported nothing. Acted on at /device-scenes.
+  const [deviceScenes] = await db
+    .select()
+    .from(frameDeviceScenes)
+    .where(eq(frameDeviceScenes.frameId, frame.id))
+    .limit(1);
   return NextResponse.json({
     assigned_checksum: frame.assignedChecksum,
+    device_scenes: deviceScenesSummary(deviceScenes),
     scenes: rows.map((row) => {
       // The version the frame was last SENT (the pin, or what "latest"
       // resolved to at that push) next to the store's newest one: the frame's

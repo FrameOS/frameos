@@ -11,7 +11,7 @@ import jsony
 
 import ../api
 import ../state
-from ../../scenes import getLastPublicState
+from ../../scenes import getLastPublicState, setUploadedScenePayload
 import ../../types
 import ../../config
 
@@ -190,6 +190,34 @@ suite "Server API helpers":
     let invalidScenesPayload = frameApiPayload(state)
     check invalidScenesPayload{"scenes"}.kind == JArray
     check invalidScenesPayload{"scenes"}.len == 0
+
+suite "the scenes a frame reports to a provider (scenes_get)":
+  test "uploaded scenes first, disk scenes after, compiled ones counted not sent":
+    let tempRoot = getTempDir() / "frameos-api-device-scenes"
+    createDir(tempRoot)
+    let scenesPath = tempRoot / "scenes.json"
+    writeFile(scenesPath, $(%*[
+      {"id": "clock", "name": "Clock (disk)", "settings": {"execution": "interpreted"}},
+      {"id": "photos", "name": "Photos", "settings": {"execution": "interpreted"}},
+      {"id": "legacy", "name": "Legacy", "settings": {"execution": "compiled"}},
+      {"name": "no id"},
+    ]))
+    putEnv("FRAMEOS_SCENES_JSON", scenesPath)
+    setUploadedScenePayload($(%*[{"id": "clock", "name": "Clock (uploaded)"}]))
+    try:
+      let allScenes = %*[{"id": "clock"}, {"id": "photos"}, {"id": "legacy"}, {"id": "nimOnly"}]
+      let payload = deviceScenesPayload(allScenes)
+      check payload{"scenes"}.len == 2
+      # The uploaded copy wins an id both stores hold.
+      check payload{"scenes"}[0]{"name"}.getStr() == "Clock (uploaded)"
+      check payload{"scenes"}[1]{"id"}.getStr() == "photos"
+      # `legacy` says so itself; `nimOnly` is in the deploy's full list and in
+      # no interpreted store.
+      check payload{"skipped_compiled"}.getInt() == 2
+      check deviceScenesPayload(){"skipped_compiled"}.getInt() == 1
+    finally:
+      setUploadedScenePayload("")
+      delEnv("FRAMEOS_SCENES_JSON")
 
 suite "private-network elevation is not a bulk-savable setting":
   test "a config save cannot flip allowLocalNetworkAccess either way":

@@ -2596,6 +2596,14 @@ static void ws_handle_message(const char *data, size_t len)
          * documented answer for a verb this plane does not serve — rather
          * than `unknown_verb`, which would say the provider invented it. */
         ws_ack(id, false, "unsupported_verb");
+    } else if (strcmp(type, "scenes_get") == 0) {
+        /* Documented, Linux only (contract: profiles ["linux"]): it hands a
+         * provider the scenes an owner built on the frame's own admin page.
+         * This firmware has no on-device editor — whatever is in its store
+         * came from a control plane or the USB tool, which still holds it —
+         * and sends no `scene_count` in its hello, so a provider following
+         * the protocol never asks. */
+        ws_ack(id, false, "unsupported_verb");
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
     } else {

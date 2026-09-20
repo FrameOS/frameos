@@ -1,5 +1,6 @@
 import type { FrameSchedule, FrameScene, FrameType } from '../types'
 import { apiFetch } from './apiFetch'
+import type { CloudDeviceScenes, CloudDeviceScenesImportResult } from './cloudDeviceScenes'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import { storeSceneErrorMessage, type StoreErrorDetail } from './storeSceneErrors'
 import {
@@ -283,10 +284,47 @@ export async function deployCloudFrameScenes(
  * scene JSON lives at /api/store/scenes/{scene_id}/scenes.json.
  */
 export async function listCloudFrameScenes(frameId: FrameId): Promise<CloudFrameSceneRow[]> {
+  return (await getCloudFrameSceneListing(frameId)).scenes
+}
+
+/**
+ * The same GET, with `device_scenes`: what the frame was running on its own
+ * when it joined the cloud (null when it reported nothing) — the import
+ * banner's input. See utils/cloudDeviceScenes.ts.
+ */
+export async function getCloudFrameSceneListing(
+  frameId: FrameId
+): Promise<{ scenes: CloudFrameSceneRow[]; deviceScenes: CloudDeviceScenes | null }> {
   const response = await apiFetch(`/api/frames/${frameId}/scenes`)
   await assertOk(response, 'Failed to load the frame scene list')
-  const data = (await response.json()) as { scenes?: CloudFrameSceneRow[] }
-  return data.scenes ?? []
+  const data = (await response.json()) as { scenes?: CloudFrameSceneRow[]; device_scenes?: CloudDeviceScenes | null }
+  return { scenes: data.scenes ?? [], deviceScenes: data.device_scenes ?? null }
+}
+
+/**
+ * Import the frame's own scenes into the account, or drop the frame's report
+ * (POST /api/frames/{id}/device-scenes). Importing mints private drafts —
+ * reusing the ones the account already has — adds them to the frame and
+ * pushes the set with the scene on screen kept. Neither touches the scenes
+ * on the device.
+ */
+export async function importCloudFrameDeviceScenes(frameId: FrameId): Promise<CloudDeviceScenesImportResult> {
+  const response = await apiFetch(`/api/frames/${frameId}/device-scenes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'import' }),
+  })
+  await assertOk(response, 'Failed to import the scenes from this frame')
+  return (await response.json()) as CloudDeviceScenesImportResult
+}
+
+export async function dismissCloudFrameDeviceScenes(frameId: FrameId): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/device-scenes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'dismiss' }),
+  })
+  await assertOk(response, 'Failed to dismiss the scenes from this frame')
 }
 
 /**

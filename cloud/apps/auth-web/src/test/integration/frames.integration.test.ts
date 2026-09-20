@@ -32,6 +32,11 @@ import {
   POST as assignFrameScenes,
 } from "../../../app/api/frames/[frameId]/scenes/route";
 import { POST as updateFrameScene } from "../../../app/api/frames/[frameId]/scenes/update/route";
+import {
+  GET as getDeviceScenes,
+  POST as postDeviceScenes,
+} from "../../../app/api/frames/[frameId]/device-scenes/route";
+import { storeFrameDeviceScenes } from "../../lib/device-scenes";
 import { POST as pushFrameSchedule } from "../../../app/api/frames/[frameId]/schedule/route";
 import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/settings/route";
 import {
@@ -3451,6 +3456,106 @@ describe("frame management API", () => {
       routeParams(frame_id),
     );
     expect(detail.status).toBe(404);
+  });
+});
+
+describe("device scenes: what a frame was running when it joined", () => {
+  const report = Buffer.from(
+    JSON.stringify({
+      active_scene: "clock",
+      scenes: [
+        { edges: [], id: "clock", name: "Clock", nodes: [] },
+        { edges: [], id: "photos", name: "Photos", nodes: [] },
+      ],
+      skipped_compiled: 0,
+    }),
+  );
+
+  async function confirmedFrameWithReport() {
+    const enrolled = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${enrolled.frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(enrolled.frame_id),
+    );
+    await storeFrameDeviceScenes(db, enrolled.frame_id, report);
+    return enrolled;
+  }
+
+  const act = (frameId: string, body: Record<string, unknown>) =>
+    postDeviceScenes(
+      postJson(`/api/frames/${frameId}/device-scenes`, body, { origin: baseUrl }),
+      routeParams(frameId),
+    );
+
+  it("lists the report on both GETs, imports it, and then lists the scenes", async () => {
+    const { frame_id } = await confirmedFrameWithReport();
+    const summary = await getDeviceScenes(
+      getRequest(`/api/frames/${frame_id}/device-scenes`),
+      routeParams(frame_id),
+    );
+    expect(summary.status).toBe(200);
+    expect(await summary.json()).toMatchObject({
+      device_scenes: {
+        scene_count: 2,
+        scenes: [
+          { id: "clock", name: "Clock" },
+          { id: "photos", name: "Photos" },
+        ],
+        status: "ready",
+      },
+    });
+    const before = await getFrameScenes(
+      getRequest(`/api/frames/${frame_id}/scenes`),
+      routeParams(frame_id),
+    );
+    expect(await before.json()).toMatchObject({
+      device_scenes: { scene_count: 2, status: "ready" },
+      scenes: [],
+    });
+
+    const imported = await act(frame_id, {});
+    expect(imported.status).toBe(200);
+    expect(await imported.json()).toMatchObject({ assigned: 2, status: "imported" });
+
+    const after = (await (
+      await getFrameScenes(getRequest(`/api/frames/${frame_id}/scenes`), routeParams(frame_id))
+    ).json()) as { device_scenes: { status: string }; scenes: { name: string }[] };
+    expect(after.scenes.map((scene) => scene.name)).toEqual(["Clock", "Photos"]);
+    expect(after.device_scenes.status).toBe("imported");
+    // Spent: a second import has nothing to work from.
+    expect((await act(frame_id, { action: "import" })).status).toBe(404);
+  });
+
+  it("dismisses, refuses unknown actions, and is invisible across accounts", async () => {
+    const { frame_id } = await confirmedFrameWithReport();
+    expect((await act(frame_id, { action: "publish" })).status).toBe(400);
+    // Cross-origin POSTs never reach the importer.
+    const crossOrigin = await postDeviceScenes(
+      postJson(`/api/frames/${frame_id}/device-scenes`, {}, { origin: "https://evil.example" }),
+      routeParams(frame_id),
+    );
+    expect(crossOrigin.status).toBe(403);
+
+    const dismissed = await act(frame_id, { action: "dismiss" });
+    expect(await dismissed.json()).toEqual({ status: "dismissed" });
+    expect((await act(frame_id, { action: "dismiss" })).status).toBe(404);
+
+    await signIn(); // a different account
+    const foreign = await getDeviceScenes(
+      getRequest(`/api/frames/${frame_id}/device-scenes`),
+      routeParams(frame_id),
+    );
+    expect(foreign.status).toBe(404);
+    expect((await act(frame_id, {})).status).toBe(404);
+  });
+
+  it("answers null for a frame that reported nothing", async () => {
+    const { frame_id } = await enrolledFrame();
+    const summary = await getDeviceScenes(
+      getRequest(`/api/frames/${frame_id}/device-scenes`),
+      routeParams(frame_id),
+    );
+    expect(await summary.json()).toEqual({ device_scenes: null });
   });
 });
 

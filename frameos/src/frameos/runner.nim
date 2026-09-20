@@ -675,6 +675,21 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               payload["y"] = %*point.y
           of "setCurrentScene":
             var sceneId = SceneId(payload["sceneId"].getStr())
+            if not sceneId.string.startsWith("uploaded/") and cloudUploadedScenesResident():
+              # A frame that joined a provider with scenes of its own has them
+              # imported and pushed back (`scenes_get`, docs/cloud-frames.md),
+              # so the same public id now names two scenes here: the owner's
+              # copy on disk and the provider's "uploaded/<id>". The provider's
+              # copy is the one being edited and deployed, so while its set is
+              # resident it shadows the disk copy for a bare id — the ESP32
+              # profile stores scenes by public id and simply replaces them,
+              # and this keeps the two profiles answering alike. The disk copy
+              # is never touched: replace the uploaded set locally, or leave
+              # the provider, and the bare id is the disk scene again.
+              let providerSceneId = SceneId("uploaded/" & sceneId.string)
+              if hasExportedScene(providerSceneId):
+                sceneId = providerSceneId
+                payload["sceneId"] = %sceneId.string
             var exportedScene = findExportedScene(sceneId)
             if exportedScene.isNone and not sceneId.string.startsWith("uploaded/"):
               # Cloud pushes register every scene as "uploaded/<id>", but the

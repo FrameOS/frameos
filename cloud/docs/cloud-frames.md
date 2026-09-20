@@ -534,6 +534,23 @@ panel itself** — shows a short code and QR pointing at
 doubles as proof of possession. This reuses `client_kind = "frame"`,
 which the device-flow tables already support.
 
+**A frame linked this way usually already runs scenes**, and the cloud's
+model — a scene LIBRARY whose scenes are assigned to frames — has no record of
+them: until 2026-09-20 such a frame arrived empty while it kept rendering what
+it had. Now its hello says how many scenes it holds, the hub asks for them
+(`scenes_get`, the protocol's one device → cloud scene path) and keeps the
+answer in `frame_device_scenes`, and the workspace offers "Import scenes from
+this frame". The split is deliberate: the hub only STORES the report — it has
+no moderation, no object-store writes and no quotas — and auth-web imports it
+through `createAccountScene`, the same publish path as "save to my account",
+so an imported draft skips none of the store's gates. It is the owner's click,
+never automatic: it mints scenes in their library, spends their daily
+new-scene budget and re-renders their panel. `store_scene_imports` is the
+dedupe ledger — (account, content digest) → the draft it became — so a frame
+that enrols again is handed the drafts it already has instead of a second copy
+of each. Wire details, the dedupe order and what happens to the frame's own
+copy: `docs/cloud-frames.md`, "Scenes the frame already had".
+
 ### 3. Flash from browser (ESP32)
 
 esptool-js over WebSerial: plug in USB, click Flash in Chrome, firmware from
@@ -580,6 +597,11 @@ New tables, hanging off existing machinery:
   `set_scenes` push; the device's ack updates sync state.
 - `frame_commands` — durable queue of pending pushes per frame (survives
   restarts; drained on reconnect), with TTL and audit linkage.
+- `frame_device_scenes` — the latest `scenes_get` reply of a frame that
+  joined with scenes of its own, one row per frame: the bytes as sent until
+  the owner imports or dismisses, then only the verdict (which is what stops
+  the hub asking). `store_scene_imports` — the import's dedupe ledger,
+  (account, content sha256) → store scene; rows die with their scene.
 - `frame_telemetry` — recent health/log/metric samples, opt-in per scope,
   aggressively capped and pruned (single Postgres, 8 MB-blob-era budgets).
 - `enrollment_tokens` — hashed single-use claim tokens with expiry, minted

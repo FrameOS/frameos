@@ -105,8 +105,9 @@ static const fos_contract_verb_t k_fos_contract_verbs[] = {
     {"asset_delete", NULL, 0},
     {"asset_rename", NULL, 0},
     {"image_get", NULL, 0},
+    {"scenes_get", NULL, 0},
 };
-#define FOS_CONTRACT_VERBS_COUNT 21
+#define FOS_CONTRACT_VERBS_COUNT 22
 
 #define FOS_CONTRACT_ASSET_MAX_FILE_BYTES 8388608
 #define FOS_CONTRACT_ASSET_PUT_MAX_BYTES 262144

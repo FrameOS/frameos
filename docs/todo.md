@@ -159,21 +159,21 @@ way, or make them work, with this.
 
 ---
 
-## A frame that joins the cloud arrives with no scenes
+## Frame scene import (`scenes_get`)
 
-Flip "Manage this frame from FrameOS Cloud" on a frame that already runs its
-own scenes and the cloud lists none — the frame keeps rendering what it has,
-and the cloud shows an empty frame. The hub protocol has no device → cloud
-scene path: `docs/cloud-frames-contract.json` carries `set_scenes` (cloud →
-device) and the `scenes_checksum` ack, and `enrollManagedFrame` registers the
-device and nothing more.
+Open on the import of a frame's own scenes (`docs/cloud-frames.md`, "Scenes
+the frame already had"):
 
-What it needs: a device → cloud "here are my scenes" verb, a cloud importer
-that creates draft store scenes and frame assignments from it, dedupe against
-scenes the account already has (a re-enrolled frame must not fork every scene
-again), and a decision about what happens to a scene the device has and the
-cloud then reassigns. A feature, not a fix — but an empty cloud frame is a
-bad first five minutes.
+- Compiled scenes stay behind: the device counts them and the import's
+  summary says so, but the owner has to find `/nim-converter` themselves.
+  Sending their JSON along and offering the conversion inside the import
+  would finish the job for frames that came from an old backend deploy.
+- Persisted scene state does not travel: the push keeps the active scene on
+  screen, but the provider's copy runs as `uploaded/<id>`, so state persisted
+  under the old id is not carried over. `set_scenes` takes a `state` seed; the
+  import sends none.
+- Bench pass on a frame that ran standalone first — so far it is covered by
+  Nim, hub and auth-web tests against a fake device only.
 
 ---
 

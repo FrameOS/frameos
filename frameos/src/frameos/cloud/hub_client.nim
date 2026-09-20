@@ -16,7 +16,10 @@
 ## resolved and bounded on-device inside the assets directory
 ## (admin_api_assets_routes' resolveAssetPath — the same guard the local
 ## Assets panel uses), with writes additionally refused for dot-directories
-## (`.frameos`, `.thumbs` — the device's own plumbing). Anything outside the
+## (`.frameos`, `.thumbs` — the device's own plumbing). `scenes_get` reads one
+## more thing, the frame's own interpreted scenes (server/api.nim
+## deviceScenesPayload) — what the local admin's scene export hands over, and
+## nothing a path in the message could widen. Anything outside the
 ## verb table is answered with `unknown_verb` and audit-logged through the
 ## normal log pipeline (`cloud:audit`).
 ##
@@ -231,6 +234,10 @@ type
     ## The current rendered image for `image_get` (error "no_image" until the
     ## first render).
     getImageFn*: proc(): AssetReadResult {.gcsafe.}
+    ## `scenes_get`: every interpreted scene the frame holds, as
+    ## {"scenes": [...], "skipped_compiled": N} with public scene ids
+    ## (server/api.nim deviceScenesPayload). nil = the verb is unsupported.
+    getScenesFn*: proc(): JsonNode {.gcsafe.}
     ## Accepts a `refresh_service_settings` nudge. The verb acks on ACCEPTANCE,
     ## never on completion: the fetch is an HTTPS request on the device's own
     ## schedule (see pullServiceSettings), and a failed fetch must not look
@@ -430,6 +437,12 @@ proc helloStatePayload*(frameConfig: FrameConfig, scenesChecksum: string): JsonN
       "states": states,
       "active_scene": sceneId.string,
       "scenes_checksum": scenesChecksum,
+      # How many interpreted scenes this frame holds, whoever put them there.
+      # With an empty scenes_checksum it is how a provider learns that a frame
+      # which just joined already runs scenes of its own, and that a
+      # `scenes_get` is worth asking. The registry count, not a disk read:
+      # this payload also rides every `state` message.
+      "scene_count": dynamicSceneCount(),
     }
 
 proc defaultReboot() {.gcsafe.} =
@@ -621,6 +634,14 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
                             mtime: epochTime().BiggestInt)
           except CatchableError:
             AssetReadResult(error: "no_image"),
+      getScenesFn: proc(): JsonNode {.gcsafe.} =
+        {.gcsafe.}:
+          var allScenes: JsonNode = nil
+          try:
+            allScenes = frameSetup.loadAllScenesPayload()
+          except CatchableError:
+            allScenes = nil
+          deviceScenesPayload(allScenes),
       refreshServiceSettingsFn: proc() {.gcsafe.} =
         requestServiceSettingsPull(),
       requestUpgradeFn: proc() {.gcsafe.} =
@@ -1058,6 +1079,45 @@ proc handleImageGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ctx.audit("image_get", true)
   CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, image))
 
+proc publicSceneId(sceneId: string): string =
+  ## The id a provider knows a scene by: the runtime registers every uploaded
+  ## scene as "uploaded/<id>", which is this frame's own bookkeeping.
+  if sceneId.startsWith("uploaded/"): sceneId["uploaded/".len .. ^1] else: sceneId
+
+proc handleScenesGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
+  ## "Which scenes do you hold?" — what a provider asks a frame that joined it
+  ## already running scenes of its own, so they can be imported instead of the
+  ## frame arriving empty. The answer is one JSON document,
+  ## {"scenes", "active_scene", "skipped_compiled"}, streamed as the same
+  ## asset_chunk frames asset_get uses: a frame's scenes can run past what one
+  ## message should carry, and every provider already reassembles that stream.
+  ## Read-only, and nothing a scene export from the local admin page would not
+  ## hand over.
+  if ctx.getScenesFn.isNil:
+    ctx.audit("scenes_get", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  var document: JsonNode
+  try:
+    document = ctx.getScenesFn()
+  except CatchableError as error:
+    ctx.audit("scenes_get", false, "read_failed: " & error.msg)
+    return CloudVerbReply(ack: ackError(id, "read_failed"))
+  if document == nil or document.kind != JObject or
+      document{"scenes"} == nil or document{"scenes"}.kind != JArray:
+    ctx.audit("scenes_get", false, "read_failed")
+    return CloudVerbReply(ack: ackError(id, "read_failed"))
+  let activeScene =
+    if ctx.getStateFn.isNil: ""
+    else: ctx.getStateFn(){"active_scene"}.getStr("")
+  document["active_scene"] = %publicSceneId(activeScene)
+  let body = $document
+  if body.len > HubMaxAssetFileBytes:
+    ctx.audit("scenes_get", false, "too_large")
+    return CloudVerbReply(ack: ackError(id, "too_large"))
+  ctx.audit("scenes_get", true)
+  CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, AssetReadResult(
+    data: body, contentType: "application/json", mtime: epochTime().BiggestInt)))
+
 proc assetWriteError(error: ref CatchableError): string =
   ## The write helpers raise ValueError for guard refusals and OSError for
   ## filesystem trouble; "Asset not found" is the one OSError worth naming.
@@ -1302,6 +1362,8 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleAssetRename(ctx, id, msg)
   of "image_get":
     result = handleImageGet(ctx, id)
+  of "scenes_get":
+    result = handleScenesGet(ctx, id)
   of "render":
     discard ctx.sendEventFn("render", %*{})
     result = CloudVerbReply(ack: ackOk(id))

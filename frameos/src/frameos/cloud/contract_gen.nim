@@ -190,6 +190,7 @@ const CloudContractVerbs* = @[
   VerbSpec(verb: "asset_delete", scope: "", content: false),
   VerbSpec(verb: "asset_rename", scope: "", content: false),
   VerbSpec(verb: "image_get", scope: "", content: false),
+  VerbSpec(verb: "scenes_get", scope: "", content: false),
 ]
 
 const CloudContractLimits* = @[

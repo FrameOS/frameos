@@ -325,7 +325,11 @@ profile they target rather than relying on the cap.
    cloud.frameos.net re-queues the assigned `set_scenes` push ahead of the
    drain, since the device holds nothing a push could clobber. Every other
    mismatch (a preview replaced the set, a push was never acked) is shown to
-   the owner as out of sync and left to a deploy.
+   the owner as out of sync and left to a deploy. The optional
+   **`scene_count`** (Linux runtime **2026.9.21**+) is how many interpreted
+   scenes the frame holds, whoever put them there: it is how a provider
+   learns that a frame which just joined already runs scenes of its own, and
+   that a `scenes_get` is worth asking — see "Scenes the frame already had".
 2. Provider → frame: `{"type": "challenge", "nonce": "base64"}` — the nonce is
    at least **32 random bytes**, and the minimum is on the *decoded* length,
    not on the base64 text.
@@ -406,6 +410,7 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 | `notify_update_available` | `{"version"?: "…"}` | nudge the device to update itself — the provider supplies no URLs and no binaries (today's provider sends a bare `{"id","type"}` frame; a `version`, if present, is logged and otherwise ignored). The full profile answers by running its own signed release upgrade (`frameos/upgrade.nim`: fetch the latest published release for its target, verify the minisign signature on-device, stage, restart — a nudge while an upgrade is in flight, or on an up-to-date install, is a logged no-op, so at-least-once redelivery is safe); the ESP32 fetches its control plane's signed OTA manifest (see the profile table; the self-hosted backend serves the same shape at `/embedded/ota/manifest`) |
 | `assets_list` | `{}` | bare ack, then a separate `{"id", "type": "assets", "assets": [{"path", "size", "mtime", "is_dir"?}…], "truncated"?: true}` message with the same `id`. Paths are **relative to the device's assets directory** (`assets_path`, default `/srv/assets`) — never absolute. A device may bound the listing (the reference cap is 5000 entries) and must then say so with `"truncated": true` rather than silently stopping |
 | `image_get` | `{}` | the frame's current rendered image. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same caps); the first chunk's `content_type` says what the device produces (the Linux runtime sends `image/png` of its last render, the ESP32 packs `image/bmp` from its framebuffer). `ok: false` ack with `no_image` when nothing has rendered yet, `busy` on a small device already streaming |
+| `scenes_get` | `{}` | every interpreted scene the frame holds, as the JSON its owner would export. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same 8 MiB cap — `too_large` past it), `content_type: application/json`, carrying ONE document: `{"scenes": […scene JSON…], "active_scene": "…", "skipped_compiled": N}`. Scene ids and `active_scene` are **public** ids (never the runtime's `uploaded/` registration). The uploaded set comes first and wins an id both of the device's stores hold; compiled scenes are counted in `skipped_compiled` and never sent, because a provider only takes interpreted node graphs. Read-only, and nothing the local admin page's scene export would not hand over. **Linux only** — the ESP32 profile answers `unsupported_verb` and sends no `scene_count`, so it is never asked. Errors: `read_failed`, `too_large` |
 | `asset_get` | `{"path": "…", "thumb"?: true}` | read one file from the assets directory. Failure is an ordinary `ok: false` ack: `invalid_path` (traversal, absolute, or outside the assets directory), `not_found`, `is_directory`, `too_large` (the reference cap is **8 MiB** raw), `busy` (a small device already streaming another file). Success is a bare ack followed by one or more `{"id", "type": "asset_chunk", "seq": 0…N, "data": "<base64>", "done": bool}` messages with the same `id`, in order; the first chunk also carries `"size"` (total raw bytes), `"mtime"` and `"content_type"`. A read that fails after the ack ends the stream with `{"type": "asset_chunk", "id", "error": "…", "done": true}` and the provider discards the partial file. With `thumb`, a device that can generate thumbnails (Linux) returns a small preview — the reference implementation fits it inside 320×320 and encodes PNG, and says so in `content_type`, which is what a provider should trust; a device that cannot (ESP32) returns the original bytes |
 | `asset_put` | `{"path": "…", "data": "<base64>"}` | store one file in the assets directory. The whole payload rides a single message, so the raw size is bounded well under the inbound frame cap (the reference device cap is **2.5 MiB** raw — `too_large` past it; bigger files ride `asset_put_chunk` below); the filename component is sanitized by the device exactly like a local admin upload, parent folders are created as needed, and an existing file at the path is replaced. Errors: `invalid_path` (traversal, absolute, outside the assets directory, or a dot-directory — see below), `invalid_data` (empty or undecodable base64), `too_large`, `write_failed`. The ack carries `"asset": {"path" (relative, as stored), "size", "mtime", "is_dir"}` |
 | `asset_put_chunk` | `{"upload_id": "…", "offset": N, "data": "<base64>", "complete"?: true, "path"?: "…"}` | store one file that does not fit a single `asset_put`, as offset-addressed chunks under one `upload_id` (`[A-Za-z0-9_-]{1,64}` — it becomes a filename component on the device). The provider sends one chunk, waits for its ack, sends the next; the last one carries `complete: true` and the destination `path` (sanitized like `asset_put`, dot-directories refused). Offsets make redelivery idempotent — hub delivery is at-least-once, and a chunk that arrives twice overwrites itself instead of appending. `offset: 0` starts (or restarts) the part; an offset past what has landed means an earlier chunk was lost and is refused with **`chunk_gap`** — the provider restarts the file from 0 under a fresh id. The part lives outside the assets directory (Linux: the admin upload temp root; ESP32: `.uploads/` on the card) until the final chunk moves it into place, so a half-uploaded file is never listable or renderable; parts nobody finishes are swept on the next session start (Linux, after 6 h) or at card mount (ESP32). Per-chunk raw cap: what one inbound frame carries (the reference Linux runtime takes up to `HubMaxAssetUploadBytes` = 2.5 MiB, an ESP32 ≈ 256 KiB); assembled-file cap **64 MiB** (`too_large`). Non-final acks carry `"received": <part bytes so far>`; the final ack carries `"asset"` exactly like `asset_put`. Errors: `invalid_upload_id`, `invalid_offset`, `invalid_data`, `invalid_path`, `chunk_gap`, `too_large`, `write_failed`. Firmware from before 2026.8.30 answers `unknown_verb`; a provider then knows only single-frame files fit and says so |
@@ -489,7 +494,7 @@ settings poll fetches the six groups itself — from the provider on a cloud-onl
 frame, from the FrameOS backend's `/embedded/settings` payload when one is
 configured, in which case the nudge is refused `backend_managed` because the
 provider is not that frame's settings source; the copy lives in RAM and is
-re-pulled every boot), `notify_update_available` (signed cloud OTA: manifest + download from the provider, minisign Ed25519 over BLAKE2b-512 verified against the baked key before the boot slot switches) | `set_display_power` (e-paper holds its image unpowered and has no backlight, so the firmware's display layer exposes nothing to switch) |
+re-pulled every boot), `notify_update_available` (signed cloud OTA: manifest + download from the provider, minisign Ed25519 over BLAKE2b-512 verified against the baked key before the boot slot switches) | `set_display_power` (e-paper holds its image unpowered and has no backlight, so the firmware's display layer exposes nothing to switch), `scenes_get` (the firmware has no on-device scene editor: whatever is in its store was put there by a control plane or the USB upload tool, which still holds the original) |
 
 The ESP32 profile is a subset because the firmware has no scheduler, no log
 buffer and no metrics buffer to expose, and updates itself from its own
@@ -511,10 +516,81 @@ lines), nothing retained across disconnects, and error acks are ignored.
 | `sleep` | `{"wake_in_seconds", "next_render_at"?, "reason", "wake_check"}` | ESP32 (firmware **2026.8.41**+), sent synchronously right before `esp_deep_sleep` halts the CPU: back (and redialing) in `wake_in_seconds`; `next_render_at` is the unix time of the next panel refresh (omitted without a synced clock; later than the wake when the wake is only a `wake_check_seconds` command check-in, `wake_check: true`); `reason` is `battery` / `always` / `battery_critical`. The forecast is an upper bound: a press on a registered GPIO button wakes the frame early (firmware **2026.8.42**+), and the reconnect clears it like any other. The provider stores the forecast (`next_wake_at` / `next_render_at` / `sleep_reason` on the frame row, cleared again on the next connect), **terminates the socket itself** — a halted chip sends no close frame, and waiting for the heartbeat to notice would keep the frame "connected" for up to a minute after it went dark — and records the disconnect as `asleep`. The SPA shows "asleep · wakes in 5 min" (and "overdue" when the wake never comes) instead of "last seen just now"; for firmware without the message it estimates the wake from the pushed power settings. The ESP32 metrics sample carries `onBattery` (the firmware's own cell-present test) for that estimate |
 | `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state. When the acked checksum matches the provider's current assigned set, the provider also promotes its per-scene deploy ledger (`assigned_scene_state` → `deployed_scene_state` on the frame row) so the workspace can name WHICH scene is still pending on later edits |
 | `assets` | `{"id", "assets": […], "truncated"?}` | reply to `assets_list`; the provider caches the latest listing per frame (the reference provider rejects listings over **256 KiB** of JSON rather than truncating them) |
-| `asset_chunk` | `{"id", "seq", "data", "done", …}` | reply stream to `asset_get`; the provider reassembles in order, bounds the total at its per-file cap, and discards the partial file on a chunk carrying `"error"` or on disconnect |
+| `asset_chunk` | `{"id", "seq", "data", "done", …}` | reply stream to `asset_get`, `image_get` and `scenes_get` (the command the `id` names decides where the bytes go — a `scenes_get` reply is never stored as an asset); the provider reassembles in order, bounds the total at its per-file cap, and discards the partial file on a chunk carrying `"error"` or on disconnect |
 | `render` | `{"active_scene": "…", "image"?: "image_get"}` | "I have written a fresh snapshot of this scene." Announcement only, never bytes — see Previews below. A provider that does not want it can ignore it entirely. `image: "image_get"` (ESP32 firmware **2026.8.43**+) says the device keeps no snapshot files — its image is its framebuffer — so a provider that wants the picture fetches it with `image_get` (into its current-image slot) rather than `asset_get` of a per-scene PNG |
 
 A provider must tolerate unknown frame→provider types (forward compatibility).
+
+### Scenes the frame already had
+
+A frame that ran on its own — scenes built on its admin page, or left by a
+backend it no longer has — and then joins a provider keeps rendering them,
+while the provider, which has assigned it nothing, would list an empty frame.
+`scenes_get` is the device → provider path that closes the gap.
+
+- **When the provider asks.** On session start, for a CONFIRMED frame whose
+  hello carries a positive `scene_count`, that has no scene assignments, and
+  whose owner has not already imported or dismissed what it holds. The ask is
+  queued ahead of the drain with a short TTL and supersedes an unanswered
+  earlier one; while the owner is undecided it is repeated on every connect,
+  so an import never works from a snapshot older than the frame's last
+  session. Firmware from before the verb sends no `scene_count` and is never
+  asked.
+- **What the provider keeps.** The reply, as sent, one per frame
+  (cloud.frameos.net: `frame_device_scenes`), parsed defensively — entries
+  without a usable id, duplicates of an id and anything flagged compiled are
+  dropped — plus a names-only summary for its UI. The bytes are dropped the
+  moment the owner imports or dismisses; an undecided report ages out with
+  the frame's logs.
+- **Import is the owner's act, never automatic.** It mints scenes in their
+  library, spends their quotas and re-renders their panel, so
+  cloud.frameos.net offers it ("This frame is running 3 scenes of its own…")
+  and does nothing until asked. Each reported scene becomes a private draft
+  through the ordinary publish path (validation, moderation, quotas, audit),
+  is added after whatever the frame is already assigned, and the set is
+  pushed as an ordinary
+  `set_scenes` with `scene_id` = the reported `active_scene`, so the scene on
+  screen stays on screen.
+- **An import grants no service keys.** What a scene declares is the
+  DEVICE's say, and claim-token enrolments hold `settings:services` by
+  default: granting "what the imported scenes declare" would let a frame that
+  is not the owner's — a leaked multi-use claim code, a confirm, one click on
+  a banner about scenes — declare every group and pull the account's keys.
+  An imported scene is a new assignment like any other, granted nothing; the
+  answer's `needs_settings_groups` names what it asks for and the owner grants
+  it where grants are always made. Until then a frame whose link holds
+  `settings:services` renders such a scene without its key — the local copy
+  of a cloud-owned group is removed by the first service-settings pull.
+- **Everything in the report is untrusted.** It is parsed defensively and
+  bounded (8 MiB, 200 scenes, 64 levels of nesting — checked iteratively,
+  since the digest recurses), names reach the UI and the audit log as text,
+  and the scene bodies are code: imported drafts are private, pass the store's
+  moderation and risk classification, never go onto a frame when shell-risk,
+  and — being served with a store `origin` like every cloud scene — still go
+  through the preview key-consent gate in the browser. Drafts are only minted
+  within the account's remaining scene budget, settled BEFORE any moderation
+  or classifier call, so a long report cannot be used to spend model calls.
+- **Dedupe: re-enrolment must not fork a library.** A frame that is deleted
+  and enrolled again, or a second frame flashed from the same card, reports
+  the same scenes. In order: a scene whose `origin.storeSceneId` names a store
+  scene the account may install, and whose stamped (else newest) version
+  holds exactly this content, is that store scene — pinned at the matched
+  version when it is another publisher's, so joining is never the moment
+  someone else's newer code lands; else a scene this account already imported
+  with exactly this content (a ledger keyed on the account and the content
+  digest) is that draft; else a new draft. "Exactly this content" is the
+  sha256 of the scene's canonical JSON — keys sorted at every depth, `origin`
+  removed, since the copy a provider pushed back carries a stamp the original
+  never had. A scene edited on the frame since is different content and
+  becomes a new draft: overwriting either copy would lose work.
+- **What happens to the frame's own copy.** Nothing — a provider never
+  deletes local content. After the push the same public id names two scenes
+  on a Linux frame: the owner's copy on disk and the provider's
+  `uploaded/<id>`. While a provider-pushed set is resident, a bare id in
+  `setCurrentScene` (the verb, a schedule entry, a button) resolves to the
+  provider's copy, because that is the one being edited and deployed. Replace
+  the uploaded set locally, or leave the provider, and the bare id is the disk
+  scene again.
 
 ### Previews
 
@@ -1062,6 +1138,8 @@ GET  {provider}/api/frames/{id}/scenes         # assigned scenes
 POST {provider}/api/frames/{id}/scenes         # assign scene versions → enqueues set_scenes
 POST {provider}/api/frames/{id}/scenes/add     # add (or re-pin) ONE scene, keeping the rest
 POST {provider}/api/frames/{id}/scenes/update  # {"scene_id"} → that scene's newest version (see "Scene updates")
+GET  {provider}/api/frames/{id}/device-scenes  # what the frame ran before it joined (names only), or null
+POST {provider}/api/frames/{id}/device-scenes  # {"action": "import" | "dismiss"} (see "Importing a frame's own scenes")
 POST {provider}/api/frames/{id}/settings       # declarative settings → persists them, enqueues set_settings
 POST {provider}/api/frames/{id}/schedule       # {"schedule": {…}, "utcOffsetMinutes"?: N} → persists the schedule, enqueues set_schedule (disabled events stripped from the push)
 POST {provider}/api/frames/{id}/command        # {"type": "render" | "reboot" | "restart_runtime" | "set_current_scene", …}
@@ -1163,6 +1241,40 @@ not on the frame; the assignment gates (`invalid_scene`, `scene_not_allowed`,
 empty-store resync — moves a scene: until 2026-09-20 they all resolved every
 unpinned assignment to the newest version, so "Update" on one scene updated
 every scene on the frame.
+
+**Importing a frame's own scenes.** `GET /api/frames/{id}/scenes` carries
+`device_scenes` next to the assignments — `null` for a frame that reported
+nothing, else `{"status": "ready" | "importing" | "imported" | "dismissed",
+"scene_count", "scenes": [{"id", "name"}…], "skipped_compiled",
+"received_at", "result"}`: names and the verdict, never a scene body (the same
+object is `GET …/device-scenes`). While it is `ready` the workspace shows the
+import banner.
+
+```http
+POST {provider}/api/frames/{id}/device-scenes
+{"action": "import"}        # the default; or {"action": "dismiss"}
+```
+
+Import runs the dedupe and publish steps under "Scenes the frame already
+had" and answers per scene: `imported` and `reused` (each `{device_scene_id,
+name, scene_id, version, assigned, not_assigned_reason?, needs_settings_groups?}`
+— the last names the service-key groups the scene declares, none of which an
+import grants; a draft that could
+not go onto the frame says `frame_full` or `scene_not_allowed`, the
+shell-risk refusal every cloud push carries), `skipped` (`{device_scene_id,
+name, reason}` with the store's own refusal code — `scene_requires_compilation`,
+`content_rejected`, a quota), `skipped_compiled`, `assigned`, `command_id` and
+`status`: `imported`, or `partial` when something was refused for a reason a
+later attempt can get past (the daily new-scene budget, a full account, a
+moderation outage) — the report then stays `ready`, the same call finishes the
+job, and the ledger makes it skip what already landed. One import per frame
+at a time (`409 import_in_progress`; a claim older than ten minutes is a
+crashed import and is taken over); `404 nothing_to_import` without a waiting
+report; `409 frame_not_active` before the owner confirmed the frame. Dismiss
+drops the report and ends the asking. Neither touches the scenes on the
+device. Audit events: `frame.device_scenes_imported` /
+`frame.device_scenes_dismissed`, plus the ordinary `store.scene_published`
+and `frame.scenes_assigned`.
 
 The metrics routes return `{"metrics": [...], "reboots": [...]}`, matching the
 self-hosted backend. Markers are derived from the device's own

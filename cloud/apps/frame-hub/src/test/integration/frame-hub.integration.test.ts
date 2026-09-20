@@ -17,7 +17,9 @@ import {
   accounts,
   auditEvents,
   createDb,
+  frameAssetFiles,
   frameCommands,
+  frameDeviceScenes,
   frameLogs,
   frameMetrics,
   frames,
@@ -814,6 +816,111 @@ describe("command redelivery", () => {
     }, "audit row frame.scenes_resynced");
     expect(audit.metadata).toMatchObject({ checksum: push.checksum, reason: "empty_store" });
     device.ws.close();
+  });
+
+  it("asks a frame that arrives with scenes of its own for them, and keeps the answer", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+
+    // A frame that ran standalone before it joined: no cloud checksum, and a
+    // hello that says it holds scenes. The cloud has assigned it nothing, so
+    // the hub asks before the drain and the question rides this connection.
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, { scene_count: 2, scenes_checksum: "" });
+    expect(ready.pending_commands).toBe(1);
+    const ask = await device.next((msg) => msg.type === "scenes_get", "scenes_get");
+    device.send({ id: ask.id, ok: true, type: "ack" });
+    const document = JSON.stringify({
+      active_scene: "clock",
+      scenes: [
+        { id: "clock", name: "Clock", nodes: [], edges: [] },
+        { id: "photos", name: "Photos", nodes: [], edges: [] },
+        { id: "legacy", name: "Legacy", settings: { execution: "compiled" } },
+        { name: "no id" },
+      ],
+      skipped_compiled: 1,
+    });
+    // Two chunks, to prove the reply is reassembled like any asset stream.
+    const half = Math.floor(document.length / 2);
+    device.send({
+      content_type: "application/json",
+      data: Buffer.from(document.slice(0, half)).toString("base64"),
+      done: false,
+      id: ask.id,
+      seq: 0,
+      type: "asset_chunk",
+    });
+    device.send({
+      data: Buffer.from(document.slice(half)).toString("base64"),
+      done: true,
+      id: ask.id,
+      seq: 1,
+      type: "asset_chunk",
+    });
+
+    const row = await waitFor(async () => {
+      const [stored] = await db
+        .select()
+        .from(frameDeviceScenes)
+        .where(eq(frameDeviceScenes.frameId, frame.id));
+      return stored;
+    }, "frame_device_scenes row");
+    expect(row.status).toBe("ready");
+    expect(row.sceneCount).toBe(2);
+    expect(row.scenes).toEqual([
+      { id: "clock", name: "Clock" },
+      { id: "photos", name: "Photos" },
+    ]);
+    // The device's own count plus the compiled scene it sent anyway.
+    expect(row.skippedCompiled).toBe(2);
+    expect(row.activeScene).toBe("clock");
+    // Never the asset cache: that is served from the app origin.
+    const cached = await db
+      .select()
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    expect(cached).toHaveLength(0);
+    device.ws.close();
+    await device.closed;
+
+    // Still undecided: the next connection asks again (a fresh snapshot)…
+    const again = await openDevice(token);
+    const readyAgain = await handshake(again, privateKey, { scene_count: 2, scenes_checksum: "" });
+    expect(readyAgain.pending_commands).toBe(1);
+    again.ws.close();
+    await again.closed;
+
+    // …and a verdict ends it.
+    await db
+      .update(frameDeviceScenes)
+      .set({ payload: null, status: "dismissed" })
+      .where(eq(frameDeviceScenes.frameId, frame.id));
+    const decided = await openDevice(token);
+    const readyDecided = await handshake(decided, privateKey, { scene_count: 2, scenes_checksum: "" });
+    expect(readyDecided.pending_commands).toBe(0);
+    decided.ws.close();
+  });
+
+  it("does not ask a frame the cloud already assigned scenes to, or one that reports none", async () => {
+    const assigned = await createFrameFixture();
+    await createAssignedStoreScene(assigned.account.id, assigned.frame.id);
+    const device = await openDevice(assigned.token);
+    // A non-empty checksum: no empty-store resync, so any pending command
+    // here could only be the question.
+    const ready = await handshake(device, assigned.privateKey, { scene_count: 3 });
+    expect(ready.pending_commands).toBe(0);
+    device.ws.close();
+
+    // Firmware from before the verb (and the ESP32 profile) sends no count.
+    const silent = await createFrameFixture();
+    const old = await openDevice(silent.token);
+    const readyOld = await handshake(old, silent.privateKey, { scenes_checksum: "" });
+    expect(readyOld.pending_commands).toBe(0);
+    const asked = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.type, "scenes_get"));
+    expect(asked).toHaveLength(0);
+    old.ws.close();
   });
 
   it("leaves any other checksum mismatch to the owner", async () => {

@@ -257,7 +257,10 @@
     {"type": "asset_mkdir", "scope": null, "profiles": ["linux", "esp32"]},
     {"type": "asset_delete", "scope": null, "profiles": ["linux", "esp32"]},
     {"type": "asset_rename", "scope": null, "profiles": ["linux", "esp32"]},
-    {"type": "image_get", "scope": null, "profiles": ["linux", "esp32"]}
+    {"type": "image_get", "scope": null, "profiles": ["linux", "esp32"]},
+    {"type": "scenes_get", "scope": null, "profiles": ["linux"],
+     "parity": {"only": "linux",
+                "why": "The verb exists for a frame that ran its own scenes before it joined a provider. The Linux runtime keeps scenes the owner built on the frame's own admin page (scenes.json.gz, state/uploaded.json), which exist nowhere else. An ESP32 has no on-device editor: every scene in its store was put there by a backend, a provider or the USB upload tool, which still holds the original. It sends no `scene_count` in its hello, so the provider never asks."}}
   ],
   "errors": {
     "$comment": "The tokens every implementation answers with. Per-verb tokens beyond these are in docs/cloud-frames.md.",
