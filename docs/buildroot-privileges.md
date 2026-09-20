@@ -468,12 +468,12 @@ sticky release root: both were removed and replaced by root's directories,
 unit-tested with a genuine hard link and symlink
 (`test_runtime_chown_is_pinned_and_refuses_hard_links`).
 
-### Not yet verified on hardware
+### Verified on hardware
 
-Everything above is covered by unit tests (`frameos/src/frameos/tests/
-test_privileged.nim`, `backend/app/tasks/tests/test_buildroot_privileges.py`)
-and the compose pipeline, but no panel has run under the unprivileged unit
-yet. `docs/manual-testing-todo.md` lists what to watch: SPI panels
-(Waveshare, Inky) and the Pi 5 framebuffer under `DevicePolicy`-free but
-group-gated nodes, the hotspot / portal flow through the door, an OTA from a
-root-only release, and the `frameos-privileged` journal.
+Beyond the unit tests (`frameos/src/frameos/tests/test_privileged.nim`,
+`backend/app/tasks/tests/test_buildroot_privileges.py`) and the compose
+pipeline, the unprivileged unit ran on hardware on 2026-09-04/05: SPI panels
+and the Pi 5 framebuffer on group-gated nodes, the hotspot / portal flow
+through the door, and an OTA from a root-only release (the migration path).
+The remaining hardening — `DevicePolicy=closed` with a `DeviceAllow` list —
+is in `docs/todo.md`, "Frame privileges and FrameOS Remote".

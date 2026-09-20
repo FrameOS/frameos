@@ -9,8 +9,8 @@ own files: security findings in `docs/security-todo.md`, architecture
 convergence in `docs/convergence-todo.md`, store
 content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`,
 cloud billing in `cloud/docs/accounting-todo.md`, ESP32/Pico firmware in
-`docs/embedded-todo.md`, CI and the release chain in
-`docs/release-chain-todo.md`.
+`docs/embedded-todo.md`, and the boxes that need a bench in
+`docs/manual-testing-todo.md`.
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
 new Nim, every surface that shows a compiled scene warns and points at the
@@ -43,131 +43,61 @@ Two rules that shape most entries:
 
 ## ESP32 NVS on the 16 KB layouts
 
-The 4 MB and 8 MB partition tables give NVS 16 KB (4 pages, one always kept
-free for compaction, so 3 × 126 32-byte entries); the 16/32 MB tables give
-24 KB. On the self-hosted backend the first settings sync stores the frame's
-TLS pair as PEM blobs, and a bare 4 MB C3 hit the ceiling on 2026-09-05 —
-the Wi-Fi driver's own writes failed (`wifi_nvs_set fail ... ret=4357`), PHY
-calibration would not store, and `wifi <ssid>` silently did not persist.
-Shipped: the driver keeps its config in RAM (~45 mirrored items gone),
-`fos_config_save` reports the first failing key, `status` prints `nvs:
-used/total`, and since 2026-09-06 the backend issues P-256 server keys
-(`backend/app/utils/tls.py`): cert + key ≈ 1 KB of PEM against ≈ 2.9 KB for
-the RSA-2048 pair it used to mint (the CA stays RSA; it never leaves the
-backend). Frames created before that keep their RSA pair until the owner
-regenerates it. Still worth doing only if a board still fills up:
+The 4 MB and 8 MB partition tables give NVS 16 KB (3 usable pages × 126
+entries); the 16/32 MB tables give 24 KB. The backend issues P-256 server
+keys (≈ 1 KB of PEM), the Wi-Fi driver keeps its config in RAM and `status`
+prints `nvs: used/total`, so a board should no longer fill up. Only if one
+does:
 
-- [ ] **Store the pair as DER, not PEM**, on the device (`nvs_set_pem`):
-  another ~30 %. Only if the EC switch turns out not to be enough.
-- [ ] Do NOT grow the NVS partition on the 4 MB / 8 MB tables casually: the
-  NVS-sparing USB update (`embeddedFlashImage.ts`) writes around the NVS
-  range read from the image and refuses a board whose table differs, so a
-  bigger NVS strands every board already on the old table.
+- [ ] **Store the TLS pair as DER, not PEM**, on the device (`nvs_set_pem`):
+  another ~30 %.
+- Do NOT grow the NVS partition on the 4 MB / 8 MB tables: the NVS-sparing
+  USB update (`embeddedFlashImage.ts`) writes around the NVS range read from
+  the image and refuses a board whose table differs, so a bigger NVS strands
+  every board already on the old table.
 
 ## Pre-release manual test sweep
 
-`docs/manual-testing-todo.md` collects every unticked manual checkbox and
-"needs hardware" note from PRs #362 onward, grouped by test bench. Work it
-before the next release; delete it when empty.
+`docs/manual-testing-todo.md` holds the boxes that need hardware: the
+HyperPixel bench (Pi 0–4 firmware-DPI path, the Square, the Round on a Pi 5)
+and the ESP32 flashing / OTA boxes that need a 16 MB C3, a 16 MB XIAO, a
+32 MB S3 and an OTA-capable board on a self-hosted backend. Delete it when
+empty.
 
 ---
 
 ## Frame privileges and FrameOS Remote
 
-Audited 2026-08-16 and implemented in PR #415;
-`docs/buildroot-privileges.md` §4 is the reference. Generic Buildroot images
+`docs/buildroot-privileges.md` §4 is the reference: generic Buildroot images
 (`raspberry-pi-64`, `raspberry-pi-5`) run `frameos.service` as the `frameos`
-user behind a hardened unit; root work goes through the privileged door
-(`frameos/src/frameos/privileged.nim`: enum verbs, validated arguments, a
-`.path`-triggered root oneshot); OTA re-verifies the minisign signature on the
-root side, refuses downgrades, and binds signed bytes to the requested
-version/target; the images ship no FrameOS Remote at all, and the remote lost
-its PTY verbs everywhere. Left:
+user behind a hardened unit, root work goes through the privileged door, and
+the images ship no FrameOS Remote. Verified on hardware 2026-09-04/05. Left:
 
-- **Verify on hardware** — nothing has rendered under the unprivileged unit
-  yet. The checklist is in `docs/manual-testing-todo.md` ("Privilege
-  separation"): SPI panels and the Pi 5 framebuffer as `frameos`, the
-  hotspot/portal flow through the door, an OTA from a root-only release (the
-  migration path), and a generic card adopted by a self-hosted backend
-  afterwards.
+- **Tighten the unit** now that the groups are known to work:
+  `DevicePolicy=closed` with an explicit `DeviceAllow` list, and
+  `ProtectKernelTunables` with the two sysfs knobs re-exposed. Needs a bench
+  pass over an SPI panel, the Pi 5 framebuffer and a touch panel.
 - **`raspberry-pi-32` stays root.** `network/supplicant.nim` runs
   wpa_supplicant/hostapd/udhcpc/dnsmasq from the runtime (39 privileged call
-  sites); it is a root network daemon and needs to become one behind the door
-  (or NetworkManager needs to build for ARMv6) before that image can drop
+  sites); it has to become a root network daemon behind the door (or
+  NetworkManager has to build for ARMv6) before that image can drop
   privileges.
-- **Backend-personalized Buildroot images stay root**, and the remote keeps
-  `shell`: the self-hosted deploy path (`backend/app/tasks/_frame_deployer.py`,
-  `deploy_remote.py`, `restart_frame.py`, the asset manager) is built out of
-  it. The way out is no longer structured verbs on the Remote but the
-  backend speaking the provider protocol the in-binary client already
-  implements (`docs/convergence-todo.md` item 7): once deploys are
-  `set_scenes` / `set_settings` / `notify_update_available`, those images
-  use the same unprivileged unit and door as generic ones and the Remote
-  retires. Meanwhile a frame with no shell at all (an adopted generic card)
-  already deploys that way from the drawer (2026-09-07), and since
-  2026-09-12 gets its assets, fonts, service keys, scene activation and
-  scene snapshots over the same admin API — "remote lite",
-  `docs/api-triality.md` "Admin-API-only frames" — with the shell-only
-  verbs refused and hidden. Nothing ever installs a Remote on such a card.
-- **Tighten the unit further once hardware says the groups work:**
-  `DevicePolicy=closed` with an explicit `DeviceAllow` list, and
-  `ProtectKernelTunables` with the two sysfs knobs re-exposed.
+- **Backend-personalized Buildroot images stay root**, and their Remote keeps
+  `shell`, because the self-hosted deploy path is built out of it
+  (`_frame_deployer.py`, `deploy_remote.py`, `restart_frame.py`, the asset
+  manager). The way out is `docs/convergence-todo.md` item 7: once the
+  backend speaks the provider protocol, those images use the same
+  unprivileged unit and door as generic ones and the Remote retires.
 
 ---
 
 ## Runtime: refs shared across HTTP worker threads
 
-The frame's web server runs four mummy worker threads. ORC refcounts are not
-atomic, so a `ref` (JsonNode, FrameConfig, …) that a global hands to more than
-one thread gets freed under its readers sooner or later. Found 2026-09-06 on a
-Zero 2 W: `server/auth.nim` cached the `frameAdminAuth` JsonNode and every
-request touched it three times; four minutes of admin-panel polling later the
-node was garbage, every request answered "Admin panel disabled" (the session
-fingerprint reads user/pass from the same node, so sessions died too), and
-the heap followed. Fixed by caching plain values (`AdminAuthValues`) and
-building a fresh node per call; `test_auth.nim` has a four-thread regression
-test that reproduces it on the old code under libc malloc.
-
-The rest of `server/` was audited 2026-09-19. What it found, all fixed and
-pinned by tests (`test_public_state_threads.nim`, `test_state.nim`,
-`test_channels.nim`, `test_config.nim`):
-
-- **`getLastPublicState()` handed the runner's `StateField` refs to every
-  worker** and took an owning copy of the `ExportedScene` to reach them —
-  on every `/image`, `/state`, `/c` and `GET /api/frames/1`. Four threads
-  doing that segfault within a second under libc malloc, every run; one
-  thread passes. An ExportedScene carries closures, so ORC also filed it in
-  the *worker's* cycle roots, where the runner's final decref cannot find it.
-  The registry now keeps the public fields as plain values
-  (`publicStateFieldValues`) and readers build their own;
-  `getLastPublicSceneState()` is the cheap one for callers that only want
-  the id and the timestamp.
-- **The admin API's frame payload shallow-copied the live config**
-  (`complete[] = config[]`: a reference to every nested object, per request,
-  per worker). It, the status screen drawn on request and the `/reload`
-  validation now work on `requestFrameConfig()` / `readConfig()` — this
-  thread's own parse of frame.json, with no process-wide side effect
-  (`loadConfig` also rewrites the path pixie resolves SVG fonts against).
-- **`POST /api/settings` and the cloud settings pull assigned
-  `globalFrameConfig.settings`**, freeing the old node under an app reading
-  its API key on the render thread. `replaceFrameConfigSettings` swaps the
-  pointer and parks both nodes, like `updateFrameConfigFrom`; the admin save
-  also takes `frameConfigWriteLock` now (it was the one frame.json writer
-  that did not).
-- **Event payloads were shared with the runner.** A `Channel` MOVES its
-  message under ORC (the deep copy is refc's), so `sendEvent(name, payload)`
-  left the HTTP worker and the runner holding one JsonNode. `sendEvent`
-  sends a copy; `sendEventOwned(name, move(payload))` hands over a fresh
-  parse for the scene uploads that are too big to hold twice.
-- **The log thread serialised an entry after storing it**, outside the lock
-  the workers copy it under. `storeUiLog` takes the node over (`sink`).
-
-Rule for new code: a global that crosses threads holds values or is only ever
-read under the same lock that writes it; hand out copies, not refs; a worker
-never takes an owning copy (`let x = global.ref`) of something the runner
-owns — field reads of scalars are fine.
-
-Left, deliberately:
+The frame's web server runs up to four mummy worker threads and ORC refcounts
+are not atomic; the rule and the helpers (`requestFrameConfig()`,
+`getLastPublicSceneState()`, `sendEvent` copies) are in `AGENTS.md`, "Refs do
+not cross threads". `server/` was audited and fixed 2026-09-19 (#503). Left,
+deliberately:
 
 - `portal.nim` as the HTTP workers call it on the setup path
   (`persistPortalSetup` copies and mutates the live `frameConfig`,
@@ -191,77 +121,86 @@ Left, deliberately:
 
 A phone that joins `FrameOS-Setup` should get the OS's "sign in to network"
 sheet with the setup form in it, instead of the owner scanning a second QR
-code (2026-09-06, Zero 2 W first boot). Two halves; the server half shipped
-the same day, the image half is open:
+code. The frame already answers the well-known probe paths and every
+foreign-`Host` request with a 302 to the setup form (`captivePortalRedirect`),
+the armv6 supplicant backend's dnsmasq already resolves every name to
+`10.42.0.1`, and the unit already holds `CAP_NET_BIND_SERVICE`. Two halves
+are missing, and they only work together (DNS without port 80 reads as plain
+"no internet"):
 
-- **Done:** while the hotspot is up the frame answers the well-known probe
-  paths (`/generate_204`, `/hotspot-detect.html`, `/connecttest.txt`, …) and
-  every not-found request whose `Host` is not `10.42.0.1` with a 302 to the
-  setup form (`captivePortalRedirect`, `server/routes/web_routes.nim`).
-- **DNS:** the hotspot's dnsmasq must resolve every name to `10.42.0.1`.
-  NetworkManager's shared mode reads `/etc/NetworkManager/dnsmasq-shared.d/`,
-  so a `address=/#/10.42.0.1` drop-in staged next to the resolved/dropbear
-  ones in `backend/app/tasks/buildroot_image.py` covers `raspberry-pi-64` /
-  `raspberry-pi-5`; the supplicant backend (`network/supplicant.nim`,
-  armv6) builds its own dnsmasq command line and takes the same `--address`.
-  Root is read-only, so this is image-time only.
-- **Port 80:** the probes go to port 80 and the runtime listens on 8787 as
-  the unprivileged `frameos` user, so nothing answers today. Either add
-  `CAP_NET_BIND_SERVICE` to `frameos.service.unprivileged` (both unit
-  renderers read that file) and have the runtime open a second listener on
-  :80 for the hotspot's lifetime that only redirects, or have the door's
-  `nm-hotspot-start` verb add an nft/iptables `REDIRECT --to-ports 8787` on
-  the hotspot interface (needs the firewall binary NetworkManager's shared
-  mode already depends on — check which one the Buildroot NM package pulls).
-  The listener is the smaller change; the redirect needs no capability.
-- Without the DNS half the popup never triggers, and with DNS but no port 80
-  the OS sees "connection refused" and reports plain "no internet" — so ship
-  both halves together, and re-test the "Saved!" auto-move: a captive sheet
-  is a restricted browser that may not run the page's timers.
+- **DNS on NetworkManager images:** shared mode reads
+  `/etc/NetworkManager/dnsmasq-shared.d/`, so an `address=/#/10.42.0.1`
+  drop-in staged next to the resolved/dropbear ones in
+  `backend/app/tasks/buildroot_image.py` covers `raspberry-pi-64` /
+  `raspberry-pi-5`. Root is read-only, so this is image-time only.
+- **Port 80:** the probes go to port 80 and the hotspot's own listener
+  (`server/hotspot_listener.nim`) takes the first free port from 8000. Give
+  it a second, redirect-only bind on `10.42.0.1:80` for the hotspot's
+  lifetime.
+- Then re-test the "Saved!" auto-move: a captive sheet is a restricted
+  browser that may not run the page's timers.
 
 ---
 
-## On-device admin
+## On-device admin: no AI on the device
 
 The frame's own admin page (`http://<frame>:8787/admin`, the shared SPA in
-frame-control mode) is how a standalone frame is managed without a backend
-or the cloud. Since 2026-09-12 its "Add scene" drawer hides **Generate
-scene** (`allowedAddSceneActions` in `workspaceSurfaces.ts`): the button
-opened the AI chat, which only the backend and the cloud can run, so on the
-device it led to a "coming soon" panel. Bring it back once the frame can
-reach an AI. Two routes, not exclusive: the frame's FrameOS Cloud link
-(sign in from the panel, the cloud's AI and metering do the work — and the
-first scene could be on us, as the reason to link at all), and/or the
-owner's own OpenAI key entered under the frame's service keys (the scene
-then costs them, and the prompt/lint pipeline in
+frame-control mode) hides **Generate scene** (`allowedAddSceneActions` in
+`workspaceSurfaces.ts`), because only the backend and the cloud can run the
+AI chat. Bring it back once the frame can reach an AI. Two routes, not
+exclusive: the frame's FrameOS Cloud link (sign in from the panel, the
+cloud's AI and metering do the work — and the first scene could be on us, as
+the reason to link at all), and/or the owner's own OpenAI key under the
+frame's service keys (the prompt/lint pipeline in
 `cloud/apps/auth-web/src/lib/ai/` would have to be callable from the
-device). The other AI entry points (the sparkles in the header and the
-scene editor) still open the same "coming soon" panel on the device; hide
-them the same way, or make them work, with this.
+device). The other AI entry points (the sparkles in the header and the scene
+editor) still open a "coming soon" panel on the device; hide them the same
+way, or make them work, with this.
 
 ---
 
 ## A frame that joins the cloud arrives with no scenes
 
-Found on the 2026-09-13 bench: flip "Manage this frame from FrameOS Cloud" on
-a frame that already runs its own scenes and the link comes up, but the cloud
-lists no scenes for it — the frame keeps rendering what it has, and the cloud
-shows an empty frame.
+Flip "Manage this frame from FrameOS Cloud" on a frame that already runs its
+own scenes and the cloud lists none — the frame keeps rendering what it has,
+and the cloud shows an empty frame. The hub protocol has no device → cloud
+scene path: `docs/cloud-frames-contract.json` carries `set_scenes` (cloud →
+device) and the `scenes_checksum` ack, and `enrollManagedFrame` registers the
+device and nothing more.
 
-Not a bug in the enrollment: the hub protocol has no device → cloud scene
-path at all. `docs/cloud-frames-contract.json` carries `set_scenes` (cloud →
-device) and the device's `scenes_checksum` ack, and that is the whole of it;
-`enrollManagedFrame` registers the device and nothing more. The cloud's model
-is a scene LIBRARY that assigns scenes to frames, so importing a device's
-scenes means minting store-scene records (with versions, images and
-provenance) for scenes that were never in anyone's library.
+What it needs: a device → cloud "here are my scenes" verb, a cloud importer
+that creates draft store scenes and frame assignments from it, dedupe against
+scenes the account already has (a re-enrolled frame must not fork every scene
+again), and a decision about what happens to a scene the device has and the
+cloud then reassigns. A feature, not a fix — but an empty cloud frame is a
+bad first five minutes.
 
-What it needs, roughly: a device → cloud "here are my scenes" verb, a cloud
-importer that creates draft store scenes and frame assignments from it,
-dedupe against scenes the account already has (a re-enrolled frame must not
-fork every scene again), and a decision about what happens to a scene the
-device has and the cloud then reassigns. Worth doing — arriving at an empty
-cloud frame is a bad first five minutes — but it is a feature, not a fix.
+---
+
+## Backend Docker image: root, and a full build toolchain
+
+Both halves are held in place by the deprecated source-build path
+(`docs/legacy-source-builds.md`), so neither is a one-line `USER`:
+
+- The toolchain (Nim, `build-essential`, `docker-ce-cli`, `/root/.nimble`) IS
+  the legacy build environment — the Modal executor runs this very image as
+  its sandbox with `HOME=/root` (`backend/app/utils/modal_sandbox.py`), and
+  `nim check` for Nim apps (`api/apps.py`) reads `/root/.nimble`. It leaves
+  with item 1 of `docs/convergence-todo.md`, not before.
+- Dropping root is an entrypoint job (start as root, `chown` the data dir,
+  `setpriv` down), not a Dockerfile `USER` — existing volumes hold a
+  root-owned `frameos.db` and a 0600 `secret_key`, and the image auto-updates
+  under people via Watchtower. What a first attempt has to get right: stay
+  root when `/var/run/docker.sock` is mounted and under Home Assistant
+  (`HASSIO_TOKEN`; the DB and key live in the Supervisor's `/data`); fall
+  back to root with a warning when the `chown` fails (NFS / rootless Docker /
+  userns-remap bind mounts) instead of boot-looping; give `redis-server` a
+  writable `--dir` (it saves `dump.rdb` into `/app` today, and a failed
+  bgsave makes Redis refuse writes — arq stops); a real `$HOME` for
+  `~/.cache/frameos`; honour a `DATABASE_URL` outside `/app/db`. Needs a
+  bench pass over an upgraded volume and an SD-image build before it ships.
+- While there: `docker-compose.yml` sets no `SECRET_KEY` (the key persists to
+  a file, so compose works; still worth setting explicitly).
 
 ---
 
@@ -292,12 +231,11 @@ file's "Current gaps".
 - Asset-backup key recovery UX. The answer has to remain "we cannot read your
   photos".
 - One backend link per installation, or per organization/project?
-- Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico) — decided
-  2026-09-01: cloud rendering is a paid-plan entitlement, enforced as N
-  frames *and* a minimum refresh interval, none on the free tier
-  (`cloud/docs/accounting-todo.md` §0.2). C3 boards stay out of the cloud
-  flasher until that entitlement is enforced at frame creation — item 3 of
-  `docs/convergence-todo.md`.
+- Thin-client frames on the cloud (ESP32-C3, Pico) — decided: cloud
+  rendering is a paid-plan entitlement, N frames *and* a minimum refresh
+  interval, none on the free tier, and enrollment enforces it. What keeps C3
+  boards out of the cloud flasher is that the hub does not render for thin
+  clients yet — item 3 of `docs/convergence-todo.md`.
 
 ---
 
@@ -370,9 +308,9 @@ Everything else parked:
   key, cached) so users do not need per-service API keys.
 - ESP32 spill follow-ups: a proactive Content-Length trigger; a URL+ETag decode
   cache.
-- ESP32 board nice-to-haves: a portal Wi-Fi scan list and AP password, mDNS
-  advertisement, log persistence across offline periods, deep-sleep
-  improvements.
+- ESP32 board nice-to-haves: a Wi-Fi scan list in the setup portal (the
+  console has `wifi-scan`), mDNS advertisement, log persistence across
+  offline periods.
 - ESP32 internal-RAM headroom, only if it gets tight again: move QuickJS
   allocations to PSRAM (`JS_NewRuntime2` with PSRAM-backed
   `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384`) and cJSON

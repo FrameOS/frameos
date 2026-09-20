@@ -139,9 +139,9 @@ frontend suite and the opt-in real-SSH deploy test — are described in
 # TODO
 
 Open work lives in `docs/todo.md`, which links the per-track files
-(`docs/convergence-todo.md`, `docs/scenes-todo.md`, `docs/ui-todo.md`,
-`docs/manual-testing-todo.md`, `docs/security-todo.md`,
-`cloud/docs/accounting-todo.md`, `cloud/STORE-TODO.md`, and the review list
-`docs/review-todo.md` while it lasts). Two files hold principles rather than
+(`docs/convergence-todo.md`, `docs/security-todo.md`,
+`docs/embedded-todo.md`, `docs/scenes-todo.md`, `docs/ui-todo.md`,
+`docs/manual-testing-todo.md`, `cloud/docs/accounting-todo.md` and
+`cloud/STORE-TODO.md`). Two files hold principles rather than
 todos: `docs/cloud-principles.md` and `cloud/SCOPE.md`. The
 historical task list is https://github.com/FrameOS/frameos/issues/1.

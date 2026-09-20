@@ -1,22 +1,16 @@
 # FrameOS Cloud accounting module — design + todo
 
-Status: written 2026-08-31, **direction revised 2026-09-01** (§0). Phases 0,
-1, 2, 3a, 4 and 5 are built: the ledger, the AI metering that feeds it, the
-admin/ops surfaces that make it readable, the account's own view of its
-usage with the switch that turns AI off, the daily cap, and plans with their
-subscription lifecycle. **Phase 3b — the payment provider — is the only
-thing left, and it is paused on purpose (2026-09-03): no provider until
-there are users to invoice.** Stripe and a merchant-of-record alternative
-get looked at then; the integration is small once needed, and nothing
-below has to change for it. §9 is the
-review of 2026-09-01 — one billing bypass, three accounting bugs and a plan
-ladder that did not do what §0.1 says — and §9.5 is what the fix
-(2026-09-02, migration 0046) did about each. Metering is **live**
-(`ai_metering_mode = live`; every turn is measured, priced and posted to
-the customer's receivable). Nothing is *collected*: no invoice is cut and
-self-serve plan purchase stays gated off (`FRAMEOS_CLOUD_PLANS_SELF_SERVE`)
-because subscribing accrues a receivable and until 3b there is no way to
-settle one.
+Status: the ledger, AI metering (**live** — every turn is measured, priced
+and posted to the customer's receivable), the admin/ops surfaces, the
+account's own usage view with its AI switch, the daily cap, and plans with
+their subscription lifecycle are built. **Phase 3b — the payment provider —
+is the only thing left, and it is paused on purpose (2026-09-03): no
+provider until there are users to invoice.** Nothing is *collected*: no
+invoice is cut and self-serve plan purchase stays gated off
+(`FRAMEOS_CLOUD_PLANS_SELF_SERVE`), because until 3b there is no way to
+settle a receivable. The open work is §7 and the lows in §10; §9 is the
+2026-09-01 review and what its fixes did, kept because the code cites its
+item numbers.
 
 The goal: real double-entry accounting inside FrameOS Cloud. We meter each
 account's AI spend (gpt-5.6-terra today), add a configurable margin (~30%),
@@ -1161,136 +1155,65 @@ quietly rotting into something that no longer compiles.
 
 ## 7. Implementation phases (the todo)
 
-### Phases 0 and 1 — shipped 2026-08-31
+**Built** (history is in git and in §9): Phases 0–1, the ledger kernel and
+its invariants (`packages/ledger`, migration 0042); Phase 2, metering at
+every OpenAI call site (0043), **live** since 2026-09-03; Phase 3a, the AI
+switch, the daily cap, `/account/ai` and the `ai` block on
+`GET /api/account/usage` (0044); Phase 4, `/admin/billing` and the nightly
+job (`scripts/accounting-nightly.sh` → `POST /api/admin/billing/nightly`);
+Phase 5, plans and subscriptions (0045), the §9 fixes (0046) and daily
+recognition (0047); the cloud-rendered-frame entitlement (§0.2), enforced at
+enrollment and in the settings push since 2026-09-06.
 
-Migration `0042_accounting_ledger.sql` (the six tables, the check
-constraints, the append-only triggers, the seeded groups and system chart)
-with matching `schema.ts` blocks, and `packages/ledger`: the `postEvent`
-kernel, `ensureLedgerAccount` + chart codes, the `manual_journal` and
-`reversal` recipes, `integrity.ts` (checks 1–5, 7, 8) and `balances.ts`.
-Twenty-one integration tests cover the happy path, idempotent replay, rollback
-of an unbalanced draft and of a caller-owned transaction, concurrent
-posting to one account, the reversal round-trip, the triggers firing, and
-the books surviving deletion of the account they billed — still attributed
-to it, including the provider-cost entry that names no customer account
-(§2.1). The remaining Phase 0 decisions that only bind later phases are
-in §8.
+Standing decisions from building them, which the open work must respect:
 
-### Phase 2 — meter AI usage — shipped 2026-08-31 (shadow mode)
+- **The metering mode is stamped per record**, so the shadow period can
+  never be billed retroactively, and **there is no backfill**: the books
+  start at go-live, shadow rows stay `event_id IS NULL` and the sweep
+  ignores them.
+- **The nightly job reports and never repairs.** Books that disagree with
+  themselves need a human.
+- **Self-serve plan purchase is gated off** (`FRAMEOS_CLOUD_PLANS_SELF_SERVE`,
+  default false) until 3b: subscribing accrues a receivable nobody can
+  settle. Downgrading to the free plan is never gated.
+- **Entitlements take the larger of the plan and the deployment's env
+  floor**, so an operator's raised limit is never lowered by a plan row.
+- **`credential_source: "platform"` has no producer yet**, so nothing is
+  billable: the charge half of the `ai_usage` recipe is exercised only by
+  tests.
+- Customer names on statements resolve live from `accounts` and degrade to
+  "deleted account"; a customer-label table becomes the answer only when
+  accounting moves to its own database (Phase 6).
 
-Migration `0043` (`ai_usage_records`, `ai_model_prices` seeded with gpt-5.5,
-gpt-5.6-luna/sol/terra and gpt-4o-mini, `billing_settings` seeded with a 30%
-margin, a $1 overdraft and `ai_metering_mode = shadow`), `pricing.ts`,
-`settings.ts`, `metering.ts` and the `ai_usage` recipe. Every OpenAI call
-site now meters: the scene chat (from the turn runner's `onFinish`, so a
-detached or resumed turn still posts), app-chat (which now resolves its key
-through `resolveAiCredentials` like everything else instead of reading the
-account setting directly), the public scene converter, and the store
-classifier at both publish and recategorize. Invariant 6 covers metering
-completeness, and the golden-file lifecycle test walks a customer from
-purchase through usage, reversal and reclassification asserting the whole
-journal at each step.
+### Owed before the first invoice
 
-Two things worth knowing before Phase 3 builds on it:
+- [ ] Compare `ai_usage_records` against the provider's own invoice over a
+      real week — the comparison that settles §8.2. The meter-vs-PostHog
+      half agrees exactly. `apps/auth-web/scripts/ai-metering-compare.mjs`
+      does all three sides per UTC day and model (exit 1 above 1%
+      disagreement), but the OpenAI side reads the organisation usage/costs
+      API and needs an **organisation admin key** (`OPENAI_ADMIN_KEY`,
+      platform.openai.com → Settings → Organization → Admin keys) that
+      nobody has minted.
 
-- **The mode is stamped per record, not read at sweep time.** Flipping
-  `ai_metering_mode` to live therefore cannot retroactively bill the shadow
-  period — those rows stay unposted forever unless somebody deliberately
-  backfills them, which is exactly the decision Phase 4 leaves open below.
-- **`credential_source: "platform"` has no producer yet.** Nothing is
-  billable until Phase 3 teaches `resolveAiCredentials` to return it, so the
-  charge half of the `ai_usage` recipe is exercised only by tests. That is
-  the shape "shadow mode" actually takes: there is no customer to charge,
-  rather than a charge being suppressed.
+### Phase 3b — the provider half
 
-The gate, half run. Metering was flipped to live without waiting for
-the rest (2026-09-03): the meter-vs-PostHog half agrees exactly and
-nobody is invoiced yet, so a wrong meter costs nothing until 3b. What is
-left is a check, not a gate:
+**Paused 2026-09-03 until there are users to invoice.** Then: §8.15
+(entity), §8.7 (provider — Stripe and one merchant-of-record alternative
+are the candidates), and this list in order. The requirement stands: postpay
+needs a payment method stored and chargeable later, not a one-off hosted
+checkout (§3.2).
 
-- [ ] Compare `ai_usage_records` against the provider's own invoice over
-      a real week — the comparison that settles §8.2.
-      **Scripted 2026-09-02** as
-      `apps/auth-web/scripts/ai-metering-compare.mjs` (three optional
-      sides — `DATABASE_URL`, PostHog personal key + project, OpenAI *admin*
-      key — compared per UTC day and model, token vocabularies normalised,
-      exit 1 above 1% disagreement) so it re-runs on the next model change.
-      The OpenAI side reads the organisation usage/costs API
-      (`/v1/organization/usage/completions`, `/v1/organization/costs`),
-      which a normal project API key (`OPENAI_API_KEY`) cannot call: it
-      needs an **organisation admin key** (`OPENAI_ADMIN_KEY`, minted at
-      platform.openai.com → Settings → Organization → Admin keys). Nobody
-      has minted one; it is not needed for anything but this script. Run
-      it once before the first invoice is cut.
-
-### Phase 3 — postpay billing (first revenue)
-
-Rewritten 2026-09-01 for §0. The prepaid checkout this phase used to be is
-now §3.5's shelf recipe; what ships instead is metering that charges a
-receivable, a daily cap, a visible number, an off switch, and one invoice a
-month.
-
-It splits at the payment provider, and the split is worth respecting because
-the first half is unblocked and the second is not.
-
-**Phase 3a — everything that does not need a provider — shipped 2026-09-01.**
-Migration `0044` (`accounts.ai_disabled_at`, the `payg_daily_cap_micros`
-setting at $10, an `(account_id, occurred_at)` index), the AI switch, the
-daily cap, the `ai` block on `GET /api/account/usage`, the account header's
-"AI usage" row and the `/account/ai` page behind it.
-
-- [x] The AI switch (§5.1): `resolveAiAccess()` in
-      `src/lib/ai/api-key.ts` is now the one door every AI surface goes
-      through — switch, then key, then cap, in that order. It replaces a
-      `null` that meant three unrelated things with a typed refusal, and
-      `src/lib/ai/access.ts` turns each into its own status code: 403 for a
-      switch the user threw, 402 for the cap, 400 for a genuinely missing
-      key. Audited both ways through `PUT /api/account/ai`.
-- [x] The daily cap (§5.3): `accountAiSpendMicros()` in
-      `packages/ledger/src/account-usage.ts`, checked before a turn, and
-      `checkDailyCapRespected` as invariant 5's postpay replacement.
-      **The chargeable amount is defined once and used twice** — by the cap
-      and by the page — because two definitions of "what you have spent
-      today" that differ by a rounding step is a bug only ever found by a
-      confused user. It is not `SUM(price_micros)`: in shadow mode that is
-      zero on every row, so the cap would never bite and would ship
-      untested. It is what the turn *would* be billed at, from the row's own
-      pricing snapshot.
-- [x] `GET /api/account/usage` carries an `ai` block, built inside
-      `accountUsage()` rather than in the route, so the payload and the
-      header component share one definition. MCP `account_quota` picks it up
-      for free.
-- [x] Account header: the "AI usage" row, with the shadow-mode "not billed
-      yet" wording and all four zero states.
-- [x] `/account/ai`: this month and last, the per-surface breakdown in the
-      user's words with the absorbed surfaces shown as free, the last twenty
-      requests, how pricing works, and the §5.1 switch. A new `AccountNav`
-      tab.
-- [x] Tests: the refusal shapes, the cap invariant (including that own-key
-      turns and absorbed surfaces stay out of it), the window arithmetic,
-      and the subscription golden file.
-
-**Phase 3b — the provider half. Paused 2026-09-03 until there are users
-to invoice.** Then: §8.15 (entity), §8.7 (provider — Stripe and one
-merchant-of-record alternative are the candidates), and this list in
-order. The requirement stands: postpay needs a payment method stored and
-chargeable later, not a one-off hosted checkout (§3.2).
-
+- [ ] **Which legal entity invoices, and from where** (§8.15): the entity on
+      the invoice, its VAT registration, whether invoices must be numbered
+      gaplessly by law (`invoices.number` is designed for that but nothing
+      assigns it), and whether B2C sales to other EU countries trigger OSS.
 - [ ] Choose the provider; SDK + env plumbing; webhook endpoint
       `app/api/webhooks/<provider>/route.ts` (signature check, provider
       event id as idempotency key, raw-body handling).
-- [ ] Migration `0048` (0045 went to plans, 0046 to the §9 fixes, 0047 to
-      §9.3's daily recognition): `invoices` (period bounds,
-      sequential number, status, provider payment ref) and the
-      stored-payment-method reference. The
-      invoice holds no amount the ledger does not — §3.2 says why.
-- [x] `ai_usage` rule **v2** (done 2026-09-01, ahead of the rest of 3b
-      because a subscription accruing on the receivable while metered usage
-      drew down a prepaid liability would have been two models in one book):
-      the charge leg debits `asset:receivable:customer:<id>` (§3.1). A
-      version bump, not a re-model. Nothing had posted under v1 — metering
-      has been in shadow throughout — so no historical entry means anything
-      different than it did.
+- [ ] Migration `0048`: `invoices` (period bounds, sequential number,
+      status, provider payment ref) and the stored-payment-method reference.
+      The invoice holds no amount the ledger does not — §3.2 says why.
 - [ ] `source: "platform"` in `resolveAiCredentials` — the thing that makes
       any of this billable at all, and still gated by §5.1 and §5.3 before
       it is reached. The scene converter stays out of it: it is an absorbed
@@ -1303,9 +1226,6 @@ chargeable later, not a one-off hosted checkout (§3.2).
       `promo_grant` against the receivable (§3.4).
 - [ ] Dunning: retry schedule, the age at which AI switches off for an
       unpaid balance, the emails. Reads the receivable, writes none of it.
-- [x] Flip `ai_metering_mode` to `live` — done (live in production as of
-      2026-09-03); the provider-invoice half of the Phase 2 check is still
-      owed before the first invoice.
 - [ ] Golden-file test: turns → cap refusal → month close → invoice →
       payment → fee → an unpaid month → write-off.
 - [ ] Legal/pricing page copy: that AI is billed monthly in arrears, that
@@ -1313,125 +1233,6 @@ chargeable later, not a one-off hosted checkout (§3.2).
       margin is, what the cap is, and how to turn it off. Plus §8.8's
       billing-records retention line, which must land before the first
       invoice, not after — and §8.15's answer (which entity invoices).
-
-### Phase 4 — books you can actually read + ops — shipped 2026-08-31
-
-`/admin/billing` in four views: the trial balance (with the 30-day revenue /
-cost / margin / liability tiles and the invariants run live on every
-render), the journal browser with account/type/customer/event filters and
-per-entry reversal, the chart of accounts with group re-mapping, and the
-per-customer statement with a running balance and the metered turns behind
-it. Posting by hand — manual journal and reclassification — goes through
-`POST /api/admin/billing/journal`, superadmin-gated, reason-required and
-audited; the `reclassification` recipe is mechanism 2 of §1.3, deliberately
-*not* using `reverses_entry_id` (that column promises a leg-for-leg
-cancellation, which the integrity checker proves, and a reclass is not one).
-Settings and groups have their own audited routes.
-
-The nightly job is `scripts/accounting-nightly.sh` +
-`ops/accounting/frameos-cloud-accounting.timer`, and it is a curl rather
-than a script that does the work: `POST /api/admin/billing/nightly` sweeps
-unposted records, runs every invariant, `reportError`s each violation and
-logs the daily summary line. The reason is one definition of "consistent" —
-the invariants are TypeScript the test suite already proves, and a
-psql sibling of `db-cleanup.sh` would have been a second copy of every query
-drifting from the first. (It cannot be a Node script either: the release
-bundle is Next's standalone output and carries no tsx, the same reason
-`object-store-sweep.sh` is bash.) It authenticates with a superadmin API
-token — an auth mechanism that already exists rather than a new secret.
-
-The job reports and never repairs. Books that disagree with themselves need
-a human; a quiet automatic "correction" is how a discrepancy becomes
-undiscoverable.
-
-§8.10 was settled by building the statement view: names are resolved live
-from `accounts` and degrade to the bare uuid, so an erased customer's
-statement reads "deleted account" and stays complete. That stops working the
-day accounting moves to its own database (§7 Phase 6) — which is when a
-deliberate customer-label table becomes the answer, and not before.
-
-Decided since:
-
-- [x] **Backfill: no.** The books start at go-live rather than fabricating a
-      history for the shadow-mode period. The shadow records stay where they
-      are with `event_id IS NULL`, the sweep is built to ignore them, and
-      invariant 6 is narrow on purpose so that this is a decision rather
-      than a permanent alarm. It costs nothing: nobody was charged for those
-      turns, so there is no receivable to reconstruct — only measurements,
-      which we still have.
-
-### Phase 5 — plans and subscriptions (§0.1) — shipped 2026-09-01
-
-Un-shelved and built the same day it was un-shelved, which is the payoff for
-§3.6 having been designed rather than merely deferred: no posting rule
-changed, `rules/ai-usage.ts` still does not know that plans exist, and the
-whole of it is schema, a lifecycle job and three two-leg recipes.
-
-- [x] Migration `0045`: `billing_plans` (code, name, price, period,
-      `margin_basis_points`, entitlements jsonb), `subscriptions`,
-      `subscription_periods`. Seeds §0.1's ladder **including PAYG as a real
-      row** at $0/100%, so "what plan is this account on" always has an
-      answer and the margin lookup has no special case.
-- [x] Recipes `subscription_charge`, `subscription_recognition`,
-      `subscription_refund_to_receivable` (`rules/subscription.ts`), and the
-      lifecycle in `subscriptions.ts`: open the periods that are due, charge
-      the ones that have started, recognize the ones that have ended. Every
-      step is idempotent on its period row, so the nightly job may run twice
-      in a night or miss three nights without double-charging anybody or
-      losing a period — and a job that has not run for two months opens both
-      months, because both were served. Never from before the subscription's
-      `started_at`, which a return after a cancellation resets: the months in
-      between were not served (§9.2 item 2, fixed 2026-09-02). The first
-      period opens and charges the moment a plan is taken, not at the next
-      nightly run.
-- [x] Per-plan margin: `accountMarginBasisPoints()` resolves the plan's rate
-      and `metering.ts` snapshots it into the record exactly as it always
-      snapshotted the global one, so a plan change is never retroactive.
-- [x] Per-plan entitlements: `accountLimits()` in `src/lib/usage.ts`, and
-      **every enforcement point moved onto it** — backups, private scenes at
-      all four write paths, the frame-log cull, and (since 2026-09-02) the
-      frame count at enroll and claim-token minting. A display that promises 10 GB
-      while the refusal still fires at 100 MB would be worse than having no
-      plans at all.
-- [x] Nightly: `runSubscriptionCycle` runs between the usage sweep and the
-      invariants — the invariants have to see the books *after* everything
-      that was going to be written tonight has been, or they report a
-      disagreement they caused themselves.
-- [x] `GET/PUT /api/account/plan`, the plan on `/account/ai`, and the
-      cancel-at-period-end flow.
-- [x] Golden file (`subscriptions.integration.test.ts`): subscribe →
-      charge → the same night again charges nobody twice → meter a turn at
-      the *plan's* margin rather than the deployment's → recognize once the
-      period has actually been served → refund the unearned remainder to the
-      receivable → cancel and expire on time.
-
-Three decisions taken while building, each of them a place where the obvious
-thing would have been wrong:
-
-- **Self-serve purchase is gated off** behind `FRAMEOS_CLOUD_PLANS_SELF_SERVE`,
-  default false. Subscribing accrues a real receivable, and Phase 3b — the
-  provider, the stored payment method, the month-end invoice — does not
-  exist. Letting somebody subscribe today would run up a balance with no way
-  to settle it: the ledger would be right and the customer would be stuck.
-  Downgrading to the free plan is never gated; refusing to let somebody stop
-  paying us would be an unpleasant thing to build.
-- **An account nobody put on a plan prices at the deployment's global margin,
-  not at PAYG's 100%.** Otherwise migration 0045 would have doubled the
-  price of every existing account's AI on the night it ran — a price change
-  wearing a schema change's clothes. PAYG's own margin applies once somebody
-  is deliberately on it, and §8.13's "what are the numbers really" question
-  is the one that should move this.
-- **Entitlements take the larger of the plan and the deployment's env floor.**
-  An operator who raised `FRAMEOS_CLOUD_MAX_BACKUP_MB` for everybody must not
-  have it silently lowered by a plan row, and the seeded PAYG numbers are
-  deliberately identical to the historical free tier so that nothing anybody
-  has today gets smaller.
-
-Still open, and genuinely Phase 6 rather than hidden work: the
-cloud-rendered-frame entitlement (§0.2) is carried in the plan row and
-enforced nowhere, because no frame is cloud-rendered yet. It becomes a count
-check at frame creation plus the minimum-refresh-interval floor the day thin
-clients land — which is the product this entitlement exists to unblock.
 
 ### Phase 6 — later, enabled by the above, not designed in detail here
 - [ ] Bank/PSP reconciliation: import the provider's payout reports + bank
@@ -1887,16 +1688,8 @@ right moment to fix it.
       and token totals) *and* against OpenAI's usage export (§8.2 settles
       there). It is one query on each side and it has not been run. Write
       it as a script so it can be re-run on the next model change.
-- [ ] **Which legal entity invoices, and from where.** *Written up as
-      §8.15 with the questions in order — the answer is the owner's, and
-      parked with the provider choice until there are users to invoice
-      (2026-09-03).* Not in this
-      document anywhere, and prior to the provider choice: the entity on
-      the invoice, its VAT registration, whether it must number invoices
-      sequentially by law (many EU jurisdictions require gapless
-      sequences — `invoices.number` is designed for that but nothing
-      assigns it), and whether B2C sales to other EU countries trigger
-      OSS. §8.6/§8.7 assume this is answered.
+- **Which legal entity invoices, and from where** — still open; it is the
+      first item of §7 Phase 3b, with the questions in §8.15.
 - [x] **Subscriptions are billed in advance**, which is normal SaaS and
       not stored value, but §0's "we invoice for a service already
       rendered" is only true of metered usage. Say so in §0 and in the

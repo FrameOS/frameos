@@ -94,76 +94,58 @@ link scope, nginx `proxy_read_timeout` checked against the route's 300 s.
 
 ## 2. The hardware-in-the-loop bench
 
-Gated on nothing; gates everything else in practice. Today: 420 unit-test
-files on the server planes, six C unit tests and QEMU on the ESP32, zero
-frontend tests, no CI that ever lights a panel, and a standing list of
-open boxes in `docs/manual-testing-todo.md` that shrinks only when a
-person sits at a bench.
+Gated on nothing; gates everything else in practice. The server planes, the
+shared SPA and the firmware's portable modules all have unit suites and the
+ESP32 boots under QEMU, but no CI ever lights a panel, and the open boxes in
+`docs/manual-testing-todo.md` shrink only when a person sits at a bench.
 
 - [ ] One shelf: a Pi (HDMI + one SPI e-ink), a Seeed E1004, one 7-colour
   Waveshare, on a self-hosted runner with power control.
 - [ ] On every release tag (not every PR): flash/deploy the release,
   render a known scene, photograph or read back the framebuffer, diff.
-- [ ] Fold the standing items from `docs/manual-testing-todo.md` §2/§4
-  into its suite one by one; that file shrinks to zero and stays there.
+- [ ] Fold the recurring checks from `docs/manual-testing-todo.md` (flash,
+  first boot, OTA, display power) into its suite one by one; that file
+  shrinks to zero and stays there.
 - [ ] Exit: "shipped" and "renders on hardware" mean the same thing for
   at least one board per architecture.
 
-## 3. Thin vs fat rendering — ruled, not yet enforced
+## 3. Thin vs fat rendering — ruled and enforced, the hub renderer is missing
 
-Both architectures exist and work: `localRenderSupported` already forks
-esp32-s3 (17.5k lines of local-render C) from esp32-c3/Pico (539-line
-backend FOSB path + 2k Pico C). The two decisions that make the fork
-policy instead of accretion are taken: the "no image proxies, ever"
-principle is bounded in `docs/cloud-principles.md` (a hub rendering a whole *scene*
-for a board below the capability line is the thin-client design, not a
-proxy), and the money question is answered in
-`cloud/docs/accounting-todo.md` §0.2 — cloud rendering is a paid-plan
-entitlement, N frames *and* a minimum refresh interval (proposal 5 min),
-none on the free tier. What is left is code:
+Both architectures exist and work: `localRenderSupported` forks esp32-s3
+(local-render C) from esp32-c3/Pico (the backend FOSB path). The policy is
+settled: a hub rendering a whole *scene* for a board below the capability
+line is the thin-client design, not an image proxy
+(`docs/cloud-principles.md`), and on the cloud it is a paid-plan entitlement
+— N frames *and* a 300 s minimum refresh interval, none on the free tier —
+which both enrollment flows and the settings push enforce
+(`cloud/docs/accounting-todo.md` §0.2). What is left is code:
 
-- [x] Enforce the entitlement — shipped 2026-09-06: both enrollment flows
-  count a board with no on-device renderer (`hardware.platform`
-  `esp32-c3*` / `pico*`, or `localRenderSupported: false`) against the
-  plan's `cloud_rendered_frames` inside the frame-quota transaction
-  (`403 cloud_rendered_frame_quota_exceeded`, claim-token budget
-  untouched), and the settings push holds such a frame to
-  `FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS` (300 s;
-  `400 interval_below_plan_floor`). `/api/account/usage` reports the pool.
-  C3 boards can go back into the cloud flasher once the hub actually
-  renders for them — the entitlement no longer blocks that, the missing
-  renderer does.
-- [ ] Then: the capability line is data, not per-board fights. New boards
-  declare PSRAM and get a renderer assigned; the fat path stops being
-  re-earned 8 MB board by 8 MB board.
+- [ ] The frame hub renders for thin clients. Until it does, C3 and Pico
+  boards stay out of the cloud flasher and cannot link to the cloud at all;
+  the self-hosted backend is their only control plane.
+- [ ] The capability line is data, not per-board fights. New boards declare
+  PSRAM and get a renderer assigned; the fat path stops being re-earned
+  8 MB board by 8 MB board.
 - [ ] Exit: a new panel bring-up touches a board table and a driver, not
   the rendering architecture.
 
-## 4. The wasm renderer is a release artifact, not a side-load
+## 4. Preview / firmware version skew
 
-`scene-render.ts` expects `public/frameos-wasm/frameos.wasm` installed on
-the server; the repo ships none, the browser preview runs `main` while
-frames run the last release, and one skew already shipped a visible lie
-(radialGradient → "No image provided").
+The wasm renderer is a signed release artifact the cloud pins from
+`versions.json`, and the preview says which runtime it runs. The skew is one
+direction only — preview = last release, frame = whatever it runs:
 
-- [x] Built and installed (PR #444): the release job attaches a signed
-  `frameos-<version>-wasm.tar.gz`; the cloud pins it from `versions.json`,
-  verifies the minisign signature on every build and installs it
-  (`FRAMEOS_WASM_SOURCE=local` for runtime development); the npm package
-  ships the same bytes. The preview shows "runtime <version>", the render
-  route returns `runtime_version`. Release 2026.9.2 proved the job.
-- [ ] The skew is now one direction only — preview = last release, frame =
-  whatever it runs — so the table this bullet wanted collapses to the
-  release notes: every release note lists interpreter changes since the
-  last, and that is the only skew document.
+- [ ] Every release note lists interpreter changes since the last; that is
+  the only skew document.
 
 ## 5. Grow the loadable catalog toward the built-in one
 
 40 apps exist only as Nim in the firmware; 7 as loadable JS. The
 converter's misses are the roadmap, not a porting program:
 
-- [ ] Instrument: every converter "no JS equivalent" and every
-  `needsManualPort` reason lands in telemetry, aggregated by missing
+- [ ] Instrument: `scene_convert` telemetry carries only a
+  `needs_manual_port` *count* today. Every converter "no JS equivalent" and
+  every `needsManualPort` reason has to land there, aggregated by missing
   primitive (drawing, text metrics, dither, shell, EXIF, …).
 - [ ] Each primitive that clears a real cluster gets a bridge call or a
   JS port of the built-ins it unblocks — demand-ordered, one at a time,
@@ -174,30 +156,18 @@ converter's misses are the roadmap, not a porting program:
 ## 6. Keep the contract discipline ahead of the drift
 
 The cloud-frames contract works (20 verbs on both device planes, one
-generated table, shared fixtures, three thin validators). The same rule
-is *not* pinned elsewhere it already matters:
+generated table, shared fixtures, three thin validators). The
+scene-execution rule is pinned the same way
+(`docs/scene-execution-fixtures.json`; new cases go in the JSON first), and
+so is the settings-key split: every single-plane key in
+`docs/cloud-frames-contract.json` carries `parity: {only, why}`, and the
+tests cap the count at 8 linux-only / 7 esp32-only — the cap can only go
+down. Standing rule rather than a task:
 
-- [x] The scene-execution rule — `docs/scene-execution-fixtures.json`
-  (2026-09-06), run by `backend/app/utils/tests/test_scene_execution_fixtures.py`
-  and `cloud/apps/auth-web/src/test/shared-spa/scene-execution-fixtures.test.ts`
-  (the shared SPA, the converter package and the cloud store's refusal
-  list in one runner). Its first run found a drift: the SPA read an
-  unknown `settings.execution` stamp as compiled while the backend read
-  it as interpreted. New cases go in the JSON first.
-- [x] The 8-both / 8-linux / 7-esp32 settings-key split is pinned
-  (2026-09-06): every single-plane key in `docs/cloud-frames-contract.json`
-  carries `parity: {only, why}` and the generator refuses the file
-  otherwise; pytest and the auth-web contract test assert the rule and cap
-  the count at today's 8 / 7. Each key that goes both-planes deletes its
-  parity entry (and the cap can only go down). Of the 15, none is a cheap
-  port: the linux-only eight are Pi-runtime features (flip stage, error
-  state machine, pairing overlay, metrics timer, assets cache, tzdata
-  timer, custom palette, driver knobs) and the esp32-only seven are power
-  management and ADC battery sense a Pi does not have.
-- [ ] `fos_cloud.c` (3,259) beside `hub_client.nim` (2,049) is the
-  accepted cost of the C decision — hold the line: new verbs land as
-  contract entry + fixtures + both walkers in one PR, and any helper
-  that can live in a generated table (not hand C and hand Nim) does.
+- [ ] `fos_cloud.c` beside `hub_client.nim` is the accepted cost of the C
+  decision — hold the line: new verbs land as contract entry + fixtures +
+  both walkers in one PR, and any helper that can live in a generated table
+  (not hand C and hand Nim) does.
 
 ## 7. The backend becomes a provider (the cloud model)
 
@@ -211,20 +181,13 @@ backend: it manages Buildroot frames over SSH and the Remote's `shell`,
 which is why backend-personalized images still run as root and why an
 adopted generic card (no Remote, no SSH) could not be deployed to at all.
 
-- [x] Stage 0 (2026-09-07): a frame the backend only reaches over its
-  admin API gets what that API allows — scenes and settings through the
-  sync path, "Check for updates / Update FrameOS" through the device's own
-  signed self-upgrade (`/api/frames/{id}/device/upgrade`), the admin login
-  locked as the one way in. Adoption follows the device's mode, board,
-  TLS state and port instead of the backend's rpios/https defaults.
-  *(2026-09-12, "remote lite":* the rest of what that API allows — the
-  Assets panel and font sync, the service keys, scene activation, the
-  frame's own scene snapshots, explicit "off" states and the viewer/server
-  keys in the push, a queued full deploy landing as the push — and the
-  workspace shaped like the cloud's for such a frame: no terminal, Remote,
-  reboot cron or build artifacts, the shell verbs answering 400
-  (`docs/api-triality.md` "Admin-API-only frames"). Deliberately NOT an
-  escalation path: nothing installs a Remote or an SSH key on the card.)*
+Stage 0 is in place ("remote lite", `docs/api-triality.md` "Admin-API-only
+frames"): a frame the backend only reaches over its admin API gets scenes,
+settings, assets, fonts, service keys, scene activation, snapshots and the
+device's own signed self-upgrade, with the shell verbs refused and hidden.
+Deliberately NOT an escalation path: nothing installs a Remote or an SSH key
+on such a card.
+
 - [ ] Stage 1: the backend hosts the management WebSocket. Either port
   `cloud/apps/frame-hub` (~3.7k lines of TS: session auth, protocol,
   queue, rate limits) into the FastAPI app or run the hub as a sidecar

@@ -4,12 +4,10 @@ The ESP32 and Pico firmware under `embedded/`. Reference material lives in
 `docs/esp32-memory.md`, `docs/esp32-image-size.md`, `docs/esp32-progressive-jpeg.md`
 and `docs/cloud-frames.md`; the cross-plane settings contract is
 `docs/cloud-frames-contract.json`. This file only carries the work.
-**When an item ships, delete it.** Seeded from the 2026-09-09 full-repo
-review (`docs/review-todo.md` §14), whose verdict was: careful, defensive C —
+**When an item ships, delete it.** The firmware is careful, defensive C —
 path sanitisation, the netguard, the contract walker, the power and battery
-logic and the verify-before-switch OTA are all correct as far as they can be
-traced. What is left is parity gaps, authenticated-peer DoS, one privacy gap
-and doc drift.
+logic and the verify-before-switch OTA all hold up; what is left is parity
+gaps, authenticated-peer DoS, one privacy gap and doc drift.
 
 Building note: ESP-IDF firmware cannot be built locally; it compiles with
 `-Werror`, so every firmware edit costs a CI round-trip on "Build and boot
