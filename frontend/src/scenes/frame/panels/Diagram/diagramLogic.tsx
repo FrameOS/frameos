@@ -67,6 +67,7 @@ import {
   sceneIsCompiledForFrame,
   confirmSceneBecomesCompiled,
 } from '../../../../utils/sceneExecution'
+import { eventPayloadIsSceneState } from '../../../../utils/eventsContract'
 import { frameEventForScene } from '../../../../utils/frameEvents'
 import { logsLogic } from '../Logs/logsLogic'
 import { runtimeNodeErrorsByNodeId } from '../../../../utils/frameRuntimeErrors'
@@ -1778,7 +1779,7 @@ export const diagramLogic = kea<diagramLogicType>([
         } else if (node.type === 'dispatch' || node.type === 'event') {
           const keyword = (node.data as DispatchNodeData | EventNodeData)?.keyword
           const event = frameEventForScene(keyword, values.scene)
-          fields = event?.name === 'setSceneState' ? values.scene?.fields ?? null : event?.fields ?? null
+          fields = eventPayloadIsSceneState(event?.name) ? values.scene?.fields ?? null : event?.fields ?? null
         } else if (node.type === 'scene') {
           fields = values.scene?.fields ?? null
         }

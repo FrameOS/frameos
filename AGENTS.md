@@ -59,6 +59,24 @@
   flight together, so the next failure explains itself instead of printing
   `expected 2 to be 1`.
 
+## Scene events: the contract is `docs/events-contract.json`
+
+- Event names, payloads, who may emit what (`origins`, an allow-list), the log
+  / coalesce / render-after policy and which host has an event all live in
+  **`docs/events-contract.json`**; `docs/events.md` is the prose and
+  `docs/event-fixtures.json` the conformance corpus. **Never add an event name
+  to a list of your own** — not in Nim, C, TypeScript or Python. Edit the
+  contract, run `python3 frameos/tools/generate_events_contract.py`, add a
+  fixture. `frontend/schema/events.json` is one of the generated files.
+- The generator's `--check` runs in the backend test suite
+  (`test_esp32_events_contract.py`), so a stale table is a red PR. The fixture
+  runners are listed at the top of `docs/events.md`; the Nim one is
+  `frameos/src/frameos/tests/test_event_fixtures.nim`.
+- Both control planes read the same tables (the backend's
+  `events_contract_gen.py`, the cloud's `events-contract.gen.ts`): an event the
+  cloud should be able to send needs a `cloud.verb` in the contract, not a new
+  `case` alone.
+
 ## AI scene chat: change the prompt/linter, then run the evals
 
 - The cloud AI (`cloud/apps/auth-web/src/lib/ai/`) builds and edits scenes on

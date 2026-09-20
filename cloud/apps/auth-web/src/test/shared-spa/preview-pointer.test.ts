@@ -115,11 +115,18 @@ describe("preview pointer input, package and frontend", () => {
     }
     // DOM: 0 main, 1 middle, 2 right, 3 back, 4 forward.
     expect([0, 1, 2, 3, 4].map(packagePointer.pointerButton)).toEqual([0, 2, 1, 3, 4]);
+    // The range is the event contract's `pointer.wireMax`, generated for
+    // every reader (docs/events-contract.json): the driver, the runner and
+    // both TypeScript copies import it rather than spell it.
+    expect(repoFile("frameos/src/frameos/events_gen.nim")).toContain(
+      `PointerWireMax* = ${packagePointer.POINTER_AXIS_MAX}`,
+    );
     expect(repoFile("frameos/src/drivers/evdev/pointer.nim")).toContain(
-      `const PointerRange* = ${packagePointer.POINTER_AXIS_MAX}`,
+      "const PointerRange* = PointerWireMax",
     );
     expect(repoFile("frameos/src/frameos/utils/image.nim")).toContain(
-      `const PointerAxisMax* = ${packagePointer.POINTER_AXIS_MAX}`,
+      "const PointerAxisMax* = PointerWireMax",
     );
+    expect(frontendPointer.POINTER_AXIS_MAX).toBe(packagePointer.POINTER_AXIS_MAX);
   });
 });

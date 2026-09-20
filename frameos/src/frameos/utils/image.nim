@@ -10,6 +10,7 @@ import sequtils
 import strutils
 import strformat
 import uri
+import frameos/events_gen
 import std/xmltree
 import std/strtabs
 
@@ -1382,7 +1383,7 @@ proc panelToScenePoint*(x, y, width, height, rotate: int, flip: string): tuple[x
     sceneY = scene.height - sceneY - 1
   (sceneX, sceneY)
 
-const PointerAxisMax* = 32767
+const PointerAxisMax* = PointerWireMax
   ## A `mouseMove` payload runs 0..PointerAxisMax on both axes, whatever the
   ## input device reports (drivers/evdev/pointer.nim scales to it) — and
   ## whatever the browser preview's canvas measures.

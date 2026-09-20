@@ -1,4 +1,5 @@
 import type { CodeArg, FieldType } from '../types'
+import { codeContextMembers, eventTypeDeclarations } from './eventsContract.gen'
 
 /**
  * TypeScript declarations for the JS code nodes in a diagram.
@@ -35,7 +36,10 @@ const fieldTypeToTsType: Record<FieldType, string> = {
   path: 'string',
 }
 
-const frameosGlobals = `declare function now(): number;
+// `context` and the event names/payloads are the event contract's
+// (docs/events-contract.json `context` and `events`), the same block the app
+// editor gets — one shape, not one per editor.
+const frameosGlobals = `${eventTypeDeclarations}declare function now(): number;
 declare function parseTs(format: string, text: string): number;
 declare function format(ts: number, format: string): string;
 declare function getState(key: string): any;
@@ -44,12 +48,7 @@ declare function getContext(key: string): any;
 declare const state: Record<string, any>;
 declare const args: Record<string, any>;
 declare const context: {
-  loopIndex?: number;
-  loopKey?: string;
-  event?: string;
-  payload?: any;
-  hasImage?: boolean;
-};
+${codeContextMembers}};
 `
 
 /** Names the block above already owns; an arg may not redeclare them. */

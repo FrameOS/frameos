@@ -43,6 +43,10 @@ import {
   validateContractSetting,
   type ContractProfile,
 } from "./cloud-frames-contract";
+import {
+  customEventMaxNameLength,
+  scheduleRefusedEvents,
+} from "./events-contract.gen";
 import { fetchTzSlice } from "./tz-slice";
 import { logWarn, reportError } from "./log";
 // usage.ts only type-imports from this module, so no runtime cycle.
@@ -540,8 +544,13 @@ export function validateFrameSchedule(
           (weekday as number) > 9)) ||
       typeof event !== "string" ||
       event.length === 0 ||
-      // The ESP32 stores the name in a 64-byte buffer, NUL included.
-      event.length > 63 ||
+      // The contract's name limit (docs/events-contract.json): the ESP32
+      // stores the name in a 64-byte buffer, NUL included.
+      event.length > customEventMaxNameLength ||
+      // What the `schedule` origin may not emit (`uploadScenes`): the device
+      // refuses it when the minute comes, so refuse it here, where the person
+      // who wrote it can still see why.
+      scheduleRefusedEvents.includes(event) ||
       (payload !== undefined && !isPlainObject(payload)) ||
       (disabled !== undefined && typeof disabled !== "boolean")
     ) {

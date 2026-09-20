@@ -8,7 +8,10 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
-import { sceneStateCommand } from "../../../../../../src/lib/frame-events";
+import {
+  cloudEventVerb,
+  sceneStateCommand,
+} from "../../../../../../src/lib/frame-events";
 import {
   enqueueFrameCommand,
   frameContractProfile,
@@ -109,17 +112,25 @@ export async function POST(
       ? (body.state as Record<string, unknown>)
       : undefined;
 
-  let type: string;
+  // Which events this route takes, and the hub verb each becomes, is the
+  // event contract's (docs/events-contract.json, the `cloud` origin): an event
+  // that is not there, or whose verb the frame's device plane cannot carry
+  // (`set_display_power` and a `set_current_scene` with state are Linux only
+  // — the esp32 profile would let the command wait out its TTL to refuse it),
+  // is a 404. What is left below is each verb's payload.
+  const routed = cloudEventVerb(eventName, frameContractProfile(frame));
+  if (!routed) {
+    return jsonError("unsupported_event", 404);
+  }
+  const type = routed.verb;
   let payload: Record<string, unknown> | undefined;
   switch (eventName) {
     case "render":
-      type = "render";
       break;
     // The Metrics panel's "Request metrics" button. The device answers with a
     // metrics message the hub already stores (frame_metrics + new_metrics
     // broadcast), so mapping the event is all it takes.
     case "metrics":
-      type = "get_metrics";
       break;
     // The frame menu's Turn display off / on. The verb carries the flag
     // rather than being two verbs, so the device has one place to refuse a
@@ -129,13 +140,6 @@ export async function POST(
     // the event still acks, so gating here would be guesswork.
     case "turnOn":
     case "turnOff":
-      // Linux only (docs/cloud-frames-contract.json): the esp32 profile
-      // answers unsupported_verb, so queueing it there would be a command
-      // that waits out its TTL to be refused.
-      if (frameContractProfile(frame) !== "linux") {
-        return jsonError("unsupported_event", 404);
-      }
-      type = "set_display_power";
       payload = { on: eventName === "turnOn" };
       break;
     case "setCurrentScene": {
@@ -191,7 +195,6 @@ export async function POST(
         // version): fall through to the plain select, which is what the
         // route always did — the device's own log then says why.
       }
-      type = "set_current_scene";
       payload = { scene_id: deviceSceneId, ...(state ? { state } : {}) };
       break;
     }
@@ -204,7 +207,6 @@ export async function POST(
       if (!command.ok) {
         return jsonError(command.error, command.status);
       }
-      type = "set_current_scene";
       payload = command.payload;
       break;
     }
@@ -254,7 +256,6 @@ export async function POST(
       if (sceneId && sceneId.length > maxSceneIdChars) {
         return jsonError("invalid_scene_id", 400);
       }
-      type = "set_scenes";
       payload = {
         checksum,
         scenes,

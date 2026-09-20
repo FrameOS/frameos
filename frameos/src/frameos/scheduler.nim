@@ -5,15 +5,17 @@ import times
 import strformat, strutils
 import frameos/types
 import frameos/channels
+import frameos/events
 import frameos/utils/local_time
 import sequtils
 import os
 
-# Events a schedule entry may fire. Everything else the runner understands is a
-# runtime verb (uploadScenes) reserved for the server/hub paths that stamp an
-# origin on what they deliver. Keep in step with sceneRefusedDispatchEvents in
-# interpreter.nim.
-const schedulerRefusedEvents* = ["uploadScenes"]
+# What a schedule entry may fire is the contract's: every event whose `origins`
+# (docs/events-contract.json) lists "schedule". What is left out is a runtime
+# verb (uploadScenes) reserved for the server/hub paths that stamp an origin
+# on what they deliver.
+proc scheduleMayFire*(event: string): bool =
+  originMayEmit(eoSchedule, event)
 
 var thread: Thread[FrameOS]
 
@@ -89,7 +91,6 @@ proc minuteKey(dt: DateTime): int64 =
 # (the ESP32 did exactly that on 2026-09-04; uus2w escaped by three seconds).
 # Only a marker from the last few minutes is honoured on start.
 const SCHEDULER_FIRED_MARKER_PATH* = "./state/scheduler-last-fired"
-const schedulerRebootEvents = ["reboot", "restart"]
 const schedulerFiredMarkerMaxAgeMinutes = 3'i64
 var schedulerFiredMarkerPath* = SCHEDULER_FIRED_MARKER_PATH
 
@@ -140,7 +141,7 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
     # with no origin stamp, which would let a schedule entry smuggle scenes
     # past the guards the direct push goes through. Schedules may switch,
     # render, power and reboot; they may not rewrite what is installed.
-    if ev.event in schedulerRefusedEvents:
+    if not scheduleMayFire(ev.event):
       log(%*{
         "event": "scheduler:refused",
         "id": ev.id,
@@ -156,7 +157,7 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
       "timeZone": self.frameConfig.timeZone,
       "payload": ev.payload,
     })
-    if ev.event in schedulerRebootEvents:
+    if eventPolicy(ev.event).endsRuntime:
       {.gcsafe.}:
         persistFiredMinute(minuteKey(dt))
     sendEvent(ev.event, ev.payload)

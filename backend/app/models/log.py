@@ -10,6 +10,7 @@ from arq import ArqRedis as Redis
 from .frame import Frame, record_successful_deploy, remember_device_reported_frameos_version, update_frame
 from .metrics import new_metrics
 from app.database import Base
+from app.utils.events_contract_gen import SCENE_CHANGED_LOG_EVENTS
 from app.utils.timezone import stored_timezone
 from sqlalchemy import Index, Integer, String, DateTime, ForeignKey, Text, delete, event, func, select
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
@@ -306,7 +307,7 @@ async def process_log(
 
     event = log.get('event', 'log')
 
-    if event in ("render:scene", "render:sceneChange", "event:setCurrentScene"):
+    if event in SCENE_CHANGED_LOG_EVENTS:
         scene_id = log.get("sceneId") or log.get("scene") or log.get("id")
         if scene_id:
             # No TTL: a frame that renders once an hour (or sleeps for a day)

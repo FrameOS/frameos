@@ -14,12 +14,20 @@ from app.utils.refresh_interval import resolve_refresh_interval
 from app.utils.scene_execution import scene_is_interpreted
 
 def get_events_schema() -> list[dict]:
-    events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
-    if os.path.exists(events_schema_path):
-        with open(events_schema_path, "r") as file:
-            return json.load(file)
-    else:
-        return []
+    """The editor's event catalog: frontend/schema/events.json, generated from
+    docs/events-contract.json. Found next to this checkout whatever the working
+    directory is (it used to be CWD-relative, and a miss silently produced
+    dispatch nodes with no payload); the CWD-relative path stays as the
+    fallback for a layout that keeps the schema elsewhere."""
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "frontend", "schema", "events.json"),
+        os.path.join("..", "frontend", "schema", "events.json"),
+    ]
+    for events_schema_path in candidates:
+        if os.path.exists(events_schema_path):
+            with open(events_schema_path, "r") as file:
+                return json.load(file)
+    return []
 
 def wrap_color(value: str) -> str:
     if (

@@ -13,15 +13,15 @@ import frameos/cloud/scene_guard
 import frameos/js_runtime/run_budget
 import frameos/node_config
 import frameos/event_log
+import frameos/events
 import frameos/planner
 import frameos/refresh_interval
 import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
-# Runtime verbs a scene's dispatch node must not reach. Keep in step with
-# schedulerRefusedEvents in scheduler.nim.
-const sceneRefusedDispatchEvents* = ["uploadScenes", "reboot", "restart", "reload"]
+# What a scene's dispatch node may not reach is the contract's: every event
+# whose `origins` (docs/events-contract.json) does not list "scene".
 
 var eventListenersRun* {.threadvar.}: int
   ## Counts every event listener a run has started, so a host can ask "did
@@ -850,7 +850,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "eventName": eventName,
           "reason": "renderSelfDispatch"
         })
-      elif eventName in sceneRefusedDispatchEvents:
+      elif not originMayEmit(eoScene, eventName):
         # Scene code is untrusted (it may be anyone's store scene). A dispatch
         # node may drive scenes and state; it may not replace the installed
         # scene set (skipping every guard the push path applies) or take the

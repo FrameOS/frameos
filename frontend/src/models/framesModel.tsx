@@ -19,6 +19,7 @@ import { compareFrames } from '../utils/frameSort'
 import { apiFetch, logApiError } from '../utils/apiFetch'
 import { mergeBroadcastFrame } from '../utils/frameSecrets'
 import { isCloudMode } from '../utils/cloudMode'
+import { logEventIsSceneChange } from '../utils/eventsContract'
 import {
   sendCloudFrameCommand,
   dismissCloudFrameDeviceScenes,
@@ -115,10 +116,9 @@ function sortFrames(frames: FrameType[]): FrameType[] {
 function activeSceneIdFromLogLine(line: string): string | null {
   try {
     const payload = JSON.parse(line)
-    if (
-      ['render:sceneChange', 'event:setCurrentScene', 'event:uploadScenes'].includes(payload?.event) &&
-      typeof payload.sceneId === 'string'
-    ) {
+    // Which log lines say so is the event contract's (`logEvents.sceneChanged`),
+    // the list the backend keeps its own copy of the active scene by.
+    if (logEventIsSceneChange(payload?.event) && typeof payload.sceneId === 'string') {
       return payload.sceneId
     }
   } catch (error) {}

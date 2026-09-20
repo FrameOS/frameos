@@ -4,6 +4,7 @@ import std/[locks, os, strutils, sysrand, tables]
 import times
 import mummy
 import frameos/types
+import frameos/events
 from frameos/config import getConfigFilename
 import ./state
 
@@ -368,10 +369,11 @@ proc hasAdminAccess*(request: Request): bool =
 ## `uploadScenes` replaces the scene set. Everything else that arrives on
 ## POST /event/@name (setCurrentScene, setSceneState, button presses, turnOn /
 ## turnOff, render, metrics, custom scene events) is scene territory.
-const ControlEvents* = ["reload", "restart", "reboot", "uploadScenes"]
-
+##
+## Which names those are is the contract's (docs/events-contract.json): the
+## events whose `origins` do not list "http:write", the frame access key.
 proc isControlEvent*(name: string): bool =
-  name in ControlEvents
+  not originMayEmit(eoHttpWrite, name)
 
 proc hasControlAccess*(request: Request): bool {.gcsafe.} =
   ## Who may fire a control-plane verb: an admin session, or the backend with

@@ -12,7 +12,13 @@ and third bullets (`init`/`open` now reach top-level interpreted scenes on all
 three hosts, `close` too, with no payload); §3.5 #1–#3, #9 and #12 (relative
 mice, key repeat, tool buttons, key payloads in the log, a tested translator);
 and the small catalog/linter/duplicate items at the end of §3.1. `wheel` is a
-new event. Everything else stands.
+new event.
+
+P1 (§5) shipped next: `docs/events-contract.json`, its generator, the prose
+spec `docs/events.md` and the conformance corpus `docs/event-fixtures.json`
+with runners. §2.1 ("the catalog") and the table in §3.1 describe the tree
+before it — the thirteen lists are generated tables or imports of them now,
+and `docs/events.md` says which. Everything else stands.
 
 Scope: the scene event layer on every host that runs scenes — the Linux runtime
 (Raspberry Pi), the ESP32 firmware, the browser wasm preview — and the control
@@ -602,10 +608,41 @@ for the later steps, on purpose:
 - No `close` on `reload` / `uploadScenes`, no `destroy`, no `reason` on `open`
   (§4.4).
 
-**P1 — the spec.** `docs/events-contract.json`, the generators, `docs/events.md`,
-`docs/event-fixtures.json` with runners; replace the lists in §3.1. No
-behaviour change beyond what the fixtures expose. This is the step that stops
-the flapping; everything after it is additive and testable.
+**P1 — the spec.** Shipped: `docs/events-contract.json`,
+`frameos/tools/generate_events_contract.py`, `docs/events.md`,
+`docs/event-fixtures.json` with runners in Nim, C, Python and TypeScript; the
+lists in §3.1 are generated or gone. The contract records what each origin
+*can* do today, so nothing a scene relies on moved. What the fixtures exposed,
+and what changed because of it:
+
+- A schedule entry firing `uploadScenes` was refused on a Pi and delivered to
+  the scene on an ESP32, and the cloud accepted it either way. The firmware
+  refuses it now (`schedule:refused`), and the cloud's validator refuses the
+  schedule.
+- The preview offered buttons for `turnOn` / `turnOff` listeners (both
+  `LIFECYCLE_EVENTS` copies forgot them); they are scene commands.
+- The fleet list followed a frame's scene by a different set of log lines than
+  the backend; both read `logEvents.sceneChanged` now.
+- The legacy codegen found the catalog relative to the working directory.
+
+Left for the later steps, on purpose:
+
+- The contract's `origins` are enforced where a host can tell an origin today
+  (`enforcedOrigins`); the envelope that carries it everywhere is P2, and with
+  it the narrowing of the input and lifecycle rows (decision 5 in §6
+  included: a custom event's own `origins`).
+- `renderAfter` is the rule the hosts converge on, not what they do: only
+  `never` for pointer events holds everywhere (`docs/events.md`, "Known host
+  differences"). Enforcing it is the dispatcher's job, P2.
+- No fixture runner for the wasm *host*: the cloud's CI runs the pinned
+  release's bundle, not the tree's. The interpreter the bundle compiles is
+  covered by the Nim runner.
+- §3.1 #11's prose copies of the `context` shape (two prompts, one doc page)
+  cannot import a table; a test holds them to the contract's keys.
+  `scene-convert` still emits `context.imageWidth` / `imageHeight` for a code
+  node, which has neither.
+- The ESP32's C switches use the generated names and allow-list but are still
+  three switches; they collapse in P2.
 
 **P2 — one dispatcher.** `event_loop.nim`, origin tagging, command/event split,
 queued delivery on ESP32 and wasm, the `renderAfter` rule, the cloud

@@ -28,6 +28,7 @@ import {
   hasCompiledNimAppSource,
 } from '../../../../utils/sceneApps'
 import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
+import { eventPayloadIsSceneState } from '../../../../utils/eventsContract'
 import { frameEventForScene } from '../../../../utils/frameEvents'
 import type { RuntimeNodeError } from '../../../../utils/frameRuntimeErrors'
 import type { FrameType } from '../../../../types'
@@ -450,7 +451,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       ): (AppConfigField | MarkdownField)[] | null => {
         let fields: (AppConfigField | MarkdownField)[] = []
         if (event) {
-          if (event.name === 'setSceneState') {
+          if (eventPayloadIsSceneState(event.name)) {
             fields = currentScene?.fields ?? []
           } else {
             fields = event?.fields ?? []

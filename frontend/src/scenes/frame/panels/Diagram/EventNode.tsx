@@ -19,6 +19,7 @@ import { ColorInput } from '../../../../components/ColorInput'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { NodeZoomLabel } from './NodeZoomLabel'
+import { eventOffersSceneState } from '../../../../utils/eventsContract'
 import { frameEventForScene } from '../../../../utils/frameEvents'
 import { parseRefreshSeconds, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
 
@@ -35,7 +36,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const data = (node?.data as EventNodeData) ?? ({ keyword: '' } satisfies EventNodeData)
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 
-  const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
+  const isEventWithStateFields = eventOffersSceneState(keyword)
 
   const eventFields = frameEventForScene(keyword, scene)?.fields ?? []
   const fields = isEventWithStateFields ? scene?.fields ?? [] : eventFields
