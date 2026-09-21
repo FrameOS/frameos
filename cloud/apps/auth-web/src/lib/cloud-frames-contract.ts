@@ -19,7 +19,7 @@ export interface ContractRule {
   enum?: readonly (string | number)[];
   minLen?: number;
   maxLen?: number;
-  format?: "iana_zone" | "html_hex_color" | "gpio_label";
+  format?: "iana_zone" | "html_hex_color" | "gpio_label" | "driver_key";
   keys?: Readonly<Record<string, ContractRule>>;
   required?: readonly string[];
   minKeys?: number;
@@ -53,6 +53,7 @@ export const contractProfiles: readonly ContractProfile[] = cloudFramesContract.
 
 const ianaZone = new RegExp(cloudFramesContract.formats.iana_zone);
 const htmlHexColor = new RegExp(cloudFramesContract.formats.html_hex_color);
+const driverKey = new RegExp(cloudFramesContract.formats.driver_key);
 
 function matchesFormat(format: ContractRule["format"], value: string): boolean {
   switch (format) {
@@ -60,6 +61,8 @@ function matchesFormat(format: ContractRule["format"], value: string): boolean {
       return ianaZone.test(value);
     case "html_hex_color":
       return htmlHexColor.test(value);
+    case "driver_key":
+      return driverKey.test(value);
     case "gpio_label": {
       // 1..32 characters after trimming, no ':' (the firmware's spec
       // separator) and no newline.

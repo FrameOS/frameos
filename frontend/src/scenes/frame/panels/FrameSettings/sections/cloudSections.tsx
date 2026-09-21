@@ -4,8 +4,9 @@ import { PowerSettingsFields } from '../../../../../components/PowerSettingsFiel
 import { Select } from '../../../../../components/Select'
 import { Switch } from '../../../../../components/Switch'
 import { TextInput } from '../../../../../components/TextInput'
-import { partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../../../../devices'
+import { cloudDisplayDriverOptions, partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../../../../devices'
 import {
+  displayDriverCloudFrameSettingsMinVersion,
   esp32ExtendedCloudFrameSettingsMinVersion,
   esp32TimeZoneCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingsMinVersion,
@@ -143,7 +144,7 @@ export function CloudBaseSettingsSection(): JSX.Element {
         <p className="frameos-muted text-sm">
           {esp32
             ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
-            : 'These are the settings a cloud-managed frame accepts. Everything else this frame runs on — its panel and display driver, network and WiFi, GPIO buttons, mount points, palette and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
+            : 'These are the settings a cloud-managed frame accepts; the display driver, palette and GPIO buttons are under Panel below. Everything else this frame runs on — network and WiFi, mount points, driver wiring and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
         </p>
       </SectionBody>
     </>
@@ -198,6 +199,42 @@ export function CloudExtendedSettingsSections(): JSX.Element | null {
 }
 
 /**
+ * `device` (displayDriverCloudFrameSettingKeys, 2026.9.22), Pi/Linux only.
+ * The frame runs driver setup for the new driver and restarts — or reboots,
+ * when the driver needs a new overlay in /boot/config.txt. Until the frame
+ * reports the new driver the field shows the one that was pushed; the rest
+ * of the Panel section follows the one the frame reports.
+ */
+function CloudDisplayDriverField(): JSX.Element {
+  const { frame, paletteDevice, cloudDisplayDriverSupported } = useFrameSettings()
+  return (
+    <fieldset disabled={!cloudDisplayDriverSupported} className="min-w-0 space-y-2">
+      <Field
+        name="device"
+        label="Display driver"
+        tooltip="The panel driver FrameOS renders to. Saving a new one runs the driver setup on the frame, then restarts FrameOS — or reboots the frame if the driver needs a new overlay. Width and height follow from the driver."
+      >
+        {({ value, onChange }) => (
+          <Select
+            name="device"
+            value={(value as string) || paletteDevice}
+            onChange={onChange}
+            options={cloudDisplayDriverOptions(paletteDevice)}
+          />
+        )}
+      </Field>
+      {!cloudDisplayDriverSupported ? (
+        <p className="frameos-muted text-sm">
+          {frame.frameos_version
+            ? `Changing the display driver needs FrameOS ${displayDriverCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to change it here.`
+            : `Changing the display driver needs FrameOS ${displayDriverCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`}
+        </p>
+      ) : null}
+    </fieldset>
+  )
+}
+
+/**
  * The 2026.8.31 hardware batch (hardwareCloudFrameSettingKeys), Pi/Linux only.
  * The display driver reads these at init, so a save that carries one restarts
  * the runtime on the frame. Only the fields the reported panel can use are
@@ -216,6 +253,7 @@ export function CloudHardwareSection(): JSX.Element | null {
         Panel
       </SectionHeading>
       <SectionBody>
+        <CloudDisplayDriverField />
         {!cloudHardwareSettingsSupported ? (
           <p className="frameos-muted text-sm">
             {frame.frameos_version

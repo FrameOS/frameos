@@ -159,6 +159,23 @@ export const devices: OptionGroup<Option>[] = [
   },
 ]
 
+/**
+ * The drivers a FrameOS Cloud frame can be switched to from its Settings
+ * panel: every Linux driver but HTTP upload, whose upload URL is not a
+ * setting the cloud may push. A frame reporting a driver that is not in the
+ * list (an older alias) keeps it as an option, so the field never renders
+ * blank or silently proposes a different driver.
+ */
+export function cloudDisplayDriverOptions(current?: string | null): OptionGroup<Option>[] {
+  const groups = devices
+    .map((group) => ({ ...group, options: group.options.filter((option) => option.value !== 'http.upload') }))
+    .filter((group) => group.options.length > 0)
+  if (current && !groups.some((group) => group.options.some((option) => option.value === current))) {
+    return [{ label: 'Current', options: [{ value: current, label: current }] }, ...groups]
+  }
+  return groups
+}
+
 export const partialRefreshDevices = new Set(['waveshare.EPD_7in5_V2', 'waveshare.EPD_13in3b'])
 
 export interface PartialRefreshDefaults {

@@ -94,7 +94,7 @@ suite "cloud verb contract fixtures":
     check CLOUD_SETTINGS_ALLOWLIST == profileAllowlist("linux")
     check "deep_sleep" notin CLOUD_SETTINGS_ALLOWLIST
     check "flip" in CLOUD_SETTINGS_ALLOWLIST
-    check CLOUD_SETTINGS_RESTART_KEYS == @["palette", "device_config", "gpio_buttons"]
+    check CLOUD_SETTINGS_RESTART_KEYS == @["palette", "device_config", "gpio_buttons", "device"]
 
   test "every verb the dispatcher serves is in the contract, and vice versa":
     for spec in CloudContractVerbs:
@@ -127,3 +127,11 @@ suite "cloud verb contract fixtures":
     check not isHtmlHexColor("#0a0")
     check isGpioLabel(" next ")
     check not isGpioLabel("a:b")
+    check isDriverKey("framebuffer")
+    check isDriverKey("pimoroni.hyperpixel4sq_touch")
+    check isDriverKey("waveshare.EPD_7in5_V2")
+    check not isDriverKey("")
+    check not isDriverKey(".hidden")
+    check not isDriverKey("a/b")
+    check not isDriverKey("a b")
+    check not isDriverKey("x;reboot")

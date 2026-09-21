@@ -2154,6 +2154,7 @@ describe("frame management API", () => {
         "palette",
         "device_config",
         "gpio_buttons",
+        "device",
         "deep_sleep",
         "deep_sleep_on_battery",
         "wake_check_seconds",
@@ -2279,12 +2280,30 @@ describe("frame management API", () => {
     expect(badPalette.status).toBe(400);
     const duplicatePin = await push({ gpio_buttons: [{ pin: 5, label: "A" }, { pin: 5, label: "B" }] });
     expect(duplicatePin.status).toBe(400);
+    // The display driver has its own floor again: the frame persists the key
+    // and runs driver setup, which firmware before 2026.9.22 cannot do.
+    const driverTooEarly = await push({ device: "pimoroni.hyperpixel4sq_touch" });
+    expect(driverTooEarly.status).toBe(400);
+    expect((await driverTooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.9.22",
+    });
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.9.22" })
+      .where(eq(frames.id, frame_id));
+    const driver = await push({ device: "pimoroni.hyperpixel4sq_touch" });
+    expect(driver.status).toBe(200);
+    // A driver key is a name, never something a shell or a path could read.
+    const shellDriver = await push({ device: "framebuffer; reboot" });
+    expect(shellDriver.status).toBe(400);
     // …and round-trip through the frame summary in the device's spelling.
     const [pushed] = await db.select().from(frames).where(eq(frames.id, frame_id));
     expect(pushed?.settings).toMatchObject({
       flip: "horizontal",
       metrics_interval: 0,
       timezone_updater: { enabled: false, hour: 4 },
+      device: "pimoroni.hyperpixel4sq_touch",
     });
   });
 

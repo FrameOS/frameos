@@ -63,6 +63,7 @@ import frameos/interpreter
 import frameos/js_runtime/app_runtime
 import frameos/scenes
 import frameos/server/api
+import frameos/server/settings_apply
 import frameos/setup as frameSetup
 import frameos/server/routes/admin_api_assets_routes
 import frameos/server/state
@@ -208,6 +209,15 @@ type
     # (which re-inits the scene and re-renders the panel). nil means "assume
     # yes", i.e. the old always-reload behaviour.
     settingsChangedFn*: proc(payload: JsonNode): bool {.gcsafe.}
+    # A push that switches the display driver needs driver setup (overlays,
+    # /boot/config.txt, maybe a reboot) before the runtime comes back, not
+    # just a restart. The plan runs BEFORE the persist and returns the merged
+    # frame.json the job applies, as text; "" when the push leaves the driver
+    # alone or the platform has no driver setup. nil = never plan one.
+    driverSetupPlanFn*: proc(payload: JsonNode): string {.gcsafe.}
+    # Queues that job (server/settings_apply.nim). It restarts the runtime
+    # itself once setup is done — or reboots the frame, if setup asks to.
+    queueDriverSetupFn*: proc(configJson: string) {.gcsafe.}
     persistChecksumFn*: proc(checksum: string) {.gcsafe.}
     getLogsFn*: proc(): JsonNode {.gcsafe.}
     getMetricsFn*: proc(): JsonNode {.gcsafe.}
@@ -598,6 +608,21 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       settingsChangedFn: proc(payload: JsonNode): bool {.gcsafe.} =
         {.gcsafe.}:
           frameApiUpdateChangesConfig(payload),
+      driverSetupPlanFn: proc(payload: JsonNode): string {.gcsafe.} =
+        {.gcsafe.}:
+          if not payload.hasKey("device"):
+            return ""
+          # The same decision the on-device admin save makes
+          # (frame_api_routes.nim): driver setup when the driver changes on
+          # a host OS that has one.
+          let preview = previewFrameApiUpdate(payload)
+          if sjDriverSetup in settingsJobsFor(preview.change, preview.next{"mode"}.getStr("")):
+            $preview.next
+          else:
+            "",
+      queueDriverSetupFn: proc(configJson: string) {.gcsafe.} =
+        {.gcsafe.}:
+          queueSettingsJobs(@[sjDriverSetup], configJson),
       persistChecksumFn: proc(checksum: string) {.gcsafe.} =
         persistScenesChecksum(checksum),
       getLogsFn: proc(): JsonNode {.gcsafe.} =
@@ -916,6 +941,8 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
     # acked without touching disk or the runtime.
     let changed = ctx.settingsChangedFn.isNil or ctx.settingsChangedFn(payload)
     if changed:
+      let driverSetupConfig =
+        if ctx.driverSetupPlanFn.isNil: "" else: ctx.driverSetupPlanFn(payload)
       try:
         ctx.persistSettingsFn(payload)
       except CatchableError as error:
@@ -929,10 +956,18 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
           needsRestart = true
       if payload.hasKey("timezone"):
         applySystemTimeZone(payload["timezone"].getStr(""))
-      # Same order as restart_runtime: the event queues here, the ack goes
-      # out on return, the runner exits when it drains the queue.
-      # The runtime's own consequence of new settings, not the provider's verb.
-      discard ctx.sendEventFn(if needsRestart: "restart" else: "reload", %*{}, eoSystem)
+      if driverSetupConfig.len > 0 and not ctx.queueDriverSetupFn.isNil:
+        # A new display driver: setup restarts the runtime itself when it is
+        # done (or reboots, for a new overlay); a restart queued here would
+        # race it and bring the old driver's leftovers back up first.
+        log(%*{"event": "cloud:settings:driver_setup",
+          "device": payload["device"].getStr("")})
+        ctx.queueDriverSetupFn(driverSetupConfig)
+      else:
+        # Same order as restart_runtime: the event queues here, the ack goes
+        # out on return, the runner exits when it drains the queue.
+        # The runtime's own consequence of new settings, not the provider's verb.
+        discard ctx.sendEventFn(if needsRestart: "restart" else: "reload", %*{}, eoSystem)
   ctx.audit("set_settings", true)
   CloudVerbReply(ack: ackOk(id))
 

@@ -14,7 +14,7 @@
     "  {type: int, min?, max?, enum?}              integers only",
     "  {type: number, min?, max?}                  int or float",
     "  {type: string, minLen?, maxLen?, enum?, format?}",
-    "      format: iana_zone | html_hex_color | gpio_label",
+    "      format: iana_zone | html_hex_color | gpio_label | driver_key",
     "  {type: object, keys: {name: rule}, required?: [], minKeys?, open?}",
     "      unknown keys refuse the value unless open",
     "  {type: array, items: rule, maxItems?}",
@@ -195,6 +195,12 @@
         }}
       }
     },
+    "device": {
+      "$comment": "The display driver key (frame.json `device`, e.g. `pimoroni.hyperpixel4sq_touch`): release images ship every driver as a shared library, so switching one is a frame.json edit plus driver setup, which may rewrite /boot/config.txt and REBOOT the frame. Width/height follow from the driver at init. Only the key moves: pins, VCOM and upload URLs stay the device's (device_config above).",
+      "rule": {"type": "string", "minLen": 1, "maxLen": 64, "format": "driver_key"},
+      "profiles": {"linux": {"since": "2026.9.22", "restart": true}},
+      "parity": {"only": "linux", "why": "The ESP32 picks its panel together with the board's pin wiring (hardware preset over USB or the setup portal); a panel key pushed without the matching pins would drive a display that is not there, with no console attached to put it back."}
+    },
     "deep_sleep": {
       "rule": {"type": "bool"},
       "profiles": {"esp32": {"since": null}},
@@ -232,7 +238,8 @@
   "formats": {
     "iana_zone": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$",
     "html_hex_color": "^#[0-9a-fA-F]{6}$",
-    "gpio_label": "1..32 characters after trimming whitespace, no ':' and no newline"
+    "gpio_label": "1..32 characters after trimming whitespace, no ':' and no newline",
+    "driver_key": "^[A-Za-z][A-Za-z0-9_.-]*$"
   },
   "verbs": [
     {"type": "set_scenes", "scope": null, "content": true, "profiles": ["linux", "esp32"]},

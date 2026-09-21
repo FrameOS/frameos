@@ -7,7 +7,7 @@ type
     rkBool, rkInt, rkNumber, rkString, rkObject, rkArray, rkMap, rkNull, rkAnyOf
 
   StringFormat* = enum
-    sfNone, sfIanaZone, sfHtmlHexColor, sfGpioLabel
+    sfNone, sfIanaZone, sfHtmlHexColor, sfGpioLabel, sfDriverKey
 
   Rule* = object
     ## One node of the rule language in docs/cloud-frames-contract.json.
