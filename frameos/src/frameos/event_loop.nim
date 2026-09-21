@@ -88,6 +88,17 @@ type
     watching, watchedOk: bool
     dropped*: int ## events refused because a lane was full; the host reports and resets it
 
+proc hasStatePayload*(payload: JsonNode): bool =
+  ## Whether an event's payload carries a `state` object. `payload{"state"}` is
+  ## nil when the key is absent, and `.kind` on that is a nil dereference: a
+  ## `setCurrentScene` without state took an ESP32 down with exactly that
+  ## (LoadProhibited, found on the bench 2026-09-21) — and wasm does not trap on
+  ## address 1, so the preview hid it. Hosts ask this instead.
+  if payload.isNil or payload.kind != JObject:
+    return false
+  let state = payload{"state"}
+  not state.isNil and state.kind == JObject
+
 proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
                    laneCapacity = DefaultLaneCapacity): EventLoop =
   EventLoop(host: host, frameConfig: frameConfig, laneCapacity: laneCapacity,
@@ -109,7 +120,12 @@ proc enqueue*(loop: EventLoop, origin: EventOrigin, name: string, payload: JsonN
   ## piles up while the panel refreshes costs one slot, and whatever else is
   ## queued keeps its place.
   let policy = eventPolicy(name)
-  let envelope = EventEnvelope(name: name, payload: (if payload.isNil: newJObject() else: payload),
+  # A payload is a JSON object (docs/events.md). Whatever else an HTTP body or a
+  # hub message held — nothing, a list, a number — reaches the hosts and the
+  # scene as {}: `hasKey` on a list is not something to find out about in the
+  # field.
+  let envelope = EventEnvelope(name: name,
+    payload: (if payload.isNil or payload.kind != JObject: newJObject() else: payload),
     target: target, origin: origin, seq: loop.nextSeq, tMono: getMonoTime(),
     fromRender: loop.hostRunDepth > 0 or loop.handlingFromRender)
   inc loop.nextSeq

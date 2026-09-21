@@ -677,7 +677,7 @@ proc selectScene(self: RunnerThread, payload: JsonNode): bool =
     self.currentSceneId = sceneId
     self.dispatchSceneEvent(some(sceneId), "setCurrentScene", payload)
     return true
-  if payload.hasKey("state"):
+  if hasStatePayload(payload):
     self.dispatchSceneEvent(some(sceneId), "setCurrentScene", payload)
     return true
   false

@@ -164,6 +164,25 @@ block dispatch_now_reports_what_came_of_it:
   doAssert not host.loop.dispatchNow(eoHttpWrite, "setCurrentScene", %*{"sceneId": "fixtures/dispatcher/nowhere"})
   localEventSink = nil
 
+block a_payload_is_an_object:
+  # `payload{"state"}` is nil without the key, and `.kind` on nil took an ESP32
+  # down on the bench (a scene's setCurrentScene carries no state). Hosts ask
+  # hasStatePayload; and a payload that is not an object never reaches them.
+  doAssert not hasStatePayload(nil)
+  doAssert not hasStatePayload(%*{"sceneId": "a"})
+  doAssert not hasStatePayload(%*{"state": "text"})
+  doAssert not hasStatePayload(%*[1, 2])
+  doAssert hasStatePayload(%*{"sceneId": "a", "state": {}})
+  let logs = new(seq[JsonNode])
+  let host = newRecordingHost("fixtures/dispatcher/lanes".SceneId, logs)
+  host.pinned = @["run lanes button {}"]
+  host.loop.enqueue(eoHttpWrite, "button", %*[1, 2, 3])
+  host.loop.enqueue(eoHttpWrite, "setCurrentScene", %*"fixtures/dispatcher/command")
+  discard host.loop.drain()
+  # (the main lane runs ahead of input)
+  doAssert host.trace == @["select  failed", "run lanes button {}"], $host.trace
+  localEventSink = nil
+
 block a_full_lane_drops_and_counts:
   let logs = new(seq[JsonNode])
   let host = newRecordingHost("fixtures/dispatcher/lanes".SceneId, logs)

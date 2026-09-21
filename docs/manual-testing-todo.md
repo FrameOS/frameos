@@ -97,18 +97,16 @@ to end.
   API answers on 8443. Finally a board still on a per-frame image from
   before release images must OTA onto the release image from the new
   manifest (the legacy `sha256` field) and verify from then on.
-- [ ] **One event dispatcher on a board** (`docs/events.md`; the Nim side is
-  covered by `test_event_loop.nim` and the C edge by
-  `test_fos_events_dispatch.c`, but no board has run them together). With a
-  scene whose `button` listener sets state: a press renders once; a press no
-  listener's state reacts to does not refresh the panel. `event button
-  {"label":"A"}` on the console does the same. `POST /event/setCurrentScene`
-  with `state` switches AND applies the state (it used to be dropped); the
-  same from the cloud's scene activation. `POST /event/restart` answers 200
-  and then restarts. A schedule entry firing a custom event reaches only a
-  scene that declares it with `origins: ["schedule"]`, and the log says
-  `event:refused … undeclared` otherwise. From the cloud: a scene's control
-  rail (`setSceneState` → `scene_event`) changes the picture while a render
-  is NOT in progress, and answers `busy` — without dropping the WebSocket —
-  when sent during a 13.3" render. Watch the cloud task's stack high-water
-  mark once: `scene_event` runs scene handlers on it.
+- [ ] **The event dispatcher's cloud and schedule paths on a board** (the
+  console, render-rule, queued-dispatch, scene-switch and device-command
+  paths passed on a reTerminal E1002, 2026-09-21). Still unseen, because they
+  need a cloud that speaks `scene_event` and a schedule on the frame: a
+  scene's control rail (`setSceneState` → `scene_event`) changes the picture
+  while a render is NOT in progress, and answers `busy` — without dropping
+  the WebSocket — when sent during a 13.3" render; watch the cloud task's
+  stack high-water mark once, since `scene_event` runs scene handlers on it.
+  A schedule entry firing a custom event reaches only a scene that declares
+  it with `origins: ["schedule"]`, and the log says `event:refused …
+  undeclared` otherwise. `POST /event/setCurrentScene` with `state` over
+  HTTP, and a physical button press (origin `driver`), take the same C
+  function the console does.

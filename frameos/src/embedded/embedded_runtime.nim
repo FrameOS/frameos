@@ -292,7 +292,7 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
         return false
       if currentSceneId.isSome and currentSceneId.get().string == nextId:
         # The scene already showing: `state` is applied, nothing switches.
-        if payload{"state"}.kind != JObject or currentScene.isNil:
+        if not hasStatePayload(payload) or currentScene.isNil:
           return false
         runEvent(currentScene, ExecutionContext(scene: currentScene, event: "setCurrentScene",
           payload: payload, loopIndex: 0, loopKey: "."))
@@ -302,7 +302,7 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
       if not requestSceneSelect(nextId.cstring):
         log("setCurrentScene: scene not selectable: " & nextId)
         return false
-      if payload{"state"}.kind == JObject:
+      if hasStatePayload(payload):
         pendingSceneSwitchId = nextId
         pendingSceneSwitchPayload = copy(payload)
       true,

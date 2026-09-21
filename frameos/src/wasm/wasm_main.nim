@@ -255,12 +255,12 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
           return false
         if currentSceneId.isSome and currentSceneId.get().string == nextId:
           # The scene already showing: `state` is applied, nothing switches.
-          if payload{"state"}.kind != JObject or currentScene.isNil:
+          if not hasStatePayload(payload) or currentScene.isNil:
             return false
           runEvent(currentScene, ExecutionContext(scene: currentScene, event: "setCurrentScene",
             payload: payload, loopIndex: 0, loopKey: "."))
           return true
-        if payload{"state"}.kind == JObject:
+        if hasStatePayload(payload):
           pendingSceneStates[nextId] = copy(payload["state"])
         selectSceneById(nextId),
       displayPower: proc (on: bool) = discard, # a canvas has no backlight; the scene still hears it

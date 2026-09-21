@@ -713,7 +713,10 @@ Left for the later steps: no `close` on `reload` / `uploadScenes`, no
 `destroy`, no `reason` on `open` (§4.4); a scheduled custom event goes to the
 scene showing at that minute, not to the scene it was declared in (that needs
 a `target` on the schedule entry — §6 decision 2); no fixture runner for the
-wasm host; none of this has run on ESP32 hardware yet
+wasm host; on ESP32 hardware the console, render-rule, queued-dispatch,
+scene-switch and device-command paths have run (a reTerminal E1002 — it found
+a nil dereference in the host's `selectScene` that the preview had hidden,
+since wasm does not trap on address 1), the cloud and schedule paths have not
 (`docs/manual-testing-todo.md`).
 
 **P3 — input v2.** Pointer/keyboard/button payloads with aliases, host cursor,
