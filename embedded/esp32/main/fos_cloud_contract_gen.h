@@ -93,6 +93,7 @@ static const fos_contract_verb_t k_fos_contract_verbs[] = {
     {"get_logs", "telemetry:logs", 0},
     {"get_metrics", "telemetry:metrics", 0},
     {"render", NULL, 0},
+    {"scene_event", NULL, 1},
     {"reboot", NULL, 0},
     {"restart_runtime", NULL, 0},
     {"set_display_power", NULL, 0},
@@ -107,7 +108,7 @@ static const fos_contract_verb_t k_fos_contract_verbs[] = {
     {"image_get", NULL, 0},
     {"scenes_get", NULL, 0},
 };
-#define FOS_CONTRACT_VERBS_COUNT 22
+#define FOS_CONTRACT_VERBS_COUNT 23
 
 #define FOS_CONTRACT_ASSET_MAX_FILE_BYTES 8388608
 #define FOS_CONTRACT_ASSET_PUT_MAX_BYTES 262144

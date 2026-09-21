@@ -10,7 +10,7 @@ import frameos/channels
 import frameos/config
 import frameos/device_setup
 import frameos/event_log
-import frameos/events
+import frameos/event_loop
 import frameos/display_detect
 import frameos/driver_render_hint
 import frameos/render_stats
@@ -30,6 +30,8 @@ import frameos/utils/memory
 import frameos/watchdog
 
 import drivers/drivers as drivers
+
+proc sceneEvents*(self: RunnerThread): EventLoop
 
 # How fast must a scene render to be condidered fast. Two in a row pauses logging for 10s.
 const FAST_SCENE_CUTOFF_SECONDS = 0.5
@@ -196,7 +198,10 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   )
 
   try:
-    discard exportedScene.render(scene, context)
+    # `hostRun`: what the render dispatches is the scene talking to itself, and
+    # renders again only by asking (event_loop.nim).
+    self.sceneEvents.hostRun:
+      discard exportedScene.render(scene, context)
     if self.frameConfig.controlCode.enabled:
       render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
       render_imageApp.App(self.controlCodeRender).run(context)
@@ -287,16 +292,7 @@ proc dispatchOpen(self: RunnerThread, exportedScene: ExportedScene, scene: Frame
   if alreadyOpened >= 0:
     self.openedByInit.del(alreadyOpened)
     return
-  var context = ExecutionContext(scene: scene, event: "open", payload: %*{"sceneId": scene.id.string},
-    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
-  markRuntimeStart("event", scene.id.string, "open")
-  try:
-    exportedScene.runEvent(scene, context)
-  except Exception as e:
-    self.logSignal(%*{"event": "event:error", "contextEvent": "open", "sceneId": scene.id.string,
-        "error": $e.msg, "stacktrace": e.getStackTrace()})
-  finally:
-    markRuntimeDone()
+  self.sceneEvents.deliverLifecycle(scene, "open", %*{"sceneId": scene.id.string})
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
@@ -352,7 +348,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           currentScene = self.scenes[sceneId]
         else:
           try:
-            currentScene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+            self.sceneEvents.hostRun:
+              currentScene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
             self.scenes[sceneId] = currentScene
             self.noteSceneInit(exportedScene.get(), sceneId)
             currentScene.updateLastPublicState()
@@ -591,21 +588,15 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         discard
       await sleepAsync(RENDER_SLEEP_SLICE_MS)
 
-proc triggerRender*(self: RunnerThread): void =
-  self.triggerRenderNext = true
-
-proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
-  let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
-  if not self.scenes.hasKey(targetSceneId):
-    self.logSignal(withEventPayload(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
-        "sceneId": targetSceneId.string, "contextEvent": event}, event, payload))
-    return
-  let exportedScene = findExportedScene(targetSceneId)
+proc runSceneEvent(self: RunnerThread, scene: FrameScene, event: string, payload: JsonNode) =
+  ## One run of `event` on a scene this runner holds: the dispatcher's way in
+  ## (`EventHost.runScene`), and `selectScene`'s for the state that comes with a
+  ## `setCurrentScene`.
+  let exportedScene = findExportedScene(scene.id)
   if exportedScene.isNone:
     self.logSignal(withEventPayload(%*{"event": "dispatchEvent:error", "error": "Scene not exported",
-        "sceneId": targetSceneId.string, "contextEvent": event}, event, payload))
+        "sceneId": scene.id.string, "contextEvent": event}, event, payload))
     return
-  let scene = self.scenes[targetSceneId]
   var context = ExecutionContext(
     scene: scene,
     event: event,
@@ -615,7 +606,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     loopKey: ".",
     nextSleep: -1
   )
-  markRuntimeStart("event", targetSceneId.string, event)
+  markRuntimeStart("event", scene.id.string, event)
   try:
     exportedScene.get().runEvent(scene, context)
     if event == "setSceneState" or event == "setCurrentScene":
@@ -624,19 +615,153 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
   finally:
     markRuntimeDone()
 
-const MessageLoopYieldEvery = 32
+# ---------------------------------------------------------------------------
+# What this host does for the shared dispatcher (frameos/event_loop): the four
+# callbacks of docs/events.md — render, select a scene, display power, a
+# runtime command — and how an event reaches one of its scenes.
+
+proc selectScene(self: RunnerThread, payload: JsonNode): bool =
+  ## `setCurrentScene`. True when the frame has something new to draw: it
+  ## switched, or `state` was applied to the scene already showing.
+  var sceneId = SceneId(payload{"sceneId"}.getStr())
+  if not sceneId.string.startsWith("uploaded/") and cloudUploadedScenesResident():
+    # A frame that joined a provider with scenes of its own has them
+    # imported and pushed back (`scenes_get`, docs/cloud-frames.md),
+    # so the same public id now names two scenes here: the owner's
+    # copy on disk and the provider's "uploaded/<id>". The provider's
+    # copy is the one being edited and deployed, so while its set is
+    # resident it shadows the disk copy for a bare id — the ESP32
+    # profile stores scenes by public id and simply replaces them,
+    # and this keeps the two profiles answering alike. The disk copy
+    # is never touched: replace the uploaded set locally, or leave
+    # the provider, and the bare id is the disk scene again.
+    let providerSceneId = SceneId("uploaded/" & sceneId.string)
+    if hasExportedScene(providerSceneId):
+      sceneId = providerSceneId
+      payload["sceneId"] = %sceneId.string
+  var exportedScene = findExportedScene(sceneId)
+  if exportedScene.isNone and not sceneId.string.startsWith("uploaded/"):
+    # Cloud pushes register every scene as "uploaded/<id>", but the
+    # provider's set_current_scene (and workspace-authored schedules)
+    # carry the public id — resolve it before declaring it missing,
+    # like the esp32 profile's fos_scenes_select does.
+    let uploadedSceneId = SceneId("uploaded/" & sceneId.string)
+    exportedScene = findExportedScene(uploadedSceneId)
+    if exportedScene.isSome:
+      sceneId = uploadedSceneId
+      payload["sceneId"] = %sceneId.string
+  if exportedScene.isNone:
+    self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
+        "contextEvent": "setCurrentScene", "payload": payload})
+    return false
+  if sceneId != self.currentSceneId:
+    # "close" carries nothing: it used to be handed this payload,
+    # which names the NEXT scene and holds that scene's state. The
+    # new scene's "open" follows from the render loop, once it is
+    # the one being drawn.
+    if self.scenes.hasKey(self.currentSceneId):
+      self.sceneEvents.deliverLifecycle(self.scenes[self.currentSceneId], "close", %*{})
+    if not self.scenes.hasKey(sceneId):
+      var scene: FrameScene
+      self.sceneEvents.hostRun:
+        scene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+      self.scenes[sceneId] = scene
+      self.noteSceneInit(exportedScene.get(), sceneId)
+      scene.updateLastPublicState()
+    self.currentSceneId = sceneId
+    self.runSceneEvent(self.scenes[sceneId], "setCurrentScene", payload)
+    return true
+  if hasStatePayload(payload):
+    if not self.scenes.hasKey(sceneId):
+      # Before its first render: there is no instance to hand the state to.
+      self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
+          "sceneId": sceneId.string, "contextEvent": "setCurrentScene"})
+      return false
+    self.runSceneEvent(self.scenes[sceneId], "setCurrentScene", payload)
+    return true
+  false
+
+proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNode) =
+  ## The device commands. None of them reaches a scene.
+  case command
+  of rcMetrics:
+    logMetricsNow()
+  of rcReload:
+    self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
+    try:
+      updateFrameConfigFrom(self.frameConfig, loadConfig())
+      # The logger and metrics threads run on copies, not on this ref.
+      applyLoggerSettings(self.frameConfig)
+      applyMetricsSettings(self.frameConfig)
+    except Exception as e:
+      self.logger.log(%*{"event": "reload:config:error", "error": e.msg, "stacktrace": e.getStackTrace()})
+    reloadInterpretedScenes(self.logger)
+    cleanupSceneTableRuntime(self.scenes)
+    self.scenes = initTable[SceneId, FrameScene]()
+    self.currentSceneId = getFirstSceneId()
+    self.configureControlCode()
+    self.configureLocalAccessOverlay()
+    self.configureLinkCodeOverlay()
+    self.forceSceneReload = true
+    self.triggerRenderNext = true
+  of rcRestart:
+    self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
+    quit(QuitSuccess)
+  of rcReboot:
+    # A scheduled `{event: "reboot"}` entry (the cloud-safe "automatic
+    # reboot") lands here; the cloud `reboot` verb runs the same
+    # detached command from hub_client. The runtime keeps going until
+    # init takes it down, so the log line gets out first.
+    self.logger.log(%*{"event": "reboot", "message": "Rebooting the device"})
+    rebootSystemDetached()
+  of rcUploadScenes:
+    let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
+    if mainSceneId.isNone:
+      self.logger.log(%*{"event": "uploadScenes:error", "error": "No scenes provided"})
+      return
+    if payload.hasKey("state") and payload["state"].kind == JObject:
+      setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
+    for sceneId in sceneIds:
+      if self.scenes.hasKey(sceneId):
+        cleanupSceneRuntime(self.scenes[sceneId])
+        self.scenes.del(sceneId)
+    self.currentSceneId = mainSceneId.get()
+    self.forceSceneReload = true
+    self.triggerRenderNext = true
+
+proc sceneEvents*(self: RunnerThread): EventLoop =
+  ## This runner's dispatcher, made on first use. Owned by the runner thread:
+  ## every other thread reaches it through `eventChannel`.
+  if self.eventLoop.isNil:
+    self.eventLoop = newEventLoop(EventHost(
+      requestRender: proc () = self.triggerRenderNext = true,
+      selectScene: proc (payload: JsonNode): bool = self.selectScene(payload),
+      displayPower: proc (on: bool) =
+        if on: drivers.turnOn() else: drivers.turnOff(),
+      runtimeCommand: proc (command: RuntimeCommand, payload: JsonNode) = self.runtimeCommand(command, payload),
+      sceneFor: proc (target: Option[SceneId]): FrameScene =
+        let sceneId = if target.isSome: target.get() else: self.currentSceneId
+        if self.scenes.hasKey(sceneId):
+          return self.scenes[sceneId]
+        self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
+            "sceneId": sceneId.string}),
+      runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
+        self.runSceneEvent(scene, event, payload),
+      log: proc (entry: JsonNode) = self.logSignal(entry),
+    ), self.frameConfig)
+    # On this thread an event goes straight into the queue (channels.nim).
+    let loop = EventLoop(self.eventLoop)
+    localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+      {.cast(gcsafe).}:
+        loop.enqueue(origin, event, payload, scene)
+  EventLoop(self.eventLoop)
+
+const MessageLoopYieldEvery = DefaultDrainBudget
 
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10
   var iterations = 0
-  # Holds the first non-mouseMove event pulled out while coalescing a burst
-  # of queued mouse moves, so ordering is preserved.
-  var pendingEvent = none((Option[SceneId], string, JsonNode))
-  # Scene events handled since this loop last let the render loop run. Both
-  # loops share one thread, and a scene whose event handler re-dispatches
-  # keeps this queue non-empty forever — so after a burst the loop yields even
-  # though more is queued, and a frame under such a scene still refreshes.
-  var handledSinceYield = 0
+  let events = self.sceneEvents
   # The detached `frameos upgrade` child reports only through its status file.
   # Following it here means every surface that reads the frame log sees the
   # upgrade happen — the frame's own admin page included, which before this
@@ -652,178 +777,40 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     inc iterations
     if maxIterations > 0 and iterations > maxIterations:
       break
-    var success: bool
-    var msg: (Option[SceneId], string, JsonNode)
-    if pendingEvent.isSome:
-      msg = pendingEvent.get()
-      pendingEvent = none((Option[SceneId], string, JsonNode))
-      success = true
-    else:
-      (success, msg) = eventChannel.tryRecv()
-    var (sceneId, event, payload) = msg
-    if success and eventCoalescesLatest(event):
-      # The contract's `coalesce: latest` (mouseMove): touch drags queue
-      # hundreds of moves while a render blocks this loop; replaying each one
-      # is pointless. Keep only the newest, and stash the first other event so
-      # nothing is reordered or lost.
-      let coalesced = event
-      while true:
-        let (nextOk, nextMsg) = eventChannel.tryRecv()
-        if not nextOk:
-          break
-        if nextMsg[1] == coalesced:
-          (sceneId, event, payload) = nextMsg
-        else:
-          pendingEvent = some(nextMsg)
-          break
-    if success:
+    # Everything the other threads sent goes into the dispatcher's queue, which
+    # is where the contract's coalescing happens: touch drags queue hundreds of
+    # moves while a render blocks this loop, and replaying each one is
+    # pointless. What does not fit stays in the channel for the next pass.
+    while events.pending < events.laneCapacity:
+      let (received, msg) = eventChannel.tryRecv()
+      if not received:
+        break
+      events.enqueue(msg[3], msg[1], msg[2], msg[0])
+
+    # One burst. Both loops share one thread, and a scene whose event handler
+    # re-dispatches keeps the queue non-empty forever — so the dispatcher hands
+    # back after a burst even though more is queued, and a frame under such a
+    # scene still refreshes.
+    if events.drain(MessageLoopYieldEvery) > 0:
       waitTime = 1
-      if eventIsLogged(event):
-        self.logSignal(withEventPayload(%*{"event": "event:" & event}, event, payload))
-      try:
-        case event:
-          of "render":
-            self.triggerRenderNext = true
-            continue
-          of "turnOn":
-            drivers.turnOn()
-          of "turnOff":
-            drivers.turnOff()
-          of "metrics":
-            logMetricsNow()
-            continue # don't dispatch this event to the scene
-          of "mouseMove":
-            if self.frameConfig.width > 0 and self.frameConfig.height > 0:
-              # 0..32767 on the panel -> panel pixels -> the scene's canvas,
-              # which a rotated or flipped frame draws the other way around.
-              let point = pointerToScenePoint(payload["x"].getInt(), payload["y"].getInt(),
-                self.frameConfig.width, self.frameConfig.height,
-                self.frameConfig.rotate, self.frameConfig.flip)
-              payload["x"] = %*point.x
-              payload["y"] = %*point.y
-          of "setCurrentScene":
-            var sceneId = SceneId(payload["sceneId"].getStr())
-            if not sceneId.string.startsWith("uploaded/") and cloudUploadedScenesResident():
-              # A frame that joined a provider with scenes of its own has them
-              # imported and pushed back (`scenes_get`, docs/cloud-frames.md),
-              # so the same public id now names two scenes here: the owner's
-              # copy on disk and the provider's "uploaded/<id>". The provider's
-              # copy is the one being edited and deployed, so while its set is
-              # resident it shadows the disk copy for a bare id — the ESP32
-              # profile stores scenes by public id and simply replaces them,
-              # and this keeps the two profiles answering alike. The disk copy
-              # is never touched: replace the uploaded set locally, or leave
-              # the provider, and the bare id is the disk scene again.
-              let providerSceneId = SceneId("uploaded/" & sceneId.string)
-              if hasExportedScene(providerSceneId):
-                sceneId = providerSceneId
-                payload["sceneId"] = %sceneId.string
-            var exportedScene = findExportedScene(sceneId)
-            if exportedScene.isNone and not sceneId.string.startsWith("uploaded/"):
-              # Cloud pushes register every scene as "uploaded/<id>", but the
-              # provider's set_current_scene (and workspace-authored schedules)
-              # carry the public id — resolve it before declaring it missing,
-              # like the esp32 profile's fos_scenes_select does.
-              let uploadedSceneId = SceneId("uploaded/" & sceneId.string)
-              exportedScene = findExportedScene(uploadedSceneId)
-              if exportedScene.isSome:
-                sceneId = uploadedSceneId
-                payload["sceneId"] = %sceneId.string
-            if exportedScene.isNone:
-              self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
-                  "contextEvent": event, "payload": payload})
-              continue
-            if sceneId != self.currentSceneId:
-              # "close" carries nothing: it used to be handed this payload,
-              # which names the NEXT scene and holds that scene's state. The
-              # new scene's "open" follows from the render loop, once it is
-              # the one being drawn.
-              if self.scenes.hasKey(self.currentSceneId):
-                self.dispatchSceneEvent(some(self.currentSceneId), "close", %*{})
-              if not self.scenes.hasKey(sceneId):
-                let scene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
-                self.scenes[sceneId] = scene
-                self.noteSceneInit(exportedScene.get(), sceneId)
-                scene.updateLastPublicState()
-              self.currentSceneId = sceneId
-              self.triggerRenderNext = true
-              self.dispatchSceneEvent(some(sceneId), event, payload)
-            elif payload.hasKey("state"):
-              self.triggerRenderNext = true
-              self.dispatchSceneEvent(some(sceneId), event, payload)
-            continue # don't dispatch this event to the scene
-          of "reload":
-            self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
-            try:
-              updateFrameConfigFrom(self.frameConfig, loadConfig())
-              # The logger and metrics threads run on copies, not on this ref.
-              applyLoggerSettings(self.frameConfig)
-              applyMetricsSettings(self.frameConfig)
-            except Exception as e:
-              self.logger.log(%*{"event": "reload:config:error", "error": e.msg, "stacktrace": e.getStackTrace()})
-            reloadInterpretedScenes(self.logger)
-            cleanupSceneTableRuntime(self.scenes)
-            self.scenes = initTable[SceneId, FrameScene]()
-            self.currentSceneId = getFirstSceneId()
-            self.configureControlCode()
-            self.configureLocalAccessOverlay()
-            self.configureLinkCodeOverlay()
-            self.forceSceneReload = true
-            self.triggerRenderNext = true
-            continue # don't dispatch this event to the scene
-          of "restart":
-            self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
-            quit(QuitSuccess)
-          of "reboot":
-            # A scheduled `{event: "reboot"}` entry (the cloud-safe "automatic
-            # reboot") lands here; the cloud `reboot` verb runs the same
-            # detached command from hub_client. The runtime keeps going until
-            # init takes it down, so the log line gets out first.
-            self.logger.log(%*{"event": "reboot", "message": "Rebooting the device"})
-            rebootSystemDetached()
-            continue # don't dispatch this event to the scene
-          of "uploadScenes":
-            let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
-            if mainSceneId.isNone:
-              self.logger.log(%*{"event": "uploadScenes:error", "error": "No scenes provided"})
-              continue
-            if payload.hasKey("state") and payload["state"].kind == JObject:
-              setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
-            for sceneId in sceneIds:
-              if self.scenes.hasKey(sceneId):
-                cleanupSceneRuntime(self.scenes[sceneId])
-                self.scenes.del(sceneId)
-            self.currentSceneId = mainSceneId.get()
-            self.forceSceneReload = true
-            self.triggerRenderNext = true
-            continue # don't dispatch this event to the scene
-          else: discard
-        self.dispatchSceneEvent(sceneId, event, payload)
-      except Exception as e:
-        self.logSignal(%*{"event": "event:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
-      inc handledSinceYield
-      if handledSinceYield >= MessageLoopYieldEvery:
-        handledSinceYield = 0
-        if self.triggerRenderNext and not self.isRendering:
-          self.triggerRender()
+      if events.pending > 0:
         await sleepAsync(1)
+      continue
 
     # after we have processed all queued messages
-    if not success:
-      handledSinceYield = 0
-      let droppedEvents = eventsDroppedCounter.exchange(0)
-      if droppedEvents > 0:
-        self.logSignal(%*{"event": "events:dropped", "count": droppedEvents})
-      let upgradeLine = upgradeWatcher.poll(epochTime())
-      if upgradeLine != nil:
-        self.logSignal(upgradeLine)
-      if self.triggerRenderNext and not self.isRendering:
-        self.triggerRender()
-        await sleepAsync(1)
-      else:
-        await sleepAsync(waitTime)
-        if waitTime < 200:
-          waitTime += 5
+    let droppedEvents = eventsDroppedCounter.exchange(0) + events.dropped
+    events.dropped = 0
+    if droppedEvents > 0:
+      self.logSignal(%*{"event": "events:dropped", "count": droppedEvents})
+    let upgradeLine = upgradeWatcher.poll(epochTime())
+    if upgradeLine != nil:
+      self.logSignal(upgradeLine)
+    if self.triggerRenderNext and not self.isRendering:
+      await sleepAsync(1)
+    else:
+      await sleepAsync(waitTime)
+      if waitTime < 200:
+        waitTime += 5
 
 proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
   {.cast(gcsafe).}:

@@ -1144,9 +1144,11 @@ static esp_err_t write_file_replace(const char *path, const char *tmp_path,
     return err;
 }
 
-/* A scene's own `setCurrentScene` dispatch, handed over by the Nim runtime.
- * Runs on the render task under the runtime lock: queue only, like every
- * other caller — fos_scenes_apply_pending_selection does the work. */
+/* A `setCurrentScene` that reached the Nim dispatcher — a scene's own
+ * dispatch, or one fos_events.c handed over for the `state` it carries.
+ * Runs under the runtime lock, on whichever task called into Nim (the render
+ * task, or the HTTP / cloud / console task): queue only, like every other
+ * caller — fos_scenes_apply_pending_selection does the work. */
 static bool select_scene_from_runtime(const char *scene_id)
 {
     return fos_scenes_select(scene_id) == ESP_OK;

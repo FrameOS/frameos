@@ -1,11 +1,13 @@
 import std/[base64, json, sequtils, strutils, tables, unittest]
 
 import ../hub_client
+import ../../events
 import ../../types
 
 type
   Recorded = ref object
     events: seq[(string, JsonNode)]
+    origins: seq[EventOrigin] ## who each of `events` was stamped as coming from
     persistedSettings: seq[JsonNode]
     persistedChecksums: seq[string]
     audits: seq[JsonNode]
@@ -28,10 +30,11 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
     frameConfig: FrameConfig(mode: "test", device: "web_only", width: 800, height: 480),
     scopes: scopes,
     scenesChecksum: "",
-    sendEventFn: proc(event: string, payload: JsonNode): bool {.gcsafe.} =
+    sendEventFn: proc(event: string, payload: JsonNode, origin: EventOrigin): bool {.gcsafe.} =
       if recorded.dropEvents:
         return false
       recorded.events.add((event, payload))
+      recorded.origins.add(origin)
       true,
     persistSettingsFn: proc(payload: JsonNode) {.gcsafe.} =
       recorded.persistedSettings.add(payload),
@@ -941,6 +944,63 @@ suite "cloud hub verb dispatcher":
     check handleCloudVerb(refusedCtx, %*{"type": "set_display_power", "on": "yes"})
       .ack{"error"}.getStr("") == "invalid_payload"
     check refused.events.len == 0
+
+  test "scene_event sends a contract event the cloud may say, stamped as the cloud":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    check handleCloudVerb(ctx, %*{"type": "scene_event", "name": "setSceneState",
+      "payload": {"state": {"title": "hi"}, "render": true}}).ack{"ok"}.getBool(false)
+    check handleCloudVerb(ctx, %*{"type": "scene_event", "name": "button",
+      "payload": {"label": "A"}}).ack{"ok"}.getBool(false)
+    check recorded.events.mapIt(it[0]) == @["setSceneState", "button"]
+    check recorded.events[0][1]["state"]["title"].getStr() == "hi"
+    check recorded.origins == @[eoCloud, eoCloud]
+    check "scene_event:button" in auditedVerbs(recorded)
+
+  test "scene_event queues a custom event for the dispatcher to judge":
+    # Whether the scene showing declares it with the `cloud` origin is known on
+    # the runner thread, not here: the verb queues it, the dispatcher refuses
+    # an undeclared one (test_event_loop.nim).
+    let recorded = Recorded()
+    check handleCloudVerb(makeContext(recorded), %*{"type": "scene_event", "name": "nextPage"})
+      .ack{"ok"}.getBool(false)
+    check recorded.events.mapIt(it[0]) == @["nextPage"]
+    check recorded.events[0][1].kind == JObject
+    check recorded.origins == @[eoCloud]
+
+  test "scene_event is not a way around the verbs that have their own":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    # Device commands have verbs with their own audit lines; lifecycle and
+    # input the contract does not give the cloud are not the provider's to say.
+    for name in ["reboot", "restart", "reload", "uploadScenes", "metrics", "open", "keyDown"]:
+      check handleCloudVerb(ctx, %*{"type": "scene_event", "name": name})
+        .ack{"error"}.getStr("") == "event_not_allowed"
+    check handleCloudVerb(ctx, %*{"type": "scene_event"}).ack{"error"}.getStr("") == "invalid_event"
+    check handleCloudVerb(ctx, %*{"type": "scene_event", "name": repeat("x", 64)})
+      .ack{"error"}.getStr("") == "invalid_event"
+    check handleCloudVerb(ctx, %*{"type": "scene_event", "name": "nextPage", "payload": [1]})
+      .ack{"error"}.getStr("") == "invalid_payload"
+    check recorded.events.len == 0
+
+  test "scene_event says so when the runtime's queue is full":
+    let recorded = Recorded(dropEvents: true)
+    check handleCloudVerb(makeContext(recorded), %*{"type": "scene_event", "name": "nextPage"})
+      .ack{"error"}.getStr("") == "queue_full"
+
+  test "what a verb sends is stamped with who is really saying it":
+    # The provider's verbs are the `cloud` origin; a reload the runtime decides
+    # on after storing new settings is its own (`system`) — `reload` is not
+    # something the contract lets the cloud say.
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    discard handleCloudVerb(ctx, %*{"type": "render"})
+    discard handleCloudVerb(ctx, %*{"type": "set_current_scene", "scene_id": "a"})
+    discard handleCloudVerb(ctx, %*{"type": "set_schedule", "schedule": {"events": []}})
+    check recorded.events.mapIt(it[0]) == @["render", "setCurrentScene", "reload"]
+    check recorded.origins == @[eoCloud, eoCloud, eoSystem]
+    for index, event in recorded.events:
+      check originMayEmit(recorded.origins[index], event[0])
 
   test "notify_update_available triggers the injected upgrade, nothing else":
     let recorded = Recorded()

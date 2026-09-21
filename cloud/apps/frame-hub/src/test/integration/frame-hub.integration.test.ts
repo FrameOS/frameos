@@ -695,9 +695,11 @@ describe("command redelivery", () => {
     second.ws.close();
   });
 
-  it.each(["reboot", "notify_update_available"])(
+  it.each(["reboot", "notify_update_available", "scene_event"])(
     "does not redeliver a %s after the socket it was sent on died",
     async (type) => {
+      // scene_event for its own reason: a button press or a `nextPage`
+      // delivered twice is two presses.
       // The disconnect is the command's expected effect: redelivering a reboot on
       // the reconnect rebooted a frame in a loop until the command's TTL ran out,
       // and redelivering an update nudge spent a second release check on a frame

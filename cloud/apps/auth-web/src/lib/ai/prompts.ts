@@ -47,7 +47,8 @@ Rules:
 - Code nodes: put the snippet in data.codeJS. It is an expression returning a value (wrap multi-statement
   logic in an IIFE). Code nodes have exactly ONE output and cannot output images.
   The ONLY globals in a code node are: state.<field>, the declared codeArgs by name, context (event,
-  payload, loopIndex, loopKey, hasImage), console.log/warn/error, and three time helpers:
+  payload, loopIndex, loopKey, hasImage, imageWidth, imageHeight — the size in pixels of the canvas being
+  drawn on, undefined outside a render), console.log/warn/error, and three time helpers:
   now() -> seconds since epoch (number); format(ts, pattern) -> string in the frame's time zone;
   parseTs(pattern, text) -> seconds. There is NO frameos object, NO fetch and NO HTTP in code nodes:
   fetch data with a data app (data/downloadUrl, data/parseJson, data/xmlToJson, ...) and wire its

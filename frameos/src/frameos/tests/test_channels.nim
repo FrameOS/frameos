@@ -36,18 +36,21 @@ suite "frameos channels":
 
   test "sendEvent overloads write expected tuples":
     let payload = %*{"value": 1}
-    sendEvent("refresh", payload)
+    sendEvent("refresh", payload, eoSystem)
     let (okCurrent, current) = eventChannel.tryRecv()
     check okCurrent
     check current[0].isNone()
     check current[1] == "refresh"
     check current[2]["value"].getInt() == 1
+    check current[3] == eoSystem
 
-    sendEvent(some("scene/a".SceneId), "jump", %*{"target": "x"})
+    sendEvent(some("scene/a".SceneId), "jump", %*{"target": "x"}, eoSchedule)
     let (okScene, direct) = eventChannel.tryRecv()
     check okScene
     check direct[0].isSome()
     check direct[0].get() == "scene/a".SceneId
+    # The origin rides along: set by whoever sends, never read from the payload.
+    check direct[3] == eoSchedule
     check direct[1] == "jump"
     check direct[2]["target"].getStr() == "x"
 
@@ -56,7 +59,7 @@ suite "frameos channels":
     # node the runner reads — on another thread. sendEvent therefore sends a
     # copy: the sender keeps using (and releasing) its own tree.
     let payload = %*{"value": 1, "nested": {"list": [1, 2, 3]}}
-    sendEvent("refresh", payload)
+    sendEvent("refresh", payload, eoSystem)
     payload["value"] = %2
     payload["nested"]["list"].add(%4)
     let (ok, received) = eventChannel.tryRecv()
@@ -65,14 +68,14 @@ suite "frameos channels":
     check received[2]["nested"]["list"].len == 3
     check cast[pointer](received[2]) != cast[pointer](payload)
 
-    check trySendEvent("queued", payload)
+    check trySendEvent("queued", payload, eoCloud)
     let (okQueued, queued) = eventChannel.tryRecv()
     check okQueued
     check queued[1] == "queued"
     check cast[pointer](queued[2]) != cast[pointer](payload)
 
     # A nil payload stays nil instead of crashing the copy.
-    sendEvent("nothing", nil)
+    sendEvent("nothing", nil, eoSystem)
     let (okNil, nothing) = eventChannel.tryRecv()
     check okNil
     check nothing[2].isNil
@@ -80,7 +83,7 @@ suite "frameos channels":
     # The owned variant hands over the very tree it was given.
     var big = %*{"scenes": [{"id": "a"}]}
     let address = cast[pointer](big)
-    sendEventOwned("uploadScenes", move(big))
+    sendEventOwned("uploadScenes", move(big), eoHttpAdmin)
     check big.isNil
     let (okOwned, owned) = eventChannel.tryRecv()
     check okOwned
@@ -89,9 +92,9 @@ suite "frameos channels":
 
   test "trySendEvent reports a full channel":
     discard eventsDroppedCounter.exchange(0)
-    while eventChannel.trySend((none(SceneId), "filler", %*{})):
+    while eventChannel.trySend((none(SceneId), "filler", %*{}, eoSystem)):
       discard
-    check not trySendEvent("overflow", %*{})
+    check not trySendEvent("overflow", %*{}, eoCloud)
     check eventsDroppedCounter.load() == 1
     drainEventChannel()
     discard eventsDroppedCounter.exchange(0)
@@ -99,16 +102,16 @@ suite "frameos channels":
   test "sendEvent drops and counts when the channel is full":
     discard eventsDroppedCounter.exchange(0)
     var sent = 0
-    while eventChannel.trySend((none(SceneId), "filler", %*{})):
+    while eventChannel.trySend((none(SceneId), "filler", %*{}, eoSystem)):
       inc sent
     check sent > 0
 
-    sendEvent("overflow", %*{"value": 1})
+    sendEvent("overflow", %*{"value": 1}, eoSystem)
     check eventsDroppedCounter.load() == 1
 
     drainEventChannel()
     discard eventsDroppedCounter.exchange(0)
-    sendEvent("fits-again", %*{})
+    sendEvent("fits-again", %*{}, eoSystem)
     check eventsDroppedCounter.load() == 0
     drainEventChannel()
 

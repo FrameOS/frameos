@@ -1,8 +1,8 @@
 {
- "$comment": "Conformance corpus of the scene event contract (docs/events-contract.json, prose in docs/events.md). Add a case here first; a runner that disagrees is the bug. Runners: frameos/src/frameos/tests/test_event_fixtures.nim (the Nim runtime every host compiles: allow-list, log policy, and what the interpreter does with a delivered event), embedded/esp32/main/tests/test_fos_events.c through backend/app/tasks/tests/test_esp32_events_contract.py (the firmware's C tables), backend/app/utils/tests/test_events_contract.py (the backend), cloud/apps/auth-web/src/test/events-contract.test.ts (the cloud's event route and schedule validator) and cloud/apps/auth-web/src/test/shared-spa/events-contract.test.ts (the shared SPA and the frameos-wasm package).",
+ "$comment": "Conformance corpus of the scene event contract (docs/events-contract.json, prose in docs/events.md). Add a case here first; a runner that disagrees is the bug. Runners: frameos/src/frameos/tests/test_event_fixtures.nim (the Nim runtime every host compiles: allow-list, log policy, and what the interpreter does with a delivered event), embedded/esp32/main/tests/test_fos_events.c through backend/app/tasks/tests/test_esp32_events_contract.py (the firmware's C tables), backend/app/utils/tests/test_events_contract.py (the backend), cloud/apps/auth-web/src/test/events-contract.test.ts (the cloud's event route and schedule validator) and cloud/apps/auth-web/src/test/shared-spa/events-contract.test.ts (the shared SPA and the frameos-wasm package). `dispatcher`: frameos/src/frameos/tests/test_event_loop.nim — queueing, origins, the command/event split and the render rule, which every host gets from the one dispatcher.",
  "version": 1,
  "origins": {
-  "$comment": "May `origin` emit `event`? Only the origins a host can tell apart today are asked (contract `enforcedOrigins`, plus http:admin as the control).",
+  "$comment": "May `origin` emit `event`? Every origin is asked: the dispatcher stamps and checks each envelope. `allowed` is what an edge that cannot see the scene answers — the scheduler, a hub verb, the firmware's C table, a control plane's validator: for a custom event from an origin a scene can opt into (`customEvents.declarableOrigins`) that is true, and the dispatcher then asks the scene showing (see `dispatcher`).",
   "cases": [
    {
     "origin": "scene",
@@ -172,11 +172,126 @@
     "origin": "http:admin",
     "event": "myCustomEvent",
     "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "open",
+    "allowed": false
+   },
+   {
+    "origin": "schedule",
+    "event": "open",
+    "allowed": false
+   },
+   {
+    "origin": "http:write",
+    "event": "open",
+    "allowed": false
+   },
+   {
+    "origin": "http:admin",
+    "event": "open",
+    "allowed": true
+   },
+   {
+    "origin": "system",
+    "event": "open",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "init",
+    "allowed": false
+   },
+   {
+    "origin": "schedule",
+    "event": "close",
+    "allowed": false
+   },
+   {
+    "origin": "http:write",
+    "event": "close",
+    "allowed": false
+   },
+   {
+    "origin": "driver",
+    "event": "button",
+    "allowed": true
+   },
+   {
+    "origin": "driver",
+    "event": "mouseMove",
+    "allowed": true
+   },
+   {
+    "origin": "driver",
+    "event": "reboot",
+    "allowed": false
+   },
+   {
+    "origin": "driver",
+    "event": "setCurrentScene",
+    "allowed": false
+   },
+   {
+    "origin": "preview",
+    "event": "button",
+    "allowed": true
+   },
+   {
+    "origin": "preview",
+    "event": "setSceneState",
+    "allowed": true
+   },
+   {
+    "origin": "preview",
+    "event": "reload",
+    "allowed": false
+   },
+   {
+    "origin": "preview",
+    "event": "wheel",
+    "allowed": false
+   },
+   {
+    "origin": "cloud",
+    "event": "button",
+    "allowed": true
+   },
+   {
+    "origin": "cloud",
+    "event": "setSceneState",
+    "allowed": true
+   },
+   {
+    "origin": "cloud",
+    "event": "keyDown",
+    "allowed": false
+   },
+   {
+    "origin": "cloud",
+    "event": "reload",
+    "allowed": false
+   },
+   {
+    "origin": "cloud",
+    "event": "myCustomEvent",
+    "allowed": true
+   },
+   {
+    "origin": "system",
+    "event": "reload",
+    "allowed": true
+   },
+   {
+    "origin": "system",
+    "event": "uploadScenes",
+    "allowed": true
    }
   ]
  },
  "cloudEventRoute": {
-  "$comment": "POST /api/frames/<id>/event/<event> on the cloud: the hub verb the event becomes, on which device profiles; verb null = 404 unsupported_event.",
+  "$comment": "POST /api/frames/<id>/event/<event> on the cloud: the hub verb the event becomes, on which device profiles, for a frame reporting `frameosVersion` (absent = none reported, which counts as older than every `since`). `customEvents` is what the scene the frame is showing declares. Where there is no verb (verb null, or a profile not listed) the route answers `error`: 404 unsupported_event unless the case names another. `sceneEventCases`: what may ride `scene_event {name, payload?}` at all — `error` null = accepted, otherwise the token the cloud (and the device) answers.",
   "cases": [
    {
     "event": "render",
@@ -205,7 +320,9 @@
     "verb": "set_current_scene",
     "profiles": [
      "linux"
-    ]
+    ],
+    "error": "frame_update_required",
+    "why": "No version reported counts as old: the stand-in on linux, the update on esp32."
    },
    {
     "event": "setCurrentScene",
@@ -239,7 +356,53 @@
    {
     "event": "button",
     "verb": null,
-    "why": "Not an event the cloud can send: 404 unsupported_event."
+    "error": "frame_update_required",
+    "why": "Rides scene_event, which a frame that reports no FrameOS version cannot be assumed to know: 409, not a verb the device answers unknown_verb to."
+   },
+   {
+    "event": "button",
+    "frameosVersion": "2026.9.20",
+    "verb": null,
+    "error": "frame_update_required",
+    "why": "One release before scene_event, and button never had a stand-in verb."
+   },
+   {
+    "event": "button",
+    "frameosVersion": "2026.9.21",
+    "verb": "scene_event",
+    "profiles": [
+     "linux",
+     "esp32"
+    ]
+   },
+   {
+    "event": "setSceneState",
+    "frameosVersion": "2026.9.20",
+    "verb": "set_current_scene",
+    "profiles": [
+     "linux"
+    ],
+    "error": "frame_update_required",
+    "why": "Older firmware keeps the set_current_scene stand-in, which only the Linux runtime reads `state` from; an esp32 that old needs the update."
+   },
+   {
+    "event": "setSceneState",
+    "frameosVersion": "2026.9.21",
+    "verb": "scene_event",
+    "profiles": [
+     "linux",
+     "esp32"
+    ]
+   },
+   {
+    "event": "setSceneState",
+    "frameosVersion": "2026.10.0",
+    "verb": "scene_event",
+    "profiles": [
+     "linux",
+     "esp32"
+    ],
+    "why": "Versions compare as numbers: 2026.10 is after 2026.9."
    },
    {
     "event": "mouseMove",
@@ -278,8 +441,177 @@
    },
    {
     "event": "myCustomEvent",
+    "frameosVersion": "2026.9.21",
     "verb": null,
-    "why": "Not an event the cloud can send: 404 unsupported_event."
+    "why": "A custom event no scene on the frame declares: 404 unsupported_event."
+   },
+   {
+    "event": "nextPage",
+    "frameosVersion": "2026.9.21",
+    "customEvents": [
+     {
+      "name": "nextPage",
+      "origins": [
+       "cloud"
+      ]
+     }
+    ],
+    "verb": "scene_event",
+    "profiles": [
+     "linux",
+     "esp32"
+    ]
+   },
+   {
+    "event": "nextPage",
+    "frameosVersion": "2026.9.21",
+    "customEvents": [
+     {
+      "name": "nextPage",
+      "origins": [
+       "schedule"
+      ]
+     },
+     {
+      "name": "previousPage",
+      "origins": [
+       "cloud"
+      ]
+     }
+    ],
+    "verb": null,
+    "why": "Declared, but for the schedule only: the device would log event:refused, so the cloud says 404 first."
+   },
+   {
+    "event": "nextPage",
+    "frameosVersion": "2026.9.21",
+    "customEvents": [
+     {
+      "name": "nextPage"
+     }
+    ],
+    "verb": null,
+    "why": "A declaration without `origins` opts into nothing."
+   },
+   {
+    "event": "nextPage",
+    "frameosVersion": "2026.9.20",
+    "customEvents": [
+     {
+      "name": "nextPage",
+      "origins": [
+       "cloud"
+      ]
+     }
+    ],
+    "verb": null,
+    "error": "frame_update_required",
+    "why": "Declared, so only the firmware is in the way: 409."
+   },
+   {
+    "event": "render",
+    "frameosVersion": "2026.9.21",
+    "customEvents": [
+     {
+      "name": "render",
+      "origins": [
+       "cloud"
+      ]
+     }
+    ],
+    "verb": "render",
+    "profiles": [
+     "linux",
+     "esp32"
+    ],
+    "why": "A contract event's name cannot be declared into a custom one: render stays the render verb."
+   },
+   {
+    "event": "reboot",
+    "frameosVersion": "2026.9.21",
+    "customEvents": [
+     {
+      "name": "reboot",
+      "origins": [
+       "cloud"
+      ]
+     }
+    ],
+    "verb": null,
+    "why": "Nor can a device command be declared into an event this route sends."
+   }
+  ],
+  "sceneEventCases": [
+   {
+    "name": "button",
+    "payload": {
+     "label": "A",
+     "level": 0,
+     "pin": 5
+    },
+    "error": null
+   },
+   {
+    "name": "setSceneState",
+    "payload": {
+     "render": true,
+     "state": {
+      "city": "Tartu"
+     }
+    },
+    "error": null
+   },
+   {
+    "name": "nextPage",
+    "error": null,
+    "why": "A custom name may ride the verb; whether the scene showing declares it is asked separately, and again by the device."
+   },
+   {
+    "name": "reboot",
+    "error": "event_not_allowed",
+    "why": "A device command has a verb and an audit line of its own; scene_event is not a second door to it."
+   },
+   {
+    "name": "uploadScenes",
+    "error": "event_not_allowed"
+   },
+   {
+    "name": "restart",
+    "error": "event_not_allowed"
+   },
+   {
+    "name": "metrics",
+    "error": "event_not_allowed"
+   },
+   {
+    "name": "init",
+    "error": "event_not_allowed",
+    "why": "Not an event the cloud origin may emit."
+   },
+   {
+    "name": "keyDown",
+    "error": "event_not_allowed"
+   },
+   {
+    "name": "",
+    "error": "invalid_event"
+   },
+   {
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "error": "invalid_event",
+    "why": "64 characters: one over the contract's name length."
+   },
+   {
+    "name": "nextPage",
+    "payload": [
+     1
+    ],
+    "error": "invalid_payload"
+   },
+   {
+    "name": "nextPage",
+    "payload": "text",
+    "error": "invalid_payload"
    }
   ]
  },
@@ -1255,6 +1587,1080 @@
         "reason": "renderSelfDispatch"
        }
       ]
+     }
+    ]
+   }
+  ]
+ },
+ "dispatcher": {
+  "$comment": "The shared dispatcher (frameos/src/frameos/event_loop.nim) with a recording host around the real interpreter. Per step: `send` = envelopes enqueued together (origin, event, payload), then ONE drain; or `renderPass` = the host renders the current scene and drains. `trace` = exactly what happened, in order: `run <scene> <event>` (add the payload as compact JSON to pin it), `refused <event> <origin> <reason>`, `command <name>`, `select <sceneId>` (` failed` when there is no such scene), `power on|off`, `pass <scene>` (a render pass) and `render` (the host was asked to render, once, after the drain). `state` = subset of the current scene's state (null = not set); `current` = the current scene id; `budget` / `handled` / `pending` = a drain with that budget delivered that many and left that many queued. The test frame is 4x3.",
+  "cases": [
+   {
+    "name": "a device command goes to the host and never to a scene",
+    "why": "`reload` is a RuntimeCommand: the host is asked, and an event node that listens for the name does not run.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/command",
+      "name": "command",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "reload"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardReload",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/command",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:admin",
+        "event": "reload"
+       }
+      ],
+      "trace": [
+       "command reload"
+      ],
+      "state": {
+       "heardReload": null
+      }
+     }
+    ]
+   },
+   {
+    "name": "an origin that is not on the list is refused, whoever it is",
+    "why": "The allow-list is asked of every envelope in one place. The access key may not reboot, a driver may not switch scenes, nobody but the host says `open`.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/refused",
+      "name": "refused",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "open"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "fakeOpen",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/refused",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "reboot"
+       },
+       {
+        "origin": "driver",
+        "event": "setCurrentScene",
+        "payload": {
+         "sceneId": "fixtures/dispatcher/command"
+        }
+       },
+       {
+        "origin": "schedule",
+        "event": "open",
+        "payload": {
+         "sceneId": "x"
+        }
+       }
+      ],
+      "trace": [
+       "refused reboot http:write origin",
+       "refused setCurrentScene driver origin",
+       "refused open schedule origin"
+      ],
+      "state": {
+       "fakeOpen": null
+      }
+     }
+    ]
+   },
+   {
+    "name": "what a handler dispatches runs after it, and the state it changes is drawn",
+    "why": "Queued delivery on every host: `button` runs to its end, then the `nextPage` it dispatched. The render rule sees the state change and asks for one render — a button press is somebody else talking to the scene.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/queued",
+      "name": "queued",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d1",
+        "type": "dispatch",
+        "data": {
+         "keyword": "nextPage",
+         "config": {}
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "nextPage"
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "turned",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "d1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/queued",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "button",
+        "payload": {
+         "pin": 1,
+         "label": "A",
+         "level": 0
+        }
+       }
+      ],
+      "trace": [
+       "run queued button",
+       "run queued nextPage",
+       "render"
+      ],
+      "state": {
+       "turned": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "button",
+        "payload": {
+         "pin": 1,
+         "label": "A",
+         "level": 0
+        }
+       }
+      ],
+      "why": "The same press again changes nothing, so nothing is drawn.",
+      "trace": [
+       "run queued button",
+       "run queued nextPage"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "renderAfter is the contract's",
+    "why": "`never` for pointer events even when a handler changes state (a scene that wants a picture dispatches render); `always` for render; `if-state-changed` for the rest.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/renderRule",
+      "name": "renderRule",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "mouseDown"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "down",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "keyDown"
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "key",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e3",
+        "type": "event",
+        "data": {
+         "keyword": "mouseUp"
+        }
+       },
+       {
+        "id": "d3",
+        "type": "dispatch",
+        "data": {
+         "keyword": "render",
+         "config": {}
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x3",
+        "source": "e3",
+        "sourceHandle": "next",
+        "target": "d3",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": [
+       {
+        "name": "page",
+        "label": "Page",
+        "type": "integer",
+        "value": "1",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/dispatcher/renderRule",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "mouseDown",
+        "payload": {
+         "button": 0
+        }
+       }
+      ],
+      "trace": [
+       "run renderRule mouseDown"
+      ],
+      "state": {
+       "down": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "keyDown",
+        "payload": {
+         "key": "KEY_A",
+         "code": 30
+        }
+       }
+      ],
+      "trace": [
+       "run renderRule keyDown",
+       "render"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "keyUp",
+        "payload": {
+         "key": "KEY_A",
+         "code": 30
+        }
+       }
+      ],
+      "trace": [
+       "run renderRule keyUp"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "mouseUp",
+        "payload": {
+         "button": 0
+        }
+       }
+      ],
+      "trace": [
+       "run renderRule mouseUp",
+       "render"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setSceneState",
+        "payload": {
+         "state": {
+          "page": 2
+         }
+        }
+       }
+      ],
+      "trace": [
+       "run renderRule setSceneState",
+       "render"
+      ],
+      "state": {
+       "page": 2
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setSceneState",
+        "payload": {
+         "state": {
+          "page": 2
+         }
+        }
+       }
+      ],
+      "trace": [
+       "run renderRule setSceneState"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "cloud",
+        "event": "render"
+       }
+      ],
+      "trace": [
+       "render"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a render that changes its own state does not cause the next render",
+    "why": "A slideshow's render dispatches setSceneState to turn its page. That is the scene talking to itself: were it to count as a state change, every render would cause another, forever, on an e-paper panel. It renders again only by dispatching `render`.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/selfTalk",
+      "name": "selfTalk",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "render"
+        }
+       },
+       {
+        "id": "d1",
+        "type": "dispatch",
+        "data": {
+         "keyword": "setSceneState",
+         "config": {
+          "page": 2
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d2",
+        "type": "dispatch",
+        "data": {
+         "keyword": "setSceneState",
+         "config": {
+          "page": 3
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "d1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "d2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": [
+       {
+        "name": "page",
+        "label": "Page",
+        "type": "integer",
+        "value": "1",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/dispatcher/selfTalk",
+    "steps": [
+     {
+      "renderPass": true,
+      "trace": [
+       "pass selfTalk",
+       "run selfTalk setSceneState"
+      ],
+      "state": {
+       "page": 2
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "button",
+        "payload": {
+         "pin": 1,
+         "label": "A",
+         "level": 0
+        }
+       }
+      ],
+      "why": "The same dispatch from a button handler is a person's doing, and is drawn.",
+      "trace": [
+       "run selfTalk button",
+       "run selfTalk setSceneState",
+       "render"
+      ],
+      "state": {
+       "page": 3
+      }
+     }
+    ]
+   },
+   {
+    "name": "a schedule or the cloud fires a custom event only at a scene that declares it",
+    "why": "Decision 5: `origins` on the custom event's declaration. The scene, the frame's own API and its drivers can always send it.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/declared",
+      "name": "declared",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "nextPage"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "turned",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "secret"
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "leaked",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": [],
+      "customEvents": [
+       {
+        "name": "nextPage",
+        "origins": [
+         "schedule",
+         "cloud"
+        ]
+       },
+       {
+        "name": "secret"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/dispatcher/declared",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "schedule",
+        "event": "secret"
+       },
+       {
+        "origin": "cloud",
+        "event": "secret"
+       }
+      ],
+      "trace": [
+       "refused secret schedule undeclared",
+       "refused secret cloud undeclared"
+      ],
+      "state": {
+       "leaked": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "schedule",
+        "event": "nextPage"
+       }
+      ],
+      "trace": [
+       "run declared nextPage",
+       "render"
+      ],
+      "state": {
+       "turned": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "cloud",
+        "event": "nextPage"
+       },
+       {
+        "origin": "http:write",
+        "event": "secret"
+       }
+      ],
+      "trace": [
+       "run declared nextPage",
+       "run declared secret",
+       "render"
+      ],
+      "state": {
+       "leaked": true
+      }
+     }
+    ]
+   },
+   {
+    "name": "a scene's own setCurrentScene switches scenes, on every host",
+    "why": "The host is asked to select; the scene left hears `close`, the one shown `open`. An unknown scene changes nothing.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/switchFrom",
+      "name": "switchFrom",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "d1",
+        "type": "dispatch",
+        "data": {
+         "keyword": "setCurrentScene",
+         "config": {
+          "sceneId": "fixtures/dispatcher/switchTo"
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "keyDown"
+        }
+       },
+       {
+        "id": "d2",
+        "type": "dispatch",
+        "data": {
+         "keyword": "setCurrentScene",
+         "config": {
+          "sceneId": "fixtures/dispatcher/nowhere"
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "d1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "d2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     },
+     {
+      "id": "fixtures/dispatcher/switchTo",
+      "name": "switchTo",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "open"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "opened",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/switchFrom",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "keyDown",
+        "payload": {
+         "key": "KEY_A",
+         "code": 30
+        }
+       }
+      ],
+      "trace": [
+       "run switchFrom keyDown",
+       "select fixtures/dispatcher/nowhere failed"
+      ],
+      "current": "fixtures/dispatcher/switchFrom"
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "button",
+        "payload": {
+         "pin": 1,
+         "label": "A",
+         "level": 0
+        }
+       }
+      ],
+      "trace": [
+       "run switchFrom button",
+       "select fixtures/dispatcher/switchTo",
+       "run switchFrom close",
+       "run switchTo open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/switchTo",
+      "state": {
+       "opened": true
+      }
+     }
+    ]
+   },
+   {
+    "name": "pointer moves coalesce, and input waits behind everything else",
+    "why": "`coalesce: latest` at enqueue: a move replaces the move it would queue behind. Two lanes: what a person did waits behind commands and scene traffic, in order within its lane.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/lanes",
+      "name": "lanes",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": [],
+      "fields": [
+       {
+        "name": "page",
+        "label": "Page",
+        "type": "integer",
+        "value": "1",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/dispatcher/lanes",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "mouseMove",
+        "payload": {
+         "x": 0,
+         "y": 0
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "mouseMove",
+        "payload": {
+         "x": 32767,
+         "y": 32767
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "button",
+        "payload": {
+         "pin": 1,
+         "label": "A",
+         "level": 0
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "mouseMove",
+        "payload": {
+         "x": 100,
+         "y": 100
+        }
+       },
+       {
+        "origin": "http:write",
+        "event": "setSceneState",
+        "payload": {
+         "state": {
+          "page": 5
+         }
+        }
+       }
+      ],
+      "trace": [
+       "run lanes setSceneState",
+       "run lanes mouseMove {\"x\":3,\"y\":2}",
+       "run lanes button",
+       "run lanes mouseMove {\"x\":0,\"y\":0}",
+       "render"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "turnOn and turnOff drive the display, then the scene hears them",
+    "why": "A scene command: the host acts, and a listener still runs.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/power",
+      "name": "power",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "turnOff"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "dark",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/power",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "schedule",
+        "event": "turnOff"
+       }
+      ],
+      "trace": [
+       "power off",
+       "run power turnOff",
+       "render"
+      ],
+      "state": {
+       "dark": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "cloud",
+        "event": "turnOn"
+       }
+      ],
+      "trace": [
+       "power on",
+       "run power turnOn"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a scene that re-dispatches its own event is handed back after a burst",
+    "why": "One drain delivers at most its budget and leaves the rest queued, so the host's render loop (or its one task) gets a turn. Nothing is dropped.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/loop",
+      "name": "loop",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "tick"
+        }
+       },
+       {
+        "id": "d1",
+        "type": "dispatch",
+        "data": {
+         "keyword": "tick",
+         "config": {}
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "d1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/loop",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "tick"
+       }
+      ],
+      "budget": 8,
+      "handled": 8,
+      "pending": 1
      }
     ]
    }

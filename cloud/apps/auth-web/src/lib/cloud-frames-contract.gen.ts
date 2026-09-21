@@ -598,6 +598,15 @@ export const cloudFramesContract = {
       ]
     },
     {
+      "type": "scene_event",
+      "scope": null,
+      "content": true,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
+    },
+    {
       "type": "reboot",
       "scope": null,
       "content": false,

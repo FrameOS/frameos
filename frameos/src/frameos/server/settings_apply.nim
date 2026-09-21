@@ -110,7 +110,7 @@ proc runSettingsJob(job: SettingsJob) {.gcsafe.} =
         log(%*{"event": "settings:driver_setup:error", "device": frameConfig.device, "error": output})
       # The driver reads its config at init; the config is saved either way.
       # If setup scheduled a reboot this restart is moot, and harmless.
-      sendEvent("restart", %*{})
+      sendEvent("restart", %*{}, eoSystem)
 
 var jobRunner: SettingsJobRunner = runSettingsJob
 var jobChannel: Channel[SettingsJob]

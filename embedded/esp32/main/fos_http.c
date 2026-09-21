@@ -28,6 +28,7 @@
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_cloud_contract_gen.h"
+#include "fos_events.h"
 #include "fos_events_gen.h"
 #include "fos_upload_limits.h"
 #include "fos_battery.h"
@@ -1898,6 +1899,21 @@ static void log_http_command_from_path(httpd_req_t *req, size_t body_len)
     log_http_command(req, slash && slash[1] ? slash + 1 : path, body_len);
 }
 
+/* The origin of an event that came in over HTTP (docs/events.md). Every
+ * caller has already passed REQUIRE_PROTECTED_ACCESS, and everything that
+ * passes it is a control credential: `api_key` is the frame's server API key
+ * (what the backend signs in with), the Basic login is the admin's, and the
+ * provisioning hotspot is physical access. This firmware has no frame access
+ * key and no `public` access, so nothing here is ever `http:write` — the day
+ * it grows one, this is where the two are told apart, and the contract's
+ * allow-list does the rest (no reload / restart / uploadScenes for a key that
+ * can only write). An unauthenticated request never gets this far: 401/403. */
+static fos_event_origin_t request_event_origin(httpd_req_t *req)
+{
+    (void)req;
+    return FOS_ORIGIN_HTTP_ADMIN;
+}
+
 static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
 {
     if (!event_name || !event_name[0]) {
@@ -1914,30 +1930,12 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
     const char *payload = body && body[0] ? body : "{}";
     log_http_command(req, event_name, body ? strlen(body) : 0);
 
-    bool ok = true;
-    if (strcmp(event_name, FOS_EVENT_RENDER) == 0) {
-        if (s_render_cb) s_render_cb();
-    } else if (strcmp(event_name, FOS_EVENT_RELOAD) == 0) {
-        fos_scenes_request_sync();
-        if (s_render_cb) s_render_cb();
-    } else if (strcmp(event_name, FOS_EVENT_UPLOAD_SCENES) == 0) {
-        ok = fos_http_store_uploaded_scenes_payload(payload, strlen(payload)) == ESP_OK;
-        if (ok && s_render_cb) s_render_cb();
-    } else if (strcmp(event_name, FOS_EVENT_SET_CURRENT_SCENE) == 0) {
-        char scene_id[128];
-        if (json_string_value(payload, "sceneId", scene_id, sizeof(scene_id)) ||
-            json_string_value(payload, "scene_id", scene_id, sizeof(scene_id))) {
-            ok = fos_scenes_select(scene_id) == ESP_OK;
-            if (ok && s_render_cb) s_render_cb();
-        } else {
-            ok = false;
-        }
-    } else if (frameos_nim_available()) {
-        ok = frameos_nim_send_event(event_name, payload);
-        if (frameos_nim_render_requested() && s_render_cb) s_render_cb();
-    } else {
-        ok = false;
-    }
+    /* What the event means — the allow-list, the firmware's own commands, the
+     * hand-off to the scene — is fos_events.c's, the same for every producer.
+     * All this route adds is who is asking. Unbounded on purpose: an event
+     * posted while a render runs is delivered after it, as it always was,
+     * rather than refused. */
+    bool ok = fos_events_dispatch(request_event_origin(req), event_name, payload) == FOS_EVENT_DONE;
     free(body);
     if (!ok) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "event rejected");

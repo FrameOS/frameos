@@ -51,18 +51,18 @@ proc closeDevice(evdev: ptr libevdev) =
 proc send(event: InputEvent) =
   case event.kind
   of iekMouseMove:
-    sendEvent("mouseMove", %*{"x": event.x, "y": event.y})
+    sendEvent("mouseMove", %*{"x": event.x, "y": event.y}, eoDriver)
   of iekMouseDown:
-    sendEvent("mouseDown", %*{"button": event.button})
+    sendEvent("mouseDown", %*{"button": event.button}, eoDriver)
   of iekMouseUp:
-    sendEvent("mouseUp", %*{"button": event.button})
+    sendEvent("mouseUp", %*{"button": event.button}, eoDriver)
   of iekWheel:
-    sendEvent("wheel", %*{"deltaX": event.deltaX, "deltaY": event.deltaY})
+    sendEvent("wheel", %*{"deltaX": event.deltaX, "deltaY": event.deltaY}, eoDriver)
   of iekKeyDown, iekKeyUp:
     sendEvent(if event.kind == iekKeyDown: "keyDown" else: "keyUp", %*{
       "key": $libevdev_event_code_get_name(EV_KEY.cuint, event.code.cuint),
       "code": event.code
-    })
+    }, eoDriver)
 
 proc startThread*(panel: (int, int)) {.thread.} =
   try:

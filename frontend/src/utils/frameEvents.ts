@@ -1,5 +1,6 @@
 import _events from '../../schema/events.json'
 import type { AppConfigField, FrameEvent, FrameScene } from '../types'
+import { customEventDeclarableOrigins, type EventOrigin } from './eventsContract.gen'
 
 export const builtinFrameEvents = _events as FrameEvent[]
 export const builtinFrameEventNames = new Set(builtinFrameEvents.map((event) => event.name))
@@ -21,13 +22,38 @@ export function normalizeCustomEventField(field: Partial<AppConfigField>): AppCo
   }
 }
 
+/**
+ * The `origins` a custom event may declare, as the device reads them
+ * (`declaredCustomEventOrigins` in events.nim): only the contract's declarable
+ * origins count, so anything else is dropped rather than stored. Sorted, so
+ * the order the boxes were ticked in never shows up as a scene change.
+ */
+export function normalizeCustomEventOrigins(origins: unknown): EventOrigin[] {
+  const declared = Array.isArray(origins) ? origins : []
+  return customEventDeclarableOrigins.filter((origin) => declared.includes(origin)).sort()
+}
+
+/**
+ * `event` with `origin` declared or not. No `origins` key at all once none is
+ * left, so a scene that never opted in is not rewritten.
+ */
+export function withCustomEventOrigin(event: FrameEvent, origin: EventOrigin, enabled: boolean): FrameEvent {
+  const { origins: current, ...rest } = event
+  const origins = normalizeCustomEventOrigins(
+    enabled ? [...(current ?? []), origin] : (current ?? []).filter((candidate) => candidate !== origin)
+  )
+  return origins.length > 0 ? { ...rest, origins } : rest
+}
+
 export function normalizeCustomEvent(event: Partial<FrameEvent>): FrameEvent {
+  const origins = normalizeCustomEventOrigins(event.origins)
   return {
     name: String(event.name ?? '').trim(),
     description: String(event.description ?? ''),
     fields: (event.fields ?? []).map((field) => normalizeCustomEventField(field)),
     canDispatch: true,
     canListen: true,
+    ...(origins.length > 0 ? { origins } : {}),
   }
 }
 

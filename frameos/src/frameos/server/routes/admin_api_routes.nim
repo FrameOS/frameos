@@ -130,7 +130,7 @@ proc addAdminApiRoutes*(router: var Router) =
         let challenge = startLocalAccessChallenge()
         # A sleeping scene renders on its own schedule, and the code is useless
         # until it is actually on the panel, so ask for a frame now.
-        sendEvent("render", %*{})
+        sendEvent("render", %*{}, eoHttpAdmin)
         # No "code" in the response on purpose: a caller who could read it
         # without seeing the panel is precisely who this keeps out.
         jsonResponse(request, Http200, %*{
@@ -159,7 +159,7 @@ proc addAdminApiRoutes*(router: var Router) =
       if not verdict.ok:
         # Repaint either way: a spent or failed ceremony must not leave a live
         # code on the panel for the next person walking past.
-        sendEvent("render", %*{})
+        sendEvent("render", %*{}, eoHttpAdmin)
         jsonResponse(request, Http403, %*{"detail": verdict.detail})
         return
       try:
@@ -172,10 +172,10 @@ proc addAdminApiRoutes*(router: var Router) =
           of "localNetwork": setLocalNetworkAccess(payload{"enabled"}.getBool(true))
           of "shellApps": setShellAppsAccess(payload{"enabled"}.getBool(true))
           else:
-            sendEvent("render", %*{})
+            sendEvent("render", %*{}, eoHttpAdmin)
             jsonResponse(request, Http400, %*{"detail": "Unknown scope: " & scope})
             return
-        sendEvent("render", %*{})
+        sendEvent("render", %*{}, eoHttpAdmin)
         jsonResponse(request, Http200, updated)
       except CatchableError as error:
         respondInternalError(request, "network:local-access:error", error, "Failed to apply the change")
@@ -230,7 +230,7 @@ proc addAdminApiRoutes*(router: var Router) =
           except JsonParsingError:
             jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
             return
-        sendEventOwned(request.pathParams["name"], move(payload))
+        sendEventOwned(request.pathParams["name"], move(payload), eoHttpAdmin)
         jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
@@ -258,6 +258,6 @@ proc addAdminApiRoutes*(router: var Router) =
           # with a SIGSEGV instead of rendering.
           let eventPayload = payload{"payload"}
           log(%*{"event": "http", "post": request.path, "eventName": eventName})
-          sendEvent(eventName, if eventPayload.isNil or eventPayload.kind == JNull: %*{} else: eventPayload)
+          sendEvent(eventName, (if eventPayload.isNil or eventPayload.kind == JNull: %*{} else: eventPayload), eoHttpAdmin)
           jsonResponse(request, Http200, %*{"status": "ok"})
   )

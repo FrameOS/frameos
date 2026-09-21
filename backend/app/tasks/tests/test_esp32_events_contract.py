@@ -19,6 +19,9 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 MAIN_DIR = REPO_ROOT / "embedded" / "esp32" / "main"
 HEADER = MAIN_DIR / "fos_events_gen.h"
 TEST_SOURCE = MAIN_DIR / "tests" / "test_fos_events.c"
+ESP32_DIR = REPO_ROOT / "embedded" / "esp32"
+DISPATCH_SOURCE = MAIN_DIR / "fos_events.c"
+DISPATCH_TEST_SOURCE = MAIN_DIR / "tests" / "test_fos_events_dispatch.c"
 FIXTURES = REPO_ROOT / "docs" / "event-fixtures.json"
 GENERATOR = REPO_ROOT / "frameos" / "tools" / "generate_events_contract.py"
 
@@ -41,6 +44,14 @@ def test_the_firmware_paths_read_the_contract():
         assert '#include "fos_events_gen.h"' in (MAIN_DIR / name).read_text(), name
 
 
+def test_every_producer_goes_through_the_one_dispatcher():
+    """fos_events.c decides what an event means; nobody else hands one to the Nim runtime."""
+    for name in ("fos_http.c", "fos_schedule.c", "fos_cloud.c", "fos_console.c", "fos_buttons.c"):
+        source = (MAIN_DIR / name).read_text()
+        assert "fos_events_dispatch" in source, name
+        assert "frameos_nim_send_event" not in source, f"{name} must call fos_events_dispatch instead"
+
+
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
 def test_fos_events_answers_the_origin_fixtures(tmp_path: Path):
     binary = tmp_path / "test_fos_events"
@@ -55,3 +66,25 @@ def test_fos_events_answers_the_origin_fixtures(tmp_path: Path):
     run_result = subprocess.run([str(binary)], input=lines, capture_output=True, text=True)
     assert run_result.returncode == 0, run_result.stdout + run_result.stderr
     assert f"{len(cases)} cases, 0 failures" in run_result.stdout
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
+def test_fos_events_dispatch_routes_events(tmp_path: Path):
+    """The routing itself (allow-list, firmware-owned events, the hand-off to Nim), against stubs."""
+    binary = tmp_path / "test_fos_events_dispatch"
+    compile_result = subprocess.run(
+        [
+            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+            "-I", str(MAIN_DIR),
+            "-I", str(MAIN_DIR / "tests" / "host_shim"),
+            "-I", str(ESP32_DIR / "components" / "frameos_nim" / "include"),
+            "-I", str(ESP32_DIR / "components" / "frameos_display" / "include"),
+            str(DISPATCH_SOURCE), str(DISPATCH_TEST_SOURCE), "-o", str(binary),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert compile_result.returncode == 0, compile_result.stderr
+    run_result = subprocess.run([str(binary)], capture_output=True, text=True)
+    assert run_result.returncode == 0, run_result.stdout + run_result.stderr
+    assert "0 failures" in run_result.stdout

@@ -83,7 +83,7 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
         if payload.hasKey(key) and payload[key] != self.state{key}:
           self.state[key] = copy(payload[key])
     if context.payload.hasKey("render"):
-      sendEvent("render", %*{})
+      sendEvent("render", %*{}, eoScene)
   else: discard
 
 proc runEvent*(self: FrameScene, context: ExecutionContext) =

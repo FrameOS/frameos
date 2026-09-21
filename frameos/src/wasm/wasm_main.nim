@@ -14,7 +14,7 @@ import pixie
 
 import frameos/types
 import frameos/channels
-import frameos/events
+import frameos/single_scene_host
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -37,13 +37,11 @@ proc log(msg: string) =
 var
   frameConfig: FrameConfig
   logger: Logger
-  currentScene: FrameScene
-  currentExported: ExportedInterpretedScene
-  currentSceneId: Option[SceneId] = none(SceneId)
   defaultSceneId: Option[SceneId] = none(SceneId)
   scenesLoadedCount = 0
-  renderRequested = false
-  handlingEvent = false
+  # The scene's lifetime, its lifecycle events and the dispatcher's EventHost:
+  # shared with the ESP32 runtime (frameos/single_scene_host).
+  host = SingleSceneHost()
   lastImage: Image
   lastNextSleep: float = -1
   sceneInfoBuffer: string
@@ -55,104 +53,21 @@ var
   pendingSceneStates = initTable[string, JsonNode]()
 
 proc currentSceneName(): string =
-  if not currentExported.isNil and currentExported.name.len > 0:
-    return currentExported.name
-  if currentSceneId.isSome:
-    return currentSceneId.get().string
-  ""
+  host.sceneName
 
 proc setLastError(msg: string) =
   lastErrorBuffer = msg
   if msg.len > 0:
     log("error: " & msg)
 
-# ------------------------------------------------------------------ cleanup
-
-proc cleanupScene(scene: FrameScene) =
-  ## Break ORC cycles and close the scene's QuickJS context before dropping
-  ## the last reference (mirrors src/embedded/embedded_runtime.nim).
-  if scene.isNil or not (scene of InterpretedFrameScene):
-    return
-  let interpreted = InterpretedFrameScene(scene)
-  for _, childScene in interpreted.sceneNodes:
-    cleanupScene(childScene)
-  interpreted.execNode = nil
-  interpreted.getDataNode = nil
-  interpreted.appsByNodeId = initTable[NodeId, AppRoot]()
-  interpreted.appInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-  interpreted.appInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-  interpreted.codeInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-  interpreted.codeInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-  interpreted.sceneNodes = initTable[NodeId, FrameScene]()
-  interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
-  interpreted.nextNodeIds = initTable[NodeId, NodeId]()
-  interpreted.eventListeners = initTable[string, seq[NodeId]]()
-  interpreted.nodes = initTable[NodeId, DiagramNode]()
-  interpreted.edges = @[]
-  interpreted.cacheValues = initTable[NodeId, Value]()
-  interpreted.cacheTimes = initTable[NodeId, float]()
-  interpreted.cacheKeys = initTable[NodeId, JsonNode]()
-  cleanupSceneJs(interpreted)
-
-proc dropCurrentScene() =
-  if not currentScene.isNil:
-    cleanupScene(currentScene)
-    currentScene = nil
-    currentExported = nil
-
 # ------------------------------------------------------------------- scenes
-
-proc runSceneEvent(event: string, payload: JsonNode) =
-  if currentScene.isNil:
-    return
-  let context = ExecutionContext(scene: currentScene, event: event,
-      payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
-  runEvent(currentScene, context)
-
-proc runLifecycleEvent(event: string, payload: JsonNode) =
-  ## "open" and "close", which the host sends the way runner.nim does: "open"
-  ## when a scene becomes the current one, "close" when the preview switches
-  ## away from it. ("init" is the interpreter's own, fired by its init.) They
-  ## count as handling an event, so a listener that dispatches does not recurse.
-  let wasHandling = handlingEvent
-  handlingEvent = true
-  try:
-    runSceneEvent(event, payload)
-  except Exception as e:
-    setLastError("event " & event & " failed: " & e.msg)
-  finally:
-    handlingEvent = wasHandling
 
 proc selectSceneById(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
-  let scenes = getInterpretedScenes()
-  if not scenes.hasKey(sceneId):
+  if not getInterpretedScenes().hasKey(sceneId):
     setLastError("scene not found: " & sceneIdText)
     return false
-  if currentSceneId.isSome and currentSceneId.get() != sceneId:
-    runLifecycleEvent("close", %*{})
-  dropCurrentScene()
-  currentSceneId = some(sceneId)
-  renderRequested = true
-  true
-
-proc ensureScene(): bool =
-  if not currentScene.isNil:
-    return true
-  if currentSceneId.isNone:
-    return false
-  let sceneId = currentSceneId.get()
-  let scenes = getInterpretedScenes()
-  if not scenes.hasKey(sceneId):
-    setLastError("scene not found: " & sceneId.string)
-    return false
-  currentExported = scenes[sceneId]
-  let persisted =
-    if pendingSceneStates.hasKey(sceneId.string): pendingSceneStates[sceneId.string]
-    else: %*{}
-  currentScene = interpreter.init(sceneId, frameConfig, logger, persisted)
-  log(&"scene \"{currentSceneName()}\" initialized")
-  runLifecycleEvent("open", %*{"sceneId": sceneId.string})
+  host.makeCurrent(sceneId)
   true
 
 # ------------------------------------------------------------------- setup
@@ -177,12 +92,12 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
   ## the same object the device receives in frame.json; apps read secrets from
   ## frameConfig.settings{"openAI"}{"apiKey"} and the like.
   try:
-    dropCurrentScene()
+    host.dropScene()
     resetInterpretedScenes()
-    currentSceneId = none(SceneId)
+    host.sceneId = none(SceneId)
     defaultSceneId = none(SceneId)
     scenesLoadedCount = 0
-    renderRequested = false
+    host.renderRequested = false
     lastImage = nil
     pendingSceneStates = initTable[string, JsonNode]()
 
@@ -247,52 +162,29 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
       jsLogHook(($payload).cstring)
     channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string,
-        payload: JsonNode) {.gcsafe.} =
+        payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
       {.cast(gcsafe).}:
         # Pointer input (mouseMove/mouseDown/mouseUp) comes from the page in
         # the first place and arrives many times a second: like runner.nim,
         # which keeps it out of the frame log, it is not echoed back.
-        let pointerEvent = eventPolicy(event).device == edPointer
-        if not pointerEvent:
+        if eventPolicy(event).device != edPointer:
           jsEventHook(event.cstring, (if payload.isNil: "{}" else: $payload).cstring)
-        if event == "render":
-          renderRequested = true
-        elif not currentScene.isNil and not handlingEvent:
-          # Unlike the ESP32 runtime the preview forwards every non-render
-          # event to the scene (like runner.nim does on Linux), so custom
-          # event nodes ("button", user events) work interactively. The
-          # handlingEvent latch keeps a scene that re-dispatches its own
-          # event from recursing forever.
-          if event == "setCurrentScene" and payload != nil and payload.kind == JObject and
-              payload.hasKey("sceneId"):
-            let nextId = payload{"sceneId"}.getStr()
-            if nextId.len > 0 and (currentSceneId.isNone or currentSceneId.get().string != nextId):
-              discard selectSceneById(nextId)
-              return
-          # Pointer input arrives the way drivers/evdev sends it — `mouseMove`
-          # as 0..32767 across the panel, `mouseDown`/`mouseUp` with a button
-          # — and reaches the scene the way runner.nim delivers it: in the
-          # scene's own pixels.
-          var scenePayload = payload
-          if event == "mouseMove" and payload != nil and payload.kind == JObject and
-              frameConfig.width > 0 and frameConfig.height > 0:
-            let point = pointerToScenePoint(payload{"x"}.getInt(), payload{"y"}.getInt(),
-              frameConfig.width, frameConfig.height, frameConfig.rotate, frameConfig.flip)
-            scenePayload = copy(payload)
-            scenePayload["x"] = %point.x
-            scenePayload["y"] = %point.y
-          handlingEvent = true
-          try:
-            runSceneEvent(event, scenePayload)
-          except Exception as e:
-            setLastError("event " & event & " failed: " & e.msg)
-          finally:
-            handlingEvent = false
-          # A frame does not render because a finger moved: a scene that wants
-          # a new picture dispatches "render" itself, and gets one here too.
-          # Every other event keeps the preview's render-after-event habit.
-          if not pointerEvent:
-            renderRequested = true
+        # Queued, never run from inside the run that dispatched it — the rule
+        # every host has (docs/events.md). frameos_wasm_event and the render
+        # pass drain.
+        host.queue(origin, event, payload, sceneId)
+    host.frameConfig = frameConfig
+    host.logger = logger
+    host.note = proc (message: string) = log(message)
+    host.logEntry = proc (entry: JsonNode) = jsLogHook(($entry).cstring)
+    # Nobody else owns a switch here: the preview just does it.
+    host.requestSelect = proc (sceneId: string): bool = selectSceneById(sceneId)
+    host.runtimeCommand = proc (command: RuntimeCommand, payload: JsonNode) =
+      log("runtime command ignored in the preview: " & $command)
+    # Backend-persisted state, seeded by frameos_wasm_set_scene_state.
+    host.initialState = proc (sceneId: SceneId): JsonNode =
+      pendingSceneStates.getOrDefault(sceneId.string)
+    host.start()
     result = true
   except Exception as e:
     setLastError("init failed: " & e.msg)
@@ -314,16 +206,16 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
       setLastError("loadScenes: no scenes survived parsing")
       return 0
 
-    dropCurrentScene()
+    host.dropScene()
     replaceInterpretedScenesCache(newScenes)
     scenesLoadedCount = newScenes.len
 
-    if currentSceneId.isSome and not newScenes.hasKey(currentSceneId.get()):
-      currentSceneId = none(SceneId)
+    if host.sceneId.isSome and not newScenes.hasKey(host.sceneId.get()):
+      host.sceneId = none(SceneId)
     defaultSceneId = firstId
-    if currentSceneId.isNone:
-      currentSceneId = firstId
-    renderRequested = true
+    if host.sceneId.isNone:
+      host.sceneId = firstId
+    host.renderRequested = true
     log(&"loadScenes: {scenesLoadedCount} scene(s) ready, default \"{firstId.get().string}\"")
     scenesLoadedCount.cint
   except Exception as e:
@@ -384,10 +276,10 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   ## Called through `frameos_wasm_render` in tools/wasm/fos_wasm_mem.c, which
   ## wraps it in the setjmp guard that catches a simulated out-of-memory and
   ## returns 3. Without a simulated memory limit the guard is a direct call.
-  renderRequested = false
+  host.renderRequested = false
   try:
     refreshDecodeBudget()
-    if not ensureScene():
+    if not host.ensureScene():
       setLastError("no scene selected")
       return 2
     # Log like the device's runner does, so the preview's runtime log shows
@@ -395,7 +287,7 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
     log($(%*{"event": "render:scene", "width": frameConfig.width, "height": frameConfig.height}))
     let renderStarted = epochTime()
     let context = ExecutionContext(
-      scene: currentScene,
+      scene: host.scene,
       event: "render",
       payload: %*{},
       hasImage: false,
@@ -403,7 +295,11 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
       loopKey: ".",
       nextSleep: -1
     )
-    let image = interpreter.render(currentScene, context)
+    # Renders, then delivers what the render (and an `init` or `open` before
+    # it) dispatched. A `render` dispatched from inside a render is dropped by
+    # the interpreter, so this does not loop the preview; one that a handler
+    # dispatched is one more pass, as on a frame.
+    let image = host.renderScene(context)
     if image.isNil:
       setLastError("render returned no image")
       return 2
@@ -411,12 +307,9 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
     lastNextSleep = context.nextSleep
     log($(%*{
       "event": "render:done",
-      "sceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
+      "sceneId": if host.sceneId.isSome: host.sceneId.get().string else: "",
       "ms": round((epochTime() - renderStarted) * 1000, 3)
     }))
-    # Scene graphs often dispatch "render" while handling the render event
-    # itself; that must not loop the preview forever.
-    renderRequested = false
     0
   except Exception as e:
     setLastError("render failed: " & e.msg)
@@ -453,14 +346,16 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
         %*{}
       else:
         parseJson($payloadJson)
-    channels.sendEvent($eventName, payload)
-    true
+    # Everything the page sends is the `preview` origin; what that may say is
+    # the contract's (docs/events-contract.json).
+    jsEventHook(eventName, ($payload).cstring)
+    host.send(eoPreview, $eventName, payload)
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
     false
 
 proc frameos_wasm_render_requested(): bool {.exportc, cdecl.} =
-  renderRequested
+  host.renderRequested
 
 # ------------------------------------------------------------------- status
 
@@ -470,10 +365,10 @@ proc frameos_wasm_next_sleep(): cdouble {.exportc, cdecl.} =
   lastNextSleep.cdouble
 
 proc frameos_wasm_scene_interval(): cdouble {.exportc, cdecl.} =
-  if not currentScene.isNil and currentScene.refreshInterval > 0:
-    return currentScene.refreshInterval.cdouble
-  if not currentExported.isNil and currentExported.refreshInterval > 0:
-    return currentExported.refreshInterval.cdouble
+  if not host.scene.isNil and host.scene.refreshInterval > 0:
+    return host.scene.refreshInterval.cdouble
+  if not host.exported.isNil and host.exported.refreshInterval > 0:
+    return host.exported.refreshInterval.cdouble
   0.0
 
 proc frameos_wasm_scene_info(): cstring {.exportc, cdecl.} =
@@ -487,19 +382,19 @@ proc frameos_wasm_scene_info(): cstring {.exportc, cdecl.} =
     })
   sceneInfoBuffer = $(%*{
     "loaded": scenesLoadedCount,
-    "currentSceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
+    "currentSceneId": if host.sceneId.isSome: host.sceneId.get().string else: "",
     "currentSceneName": currentSceneName(),
     "defaultSceneId": if defaultSceneId.isSome: defaultSceneId.get().string else: "",
-    "renderRequested": renderRequested,
+    "renderRequested": host.renderRequested,
     "scenes": sceneItems,
   })
   sceneInfoBuffer.cstring
 
 proc frameos_wasm_scene_state(): cstring {.exportc, cdecl.} =
-  if currentScene.isNil or currentScene.state.isNil or currentScene.state.kind != JObject:
+  if host.scene.isNil or host.scene.state.isNil or host.scene.state.kind != JObject:
     sceneStateBuffer = "{}"
   else:
-    sceneStateBuffer = $currentScene.state
+    sceneStateBuffer = $host.scene.state
   sceneStateBuffer.cstring
 
 proc frameos_wasm_last_error(): cstring {.exportc, cdecl.} =

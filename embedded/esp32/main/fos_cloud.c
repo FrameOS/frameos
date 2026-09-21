@@ -35,6 +35,7 @@
 #include "fos_assets_sd.h"
 #include "fos_client.h"
 #include "fos_config.h"
+#include "fos_events.h"
 #include "fos_mem.h"
 #include "fos_http.h"
 #include "fos_ota.h"
@@ -2388,6 +2389,135 @@ static void ws_ack_unparseable(const char *data, size_t len)
     cJSON_Delete(id_item);
 }
 
+/* ------------------------------------------------- verbs that are events
+ *
+ * `render`, `set_current_scene`, `reboot` / `restart_runtime` and
+ * `scene_event` are scene events said by the provider: each goes through
+ * fos_events_dispatch with the `cloud` origin, the one routing function the
+ * HTTP route, the schedule, the console and the buttons use, so what the
+ * provider may say is the contract's answer (docs/events-contract.json) and
+ * not a list kept here. The verbs keep their own ack tokens. */
+
+/* A verb with no payload of its own: render, reboot, restart_runtime. Acked
+ * BEFORE the dispatch — a restart does not come back to send one, and the
+ * delay in fos_events.c exists so this ack gets onto the wire — which is why
+ * the allow-list is asked here first instead of reading the result. */
+static void ws_handle_event_verb(const char *event, const cJSON *id)
+{
+    if (!fos_event_origin_may_emit(FOS_ORIGIN_CLOUD, event)) {
+        ws_ack(id, false, "event_not_allowed");
+        return;
+    }
+    ws_ack(id, true, NULL);
+    fos_events_dispatch(FOS_ORIGIN_CLOUD, event, NULL);
+}
+
+/* `set_current_scene {scene_id, state?}` → setCurrentScene {sceneId, state?},
+ * the shape the local event carries (docs/cloud-frames.md). The switch is
+ * queued without waiting for anything; `state` is handed to the runtime with a
+ * bounded wait (fos_events.c), so this task never parks behind a render. */
+static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id)
+{
+    char scene_id[128] = "";
+    if (!json_field_str(root, "scene_id", scene_id, sizeof(scene_id))) {
+        ws_ack(id, false, "unknown_scene");
+        return;
+    }
+    cJSON *payload = cJSON_CreateObject();
+    char *printed = NULL;
+    if (payload != NULL && cJSON_AddStringToObject(payload, "sceneId", scene_id) != NULL) {
+        /* Optional public scene-state values. Referenced, not copied: `root`
+         * outlives the print below. */
+        cJSON *state = cJSON_GetObjectItem(root, "state");
+        if (!cJSON_IsObject(state) || cJSON_AddItemReferenceToObject(payload, "state", state)) {
+            printed = cJSON_PrintUnformatted(payload);
+        }
+    }
+    cJSON_Delete(payload);
+    if (printed == NULL) {
+        ws_ack(id, false, "no_memory");
+        return;
+    }
+    fos_event_result_t result = fos_events_dispatch(FOS_ORIGIN_CLOUD, FOS_EVENT_SET_CURRENT_SCENE, printed);
+    cJSON_free(printed);
+    if (result == FOS_EVENT_DONE) {
+        ws_ack(id, true, NULL);
+    } else {
+        ws_ack(id, false, result == FOS_EVENT_REFUSED ? "event_not_allowed" : "unknown_scene");
+    }
+}
+
+/* How long `scene_event` waits for the Nim runtime before answering `busy`.
+ * Well inside the hub's command timeout, and short enough that the socket's
+ * keepalive never notices; the provider may simply send it again. */
+#define FOS_CLOUD_SCENE_EVENT_WAIT_MS 3000
+
+/* `scene_event {name, payload?}`: an event for the scene the frame is showing,
+ * said by the provider. The mirror of handleSceneEvent in
+ * frameos/src/frameos/cloud/hub_client.nim, token for token: a contract event
+ * that lists the `cloud` origin — never a device command, those have verbs of
+ * their own — or a custom event, which the Nim dispatcher delivers only when
+ * the scene declares it with `origins: ["cloud"]`.
+ *
+ * One difference from Linux, where the ack means "queued": there is no queue
+ * between this task and the scene here, the event is delivered under the
+ * runtime lock before the ack. So the wait for that lock is bounded — a render
+ * on a large panel holds it for a minute and more, and this task has a hub to
+ * keep answering — and `busy` says the event was NOT delivered. `ok` means
+ * "handed to the dispatcher"; what came of it (no listener, an undeclared
+ * custom event) is in the frame log, as on Linux. */
+static void ws_handle_scene_event(const cJSON *root, const cJSON *id)
+{
+    const cJSON *name_item = cJSON_GetObjectItem(root, "name");
+    const char *name = cJSON_IsString(name_item) && name_item->valuestring ? name_item->valuestring : "";
+    if (name[0] == '\0' || strlen(name) > FOS_CUSTOM_EVENT_MAX_NAME_LENGTH) {
+        ws_ack(id, false, "invalid_event");
+        return;
+    }
+    if (fos_event_is_device_command(name) ||
+        (fos_event_spec(name)->event_class != FOS_EVENT_CLASS_CUSTOM &&
+         !fos_event_origin_may_emit(FOS_ORIGIN_CLOUD, name))) {
+        ws_ack(id, false, "event_not_allowed");
+        return;
+    }
+    const cJSON *payload = cJSON_GetObjectItem(root, "payload");
+    if (payload != NULL && !cJSON_IsObject(payload) && !cJSON_IsNull(payload)) {
+        ws_ack(id, false, "invalid_payload");
+        return;
+    }
+    char *printed = cJSON_IsObject(payload) ? cJSON_PrintUnformatted(payload) : NULL;
+    if (cJSON_IsObject(payload) && printed == NULL) {
+        ws_ack(id, false, "no_memory");
+        return;
+    }
+    fos_event_result_t result = fos_events_dispatch_wait(FOS_ORIGIN_CLOUD, name, printed,
+                                                         FOS_CLOUD_SCENE_EVENT_WAIT_MS);
+    if (printed != NULL) cJSON_free(printed);
+    switch (result) {
+        case FOS_EVENT_BUSY:
+            ws_ack(id, false, "busy");
+            break;
+        case FOS_EVENT_REFUSED:
+            ws_ack(id, false, "event_not_allowed");
+            break;
+        case FOS_EVENT_FAILED:
+            /* A thin-client build has no scene to send an event to: the verb
+             * is not served. Otherwise the dispatcher had the event and the
+             * frame log says what came of it (no scene yet, a custom event the
+             * scene never declared for the cloud) — the `ok` Linux gives for
+             * an event it queued. */
+            if (!frameos_nim_available()) {
+                ws_ack(id, false, "unsupported_verb");
+                break;
+            }
+            ws_ack(id, true, NULL);
+            break;
+        default:
+            ws_ack(id, true, NULL);
+            break;
+    }
+}
+
 static void ws_handle_message(const char *data, size_t len)
 {
     /* Depth first: cJSON recurses per nesting level on this task's 10 KB
@@ -2502,17 +2632,11 @@ static void ws_handle_message(const char *data, size_t len)
         if (!ws_send_state(id)) ws_ack(id, false, "runtime_busy");
         else ws_ack(id, true, NULL);
     } else if (strcmp(type, "render") == 0) {
-        fos_client_render_now();
-        ws_ack(id, true, NULL);
+        ws_handle_event_verb(FOS_EVENT_RENDER, id);
     } else if (strcmp(type, "set_current_scene") == 0) {
-        char scene_id[128] = "";
-        if (json_field_str(root, "scene_id", scene_id, sizeof(scene_id)) &&
-            fos_scenes_select(scene_id) == ESP_OK) {
-            fos_client_render_now();
-            ws_ack(id, true, NULL);
-        } else {
-            ws_ack(id, false, "unknown_scene");
-        }
+        ws_handle_set_current_scene(root, id);
+    } else if (strcmp(type, "scene_event") == 0) {
+        ws_handle_scene_event(root, id);
     } else if (strcmp(type, "set_scenes") == 0) {
         ws_handle_set_scenes(root, id);
     } else if (strcmp(type, "set_settings") == 0) {
@@ -2534,9 +2658,9 @@ static void ws_handle_message(const char *data, size_t len)
     } else if (strcmp(type, "image_get") == 0) {
         ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
     } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
-        /* On ESP32 the runtime IS the firmware: restart_runtime == reboot. */
-        ws_ack(id, true, NULL);
-        ws_schedule_reboot();
+        /* On ESP32 the runtime IS the firmware: restart_runtime == reboot,
+         * and fos_events.c carries both out the same way. */
+        ws_handle_event_verb(strcmp(type, "reboot") == 0 ? FOS_EVENT_REBOOT : FOS_EVENT_RESTART, id);
     } else if (strcmp(type, "set_schedule") == 0) {
         /* The chip carries no tz database, so the provider sends the frame's
          * current UTC offset alongside the schedule (the backend poll does the

@@ -2,6 +2,7 @@ import { Edge, Node } from 'reactflow'
 import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 import type { FrameId } from './utils/frameId'
 import type { ScheduledEventName } from './utils/scheduleEvents'
+import type { EventOrigin } from './utils/eventsContract.gen'
 
 // Defined in utils/frameId.ts (which has no imports) and re-exported here so
 // the SPA's usual `from '../types'` import keeps working.
@@ -509,8 +510,12 @@ export interface ScheduledEvent {
   minute: number
   hour: number
   weekday: number // undefined/null/''/0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
-  /** setCurrentScene shows a scene; restart / reboot (utils/scheduleEvents.ts) carry an empty payload. */
-  event: ScheduledEventName
+  /**
+   * setCurrentScene shows a scene; restart / reboot (ScheduledEventName,
+   * utils/scheduleEvents.ts) carry an empty payload, and so does a scene's
+   * custom event, which is any other name.
+   */
+  event: string
   payload: { sceneId?: string; state?: Record<string, any> }
   disabled?: boolean
 }
@@ -1073,6 +1078,12 @@ export interface FrameEvent {
   canDispatch?: boolean
   /** Can this event be listened to */
   canListen?: boolean
+  /**
+   * Custom events only: who, beyond the scene itself and the frame's own API,
+   * may send this event: 'schedule', 'cloud'. Absent means neither; the device
+   * checks it (docs/events.md).
+   */
+  origins?: EventOrigin[]
 }
 
 export interface FrameOSSettings {

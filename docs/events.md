@@ -11,8 +11,10 @@ send them and what a host does with one. Three files, one job each:
 
 The history — what was wrong, and where this is going — is
 [`event-system-analysis.md`](event-system-analysis.md). This file describes the
-tree as it is; where the hosts still differ it says so
-([Known host differences](#known-host-differences)) instead of pretending.
+tree as it is. Everything under [The model](#the-model) is one piece of Nim,
+`frameos/src/frameos/event_loop.nim`, which the Linux runner, the ESP32 runtime
+and the wasm preview all compile; what is left that differs per host is in
+[Known host differences](#known-host-differences).
 
 ## Changing an event
 
@@ -28,7 +30,7 @@ own: if the contract cannot answer the question you are asking, add a column.
 | Generated file | Read by |
 |---|---|
 | `frameos/src/frameos/events_gen.nim` | Every Nim host (Linux, ESP32, wasm), through `frameos/events.nim` |
-| `embedded/esp32/main/fos_events_gen.h` | The ESP32's C paths (`fos_schedule.c`, `fos_http.c`) |
+| `embedded/esp32/main/fos_events_gen.h` | The ESP32's C edge, `main/fos_events.c` |
 | `frontend/src/utils/eventsContract.gen.ts` | The shared SPA, through `utils/eventsContract.ts`; both Monaco declaration files |
 | `frontend/schema/events.json` | The editor's node catalog, the legacy compiled-scene codegen, the AI context |
 | `frameos/wasm/src/events.gen.ts` | The `frameos-wasm` npm package |
@@ -38,6 +40,7 @@ own: if the contract cannot answer the question you are asking, add a column.
 | Runner of the fixtures | Covers |
 |---|---|
 | `frameos/src/frameos/tests/test_event_fixtures.nim` | `origins`, `log`, `sequences` — the code all three hosts compile |
+| `frameos/src/frameos/tests/test_event_loop.nim` | `dispatcher` — the shared dispatcher around the real interpreter: queueing, origins, the command/event split, the render rule |
 | `embedded/esp32/main/tests/test_fos_events.c` (via `backend/app/tasks/tests/test_esp32_events_contract.py`) | `origins`, against the firmware's C table |
 | `backend/app/utils/tests/test_events_contract.py` | `origins`, against the backend's choice of credential |
 | `cloud/apps/auth-web/src/test/events-contract.test.ts` | `cloudEventRoute`, and `origins` for the schedule validator |
@@ -55,6 +58,48 @@ A name that is not in the contract is a **custom event**: a scene declares it
 in `customEvents`, and every host delivers it by name like any other. Custom
 event names are at most 63 characters (`customEvents.maxNameLength`; the ESP32
 keeps a schedule's event name in 64 bytes).
+
+### The envelope and the dispatcher
+
+What travels is an **envelope**: `{name, payload, target?, origin, seq, tMono}`.
+`origin` is who is saying it, and it is set by the producer's own entry point —
+the HTTP route, the scheduler, the hub client, the driver boundary, a dispatch
+node — never read from the payload. `sendEvent(event, payload, origin)` has no
+default: a new producer has to say who it is.
+
+One dispatcher per runtime takes envelopes off a queue and, for each:
+
+1. asks the allow-list (below) — a refused event is logged as `event:refused
+   {name, origin, reason}` and goes nowhere;
+2. logs it by the contract's `log` policy, with its origin;
+3. routes it. A **device command** becomes a `RuntimeCommand` for the host and
+   is never delivered to a scene. `render` is a request for a render pass.
+   `setCurrentScene` asks the host to select a scene. `turnOn` / `turnOff` ask
+   the host for display power, and then the scene hears them. Everything else
+   is delivered to the scene.
+4. when the queue is empty, applies the render rule (`renderAfter`, below):
+   at most one render request per drain.
+
+The host supplies `EventHost` — request a render, select a scene, display
+power, a runtime command, and how to reach a scene instance — and nothing else.
+There are two hosts, not three: the Linux runner (`runner.nim`: many scenes, a
+thread of its own), and `frameos/single_scene_host.nim` for a runtime that
+holds one scene on one task, which the ESP32 and the preview share — they
+supply who owns a scene switch, what a device command does there and where a
+log line goes.
+On Linux the other threads reach the runner's dispatcher through the bounded
+`eventChannel`; what is sent on the runner thread itself (a scene's dispatch)
+goes straight into the queue. The ESP32 and the preview have one task and no
+channel. On the ESP32 the firmware owns rendering, scene selection and the
+device commands, so its C edge (`main/fos_events.c`, one function for HTTP,
+schedule, cloud, console and buttons) asks the same allow-list and does those
+itself — without waiting for the runtime lock a 90-second render holds — and
+hands everything else to the dispatcher.
+
+The queue has two lanes: **input** (what a person did, arriving in bursts from
+a driver) waits behind everything else, so a reboot or a scene switch is never
+stuck behind a drag. Within a lane, order of arrival. A full lane drops the
+newest event and counts it (`events:dropped`).
 
 **Filters** are string equality on top-level payload keys: an event node's
 `data.config` maps a payload key to the text it must equal (`{"pin": "6"}`
@@ -97,31 +142,49 @@ event. A new origin starts with nothing.
 | `cloud` | FrameOS Cloud, through a hub verb (`cloud.verb` names it) |
 | `system` | The runtime itself |
 
-The allow-list is asked wherever a host can tell where an event came from
-today — `enforcedOrigins`: a scene's dispatch node (`interpreter.nim`), the
-scheduler (`scheduler.nim`, `fos_schedule.c`), the frame's HTTP routes
-(`server/auth.nim`; the backend picks its credential by the same list) and the
-cloud (the frame event route, the schedule validator). The other origins are
-trusted code and are not checked anywhere yet; their lists are descriptive.
-What that comes to:
+The allow-list is asked by the dispatcher, of every envelope, whatever its
+origin. An edge that can answer sooner asks the same question for a better
+answer than a log line: the frame's HTTP routes (a 401; the backend picks its
+credential by the same list), a dispatch node (`interpreter:dispatch:ignored`
+with its node id), the scheduler, the hub client's `scene_event`, the cloud's
+event route and schedule validator. What it comes to:
 
 - The frame access key is printed on the frame's QR code. It may pick a scene;
   it may not `reload`, `restart`, `reboot` or `uploadScenes`.
 - A scene is untrusted code (anyone's store scene). Same four.
 - A schedule is data nobody validated. It may switch, render, power, reload
   and reboot; it may not `uploadScenes`.
-- The cloud sends what has a hub verb. Input, lifecycle and custom events have
-  none: the route answers 404 `unsupported_event`.
+- The lifecycle events are the host's to say, at the moment they are true.
+  Nobody else may emit `init`, `open` or `close` (an admin session may, as a
+  debugging tool).
+- The cloud sends what has a hub verb (`cloud.verb`). `scene_event {name,
+  payload}` is the generic one: `button`, `setSceneState` and custom events
+  ride on it. Keys and pointers have none: the route answers 404
+  `unsupported_event`. `cloud.since` is the FrameOS version whose frames know
+  the verb; an older frame gets `cloud.before` where there is one.
 
-A refused event is dropped and logged (`interpreter:dispatch:ignored` with
-`reason: "runtimeVerb"`, `scheduler:refused` / `schedule:refused`), or
-answered 401/404 on HTTP.
+**Custom events** may always be sent by the scene itself, the frame's drivers,
+its HTTP API and the preview (`customEvents.origins`). A **schedule** or the
+**cloud** may fire one only at a scene that says so — `origins` on the event's
+declaration:
 
-The lists for non-command events are wide on purpose: they record what each
-origin *can* do today, because narrowing one is a behaviour change for scenes
-in the wild. When the origin becomes part of the event envelope
-(`event-system-analysis.md` §4.2) each narrowing is one line in the contract
-and one fixture.
+```json
+"customEvents": [{"name": "nextPage", "origins": ["schedule", "cloud"]}]
+```
+
+Which origins can be opted into is `customEvents.declarableOrigins`. The edges
+that cannot see the scene (the scheduler, the hub verb, a control plane's
+schedule validator) let such an event through, and the dispatcher asks the
+scene that is showing: an undeclared one is `event:refused` with `reason:
+"undeclared"`.
+
+A refused event is dropped and logged (`event:refused`,
+`interpreter:dispatch:ignored` with `reason: "runtimeVerb"`,
+`scheduler:refused` / `schedule:refused`), or answered 401/404 on HTTP.
+
+The lists for input events are still wide: a schedule or a scene may say
+`button`, because scenes in the wild use that to reuse a handler. Narrowing
+one is a line in the contract and a fixture.
 
 ### Payloads, units and the wire
 
@@ -155,10 +218,16 @@ dispatch forms.
 - **`coalesce`** — `latest`: consecutive queued events of this name collapse
   to the newest (`mouseMove`), and the first other event behind them is kept in
   order.
-- **`renderAfter`** — whether the host renders once the event is handled:
-  `never`, `always`, or `if-state-changed` (a handler changed scene state or
-  dispatched `render`). This is the rule the hosts converge on; today only
-  `never` for pointer events is honoured everywhere — see below.
+- **`renderAfter`** — whether the frame renders once the event is handled,
+  decided by the dispatcher when its queue is empty: `never` (pointer events: a
+  frame does not render because a finger moved — a scene that wants a picture
+  dispatches `render`), `always`, or `if-state-changed` (a handler changed the
+  scene's state). One exception, because without it a slideshow would never
+  stop refreshing: an event dispatched **from inside a render** (or an `init`,
+  `open` or `close`), and whatever its handlers dispatch in turn, is the scene
+  talking to itself and does not render by changing state. It renders by
+  dispatching `render`. State an app keeps to itself is not scene state: say
+  `render` for that too.
 - **`hosts`** — whether a host produces or handles the event at all. Pointer
   and keyboard events are described for every host and are
   `hosts.esp32: false`: no board in the tree has touch, and nothing is built
@@ -170,10 +239,13 @@ dispatch forms.
 ### Dispatch from a scene
 
 What a handler dispatches is **queued**: it is delivered after the run that
-dispatched it, never inside it. A run may dispatch 64 events; the first one
-over is logged (`reason: "dispatchBudget"`), the rest are dropped.
-`render` dispatched while handling `render` is ignored
-(`reason: "renderSelfDispatch"`).
+dispatched it, never inside it — on every host. A run may dispatch 64 events;
+the first one over is logged (`reason: "dispatchBudget"`), the rest are
+dropped. `render` dispatched while handling `render` is ignored
+(`reason: "renderSelfDispatch"`). A scene whose handler re-dispatches its own
+event never empties the queue, so one drain delivers at most 32 events and
+hands back with the rest still queued: the render loop (or the host's one task)
+gets its turn, and nothing is dropped.
 
 ### `context` in JavaScript
 
@@ -191,23 +263,22 @@ list). `sceneStateChanged` — the frame's state is worth re-reading.
 
 ## Known host differences
 
-The interpreter — delivery by name, filters, state, the dispatch rules above —
-is one piece of Nim that all three hosts compile, and the fixtures run it. What
-each host does *around* it is still three pieces of code, and they differ.
-These are not the spec; they are what is left to fix, and none of them has a
-fixture yet because no shared code exists to hold to one
-(`event-system-analysis.md` §4.3, "one dispatcher").
+The dispatcher is shared, so these are about what a host *is*, not about what
+an event means:
 
 | Behaviour | Linux | ESP32 | wasm preview |
 |---|---|---|---|
-| A handler's dispatch is delivered | after the run (queue) | now, nested (depth 4) | now — and dropped if already inside a handler |
-| Render after an event | only if the scene dispatches `render` | after a `button` a listener handled; otherwise only on `render` | always, except pointer events |
-| `turnOn` / `turnOff` | drives the display, then the scene hears it | the scene hears it; no display action | the scene hears it |
-| A scheduled `reload` | reloads | goes to the scene as an unknown event | — |
-| `setSceneState` from the cloud | rides on `set_current_scene` for the scene last reported | refused (the verb drops `state`) | — |
-| `close` on `reload` / `uploadScenes` | not sent | not sent | not sent |
+| Display power (`turnOn` / `turnOff`) | the driver acts, then the scene hears it | nothing to switch (e-paper holds its image unpowered); the scene hears it | nothing to switch; the scene hears it |
+| Device commands | all five | `metrics` has no host; the rest are the firmware's (`fos_events.c`) | none: logged and ignored |
+| When a queued event is delivered | the runner thread's message loop | on the task that sent it, before `frameos_nim_send_event` returns; what a render dispatched, right after the render | before `frameos_wasm_event` returns; right after a render |
+| An event aimed at a scene that is not the current one (`target`) | delivered if that scene is in memory | dropped: one resident scene | dropped |
+| `close` on `reload` / `uploadScenes` | not sent | not sent | — |
 
-A fixture runner for the wasm *host* (the bundle under node) belongs with that
-work: the cloud's CI runs the wasm runtime of the pinned release, not of the
-tree, so until a job builds the bundle from source such a runner would test
-last month's code.
+A frame on firmware older than `cloud.since` does not know `scene_event`: the
+cloud sends it `cloud.before` where the contract has one (`setSceneState` rides
+on `set_current_scene`, Linux only, as before) and refuses the rest.
+
+A fixture runner for the wasm *host* (the bundle under node) is still missing:
+the cloud's CI runs the wasm runtime of the pinned release, not of the tree, so
+until a job builds the bundle from source such a runner would test last month's
+code. The dispatcher the bundle compiles is covered by `test_event_loop.nim`.

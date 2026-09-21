@@ -18,7 +18,13 @@ P1 (§5) shipped next: `docs/events-contract.json`, its generator, the prose
 spec `docs/events.md` and the conformance corpus `docs/event-fixtures.json`
 with runners. §2.1 ("the catalog") and the table in §3.1 describe the tree
 before it — the thirteen lists are generated tables or imports of them now,
-and `docs/events.md` says which. Everything else stands.
+and `docs/events.md` says which.
+
+P2 (§5) shipped after that: `frameos/src/frameos/event_loop.nim` is the one
+dispatcher all three hosts compile. §2.2 ("transport, per host"), §3.2, §3.3
+and §3.7 describe the tree before it; `docs/events.md` describes it now, and
+its "Known host differences" is what is left of §3.3. §4.5 onwards (input v2,
+routing, focus, timers, the driver thread) stands as the plan.
 
 Scope: the scene event layer on every host that runs scenes — the Linux runtime
 (Raspberry Pi), the ESP32 firmware, the browser wasm preview — and the control
@@ -628,7 +634,7 @@ and what changed because of it:
 Left for the later steps, on purpose:
 
 - The contract's `origins` are enforced where a host can tell an origin today
-  (`enforcedOrigins`); the envelope that carries it everywhere is P2, and with
+  (`enforcedOrigins`, a column P2 deleted: every origin is asked now); the envelope that carries it everywhere is P2, and with
   it the narrowing of the input and lifecycle rows (decision 5 in §6
   included: a custom event's own `origins`).
 - `renderAfter` is the rule the hosts converge on, not what they do: only
@@ -644,9 +650,85 @@ Left for the later steps, on purpose:
 - The ESP32's C switches use the generated names and allow-list but are still
   three switches; they collapse in P2.
 
-**P2 — one dispatcher.** `event_loop.nim`, origin tagging, command/event split,
-queued delivery on ESP32 and wasm, the `renderAfter` rule, the cloud
-`scene_event` verb. Delete the C switches and the three deny-lists.
+**P2 — one dispatcher.** Shipped: `frameos/src/frameos/event_loop.nim`, the
+envelope with its origin (`sendEvent` has no default origin — a new producer
+says who it is), the command/event split (`RuntimeCommand`, generated from the
+contract's device commands), queued delivery on the ESP32 and in the preview
+(the depth-4 guard and the `handlingEvent` latch are gone), the `renderAfter`
+rule, custom events' own `origins` (decision 5), the cloud's `scene_event`
+verb, and a `dispatcher` section in the fixtures with a runner around the real
+interpreter. What changed for a scene, deliberately:
+
+- A handler that changes scene state is drawn, on every host, without
+  dispatching `render`. Linux used to need the dispatch; the ESP32 rendered
+  whenever a `button` listener ran, the preview after every event.
+- A press nobody's state reacts to draws nothing, on every host.
+- `init`, `open` and `close` are the host's to say: a scene, a schedule and the
+  access key can no longer fake them.
+- A schedule fires a custom event only at a scene that declares it with
+  `origins: ["schedule"]`. The Schedule panel never offered custom events, so
+  this reaches schedules somebody wrote by hand.
+- On the ESP32 and in the preview a handler's dispatch now runs after the
+  handler, not inside it, and a scene-dispatched `setCurrentScene` switches
+  scenes in the preview too.
+
+Where it departs from §4.3, and why:
+
+- **The render rule has an exception the proposal did not see.** A slideshow's
+  render dispatches `setSceneState` to turn its page; with a plain
+  "if state changed, render" every render causes the next, forever, on
+  e-paper. An event dispatched from inside the host's own run of a scene (a
+  render, `init`, `open`, `close`) — and whatever its handlers dispatch in turn
+  — renders only by dispatching `render`. For the dispatcher to know, what is
+  sent on the runner thread goes straight into its queue instead of through
+  the channel (`channels.localEventSink`).
+- **Two lanes, but only input waits.** "Commands ahead of input" as written
+  would reorder a scene's own dispatches (a custom event, then a
+  `setCurrentScene`). Only the input class has its own lane.
+- **The ESP32's switches collapsed into C, not into Nim.** Rendering, scene
+  selection and the device commands are the firmware's, and the cloud
+  WebSocket task must not park behind the runtime lock a 90-second render
+  holds. `main/fos_events.c` is the one C edge for HTTP, schedule, cloud,
+  console and buttons: it asks the generated allow-list, does the firmware's
+  own part, and hands the rest to the dispatcher. The Nim host's callbacks land
+  in the same C functions, so a scene's dispatch and an HTTP request take the
+  same path from there.
+- **The deny-lists are one question asked in more than one place.** The
+  dispatcher asks `originMayEmit` of every envelope. The HTTP route, the
+  dispatch node, the scheduler and the hub verb still ask first, because a 401
+  or a log line with a node id is a better answer than `event:refused`.
+- A full lane drops the newest event and counts it. "Never drop `pointerUp`,
+  synthesize `pointerCancel`" needs the P3 payloads.
+
+Both control planes got the same things: the Events panel's custom event
+editor has "A schedule may fire it" / "FrameOS Cloud may send it", the Schedule
+panel offers the custom events a scene declares for it, and the cloud's event
+route sends `button`, `setSceneState` and declared custom events as
+`scene_event` (a frame older than 2026.9.21 keeps the `set_current_scene`
+stand-in for `setSceneState`, and is told to update for the rest). The
+self-hosted backend already forwards any event to the frame's `/event/<name>`
+as `http:admin`.
+
+Cleaned up afterwards, because a dispatcher that only adds code has not
+replaced anything: the ESP32 runtime and the preview share one host
+(`frameos/single_scene_host.nim` — their two copies of the scene lifetime,
+the lifecycle events and the EventHost had already drifted: the preview leaked
+its JS app runtimes on every scene switch, and handed a switch's `state` to
+`init` as persisted state instead of applying its public fields);
+`enforcedOrigins` left the contract (every origin is asked); the C table lost
+the policy columns only the Nim dispatcher reads; `dispatchSceneEvent`,
+`triggerRender`, `isControlEvent`, `scheduleMayFire`, `eventCoalescesLatest`
+and `refusedEvents` are gone.
+
+Left for the later steps: no `close` on `reload` / `uploadScenes`, no
+`destroy`, no `reason` on `open` (§4.4); a scheduled custom event goes to the
+scene showing at that minute, not to the scene it was declared in (that needs
+a `target` on the schedule entry — §6 decision 2); no fixture runner for the
+wasm host; on ESP32 hardware the console, render-rule, queued-dispatch,
+scene-switch and device-command paths have run (a reTerminal E1002 — it found
+a nil dereference in the host's `selectScene` that the preview had hidden,
+since wasm does not trap on address 1), the cloud and schedule paths have not
+(`docs/manual-testing-todo.md`).
 
 **P3 — input v2.** Pointer/keyboard/button payloads with aliases, host cursor,
 hotplug, grab, layouts, gestures, struct ABI, preview keyboard forwarding.

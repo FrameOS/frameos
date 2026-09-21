@@ -203,7 +203,7 @@ proc queueRuntimeControl(request: Request, action: string, eventName: string) {.
       # SVG font lookup at the assets folder through a global string, which
       # is the render thread's to write.
       discard readConfig()
-    sendEvent(eventName, %*{})
+    sendEvent(eventName, %*{}, eoHttpAdmin)
     jsonResponse(request, Http200, %*{"status": "ok", "action": action})
   except CatchableError as e:
     log(%*{"event": action & ":error", "error": e.msg})
@@ -512,13 +512,13 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
           # Driver setup restarts the runtime itself once it is done (it may
           # even reboot); a restart queued here would race it.
           if sjDriverSetup notin jobs:
-            sendEvent("restart", %*{})
+            sendEvent("restart", %*{}, eoSystem)
         elif runtimeAction == "reload":
-          sendEvent("reload", %*{})
+          sendEvent("reload", %*{}, eoSystem)
         queueSettingsJobs(jobs, $preview.next)
         let nextAction = payload{"next_action"}.getStr("")
         if nextAction == "render" and runtimeAction != "restart":
-          sendEvent("render", %*{})
+          sendEvent("render", %*{}, eoHttpAdmin)
         let framePayload = frameApiPayload(connectionsState, exposeSecrets = canAccessFrameSecrets(request))
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = "application/json"
@@ -592,6 +592,6 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
         except JsonParsingError:
           jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
           return
-      sendEventOwned("uploadScenes", move(payload))
+      sendEventOwned("uploadScenes", move(payload), eoHttpAdmin)
       jsonResponse(request, Http200, %*{"status": "ok"})
   )

@@ -20,7 +20,7 @@ suite "Scheduler Tests (Various Time Configurations)":
       done = not success
 
   # Helper to retrieve any triggered events from eventChannel
-  proc drainEvents(): seq[(Option[SceneId], string, JsonNode)] =
+  proc drainEvents(): seq[EventMessage] =
     result = @[]
     while true:
       let (success, item) = eventChannel.tryRecv()

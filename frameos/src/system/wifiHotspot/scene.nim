@@ -104,7 +104,7 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
         if payload.hasKey(key) and payload[key] != self.state{key}:
           self.state[key] = copy(payload[key])
     if context.payload.hasKey("render"):
-      sendEvent("render", %*{})
+      sendEvent("render", %*{}, eoScene)
   of "setCurrentScene":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       let payload = context.payload["state"]

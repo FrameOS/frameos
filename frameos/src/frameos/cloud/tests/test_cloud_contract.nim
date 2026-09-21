@@ -8,6 +8,7 @@ import std/[json, os, unittest]
 
 import ../contract
 import ../hub_client
+import ../../events
 import ../../types
 
 const FixturesPath = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." /
@@ -21,7 +22,7 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
   CloudVerbContext(
     frameConfig: FrameConfig(mode: "test", device: "web_only", width: 800, height: 480),
     scopes: scopes,
-    sendEventFn: proc(event: string, payload: JsonNode): bool {.gcsafe.} =
+    sendEventFn: proc(event: string, payload: JsonNode, origin: EventOrigin): bool {.gcsafe.} =
       recorded.events.add(event)
       true,
     persistSettingsFn: proc(payload: JsonNode) {.gcsafe.} =

@@ -420,6 +420,18 @@ proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
       return jsonToJS(ctx, e.context.payload)
   of "hasImage":
     return nimBoolToJS(ctx, e.context.hasImage)
+  # The canvas this run draws on, in its own pixels: the whole scene's during a
+  # render, a cell's inside render/split — which is what a code node that lays
+  # something out needs, and the frame's size cannot tell it. Undefined when
+  # the run has no canvas (an event other than "render"), like in an app.
+  of "imageWidth":
+    if e.context.hasImage and not e.context.image.isNil:
+      return nimIntToJS(ctx, e.context.image.width.int32)
+    return jsUndefSentinel(ctx)
+  of "imageHeight":
+    if e.context.hasImage and not e.context.image.isNil:
+      return nimIntToJS(ctx, e.context.image.height.int32)
+    return jsUndefSentinel(ctx)
   else:
     return jsUndefSentinel(ctx)
 

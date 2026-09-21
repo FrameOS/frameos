@@ -10,13 +10,6 @@ import frameos/utils/local_time
 import sequtils
 import os
 
-# What a schedule entry may fire is the contract's: every event whose `origins`
-# (docs/events-contract.json) lists "schedule". What is left out is a runtime
-# verb (uploadScenes) reserved for the server/hub paths that stamp an origin
-# on what they deliver.
-proc scheduleMayFire*(event: string): bool =
-  originMayEmit(eoSchedule, event)
-
 var thread: Thread[FrameOS]
 
 # Returns the weekday as 1=Monday..7=Sunday
@@ -136,12 +129,14 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
 
   for ev in matched:
     # A schedule is data — it arrives from frame.json, the backend, or the
-    # cloud's set_schedule verb, none of which validates the event name. The
-    # runner treats "uploadScenes" as "replace every scene with this payload"
-    # with no origin stamp, which would let a schedule entry smuggle scenes
-    # past the guards the direct push goes through. Schedules may switch,
-    # render, power and reboot; they may not rewrite what is installed.
-    if not scheduleMayFire(ev.event):
+    # cloud's set_schedule verb, none of which validates the event name. What
+    # it may fire is the contract's (docs/events-contract.json, the `schedule`
+    # origin): it may switch, render, power and reboot; it may not rewrite what
+    # is installed (`uploadScenes`) or fake a lifecycle event. The dispatcher
+    # would refuse those too — this is the log line that names the entry. A
+    # custom event is queued, and the dispatcher delivers it when the scene
+    # showing declares it with `origins: ["schedule"]` (frameos/event_loop).
+    if not originMayQueue(eoSchedule, ev.event):
       log(%*{
         "event": "scheduler:refused",
         "id": ev.id,
@@ -160,7 +155,7 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
     if eventPolicy(ev.event).endsRuntime:
       {.gcsafe.}:
         persistFiredMinute(minuteKey(dt))
-    sendEvent(ev.event, ev.payload)
+    sendEvent(ev.event, ev.payload, eoSchedule)
 
 proc start*(self: Scheduler) =
   # NTP step corrections (routine on RTC-less Pis) can replay or repeat a

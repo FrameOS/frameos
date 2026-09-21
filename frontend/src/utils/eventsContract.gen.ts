@@ -49,7 +49,13 @@ export interface ContractEventSpec {
   since?: string
   /** Offered by the Schedule panel. `endsRuntime`: the runtime does not survive it. */
   schedule?: { label: string; description?: string; since?: string; endsRuntime?: boolean }
-  cloud?: { verb: string; profiles?: string[]; eventRoute?: boolean }
+  cloud?: {
+    verb: string
+    profiles?: string[]
+    eventRoute?: boolean
+    since?: string
+    before?: { verb: string; profiles?: string[] }
+  }
 }
 
 export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = {
@@ -60,9 +66,6 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "sceneState": "read",
     "origins": [
       "system",
-      "scene",
-      "schedule",
-      "http:write",
       "http:admin"
     ],
     "renderAfter": "if-state-changed",
@@ -108,9 +111,6 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "dispatch": false,
     "origins": [
       "system",
-      "scene",
-      "schedule",
-      "http:write",
       "http:admin"
     ],
     "renderAfter": "if-state-changed",
@@ -129,9 +129,6 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "dispatch": false,
     "origins": [
       "system",
-      "scene",
-      "schedule",
-      "http:write",
       "http:admin"
     ],
     "renderAfter": "never",
@@ -346,6 +343,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "schedule",
       "http:write",
       "http:admin",
+      "cloud",
       "system"
     ],
     "renderAfter": "if-state-changed",
@@ -355,6 +353,10 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "linux": true,
       "esp32": true,
       "wasm": true
+    },
+    "cloud": {
+      "verb": "scene_event",
+      "since": "2026.9.21"
     }
   },
   "setSceneState": {
@@ -380,10 +382,14 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "wasm": true
     },
     "cloud": {
-      "verb": "set_current_scene",
-      "profiles": [
-        "linux"
-      ]
+      "verb": "scene_event",
+      "since": "2026.9.21",
+      "before": {
+        "verb": "set_current_scene",
+        "profiles": [
+          "linux"
+        ]
+      }
     }
   },
   "setCurrentScene": {
@@ -542,7 +548,6 @@ export const customEventPolicy: Pick<ContractEventSpec, 'origins' | 'renderAfter
     "driver",
     "preview",
     "scene",
-    "schedule",
     "http:write",
     "http:admin",
     "system"
@@ -552,13 +557,16 @@ export const customEventPolicy: Pick<ContractEventSpec, 'origins' | 'renderAfter
   "log": "full"
 }
 
+/** Origins a scene opts into per custom event: `origins` on its declaration. */
+export const customEventDeclarableOrigins: readonly EventOrigin[] = ["schedule", "cloud"]
+
 /** Log lines, not scene events (docs/events-contract.json `logEvents`). */
 export const sceneChangedLogEvents: readonly string[] = ["render:scene", "render:sceneChange", "event:setCurrentScene"]
 /** Log lines, not scene events (docs/events-contract.json `logEvents`). */
 export const sceneStateChangedLogEvents: readonly string[] = ["event:setSceneState", "event:setCurrentScene", "event:uploadScenes"]
 
 /** `context` keys per JavaScript sandbox. */
-export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage"]
+export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight"]
 export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight"]
 
 /** Ambient declarations for the Monaco editors: event names and payloads. */
@@ -608,6 +616,10 @@ export const codeContextMembers = `  /** The name of the event this run is handl
   loopKey: string;
   /** Whether the run carries a canvas. */
   hasImage: boolean;
+  /** Width of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
+  imageWidth?: number;
+  /** Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
+  imageHeight?: number;
 `
 
 /** The members of a JavaScript app's `FrameOSContext`. */
@@ -625,8 +637,8 @@ export const appContextMembers = `  /** The name of the event this run is handli
   nextSleep: number;
   /** The canvas, when there is one. */
   image?: FrameOSImageRef;
-  /** Width of the canvas. */
+  /** Width of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
   imageWidth?: number;
-  /** Height of the canvas. */
+  /** Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
   imageHeight?: number;
 `

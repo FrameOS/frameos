@@ -28,6 +28,7 @@
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_defaults.h"
+#include "fos_events.h"
 #include "fos_buttons.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -313,6 +314,10 @@ void app_main(void)
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
+    /* The other half of what the Nim dispatcher hands back to the firmware:
+     * fos_scenes_init installed the scene-select hook, this installs the
+     * device-command one. Before any producer (HTTP, cloud, console) exists. */
+    fos_events_init();
     BOOTMEM("after-scenes-init");
     /* Needs the Nim runtime (chrono) and /state (the stored slice): from
      * here localtime(), QuickJS Date and the schedule run in the frame's

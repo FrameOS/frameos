@@ -11,6 +11,7 @@ export ids
 import frameos/spool
 export spool
 import frameos/js_runtime/burrito
+import frameos/events_gen
 
 const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
 
@@ -323,6 +324,9 @@ type
     getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
+    ## Custom event name -> the origins its declaration opts into, on top of
+    ## what every custom event gets (docs/events.md, "Custom events").
+    customEventOrigins*: Table[string, set[EventOrigin]]
 
   FontStyle* = ref object
     typeface*: Typeface
@@ -376,6 +380,7 @@ type
     ## set): anyone's code, whichever control plane installed it. Trust
     ## decisions key on this, not on who uploaded the payload.
     storeOrigin*: bool
+    customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
@@ -409,6 +414,8 @@ type
     settings*: FrameSceneSettings
     ## Template provenance the editor/cloud writes ({href, storeSceneId, version}); nil when absent.
     origin*: JsonNode
+    ## The scene's custom event declarations ([{name, origins?, …}]); nil when absent.
+    customEvents*: JsonNode
 
   # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene
@@ -541,6 +548,9 @@ type
     ## Compiled scenes initialized since their last "open": the generated init
     ## fires "open" itself, so the runner must not fire it a second time.
     openedByInit*: seq[SceneId]
+    ## The scene event dispatcher (frameos/event_loop.EventLoop, which imports
+    ## this module — hence the base type). Made by the runner on first use.
+    eventLoop*: RootRef
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
     localAccessRender*: AppRoot

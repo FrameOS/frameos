@@ -1,9 +1,16 @@
 import { MakeLogicType, actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { v4 as uuidv4 } from 'uuid'
 
-import { ScheduledEvent, ScheduledEventName, StateField, FrameId } from '../../../../types'
+import { ScheduledEvent, StateField, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { isScheduledSystemEvent, ScheduledSystemEventName } from '../../../../utils/scheduleEvents'
+import {
+  isScheduledCustomEvent,
+  isScheduledSystemEvent,
+  schedulableCustomEventGroups,
+  scheduledEventIsSceneChange,
+  ScheduledCustomEventGroup,
+  ScheduledSystemEventName,
+} from '../../../../utils/scheduleEvents'
 import type { FrameType } from '../../../../types'
 import type { DeepPartial } from 'kea-forms/lib/types'
 import type { FrameScene, FrameSchedule } from '../../../../types'
@@ -20,6 +27,7 @@ const scheduleInsertStepMinutes = 30
 export interface scheduleLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  customEventGroups: ScheduledCustomEventGroup[]
   disabled: boolean
   dropIndex: number | null
   dropZoneVisible: boolean
@@ -67,9 +75,9 @@ export interface scheduleLogicActions {
   }
   setEventType: (
     id: string,
-    eventType: ScheduledEventName
+    eventType: string
   ) => {
-    eventType: ScheduledEventName
+    eventType: string
     id: string
   }
   setSceneSearch: (sceneSearch: string) => {
@@ -89,6 +97,7 @@ export interface scheduleLogicMeta {
     disabled: (schedule: FrameSchedule | undefined) => boolean
     scenes: (frame: FrameType, frameForm: Partial<FrameType>) => FrameScene[] | undefined
     sortedScenes: (scenes: FrameScene[] | undefined) => FrameScene[]
+    customEventGroups: (sortedScenes: FrameScene[]) => ScheduledCustomEventGroup[]
     filteredScenes: (sortedScenes: FrameScene[], sceneSearch: string) => FrameScene[]
     fieldsForScene: (frame: FrameType, frameForm: Partial<FrameType>) => Record<string, StateField[]>
     eventCountsByScene: (events: ScheduledEvent[]) => Record<string, number>
@@ -119,8 +128,8 @@ export const scheduleLogic = kea<scheduleLogicType>([
     addSystemEvent: (systemEvent: ScheduledSystemEventName) => ({
       event: newSystemScheduledEvent(systemEvent),
     }),
-    /** Switch an existing entry between showing a scene and a system action. */
-    setEventType: (id: string, eventType: ScheduledEventName) => ({ id, eventType }),
+    /** Switch an existing entry between showing a scene, a system action and a scene's custom event. */
+    setEventType: (id: string, eventType: string) => ({ id, eventType }),
     editEvent: (id: string) => ({ id }),
     closeEvent: (id: string) => ({ id }),
     deleteEvent: (id: string) => ({ id }),
@@ -191,6 +200,11 @@ export const scheduleLogic = kea<scheduleLogicType>([
       (scenes: scheduleLogicValues['scenes']) =>
         [...(scenes ?? [])].toSorted((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
     ],
+    customEventGroups: [
+      (s) => [s.sortedScenes],
+      (sortedScenes: scheduleLogicValues['sortedScenes']): ScheduledCustomEventGroup[] =>
+        schedulableCustomEventGroups(sortedScenes),
+    ],
     filteredScenes: [
       (s) => [s.sortedScenes, s.sceneSearch],
       (sortedScenes: scheduleLogicValues['sortedScenes'], sceneSearch: scheduleLogicValues['sceneSearch']) => {
@@ -221,7 +235,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
       (s) => [s.events],
       (events: scheduleLogicValues['events']): Record<string, number> =>
         events.reduce((acc, event) => {
-          const sceneId = isScheduledSystemEvent(event.event) ? null : event.payload?.sceneId
+          const sceneId = scheduledEventIsSceneChange(event) ? event.payload?.sceneId : null
           if (sceneId) {
             acc[sceneId] = (acc[sceneId] ?? 0) + 1
           }
@@ -387,12 +401,12 @@ function newSystemScheduledEvent(systemEvent: ScheduledSystemEventName): Schedul
   }
 }
 
-/** Keep id/time/enabled, swap what the entry does. A system action carries no payload. */
-export function withEventType(event: ScheduledEvent, eventType: ScheduledEventName): ScheduledEvent {
+/** Keep id/time/enabled, swap what the entry does. A system action and a custom event carry no payload. */
+export function withEventType(event: ScheduledEvent, eventType: string): ScheduledEvent {
   if (event.event === eventType) {
     return event
   }
-  if (isScheduledSystemEvent(eventType)) {
+  if (isScheduledSystemEvent(eventType) || isScheduledCustomEvent(eventType)) {
     return { ...event, event: eventType, payload: {} }
   }
   return {

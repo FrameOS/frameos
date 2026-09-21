@@ -31,6 +31,14 @@ type
     elFull = "full"
     elNameOnly = "name-only"
     elNone = "none"
+  RuntimeCommand* = enum
+    ## The device commands: handled by the host before scene dispatch, never
+    ## delivered to a scene (event_loop.nim).
+    rcMetrics = "metrics"
+    rcReload = "reload"
+    rcRestart = "restart"
+    rcReboot = "reboot"
+    rcUploadScenes = "uploadScenes"
   EventPolicy* = object
     ## No strings and no refs: a policy is read on every thread that sends or
     ## drains events, once per event.
@@ -48,7 +56,8 @@ const
   EventsContractVersion* = 1
   PointerWireMax* = 32767
   CustomEventMaxNameLength* = 63
-  EnforcedEventOrigins*: set[EventOrigin] = {eoScene, eoSchedule, eoHttpWrite, eoCloud}
+  ## Origins a scene opts into per custom event (`origins` on its declaration).
+  CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 
   evInit* = "init"
   evRender* = "render"
@@ -97,7 +106,7 @@ const
   ContractEventPolicies*: array[20, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
-      origins: {eoSystem, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin},
+      origins: {eoSystem, eoHttpAdmin},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # render
@@ -107,12 +116,12 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # open
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
-      origins: {eoSystem, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin},
+      origins: {eoSystem, eoHttpAdmin},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # close
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
-      origins: {eoSystem, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin},
+      origins: {eoSystem, eoHttpAdmin},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # keyDown
@@ -157,7 +166,7 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # button
       class: ecInput, device: edButton, listen: true, dispatch: false,
-      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setSceneState
@@ -201,7 +210,7 @@ const
 
   CustomEventPolicy* = EventPolicy(
     class: ecCustom, device: edNone, listen: true, dispatch: true,
-    origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+    origins: {eoDriver, eoPreview, eoScene, eoHttpWrite, eoHttpAdmin, eoSystem},
     renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
     linux: true, esp32: true, wasm: true)
 

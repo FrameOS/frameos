@@ -5,11 +5,18 @@ EVENTS_CONTRACT_VERSION = 1
 # origin -> contract events it may not emit. `http:write` is the frame access
 # key: what it is refused needs an admin session or the serverApiKey instead.
 REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {
-    "scene": frozenset({"reload", "restart", "reboot", "uploadScenes"}),
-    "schedule": frozenset({"uploadScenes"}),
-    "http:write": frozenset({"reload", "restart", "reboot", "uploadScenes"}),
-    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "mouseMove", "mouseDown", "mouseUp", "wheel", "button", "reload"}),
+    "driver": frozenset({"init", "open", "close", "turnOn", "turnOff", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
+    "preview": frozenset({"init", "open", "close", "keyDown", "keyUp", "wheel", "turnOn", "turnOff", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
+    "scene": frozenset({"init", "open", "close", "reload", "restart", "reboot", "uploadScenes"}),
+    "schedule": frozenset({"init", "open", "close", "uploadScenes"}),
+    "http:write": frozenset({"init", "open", "close", "reload", "restart", "reboot", "uploadScenes"}),
+    "http:admin": frozenset({}),
+    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "mouseMove", "mouseDown", "mouseUp", "wheel", "reload"}),
+    "system": frozenset({}),
 }
+
+# Origins a scene opts into per custom event: `origins` on its declaration.
+CUSTOM_EVENT_DECLARABLE_ORIGINS: frozenset[str] = frozenset({"schedule", "cloud"})
 
 DEVICE_COMMAND_EVENTS: frozenset[str] = frozenset({"metrics", "reload", "restart", "reboot", "uploadScenes"})
 

@@ -14,6 +14,7 @@ import frameos/types
 import lib/tz
 import std/times
 import frameos/channels
+import frameos/single_scene_host
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/planner
@@ -26,6 +27,10 @@ proc espLog(msg: cstring) {.importc: "frameos_nim_log_hook", cdecl.}
 proc requestSceneSelect(sceneId: cstring): bool {.importc: "frameos_nim_request_scene_select", cdecl.}
   ## Queues a scene switch with the firmware (fos_scenes_select), which owns
   ## it: the scene may have to come off flash, and the choice is persisted.
+proc requestRuntimeCommand(command: cstring, payloadJson: cstring): bool {.importc: "frameos_nim_request_runtime_command", cdecl.}
+  ## A device command a scene-side producer reached the dispatcher with
+  ## (`metrics` is the only one a scene may say). The firmware owns them all:
+  ## main/fos_events.c.
 
 proc log*(msg: string) =
   espLog(msg.cstring)
@@ -35,20 +40,12 @@ proc log*(msg: string) =
 var
   frameConfig: FrameConfig
   logger: Logger
-  currentScene: FrameScene
-  currentExported: ExportedInterpretedScene
-  currentSceneId: Option[SceneId] = none(SceneId)
   defaultSceneId: Option[SceneId] = none(SceneId)
   scenesLoadedCount = 0
-  renderRequested = false
-  # Nesting of synchronously dispatched scene events (see the event hook).
-  embeddedEventDepth = 0
-  # The payload of a scene-dispatched `setCurrentScene` that carried `state`,
-  # held until the firmware has made that scene the current one.
-  pendingSceneSwitchId = ""
-  pendingSceneSwitchPayload: JsonNode = nil
-
-const MaxEmbeddedEventDepth = 4
+  # The scene's lifetime, its lifecycle events and the dispatcher's EventHost:
+  # shared with the wasm preview (frameos/single_scene_host). Allocated here so
+  # the status procs below can be asked before initRuntime.
+  host = SingleSceneHost()
 
 type
   SceneCatalogEntry* = object
@@ -70,14 +67,10 @@ proc sceneCount*(): int =
   scenesLoadedCount
 
 proc hasScene*(): bool =
-  not currentExported.isNil or defaultSceneId.isSome
+  not host.exported.isNil or defaultSceneId.isSome
 
 proc currentSceneName*(): string =
-  if not currentExported.isNil and currentExported.name.len > 0:
-    return currentExported.name
-  if currentSceneId.isSome:
-    return currentSceneId.get().string
-  ""
+  host.sceneName
 
 proc sceneInfoJson*(): string =
   ## The scene list as the console, the USB API and the cloud see it.
@@ -111,32 +104,47 @@ proc sceneInfoJson*(): string =
     "loaded": scenesLoadedCount,
     "available": available,
     "hasScene": hasScene(),
-    "currentSceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
+    "currentSceneId": if host.sceneId.isSome: host.sceneId.get().string else: "",
     "currentSceneName": currentSceneName(),
     "defaultSceneId": if defaultSceneId.isSome: defaultSceneId.get().string else: "",
-    "renderRequested": renderRequested,
+    "renderRequested": host.renderRequested,
     "scenes": sceneItems,
   }
   $payload
 
 proc sceneStateJson*(): string =
-  if currentScene.isNil or currentScene.state.isNil or currentScene.state.kind != JObject:
+  if host.scene.isNil or host.scene.state.isNil or host.scene.state.kind != JObject:
     return "{}"
-  $currentScene.state
+  $host.scene.state
 
 proc takeRenderRequested*(): bool =
-  result = renderRequested
-  renderRequested = false
+  host.takeRenderRequested()
 
-proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.exportc, cdecl.} =
+proc originFromMask(mask: cuint): Option[EventOrigin] =
+  ## The firmware names an origin by its bit in fos_events_gen.h
+  ## (`FOS_ORIGIN_*` = 1 shl the origin's place in the contract) — the same
+  ## order `EventOrigin` is generated in.
+  for origin in EventOrigin:
+    if mask == (1.cuint shl ord(origin)):
+      return some(origin)
+  none(EventOrigin)
+
+proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson: cstring): bool {.exportc, cdecl.} =
+  ## One event from the firmware, stamped with who said it. It is queued and
+  ## the queue is drained before this returns (one task: nobody else will), so
+  ## what its handlers dispatch is delivered here too, after them. False when it
+  ## came to nothing: an origin that may not say it, no scene, bad JSON.
   try:
+    let origin = originFromMask(originMask)
+    if origin.isNone:
+      log("event " & $eventName & " dropped: unknown origin")
+      return false
     let payload =
       if payloadJson == nil or ($payloadJson).len == 0:
         %*{}
       else:
         parseJson($payloadJson)
-    channels.sendEvent($eventName, payload)
-    result = true
+    result = host.send(origin.get(), $eventName, payload)
   except Exception as e:
     log("event " & $eventName & " failed: " & e.msg)
     result = false
@@ -257,110 +265,27 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
   initLock(logger.lock)
   channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
     espLog(($payload).cstring)
-  channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
+  channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string, payload: JsonNode,
+      origin: EventOrigin) {.gcsafe.} =
     {.cast(gcsafe).}:
-      # Every event reaches the scene graph, not a hardcoded few. This used to
-      # dispatch only setSceneState/setCurrentScene, which silently dropped
-      # everything a scene defines its own handler for — a GPIO button press
-      # arrived from the firmware as a "button" event, matched no branch, and
-      # vanished. The Counter scene's `event button` nodes never ran, and the
-      # frame looked like it had dead buttons. The Pi runner has always
-      # dispatched by name (frameos/runner.nim), so this also removes a
-      # difference between the two runtimes that scene authors could not see.
-      if event == "render":
-        renderRequested = true
-      elif event == "setCurrentScene" and not payload.isNil and payload.kind == JObject and
-          payload{"sceneId"}.getStr().len > 0 and
-          (currentSceneId.isNone or currentSceneId.get().string != payload{"sceneId"}.getStr()):
-        # A scene's own dispatch node switching scenes. The HTTP, schedule and
-        # cloud paths never get here (the firmware selects the scene itself),
-        # so until now this fell through to the branch below and applied the
-        # payload's state to the CURRENT scene instead of switching.
-        let nextId = payload{"sceneId"}.getStr()
-        if requestSceneSelect(nextId.cstring):
-          if payload{"state"}.kind == JObject:
-            pendingSceneSwitchId = nextId
-            pendingSceneSwitchPayload = copy(payload)
-          renderRequested = true
-        else:
-          log("setCurrentScene: scene not selectable: " & nextId)
-      elif not currentScene.isNil:
-        # Events run synchronously here (one task, no queue), so a handler that
-        # dispatches its own event recurses on the render task's stack. The
-        # per-run dispatch budget (interpreter, run_budget.nim) caps the fan-out;
-        # this caps the depth, and names the loop instead of overflowing.
-        if embeddedEventDepth >= MaxEmbeddedEventDepth:
-          log("event " & event & " dropped: " & $embeddedEventDepth &
-              " events deep — a scene is re-dispatching its own event")
-        else:
-          inc embeddedEventDepth
-          let listenersBefore = eventListenersRun
-          try:
-            let context = ExecutionContext(scene: currentScene, event: event,
-                payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
-            runEvent(currentScene, context)
-            # A press draws a new frame only when a listener took it. The
-            # firmware used to ask for a render on every press, heard or not —
-            # on a Spectra panel, half a minute of refresh for nothing.
-            if event == "button" and eventListenersRun != listenersBefore:
-              renderRequested = true
-          except Exception as e:
-            log("event " & event & " failed: " & e.msg)
-          finally:
-            dec embeddedEventDepth
-
-proc runLifecycleEvent(event: string, payload: JsonNode) =
-  ## The events the host sends around a scene switch, the way runner.nim sends
-  ## them: "close" to the scene being left, "open" to the one that became
-  ## current. ("init" is the interpreter's own, fired by its init.)
-  if currentScene.isNil:
-    return
-  inc embeddedEventDepth
-  try:
-    let context = ExecutionContext(scene: currentScene, event: event, payload: payload,
-        loopIndex: 0, loopKey: ".")
-    runEvent(currentScene, context)
-  except Exception as e:
-    log("event " & event & " failed: " & e.msg)
-  finally:
-    dec embeddedEventDepth
-
-proc cleanupScene(scene: FrameScene) =
-  ## Break ORC cycles and close the scene's QuickJS context before dropping
-  ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
-  ## outside the embedded build).
-  if scene.isNil or not (scene of InterpretedFrameScene):
-    return
-  when defined(memProbe): memProbe("  cleanupScene: entry")
-  let interpreted = InterpretedFrameScene(scene)
-  for _, childScene in interpreted.sceneNodes:
-    cleanupScene(childScene)
-  interpreted.execNode = nil
-  interpreted.getDataNode = nil
-  # Before the apps are dropped: each JS app node owns a QuickJS runtime with
-  # no destructor, and liveJsRuntimes keeps it reachable regardless, so the
-  # scene going away frees none of it.
-  for _, app in interpreted.appsByNodeId:
-    releaseJsAppRuntime(app)
-  when defined(memProbe): memProbe("  cleanupScene: js app runtimes released")
-  interpreted.appsByNodeId = initTable[NodeId, AppRoot]()
-  interpreted.appInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-  interpreted.appInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-  interpreted.codeInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-  interpreted.codeInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-  interpreted.sceneNodes = initTable[NodeId, FrameScene]()
-  interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
-  interpreted.nextNodeIds = initTable[NodeId, NodeId]()
-  interpreted.eventListeners = initTable[string, seq[NodeId]]()
-  interpreted.nodes = initTable[NodeId, DiagramNode]()
-  interpreted.edges = @[]
-  interpreted.cacheValues = initTable[NodeId, Value]()
-  interpreted.cacheTimes = initTable[NodeId, float]()
-  interpreted.cacheKeys = initTable[NodeId, JsonNode]()
-  interpreted.cacheExprs = initTable[NodeId, JsonNode]()
-  when defined(memProbe): memProbe("  cleanupScene: tables cleared")
-  cleanupSceneJs(interpreted)
-  when defined(memProbe): memProbe("  cleanupScene: js closed")
+      # Queued, never run from inside the run that dispatched it — the rule the
+      # Pi has always had (docs/events.md). Whoever entered the runtime drains:
+      # fos_nim_send_event_impl, and the render pass for what a render, an
+      # `init` or an `open` dispatched.
+      host.queue(origin, event, payload, sceneId)
+  host.frameConfig = frameConfig
+  host.logger = logger
+  host.note = proc (message: string) = log(message)
+  host.logEntry = proc (entry: JsonNode) = espLog(($entry).cstring)
+  # The firmware owns a switch (the scene may have to come off flash, and the
+  # choice is persisted): it is queued there, and comes back as selectScene.
+  host.requestSelect = proc (sceneId: string): bool = requestSceneSelect(sceneId.cstring)
+  host.runtimeCommand = proc (command: RuntimeCommand, payload: JsonNode) =
+    let name = $command
+    let payloadText = $payload
+    if not requestRuntimeCommand(name.cstring, payloadText.cstring):
+      log("runtime command not handled: " & name)
+  host.start()
 
 # ------------------------------------------------------------------- scenes
 
@@ -383,11 +308,8 @@ proc loadScenes*(payload: string): int =
 
   # Tear down the old scene before swapping the registry so its QuickJS
   # context and app instances are reclaimed.
-  if not currentScene.isNil:
-    cleanupScene(currentScene)
-    currentScene = nil
-    currentExported = nil
-    when defined(memProbe): memProbe("  loadScene: old scene dropped")
+  host.dropScene()
+  when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
@@ -395,11 +317,11 @@ proc loadScenes*(payload: string): int =
 
   # Keep the current scene across updates when it still exists; otherwise
   # fall back to the first scene in the payload.
-  if currentSceneId.isSome and not newScenes.hasKey(currentSceneId.get()):
-    currentSceneId = none(SceneId)
+  if host.sceneId.isSome and not newScenes.hasKey(host.sceneId.get()):
+    host.sceneId = none(SceneId)
   defaultSceneId = firstId
-  if currentSceneId.isNone:
-    currentSceneId = firstId
+  if host.sceneId.isNone:
+    host.sceneId = firstId
 
   log(&"loadScenes: {scenesLoadedCount} scene(s) ready, default \"{firstId.get().string}\"")
   scenesLoadedCount
@@ -446,9 +368,9 @@ proc setSceneCatalog*(indexJson: string): int =
     if defaultId.len > 0: defaultId else: entries[0].id))
   # A previously selected scene that is no longer on flash must not stick
   # around as the target of the next render.
-  if currentSceneId.isSome and
-      not entries.anyIt(it.id == currentSceneId.get().string):
-    currentSceneId = none(SceneId)
+  if host.sceneId.isSome and
+      not entries.anyIt(it.id == host.sceneId.get().string):
+    host.sceneId = none(SceneId)
   log(&"setSceneCatalog: {entries.len} scene(s) available, default \"{defaultSceneId.get().string}\"")
   entries.len
 
@@ -474,20 +396,17 @@ proc loadScene*(payload: string): bool =
     log("loadScene: scene did not survive parsing")
     return false
 
-  if not currentScene.isNil:
-    cleanupScene(currentScene)
-    currentScene = nil
-    currentExported = nil
-    when defined(memProbe): memProbe("  loadScene: old scene dropped")
+  host.dropScene()
+  when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
   let sceneId = inputs[0].id
-  currentSceneId = some(sceneId)
+  host.sceneId = some(sceneId)
   if defaultSceneId.isNone:
     defaultSceneId = some(sceneId)
-  renderRequested = true
+  host.renderRequested = true
   log(&"loadScene: \"{sceneId.string}\" resident (1 of {max(sceneCatalog.len, 1)})")
   true
 
@@ -502,50 +421,16 @@ proc selectScene*(sceneIdText: string): bool =
     if not catalogHas(sceneIdText):
       log("selectScene: scene not found: " & sceneIdText)
       return false
-    if currentSceneId.isSome and currentSceneId.get() != sceneId:
-      runLifecycleEvent("close", %*{})
-    currentSceneId = some(sceneId)
-    renderRequested = true
+    # The old instance stays until loadScene replaces it.
+    host.makeCurrent(sceneId, drop = false)
     log("selectScene: " & sceneIdText & " (pending load from flash)")
     return true
   if not scenes.hasKey(sceneId):
     log("selectScene: scene not found: " & sceneIdText)
     return false
 
-  if currentSceneId.isSome and currentSceneId.get() != sceneId:
-    runLifecycleEvent("close", %*{})
-  if not currentScene.isNil:
-    cleanupScene(currentScene)
-    currentScene = nil
-    currentExported = nil
-
-  currentSceneId = some(sceneId)
-  renderRequested = true
+  host.makeCurrent(sceneId)
   log("selectScene: " & sceneIdText)
-  true
-
-proc ensureScene(): bool =
-  if not currentScene.isNil:
-    return true
-  if currentSceneId.isNone:
-    return false
-  let sceneId = currentSceneId.get()
-  let scenes = getInterpretedScenes()
-  if not scenes.hasKey(sceneId):
-    log("scene not found: " & sceneId.string)
-    return false
-  currentExported = scenes[sceneId]
-  when defined(memProbe): memProbe("  SCENE INIT " & sceneId.string)
-  currentScene = interpreter.init(sceneId, frameConfig, logger, %*{})
-  when defined(memProbe): memProbe("  ensureScene: init done")
-  log(&"scene \"{currentSceneName()}\" initialized")
-  # The order runner.nim keeps: the switch's state is applied (public fields
-  # only, by the scene's own `setCurrentScene` handling), then "open".
-  if pendingSceneSwitchId == sceneId.string and not pendingSceneSwitchPayload.isNil:
-    runLifecycleEvent("setCurrentScene", pendingSceneSwitchPayload)
-  pendingSceneSwitchId = ""
-  pendingSceneSwitchPayload = nil
-  runLifecycleEvent("open", %*{"sceneId": sceneId.string})
   true
 
 proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
@@ -562,11 +447,8 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
   if imageFusionEnabled == wanted:
     return
   imageFusionEnabled = wanted
-  if not currentScene.isNil:
-    cleanupScene(currentScene)
-    currentScene = nil
-    currentExported = nil
-  renderRequested = true
+  host.dropScene()
+  host.renderRequested = true
   log("image fusion " & (if wanted: "enabled" else: "disabled") & "; scene will re-plan")
 
 # ------------------------------------------------------------- the canvas
@@ -648,10 +530,10 @@ proc renderCanvas*(): Image =
   sceneCanvas
 
 proc sceneRefreshSeconds*(): float =
-  if not currentScene.isNil and currentScene.refreshInterval > 0:
-    return currentScene.refreshInterval
-  if not currentExported.isNil and currentExported.refreshInterval > 0:
-    return currentExported.refreshInterval
+  if not host.scene.isNil and host.scene.refreshInterval > 0:
+    return host.scene.refreshInterval
+  if not host.exported.isNil and host.exported.refreshInterval > 0:
+    return host.exported.refreshInterval
   0.0
 
 var lastNextSleep: float = -1
@@ -666,12 +548,12 @@ proc renderCurrentScene*(): Option[Image] =
   ## Render the active interpreted scene; none() when no scenes are loaded
   ## (the caller falls back to the baked demo scene).
   lastNextSleep = -1
-  if not ensureScene():
+  if not host.ensureScene():
     return none(Image)
   # The persistent canvas goes in with the event; the interpreter's "render"
   # handler fills it with the scene background and draws into it.
   let context = ExecutionContext(
-    scene: currentScene,
+    scene: host.scene,
     event: "render",
     payload: %*{},
     image: renderCanvas(),
@@ -680,7 +562,7 @@ proc renderCurrentScene*(): Option[Image] =
     loopKey: ".",
     nextSleep: -1
   )
-  let image = interpreter.render(currentScene, context)
+  let image = host.renderScene(context)
   # The scene is done with its JS nodes until the next render, which on this
   # board is minutes away. Hand their interpreters back now so the packing and
   # display work below — and the next render's image decodes — see the memory.

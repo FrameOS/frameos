@@ -244,6 +244,7 @@
     {"type": "get_logs", "scope": "telemetry:logs", "profiles": ["linux", "esp32"]},
     {"type": "get_metrics", "scope": "telemetry:metrics", "profiles": ["linux", "esp32"]},
     {"type": "render", "scope": null, "profiles": ["linux", "esp32"]},
+    {"type": "scene_event", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
     {"type": "reboot", "scope": null, "profiles": ["linux", "esp32"]},
     {"type": "restart_runtime", "scope": null, "profiles": ["linux", "esp32"]},
     {"type": "set_display_power", "scope": null, "profiles": ["linux"],

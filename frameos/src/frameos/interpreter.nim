@@ -24,9 +24,9 @@ import apps/apps
 # whose `origins` (docs/events-contract.json) does not list "scene".
 
 var eventListenersRun* {.threadvar.}: int
-  ## Counts every event listener a run has started, so a host can ask "did
-  ## anything handle that?" by comparing it across a `runEvent` (the ESP32
-  ## renders after a button press only when something did).
+  ## Counts every event listener a run has started. Nothing in the runtime
+  ## reads it any more (the render rule is the dispatcher's, and looks at scene
+  ## state); the event fixtures do, to say how many listeners an event reached.
 
 const TRACING = false
 when defined(frameosEmbedded):
@@ -868,7 +868,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         # on the Pi and recurses on the ESP32. Logged once per run, then dropped.
         case takeDispatchBudget()
         of dvAllowed:
-          sendEvent(eventName, finalPayload)
+          sendEvent(eventName, finalPayload, eoScene)
         of dvRefusedFirst:
           self.logger.log(%*{
             "event": "interpreter:dispatch:ignored",
@@ -1260,6 +1260,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     edges: @[],
     apps: exportedScene.apps,
     storeOrigin: exportedScene.storeOrigin,
+    customEventOrigins: exportedScene.customEventOrigins,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -1596,7 +1597,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       applyPublicStateFromPayload(scene, context.payload["state"])
     if context.payload.hasKey("render"):
-      sendEvent("render", %*{})
+      sendEvent("render", %*{}, eoSystem)
   of "setCurrentScene":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       applyPublicStateFromPayload(scene, context.payload["state"])
@@ -1831,6 +1832,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: refresh.fields,
     storeOrigin: sceneOriginIsStore(scene.origin),
+    customEventOrigins: declaredCustomEventOrigins(scene.customEvents),
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.
     publicStateFields: refresh.fields.filterIt(it.access != "private"),

@@ -66,7 +66,9 @@ extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char 
 extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
-extern bool fos_nim_send_event_impl(const char *event, const char *payload_json);
+/* `origin` is the event's FOS_ORIGIN_* bit (main/fos_events_gen.h): who said
+ * it, stamped by the producer's entry point and never read from the payload. */
+extern bool fos_nim_send_event_impl(unsigned int origin, const char *event, const char *payload_json);
 
 static bool s_nim_started = false;
 static bool s_nim_ready = false;
@@ -190,12 +192,34 @@ void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id))
     s_scene_select = select;
 }
 
-/* Called from Nim (embedded_runtime.nim), on the render task and under the
- * runtime lock — so the hook must not call back into the runtime. */
+/* Called from Nim (embedded_runtime.nim) under the runtime lock — so the hook
+ * must not call back into the runtime — and on whatever task called into Nim:
+ * the render task for a scene's own dispatch, the HTTP, cloud or console task
+ * for a `setCurrentScene` their event carried. */
 bool frameos_nim_request_scene_select(const char *scene_id)
 {
     if (s_scene_select == NULL || scene_id == NULL || scene_id[0] == '\0') return false;
     return s_scene_select(scene_id);
+}
+
+static bool (*s_runtime_command)(const char *command, const char *payload_json) = NULL;
+
+void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, const char *payload_json))
+{
+    s_runtime_command = hook;
+}
+
+/* Called from Nim (embedded_runtime.nim) when a device command — `metrics`,
+ * `reload`, `restart`, `reboot`, `uploadScenes`, by their contract names —
+ * reaches the dispatcher there; the firmware owns them all (main/fos_events.c).
+ * It runs on whatever task called into Nim — the render task for what a render
+ * dispatched, the HTTP, cloud or console task for what their event did — and
+ * under the runtime lock, which is not recursive: the hook must not call back
+ * into the Nim runtime. */
+bool frameos_nim_request_runtime_command(const char *command, const char *payload_json)
+{
+    if (s_runtime_command == NULL || command == NULL || command[0] == '\0') return false;
+    return s_runtime_command(command, payload_json ? payload_json : "{}");
 }
 
 static void render_buffer_dispose(void *ptr)
@@ -834,14 +858,19 @@ bool frameos_nim_render_requested(void)
     return requested;
 }
 
-bool frameos_nim_send_event(const char *event, const char *payload_json)
+bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char *payload_json,
+                                 int timeout_ms, bool *busy)
 {
+    if (busy) *busy = false;
     if (!s_nim_ready || event == NULL) return false;
-    if (!nim_lock_take()) return false;
+    if (!nim_lock_take_for(timeout_ms)) {
+        if (busy) *busy = true;
+        return false;
+    }
     bool ok;
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
-        ok = fos_nim_send_event_impl(event, payload_json ? payload_json : "{}");
+        ok = fos_nim_send_event_impl((unsigned int)origin, event, payload_json ? payload_json : "{}");
     } else {
         nim_oom_abort_note("event dispatch");
         ok = false;
@@ -849,6 +878,11 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
     s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return ok;
+}
+
+bool frameos_nim_send_event(uint32_t origin, const char *event, const char *payload_json)
+{
+    return frameos_nim_send_event_wait(origin, event, payload_json, -1, NULL);
 }
 
 static void note_log_drop(void)

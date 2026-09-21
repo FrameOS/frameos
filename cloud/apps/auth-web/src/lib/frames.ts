@@ -286,6 +286,12 @@ export const allowedFrameCommandTypes = new Set([
   "refresh_service_settings",
   "render",
   "restart_runtime",
+  // An event for the scene the frame is showing ({name, payload?}): `button`,
+  // `setSceneState`, or a custom event the scene declares with the `cloud`
+  // origin. Never a device command — those are the verbs around it — and only
+  // for a frame whose FrameOS knows the verb; the command route asks both
+  // (sceneEventCommand, the event contract's `since`).
+  "scene_event",
   "set_current_scene",
   // Powers the panel itself down or up ({on: bool}) — a driver capability
   // only some displays have, which is why the workspace offers it per device
