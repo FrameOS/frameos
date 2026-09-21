@@ -4,6 +4,7 @@ import std/[atomics, os]
 import mummy
 
 import ../../types
+import ../../events
 import ../state
 import ../auth
 import ../routes/cloud_api_routes
@@ -370,10 +371,10 @@ suite "Server auth helpers":
   test "control-plane verbs take an admin session or the serverApiKey bearer, never the access key":
     setGlobalAdminSessionSalt("salt")
     for event in ["reload", "restart", "reboot", "uploadScenes"]:
-      check isControlEvent(event)
+      check not originMayEmit(eoHttpWrite, event)
     for event in ["setCurrentScene", "setSceneState", "button", "render", "turnOn", "turnOff",
                   "metrics", "Reboot", "custom"]:
-      check not isControlEvent(event)
+      check originMayEmit(eoHttpWrite, event)
 
     globalFrameConfig = FrameConfig(
       frameAccess: "private",

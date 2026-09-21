@@ -588,21 +588,15 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         discard
       await sleepAsync(RENDER_SLEEP_SLICE_MS)
 
-proc triggerRender*(self: RunnerThread): void =
-  self.triggerRenderNext = true
-
-proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
-  let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
-  if not self.scenes.hasKey(targetSceneId):
-    self.logSignal(withEventPayload(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
-        "sceneId": targetSceneId.string, "contextEvent": event}, event, payload))
-    return
-  let exportedScene = findExportedScene(targetSceneId)
+proc runSceneEvent(self: RunnerThread, scene: FrameScene, event: string, payload: JsonNode) =
+  ## One run of `event` on a scene this runner holds: the dispatcher's way in
+  ## (`EventHost.runScene`), and `selectScene`'s for the state that comes with a
+  ## `setCurrentScene`.
+  let exportedScene = findExportedScene(scene.id)
   if exportedScene.isNone:
     self.logSignal(withEventPayload(%*{"event": "dispatchEvent:error", "error": "Scene not exported",
-        "sceneId": targetSceneId.string, "contextEvent": event}, event, payload))
+        "sceneId": scene.id.string, "contextEvent": event}, event, payload))
     return
-  let scene = self.scenes[targetSceneId]
   var context = ExecutionContext(
     scene: scene,
     event: event,
@@ -612,7 +606,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     loopKey: ".",
     nextSleep: -1
   )
-  markRuntimeStart("event", targetSceneId.string, event)
+  markRuntimeStart("event", scene.id.string, event)
   try:
     exportedScene.get().runEvent(scene, context)
     if event == "setSceneState" or event == "setCurrentScene":
@@ -675,10 +669,15 @@ proc selectScene(self: RunnerThread, payload: JsonNode): bool =
       self.noteSceneInit(exportedScene.get(), sceneId)
       scene.updateLastPublicState()
     self.currentSceneId = sceneId
-    self.dispatchSceneEvent(some(sceneId), "setCurrentScene", payload)
+    self.runSceneEvent(self.scenes[sceneId], "setCurrentScene", payload)
     return true
   if hasStatePayload(payload):
-    self.dispatchSceneEvent(some(sceneId), "setCurrentScene", payload)
+    if not self.scenes.hasKey(sceneId):
+      # Before its first render: there is no instance to hand the state to.
+      self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
+          "sceneId": sceneId.string, "contextEvent": "setCurrentScene"})
+      return false
+    self.runSceneEvent(self.scenes[sceneId], "setCurrentScene", payload)
     return true
   false
 
@@ -747,7 +746,7 @@ proc sceneEvents*(self: RunnerThread): EventLoop =
         self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
             "sceneId": sceneId.string}),
       runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
-        self.dispatchSceneEvent(some(scene.id), event, payload),
+        self.runSceneEvent(scene, event, payload),
       log: proc (entry: JsonNode) = self.logSignal(entry),
     ), self.frameConfig)
     # On this thread an event goes straight into the queue (channels.nim).

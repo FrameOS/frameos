@@ -3,8 +3,6 @@ import ../channels
 import ../event_log
 import ../events
 import ../interpreter
-import ../scheduler
-import ../server/auth
 import ../types
 
 # The Nim runner of docs/event-fixtures.json, the conformance corpus of the
@@ -37,16 +35,15 @@ block origin_matrix:
     # (a custom event's declaration) is the dispatcher's — test_event_loop.nim.
     doAssert originMayQueue(origin, event) == allowed,
       $origin & " / " & event & ": expected allowed=" & $allowed
-    # The edges that ask, each by its own name.
-    case origin
-    of eoHttpWrite:
-      doAssert isControlEvent(event) == not allowed, "auth.isControlEvent disagrees on " & event
-    of eoSchedule:
-      doAssert scheduleMayFire(event) == allowed, "scheduler disagrees on " & event
-    else:
-      discard
     inc ran
   doAssert ran > 20
+
+proc refusedEvents(origin: EventOrigin): seq[string] =
+  ## The contract events `origin` may not emit — what used to be a deny-list per
+  ## origin, derived here to be looked at whole.
+  for index, name in ContractEventNames:
+    if origin notin ContractEventPolicies[index].origins:
+      result.add(name)
 
 block refused_lists_are_derived:
   doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uploadScenes"]

@@ -12,7 +12,6 @@
     "cloud": "FrameOS Cloud, through a hub verb.",
     "system": "The runtime itself: boot, the portal, settings apply, device flow."
   },
-  "enforcedOrigins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
   "classes": {
     "lifecycle": "Sent by the host to a scene as it is loaded, shown, rendered and left.",
     "input": "Something a person did: a key, a pointer, a button.",

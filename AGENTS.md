@@ -83,7 +83,11 @@
   default origin on purpose: the producer's entry point says who is talking
   (`eoHttpWrite`, `eoSchedule`, `eoCloud`, `eoScene`, …), never the payload. Do
   not add a `case event` to a host — add a contract column, or a callback to
-  `EventHost`. On the ESP32 the C edge is `embedded/esp32/main/fos_events.c`
+  `EventHost`. The ESP32 runtime and the wasm preview share their host
+  (`frameos/single_scene_host.nim`: scene lifetime, lifecycle events, the
+  EventHost): a fix there is a fix for both, and a copy in either file is how
+  the two drift. wasm does not trap on a nil dereference (address 1 is
+  readable) — a green preview check says nothing about one. On the ESP32 the C edge is `embedded/esp32/main/fos_events.c`
   (one function for HTTP, schedule, cloud, console and buttons). New behaviour
   gets a case in the `dispatcher` section of `docs/event-fixtures.json`
   (`test_event_loop.nim` runs it).

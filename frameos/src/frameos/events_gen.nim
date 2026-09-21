@@ -56,7 +56,6 @@ const
   EventsContractVersion* = 1
   PointerWireMax* = 32767
   CustomEventMaxNameLength* = 63
-  EnforcedEventOrigins*: set[EventOrigin] = {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem}
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 

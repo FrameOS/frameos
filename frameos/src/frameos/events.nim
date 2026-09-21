@@ -79,12 +79,3 @@ proc eventIsLogged*(name: string): bool =
 proc eventLogsPayload*(name: string): bool =
   eventPolicy(name).log == elFull
 
-proc eventCoalescesLatest*(name: string): bool =
-  eventPolicy(name).coalesceLatest
-
-proc refusedEvents*(origin: EventOrigin): seq[string] =
-  ## The contract events `origin` may not emit — what used to be a deny-list
-  ## per origin. For messages and tests; the check itself is `originMayEmit`.
-  for index, name in ContractEventNames:
-    if origin notin ContractEventPolicies[index].origins:
-      result.add(name)

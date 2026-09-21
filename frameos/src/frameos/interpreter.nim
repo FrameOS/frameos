@@ -24,9 +24,9 @@ import apps/apps
 # whose `origins` (docs/events-contract.json) does not list "scene".
 
 var eventListenersRun* {.threadvar.}: int
-  ## Counts every event listener a run has started, so a host can ask "did
-  ## anything handle that?" by comparing it across a `runEvent` (the ESP32
-  ## renders after a button press only when something did).
+  ## Counts every event listener a run has started. Nothing in the runtime
+  ## reads it any more (the render rule is the dispatcher's, and looks at scene
+  ## state); the event fixtures do, to say how many listeners an event reached.
 
 const TRACING = false
 when defined(frameosEmbedded):

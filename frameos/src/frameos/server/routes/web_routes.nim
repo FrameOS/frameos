@@ -9,6 +9,7 @@ import mummy
 import mummy/routers
 import httpcore
 import frameos/channels
+import frameos/events
 import frameos/config
 import frameos/types
 import frameos/portal as netportal
@@ -384,8 +385,8 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     # The dispatcher asks the allow-list again; this is the 401 it cannot give.
     let origin = if hasControlAccess(request): eoHttpAdmin else: eoHttpWrite
     let allowed =
-      if isControlEvent(eventName): origin == eoHttpAdmin
-      else: hasAccess(request, Write)
+      if originMayEmit(eoHttpWrite, eventName): hasAccess(request, Write)
+      else: origin == eoHttpAdmin
     if not allowed:
       request.respond(Http401, body = "Unauthorized")
       return

@@ -71,9 +71,6 @@ def load():
     doc = json.loads(SOURCE.read_text())
     origins = list(doc["origins"])
     hosts = doc["hosts"]
-    for origin in doc["enforcedOrigins"]:
-        if origin not in origins:
-            fail(f"enforcedOrigins: unknown origin {origin!r}")
     if set(doc["classes"]) != set(CLASSES):
         fail(f"classes must be exactly {CLASSES}")
     verbs = {verb["type"]: verb for verb in json.loads(CLOUD_CONTRACT.read_text())["verbs"]}
@@ -299,7 +296,6 @@ def gen_nim(doc):
         f"  EventsContractVersion* = {int(doc['version'])}",
         f"  PointerWireMax* = {int(doc['pointer']['wireMax'])}",
         f"  CustomEventMaxNameLength* = {int(doc['customEvents']['maxNameLength'])}",
-        f"  EnforcedEventOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['enforcedOrigins'])}}}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",
@@ -353,8 +349,9 @@ def gen_c(doc):
     out = [
         f"/* {BANNER}",
         " *",
-        " * Header-only and IDF-free: names, the origin allow-lists and the per-event",
-        " * policy, for the one C path that looks at an event before the Nim runtime",
+        " * Header-only and IDF-free: names, classes and the origin allow-lists — what",
+        " * is left of an event's policy (log, render-after, coalescing) is the Nim",
+        " * dispatcher's — for the one C path that looks at an event before the Nim runtime",
         " * does (fos_events.c, which every producer calls) and the cloud verb that",
         " * vets a name first (fos_cloud.c). Host-tested by main/tests/test_fos_events.c. */",
         "#pragma once",
@@ -381,16 +378,10 @@ def gen_c(doc):
         "    FOS_EVENT_CLASS_CUSTOM,",
         "} fos_event_class_t;",
         "",
-        "typedef enum { " + ", ".join(f"FOS_RENDER_AFTER_{upper_snake(v)}" for v in RENDER_AFTER) + " } fos_event_render_after_t;",
-        "typedef enum { " + ", ".join(f"FOS_EVENT_LOG_{upper_snake(v)}" for v in LOG) + " } fos_event_log_t;",
-        "",
         "typedef struct {",
         "    const char *name;",
         "    uint8_t event_class;   /* fos_event_class_t */",
         "    uint16_t origins;      /* mask of fos_event_origin_t that may emit it */",
-        "    uint8_t render_after;  /* fos_event_render_after_t */",
-        "    uint8_t log;           /* fos_event_log_t */",
-        "    uint8_t esp32;         /* this firmware produces or handles it */",
         "    uint8_t ends_runtime;  /* the firmware does not survive it: a schedule must remember it fired */",
         "} fos_event_spec_t;",
         "",
@@ -403,17 +394,14 @@ def gen_c(doc):
     for event in doc["events"]:
         out.append(
             f"    {{FOS_EVENT_{upper_snake(event['name'])}, FOS_EVENT_CLASS_{upper_snake(event['class'])},\n"
-            f"     {mask(event)},\n"
-            f"     FOS_RENDER_AFTER_{upper_snake(event['renderAfter'])}, FOS_EVENT_LOG_{upper_snake(event['log'])}, "
-            f"{1 if event['hosts']['esp32'] else 0}, {1 if event.get('schedule', {}).get('endsRuntime') else 0}}},"
+            f"     {mask(event)}, {1 if event.get('schedule', {}).get('endsRuntime') else 0}}},"
         )
     out.append("};")
     out.append(f"#define FOS_EVENT_SPEC_COUNT {len(doc['events'])}")
     out.append("")
     custom = doc["customEvents"]
     out.append("static const fos_event_spec_t FOS_CUSTOM_EVENT_SPEC = {")
-    out.append(f"    NULL, FOS_EVENT_CLASS_CUSTOM,\n     {mask(custom)},")
-    out.append(f"     FOS_RENDER_AFTER_{upper_snake(custom['renderAfter'])}, FOS_EVENT_LOG_{upper_snake(custom['log'])}, 1, 0}};")
+    out.append(f"    NULL, FOS_EVENT_CLASS_CUSTOM,\n     {mask(custom)}, 0}};")
     declarable = " | ".join(f"FOS_ORIGIN_{upper_snake(o)}" for o in custom.get("declarableOrigins", [])) or "0"
     out.append("/* Origins a scene opts into per custom event; the Nim dispatcher knows the scene's answer. */")
     out.append(f"#define FOS_CUSTOM_EVENT_DECLARABLE_ORIGINS ({declarable})")
@@ -676,7 +664,7 @@ def gen_py(doc):
     out.append("# origin -> contract events it may not emit. `http:write` is the frame access")
     out.append("# key: what it is refused needs an admin session or the serverApiKey instead.")
     out.append("REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {")
-    for origin in doc["enforcedOrigins"]:
+    for origin in origin_names(doc):
         names = ", ".join(json.dumps(name) for name in refused[origin])
         out.append(f"    {json.dumps(origin)}: frozenset({{{names}}}),")
     out.append("}")

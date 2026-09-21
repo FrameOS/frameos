@@ -82,6 +82,11 @@ One dispatcher per runtime takes envelopes off a queue and, for each:
 
 The host supplies `EventHost` — request a render, select a scene, display
 power, a runtime command, and how to reach a scene instance — and nothing else.
+There are two hosts, not three: the Linux runner (`runner.nim`: many scenes, a
+thread of its own), and `frameos/single_scene_host.nim` for a runtime that
+holds one scene on one task, which the ESP32 and the preview share — they
+supply who owns a scene switch, what a device command does there and where a
+log line goes.
 On Linux the other threads reach the runner's dispatcher through the bounded
 `eventChannel`; what is sent on the runner thread itself (a scene's dispatch)
 goes straight into the queue. The ESP32 and the preview have one task and no

@@ -634,7 +634,7 @@ and what changed because of it:
 Left for the later steps, on purpose:
 
 - The contract's `origins` are enforced where a host can tell an origin today
-  (`enforcedOrigins`); the envelope that carries it everywhere is P2, and with
+  (`enforcedOrigins`, a column P2 deleted: every origin is asked now); the envelope that carries it everywhere is P2, and with
   it the narrowing of the input and lifecycle rows (decision 5 in §6
   included: a custom event's own `origins`).
 - `renderAfter` is the rule the hosts converge on, not what they do: only
@@ -708,6 +708,17 @@ route sends `button`, `setSceneState` and declared custom events as
 stand-in for `setSceneState`, and is told to update for the rest). The
 self-hosted backend already forwards any event to the frame's `/event/<name>`
 as `http:admin`.
+
+Cleaned up afterwards, because a dispatcher that only adds code has not
+replaced anything: the ESP32 runtime and the preview share one host
+(`frameos/single_scene_host.nim` — their two copies of the scene lifetime,
+the lifecycle events and the EventHost had already drifted: the preview leaked
+its JS app runtimes on every scene switch, and handed a switch's `state` to
+`init` as persisted state instead of applying its public fields);
+`enforcedOrigins` left the contract (every origin is asked); the C table lost
+the policy columns only the Nim dispatcher reads; `dispatchSceneEvent`,
+`triggerRender`, `isControlEvent`, `scheduleMayFire`, `eventCoalescesLatest`
+and `refusedEvents` are gone.
 
 Left for the later steps: no `close` on `reload` / `uploadScenes`, no
 `destroy`, no `reason` on `open` (§4.4); a scheduled custom event goes to the
