@@ -88,10 +88,32 @@ def load():
         if not spec.get("origins") or any(o not in origins for o in spec["origins"]):
             fail(f"{where}: origins must be a non-empty subset of {origins}")
 
+    def check_cloud(where, cloud):
+        for mapping in [cloud, cloud.get("before")]:
+            if mapping is None:
+                continue
+            verb = verbs.get(mapping.get("verb"))
+            if verb is None:
+                fail(f"{where}: cloud.verb {mapping.get('verb')!r} is not in docs/cloud-frames-contract.json")
+            for profile in mapping.get("profiles", verb["profiles"]):
+                if profile not in verb["profiles"]:
+                    fail(f"{where}: verb {verb['type']} has no {profile!r} profile")
+        if "since" in cloud and not VERSION_RE.fullmatch(cloud["since"]):
+            fail(f"{where}: cloud.since must be a FrameOS version")
+        if "before" in cloud and "since" not in cloud:
+            fail(f"{where}: cloud.before is what a frame older than cloud.since gets — it needs a since")
+
     custom = doc["customEvents"]
     check_policy("customEvents", custom)
     if not isinstance(custom.get("maxNameLength"), int):
         fail("customEvents.maxNameLength must be an integer")
+    declarable = custom.get("declarableOrigins", [])
+    if any(o not in origins or o in custom["origins"] for o in declarable):
+        fail("customEvents.declarableOrigins: origins a scene opts into, none of them in customEvents.origins")
+    if ("cloud" in declarable) != ("cloud" in custom):
+        fail("customEvents: the declarable `cloud` origin and the `cloud` verb mapping come together")
+    if "cloud" in custom:
+        check_cloud("customEvents", custom["cloud"])
 
     seen = set()
     for event in doc["events"]:
@@ -142,12 +164,7 @@ def load():
         if ("cloud" in event["origins"]) != (cloud is not None):
             fail(f"{where}: the `cloud` origin and the `cloud` verb mapping come together")
         if cloud is not None:
-            verb = verbs.get(cloud.get("verb"))
-            if verb is None:
-                fail(f"{where}: cloud.verb {cloud.get('verb')!r} is not in docs/cloud-frames-contract.json")
-            for profile in cloud.get("profiles", verb["profiles"]):
-                if profile not in verb["profiles"]:
-                    fail(f"{where}: verb {verb['type']} has no {profile!r} profile")
+            check_cloud(where, cloud)
         schedule = event.get("schedule")
         if schedule is not None:
             if "schedule" not in event["origins"]:
@@ -258,6 +275,12 @@ def gen_nim(doc):
     out.append("  EventLogPolicy* = enum")
     for value in LOG:
         out.append(f"    el{camel(value)} = {nim_str(value)}")
+    out.append("  RuntimeCommand* = enum")
+    out.append("    ## The device commands: handled by the host before scene dispatch, never")
+    out.append("    ## delivered to a scene (event_loop.nim).")
+    for event in events:
+        if event["class"] == "device-command":
+            out.append(f"    rc{camel(event['name'])} = {nim_str(event['name'])}")
     out += [
         "  EventPolicy* = object",
         "    ## No strings and no refs: a policy is read on every thread that sends or",
@@ -277,6 +300,8 @@ def gen_nim(doc):
         f"  PointerWireMax* = {int(doc['pointer']['wireMax'])}",
         f"  CustomEventMaxNameLength* = {int(doc['customEvents']['maxNameLength'])}",
         f"  EnforcedEventOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['enforcedOrigins'])}}}",
+        "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
+        f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",
     ]
     for event in events:
@@ -329,9 +354,9 @@ def gen_c(doc):
         f"/* {BANNER}",
         " *",
         " * Header-only and IDF-free: names, the origin allow-lists and the per-event",
-        " * policy, for the C paths that look at an event before the Nim runtime does",
-        " * (fos_http.c, fos_schedule.c, fos_buttons.c). Host-tested by",
-        " * main/tests/test_fos_events.c. */",
+        " * policy, for the one C path that looks at an event before the Nim runtime",
+        " * does (fos_events.c, which every producer calls) and the cloud verb that",
+        " * vets a name first (fos_cloud.c). Host-tested by main/tests/test_fos_events.c. */",
         "#pragma once",
         "",
         "#include <stdbool.h>",
@@ -389,6 +414,9 @@ def gen_c(doc):
     out.append("static const fos_event_spec_t FOS_CUSTOM_EVENT_SPEC = {")
     out.append(f"    NULL, FOS_EVENT_CLASS_CUSTOM,\n     {mask(custom)},")
     out.append(f"     FOS_RENDER_AFTER_{upper_snake(custom['renderAfter'])}, FOS_EVENT_LOG_{upper_snake(custom['log'])}, 1, 0}};")
+    declarable = " | ".join(f"FOS_ORIGIN_{upper_snake(o)}" for o in custom.get("declarableOrigins", [])) or "0"
+    out.append("/* Origins a scene opts into per custom event; the Nim dispatcher knows the scene's answer. */")
+    out.append(f"#define FOS_CUSTOM_EVENT_DECLARABLE_ORIGINS ({declarable})")
     out += [
         "",
         "/* The contract row of `name`; the custom-event row for any other name. Never NULL. */",
@@ -404,14 +432,34 @@ def gen_c(doc):
         "    return &FOS_CUSTOM_EVENT_SPEC;",
         "}",
         "",
+        "/* What the firmware's C edges ask (fos_events.c). For a custom event an origin",
+        " * a scene can opt into passes here: whether the scene showing declared it is",
+        " * the Nim dispatcher's to say (frameos/event_loop.nim). */",
         "static inline bool fos_event_origin_may_emit(fos_event_origin_t origin, const char *name)",
         "{",
-        "    return (fos_event_spec(name)->origins & (uint16_t)origin) != 0;",
+        "    const fos_event_spec_t *spec = fos_event_spec(name);",
+        "    if ((spec->origins & (uint16_t)origin) != 0) {",
+        "        return true;",
+        "    }",
+        "    return spec->event_class == FOS_EVENT_CLASS_CUSTOM &&",
+        "           (FOS_CUSTOM_EVENT_DECLARABLE_ORIGINS & (uint16_t)origin) != 0;",
         "}",
         "",
         "static inline bool fos_event_is_device_command(const char *name)",
         "{",
         "    return fos_event_spec(name)->event_class == FOS_EVENT_CLASS_DEVICE_COMMAND;",
+        "}",
+        "",
+        "/* The contract's name for one origin bit, for log lines. Never NULL. */",
+        "static inline const char *fos_event_origin_name(fos_event_origin_t origin)",
+        "{",
+        "    switch (origin) {",
+    ]
+    for origin in origins:
+        out.append(f"        case FOS_ORIGIN_{upper_snake(origin)}: return {c_str(origin)};")
+    out += [
+        "    }",
+        '    return "unknown";',
         "}",
     ]
     return "\n".join(out) + "\n"
@@ -510,7 +558,13 @@ def gen_ts_frontend(doc):
         "  since?: string",
         "  /** Offered by the Schedule panel. `endsRuntime`: the runtime does not survive it. */",
         "  schedule?: { label: string; description?: string; since?: string; endsRuntime?: boolean }",
-        "  cloud?: { verb: string; profiles?: string[]; eventRoute?: boolean }",
+        "  cloud?: {",
+        "    verb: string",
+        "    profiles?: string[]",
+        "    eventRoute?: boolean",
+        "    since?: string",
+        "    before?: { verb: string; profiles?: string[] }",
+        "  }",
         "}",
         "",
     ]
@@ -523,6 +577,9 @@ def gen_ts_frontend(doc):
         "export const customEventPolicy: Pick<ContractEventSpec, 'origins' | 'renderAfter' | 'coalesce' | 'log'> = "
         + ts_json(custom_view)
     )
+    out.append("")
+    out.append("/** Origins a scene opts into per custom event: `origins` on its declaration. */")
+    out.append(f"export const customEventDeclarableOrigins: readonly EventOrigin[] = {ts_json(custom.get('declarableOrigins', []), None)}")
     out.append("")
     for name, lines in log_events(doc).items():
         out.append(f"/** Log lines, not scene events (docs/events-contract.json `logEvents`). */")
@@ -571,8 +628,11 @@ def gen_ts_wasm(doc):
 
 
 def gen_ts_cloud(doc):
+    def route(cloud):
+        return {key: cloud[key] for key in ("verb", "profiles", "since", "before") if key in cloud}
+
     routed = {
-        event["name"]: {"verb": event["cloud"]["verb"], **({"profiles": event["cloud"]["profiles"]} if "profiles" in event["cloud"] else {})}
+        event["name"]: route(event["cloud"])
         for event in doc["events"]
         if event.get("cloud") and event["cloud"].get("eventRoute", True)
     }
@@ -581,12 +641,26 @@ def gen_ts_cloud(doc):
         "",
         f"export const customEventMaxNameLength = {int(doc['customEvents']['maxNameLength'])};",
         "",
+        "/** Every built-in event name. Any other name is a custom scene event. */",
+        f"export const contractEventNames: readonly string[] = {ts_json([e['name'] for e in doc['events']], None)};",
+        "",
+        "export type CloudEventRoute = {",
+        "  verb: string;",
+        "  profiles?: readonly string[];",
+        "  /** The FrameOS version whose frames know `verb`; older ones get `before`, or a refusal. */",
+        "  since?: string;",
+        "  before?: { verb: string; profiles?: readonly string[] };",
+        "};",
+        "",
         "/** Events the frame event route accepts, and the hub verb each becomes.",
         " * `profiles`: the device planes whose verb can carry it (absent = all). */",
-        "export const cloudEventRouteVerbs: Record<",
-        "  string,",
-        "  { verb: string; profiles?: readonly string[] }",
-        f"> = {ts_json(routed)};",
+        f"export const cloudEventRouteVerbs: Record<string, CloudEventRoute> = {ts_json(routed)};",
+        "",
+        "/** A custom scene event: sent when the scene declares it with the `cloud` origin. */",
+        f"export const cloudCustomEventRoute: CloudEventRoute = {ts_json(route(doc['customEvents']['cloud']))};",
+        "",
+        "/** Origins a scene opts into per custom event: `origins` on its declaration. */",
+        f"export const customEventDeclarableOrigins: readonly string[] = {ts_json(doc['customEvents'].get('declarableOrigins', []), None)};",
         "",
         "/** Contract events a schedule entry may not fire: the device refuses them. */",
         f"export const scheduleRefusedEvents: readonly string[] = {ts_json(refused_by_origin(doc)['schedule'], None)};",
@@ -606,6 +680,10 @@ def gen_py(doc):
         names = ", ".join(json.dumps(name) for name in refused[origin])
         out.append(f"    {json.dumps(origin)}: frozenset({{{names}}}),")
     out.append("}")
+    out.append("")
+    out.append("# Origins a scene opts into per custom event: `origins` on its declaration.")
+    declarable = ", ".join(json.dumps(o) for o in doc["customEvents"].get("declarableOrigins", []))
+    out.append(f"CUSTOM_EVENT_DECLARABLE_ORIGINS: frozenset[str] = frozenset({{{declarable}}})")
     out.append("")
     device = names_where(doc, lambda e: e["class"] == "device-command")
     out.append("DEVICE_COMMAND_EVENTS: frozenset[str] = frozenset({" + ", ".join(json.dumps(n) for n in device) + "})")

@@ -39,8 +39,11 @@ def test_control_paths_are_what_the_access_key_is_refused():
         assert _is_control_path(f"/event/{case['event']}?x=1") == (not case["allowed"]), case
 
 
-def test_what_a_scene_is_refused_is_a_device_command():
-    assert REFUSED_BY_ORIGIN["scene"] <= DEVICE_COMMAND_EVENTS
+def test_what_a_scene_is_refused_is_a_device_command_or_a_lifecycle_event():
+    # A scene may not run the device, and it may not fake the runtime's own
+    # `init` / `open` / `close` either. Anything else it is refused is a bug.
+    lifecycle = {event["name"] for event in CONTRACT["events"] if event["class"] == "lifecycle"}
+    assert REFUSED_BY_ORIGIN["scene"] <= DEVICE_COMMAND_EVENTS | lifecycle
 
 
 def test_scene_changed_log_events_are_the_contracts():

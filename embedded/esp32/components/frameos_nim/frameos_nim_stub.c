@@ -7,6 +7,7 @@
 bool frameos_nim_available(void) { return false; }
 void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len), void (*release)(void *ptr)) { (void)acquire; (void)release; }
 void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id)) { (void)select; }
+void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, const char *payload_json)) { (void)hook; }
 bool frameos_nim_reserve_canvas(size_t len) { (void)len; return false; }
 void *frameos_nim_canvas_buffer(size_t len) { (void)len; return NULL; }
 size_t frameos_nim_canvas_reserved(void) { return 0; }
@@ -72,9 +73,16 @@ bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, cha
 double frameos_nim_scene_interval(void) { return 0; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
-bool frameos_nim_send_event(const char *event, const char *payload_json)
+bool frameos_nim_send_event(uint32_t origin, const char *event, const char *payload_json)
 {
-    (void)event; (void)payload_json;
+    (void)origin; (void)event; (void)payload_json;
+    return false;
+}
+bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char *payload_json,
+                                 int timeout_ms, bool *busy)
+{
+    (void)origin; (void)event; (void)payload_json; (void)timeout_ms;
+    if (busy) *busy = false;
     return false;
 }
 void frameos_nim_log_hook(const char *msg) { (void)msg; }

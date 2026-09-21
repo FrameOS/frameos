@@ -130,7 +130,8 @@ describe("the JavaScript `context`", () => {
     expect([...codeContextKeys]).toEqual(keysOf("code"));
     expect([...appContextKeys]).toEqual(keysOf("app"));
     for (const key of codeContextKeys) {
-      expect(codeContextMembers).toContain(`  ${key}: `);
+      // `imageWidth?: number;` — a key the run may not have is declared optional.
+      expect(codeContextMembers).toMatch(new RegExp(`^  ${key}\\??: `, "m"));
     }
     expect(repoFile("frontend/src/utils/codeNodeTypeDeclarations.ts")).toContain("${codeContextMembers}");
     expect(repoFile("frontend/src/utils/appTypeDeclarations.ts")).toContain("${appContextMembers}");
@@ -158,9 +159,7 @@ describe("the JavaScript `context`", () => {
 
   it("is spelled with at least the code-node keys wherever prose repeats it", () => {
     // Prose cannot import a table; these are the places that repeat the shape
-    // (docs/event-system-analysis.md §3.1 #11). scene-convert's prompt also
-    // lists imageWidth/imageHeight, which a code node does not have — known,
-    // and the converter's to fix.
+    // (docs/event-system-analysis.md §3.1 #11).
     for (const path of [
       "docs/js-apps-and-code-nodes.md",
       "cloud/packages/scene-convert/src/prompt.ts",

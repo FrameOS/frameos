@@ -1863,6 +1863,30 @@ def test_frame_sync_scene_diff_reports_custom_event_changes():
     ]
 
 
+def test_frame_sync_scene_diff_keeps_custom_event_origins():
+    # `origins` is what lets a schedule or the cloud fire a custom event: a
+    # frame that lost it must show as a change, an empty list must not.
+    backend_scene = {
+        'id': 'scene-1',
+        'name': 'Calendar',
+        'settings': {'execution': 'interpreted', 'refreshInterval': 300},
+        'customEvents': [{'name': 'nextPage', 'origins': ['cloud', 'schedule']}],
+        'nodes': [],
+        'edges': [],
+    }
+    frame_scene = {**backend_scene, 'customEvents': [{'name': 'nextPage', 'origins': []}]}
+
+    section = frame_sync._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
+
+    assert len(section['changes']) == 1
+    assert section['changes'][0]['backend_json'] == backend_scene
+    assert [detail['path'] for detail in section['changes'][0]['details']] == ['Custom events[0].origins']
+
+    undeclared = {**backend_scene, 'customEvents': [{'name': 'nextPage'}]}
+    section = frame_sync._build_scene_sync_section({'scenes': [undeclared]}, {'scenes': [frame_scene]})
+    assert section['changes'] == []
+
+
 @pytest.mark.asyncio
 async def test_api_frame_sync_status_filters_runtime_and_deploy_noise(async_client, db, redis):
     frame = await new_frame(db, redis, 'Noise Backend', 'localhost', 'localhost')

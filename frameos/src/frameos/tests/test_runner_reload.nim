@@ -181,7 +181,7 @@ suite "runner reload safety":
       )
 
       let messageLoop = runnerThread.startMessageLoop(maxIterations = 3)
-      sendEvent("reload", %*{})
+      sendEvent("reload", %*{}, eoHttpAdmin)
 
       let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
       check finished
@@ -233,7 +233,7 @@ suite "runner reload safety":
         runnerThread.scenes[sceneId] = scene
 
         let messageLoop = runnerThread.startMessageLoop(maxIterations = 3)
-        sendEvent("reload", %*{})
+        sendEvent("reload", %*{}, eoHttpAdmin)
 
         let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
         check finished

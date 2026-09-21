@@ -12,7 +12,7 @@
     "cloud": "FrameOS Cloud, through a hub verb.",
     "system": "The runtime itself: boot, the portal, settings apply, device flow."
   },
-  "enforcedOrigins": ["scene", "schedule", "http:write", "cloud"],
+  "enforcedOrigins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
   "classes": {
     "lifecycle": "Sent by the host to a scene as it is loaded, shown, rendered and left.",
     "input": "Something a person did: a key, a pointer, a button.",
@@ -20,9 +20,11 @@
     "device-command": "Asks the runtime to do something to the device. Never delivered to a scene, never offered by the editor."
   },
   "customEvents": {
-    "$comment": "A name that is not in `events` is a custom scene event (a scene's `customEvents`). Every host delivers it to the current scene's listeners of that name.",
+    "$comment": "A name that is not in `events` is a custom scene event (a scene's `customEvents`). Every host delivers it to the current scene's listeners of that name. `origins` is who may always send one; `declarableOrigins` are the ones a scene opts into per event, with `origins` on its declaration (`{name: \"nextPage\", origins: [\"schedule\"]}`).",
     "maxNameLength": 63,
-    "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+    "origins": ["driver", "preview", "scene", "http:write", "http:admin", "system"],
+    "declarableOrigins": ["schedule", "cloud"],
+    "cloud": {"verb": "scene_event", "since": "2026.9.21"},
     "renderAfter": "if-state-changed",
     "coalesce": "none",
     "log": "full"
@@ -41,8 +43,8 @@
       {"name": "hasImage", "type": "boolean", "sandboxes": ["code", "app"], "description": "Whether the run carries a canvas."},
       {"name": "nextSleep", "type": "float", "sandboxes": ["app"], "description": "Seconds until the next render."},
       {"name": "image", "type": "image", "optional": true, "sandboxes": ["app"], "description": "The canvas, when there is one."},
-      {"name": "imageWidth", "type": "integer", "optional": true, "sandboxes": ["app"], "description": "Width of the canvas."},
-      {"name": "imageHeight", "type": "integer", "optional": true, "sandboxes": ["app"], "description": "Height of the canvas."}
+      {"name": "imageWidth", "type": "integer", "optional": true, "sandboxes": ["code", "app"], "description": "Width of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none."},
+      {"name": "imageHeight", "type": "integer", "optional": true, "sandboxes": ["code", "app"], "description": "Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none."}
     ]
   },
   "logEvents": {
@@ -59,7 +61,7 @@
       "dispatch": false,
       "payload": [],
       "sceneState": "read",
-      "origins": ["system", "scene", "schedule", "http:write", "http:admin"],
+      "origins": ["system", "http:admin"],
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "full",
@@ -90,7 +92,7 @@
       "payload": [
         {"name": "sceneId", "label": "Scene", "type": "scene", "required": true}
       ],
-      "origins": ["system", "scene", "schedule", "http:write", "http:admin"],
+      "origins": ["system", "http:admin"],
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "full",
@@ -104,7 +106,7 @@
       "listen": true,
       "dispatch": false,
       "payload": [],
-      "origins": ["system", "scene", "schedule", "http:write", "http:admin"],
+      "origins": ["system", "http:admin"],
       "renderAfter": "never",
       "coalesce": "none",
       "log": "full",
@@ -252,7 +254,8 @@
         {"name": "label", "label": "Label", "type": "string", "required": true},
         {"name": "level", "label": "Level", "type": "integer", "required": true, "unit": "gpio-level"}
       ],
-      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
+      "cloud": {"verb": "scene_event", "since": "2026.9.21"},
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "full",
@@ -270,7 +273,7 @@
       ],
       "sceneState": "payload",
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
-      "cloud": {"verb": "set_current_scene", "profiles": ["linux"]},
+      "cloud": {"verb": "scene_event", "since": "2026.9.21", "before": {"verb": "set_current_scene", "profiles": ["linux"]}},
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "full",

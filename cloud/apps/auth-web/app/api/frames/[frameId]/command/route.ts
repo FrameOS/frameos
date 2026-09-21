@@ -8,8 +8,15 @@ import {
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
 import {
+  cloudEventRouting,
+  isContractEventName,
+  sceneEventCommand,
+} from "../../../../../src/lib/frame-events";
+import { customEventRoutingForFrame } from "../../../../../src/lib/frame-scenes";
+import {
   allowedFrameCommandTypes,
   enqueueFrameCommand,
+  frameContractProfile,
   frameForAccount,
   supersedePendingCommands,
 } from "../../../../../src/lib/frames";
@@ -79,6 +86,40 @@ export async function POST(
     // answer apply-failed while the queue said delivered.
     payload = { scene_id: await deviceSceneIdForFrame(db, frame.id, sceneId) };
   }
+  let sceneEventName: string | undefined;
+  if (type === "scene_event") {
+    // The raw form of /event/<name>, held to the same three questions so it
+    // is not a way around them: is this an event the verb carries (never a
+    // device command), does this frame's FrameOS know the verb, and — for a
+    // custom event — does a scene on the frame let the cloud send it. The
+    // device asks the first and the last again.
+    const built = sceneEventCommand(body.name, body.payload);
+    if (!built.ok) {
+      return jsonError(built.error, built.status);
+    }
+    // allowBefore: an older frame's stand-in for the event (setSceneState's
+    // set_current_scene) is the event route's business — this route was
+    // asked for the verb by name.
+    const routed = isContractEventName(built.payload.name)
+      ? cloudEventRouting(
+          built.payload.name,
+          frameContractProfile(frame),
+          frame.frameosVersion,
+          { allowBefore: false },
+        )
+      : await customEventRoutingForFrame(db, frame, built.payload.name);
+    if (!routed.ok) {
+      return jsonError(
+        routed.error,
+        routed.status,
+        routed.error === "frame_update_required"
+          ? { min_frameos_version: routed.minFrameosVersion }
+          : undefined,
+      );
+    }
+    payload = built.payload;
+    sceneEventName = built.payload.name;
+  }
 
   if (type === "notify_update_available") {
     await supersedePendingCommands(db, frame.id, type);
@@ -98,7 +139,7 @@ export async function POST(
       providerSubject: session.providerSubject,
     },
     eventType: "frame.command_sent",
-    metadata: { type },
+    metadata: { type, ...(sceneEventName ? { event: sceneEventName } : {}) },
     target: { commandId: command?.id, frameId: frame.id },
   });
 

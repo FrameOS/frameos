@@ -5,7 +5,8 @@ import { Button } from '../../../../components/Button'
 import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
 
-import { eventsLogic } from './eventsLogic'
+import { customEventOriginOptions, eventsLogic } from './eventsLogic'
+import { Checkbox } from '../../../../components/Checkbox'
 import { Tabs } from '../../../../components/panels/Tabs'
 import { Tab } from '../../../../components/panels/Tab'
 import { TextArea } from '../../../../components/TextArea'
@@ -49,6 +50,7 @@ export function Events({ frameId, sceneId }: EventsProps) {
     closeCustomEvent,
     removeCustomEvent,
     setCustomEventFields,
+    setCustomEventOrigin,
     addCustomEventField,
     editCustomEventField,
     closeCustomEventField,
@@ -104,7 +106,7 @@ export function Events({ frameId, sceneId }: EventsProps) {
                   Add event
                 </Button>
               </div>
-              {customEventRows.map(({ event, index }) => (
+              {customEventRows.map(({ event, index, originsSummary }) => (
                 <Group name={['customEvents', index]} key={index}>
                   {customEventsWithErrors[index] ? (
                     <div className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-400">
@@ -183,6 +185,22 @@ export function Events({ frameId, sceneId }: EventsProps) {
                           </div>
                         ) : null}
                       </div>
+                      <div className="space-y-2">
+                        <H6>Who else may send it</H6>
+                        <div className="flex flex-col gap-1.5">
+                          {customEventOriginOptions.map(({ origin, label }) => (
+                            <Checkbox
+                              key={origin}
+                              label={label}
+                              value={event.origins?.includes(origin) ?? false}
+                              onChange={(enabled) => setCustomEventOrigin(index, origin, enabled)}
+                            />
+                          ))}
+                        </div>
+                        <div className="frame-tool-muted text-sm">
+                          The scene itself, the frame's buttons and API, and the control page can always send it.
+                        </div>
+                      </div>
                       <div className="flex w-full items-center justify-between gap-2">
                         <Button
                           onClick={() => closeCustomEvent(index)}
@@ -215,6 +233,9 @@ export function Events({ frameId, sceneId }: EventsProps) {
                           {event.description}
                           {fieldsSummary(event.fields)}
                         </div>
+                        {originsSummary ? (
+                          <div className="frame-tool-muted text-sm">Also accepted from: {originsSummary}</div>
+                        ) : null}
                         {event.name?.trim() ? (
                           <div className="mt-2 flex gap-2">
                             <div

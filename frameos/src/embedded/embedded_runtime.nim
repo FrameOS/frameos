@@ -14,6 +14,7 @@ import frameos/types
 import lib/tz
 import std/times
 import frameos/channels
+import frameos/event_loop
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/planner
@@ -26,6 +27,10 @@ proc espLog(msg: cstring) {.importc: "frameos_nim_log_hook", cdecl.}
 proc requestSceneSelect(sceneId: cstring): bool {.importc: "frameos_nim_request_scene_select", cdecl.}
   ## Queues a scene switch with the firmware (fos_scenes_select), which owns
   ## it: the scene may have to come off flash, and the choice is persisted.
+proc requestRuntimeCommand(command: cstring, payloadJson: cstring): bool {.importc: "frameos_nim_request_runtime_command", cdecl.}
+  ## A device command a scene-side producer reached the dispatcher with
+  ## (`metrics` is the only one a scene may say). The firmware owns them all:
+  ## main/fos_events.c.
 
 proc log*(msg: string) =
   espLog(msg.cstring)
@@ -41,14 +46,12 @@ var
   defaultSceneId: Option[SceneId] = none(SceneId)
   scenesLoadedCount = 0
   renderRequested = false
-  # Nesting of synchronously dispatched scene events (see the event hook).
-  embeddedEventDepth = 0
+  # The shared dispatcher (frameos/event_loop): queue, allow-list, render rule.
+  sceneEvents: EventLoop
   # The payload of a scene-dispatched `setCurrentScene` that carried `state`,
   # held until the firmware has made that scene the current one.
   pendingSceneSwitchId = ""
   pendingSceneSwitchPayload: JsonNode = nil
-
-const MaxEmbeddedEventDepth = 4
 
 type
   SceneCatalogEntry* = object
@@ -128,15 +131,31 @@ proc takeRenderRequested*(): bool =
   result = renderRequested
   renderRequested = false
 
-proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.exportc, cdecl.} =
+proc originFromMask(mask: cuint): Option[EventOrigin] =
+  ## The firmware names an origin by its bit in fos_events_gen.h
+  ## (`FOS_ORIGIN_*` = 1 shl the origin's place in the contract) — the same
+  ## order `EventOrigin` is generated in.
+  for origin in EventOrigin:
+    if mask == (1.cuint shl ord(origin)):
+      return some(origin)
+  none(EventOrigin)
+
+proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson: cstring): bool {.exportc, cdecl.} =
+  ## One event from the firmware, stamped with who said it. It is queued and
+  ## the queue is drained before this returns (one task: nobody else will), so
+  ## what its handlers dispatch is delivered here too, after them. False when it
+  ## came to nothing: an origin that may not say it, no scene, bad JSON.
   try:
+    let origin = originFromMask(originMask)
+    if origin.isNone or sceneEvents.isNil:
+      log("event " & $eventName & " dropped: " & (if sceneEvents.isNil: "runtime not ready" else: "unknown origin"))
+      return false
     let payload =
       if payloadJson == nil or ($payloadJson).len == 0:
         %*{}
       else:
         parseJson($payloadJson)
-    channels.sendEvent($eventName, payload)
-    result = true
+    result = sceneEvents.dispatchNow(origin.get(), $eventName, payload)
   except Exception as e:
     log("event " & $eventName & " failed: " & e.msg)
     result = false
@@ -257,73 +276,63 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
   initLock(logger.lock)
   channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
     espLog(($payload).cstring)
-  channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
+  channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string, payload: JsonNode,
+      origin: EventOrigin) {.gcsafe.} =
     {.cast(gcsafe).}:
-      # Every event reaches the scene graph, not a hardcoded few. This used to
-      # dispatch only setSceneState/setCurrentScene, which silently dropped
-      # everything a scene defines its own handler for — a GPIO button press
-      # arrived from the firmware as a "button" event, matched no branch, and
-      # vanished. The Counter scene's `event button` nodes never ran, and the
-      # frame looked like it had dead buttons. The Pi runner has always
-      # dispatched by name (frameos/runner.nim), so this also removes a
-      # difference between the two runtimes that scene authors could not see.
-      if event == "render":
-        renderRequested = true
-      elif event == "setCurrentScene" and not payload.isNil and payload.kind == JObject and
-          payload{"sceneId"}.getStr().len > 0 and
-          (currentSceneId.isNone or currentSceneId.get().string != payload{"sceneId"}.getStr()):
-        # A scene's own dispatch node switching scenes. The HTTP, schedule and
-        # cloud paths never get here (the firmware selects the scene itself),
-        # so until now this fell through to the branch below and applied the
-        # payload's state to the CURRENT scene instead of switching.
-        let nextId = payload{"sceneId"}.getStr()
-        if requestSceneSelect(nextId.cstring):
-          if payload{"state"}.kind == JObject:
-            pendingSceneSwitchId = nextId
-            pendingSceneSwitchPayload = copy(payload)
-          renderRequested = true
-        else:
-          log("setCurrentScene: scene not selectable: " & nextId)
-      elif not currentScene.isNil:
-        # Events run synchronously here (one task, no queue), so a handler that
-        # dispatches its own event recurses on the render task's stack. The
-        # per-run dispatch budget (interpreter, run_budget.nim) caps the fan-out;
-        # this caps the depth, and names the loop instead of overflowing.
-        if embeddedEventDepth >= MaxEmbeddedEventDepth:
-          log("event " & event & " dropped: " & $embeddedEventDepth &
-              " events deep — a scene is re-dispatching its own event")
-        else:
-          inc embeddedEventDepth
-          let listenersBefore = eventListenersRun
-          try:
-            let context = ExecutionContext(scene: currentScene, event: event,
-                payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
-            runEvent(currentScene, context)
-            # A press draws a new frame only when a listener took it. The
-            # firmware used to ask for a render on every press, heard or not —
-            # on a Spectra panel, half a minute of refresh for nothing.
-            if event == "button" and eventListenersRun != listenersBefore:
-              renderRequested = true
-          except Exception as e:
-            log("event " & event & " failed: " & e.msg)
-          finally:
-            dec embeddedEventDepth
+      # Queued, never run from inside the run that dispatched it — the rule the
+      # Pi has always had (docs/events.md). Whoever entered the runtime drains:
+      # fos_nim_send_event_impl, and the render pass for what a render, an
+      # `init` or an `open` dispatched.
+      sceneEvents.enqueue(origin, event, payload, sceneId)
+  sceneEvents = newEventLoop(EventHost(
+    requestRender: proc () = renderRequested = true,
+    selectScene: proc (payload: JsonNode): bool =
+      let nextId = payload{"sceneId"}.getStr()
+      if nextId.len == 0:
+        return false
+      if currentSceneId.isSome and currentSceneId.get().string == nextId:
+        # The scene already showing: `state` is applied, nothing switches.
+        if payload{"state"}.kind != JObject or currentScene.isNil:
+          return false
+        runEvent(currentScene, ExecutionContext(scene: currentScene, event: "setCurrentScene",
+          payload: payload, loopIndex: 0, loopKey: "."))
+        return true
+      # The firmware owns the switch (the scene may have to come off flash, and
+      # the choice is persisted); `state` waits until that scene is the one.
+      if not requestSceneSelect(nextId.cstring):
+        log("setCurrentScene: scene not selectable: " & nextId)
+        return false
+      if payload{"state"}.kind == JObject:
+        pendingSceneSwitchId = nextId
+        pendingSceneSwitchPayload = copy(payload)
+      true,
+    displayPower: proc (on: bool) =
+      # E-paper holds its image unpowered and has no backlight: nothing to
+      # switch (docs/cloud-frames-contract.json, set_display_power). The scene
+      # still hears the event.
+      discard,
+    runtimeCommand: proc (command: RuntimeCommand, payload: JsonNode) =
+      let name = $command
+      let payloadText = $payload
+      if not requestRuntimeCommand(name.cstring, payloadText.cstring):
+        log("runtime command not handled: " & name),
+    sceneFor: proc (target: Option[SceneId]): FrameScene =
+      # One resident scene: an event aimed at another one has nowhere to go.
+      if target.isSome and (currentSceneId.isNone or target.get() != currentSceneId.get()):
+        return nil
+      currentScene,
+    runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
+      runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload,
+        loopIndex: 0, loopKey: ".")),
+    log: proc (entry: JsonNode) = espLog(($entry).cstring),
+  ), frameConfig)
 
 proc runLifecycleEvent(event: string, payload: JsonNode) =
   ## The events the host sends around a scene switch, the way runner.nim sends
   ## them: "close" to the scene being left, "open" to the one that became
   ## current. ("init" is the interpreter's own, fired by its init.)
-  if currentScene.isNil:
-    return
-  inc embeddedEventDepth
-  try:
-    let context = ExecutionContext(scene: currentScene, event: event, payload: payload,
-        loopIndex: 0, loopKey: ".")
-    runEvent(currentScene, context)
-  except Exception as e:
-    log("event " & event & " failed: " & e.msg)
-  finally:
-    dec embeddedEventDepth
+  if not sceneEvents.isNil:
+    sceneEvents.deliverLifecycle(currentScene, event, payload)
 
 proc cleanupScene(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
@@ -536,13 +545,18 @@ proc ensureScene(): bool =
     return false
   currentExported = scenes[sceneId]
   when defined(memProbe): memProbe("  SCENE INIT " & sceneId.string)
-  currentScene = interpreter.init(sceneId, frameConfig, logger, %*{})
+  sceneEvents.hostRun:
+    currentScene = interpreter.init(sceneId, frameConfig, logger, %*{})
   when defined(memProbe): memProbe("  ensureScene: init done")
   log(&"scene \"{currentSceneName()}\" initialized")
   # The order runner.nim keeps: the switch's state is applied (public fields
   # only, by the scene's own `setCurrentScene` handling), then "open".
   if pendingSceneSwitchId == sceneId.string and not pendingSceneSwitchPayload.isNil:
-    runLifecycleEvent("setCurrentScene", pendingSceneSwitchPayload)
+    try:
+      runEvent(currentScene, ExecutionContext(scene: currentScene, event: "setCurrentScene",
+        payload: pendingSceneSwitchPayload, loopIndex: 0, loopKey: "."))
+    except Exception as e:
+      log("setCurrentScene state failed: " & e.msg)
   pendingSceneSwitchId = ""
   pendingSceneSwitchPayload = nil
   runLifecycleEvent("open", %*{"sceneId": sceneId.string})
@@ -680,7 +694,12 @@ proc renderCurrentScene*(): Option[Image] =
     loopKey: ".",
     nextSleep: -1
   )
-  let image = interpreter.render(currentScene, context)
+  var image: Image
+  sceneEvents.hostRun:
+    image = interpreter.render(currentScene, context)
+  # What the render (and an `init` or `open` before it) dispatched: delivered
+  # now that the run is over. A `render` among it is one more pass.
+  discard sceneEvents.drain()
   # The scene is done with its JS nodes until the next render, which on this
   # board is minutes away. Hand their interpreters back now so the packing and
   # display work below — and the next render's image decodes — see the memory.

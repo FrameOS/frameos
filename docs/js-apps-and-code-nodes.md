@@ -20,7 +20,7 @@ Globals available inside a code node — and nothing else:
 |---|---|
 | `state.<field>` | the scene's state fields (declare them in the scene's `fields`), plus `state.refreshInterval` — see [the refresh interval](#the-refresh-interval-is-a-state-field) |
 | `<arg>` | every declared `codeArgs` entry, by name |
-| `context` | `{ event, payload, loopIndex, loopKey, hasImage }` |
+| `context` | `{ event, payload, loopIndex, loopKey, hasImage, imageWidth, imageHeight }` — `imageWidth` / `imageHeight` are the canvas this run draws on, in scene pixels (a cell's inside `render/split`), and `undefined` when it has none (`hasImage` is false: any event but `render`) |
 | `console.log/warn/error` | goes to the frame log |
 | `now()` | seconds since epoch (number) |
 | `format(ts, pattern)` | formats a timestamp in the frame's time zone |

@@ -133,7 +133,7 @@ suite "runner loop safety":
 
     let renderLoop = runnerThread.startRenderLoop(maxCycles = 1)
     let messageLoop = runnerThread.startMessageLoop(maxIterations = 120)
-    sendEvent("render", %*{})
+    sendEvent("render", %*{}, eoHttpAdmin)
 
     waitFor renderLoop
     let sawRenderEvent = waitUntil(proc(): bool =
@@ -388,7 +388,7 @@ suite "runner loop safety":
     )
 
     let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
-    sendEvent("setCurrentScene", %*{"sceneId": "tests/runner/missing-scene"})
+    sendEvent("setCurrentScene", %*{"sceneId": "tests/runner/missing-scene"}, eoHttpAdmin)
 
     let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
     check finished
@@ -432,7 +432,7 @@ suite "runner loop safety":
       )
 
       let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
-      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId})
+      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId}, eoHttpAdmin)
 
       let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
       check finished
@@ -483,7 +483,7 @@ suite "runner loop safety":
         logger: testLogger(config, store)
       )
       let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
-      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId})
+      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId}, eoHttpAdmin)
       let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
       check finished
       if finished:
@@ -494,7 +494,7 @@ suite "runner loop safety":
       # bare id is the disk scene again.
       discard updateUploadedScenesFromPayload(%*{"scenes": [sceneJson]}, persistPayload = false)
       let localLoop = runnerThread.startMessageLoop(maxIterations = 2)
-      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId})
+      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId}, eoHttpAdmin)
       let localFinished = waitUntil(proc(): bool = localLoop.finished, steps = 200, stepMs = 5)
       check localFinished
       if localFinished:
@@ -531,7 +531,7 @@ suite "runner loop safety":
       )
 
       let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
-      sendEvent("reboot", %*{})
+      sendEvent("reboot", %*{}, eoHttpAdmin)
 
       let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
       check finished
@@ -589,10 +589,10 @@ suite "runner loop safety":
         heard.countIt(it[0] == sceneId.string and it[1] == "open")
 
       check waitUntil(proc(): bool = opens(sceneA) == 1)
-      sendEvent("setCurrentScene", %*{"sceneId": sceneB.string, "state": {"secret": "for B"}})
+      sendEvent("setCurrentScene", %*{"sceneId": sceneB.string, "state": {"secret": "for B"}}, eoHttpAdmin)
       check waitUntil(proc(): bool = opens(sceneB) == 1)
       # Back to a scene that is still in memory: no init, but it is open again.
-      sendEvent("setCurrentScene", %*{"sceneId": sceneA.string})
+      sendEvent("setCurrentScene", %*{"sceneId": sceneA.string}, eoHttpAdmin)
       check waitUntil(proc(): bool = opens(sceneA) == 2)
       waitFor renderLoop
       waitFor messageLoop
@@ -624,10 +624,10 @@ suite "runner loop safety":
       logger: testLogger(config, store)
     )
     let messageLoop = runnerThread.startMessageLoop(maxIterations = 6)
-    sendEvent("keyDown", %*{"key": "KEY_P", "code": 25})
-    sendEvent("keyUp", %*{"key": "KEY_P", "code": 25})
-    sendEvent("wheel", %*{"deltaX": 0, "deltaY": 1})
-    sendEvent("button", %*{"pin": 5, "label": "A", "level": 0})
+    sendEvent("keyDown", %*{"key": "KEY_P", "code": 25}, eoHttpAdmin)
+    sendEvent("keyUp", %*{"key": "KEY_P", "code": 25}, eoHttpAdmin)
+    sendEvent("wheel", %*{"deltaX": 0, "deltaY": 1}, eoHttpAdmin)
+    sendEvent("button", %*{"pin": 5, "label": "A", "level": 0}, eoHttpAdmin)
     waitFor messageLoop
 
     check hasEvent(store, "event:keyDown")

@@ -8,10 +8,15 @@
 // by the runner, `restart` exits the runtime (systemd brings it back),
 // `reboot` runs the device's privileged reboot. On the ESP32 the last two are
 // the same esp_restart(). What a device *accepts* from a schedule is wider —
-// every event whose `origins` list "schedule", and any custom scene event —
-// so this is still a UI list, only no longer a second one.
+// every event whose `origins` list "schedule" — so this is still a UI list,
+// only no longer a second one.
+//
+// A scene's custom event is schedulable when its declaration opts in
+// (`customEvents: [{name, origins: ["schedule"]}]`, the Events panel's
+// checkbox): the panel offers those per scene, and the device refuses the rest.
 
-import { schedulableContractEvents } from './eventsContract'
+import { isContractEvent, schedulableContractEvents } from './eventsContract'
+import { CUSTOM_EVENT_MAX_NAME_LENGTH } from './eventsContract.gen'
 
 export type ScheduledEventName = 'setCurrentScene' | 'restart' | 'reboot'
 export type ScheduledSystemEventName = Exclude<ScheduledEventName, 'setCurrentScene'>
@@ -50,8 +55,59 @@ export function isScheduledSystemEvent(event: string | null | undefined): event 
   return scheduledSystemEvents.some((option) => option.value === event)
 }
 
+/** An entry that fires a scene's custom event: any name that is not the contract's. */
+export function isScheduledCustomEvent(event: string | null | undefined): boolean {
+  return !!event && !isContractEvent(event)
+}
+
 export function scheduledEventIsSceneChange(event: ScheduledEventLike): boolean {
-  return !isScheduledSystemEvent(event.event)
+  return !isScheduledSystemEvent(event.event) && !isScheduledCustomEvent(event.event)
+}
+
+export interface SceneCustomEventsLike {
+  id?: string
+  name?: string
+  customEvents?: readonly { name?: string; origins?: readonly string[] }[] | null
+}
+
+export interface ScheduledCustomEventGroup {
+  /** The declaring scene's name. */
+  label: string
+  options: { value: string; label: string }[]
+}
+
+/**
+ * The custom events a schedule may fire, grouped by the scene that declares
+ * them with the `schedule` origin — the device's reading of the same array
+ * (`declaredCustomEventOrigins`, frameos/events.nim). The entry fires
+ * `{event: <name>, payload: {}}` at whichever scene is showing.
+ */
+export function schedulableCustomEventGroups(
+  scenes: readonly SceneCustomEventsLike[] | null | undefined
+): ScheduledCustomEventGroup[] {
+  const groups: ScheduledCustomEventGroup[] = []
+  for (const scene of scenes ?? []) {
+    const names = new Set<string>()
+    for (const event of scene.customEvents ?? []) {
+      const name = String(event?.name ?? '').trim()
+      if (
+        name &&
+        new TextEncoder().encode(name).length <= CUSTOM_EVENT_MAX_NAME_LENGTH &&
+        !isContractEvent(name) &&
+        Array.isArray(event.origins) &&
+        event.origins.includes('schedule')
+      ) {
+        names.add(name)
+      }
+    }
+    if (names.size > 0) {
+      groups.push({
+        label: scene.name || scene.id || 'Unnamed scene',
+        options: [...names].map((name) => ({ value: name, label: name })),
+      })
+    }
+  }
+  return groups
 }
 
 export function scheduledSystemEventLabel(event: string | null | undefined): string {
@@ -61,7 +117,7 @@ export function scheduledSystemEventLabel(event: string | null | undefined): str
 /**
  * The one-line title of an entry: the scene's name for a scene change
  * (`sceneName` resolves it; `fallback` when the scene is gone), the action's
- * label otherwise.
+ * label for a maintenance entry, the event's name for a custom event.
  */
 export function scheduledEventTitle(
   event: ScheduledEventLike,
@@ -70,6 +126,9 @@ export function scheduledEventTitle(
 ): string {
   if (isScheduledSystemEvent(event.event)) {
     return scheduledSystemEventLabel(event.event)
+  }
+  if (isScheduledCustomEvent(event.event)) {
+    return event.event
   }
   const sceneId = event.payload?.sceneId
   return (sceneId ? sceneName(sceneId) : null) || fallback

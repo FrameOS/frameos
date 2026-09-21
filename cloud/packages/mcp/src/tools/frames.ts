@@ -631,9 +631,11 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_command_send",
     {
       description:
-        "Queue a raw device command. Types: render, get_metrics, reboot, restart_runtime, refresh_service_settings, set_schedule (re-push the stored schedule), set_current_scene (scene_id may be a store scene id or a runtime scene id; prefer frame_scene_activate), notify_update_available (start a signed OTA firmware update).",
+        "Queue a raw device command. Types: render, get_metrics, reboot, restart_runtime, refresh_service_settings, set_schedule (re-push the stored schedule), set_current_scene (scene_id may be a store scene id or a runtime scene id; prefer frame_scene_activate), scene_event (an event for the scene the frame is showing: event_name \"button\" with event_payload {pin?, label?, level?}, \"setSceneState\" with {state, render?}, or a custom event name a scene on the frame declares with origins [\"cloud\"] in its customEvents; needs FrameOS 2026.9.21+, never a device command), notify_update_available (start a signed OTA firmware update).",
       inputSchema: {
         confirm: confirmed("sends the device a command (including set_current_scene and notify_update_available)"),
+        event_name: z.string().min(1).max(63).optional(),
+        event_payload: z.record(z.string(), z.unknown()).optional(),
         frame_id: frameId,
         scene_id: z.string().max(256).optional(),
         type: z.enum([
@@ -643,16 +645,24 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
           "refresh_service_settings",
           "render",
           "restart_runtime",
+          "scene_event",
           "set_current_scene",
           "set_schedule",
         ]),
       },
     },
-    async ({ frame_id, scene_id, type }) =>
+    async ({ event_name, event_payload, frame_id, scene_id, type }) =>
       run(async () =>
         text(
           await api.json("POST", `/api/frames/${frame_id}/command`, {
-            body: { type, ...(scene_id ? { scene_id } : {}) },
+            body: {
+              type,
+              ...(scene_id ? { scene_id } : {}),
+              // scene_event's {name, payload?}; the route validates both and
+              // refuses what the frame's scenes or firmware cannot take.
+              ...(type === "scene_event" && event_name ? { name: event_name } : {}),
+              ...(type === "scene_event" && event_payload ? { payload: event_payload } : {}),
+            },
           }),
         ),
       ),

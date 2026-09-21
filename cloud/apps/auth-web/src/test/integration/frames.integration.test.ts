@@ -2877,10 +2877,11 @@ describe("frame management API", () => {
     expect(commands.some((command) => command.type === "set_display_power")).toBe(false);
   });
 
-  // setSceneState has no verb of its own yet; on the full runtime a
-  // set_current_scene that names the scene already showing IS "apply this
-  // state and render" (src/lib/frame-events.ts), so that is what is queued.
-  it("queues setSceneState as set_current_scene on the scene the frame is showing", async () => {
+  // A frame whose FrameOS predates scene_event (enrolledFrame reports
+  // 2026.8.1): on the full runtime a set_current_scene that names the scene
+  // already showing IS "apply this state and render"
+  // (src/lib/frame-events.ts), so that is what is queued.
+  it("queues setSceneState as set_current_scene on the scene an older frame is showing", async () => {
     const { frame_id } = await enrolledFrame();
     await confirmFrame(
       postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
@@ -2922,6 +2923,139 @@ describe("frame management API", () => {
     expect(queued).toHaveLength(1);
     expect(queued[0]?.payload).toEqual({ scene_id: "uploaded/clock", state: { city: "Tartu" } });
     expect(queued[0]?.expiresAt).not.toBeNull();
+  });
+
+  // scene_event, the one generic verb (FrameOS 2026.9.21): button and
+  // setSceneState ride it as the events they are, and so does a custom event
+  // — when a scene on the frame declares it with the `cloud` origin, which is
+  // the device's own rule asked where the person can still be told.
+  it("queues button, setSceneState and a declared custom event as scene_event", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const event = (eventName: string, body: Record<string, unknown>) =>
+      postFrameEvent(postJson(`/api/frames/${frame_id}/event/${eventName}`, body, { origin: baseUrl }), {
+        params: Promise.resolve({ eventName, frameId: frame_id }),
+      });
+    const sceneEvents = async () =>
+      (
+        await db
+          .select()
+          .from(frameCommands)
+          .where(eq(frameCommands.frameId, frame_id))
+          .orderBy(asc(frameCommands.createdAt))
+      ).filter((command) => command.type === "scene_event");
+
+    // The firmware the frame enrolled with does not know the verb: button
+    // has no stand-in, so the update is named instead of queueing a command
+    // the device would answer unknown_verb to.
+    const tooOld = await event("button", { label: "A", pin: 5 });
+    expect(tooOld.status).toBe(409);
+    expect(await tooOld.json()).toMatchObject({
+      error: "frame_update_required",
+      min_frameos_version: "2026.9.21",
+    });
+
+    await db.update(frames).set({ frameosVersion: "2026.9.21" }).where(eq(frames.id, frame_id));
+
+    const button = await event("button", { label: "A", level: 0, pin: 5, sceneId: "ignored" });
+    expect(button.status).toBe(200);
+    expect(await button.json()).toMatchObject({ status: "queued", type: "scene_event" });
+    expect((await event("button", {})).status).toBe(400);
+
+    // No active scene needed any more: the event goes to whatever is showing.
+    const state = await event("setSceneState", { state: { city: "Tartu" } });
+    expect(state.status).toBe(200);
+    expect(await state.json()).toMatchObject({ status: "queued", type: "scene_event" });
+    expect((await event("setSceneState", {})).status).toBe(400);
+
+    // A custom event nothing on the frame declares.
+    const undeclared = await event("nextPage", {});
+    expect(undeclared.status).toBe(404);
+    expect(await undeclared.json()).toMatchObject({ error: "unsupported_event" });
+
+    const pager = await createStoreScene(accountId, { name: "Pager" });
+    await db
+      .update(storeSceneVersions)
+      .set({
+        content: Buffer.from(
+          zipSync({
+            "scene/scenes.json": new TextEncoder().encode(
+              JSON.stringify([
+                {
+                  customEvents: [
+                    { name: "nextPage", origins: ["cloud"] },
+                    { name: "chime", origins: ["schedule"] },
+                  ],
+                  edges: [],
+                  id: pager.id,
+                  name: "Pager",
+                  nodes: [],
+                },
+              ]),
+            ),
+            "scene/template.json": new TextEncoder().encode(JSON.stringify({ name: "Pager" })),
+          }),
+        ),
+      })
+      .where(eq(storeSceneVersions.sceneId, pager.id));
+    const assign = await assignFrameScenes(
+      postJson(`/api/frames/${frame_id}/scenes`, { scenes: [{ scene_id: pager.id }] }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+
+    const declared = await event("nextPage", { by: 2 });
+    expect(declared.status).toBe(200);
+    expect(await declared.json()).toMatchObject({ status: "queued", type: "scene_event" });
+    // Declared, but for the schedule only.
+    expect((await event("chime", {})).status).toBe(404);
+    // The scene showing decides when the cloud knows it.
+    await db
+      .update(frames)
+      .set({ lastState: { active_scene: `uploaded/${pager.id}` } })
+      .where(eq(frames.id, frame_id));
+    expect((await event("nextPage", {})).status).toBe(200);
+
+    // The raw command route is held to the same questions.
+    const command = (body: Record<string, unknown>) =>
+      sendCommand(postJson(`/api/frames/${frame_id}/command`, body, { origin: baseUrl }), routeParams(frame_id));
+    const deviceCommand = await command({ name: "reboot", type: "scene_event" });
+    expect(deviceCommand.status).toBe(400);
+    expect(await deviceCommand.json()).toMatchObject({ error: "event_not_allowed" });
+    expect((await command({ name: "chime", type: "scene_event" })).status).toBe(404);
+    expect((await command({ name: "nextPage", payload: [1], type: "scene_event" })).status).toBe(400);
+    expect((await command({ name: "nextPage", payload: { by: 3 }, type: "scene_event" })).status).toBe(200);
+
+    const queued = await sceneEvents();
+    expect(queued.map((row) => row.payload)).toEqual([
+      { name: "button", payload: { label: "A", level: 0, pin: 5 } },
+      { name: "setSceneState", payload: { render: true, state: { city: "Tartu" } } },
+      { name: "nextPage", payload: { by: 2 } },
+      { name: "nextPage" },
+      { name: "nextPage", payload: { by: 3 } },
+    ]);
+    // An event pressed on Monday must not fire on Friday.
+    expect(queued.every((row) => row.expiresAt !== null)).toBe(true);
+
+    // Declared and too old: only the update is missing, on both routes.
+    await db.update(frames).set({ frameosVersion: "2026.9.20" }).where(eq(frames.id, frame_id));
+    const oldCustom = await event("nextPage", {});
+    expect(oldCustom.status).toBe(409);
+    expect(await oldCustom.json()).toMatchObject({
+      error: "frame_update_required",
+      min_frameos_version: "2026.9.21",
+    });
+    // …and the raw route does not reach for setSceneState's stand-in.
+    const oldState = await command({
+      name: "setSceneState",
+      payload: { state: { city: "Tartu" } },
+      type: "scene_event",
+    });
+    expect(oldState.status).toBe(409);
+    expect(await sceneEvents()).toHaveLength(5);
   });
 
   // A scene the device does not hold cannot be selected: it answers

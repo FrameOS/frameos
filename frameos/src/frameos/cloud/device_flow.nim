@@ -117,7 +117,7 @@ proc requestRender() {.gcsafe.} =
   ## A sleeping scene renders on its own schedule; every state change that
   ## puts a code on the panel or takes one off asks for a frame right away.
   {.gcsafe.}:
-    sendEvent("render", %*{})
+    sendEvent("render", %*{}, eoSystem)
 
 # ---------------------------------------------------------------------------
 # Start

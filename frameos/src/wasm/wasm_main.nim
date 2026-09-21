@@ -14,7 +14,7 @@ import pixie
 
 import frameos/types
 import frameos/channels
-import frameos/events
+import frameos/event_loop
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -43,7 +43,8 @@ var
   defaultSceneId: Option[SceneId] = none(SceneId)
   scenesLoadedCount = 0
   renderRequested = false
-  handlingEvent = false
+  # The shared dispatcher (frameos/event_loop): queue, allow-list, render rule.
+  sceneEvents: EventLoop
   lastImage: Image
   lastNextSleep: float = -1
   sceneInfoBuffer: string
@@ -102,26 +103,13 @@ proc dropCurrentScene() =
 
 # ------------------------------------------------------------------- scenes
 
-proc runSceneEvent(event: string, payload: JsonNode) =
-  if currentScene.isNil:
-    return
-  let context = ExecutionContext(scene: currentScene, event: event,
-      payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
-  runEvent(currentScene, context)
-
 proc runLifecycleEvent(event: string, payload: JsonNode) =
   ## "open" and "close", which the host sends the way runner.nim does: "open"
   ## when a scene becomes the current one, "close" when the preview switches
-  ## away from it. ("init" is the interpreter's own, fired by its init.) They
-  ## count as handling an event, so a listener that dispatches does not recurse.
-  let wasHandling = handlingEvent
-  handlingEvent = true
-  try:
-    runSceneEvent(event, payload)
-  except Exception as e:
-    setLastError("event " & event & " failed: " & e.msg)
-  finally:
-    handlingEvent = wasHandling
+  ## away from it. ("init" is the interpreter's own, fired by its init.) What a
+  ## listener dispatches is queued, like from any other run.
+  if not sceneEvents.isNil:
+    sceneEvents.deliverLifecycle(currentScene, event, payload)
 
 proc selectSceneById(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
@@ -150,7 +138,8 @@ proc ensureScene(): bool =
   let persisted =
     if pendingSceneStates.hasKey(sceneId.string): pendingSceneStates[sceneId.string]
     else: %*{}
-  currentScene = interpreter.init(sceneId, frameConfig, logger, persisted)
+  sceneEvents.hostRun:
+    currentScene = interpreter.init(sceneId, frameConfig, logger, persisted)
   log(&"scene \"{currentSceneName()}\" initialized")
   runLifecycleEvent("open", %*{"sceneId": sceneId.string})
   true
@@ -247,52 +236,45 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
       jsLogHook(($payload).cstring)
     channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string,
-        payload: JsonNode) {.gcsafe.} =
+        payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
       {.cast(gcsafe).}:
         # Pointer input (mouseMove/mouseDown/mouseUp) comes from the page in
         # the first place and arrives many times a second: like runner.nim,
         # which keeps it out of the frame log, it is not echoed back.
-        let pointerEvent = eventPolicy(event).device == edPointer
-        if not pointerEvent:
+        if eventPolicy(event).device != edPointer:
           jsEventHook(event.cstring, (if payload.isNil: "{}" else: $payload).cstring)
-        if event == "render":
-          renderRequested = true
-        elif not currentScene.isNil and not handlingEvent:
-          # Unlike the ESP32 runtime the preview forwards every non-render
-          # event to the scene (like runner.nim does on Linux), so custom
-          # event nodes ("button", user events) work interactively. The
-          # handlingEvent latch keeps a scene that re-dispatches its own
-          # event from recursing forever.
-          if event == "setCurrentScene" and payload != nil and payload.kind == JObject and
-              payload.hasKey("sceneId"):
-            let nextId = payload{"sceneId"}.getStr()
-            if nextId.len > 0 and (currentSceneId.isNone or currentSceneId.get().string != nextId):
-              discard selectSceneById(nextId)
-              return
-          # Pointer input arrives the way drivers/evdev sends it — `mouseMove`
-          # as 0..32767 across the panel, `mouseDown`/`mouseUp` with a button
-          # — and reaches the scene the way runner.nim delivers it: in the
-          # scene's own pixels.
-          var scenePayload = payload
-          if event == "mouseMove" and payload != nil and payload.kind == JObject and
-              frameConfig.width > 0 and frameConfig.height > 0:
-            let point = pointerToScenePoint(payload{"x"}.getInt(), payload{"y"}.getInt(),
-              frameConfig.width, frameConfig.height, frameConfig.rotate, frameConfig.flip)
-            scenePayload = copy(payload)
-            scenePayload["x"] = %point.x
-            scenePayload["y"] = %point.y
-          handlingEvent = true
-          try:
-            runSceneEvent(event, scenePayload)
-          except Exception as e:
-            setLastError("event " & event & " failed: " & e.msg)
-          finally:
-            handlingEvent = false
-          # A frame does not render because a finger moved: a scene that wants
-          # a new picture dispatches "render" itself, and gets one here too.
-          # Every other event keeps the preview's render-after-event habit.
-          if not pointerEvent:
-            renderRequested = true
+        # Queued, never run from inside the run that dispatched it — the rule
+        # every host has (docs/events.md). frameos_wasm_event and the render
+        # pass drain.
+        sceneEvents.enqueue(origin, event, payload, sceneId)
+    sceneEvents = newEventLoop(EventHost(
+      requestRender: proc () = renderRequested = true,
+      selectScene: proc (payload: JsonNode): bool =
+        let nextId = payload{"sceneId"}.getStr()
+        if nextId.len == 0:
+          return false
+        if currentSceneId.isSome and currentSceneId.get().string == nextId:
+          # The scene already showing: `state` is applied, nothing switches.
+          if payload{"state"}.kind != JObject or currentScene.isNil:
+            return false
+          runEvent(currentScene, ExecutionContext(scene: currentScene, event: "setCurrentScene",
+            payload: payload, loopIndex: 0, loopKey: "."))
+          return true
+        if payload{"state"}.kind == JObject:
+          pendingSceneStates[nextId] = copy(payload["state"])
+        selectSceneById(nextId),
+      displayPower: proc (on: bool) = discard, # a canvas has no backlight; the scene still hears it
+      runtimeCommand: proc (command: RuntimeCommand, payload: JsonNode) =
+        log("runtime command ignored in the preview: " & $command),
+      sceneFor: proc (target: Option[SceneId]): FrameScene =
+        if target.isSome and (currentSceneId.isNone or target.get() != currentSceneId.get()):
+          return nil
+        currentScene,
+      runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
+        runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload,
+          loopIndex: 0, loopKey: ".")),
+      log: proc (entry: JsonNode) = jsLogHook(($entry).cstring),
+    ), frameConfig)
     result = true
   except Exception as e:
     setLastError("init failed: " & e.msg)
@@ -403,7 +385,9 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
       loopKey: ".",
       nextSleep: -1
     )
-    let image = interpreter.render(currentScene, context)
+    var image: Image
+    sceneEvents.hostRun:
+      image = interpreter.render(currentScene, context)
     if image.isNil:
       setLastError("render returned no image")
       return 2
@@ -414,9 +398,12 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
       "sceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
       "ms": round((epochTime() - renderStarted) * 1000, 3)
     }))
-    # Scene graphs often dispatch "render" while handling the render event
-    # itself; that must not loop the preview forever.
+    # What the render (and an `init` or `open` before it) dispatched: delivered
+    # now that the run is over. A `render` dispatched from inside a render is
+    # dropped by the interpreter, so this does not loop the preview; one that a
+    # handler dispatched is one more pass, as on a frame.
     renderRequested = false
+    discard sceneEvents.drain()
     0
   except Exception as e:
     setLastError("render failed: " & e.msg)
@@ -453,8 +440,10 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
         %*{}
       else:
         parseJson($payloadJson)
-    channels.sendEvent($eventName, payload)
-    true
+    # Everything the page sends is the `preview` origin; what that may say is
+    # the contract's (docs/events-contract.json).
+    jsEventHook(eventName, ($payload).cstring)
+    sceneEvents.dispatchNow(eoPreview, $eventName, payload)
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
     false

@@ -12,10 +12,11 @@ import os
 
 # What a schedule entry may fire is the contract's: every event whose `origins`
 # (docs/events-contract.json) lists "schedule". What is left out is a runtime
-# verb (uploadScenes) reserved for the server/hub paths that stamp an origin
-# on what they deliver.
+# verb (uploadScenes) and the lifecycle events, which are the host's to say. A
+# custom event is queued and the dispatcher decides: it is delivered when the
+# scene showing declares it with `origins: ["schedule"]` (frameos/event_loop).
 proc scheduleMayFire*(event: string): bool =
-  originMayEmit(eoSchedule, event)
+  originMayQueue(eoSchedule, event)
 
 var thread: Thread[FrameOS]
 
@@ -160,7 +161,7 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
     if eventPolicy(ev.event).endsRuntime:
       {.gcsafe.}:
         persistFiredMinute(minuteKey(dt))
-    sendEvent(ev.event, ev.payload)
+    sendEvent(ev.event, ev.payload, eoSchedule)
 
 proc start*(self: Scheduler) =
   # NTP step corrections (routine on RTC-less Pis) can replay or repeat a

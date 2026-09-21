@@ -1395,7 +1395,7 @@ proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
   let hotspotStarted = getMonoTime()
   frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
-  sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
+  sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId}, eoSystem)
   if portalAutoTimeoutEnabledHook():
     spawn hotspotAutoTimeoutLoop(runtimeHandle(frameOS), hotspotStarted)
   true
@@ -1556,7 +1556,7 @@ proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime) {.gcsafe
         frameOS.network.status = if res.ok: NetworkStatus.connected else: NetworkStatus.error
         if res.ok:
           requestEnrollmentNudge()
-      sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+      sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
 
 proc attemptConnectSupplicant(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
   ## No post-connect grace sleep here (unlike the nmcli path): wpa.connect
@@ -1576,7 +1576,7 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
   if activeNetworkBackend() == nbSupplicant:
     result = attemptConnectSupplicant(frameOS, ssid, password)
     frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
-    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
     return
 
   if privilegedDoorAvailable():
@@ -1588,7 +1588,7 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
     frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
     if frameOS.network.status == NetworkStatus.connected:
       portalSleepHook(5000) # give DHCP etc a moment
-    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
     return
 
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
@@ -1630,7 +1630,7 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
   if frameOS.network.status == NetworkStatus.connected:
     portalSleepHook(5000) # give DHCP etc a moment
 
-  sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+  sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
 
 # Immediately sync the clock so HTTPS certificates validate
 const clockSyncMarkerPath = "/run/systemd/timesync/synchronized"
@@ -1720,7 +1720,7 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
           # errors and sits in backoff; the network is provably up now.
           requestEnrollmentNudge()
           discard runDriverSetupFromSavedConfig(frameOS, options)
-          sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+          sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
           return
         else:
           log(%*{"event": "networkCheck", "status": "failed", "response": response.status})

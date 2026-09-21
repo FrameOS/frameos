@@ -2,12 +2,20 @@
 
 export const customEventMaxNameLength = 63;
 
+/** Every built-in event name. Any other name is a custom scene event. */
+export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "mouseMove", "mouseDown", "mouseUp", "wheel", "turnOn", "turnOff", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"];
+
+export type CloudEventRoute = {
+  verb: string;
+  profiles?: readonly string[];
+  /** The FrameOS version whose frames know `verb`; older ones get `before`, or a refusal. */
+  since?: string;
+  before?: { verb: string; profiles?: readonly string[] };
+};
+
 /** Events the frame event route accepts, and the hub verb each becomes.
  * `profiles`: the device planes whose verb can carry it (absent = all). */
-export const cloudEventRouteVerbs: Record<
-  string,
-  { verb: string; profiles?: readonly string[] }
-> = {
+export const cloudEventRouteVerbs: Record<string, CloudEventRoute> = {
   "render": {
     "verb": "render"
   },
@@ -23,11 +31,19 @@ export const cloudEventRouteVerbs: Record<
       "linux"
     ]
   },
+  "button": {
+    "verb": "scene_event",
+    "since": "2026.9.21"
+  },
   "setSceneState": {
-    "verb": "set_current_scene",
-    "profiles": [
-      "linux"
-    ]
+    "verb": "scene_event",
+    "since": "2026.9.21",
+    "before": {
+      "verb": "set_current_scene",
+      "profiles": [
+        "linux"
+      ]
+    }
   },
   "setCurrentScene": {
     "verb": "set_current_scene"
@@ -40,5 +56,14 @@ export const cloudEventRouteVerbs: Record<
   }
 };
 
+/** A custom scene event: sent when the scene declares it with the `cloud` origin. */
+export const cloudCustomEventRoute: CloudEventRoute = {
+  "verb": "scene_event",
+  "since": "2026.9.21"
+};
+
+/** Origins a scene opts into per custom event: `origins` on its declaration. */
+export const customEventDeclarableOrigins: readonly string[] = ["schedule", "cloud"];
+
 /** Contract events a schedule entry may not fire: the device refuses them. */
-export const scheduleRefusedEvents: readonly string[] = ["uploadScenes"];
+export const scheduleRefusedEvents: readonly string[] = ["init", "open", "close", "uploadScenes"];

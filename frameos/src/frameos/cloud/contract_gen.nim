@@ -178,6 +178,7 @@ const CloudContractVerbs* = @[
   VerbSpec(verb: "get_logs", scope: "telemetry:logs", content: false),
   VerbSpec(verb: "get_metrics", scope: "telemetry:metrics", content: false),
   VerbSpec(verb: "render", scope: "", content: false),
+  VerbSpec(verb: "scene_event", scope: "", content: true),
   VerbSpec(verb: "reboot", scope: "", content: false),
   VerbSpec(verb: "restart_runtime", scope: "", content: false),
   VerbSpec(verb: "set_display_power", scope: "", content: false),

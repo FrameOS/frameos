@@ -9,8 +9,13 @@ import {
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import {
-  cloudEventVerb,
+  buttonEventCommand,
+  cloudEventRouting,
+  isContractEventName,
+  sceneEventCommand,
   sceneStateCommand,
+  sceneStateEventCommand,
+  type SceneEventCommand,
 } from "../../../../../../src/lib/frame-events";
 import {
   enqueueFrameCommand,
@@ -21,6 +26,7 @@ import {
 } from "../../../../../../src/lib/frames";
 import {
   currentSceneAssignments,
+  customEventRoutingForFrame,
   frameHoldsAssignedScenes,
   redeployAssignedScenesToFrame,
 } from "../../../../../../src/lib/frame-scenes";
@@ -52,11 +58,25 @@ const maxScenesPerUpload = 20;
 // cloud mode those map onto queue verbs the device already speaks:
 //
 //   render          → render
+//   metrics         → get_metrics
 //   setCurrentScene → set_current_scene {scene_id, state?}
-//   setSceneState   → set_current_scene {scene_id: <the scene showing>, state}
-//                     (linux profile only — src/lib/frame-events.ts says why)
 //   uploadScenes    → set_scenes {scenes, checksum, scene_id?, state?}
-//   turnOn/turnOff  → set_display_power {on}
+//   turnOn/turnOff  → set_display_power {on}                  (linux only)
+//   setSceneState   → scene_event {name, payload: {state, render: true}}
+//                     before FrameOS 2026.9.21: set_current_scene
+//                     {scene_id: <the scene showing>, state}, linux only
+//                     (src/lib/frame-events.ts says why)
+//   button          → scene_event {name, payload: {pin?, label?, level?}}
+//   <custom event>  → scene_event {name, payload: <the request body>}, when
+//                     a scene on the frame declares it with the `cloud`
+//                     origin (`customEvents: [{name, origins: ["cloud"]}]`)
+//
+// `scene_event` is the one generic verb — "an event for the scene the frame
+// is showing, said by the provider" — and frames know it from FrameOS
+// 2026.9.21 (the contract's `since`). An older frame gets what the event
+// became before, where that exists, and otherwise 409 frame_update_required
+// with the release that would do: a verb the device answers `unknown_verb`
+// to would sit in the queue looking delivered.
 //
 // An uploadScenes push deliberately does NOT touch the frame's store-scene
 // assignments: the device's scenes_checksum will differ from the assigned
@@ -65,8 +85,8 @@ const maxScenesPerUpload = 20;
 // assignment push, though (assignScenesToFrame): a scene the store would
 // flag `shell` and a legacy compiled scene are refused here too, so the
 // ad-hoc route is not a way around the gates on the assigned one. Anything
-// else the backend accepts as an event (custom scene events) has no cloud
-// verb yet and 404s honestly.
+// else the backend accepts as an event — an input event, a lifecycle event, a
+// custom event no scene on the frame lets the cloud send — 404s honestly.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string; eventName: string }> },
@@ -117,13 +137,28 @@ export async function POST(
   // that is not there, or whose verb the frame's device plane cannot carry
   // (`set_display_power` and a `set_current_scene` with state are Linux only
   // — the esp32 profile would let the command wait out its TTL to refuse it),
-  // is a 404. What is left below is each verb's payload.
-  const routed = cloudEventVerb(eventName, frameContractProfile(frame));
-  if (!routed) {
-    return jsonError("unsupported_event", 404);
+  // is a 404. A name the contract does not have is a custom scene event: the
+  // device delivers one from the cloud only to a scene that declares it with
+  // the `cloud` origin, so that is asked of the frame's scenes here. What is
+  // left below is each verb's payload.
+  const custom = !isContractEventName(eventName);
+  const routed = custom
+    ? await customEventRoutingForFrame(db, frame, eventName)
+    : cloudEventRouting(eventName, frameContractProfile(frame), frame.frameosVersion);
+  if (!routed.ok) {
+    return jsonError(
+      routed.error,
+      routed.status,
+      routed.error === "frame_update_required"
+        ? { min_frameos_version: routed.minFrameosVersion }
+        : routed.reason
+          ? { reason: routed.reason }
+          : undefined,
+    );
   }
   const type = routed.verb;
   let payload: Record<string, unknown> | undefined;
+  let sceneEvent: SceneEventCommand | undefined;
   switch (eventName) {
     case "render":
       break;
@@ -198,7 +233,18 @@ export async function POST(
       payload = { scene_id: deviceSceneId, ...(state ? { state } : {}) };
       break;
     }
+    // A GPIO button press, said from the workspace instead of the frame's own
+    // button: the scene's `button` listeners cannot tell the difference, which
+    // is the point.
+    case "button":
+      sceneEvent = buttonEventCommand(body);
+      break;
     case "setSceneState": {
+      if (type === "scene_event") {
+        sceneEvent = sceneStateEventCommand(state);
+        break;
+      }
+      // Older firmware: the set_current_scene stand-in.
       const command = sceneStateCommand({
         lastState: frame.lastState,
         profile: frameContractProfile(frame),
@@ -267,7 +313,21 @@ export async function POST(
       break;
     }
     default:
-      return jsonError("unsupported_event", 404);
+      if (!custom) {
+        return jsonError("unsupported_event", 404);
+      }
+      // A custom event's payload is the request body, as it is on the
+      // backend's event route and the frame's own /event/<name>.
+      sceneEvent = sceneEventCommand(
+        eventName,
+        Object.keys(body).length > 0 ? body : undefined,
+      );
+  }
+  if (sceneEvent) {
+    if (!sceneEvent.ok) {
+      return jsonError(sceneEvent.error, sceneEvent.status);
+    }
+    payload = sceneEvent.payload;
   }
 
   const command = await enqueueFrameCommand(db, {

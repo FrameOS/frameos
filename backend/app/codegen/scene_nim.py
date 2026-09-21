@@ -1038,13 +1038,13 @@ class SceneWriter:
                                 f"of {node_integer}.NodeId: # {nim_comment(event)}",
                                 f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
                                 *[f"    {('    ' + newline).join(x)}," for x in event_payload_pairs],
-                                "  })",
+                                "  }, eoScene)",
                                 f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                             ]
                         else:
                             self.run_node_lines += [
                                 f"of {node_integer}.NodeId: # {nim_comment(event)}",
-                                f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
+                                f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'}, eoScene)",
                                 f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                             ]
             elif node.get("type") == "scene":
@@ -1190,7 +1190,7 @@ class SceneWriter:
         set_scene_state_lines = [
             *set_current_scene_lines,
             '  if context.payload.hasKey("render"):',
-            '    sendEvent("render", %*{})',
+            '    sendEvent("render", %*{}, eoScene)',
         ]
 
         for event, nodes in self.event_nodes.items():

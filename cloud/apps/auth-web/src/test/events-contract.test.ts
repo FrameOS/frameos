@@ -8,8 +8,19 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { contractVerbs, type ContractProfile } from "../lib/cloud-frames-contract";
-import { cloudEventRouteVerbs } from "../lib/events-contract.gen";
-import { cloudEventVerb } from "../lib/frame-events";
+import {
+  cloudCustomEventRoute,
+  cloudEventRouteVerbs,
+  contractEventNames,
+} from "../lib/events-contract.gen";
+import {
+  cloudEventRouting,
+  cloudEventVerb,
+  customEventRouting,
+  isContractEventName,
+  sceneEventCommand,
+  type CloudEventRouting,
+} from "../lib/frame-events";
 import { validateFrameSchedule } from "../lib/frames";
 
 interface OriginCase {
@@ -21,6 +32,17 @@ interface CloudRouteCase {
   event: string;
   verb: string | null;
   profiles?: ContractProfile[];
+  /** What the frame reports; absent = nothing, which is older than any `since`. */
+  frameosVersion?: string;
+  /** What the scene the frame is showing declares. */
+  customEvents?: unknown[];
+  /** The refusal where there is no verb; absent = unsupported_event. */
+  error?: string;
+}
+interface SceneEventCase {
+  name: string;
+  payload?: unknown;
+  error: string | null;
 }
 
 const repoFile = (path: string): string =>
@@ -28,11 +50,16 @@ const repoFile = (path: string): string =>
 
 const fixtures = JSON.parse(repoFile("docs/event-fixtures.json")) as {
   origins: { cases: OriginCase[] };
-  cloudEventRoute: { cases: CloudRouteCase[] };
+  cloudEventRoute: { cases: CloudRouteCase[]; sceneEventCases: SceneEventCase[] };
 };
 const contract = JSON.parse(repoFile("docs/events-contract.json")) as {
-  customEvents: { maxNameLength: number };
-  events: { name: string; origins: string[]; cloud?: { verb: string; eventRoute?: boolean } }[];
+  customEvents: { maxNameLength: number; cloud?: { verb: string; since?: string } };
+  events: {
+    name: string;
+    class: string;
+    origins: string[];
+    cloud?: { verb: string; eventRoute?: boolean; since?: string; before?: { verb: string } };
+  }[];
 };
 
 const profiles: ContractProfile[] = ["linux", "esp32"];
@@ -41,16 +68,84 @@ function schedule(event: string): unknown {
   return { events: [{ event, hour: 1, id: "a", minute: 2, payload: {}, weekday: 0 }] };
 }
 
+// The route's own decision: a contract event by the contract's table, any
+// other name as a custom event of the scene the frame is showing.
+function routeCase(c: CloudRouteCase, profile: ContractProfile): CloudEventRouting {
+  return isContractEventName(c.event)
+    ? cloudEventRouting(c.event, profile, c.frameosVersion)
+    : customEventRouting({
+        activeSceneId: "uploaded/showing",
+        eventName: c.event,
+        frameosVersion: c.frameosVersion,
+        profile,
+        scenes: [{ customEvents: c.customEvents, id: "showing" }],
+      });
+}
+
 describe("the frame event route", () => {
-  it("turns an event into the verb the fixtures name, on the profiles they name", () => {
-    expect(fixtures.cloudEventRoute.cases.length).toBeGreaterThan(10);
+  it("turns an event into the verb the fixtures name, on the profiles and firmware they name", () => {
+    expect(fixtures.cloudEventRoute.cases.length).toBeGreaterThan(20);
     for (const c of fixtures.cloudEventRoute.cases) {
       for (const profile of profiles) {
-        const expected =
-          c.verb !== null && (c.profiles ?? profiles).includes(profile) ? { verb: c.verb } : undefined;
-        expect(cloudEventVerb(c.event, profile), `${c.event} on ${profile}`).toEqual(expected);
+        const what = `${c.event} on ${profile} ${c.frameosVersion ?? "(no version)"}`;
+        const routed = routeCase(c, profile);
+        if (c.verb !== null && (c.profiles ?? profiles).includes(profile)) {
+          expect(routed, what).toEqual({ ok: true, verb: c.verb });
+        } else {
+          expect(routed.ok, what).toBe(false);
+          expect(routed.ok ? undefined : routed.error, what).toBe(c.error ?? "unsupported_event");
+        }
+        if (isContractEventName(c.event)) {
+          expect(cloudEventVerb(c.event, profile, c.frameosVersion), what).toEqual(
+            routed.ok ? { verb: routed.verb } : undefined,
+          );
+        }
       }
     }
+  });
+
+  it("says which release a frame needs when only its firmware is in the way", () => {
+    expect(cloudEventRouting("button", "esp32", "2026.9.20")).toEqual({
+      error: "frame_update_required",
+      minFrameosVersion: "2026.9.21",
+      ok: false,
+      status: 409,
+    });
+    // The raw command route names the verb itself: no stand-in.
+    expect(cloudEventRouting("setSceneState", "linux", "2026.9.20", { allowBefore: false })).toMatchObject({
+      error: "frame_update_required",
+    });
+  });
+
+  it("lets scene_event carry what the fixtures say, and nothing else", () => {
+    expect(fixtures.cloudEventRoute.sceneEventCases.length).toBeGreaterThan(10);
+    for (const c of fixtures.cloudEventRoute.sceneEventCases) {
+      const built = sceneEventCommand(c.name, c.payload);
+      expect(built.ok ? null : built.error, `scene_event ${c.name}`).toBe(c.error);
+      if (built.ok) {
+        expect(built.payload).toEqual({
+          name: c.name,
+          ...(c.payload === undefined ? {} : { payload: c.payload }),
+        });
+      }
+    }
+  });
+
+  it("never lets a device command ride scene_event", () => {
+    const deviceCommands = contract.events.filter((event) => event.class === "device-command");
+    expect(deviceCommands.length).toBeGreaterThan(3);
+    for (const event of deviceCommands) {
+      expect(sceneEventCommand(event.name), event.name).toMatchObject({ error: "event_not_allowed" });
+    }
+    // …and what does ride it is what the contract routes there.
+    for (const event of contract.events) {
+      expect(sceneEventCommand(event.name).ok, event.name).toBe(event.cloud?.verb === "scene_event");
+    }
+  });
+
+  it("knows the contract's names, and its custom event route", () => {
+    expect([...contractEventNames]).toEqual(contract.events.map((event) => event.name));
+    expect(cloudCustomEventRoute).toEqual(contract.customEvents.cloud);
   });
 
   it("covers every event the contract gives the cloud origin on this route", () => {

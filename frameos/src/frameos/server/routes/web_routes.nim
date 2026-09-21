@@ -379,8 +379,12 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     # restart, reboot, uploadScenes — take an admin session or the backend's
     # serverApiKey bearer instead; see ControlEvents in auth.nim.
     let eventName = request.pathParams["name"]
+    # The credential is the origin (docs/events.md): an admin session or the
+    # backend's bearer speaks as `http:admin`, the access key as `http:write`.
+    # The dispatcher asks the allow-list again; this is the 401 it cannot give.
+    let origin = if hasControlAccess(request): eoHttpAdmin else: eoHttpWrite
     let allowed =
-      if isControlEvent(eventName): hasControlAccess(request)
+      if isControlEvent(eventName): origin == eoHttpAdmin
       else: hasAccess(request, Write)
     if not allowed:
       request.respond(Http401, body = "Unauthorized")
@@ -394,7 +398,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         return
     # `uploadScenes` arrives here too (the backend's deploy), megabytes at a
     # time: hand the parse over rather than copy it.
-    sendEventOwned(eventName, move(payload))
+    sendEventOwned(eventName, move(payload), origin)
     jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
@@ -409,7 +413,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       except JsonParsingError:
         jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
         return
-    sendEventOwned("uploadScenes", move(payload))
+    sendEventOwned("uploadScenes", move(payload), eoHttpAdmin)
     jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
@@ -427,7 +431,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         # rewrites the global path pixie resolves SVG fonts against, under
         # the render thread.
         discard readConfig()
-      sendEvent("reload", %*{})
+      sendEvent("reload", %*{}, eoHttpAdmin)
       jsonResponse(request, Http200, %*{"status": "ok"})
     except CatchableError as e:
       log(%*{"event": "reload:error", "error": e.msg})

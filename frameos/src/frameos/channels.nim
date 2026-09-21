@@ -7,6 +7,8 @@ when defined(frameosDriverLibrary):
   import options
   import frameos/ids
   import frameos/driver_abi
+  import frameos/events_gen
+  export events_gen.EventOrigin
 
   var
     sharedHostLogHook: HostLogProc
@@ -21,14 +23,18 @@ when defined(frameosDriverLibrary):
   # expression is a temporary the compiler is free to free first. The host
   # copies what it needs before returning (frameos/driver_abi).
 
+  # The origin does not cross the `.so` boundary: whatever a driver library
+  # sends, the host stamps `driver` on it (drivers/drivers.nim). The parameter
+  # is here so a driver's source reads the same compiled in or as a library.
+
   # Send an event to the current scene
-  proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
+  proc sendEvent*(event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
     if not sharedHostSendEventHook.isNil:
       let payloadText = $payload
       sharedHostSendEventHook(nil, event.cstring, payloadText.cstring)
 
   # Send an event to a specific scene
-  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
+  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
     if not sharedHostSendEventHook.isNil:
       let payloadText = $payload
       let sceneText = if scene.isSome: scene.get().string else: ""
@@ -38,8 +44,8 @@ when defined(frameosDriverLibrary):
         payloadText.cstring,
       )
 
-  proc sendEventOwned*(event: string, payload: sink JsonNode) {.gcsafe.} =
-    sendEvent(event, payload)
+  proc sendEventOwned*(event: string, payload: sink JsonNode, origin: EventOrigin) {.gcsafe.} =
+    sendEvent(event, payload, origin)
 
   proc log*(event: JsonNode) {.gcsafe.} =
     if not sharedHostLogHook.isNil:
@@ -57,11 +63,13 @@ elif defined(frameosEmbedded) or defined(frameosWasm):
   import options
   import frameos/ids
   import frameos/driver_abi
+  import frameos/events_gen
+  export events_gen.EventOrigin
 
   type
     EmbeddedLogHook* = proc(payload: JsonNode) {.gcsafe, nimcall.}
     EmbeddedEventHook* = proc(sceneId: Option[SceneId], event: string,
-                             payload: JsonNode) {.gcsafe, nimcall.}
+                             payload: JsonNode, origin: EventOrigin) {.gcsafe, nimcall.}
 
   var embeddedLogHook*: EmbeddedLogHook
   var embeddedEventHook*: EmbeddedEventHook
@@ -69,16 +77,18 @@ elif defined(frameosEmbedded) or defined(frameosWasm):
   proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
     discard
 
-  proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
+  # The hook queues (frameos/event_loop): what a scene dispatches is delivered
+  # after the run that dispatched it, here like on Linux.
+  proc sendEvent*(event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
     if not embeddedEventHook.isNil:
-      embeddedEventHook(none(SceneId), event, payload)
+      embeddedEventHook(none(SceneId), event, payload, origin)
 
-  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
+  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
     if not embeddedEventHook.isNil:
-      embeddedEventHook(scene, event, payload)
+      embeddedEventHook(scene, event, payload, origin)
 
-  proc sendEventOwned*(event: string, payload: sink JsonNode) {.gcsafe.} =
-    sendEvent(event, payload)
+  proc sendEventOwned*(event: string, payload: sink JsonNode, origin: EventOrigin) {.gcsafe.} =
+    sendEvent(event, payload, origin)
 
   proc log*(eventPayload: JsonNode) {.gcsafe.} =
     if not embeddedLogHook.isNil:
@@ -103,17 +113,25 @@ else:
   import frameos/ids
   import frameos/driver_abi
   import frameos/types
+  import frameos/events_gen
+  export events_gen.EventOrigin
 
   proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
     discard
 
   # Event
 
+  # One message: the target scene (none = the current one), the event, its
+  # payload, and the origin — who is saying it. The origin is set by the
+  # producer's own entry point and never read from the payload; the runner's
+  # dispatcher (frameos/event_loop) asks the contract's allow-list of it.
+  type EventMessage* = (Option[SceneId], string, JsonNode, EventOrigin)
+
   # Bounded: the runner drains this on a single thread that can be busy for
   # the full duration of an e-ink render or a slow event handler. Producers
   # (touch input, HTTP routes, scheduler) must drop instead of growing the
   # queue without limit; the runner reports drops once it catches up.
-  var eventChannel*: Channel[(Option[SceneId], string, JsonNode)]
+  var eventChannel*: Channel[EventMessage]
   eventChannel.open(1000)
 
   # Count of events dropped because eventChannel was full; the runner
@@ -130,30 +148,43 @@ else:
   proc isolatedPayload(payload: JsonNode): JsonNode =
     if payload.isNil: nil else: copy(payload)
 
-  # Send an event to the current scene
-  proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
-    if not eventChannel.trySend((none(SceneId), event, isolatedPayload(payload))):
-      atomicInc(eventsDroppedCounter)
+  # The runner thread owns the dispatcher, so what is sent ON it — a scene's
+  # dispatch node, mostly — goes straight into the dispatcher's queue: no copy,
+  # no channel slot, and the dispatcher sees it arrive while the run that sent
+  # it is still going, which is how it knows a render's own dispatches from
+  # everybody else's (event_loop.nim, `hostRun`). Every other thread has no
+  # sink and uses the channel.
+  type LocalEventSink* = proc(scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.}
+  var localEventSink* {.threadvar.}: LocalEventSink
 
-  # Send an event to a specific scene
-  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
-    if not eventChannel.trySend((scene, event, isolatedPayload(payload))):
-      atomicInc(eventsDroppedCounter)
-
-  proc trySendEvent*(event: string, payload: JsonNode): bool {.gcsafe.} =
-    ## sendEvent for a caller that has to know whether the event was queued
-    ## (the hub client must not ack a scene push the runner never saw).
-    result = eventChannel.trySend((none(SceneId), event, isolatedPayload(payload)))
+  proc queueEvent(scene: Option[SceneId], event: string, payload: sink JsonNode, origin: EventOrigin,
+                  owned: bool): bool {.gcsafe.} =
+    if not localEventSink.isNil:
+      localEventSink(scene, event, payload, origin)
+      return true
+    result = eventChannel.trySend((scene, event, (if owned: payload else: isolatedPayload(payload)), origin))
     if not result:
       atomicInc(eventsDroppedCounter)
 
-  proc sendEventOwned*(event: string, payload: sink JsonNode) {.gcsafe.} =
+  # Send an event to the current scene
+  proc sendEvent*(event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    discard queueEvent(none(SceneId), event, payload, origin, owned = false)
+
+  # Send an event to a specific scene
+  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    discard queueEvent(scene, event, payload, origin, owned = false)
+
+  proc trySendEvent*(event: string, payload: JsonNode, origin: EventOrigin): bool {.gcsafe.} =
+    ## sendEvent for a caller that has to know whether the event was queued
+    ## (the hub client must not ack a scene push the runner never saw).
+    queueEvent(none(SceneId), event, payload, origin, owned = false)
+
+  proc sendEventOwned*(event: string, payload: sink JsonNode, origin: EventOrigin) {.gcsafe.} =
     ## sendEvent without the copy, for a payload too big to hold twice (a
     ## scene upload is megabytes of JSON on a 512 MB frame). The caller gives
     ## the tree up: pass a fresh parse with `move`, keep no reference to it or
     ## to any node inside it.
-    if not eventChannel.trySend((none(SceneId), event, payload)):
-      atomicInc(eventsDroppedCounter)
+    discard queueEvent(none(SceneId), event, payload, origin, owned = true)
 
   # Log
 

@@ -500,10 +500,11 @@ export async function startFrameHub(
   }
 
   // Delivery is at-least-once. The device acks by command id and every command
-  // type is idempotent on the device side (set_scenes/set_settings overwrite,
-  // render repeats an action that is safe to repeat, and all carry a 5-minute
-  // TTL that expireStaleCommands enforces), so redelivering an unacked command
-  // is preferable to stranding it.
+  // type but the exceptions below is idempotent on the device side
+  // (set_scenes/set_settings overwrite, render repeats an action that is safe
+  // to repeat, and all carry a 5-minute TTL that expireStaleCommands
+  // enforces), so redelivering an unacked command is preferable to stranding
+  // it.
   //
   // The exceptions are the commands whose own effect takes the session down:
   // reboot, restart_runtime and notify_update_available. The disconnect is the
@@ -517,6 +518,13 @@ export async function startFrameHub(
   // resolving `up_to_date` (uus2w, 9.6 -> 9.7). A nudge genuinely lost in
   // flight is not worth a second one either — the device checks for releases
   // on its own, and the owner can press the button again.
+  //
+  // scene_event is here for the other reason a command can have: it is not
+  // idempotent. It carries a button press or a scene's custom event
+  // (`nextPage`), and a press delivered twice turns two pages. The device
+  // acks it as soon as the event is queued, so the window for a lost ack is
+  // narrow, and a press that does go missing is one the person sees did
+  // nothing and makes again — at most once is the honest contract for input.
   //
   // Two ways a command in "sent" needs redelivering: the socket died between
   // the write and the ack (caught on reconnect, cutoff = now, because nothing
@@ -543,6 +551,7 @@ export async function startFrameHub(
             "reboot",
             "restart_runtime",
             "notify_update_available",
+            "scene_event",
           ]),
         ),
       );

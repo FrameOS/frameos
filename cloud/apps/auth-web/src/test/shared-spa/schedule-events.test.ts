@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { cloudFrameSupportsSettingsFrom } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import {
+  isScheduledCustomEvent,
   isScheduledSystemEvent,
+  schedulableCustomEventGroups,
+  scheduledEventIsSceneChange,
   scheduledEventOptions,
   scheduledEventTitle,
   scheduledSystemEvents,
@@ -62,6 +65,45 @@ describe("scheduled system events", () => {
     ).toBe("Restart FrameOS");
     expect(scheduledEventTitle({ event: "reboot", payload: {} }, byId)).toBe(
       "Reboot device",
+    );
+  });
+
+  it("offer a scene's custom event only when its declaration lets a schedule fire it", () => {
+    // The device's reading of the same array (declaredCustomEventOrigins,
+    // frameos/events.nim): no `origins`, no schedule; a contract name cannot
+    // be declared.
+    const groups = schedulableCustomEventGroups([
+      {
+        id: "a",
+        name: "Book",
+        customEvents: [
+          { name: "nextPage", origins: ["cloud", "schedule"] },
+          { name: " nextPage ", origins: ["schedule"] },
+          { name: "cloudOnly", origins: ["cloud"] },
+          { name: "undeclared" },
+          { name: "render", origins: ["schedule"] },
+          { name: "x".repeat(64), origins: ["schedule"] },
+        ],
+      },
+      { id: "b", name: "Clock", customEvents: [] },
+      { id: "c", customEvents: [{ name: "chime", origins: ["schedule"] }] },
+    ]);
+    expect(groups).toEqual([
+      { label: "Book", options: [{ value: "nextPage", label: "nextPage" }] },
+      { label: "c", options: [{ value: "chime", label: "chime" }] },
+    ]);
+    expect(schedulableCustomEventGroups(undefined)).toEqual([]);
+  });
+
+  it("title a custom event entry by its name, never as a scene", () => {
+    expect(isScheduledCustomEvent("nextPage")).toBe(true);
+    expect(isScheduledCustomEvent("setCurrentScene")).toBe(false);
+    expect(isScheduledCustomEvent("restart")).toBe(false);
+    expect(isScheduledCustomEvent("")).toBe(false);
+    expect(scheduledEventIsSceneChange({ event: "nextPage", payload: {} })).toBe(false);
+    expect(scheduledEventIsSceneChange({ event: "setCurrentScene", payload: {} })).toBe(true);
+    expect(scheduledEventTitle({ event: "nextPage", payload: {} }, () => "Morning news")).toBe(
+      "nextPage",
     );
   });
 

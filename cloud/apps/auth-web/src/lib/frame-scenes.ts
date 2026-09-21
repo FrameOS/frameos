@@ -23,12 +23,18 @@ import {
   buildScenesPayloadForFrame,
   enqueueFrameCommand,
   enqueueServiceSettingsRefreshIfScoped,
+  frameContractProfile,
   grantedServiceSettingGroupsUnion,
   grantedSettingsGroupsForAssignment,
   pinnedSceneVersion,
   readServiceSettingGroups,
   supersedePendingCommands,
 } from "./frames";
+import {
+  customEventRouting,
+  reportedActiveSceneId,
+  type CloudEventRouting,
+} from "./frame-events";
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { reportError } from "./log";
 
@@ -205,6 +211,35 @@ export async function currentSceneAssignments(
       ? {}
       : { settingsGroups: grantedSettingsGroupsForAssignment(row) }),
   }));
+}
+
+// May the cloud send this frame the custom scene event `eventName`
+// (customEventRouting, frame-events.ts)? The scenes asked are the ones a push
+// to this frame would carry right now — the assignments at the versions the
+// frame holds (buildScenesPayloadForFrame) — because `customEvents` lives in
+// each version's scenes.json and nowhere else. A set that cannot be assembled
+// (a pulled scene, a yanked version) declares nothing. That reads every
+// assigned scene's blob, which is fine for an event somebody pressed a button
+// for: both routes that call this are rate limited, and contract events never
+// come here.
+export async function customEventRoutingForFrame(
+  db: Database,
+  frame: {
+    id: string;
+    hardware: unknown;
+    frameosVersion: string | null;
+    lastState: unknown;
+  },
+  eventName: string,
+): Promise<CloudEventRouting> {
+  const built = await buildScenesPayloadForFrame(db, frame.id);
+  return customEventRouting({
+    activeSceneId: reportedActiveSceneId(frame.lastState),
+    eventName,
+    frameosVersion: frame.frameosVersion,
+    profile: frameContractProfile(frame),
+    scenes: "error" in built ? [] : built.scenes,
+  });
 }
 
 // Every scene must be accessible to this account (own scene or public), the

@@ -221,6 +221,8 @@ def test_custom_event_dispatch_uses_scene_event_fields():
     assert 'sendEvent("photoSelected", %*{' in source
     assert 'message: "hello"' in source
     assert "count: 3" in source
+    # A dispatch node is the scene talking: the dispatcher checks that origin.
+    assert "  }, eoScene)" in source
 
 
 def test_event_listener_filters_match_configured_payload_fields():

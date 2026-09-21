@@ -13,8 +13,8 @@ import ../types
 #
 # What it runs is the code all three hosts compile: the generated allow-lists,
 # the log policy, and what the interpreter does with an event it is handed.
-# What a host does around that — queueing, render-after — is not shared code
-# yet (docs/event-system-analysis.md §4.3), so it is not a fixture yet either.
+# What happens around that — queueing, origins, render-after — is the shared
+# dispatcher's, and the `dispatcher` section's: test_event_loop.nim.
 
 const fixturesPath = currentSourcePath().parentDir / ".." / ".." / ".." / ".." / "docs" / "event-fixtures.json"
 let fixtures = parseFile(fixturesPath)
@@ -33,9 +33,11 @@ block origin_matrix:
     let origin = originOf(c["origin"].getStr())
     let event = c["event"].getStr()
     let allowed = c["allowed"].getBool()
-    doAssert originMayEmit(origin, event) == allowed,
+    # What an edge that cannot see the scene answers; the scene-dependent half
+    # (a custom event's declaration) is the dispatcher's — test_event_loop.nim.
+    doAssert originMayQueue(origin, event) == allowed,
       $origin & " / " & event & ": expected allowed=" & $allowed
-    # The places that ask today, each by its own name.
+    # The edges that ask, each by its own name.
     case origin
     of eoHttpWrite:
       doAssert isControlEvent(event) == not allowed, "auth.isControlEvent disagrees on " & event
@@ -47,11 +49,14 @@ block origin_matrix:
   doAssert ran > 20
 
 block refused_lists_are_derived:
-  doAssert refusedEvents(eoSchedule) == @["uploadScenes"]
+  doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uploadScenes"]
   doAssert refusedEvents(eoHttpAdmin).len == 0
   doAssert refusedEvents(eoSystem).len == 0
+  # A scene is refused the device commands, and the lifecycle events — those
+  # are the host's to say, at the moment they are true.
   for name in refusedEvents(eoScene):
-    doAssert isDeviceCommand(name), name & " is refused to scenes but is no device command"
+    doAssert isDeviceCommand(name) or eventPolicy(name).class == ecLifecycle,
+      name & " is refused to scenes but is neither a device command nor lifecycle"
 
 # ---------------------------------------------------------------------- log
 

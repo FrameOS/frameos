@@ -8,12 +8,15 @@ import { TextInput } from '../../../../components/TextInput'
 import { FrameImage } from '../../../../components/FrameImage'
 import { useActions, useValues } from 'kea'
 import { scheduleLogic } from './scheduleLogic'
-import { ArrowPathIcon, CalendarDaysIcon, PowerIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, BoltIcon, CalendarDaysIcon, PowerIcon } from '@heroicons/react/24/outline'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { FrameScene, ScheduledEvent, StateField, FrameId } from '../../../../types'
 import {
+  isScheduledCustomEvent,
   isScheduledSystemEvent,
+  ScheduledCustomEventGroup,
   ScheduledSystemEventName,
+  scheduledEventIsSceneChange,
   scheduledEventOptions,
   scheduledSystemEvents,
   scheduledSystemEventLabel,
@@ -71,7 +74,11 @@ function sceneName(scene: FrameScene | null | undefined, fallback = 'Unspecified
 }
 
 function entryTitle(event: ScheduledEvent, scene: FrameScene | null | undefined): string {
-  return isScheduledSystemEvent(event.event) ? scheduledSystemEventLabel(event.event) : sceneName(scene)
+  return isScheduledSystemEvent(event.event)
+    ? scheduledSystemEventLabel(event.event)
+    : isScheduledCustomEvent(event.event)
+    ? event.event
+    : sceneName(scene)
 }
 
 function SystemEventIcon({ event, className }: { event: ScheduledSystemEventName; className?: string }): JSX.Element {
@@ -304,6 +311,10 @@ function ScheduleEntryCard({ frameId, event, scene, className }: ScheduleEntryCa
           <div className="flex h-full w-full items-center justify-center">
             <SystemEventIcon event={event.event} className="h-7 w-7 text-slate-500" />
           </div>
+        ) : isScheduledCustomEvent(event.event) ? (
+          <div className="flex h-full w-full items-center justify-center">
+            <BoltIcon className="h-7 w-7 text-slate-500" />
+          </div>
         ) : scene ? (
           <FrameImage
             frameId={frameId}
@@ -341,11 +352,13 @@ interface EditRowProps {
   event: ScheduledEvent
   scene: FrameScene | null
   eventFields: StateField[]
+  /** Custom events a schedule may fire, per declaring scene (scheduleLogic). */
+  customEventGroups: ScheduledCustomEventGroup[]
   /** null = system actions are not available for this frame (reason in systemEventsUnavailableReason). */
   systemEventsUnavailableReason: string | null
   closeEvent: (id: string) => void
   deleteEvent: (id: string) => void
-  setEventType: (id: string, eventType: ScheduledEvent['event']) => void
+  setEventType: (id: string, eventType: string) => void
 }
 
 function CompactScheduleField({
@@ -370,19 +383,24 @@ function EditRow({
   event,
   scene,
   eventFields,
+  customEventGroups,
   systemEventsUnavailableReason,
   closeEvent,
   deleteEvent,
   setEventType,
 }: EditRowProps) {
   const systemEvent = isScheduledSystemEvent(event.event)
+  const customEvent = isScheduledCustomEvent(event.event)
   // An entry that already IS a system action stays editable even below the
   // firmware floor — hiding it would hide what the schedule will do.
-  const actionOptions = scheduledEventOptions.map((option) => ({
-    ...option,
-    disabled:
-      option.value !== event.event && isScheduledSystemEvent(option.value) && systemEventsUnavailableReason !== null,
-  }))
+  const actionOptions = [
+    ...scheduledEventOptions.map((option) => ({
+      ...option,
+      disabled:
+        option.value !== event.event && isScheduledSystemEvent(option.value) && systemEventsUnavailableReason !== null,
+    })),
+    ...customEventGroups,
+  ]
   return (
     <div className="space-y-4">
       <button
@@ -403,12 +421,18 @@ function EditRow({
             <Select
               options={actionOptions}
               value={event.event}
-              onChange={(value_) => setEventType(event.id, value_ as ScheduledEvent['event'])}
+              onChange={(value_) => setEventType(event.id, value_)}
               className="h-9 min-w-0"
             />
             {systemEvent ? (
               <div className="frame-tool-muted mt-1 text-xs">
                 {scheduledSystemEvents.find((option) => option.value === event.event)?.description}
+              </div>
+            ) : null}
+            {customEvent ? (
+              <div className="frame-tool-muted mt-1 text-xs">
+                Sends "{event.event}" to the scene showing at that time. A scene receives it only if its Events panel
+                lets a schedule fire it.
               </div>
             ) : null}
           </div>
@@ -451,7 +475,7 @@ function EditRow({
         </CompactScheduleField>
       </div>
       <Group name="payload">
-        {!systemEvent && event.payload?.sceneId ? (
+        {scheduledEventIsSceneChange(event) && event.payload?.sceneId ? (
           <Group name="state">
             <div className="mt-3 space-y-3">
               {visiblePublicStateFields(eventFields, event.payload?.state ?? {}).map((field) => (
@@ -520,6 +544,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     sortedEvents,
     sortedScenes,
     fieldsForScene,
+    customEventGroups,
     disabled,
     eventCountsByScene,
   } = useValues(scheduleLogic({ frameId }))
@@ -723,7 +748,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
         if (eventIndex === -1) {
           return null
         }
-        const sceneId = isScheduledSystemEvent(event.event) ? '' : event.payload?.sceneId ?? ''
+        const sceneId = scheduledEventIsSceneChange(event) ? event.payload?.sceneId ?? '' : ''
         const scene = (sceneId ? scenesById[sceneId] : null) ?? null
         const inactive = event.disabled || disabled
 
@@ -749,6 +774,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
                       event={event}
                       scene={scene}
                       eventFields={(sceneId ? fieldsForScene[sceneId] : undefined) ?? []}
+                      customEventGroups={customEventGroups}
                       systemEventsUnavailableReason={systemEventsUnavailableReason}
                       closeEvent={closeEvent}
                       deleteEvent={deleteEvent}

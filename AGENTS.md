@@ -76,6 +76,17 @@
   `events_contract_gen.py`, the cloud's `events-contract.gen.ts`): an event the
   cloud should be able to send needs a `cloud.verb` in the contract, not a new
   `case` alone.
+- **One dispatcher, `frameos/src/frameos/event_loop.nim`, for Linux, the ESP32
+  and the wasm preview.** It owns the queue, the origin allow-list, the
+  command/event split and the render rule (`renderAfter`); a host supplies an
+  `EventHost` and no opinions. `sendEvent(event, payload, origin)` has no
+  default origin on purpose: the producer's entry point says who is talking
+  (`eoHttpWrite`, `eoSchedule`, `eoCloud`, `eoScene`, …), never the payload. Do
+  not add a `case event` to a host — add a contract column, or a callback to
+  `EventHost`. On the ESP32 the C edge is `embedded/esp32/main/fos_events.c`
+  (one function for HTTP, schedule, cloud, console and buttons). New behaviour
+  gets a case in the `dispatcher` section of `docs/event-fixtures.json`
+  (`test_event_loop.nim` runs it).
 
 ## AI scene chat: change the prompt/linter, then run the evals
 

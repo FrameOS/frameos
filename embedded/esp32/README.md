@@ -33,6 +33,13 @@ main/                     boot orchestration + platform modules
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
+  fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
+                          producer — /event/<name>, the schedule, the cloud verbs, the console's
+                          `event`, the buttons — names its origin and calls it. Allow-list from
+                          fos_events_gen.h (generated from docs/events-contract.json), then the
+                          firmware's own part (render, setCurrentScene, reload / restart / reboot /
+                          uploadScenes) or the Nim dispatcher; also the Nim runtime's
+                          device-command hook (host-tested)
   fos_assets.c            asset verbs (list/get/put/mkdir/delete/rename)
   fos_assets_path.c       the assets-path rule behind every asset verb (host-tested)
   fos_assets_sd.c         SD card mount/probe/format for the assets root
@@ -40,7 +47,7 @@ main/                     boot orchestration + platform modules
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_board.c             board table: pins, panel defaults, battery divider per board
-  fos_buttons.c           GPIO button map → scene events
+  fos_buttons.c           GPIO button map → `button` events (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
   fos_power.c             deep sleep, wake-check render skip, VBUS truth
   fos_wake.c              wake scheduling (next render / schedule event)
@@ -61,7 +68,8 @@ partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M s
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, SD probe, board,
-                          power, wake, battery-filter and version tests run from the backend's
+                          power, wake, battery-filter, version and scene-event (contract table +
+                          fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py); the contract
                           walker, JSON guard, upload limits, assets-path, URL guard, minisig,
                           config-parse and schedule catch-up tests run in the ESP32 job of

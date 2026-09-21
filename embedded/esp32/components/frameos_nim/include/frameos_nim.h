@@ -56,6 +56,13 @@ void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
  * flash and the choice is persisted. main/ installs fos_scenes_select, which
  * only queues — the render task applies it on its next pass. */
 void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id));
+/* Device-command hook, the same arrangement: a device command that reaches the
+ * Nim dispatcher (a scene may say `metrics`) is the firmware's to carry out.
+ * main/fos_events.c installs its one runtime_command(); `command` is the
+ * contract name ("metrics", "reload", "restart", "reboot", "uploadScenes").
+ * The hook runs on whatever task called into Nim, under the runtime lock: it
+ * must not call back into the Nim runtime. */
+void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, const char *payload_json));
 const char *frameos_nim_scene_info_json(void);
 /* Same, but gives up after timeout_ms (-1 = wait forever, 0 = try once).
  * NULL means exactly one thing: the wait timed out because the runtime is
@@ -128,8 +135,25 @@ double frameos_nim_scene_interval(void);
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
-/* Deliver a JSON event payload to the current interpreted scene. */
-bool frameos_nim_send_event(const char *event, const char *payload_json);
+/* Hand one event to the Nim dispatcher (frameos/event_loop.nim), which queues
+ * it and drains the queue before this returns. `origin` is who said it: ONE
+ * FOS_ORIGIN_* bit of main/fos_events_gen.h (this component cannot include
+ * main/'s header, hence the plain integer), stamped by the producer's entry
+ * point and never read from the payload. False when the event came to nothing:
+ * an origin that may not say it, no scene, bad JSON. Firmware code does not
+ * call this directly — main/fos_events.c is the one entry point, and it owns
+ * what the firmware does itself (render, scene switches, device commands).
+ * Waits for the runtime lock, i.e. behind a render in progress. */
+bool frameos_nim_send_event(uint32_t origin, const char *event, const char *payload_json);
+/* Same, but gives up on the runtime lock after timeout_ms (-1 = wait forever,
+ * 0 = try once), for the tasks that must not park behind a 90 s render: the
+ * cloud WebSocket task above all (see frameos_nim_scene_info_json_wait). A
+ * false return with *busy set means the lock was not obtained and the event
+ * was NOT delivered; `busy` may be NULL. The render flag is not read here —
+ * frameos_nim_render_requested() waits for the same lock — so a bounded caller
+ * wakes the render task instead, which polls it (fos_client_wake_for_events). */
+bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char *payload_json,
+                                 int timeout_ms, bool *busy);
 
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);

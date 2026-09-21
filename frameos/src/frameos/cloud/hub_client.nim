@@ -58,6 +58,7 @@ import ws
 
 import frameos/channels
 import frameos/device_setup
+import frameos/events
 import frameos/interpreter
 import frameos/js_runtime/app_runtime
 import frameos/scenes
@@ -200,7 +201,7 @@ type
     scenesChecksum*: string
     ## Returns false when the runtime event queue was full and the event was
     ## dropped, so verbs that must not be acked optimistically can say so.
-    sendEventFn*: proc(event: string, payload: JsonNode): bool {.gcsafe.}
+    sendEventFn*: proc(event: string, payload: JsonNode, origin: EventOrigin): bool {.gcsafe.}
     persistSettingsFn*: proc(payload: JsonNode) {.gcsafe.}
     # "Would persisting this payload change anything?" — the guard that lets
     # an idempotent set_settings redelivery be acked without a config reload
@@ -584,13 +585,13 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       frameConfig: frameConfig,
       scopes: scopes,
       scenesChecksum: scenesChecksum,
-      sendEventFn: proc(event: string, payload: JsonNode): bool {.gcsafe.} =
+      sendEventFn: proc(event: string, payload: JsonNode, origin: EventOrigin): bool {.gcsafe.} =
         # Same bounded enqueue as channels.sendEvent, but the caller learns
         # whether the event actually made it: a dropped `uploadScenes` must not
         # be acked as a successful deploy (the provider would never re-push).
         # The runner gets its own copy of the payload: this thread goes on
         # reading the command it came in (channels.nim, isolatedPayload).
-        trySendEvent(event, payload),
+        trySendEvent(event, payload, origin),
       persistSettingsFn: proc(payload: JsonNode) {.gcsafe.} =
         {.gcsafe.}:
           persistFrameApiUpdate(payload),
@@ -785,7 +786,7 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
     if id != nil and id.kind != JNull:
       unchangedAck["id"] = id
     return CloudVerbReply(ack: ackOk(id), extra: @[unchangedAck])
-  if not ctx.sendEventFn("uploadScenes", eventPayload):
+  if not ctx.sendEventFn("uploadScenes", eventPayload, eoCloud):
     # The runtime queue was full, so the deploy never happened. Acking ok here
     # (and persisting the checksum) would tell the provider the frame is up to
     # date forever; a retryable error makes it push again instead.
@@ -872,7 +873,7 @@ proc applyEnrollmentPersonalization(personalization: JsonNode) {.gcsafe.} =
       if frameApiUpdateChangesConfig(personalization):
         persistFrameApiUpdate(personalization)
         log(%*{"event": "cloud:enroll:personalization", "applied": redactSecrets(personalization)})
-        sendEvent("reload", %*{})
+        sendEvent("reload", %*{}, eoSystem)
       if personalization.hasKey("timezone"):
         applySystemTimeZone(personalization["timezone"].getStr(""))
     except CatchableError as error:
@@ -930,7 +931,8 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
         applySystemTimeZone(payload["timezone"].getStr(""))
       # Same order as restart_runtime: the event queues here, the ack goes
       # out on return, the runner exits when it drains the queue.
-      discard ctx.sendEventFn(if needsRestart: "restart" else: "reload", %*{})
+      # The runtime's own consequence of new settings, not the provider's verb.
+      discard ctx.sendEventFn(if needsRestart: "restart" else: "reload", %*{}, eoSystem)
   ctx.audit("set_settings", true)
   CloudVerbReply(ack: ackOk(id))
 
@@ -965,7 +967,7 @@ proc handleSetSchedule(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
   except CatchableError as error:
     ctx.audit("set_schedule", false, "persist_failed: " & error.msg)
     return CloudVerbReply(ack: ackError(id, "persist_failed"))
-  discard ctx.sendEventFn("reload", %*{})
+  discard ctx.sendEventFn("reload", %*{}, eoSystem)
   ctx.audit("set_schedule", true)
   CloudVerbReply(ack: ackOk(id))
 
@@ -980,8 +982,34 @@ proc handleSetCurrentScene(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): 
   let state = msg{"state"}
   if state != nil and state.kind == JObject:
     payload["state"] = copy(state)
-  discard ctx.sendEventFn("setCurrentScene", payload)
+  discard ctx.sendEventFn("setCurrentScene", payload, eoCloud)
   ctx.audit("set_current_scene", true)
+  CloudVerbReply(ack: ackOk(id))
+
+proc handleSceneEvent(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  ## `scene_event {name, payload?}`: an event for the scene the frame is
+  ## showing, said by the provider. What it may be is the event contract's
+  ## (docs/events-contract.json): a contract event that lists the `cloud` origin
+  ## — never a device command, those have verbs of their own and their own
+  ## audit lines — or a custom event, which the dispatcher delivers only when
+  ## the scene declares it with `origins: ["cloud"]` (frameos/event_loop).
+  ## Queued like everything else: the ack says "queued", the frame log says
+  ## what came of it.
+  let name = msg{"name"}.getStr("")
+  if name.len == 0 or name.len > CustomEventMaxNameLength:
+    ctx.audit("scene_event", false, "invalid_event")
+    return CloudVerbReply(ack: ackError(id, "invalid_event"))
+  if isDeviceCommand(name) or not originMayQueue(eoCloud, name):
+    ctx.audit("scene_event:" & name, false, "event_not_allowed")
+    return CloudVerbReply(ack: ackError(id, "event_not_allowed"))
+  let payload = msg{"payload"}
+  if payload != nil and payload.kind notin {JObject, JNull}:
+    ctx.audit("scene_event:" & name, false, "invalid_payload")
+    return CloudVerbReply(ack: ackError(id, "invalid_payload"))
+  if not ctx.sendEventFn(name, (if payload.isNil or payload.kind == JNull: newJObject() else: payload), eoCloud):
+    ctx.audit("scene_event:" & name, false, "queue_full")
+    return CloudVerbReply(ack: ackError(id, "queue_full"))
+  ctx.audit("scene_event:" & name, true)
   CloudVerbReply(ack: ackOk(id))
 
 proc handleAssetsList(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
@@ -1329,6 +1357,8 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleRefreshServiceSettings(ctx, id)
   of "set_current_scene":
     result = handleSetCurrentScene(ctx, id, msg)
+  of "scene_event":
+    result = handleSceneEvent(ctx, id, msg)
   of "get_state":
     var ack = ackOk(id)
     ack["state"] = ctx.getStateFn()
@@ -1360,7 +1390,7 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
   of "scenes_get":
     result = handleScenesGet(ctx, id)
   of "render":
-    discard ctx.sendEventFn("render", %*{})
+    discard ctx.sendEventFn("render", %*{}, eoCloud)
     result = CloudVerbReply(ack: ackOk(id))
   of "reboot":
     ctx.audit("reboot", true)
@@ -1370,7 +1400,7 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
   of "restart_runtime":
     ctx.audit("restart_runtime", true)
     result = CloudVerbReply(ack: ackOk(id))
-    discard ctx.sendEventFn("restart", %*{})
+    discard ctx.sendEventFn("restart", %*{}, eoCloud)
   of "set_display_power":
     # Powers the panel itself down or back up, for the drivers that can
     # (frameBuffer, inkyHyperPixel2r, hyperPixel4); the rest generate a
@@ -1387,7 +1417,7 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
       let turnOn = onFlag.getBool()
       ctx.audit("set_display_power", true)
       result = CloudVerbReply(ack: ackOk(id))
-      discard ctx.sendEventFn(if turnOn: "turnOn" else: "turnOff", %*{})
+      discard ctx.sendEventFn(if turnOn: "turnOn" else: "turnOff", %*{}, eoCloud)
   of "notify_update_available":
     # The provider supplies no URLs and no binaries — this nudges the device
     # to run its own signed upgrade flow (frameos/upgrade.nim), which fetches
@@ -1758,7 +1788,7 @@ proc pullServiceSettings(link: HubLinkSnapshot, ctx: CloudVerbContext): ServiceS
   if outcome.changed:
     # Only when something really changed on disk — a 304 or an identical
     # payload must not restart the scenes.
-    discard ctx.sendEventFn("reload", %*{})
+    discard ctx.sendEventFn("reload", %*{}, eoSystem)
   if outcome.authFailed:
     raise newException(CloudHubAuthError,
       "Provider rejected the link token on the service-settings fetch")

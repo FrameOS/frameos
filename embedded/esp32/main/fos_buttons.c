@@ -19,6 +19,7 @@
 
 #include "fos_client.h"
 #include "fos_config.h"
+#include "fos_events.h"
 #include "fos_wake.h"
 #include "frameos_nim.h"
 
@@ -234,7 +235,11 @@ void fos_buttons_process_events(void)
         char payload[96];
         snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"%s\",\"level\":%d}",
                  event.pin, label, event.level);
-        bool dispatched = frameos_nim_send_event("button", payload);
+        /* `driver`: a press is hardware talking, and the contract lets it say
+         * input and nothing else. fos_events.c hands it to the scene and asks
+         * for the render when a listener took it; this is the render task, so
+         * the runtime lock is free. */
+        bool dispatched = fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_BUTTON, payload) == FOS_EVENT_DONE;
         /* Into the frame log, not just the serial console: a press used to
          * leave no trace anywhere a user can see. When a scene ignores it the
          * interpreter says so (runEvent:noListenerMatched), but that only
@@ -247,7 +252,7 @@ void fos_buttons_process_events(void)
                  event.wake ? "true" : "false");
         frameos_nim_log_hook(line);
         if (!dispatched) {
-            ESP_LOGW(TAG, "button event skipped: Nim runtime unavailable");
+            ESP_LOGW(TAG, "button event not delivered: no scene runtime, or no scene to hear it");
         }
     }
 }

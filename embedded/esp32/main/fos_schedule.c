@@ -18,9 +18,8 @@
 #include "nvs.h"
 
 #include "cJSON.h"
-#include "fos_client.h"
+#include "fos_events.h"
 #include "fos_events_gen.h"
-#include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -288,52 +287,40 @@ static bool weekday_matches(int event_weekday, int today)
 static void fire_event(const schedule_event_t *event)
 {
     char line[256];
-    /* What a schedule may fire is the contract's (docs/events-contract.json,
-     * the `schedule` origin) — the same answer scheduler.nim gives on a Pi.
-     * A schedule is data nobody validated: it may switch, render and reboot,
-     * it may not replace the installed scenes. */
-    if (!fos_event_origin_may_emit(FOS_ORIGIN_SCHEDULE, event->event)) {
-        snprintf(line, sizeof(line),
-                 "{\"event\":\"schedule:refused\",\"source\":\"esp32\","
-                 "\"name\":\"%s\",\"reason\":\"runtime-only event is not schedulable\"}",
-                 event->event);
-        frameos_nim_log_hook(line);
-        return;
-    }
     snprintf(line, sizeof(line),
              "{\"event\":\"schedule:fire\",\"source\":\"esp32\","
              "\"name\":\"%s\",\"hour\":%d,\"minute\":%d}",
              event->event, event->hour, event->minute);
     frameos_nim_log_hook(line);
-    if (strcmp(event->event, FOS_EVENT_SET_CURRENT_SCENE) == 0) {
-        cJSON *payload = cJSON_Parse(event->payload);
-        const cJSON *scene = payload ? cJSON_GetObjectItem(payload, "sceneId") : NULL;
-        if (!cJSON_IsString(scene)) {
-            scene = payload ? cJSON_GetObjectItem(payload, "scene_id") : NULL;
-        }
-        if (cJSON_IsString(scene) && scene->valuestring[0]) {
-            if (fos_scenes_select(scene->valuestring) == ESP_OK) {
-                fos_client_render_now();
-            } else {
-                ESP_LOGW(TAG, "scheduled scene \"%s\" not loaded", scene->valuestring);
-            }
-        }
-        cJSON_Delete(payload);
-    } else if (strcmp(event->event, FOS_EVENT_RENDER) == 0) {
-        fos_client_render_now();
-    } else if (fos_event_spec(event->event)->ends_runtime) {
-        /* `restart` and `reboot` (the contract's schedule.endsRuntime). */
-        /* The cloud-safe "automatic reboot": a schedule entry, not a cron
-         * line. One process here, so restarting the runtime and rebooting
-         * the board are the same thing. The log line above is what the owner
-         * sees; flush it and let the upload go out before the reset. */
+    /* `restart` and `reboot` (the contract's schedule.endsRuntime): the
+     * firmware does not come back from the dispatch below, so the minute is
+     * remembered first — otherwise the boot that follows catches up on this
+     * very entry and reboots again (fos_schedule_catchup.h). The line above is
+     * what the owner sees; fos_events.c flushes it before the reset. */
+    if (fos_event_spec(event->event)->ends_runtime) {
         persist_fired_minute(s_last_fired_minute);
-        frameos_nim_flush_logs();
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        esp_restart();
-    } else if (frameos_nim_available()) {
-        frameos_nim_send_event(event->event, event->payload);
-        if (frameos_nim_render_requested()) fos_client_render_now();
+    }
+    /* What the entry means, and whether a schedule may say it at all, is
+     * fos_events.c's — the same answer scheduler.nim gets from the shared
+     * dispatcher on a Pi. A schedule is data nobody validated: it may switch,
+     * render and reboot, it may not replace the installed scenes. This runs on
+     * the render task (fos_schedule_tick), so the hand-off to the scene never
+     * waits for a render. */
+    switch (fos_events_dispatch(FOS_ORIGIN_SCHEDULE, event->event, event->payload)) {
+        case FOS_EVENT_REFUSED:
+            snprintf(line, sizeof(line),
+                     "{\"event\":\"schedule:refused\",\"source\":\"esp32\","
+                     "\"name\":\"%s\",\"reason\":\"runtime-only event is not schedulable\"}",
+                     event->event);
+            frameos_nim_log_hook(line);
+            break;
+        case FOS_EVENT_FAILED:
+            /* A scene id that names nothing, a custom event the scene showing
+             * never declared for schedules (the dispatcher logged which). */
+            ESP_LOGW(TAG, "scheduled event \"%s\" came to nothing", event->event);
+            break;
+        default:
+            break;
     }
 }
 

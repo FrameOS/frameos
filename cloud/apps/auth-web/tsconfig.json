@@ -137,6 +137,8 @@
     "src/test/shared-spa/scene-update-available.test.ts",
     "src/test/shared-spa/scene-update-banner.test.tsx",
     // Mounts templatesLogic (→ frameLogic), same reason.
-    "src/test/shared-spa/template-install-feedback.test.ts"
+    "src/test/shared-spa/template-install-feedback.test.ts",
+    // Mounts eventsLogic (→ frameLogic), same reason.
+    "src/test/shared-spa/custom-event-origins.test.ts"
   ]
 }

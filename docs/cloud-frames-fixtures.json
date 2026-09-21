@@ -253,6 +253,7 @@
     {"name": "file_write is not a verb", "type": "file_write", "expect": "unknown_verb"},
     {"name": "get_logs needs telemetry:logs", "type": "get_logs", "scopes": [], "expect": "insufficient_scope"},
     {"name": "get_metrics needs telemetry:metrics", "type": "get_metrics", "scopes": ["telemetry:logs"], "expect": "insufficient_scope"},
-    {"name": "refresh_service_settings needs settings:services", "type": "refresh_service_settings", "scopes": [], "expect": "insufficient_scope"}
+    {"name": "refresh_service_settings needs settings:services", "type": "refresh_service_settings", "scopes": [], "expect": "insufficient_scope"},
+    {"name": "scene_event is a verb, and needs the event's name", "type": "scene_event", "expect": "invalid_event"}
   ]
 }

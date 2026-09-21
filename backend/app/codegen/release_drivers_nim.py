@@ -169,7 +169,9 @@ proc hostSendEvent(sceneId: cstring, event: cstring, payload: cstring) {{.cdecl,
     parsed = if payload.isNil: newJObject() else: parseJson($payload)
   except CatchableError:
     parsed = newJObject()
-  hostChannels.sendEvent(scene, $event, parsed)
+  # The origin is this entry point's to say, never the library's: whatever
+  # crosses the driver ABI is a driver talking.
+  hostChannels.sendEvent(scene, $event, parsed, eoDriver)
 
 proc isInkyButtonDevice(device: string): bool =
   device in [

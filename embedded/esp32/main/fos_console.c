@@ -28,6 +28,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_events.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_mem.h"
@@ -910,20 +911,24 @@ static int cmd_event(int argc, char **argv)
         printf("  e.g. event button {\"label\":\"A\"}   (the label a scene node filters on)\n");
         return 1;
     }
-    if (!frameos_nim_available()) {
-        printf("no interpreted scene runtime on this build\n");
-        return 1;
-    }
     const char *payload = argc >= 3 ? argv[2] : "{}";
-    if (!frameos_nim_send_event(argv[1], payload)) {
-        printf("event rejected by the scene runtime\n");
-        return 1;
+    /* `system`: a person at the serial console is the device's own operator,
+     * the origin the contract refuses nothing. Routed like every other producer's
+     * (fos_events.c), so `event render`, `event setCurrentScene {...}` and
+     * `event reboot` do here what they do over HTTP. */
+    switch (fos_events_dispatch(FOS_ORIGIN_SYSTEM, argv[1], payload)) {
+        case FOS_EVENT_DONE:
+            break;
+        case FOS_EVENT_REFUSED:
+            printf("event refused: not one the console may send\n");
+            return 1;
+        default:
+            printf("event rejected: %s\n",
+                   frameos_nim_available() ? "the scene runtime did not take it (see the log)"
+                                           : "no interpreted scene runtime on this build");
+            return 1;
     }
     printf("sent %s %s\n", argv[1], payload);
-    if (frameos_nim_render_requested()) {
-        fos_client_render_now();
-        printf("scene asked for a render\n");
-    }
     return 0;
 }
 
