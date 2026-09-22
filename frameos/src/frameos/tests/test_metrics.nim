@@ -1,4 +1,4 @@
-import std/[json, sequtils, strutils, unittest]
+import std/[json, os, sequtils, strutils, unittest]
 
 import ../channels
 import ../metrics
@@ -226,3 +226,33 @@ suite "metrics loop":
       check sampleJson["cpuUsage"].getFloat() == 1.0
       inc samples
     check samples == 3
+
+suite "disk and upgrade health":
+  test "the install partition is the longest mount FrameOS lives under":
+    let mounts = @["/", "/srv/assets", "/srv/frameos", "/etc/wpa_supplicant"]
+    check mountFor(mounts, "/srv/frameos") == "/srv/frameos"
+    check mountFor(mounts, "/srv/frameos/releases") == "/srv/frameos"
+    check mountFor(@["/", "/srv/assets"], "/srv/frameos") == "/"
+    check mountFor(@["/srv/frameosX"], "/srv/frameos") == ""
+
+  test "a refused upgrade rides along with the metrics":
+    let dir = getTempDir() / ("frameos-metrics-upgrade-" & $getCurrentProcessId())
+    createDir(dir / "state")
+    putEnv("FRAMEOS_DIR", dir)
+    try:
+      check upgradeStatusSummary().isNil
+      writeFile(dir / "state" / "upgrade-status.json", $(%*{
+        "status": "failed", "current_version": "2026.9.17", "latest_version": "2026.9.21",
+        "finished_at": "2026-09-21T23:23:50Z",
+        "message": "Not enough free disk space in /srv/frameos/tmp to unpack the release",
+        "latest_release": {"asset_url": "https://example.invalid/x.tar.gz"}}))
+      let summary = upgradeStatusSummary()
+      check summary["status"].getStr() == "failed"
+      check summary["latest_version"].getStr() == "2026.9.21"
+      check summary["message"].getStr().startsWith("Not enough free disk space")
+      check not summary.hasKey("latest_release")
+      writeFile(dir / "state" / "upgrade-status.json", $(%*{"status": "success", "message": "FrameOS upgraded"}))
+      check not upgradeStatusSummary().hasKey("message")
+    finally:
+      delEnv("FRAMEOS_DIR")
+      removeDir(dir)
