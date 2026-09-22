@@ -5,6 +5,7 @@ import frameos/buildroot_privileges
 import frameos/config
 import frameos/device_setup
 import frameos/privileged
+import frameos/release_space
 import frameos/samba_mounts
 import frameos/types
 import frameos/cloud/contract
@@ -942,6 +943,14 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     addSetupResult(result, runSetupStep("persistent state mounts",
       proc(): SetupResult = setupPersistentStateMounts(liveApply)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
+  # Every upgrade and deploy that lands here added a release; keep the ones a
+  # rollback needs and room for the next upgrade (release_space.nim). A no-op
+  # outside an installed /srv/frameos layout.
+  addSetupResult(result, runSetupStep("old releases", proc(): SetupResult =
+    discard pruneReleases(frameosInstallDir(), frameosRemoteInstallDir(),
+      log = proc(message: string) = setupLog(message))
+    setupOk()
+  ))
   if frameOS.frameConfig.mode == "buildroot":
     # Last, after everything above may have created root-owned files under
     # /srv/frameos: the runtime user must own its state before it restarts.

@@ -6,6 +6,8 @@ import frameos/cloud/identity
 import frameos/config
 import frameos/ota_pubkey
 import frameos/privileged
+import frameos/release_space
+export release_space.frameosInstallDir, release_space.frameosRemoteInstallDir
 import frameos/utils/blake2b
 import frameos/device_setup
 from frameos/setup import frameosServiceContents, frameosServiceUser
@@ -55,15 +57,6 @@ type
     serviceUser*: string
     setupStatus*: int
 
-proc frameosInstallDir*(): string =
-  getEnv("FRAMEOS_DIR", "/srv/frameos").strip(leading = false, trailing = true, chars = {'/'})
-
-proc frameosRemoteInstallDir*(): string =
-  getEnv("FRAMEOS_REMOTE_DIR", getEnv("FRAMEOS_AGENT_DIR", frameosInstallDir() / "remote")).strip(
-    leading = false,
-    trailing = true,
-    chars = {'/'},
-  )
 
 proc frameosAssetsDir(): string =
   getEnv("FRAMEOS_ASSETS_DIR", "/srv/assets").strip(leading = false, trailing = true, chars = {'/'})
@@ -886,6 +879,14 @@ proc assembleReleaseFromArchive(release: FrameOSReleaseInfo, archivePath, workDi
   createDir(frameosStateDir())
   createDir(frameosAssetsDir())
 
+  # Short of room: old releases are what fills the partition (release_space),
+  # so make the room before refusing — keeping current, the release before it
+  # and the one being staged.
+  let archiveBytes = getFileSize(archivePath)
+  if releaseSpaceShortfall(archiveBytes, getAvailableDiskSpace(frameosInstallDir() / "releases")) > 0:
+    discard pruneReleases(frameosInstallDir(), frameosRemoteInstallDir(),
+      neededBytes = archiveBytes * ReleaseExtractSpaceFactor, protect = @[staged.name],
+      log = proc(message: string) = setupLog(message))
   ensureFreeSpaceForRelease(archivePath, [workDir, frameosInstallDir() / "releases"])
   # Extraction can run as root: never restore archive-supplied ownership or
   # special mode bits even though the release signature is valid.

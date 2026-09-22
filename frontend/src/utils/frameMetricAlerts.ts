@@ -28,8 +28,9 @@ function finiteNumber(value: unknown): number | null {
 
 function latestMetricWithValue(metrics: MetricsType[], key: string): MetricsType | null {
   for (let i = metrics.length - 1; i >= 0; i--) {
-    if (metrics[i].metrics?.[key] !== undefined) {
-      return metrics[i]
+    const metric = metrics[i]
+    if (metric?.metrics?.[key] !== undefined) {
+      return metric
     }
   }
   return null
@@ -82,6 +83,39 @@ function diskUsageAlertLabel(value: unknown): string | null {
     : null
 }
 
+function formatMegabytes(bytes: number): string {
+  return `${Math.max(0, Math.round(bytes / (1024 * 1024)))} MB`
+}
+
+/**
+ * The frame reports what its next upgrade needs free on the partition FrameOS
+ * lives on (`diskUsage.upgradeHeadroom`, frameos/release_space.nim). A fixed
+ * percentage cannot say this: on a 2 GB partition an upgrade is refused
+ * at ~93%, so a 90% alert either cries wolf or arrives after the fact.
+ */
+function upgradeHeadroomAlertLabel(value: unknown): string | null {
+  const headroom = isRecord(value) ? value.upgradeHeadroom : null
+  if (!isRecord(headroom)) {
+    return null
+  }
+  const needed = finiteNumber(headroom.needed)
+  const available = finiteNumber(headroom.available)
+  if (needed === null || available === null || needed <= 0 || available >= needed) {
+    return null
+  }
+  return `No room for the next FrameOS update (${formatMegabytes(available)} free, ${formatMegabytes(needed)} needed)`
+}
+
+/** The frame's last `frameos upgrade`, if it failed (metrics.upgrade, frameos/metrics.nim). */
+function failedUpgradeAlertLabel(value: unknown): string | null {
+  if (!isRecord(value) || value.status !== 'failed') {
+    return null
+  }
+  const version = typeof value.latest_version === 'string' ? ` to ${value.latest_version}` : ''
+  const message = typeof value.message === 'string' && value.message ? `: ${value.message}` : ''
+  return `FrameOS update${version} failed${message}`
+}
+
 function cpuCountFromMetric(metrics: Record<string, unknown>): number {
   const cpuCount =
     finiteNumber(metrics.cpuCount) ??
@@ -127,6 +161,18 @@ export function getFrameMetricAlerts(frame: FrameType, metrics: MetricsType[]): 
   if (diskAlertLabel) {
     alerts.push({ key: 'diskUsage', label: diskAlertLabel })
   }
+  const headroomAlertLabel = upgradeHeadroomAlertLabel(diskMetric?.metrics.diskUsage)
+  if (headroomAlertLabel) {
+    alerts.push({ key: 'diskUsage.upgradeHeadroom', label: headroomAlertLabel })
+  }
+
+  // The newest sample only: a failure the frame has since moved past (a later
+  // attempt succeeded, or it was upgraded by hand) must not linger.
+  const newestMetric = orderedMetrics[orderedMetrics.length - 1]
+  const upgradeAlertLabel = failedUpgradeAlertLabel(newestMetric?.metrics?.upgrade)
+  if (upgradeAlertLabel) {
+    alerts.push({ key: 'upgrade', label: upgradeAlertLabel })
+  }
 
   const cpuTemperatureMetric = latestMetricWithValue(orderedMetrics, 'cpuTemperature')
   const cpuTemperature = finiteNumber(cpuTemperatureMetric?.metrics.cpuTemperature)
@@ -166,7 +212,8 @@ export function getFrameMetricAlerts(frame: FrameType, metrics: MetricsType[]): 
 }
 
 export function frameMetricAlertTitle(alerts: FrameMetricAlert[]): string {
-  return alerts.length === 1
-    ? `Frame alert: ${alerts[0].label}`
+  const [only] = alerts
+  return alerts.length === 1 && only
+    ? `Frame alert: ${only.label}`
     : `Frame alerts: ${alerts.map((alert) => alert.label).join(', ')}`
 }
