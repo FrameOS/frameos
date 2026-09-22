@@ -3,6 +3,7 @@ import std/atomics
 import frameos/types
 import frameos/channels
 import frameos/runtime_diagnostics
+import frameos/release_space
 import frameos/utils/system
 
 type
@@ -183,12 +184,33 @@ proc getMountDiskUsage(mount: string): tuple[total, used, available: int64, perc
   finally:
     discard close(fd)
 
+# The size of the current release, measured once per release rather than
+# every sample (a walk of a few hundred files). Metrics thread only.
+var currentReleaseSizeCache {.threadvar.}: tuple[name: string, bytes: int64]
+
+proc currentReleaseBytes(installDir: string): int64 =
+  let name = currentReleaseName(installDir)
+  if name.len == 0:
+    return 0
+  if currentReleaseSizeCache.name != name:
+    currentReleaseSizeCache = (name, directoryBytes(installDir / "releases" / name))
+  currentReleaseSizeCache.bytes
+
+proc mountFor*(mounts: seq[string], path: string): string =
+  ## The longest mount point `path` lives under.
+  for mount in mounts:
+    let prefix = if mount == "/": "/" else: mount & "/"
+    if (path == mount or path.startsWith(prefix)) and mount.len > result.len:
+      result = mount
+
 proc defaultDiskUsage(): JsonNode =
   var total = 0'i64
   var used = 0'i64
   var available = 0'i64
   var filesystems = newJArray()
   var seen = initHashSet[string]()
+  var seenDevices = initHashSet[string]()
+  var mounts: seq[string]
 
   try:
     for line in metricsReadFileHook("/proc/mounts").splitLines():
@@ -211,9 +233,14 @@ proc defaultDiskUsage(): JsonNode =
       if usage.total <= 0:
         continue
 
-      total += usage.total
-      used += usage.used
-      available += usage.available
+      # A bind mount (Buildroot binds state directories out of /srv/frameos)
+      # is the same filesystem again: listed, not counted twice.
+      if not seenDevices.contains(device):
+        seenDevices.incl(device)
+        total += usage.total
+        used += usage.used
+        available += usage.available
+      mounts.add(mount)
       filesystems.add(%*{
         "mount": mount,
         "device": device,
@@ -233,6 +260,22 @@ proc defaultDiskUsage(): JsonNode =
     result["available"] = %available
     result["percentage"] = %((used.float / total.float) * 100.0)
     result["filesystems"] = filesystems
+    # The headline is the filesystem FrameOS lives on, not the sum: summed
+    # with a 60 GB assets partition, a full 2 GB /srv/frameos read "10%"
+    # while every upgrade was refused for space.
+    let installDir = frameosInstallDir()
+    let installMount = mountFor(mounts, installDir)
+    for filesystem in filesystems:
+      if installMount.len > 0 and filesystem["mount"].getStr() == installMount:
+        for key in ["total", "used", "available", "percentage"]:
+          result[key] = filesystem[key]
+        result["mount"] = %installMount
+        # What the next upgrade needs free there (release_space.nim), so a
+        # control plane can warn before the refusal instead of after it.
+        let needed = upgradeHeadroomBytes(currentReleaseBytes(installDir))
+        if needed > 0:
+          result["upgradeHeadroom"] = %*{"needed": needed, "available": filesystem["available"]}
+        break
 
 var metricsCpuUsageHook: CpuUsageHook = proc(interval: float): float = defaultCpuUsage(interval)
 var metricsMemoryUsageHook: MemoryUsageHook = proc(): tuple[total, used: int64, percentage: float] = defaultMemoryUsage()
@@ -282,6 +325,23 @@ template probe(payload: JsonNode, errors: JsonNode, key: string, body: untyped) 
     payload[key] = newJNull()
     errors[key] = %e.msg
 
+proc upgradeStatusSummary*(): JsonNode =
+  ## The last `frameos upgrade`'s outcome, from the status file it writes, so a
+  ## refused upgrade shows up where people look (the metrics alerts) and not
+  ## only as a log line. nil when no upgrade ever ran.
+  let path = frameosInstallDir() / "state" / "upgrade-status.json"
+  if not fileExists(path):
+    return nil
+  let status = parseJson(metricsReadFileHook(path))
+  if status.kind != JObject:
+    return nil
+  result = newJObject()
+  for key in ["status", "current_version", "latest_version", "finished_at"]:
+    if status.hasKey(key) and status[key].kind == JString:
+      result[key] = status[key]
+  if status{"status"}.getStr("") == "failed" and status{"message"}.getStr("").len > 0:
+    result["message"] = %status["message"].getStr()[0 ..< min(300, status["message"].getStr().len)]
+
 proc buildMetricsSample(self: MetricsLoggerThread): JsonNode =
   result = %*{"event": "metrics"}
   var errors = newJObject()
@@ -294,6 +354,12 @@ proc buildMetricsSample(self: MetricsLoggerThread): JsonNode =
   probe(result, errors, "cpuCount"): self.getCPUCount()
   probe(result, errors, "openFileDescriptors"): self.getOpenFileDescriptors()
   probe(result, errors, "runtime"): runtimeDiagnosticsSnapshot()
+  try:
+    let upgrade = upgradeStatusSummary()
+    if upgrade != nil:
+      result["upgrade"] = upgrade
+  except CatchableError as e:
+    errors["upgrade"] = %e.msg
   if errors.len > 0:
     result["errors"] = errors
 
