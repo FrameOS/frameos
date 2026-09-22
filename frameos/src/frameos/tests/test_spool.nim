@@ -224,6 +224,21 @@ suite "spool ownership":
     check fileExists(path)
     removeFile(path)
 
+  when not defined(useMalloc):
+    test "a dropped spool frees what it held":
+      # Both destroy hooks replace the generated ones, so they must free their
+      # fields too. They did not: every in-memory body leaked whole, and a
+      # downloadUrl re-fetched each render ran a Pi out of memory.
+      let before = getOccupiedMem()
+      for i in 0 ..< 50:
+        var s = newMemorySpool(newString(1_000_000))
+        check s.len == 1_000_000
+        s = nil
+        var img = newImageSpool(newString(100_000), 1, 1, owned = false)
+        check img.width == 1
+        img = nil
+      check getOccupiedMem() - before < 4_000_000
+
 suite "spool scratch sweep":
   test "boot sweep removes leftover spill files but keeps directories":
     let dir = ScratchDir / "sweep"
