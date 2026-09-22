@@ -1,5 +1,4 @@
 import { BindLogic, useActions, useValues } from 'kea'
-import { router } from 'kea-router'
 import { NodeProps, Handle, Position, NodeResizer, useUpdateNodeInternals } from 'reactflow'
 import { AppNodeData, DispatchNodeData } from '../../../../types'
 import clsx from 'clsx'
@@ -11,7 +10,6 @@ import { selectFieldOptions } from '../../../../utils/selectOptions'
 import React, { useEffect, useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
-import { urls } from '../../../../urls'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
 import {
@@ -40,7 +38,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   const { frameId, sceneId, sceneOptions, convertingSceneId } = useValues(diagramLogic)
   const { updateNodeConfig, copyAppJSON, duplicateNode, deleteApp, forkSceneApp, convertSceneToInterpreted } =
     useActions(diagramLogic)
-  const { editApp } = useActions(frameEditorsLogic)
+  const { openAppModal } = useActions(frameEditorsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const {
     node,
@@ -194,10 +192,8 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                 : [
                     {
                       label: appMenuEditLabel,
-                      onClick: () => {
-                        editApp(sceneId, id, data)
-                        router.actions.push(urls.apps(frameId, sceneId, id))
-                      },
+                      // Over the scene, in a modal: the diagram stays where it was.
+                      onClick: () => openAppModal(sceneId, id, data),
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
                     ...(isSceneApp && !isJavaScriptSceneApp

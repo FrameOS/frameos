@@ -73,6 +73,23 @@ export const hardwareCloudFrameSettingsMinVersion = '2026.8.31'
  */
 export const hardwareCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(hardwareCloudFrameSettingsMinVersion)
 
+/** Firmware from here on takes a new display driver from the cloud. */
+export const displayDriverCloudFrameSettingsMinVersion = '2026.9.22'
+
+/**
+ * `device`, the display driver key (Pi/Linux only). Switching it is a
+ * frame.json edit plus driver setup on the frame, which may rewrite
+ * /boot/config.txt and reboot it; the panel's width and height follow from
+ * the new driver. Callers gate on cloudFrameSupportsDisplayDriverSetting.
+ */
+export const displayDriverCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(
+  displayDriverCloudFrameSettingsMinVersion
+)
+
+export function cloudFrameSupportsDisplayDriverSetting(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(displayDriverCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /**
  * Power-management keys only the ESP32 firmware consumes. The Linux runtime
  * refuses the whole verb on them, so callers include them only for esp32
@@ -152,6 +169,7 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...cloudFrameSettingKeys,
     ...extendedCloudFrameSettingKeys,
     ...hardwareCloudFrameSettingKeys,
+    ...displayDriverCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )

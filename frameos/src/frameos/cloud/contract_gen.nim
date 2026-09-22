@@ -142,6 +142,10 @@ const CloudContractSettings* = @[
             Rule(kind: rkInt, hasMin: true, min: 0.0, hasMax: true, max: 48.0)),
           KeyRule(name: "label", rule:
             Rule(kind: rkString, format: sfGpioLabel))])]))]),
+  SettingSpec(key: "device", rule:
+    Rule(kind: rkString, minLen: 1, maxLen: 64, format: sfDriverKey),
+  profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.9.22", restart: true)]),
   SettingSpec(key: "deep_sleep", rule:
     Rule(kind: rkBool),
   profiles: @[

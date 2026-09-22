@@ -65,6 +65,8 @@ export interface frameEditorsLogicValues {
   activeEditor: FrameEditor | null
   activeEditorKey: string | null
   activeSceneEditorId: string | null
+  appModalEditor: FrameEditor | null
+  appModalEditorKey: string | null
   lastSelectedScene: string | null
   openEditors: FrameEditor[]
   scenesOpen: boolean
@@ -96,6 +98,15 @@ export interface frameEditorsLogicActions {
   editSceneJSON: (sceneId: string) => {
     sceneId: string
   }
+  openAppModal: (
+    sceneId: string,
+    nodeId: string,
+    nodeData: AppNodeData
+  ) => {
+    nodeData: AppNodeData
+    nodeId: string
+    sceneId: string
+  }
   persistUntilClosed: (
     editorKey: string,
     logic: AnyBuiltLogic
@@ -115,6 +126,7 @@ export interface frameEditorsLogicMeta {
     activeEditor: (openEditors: FrameEditor[], activeEditorKey: string | null) => FrameEditor | null
     scenesOpen: (activeEditor: FrameEditor | null) => boolean
     activeSceneEditorId: (activeEditor: FrameEditor | null) => string | null
+    appModalEditor: (openEditors: FrameEditor[], appModalEditorKey: string | null) => FrameEditor | null
     activeEditApp: (activeEditor: FrameEditor | null) => FrameEditor | null
     selectedSceneId: (
       frameForm: Partial<FrameType>,
@@ -167,6 +179,11 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
     editScene: (sceneId: string) => ({ sceneId }),
     editSceneJSON: (sceneId: string) => ({ sceneId }),
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
+    // The scene workspace edits an app in a modal over the diagram (the store
+    // editor's way), not on the /apps page. Its own key, not `activeEditor`:
+    // an app left open on the /apps page must not pop up over the scene when
+    // you come back to it.
+    openAppModal: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     closeEditor: (editorKey: string) => ({ editorKey }),
     closeSceneEditors: (sceneIds: string[]) => ({ sceneIds }),
     persistUntilClosed: (editorKey: string, logic: AnyBuiltLogic) => ({ editorKey, logic }),
@@ -201,6 +218,15 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
         closeEditor: (state, { editorKey }) => (state === editorKey ? null : state),
       },
     ],
+    appModalEditorKey: [
+      null as string | null,
+      {
+        openAppModal: (_, { sceneId, nodeId }) => editAppEditorKey(sceneId, nodeId),
+        closeEditor: (state, { editorKey }) => (state === editorKey ? null : state),
+        closeSceneEditors: (state, { sceneIds }) =>
+          state && sceneIds.some((sceneId) => state.startsWith(`editApp:${sceneId}.`)) ? null : state,
+      },
+    ],
     lastSelectedScene: [
       null as string | null,
       {
@@ -229,6 +255,14 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
         activeEditor && (activeEditor.kind === 'diagram' || activeEditor.kind === 'sceneJSON')
           ? activeEditor.sceneId
           : null,
+    ],
+    appModalEditor: [
+      (s) => [s.openEditors, s.appModalEditorKey],
+      (
+        openEditors: frameEditorsLogicValues['openEditors'],
+        appModalEditorKey: frameEditorsLogicValues['appModalEditorKey']
+      ): FrameEditor | null =>
+        appModalEditorKey ? openEditors.find((editor) => editor.key === appModalEditorKey) ?? null : null,
     ],
     activeEditApp: [
       (s) => [s.activeEditor],
@@ -269,7 +303,10 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
         ) === 'interpreted',
     ],
   })),
-  listeners(({ pathString }) => ({
+  listeners(({ actions, pathString }) => ({
+    openAppModal: ({ sceneId, nodeId, nodeData }) => {
+      actions.editApp(sceneId, nodeId, nodeData)
+    },
     persistUntilClosed: ({ editorKey, logic }) => {
       const persisted = persistedEditors.get(pathString) ?? new Map<string, () => void>()
       if (!persisted.has(editorKey)) {

@@ -13,7 +13,7 @@ typedef enum {
     FOS_RULE_ARRAY, FOS_RULE_MAP, FOS_RULE_NULL, FOS_RULE_ANY_OF,
 } fos_rule_kind_t;
 
-typedef enum { FOS_FMT_NONE = 0, FOS_FMT_IANA_ZONE, FOS_FMT_HTML_HEX_COLOR, FOS_FMT_GPIO_LABEL } fos_rule_format_t;
+typedef enum { FOS_FMT_NONE = 0, FOS_FMT_IANA_ZONE, FOS_FMT_HTML_HEX_COLOR, FOS_FMT_GPIO_LABEL, FOS_FMT_DRIVER_KEY } fos_rule_format_t;
 
 typedef struct {
     uint8_t kind, format, has_min, has_max, open, min_keys;

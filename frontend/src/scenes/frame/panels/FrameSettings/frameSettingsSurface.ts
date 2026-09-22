@@ -124,7 +124,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     nav: [],
     navNote: 'Only some panels have a palette or partial refresh, so the heading is not always followed by a field.',
     conditions:
-      'Disabled below hardwareCloudFrameSettingsMinVersion; palette and partial refresh depend on the panel the device reported.',
+      'Disabled below hardwareCloudFrameSettingsMinVersion, the display driver field below displayDriverCloudFrameSettingsMinVersion; palette and partial refresh depend on the panel the device reported.',
   },
   {
     key: 'cloud-hardware-gpio',

@@ -61,12 +61,25 @@ static bool is_gpio_label(const char *s)
     return len >= 1 && len <= 32;
 }
 
+/* A display driver key: a letter, then letters, digits, '_', '.' and '-'.
+ * No profile of this firmware takes one today (the contract's `device` is
+ * Linux-only); the case exists so every validator speaks every format. */
+static bool is_driver_key(const char *s)
+{
+    if (!((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z'))) return false;
+    for (const char *c = s; *c; c++) {
+        if (!(is_alnum(*c) || *c == '_' || *c == '.' || *c == '-')) return false;
+    }
+    return true;
+}
+
 static bool matches_format(uint8_t format, const char *s)
 {
     switch (format) {
         case FOS_FMT_IANA_ZONE: return is_iana_zone(s);
         case FOS_FMT_HTML_HEX_COLOR: return is_html_hex_color(s);
         case FOS_FMT_GPIO_LABEL: return is_gpio_label(s);
+        case FOS_FMT_DRIVER_KEY: return is_driver_key(s);
         default: return true;
     }
 }

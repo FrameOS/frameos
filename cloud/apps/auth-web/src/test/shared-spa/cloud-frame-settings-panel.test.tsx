@@ -20,6 +20,8 @@ import { framesModel } from "../../../../../../frontend/src/models/framesModel";
 import { FrameSettings } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/FrameSettings";
 import {
   cloudFrameSettingKeys,
+  displayDriverCloudFrameSettingKeys,
+  displayDriverCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingsMinVersion,
@@ -160,6 +162,7 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     const saveable = new Set<string>([
       ...cloudFrameSettingKeys,
       ...Object.keys(extendedFieldNames),
+      ...displayDriverCloudFrameSettingKeys,
     ]);
     const unsaveable = [...rendered].filter((name) => !saveable.has(name));
 
@@ -247,8 +250,29 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
 
     const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
     expect(flip?.matches(":disabled")).toBe(true);
-    // Both gated batches say so — the extended one and the hardware one.
-    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(2);
+    // Every gated batch says so — the extended one, the hardware one and the
+    // display driver.
+    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(3);
+  });
+
+  it("offers the display driver on firmware that takes it, showing the one the frame reports", () => {
+    renderPanel(cloudFrame("raspberry-pi-32", displayDriverCloudFrameSettingsMinVersion, "framebuffer"));
+    const driver = document.querySelector<HTMLSelectElement>('select[name="device"]');
+    expect(driver, "the display driver field is missing").toBeTruthy();
+    expect(driver?.matches(":disabled")).toBe(false);
+    expect(driver?.value).toBe("framebuffer");
+    const options = Array.from(driver?.querySelectorAll("option") ?? []).map((option) => option.value);
+    expect(options).toContain("pimoroni.hyperpixel4sq_touch");
+    // Its upload URL is not a setting the cloud can push.
+    expect(options).not.toContain("http.upload");
+  });
+
+  it("disables (never hides) the display driver below its floor, and says why", () => {
+    renderPanel(cloudFrame("raspberry-pi-32", "2026.9.21", "framebuffer"));
+    const driver = document.querySelector<HTMLSelectElement>('select[name="device"]');
+    expect(driver, "the field is hidden rather than disabled").toBeTruthy();
+    expect(driver?.matches(":disabled")).toBe(true);
+    expect(screen.getByText(/Changing the display driver needs FrameOS 2026\.9\.22 or newer/)).toBeTruthy();
   });
 
   it("offers the account's SSH keys, which go on the SD cards it builds", () => {

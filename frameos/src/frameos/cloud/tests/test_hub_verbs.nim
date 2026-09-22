@@ -252,6 +252,54 @@ suite "cloud hub verb dispatcher":
     discard handleCloudVerb(makeContext(soft), %*{"id": "h2", "type": "set_settings", "settings": {"flip": "both"}})
     check soft.events.len == 1 and soft.events[0][0] == "reload"
 
+  test "set_settings device runs driver setup instead of a bare restart":
+    # A new display driver needs driver setup (overlays, /boot/config.txt,
+    # maybe a reboot) before the runtime comes back; setup restarts it
+    # itself, so no restart event may race it.
+    let recorded = Recorded()
+    var planned: seq[JsonNode]
+    var queued: seq[string]
+    var ctx = makeContext(recorded)
+    ctx.driverSetupPlanFn = proc(payload: JsonNode): string {.gcsafe.} =
+      {.cast(gcsafe).}:
+        planned.add(copy(payload))
+      if payload.hasKey("device"): "{\"device\": \"pimoroni.hyperpixel4sq_touch\"}" else: ""
+    ctx.queueDriverSetupFn = proc(configJson: string) {.gcsafe.} =
+      {.cast(gcsafe).}:
+        queued.add(configJson)
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "drv", "type": "set_settings",
+      "settings": {"name": "Kitchen", "device": "pimoroni.hyperpixel4sq_touch"},
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.persistedSettings.len == 1
+    check recorded.persistedSettings[0]{"device"}.getStr("") == "pimoroni.hyperpixel4sq_touch"
+    check planned.len == 1
+    check queued == @["{\"device\": \"pimoroni.hyperpixel4sq_touch\"}"]
+    check recorded.events.len == 0
+
+    # No driver setup on this platform (or the driver did not change): the
+    # plan says "", and `device` restarts like the other driver-init keys.
+    let plain = Recorded()
+    var queuedPlain = 0
+    var plainCtx = makeContext(plain)
+    plainCtx.driverSetupPlanFn = proc(payload: JsonNode): string {.gcsafe.} = ""
+    plainCtx.queueDriverSetupFn = proc(configJson: string) {.gcsafe.} =
+      {.cast(gcsafe).}:
+        inc queuedPlain
+    discard handleCloudVerb(plainCtx, %*{"id": "drv2", "type": "set_settings",
+      "settings": {"device": "framebuffer"}})
+    check queuedPlain == 0
+    check plain.events.len == 1 and plain.events[0][0] == "restart"
+
+  test "set_settings refuses a device key that is not a driver name":
+    for bad in [%*"framebuffer; reboot", %*"../../bin/sh", %*"", %*7, %*"$(id)"]:
+      let recorded = Recorded()
+      let reply = handleCloudVerb(makeContext(recorded), %*{"id": "bad", "type": "set_settings",
+        "settings": {"device": bad}})
+      check reply.ack{"error"}.getStr("") == "invalid_settings"
+      check recorded.persistedSettings.len == 0
+
   test "set_settings refuses bad values for allowlisted keys with invalid_settings":
     let bad = [
       %*{"palette": {"colors": ["red"]}},
@@ -320,6 +368,7 @@ suite "cloud hub verb dispatcher":
       "palette": {"colors": ["#ffffff", "#000000"]},
       "device_config": {"partial": true},
       "gpio_buttons": [{"pin": 5, "label": "A"}],
+      "device": "pimoroni.hyperpixel4sq_touch",
     }
     for key in CLOUD_SETTINGS_ALLOWLIST:
       check samples.hasKey(key)

@@ -7,7 +7,10 @@ import {
   cloudFrameSettingsPayload,
   cloudFrameSupportsExtendedSettings,
   cloudFrameSupportsHardwareSettings,
+  cloudFrameSupportsDisplayDriverSetting,
   cloudGpioButtonsPayload,
+  displayDriverCloudFrameSettingKeys,
+  displayDriverCloudFrameSettingsMinVersion,
   cloudPalettePayload,
   cloudPartialRefreshPayload,
   cloudFrameSupportsEsp32ExtendedSettings,
@@ -299,6 +302,29 @@ describe("cloud settings push", () => {
     for (const [key, value] of Object.entries(settings)) {
       expect(allowedFrameSettings.get(key)?.(value), key).toBe(true);
     }
+  });
+
+  it("gates the display driver on its own floor, Pi/Linux only", () => {
+    expect([...displayDriverCloudFrameSettingKeys]).toEqual(["device"]);
+    expect(displayDriverCloudFrameSettingsMinVersion).toBe("2026.9.22");
+    expect(allowedFrameSettings.get("device")?.("pimoroni.hyperpixel4sq_touch")).toBe(true);
+    expect(allowedFrameSettings.get("device")?.("framebuffer; reboot")).toBe(false);
+    expect(esp32SettableKeys.has("device")).toBe(false);
+    expect(cloudFrameSupportsDisplayDriverSetting("2026.9.21")).toBe(false);
+    expect(cloudFrameSupportsDisplayDriverSetting("2026.9.22")).toBe(true);
+    expect(cloudFrameSettingKeysForVersion("2026.9.21")).not.toContain("device");
+    expect(cloudFrameSettingKeysForVersion("2026.9.22")).toContain("device");
+    // A form that never touched the driver sends none: the key is only in
+    // the payload once the owner picked one (or the cloud stored a pick).
+    expect(cloudFrameSettingsPayload({ interval: 60 }, cloudFrameSettingKeysForVersion("2026.9.22"))).toEqual({
+      interval: 60,
+    });
+    expect(
+      cloudFrameSettingsPayload(
+        { device: "pimoroni.hyperpixel4sq_touch" },
+        cloudFrameSettingKeysForVersion("2026.9.22"),
+      ),
+    ).toEqual({ device: "pimoroni.hyperpixel4sq_touch" });
   });
 
   it("only includes the extended batch for firmware that knows it", () => {

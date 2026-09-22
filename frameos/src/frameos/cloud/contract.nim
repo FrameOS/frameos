@@ -101,12 +101,25 @@ proc isGpioLabel*(value: string): bool =
   let trimmed = value.strip()
   trimmed.len in 1 .. 32 and ':' notin value and '\n' notin value
 
+proc isDriverKey*(value: string): bool =
+  ## A display driver key as frame.json spells it ("framebuffer",
+  ## "pimoroni.hyperpixel4sq_touch", "waveshare.EPD_7in5_V2"): a letter,
+  ## then letters, digits, `_`, `.` and `-`. The value reaches driver setup,
+  ## so nothing a shell or a path could read as syntax gets through.
+  if value.len == 0 or value[0] notin {'A'..'Z', 'a'..'z'}:
+    return false
+  for ch in value:
+    if ch notin {'A'..'Z', 'a'..'z', '0'..'9', '_', '.', '-'}:
+      return false
+  true
+
 proc matchesFormat(format: StringFormat, value: string): bool =
   case format
   of sfNone: true
   of sfIanaZone: isIanaZone(value)
   of sfHtmlHexColor: isHtmlHexColor(value)
   of sfGpioLabel: isGpioLabel(value)
+  of sfDriverKey: isDriverKey(value)
 
 # ------------------------------------------------------------- the walker
 

@@ -22,12 +22,11 @@ import { PencilSquareIcon, PlayIcon } from '@heroicons/react/24/solid'
 
 import { FrameosTheme } from '../utils/frameosTheme'
 import { ZoomOutArea } from '../icons/ZoomOutArea'
-import { Modal } from '../components/Modal'
 
 import { frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
 import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
 import { diagramLogic } from '../scenes/frame/panels/Diagram/diagramLogic'
-import { EditApp } from '../scenes/frame/panels/EditApp/EditApp'
+import { EditAppModal } from '../scenes/frame/panels/EditApp/EditAppModal'
 import { Apps } from '../scenes/frame/panels/Apps/Apps'
 import { Events } from '../scenes/frame/panels/Events/Events'
 import { SceneJSON } from '../scenes/frame/panels/SceneJSON/SceneJSON'
@@ -642,24 +641,7 @@ function EmbeddedEditorBody({
           />
         ) : null}
       </div>
-      {appEditor ? (
-        <Modal
-          open
-          onClose={() => closeEditor(appEditor.key)}
-          title={appEditor.title || 'Edit app source'}
-          panelClassName="max-w-[min(1200px,calc(100vw-2rem))]"
-          bodyClassName="h-[calc(100dvh-11rem)]"
-        >
-          <div className="h-full min-h-0 overflow-hidden">
-            <EditApp
-              editorKey={appEditor.key}
-              sceneId={appEditor.sceneId}
-              nodeId={appEditor.nodeId ?? ''}
-              showToolbar
-            />
-          </div>
-        </Modal>
-      ) : null}
+      {appEditor ? <EditAppModal editor={appEditor} onClose={() => closeEditor(appEditor.key)} /> : null}
     </div>
   )
 }

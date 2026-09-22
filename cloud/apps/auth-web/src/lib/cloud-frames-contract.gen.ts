@@ -438,6 +438,20 @@ export const cloudFramesContract = {
         "no pin appears twice"
       ]
     },
+    "device": {
+      "rule": {
+        "type": "string",
+        "minLen": 1,
+        "maxLen": 64,
+        "format": "driver_key"
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.9.22",
+          "restart": true
+        }
+      }
+    },
     "deep_sleep": {
       "rule": {
         "type": "bool"
@@ -513,7 +527,8 @@ export const cloudFramesContract = {
   "formats": {
     "iana_zone": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$",
     "html_hex_color": "^#[0-9a-fA-F]{6}$",
-    "gpio_label": "1..32 characters after trimming whitespace, no ':' and no newline"
+    "gpio_label": "1..32 characters after trimming whitespace, no ':' and no newline",
+    "driver_key": "^[A-Za-z][A-Za-z0-9_.-]*$"
   },
   "verbs": [
     {

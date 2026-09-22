@@ -48,6 +48,7 @@ import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { SceneSettings } from '../frame/panels/Scenes/SceneSettings'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
+import { EditAppModal } from '../frame/panels/EditApp/EditAppModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
@@ -993,6 +994,15 @@ function SceneCanvas({
   )
 }
 
+/** The app being edited from the diagram, over the scene (openAppModal). */
+function SceneAppModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
+  const { appModalEditor } = useValues(frameEditorsLogic({ frameId }))
+  const { closeEditor } = useActions(frameEditorsLogic({ frameId }))
+  return appModalEditor ? (
+    <EditAppModal editor={appModalEditor} onClose={() => closeEditor(appModalEditor.key)} />
+  ) : null
+}
+
 function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
   const { selectedNodeId } = useValues(workspaceLogic)
   const diagram = diagramLogic({ frameId, sceneId })
@@ -1093,6 +1103,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
         </FrameosShell>
         <EditTemplateModal />
         <RenameSceneModal frameId={frameId} />
+        <SceneAppModal frameId={frameId} />
       </BindLogic>
     </BindLogic>
   )

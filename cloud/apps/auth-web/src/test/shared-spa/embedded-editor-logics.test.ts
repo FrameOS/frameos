@@ -187,3 +187,30 @@ describe("the embedded editor's frameLogic shim", () => {
     expect(String(alertMock.mock.calls[0]?.[0])).toContain("Too many conversions");
   });
 });
+
+describe("editing an app in a modal (frameEditorsLogic.openAppModal)", () => {
+  it("opens the app over the scene and closes with its editor", () => {
+    const logic = frameEditorsLogic({ frameId });
+    const unmount = logic.mount();
+    const data = scene.nodes[0].data as never;
+
+    // An app opened the /apps page way is not a modal over the scene.
+    logic.actions.editApp(sceneId, nodeId, data);
+    expect(logic.values.appModalEditor).toBeNull();
+    logic.actions.closeEditor(logic.values.activeEditor!.key);
+
+    logic.actions.openAppModal(sceneId, nodeId, data);
+    expect(logic.values.appModalEditor).toMatchObject({ kind: "editApp", sceneId, nodeId });
+    // The store editor keys its modal on the active editor: same app.
+    expect(logic.values.activeEditor?.key).toBe(logic.values.appModalEditor?.key);
+
+    logic.actions.closeEditor(logic.values.appModalEditor!.key);
+    expect(logic.values.appModalEditor).toBeNull();
+
+    // Deleting the scene takes its app modal with it.
+    logic.actions.openAppModal(sceneId, nodeId, data);
+    logic.actions.closeSceneEditors([sceneId]);
+    expect(logic.values.appModalEditor).toBeNull();
+    unmount();
+  });
+});

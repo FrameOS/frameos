@@ -58,6 +58,10 @@ export const cloudFramesContractSettings = {
     "gpio_buttons": {
       "since": "2026.8.31",
       "restart": true
+    },
+    "device": {
+      "since": "2026.9.22",
+      "restart": true
     }
   },
   "esp32": {

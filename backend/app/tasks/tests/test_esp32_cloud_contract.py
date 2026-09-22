@@ -95,5 +95,6 @@ def test_single_plane_settings_carry_a_parity_reason():
     by_plane = {}
     for spec in single.values():
         by_plane[spec["parity"]["only"]] = by_plane.get(spec["parity"]["only"], 0) + 1
-    assert by_plane.get("linux", 0) <= 8, by_plane
+    # 9 since `device` (2026.9.22, docs/convergence-todo.md §6).
+    assert by_plane.get("linux", 0) <= 9, by_plane
     assert by_plane.get("esp32", 0) <= 7, by_plane

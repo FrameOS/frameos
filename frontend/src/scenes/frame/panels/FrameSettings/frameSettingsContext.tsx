@@ -12,6 +12,7 @@ import {
   cloudFrameSupportsEsp32TimeZone,
   cloudFrameSupportsExtendedSettings,
   cloudFrameSupportsHardwareSettings,
+  cloudFrameSupportsDisplayDriverSetting,
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
@@ -98,6 +99,8 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   // the reason rather than disappearing.
   cloudExtendedSettingsSupported: boolean
   cloudHardwareSettingsSupported: boolean
+  /** Can this cloud frame be sent a new display driver (`device`)? */
+  cloudDisplayDriverSupported: boolean
   cloudEsp32ExtendedSettingsSupported: boolean
   cloudEsp32TimeZoneSupported: boolean
   cloudBatteryEnablePinDisabledReason: string | undefined
@@ -249,6 +252,10 @@ export function FrameSettingsProvider({
   // the device reported at enrollment — a cloud frame's `device` is the one
   // in frame.hardware, never a form value.
   const cloudHardwareSettingsSupported = cloudProfile && cloudFrameSupportsHardwareSettings(frame.frameos_version)
+  // 2026.9.22: the display driver itself (Pi/Linux only), applied with driver
+  // setup on the frame.
+  const cloudDisplayDriverSupported =
+    surface === 'cloudLinux' && cloudFrameSupportsDisplayDriverSetting(frame.frameos_version)
   // The ESP32 firmware's own 2026.8.31 additions: debug logging, the HTTP
   // ceiling and GPIO buttons (esp32ExtendedCloudFrameSettingKeys).
   const cloudEsp32ExtendedSettingsSupported =
@@ -481,6 +488,7 @@ export function FrameSettingsProvider({
 
     cloudExtendedSettingsSupported,
     cloudHardwareSettingsSupported,
+    cloudDisplayDriverSupported,
     cloudEsp32ExtendedSettingsSupported,
     cloudEsp32TimeZoneSupported,
     cloudBatteryEnablePinDisabledReason,

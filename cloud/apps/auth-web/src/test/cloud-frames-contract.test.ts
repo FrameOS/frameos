@@ -90,7 +90,9 @@ describe("settings parity between the device planes", () => {
     for (const spec of Object.values(contract.settings)) {
       if (spec.parity) counts[spec.parity.only] = (counts[spec.parity.only] ?? 0) + 1;
     }
-    expect(counts.linux ?? 0).toBeLessThanOrEqual(8);
+    // 9 since `device` (2026.9.22): the display driver, Linux-only until the
+    // ESP32 can check a pushed panel against its board (convergence-todo §6).
+    expect(counts.linux ?? 0).toBeLessThanOrEqual(9);
     expect(counts.esp32 ?? 0).toBeLessThanOrEqual(7);
   });
 });
