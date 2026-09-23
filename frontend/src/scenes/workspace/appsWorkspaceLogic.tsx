@@ -1,4 +1,4 @@
-import { MakeLogicType, afterMount, kea, key, path, props } from 'kea'
+import { MakeLogicType, afterMount, connect, kea, key, path, props } from 'kea'
 import { router } from 'kea-router'
 import { urls } from '../../urls'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
@@ -6,6 +6,7 @@ import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { parseRouteFrameId } from '../../utils/frameId'
 import { workspaceLogic } from './workspaceLogic'
+import { routeFrameEditors } from './sceneWorkspaceLogic'
 
 export const SYSTEM_APPS_ROUTE_TOKEN = 'system'
 
@@ -33,6 +34,10 @@ export const appsWorkspaceLogic = kea<appsWorkspaceLogicType>([
   path(['src', 'scenes', 'workspace', 'appsWorkspaceLogic']),
   props({} as AppsWorkspaceLogicProps),
   key((props) => `${props.routeFrameId ?? 'none'}:${props.routeSceneId ?? 'none'}:${props.routeNodeId ?? 'none'}`),
+  // Same as sceneWorkspaceLogic: selectScene must land on a mounted logic.
+  connect((props: AppsWorkspaceLogicProps) => ({
+    logic: props.routeFrameId === SYSTEM_APPS_ROUTE_TOKEN ? [] : routeFrameEditors(props.routeFrameId),
+  })),
   afterMount(({ props }) => {
     if (props.routeFrameId === SYSTEM_APPS_ROUTE_TOKEN && isInFrameAdminMode()) {
       const href = urls.apps(getFrameControlFrameId())

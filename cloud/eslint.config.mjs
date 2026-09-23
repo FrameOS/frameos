@@ -76,6 +76,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/cloud-frame-settings-panel.test.tsx",
       // Same exclusion, same reason: imports frameLogic.
       "**/src/test/shared-spa/frame-service-keys-change.test.ts",
+      "**/src/test/shared-spa/fleet-update.test.ts",
       // Same exclusion, same reason: diagramLogic against the embed shim,
       // and export helpers that reach frameLogic / duplicateScenes.
       "**/src/test/shared-spa/diagram-history.test.ts",

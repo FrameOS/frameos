@@ -1998,16 +1998,23 @@ export const diagramLogic = kea<diagramLogicType>([
     cache.hasAutoArranged = false
     actions.resetHistory(snapshotOf(values))
 
-    // Every open scene tab mounts this logic (the tab title reads from it),
-    // so a global shortcut must only act in the scene that is actually shown —
-    // otherwise Cmd+V pastes into every open scene at once.
+    // Every open scene tab mounts this logic (the tab title reads from it,
+    // and the scene workspace's node list mounts one per scene), so a global
+    // shortcut must only act in the scene that is actually shown — otherwise
+    // Cmd+V pastes into every open scene at once. The legacy tabbed editor
+    // opens a scene with editScene (an `activeEditor`); the scene workspace
+    // only selects it (selectScene → `selectedSceneId`), which left every
+    // shortcut dead there: Cmd+Z after "Realign nodes" did nothing.
     const isVisibleDiagram = (): boolean => {
       const mountedEditors = frameEditorsLogic.findMounted({ frameId: props.frameId })
       if (!mountedEditors) {
         return true
       }
-      const activeEditor = mountedEditors.values.activeEditor
-      return activeEditor?.kind === 'diagram' && activeEditor.sceneId === props.sceneId
+      const { activeEditor, selectedSceneId } = mountedEditors.values
+      if (activeEditor) {
+        return activeEditor.kind === 'diagram' && activeEditor.sceneId === props.sceneId
+      }
+      return selectedSceneId === props.sceneId
     }
 
     // Keyed by path, not kept on this instance's cache: React can re-mount
