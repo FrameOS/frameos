@@ -2,7 +2,7 @@
 // mirror the FrameOS backend/frontend definitions (frontend/src/types.tsx and
 // frameos/src/frameos/types.nim) for the parts a browser preview needs.
 
-import { HOST_EVENT_NAMES, POINTER_EVENT_NAMES } from './events.gen'
+import { HOST_EVENT_NAMES, KEYBOARD_EVENT_NAMES, POINTER_EVENT_NAMES } from './events.gen'
 
 /** One showIf condition: compare a (state) field's value against `value`. */
 export interface ConfigFieldCondition {
@@ -97,6 +97,12 @@ export interface PreviewRuntimeInfo {
    * render per move — see ./pointer). False for a bundle from before it,
    * which a page must not forward pointers to. */
   pointerEvents: boolean
+  /** Whether the bundle takes input v2 (2026.9.23): `pointerMove` /
+   * `pointerDown` / `pointerUp` / `pointerCancel` with a position, an id and
+   * a type, `wheel`, and the keyboard as `keyDown` / `keyUp` / `textInput`
+   * (see ./pointer). False sends the older bundle the old mouse events and
+   * no keys. */
+  inputEvents: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */
@@ -128,6 +134,10 @@ export const LIFECYCLE_EVENTS = new Set(HOST_EVENT_NAMES)
  * without its deltas, which only a frame's mouse produces. */
 export const POINTER_EVENTS = new Set(POINTER_EVENT_NAMES)
 
+/** Keyboard input: the focused canvas sends the keys itself (see ./pointer);
+ * a button could only send a key with no `code`. */
+export const KEYBOARD_EVENTS = new Set(KEYBOARD_EVENT_NAMES)
+
 /** The custom event nodes of a scene, deduplicated — render these as buttons. */
 export function sceneEventButtons(scene: FrameOSScene | undefined | null): SceneEventButton[] {
   if (!scene) {
@@ -141,7 +151,7 @@ export function sceneEventButtons(scene: FrameOSScene | undefined | null): Scene
     }
     const data = (node.data ?? {}) as Record<string, unknown> & { config?: Record<string, unknown> }
     const keyword = String(data.keyword ?? '')
-    if (!keyword || LIFECYCLE_EVENTS.has(keyword) || POINTER_EVENTS.has(keyword)) {
+    if (!keyword || LIFECYCLE_EVENTS.has(keyword) || POINTER_EVENTS.has(keyword) || KEYBOARD_EVENTS.has(keyword)) {
       continue
     }
     const label = (data.config?.label ?? data.label ?? null) as string | null

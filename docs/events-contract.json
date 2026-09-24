@@ -29,8 +29,10 @@
     "log": "full"
   },
   "pointer": {
-    "$comment": "Driver / preview -> host: both axes 0..wireMax across the panel, whatever the device reports. The host scales into scene pixels before a scene sees it.",
-    "wireMax": 32767
+    "$comment": "Driver / preview -> host: both axes 0..wireMax across the panel, whatever the device reports. The host scales into scene pixels before a scene sees it, and every pointer event a scene hears carries the position. `types` is `pointerType`; `buttons` is what the `button` number and the `buttons` bitmask (1 << button) mean.",
+    "wireMax": 32767,
+    "types": ["mouse", "touch", "pen"],
+    "buttons": {"0": "left / touch / pen tip", "1": "right", "2": "middle", "3": "side", "4": "extra", "5": "forward", "6": "back", "7": "task"}
   },
   "context": {
     "$comment": "The `context` object JavaScript sees. `sandboxes` says where a key exists: a code node (one expression) or an app (a module).",
@@ -42,8 +44,20 @@
       {"name": "hasImage", "type": "boolean", "sandboxes": ["code", "app"], "description": "Whether the run carries a canvas."},
       {"name": "nextSleep", "type": "float", "sandboxes": ["app"], "description": "Seconds until the next render."},
       {"name": "image", "type": "image", "optional": true, "sandboxes": ["app"], "description": "The canvas, when there is one."},
-      {"name": "imageWidth", "type": "integer", "optional": true, "sandboxes": ["code", "app"], "description": "Width of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none."},
-      {"name": "imageHeight", "type": "integer", "optional": true, "sandboxes": ["code", "app"], "description": "Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none."}
+      {
+        "name": "imageWidth",
+        "type": "integer",
+        "optional": true,
+        "sandboxes": ["code", "app"],
+        "description": "Width of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none."
+      },
+      {
+        "name": "imageHeight",
+        "type": "integer",
+        "optional": true,
+        "sandboxes": ["code", "app"],
+        "description": "Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none."
+      }
     ]
   },
   "logEvents": {
@@ -116,18 +130,24 @@
       "name": "keyDown",
       "class": "input",
       "device": "keyboard",
-      "description": "When a key is pressed on a keyboard",
+      "description": "When a key is pressed on a keyboard (or held: `repeat`). `code` is the physical key (`KeyA`, `ArrowLeft`), `key` what it means under the frame's keyboard layout (`a`, `A`, `Enter`).",
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "key", "label": "Key", "type": "string", "required": true, "unit": "linux-key-name"},
-        {"name": "code", "label": "Code", "type": "integer", "required": true, "unit": "linux-key-code"}
+        {"name": "code", "label": "Code", "type": "string", "required": true, "unit": "key-code"},
+        {"name": "key", "label": "Key", "type": "string", "required": true, "unit": "key-value"},
+        {"name": "repeat", "label": "Repeat", "type": "boolean", "required": true, "catalog": false},
+        {"name": "shift", "label": "Shift", "type": "boolean", "required": true},
+        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": true},
+        {"name": "alt", "label": "Alt", "type": "boolean", "required": true},
+        {"name": "meta", "label": "Meta", "type": "boolean", "required": true},
+        {"name": "linuxCode", "label": "Linux code", "type": "integer", "required": false, "unit": "linux-key-code", "catalog": false}
       ],
-      "origins": ["driver", "scene", "schedule", "http:write", "http:admin", "system"],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "name-only",
-      "hosts": {"linux": true, "esp32": false, "wasm": false}
+      "hosts": {"linux": true, "esp32": false, "wasm": true}
     },
     {
       "name": "keyUp",
@@ -137,20 +157,129 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "key", "label": "Key", "type": "string", "required": true, "unit": "linux-key-name"},
-        {"name": "code", "label": "Code", "type": "integer", "required": true, "unit": "linux-key-code"}
+        {"name": "code", "label": "Code", "type": "string", "required": true, "unit": "key-code"},
+        {"name": "key", "label": "Key", "type": "string", "required": true, "unit": "key-value"},
+        {"name": "shift", "label": "Shift", "type": "boolean", "required": true},
+        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": true},
+        {"name": "alt", "label": "Alt", "type": "boolean", "required": true},
+        {"name": "meta", "label": "Meta", "type": "boolean", "required": true},
+        {"name": "linuxCode", "label": "Linux code", "type": "integer", "required": false, "unit": "linux-key-code", "catalog": false}
       ],
-      "origins": ["driver", "scene", "schedule", "http:write", "http:admin", "system"],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "name-only",
-      "hosts": {"linux": true, "esp32": false, "wasm": false}
+      "hosts": {"linux": true, "esp32": false, "wasm": true}
+    },
+    {
+      "name": "textInput",
+      "class": "input",
+      "device": "keyboard",
+      "description": "Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). Made by the dispatcher from `keyDown`; a preview forwards the browser's `beforeinput`.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "text", "label": "Text", "type": "string", "required": true, "unit": "text"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "name-only",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "synthesized": true,
+      "since": "2026.9.23"
+    },
+    {
+      "name": "pointerMove",
+      "class": "input",
+      "device": "pointer",
+      "description": "When a pointer (a finger, a mouse, a pen) moves (not logged)",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "latest",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23"
+    },
+    {
+      "name": "pointerDown",
+      "class": "input",
+      "device": "pointer",
+      "description": "When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "button", "label": "Button", "type": "integer", "required": true, "unit": "pointer-button"},
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23"
+    },
+    {
+      "name": "pointerUp",
+      "class": "input",
+      "device": "pointer",
+      "description": "When a pointer button is released or a finger lifts (not logged)",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "button", "label": "Button", "type": "integer", "required": true, "unit": "pointer-button"},
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23"
+    },
+    {
+      "name": "pointerCancel",
+      "class": "input",
+      "device": "pointer",
+      "description": "When a pointer that was down is lost without a release: the queue overflowed, the device went away. A scene holding a drag lets go.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23"
     },
     {
       "name": "mouseMove",
+      "aliasOf": "pointerMove",
       "class": "input",
       "device": "pointer",
-      "description": "When a mouse moves (not logged)",
+      "description": "When a mouse moves (not logged). An alias of `pointerMove` with its old payload.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -165,9 +294,10 @@
     },
     {
       "name": "mouseDown",
+      "aliasOf": "pointerDown",
       "class": "input",
       "device": "pointer",
-      "description": "When a mouse button is pressed (not logged)",
+      "description": "When a mouse button is pressed (not logged). An alias of `pointerDown` with its old payload.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -181,9 +311,10 @@
     },
     {
       "name": "mouseUp",
+      "aliasOf": "pointerUp",
       "class": "input",
       "device": "pointer",
-      "description": "When a mouse button is released (not logged)",
+      "description": "When a mouse button is released (not logged). An alias of `pointerUp` with its old payload.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -196,21 +327,111 @@
       "hosts": {"linux": true, "esp32": false, "wasm": true}
     },
     {
+      "name": "tap",
+      "class": "input",
+      "device": "pointer",
+      "description": "A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23",
+      "synthesized": true
+    },
+    {
+      "name": "doubleTap",
+      "class": "input",
+      "device": "pointer",
+      "description": "A second `tap` in the same place within `gestures.doubleTapMs` of the first. The first tap is delivered too.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23",
+      "synthesized": true
+    },
+    {
+      "name": "longPress",
+      "class": "input",
+      "device": "pointer",
+      "description": "A pointer held in one place for `gestures.longPressMs`. Delivered while it is still held where the host ticks the dispatcher, on release otherwise; no `tap` follows it.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": true, "unit": "ms"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23",
+      "synthesized": true
+    },
+    {
+      "name": "swipe",
+      "class": "input",
+      "device": "pointer",
+      "description": "A press and a release at least `gestures.swipeMinPx` apart, in one of four directions.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "direction", "label": "Direction", "type": "string", "required": true, "unit": "swipe-direction"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "startX", "label": "Start X", "type": "integer", "required": true, "unit": "scene-px"},
+        {"name": "startY", "label": "Start Y", "type": "integer", "required": true, "unit": "scene-px"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.9.23",
+      "synthesized": true
+    },
+    {
       "name": "wheel",
       "class": "input",
       "device": "pointer",
-      "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. Linux frames only.",
+      "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
       "listen": true,
       "dispatch": false,
       "payload": [
         {"name": "deltaX", "label": "Delta X", "type": "integer", "required": true, "unit": "wheel-notch"},
-        {"name": "deltaY", "label": "Delta Y", "type": "integer", "required": true, "unit": "wheel-notch"}
+        {"name": "deltaY", "label": "Delta Y", "type": "integer", "required": true, "unit": "wheel-notch"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"}
       ],
-      "origins": ["driver", "scene", "schedule", "http:write", "http:admin", "system"],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",
       "coalesce": "none",
       "log": "none",
-      "hosts": {"linux": true, "esp32": false, "wasm": false},
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
       "since": "2026.9.21"
     },
     {
@@ -245,13 +466,17 @@
       "name": "button",
       "class": "input",
       "device": "button",
-      "description": "When a GPIO button is pressed",
+      "description": "When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only.",
       "listen": true,
       "dispatch": false,
       "payload": [
         {"name": "pin", "label": "Pin", "type": "integer", "required": true, "unit": "gpio-pin"},
         {"name": "label", "label": "Label", "type": "string", "required": true},
-        {"name": "level", "label": "Level", "type": "integer", "required": true, "unit": "gpio-level"}
+        {"name": "role", "label": "Role", "type": "string", "required": true, "unit": "button-role"},
+        {"name": "action", "label": "Action", "type": "string", "required": true, "unit": "button-action", "listenDefault": "press"},
+        {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": false, "unit": "ms"},
+        {"name": "wake", "label": "Woke the device", "type": "boolean", "required": false},
+        {"name": "level", "label": "Level", "type": "integer", "required": false, "unit": "gpio-level", "catalog": false}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
       "cloud": {"verb": "scene_event", "since": "2026.9.21"},
@@ -272,7 +497,11 @@
       ],
       "sceneState": "payload",
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
-      "cloud": {"verb": "scene_event", "since": "2026.9.21", "before": {"verb": "set_current_scene", "profiles": ["linux"]}},
+      "cloud": {
+        "verb": "scene_event",
+        "since": "2026.9.21",
+        "before": {"verb": "set_current_scene", "profiles": ["linux"]}
+      },
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "full",
@@ -371,5 +600,171 @@
       "log": "full",
       "hosts": {"linux": true, "esp32": true, "wasm": false}
     }
-  ]
+  ],
+  "gestures": {
+    "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
+    "tapSlopPx": 16,
+    "tapMs": 500,
+    "doubleTapMs": 350,
+    "longPressMs": 500,
+    "swipeMinPx": 48,
+    "directions": ["left", "right", "up", "down"]
+  },
+  "buttons": {
+    "$comment": "GPIO buttons. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). `actions`: `press` on the edge, `longPress` once after `longPressMs` held, `repeat` every `repeatMs` after that, `release` with `durationMs`.",
+    "roles": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"],
+    "roleByLabel": {
+      "A": "primary", "B": "next", "C": "prev", "D": "back", "BOOT": "primary", "KEY1": "next", "KEY2": "prev",
+      "KEY3": "next", "BUTTON": "primary", "POWER": "primary", "OK": "primary", "ENTER": "primary",
+      "SELECT": "primary", "HOME": "menu", "MENU": "menu", "EXIT": "back", "BACK": "back", "NEXT": "next",
+      "RIGHT": "next", "PREV": "prev", "LEFT": "prev", "UP": "up", "DOWN": "down", "REFRESH": "refresh"
+    },
+    "actions": ["press", "longPress", "repeat", "release"],
+    "longPressMs": 500,
+    "repeatMs": 250
+  },
+  "keyboard": {
+    "$comment": "`codes`: the Linux KEY_* number -> the W3C KeyboardEvent.code (physical, layout-independent; what a browser produces for free). `named`: the `key` of a code that is not printable. `layouts`: what a printable code means as [unshifted, shifted, altGr]; a letter key is its letter unless listed; `inherits` fills what a layout does not list. The frame's `keyboardLayout` setting picks one; `us` is the default.",
+    "codes": {
+      "1": "Escape", "2": "Digit1", "3": "Digit2", "4": "Digit3", "5": "Digit4", "6": "Digit5", "7": "Digit6",
+      "8": "Digit7", "9": "Digit8", "10": "Digit9", "11": "Digit0", "12": "Minus", "13": "Equal",
+      "14": "Backspace", "15": "Tab", "16": "KeyQ", "17": "KeyW", "18": "KeyE", "19": "KeyR", "20": "KeyT",
+      "21": "KeyY", "22": "KeyU", "23": "KeyI", "24": "KeyO", "25": "KeyP", "26": "BracketLeft",
+      "27": "BracketRight", "28": "Enter", "29": "ControlLeft", "30": "KeyA", "31": "KeyS", "32": "KeyD",
+      "33": "KeyF", "34": "KeyG", "35": "KeyH", "36": "KeyJ", "37": "KeyK", "38": "KeyL", "39": "Semicolon",
+      "40": "Quote", "41": "Backquote", "42": "ShiftLeft", "43": "Backslash", "44": "KeyZ", "45": "KeyX",
+      "46": "KeyC", "47": "KeyV", "48": "KeyB", "49": "KeyN", "50": "KeyM", "51": "Comma", "52": "Period",
+      "53": "Slash", "54": "ShiftRight", "55": "NumpadMultiply", "56": "AltLeft", "57": "Space",
+      "58": "CapsLock", "59": "F1", "60": "F2", "61": "F3", "62": "F4", "63": "F5", "64": "F6", "65": "F7",
+      "66": "F8", "67": "F9", "68": "F10", "69": "NumLock", "70": "ScrollLock", "71": "Numpad7",
+      "72": "Numpad8", "73": "Numpad9", "74": "NumpadSubtract", "75": "Numpad4", "76": "Numpad5",
+      "77": "Numpad6", "78": "NumpadAdd", "79": "Numpad1", "80": "Numpad2", "81": "Numpad3", "82": "Numpad0",
+      "83": "NumpadDecimal", "86": "IntlBackslash", "87": "F11", "88": "F12", "89": "IntlRo",
+      "96": "NumpadEnter", "97": "ControlRight", "98": "NumpadDivide", "99": "PrintScreen", "100": "AltRight",
+      "102": "Home", "103": "ArrowUp", "104": "PageUp", "105": "ArrowLeft", "106": "ArrowRight", "107": "End",
+      "108": "ArrowDown", "109": "PageDown", "110": "Insert", "111": "Delete", "113": "AudioVolumeMute",
+      "114": "AudioVolumeDown", "115": "AudioVolumeUp", "116": "Power", "117": "NumpadEqual", "119": "Pause",
+      "121": "NumpadComma", "124": "IntlYen", "125": "MetaLeft", "126": "MetaRight", "127": "ContextMenu",
+      "142": "Sleep", "143": "WakeUp", "163": "MediaTrackNext", "164": "MediaPlayPause",
+      "165": "MediaTrackPrevious", "166": "MediaStop", "183": "F13", "184": "F14", "185": "F15", "186": "F16",
+      "187": "F17", "188": "F18", "189": "F19", "190": "F20", "191": "F21", "192": "F22", "193": "F23",
+      "194": "F24"
+    },
+    "named": {
+      "Escape": "Escape", "Backspace": "Backspace", "Tab": "Tab", "Enter": "Enter", "NumpadEnter": "Enter",
+      "ControlLeft": "Control", "ControlRight": "Control", "ShiftLeft": "Shift", "ShiftRight": "Shift",
+      "AltLeft": "Alt", "AltRight": "AltGraph", "MetaLeft": "Meta", "MetaRight": "Meta", "CapsLock": "CapsLock",
+      "NumLock": "NumLock", "ScrollLock": "ScrollLock", "ContextMenu": "ContextMenu",
+      "PrintScreen": "PrintScreen", "Pause": "Pause", "Insert": "Insert", "Delete": "Delete", "Home": "Home",
+      "End": "End", "PageUp": "PageUp", "PageDown": "PageDown", "ArrowUp": "ArrowUp", "ArrowDown": "ArrowDown",
+      "ArrowLeft": "ArrowLeft", "ArrowRight": "ArrowRight", "F1": "F1", "F2": "F2", "F3": "F3", "F4": "F4",
+      "F5": "F5", "F6": "F6", "F7": "F7", "F8": "F8", "F9": "F9", "F10": "F10", "F11": "F11", "F12": "F12",
+      "F13": "F13", "F14": "F14", "F15": "F15", "F16": "F16", "F17": "F17", "F18": "F18", "F19": "F19",
+      "F20": "F20", "F21": "F21", "F22": "F22", "F23": "F23", "F24": "F24",
+      "AudioVolumeMute": "AudioVolumeMute", "AudioVolumeDown": "AudioVolumeDown",
+      "AudioVolumeUp": "AudioVolumeUp", "MediaTrackNext": "MediaTrackNext", "MediaPlayPause": "MediaPlayPause",
+      "MediaTrackPrevious": "MediaTrackPrevious", "MediaStop": "MediaStop", "Power": "Power",
+      "Sleep": "Standby", "WakeUp": "WakeUp"
+    },
+    "layouts": {
+      "us": {
+        "label": "US (QWERTY)",
+        "keys": {
+          "Backquote": ["`", "~"], "Digit1": ["1", "!"], "Digit2": ["2", "@"], "Digit3": ["3", "#"],
+          "Digit4": ["4", "$"], "Digit5": ["5", "%"], "Digit6": ["6", "^"], "Digit7": ["7", "&"],
+          "Digit8": ["8", "*"], "Digit9": ["9", "("], "Digit0": ["0", ")"], "Minus": ["-", "_"],
+          "Equal": ["=", "+"], "BracketLeft": ["[", "{"], "BracketRight": ["]", "}"], "Backslash": ["\\", "|"],
+          "Semicolon": [";", ":"], "Quote": ["'", "\""], "Comma": [",", "<"], "Period": [".", ">"],
+          "Slash": ["/", "?"], "IntlBackslash": ["\\", "|"], "Space": [" ", " "], "Numpad0": ["0", "0"],
+          "Numpad1": ["1", "1"], "Numpad2": ["2", "2"], "Numpad3": ["3", "3"], "Numpad4": ["4", "4"],
+          "Numpad5": ["5", "5"], "Numpad6": ["6", "6"], "Numpad7": ["7", "7"], "Numpad8": ["8", "8"],
+          "Numpad9": ["9", "9"], "NumpadDecimal": [".", "."], "NumpadMultiply": ["*", "*"],
+          "NumpadAdd": ["+", "+"], "NumpadSubtract": ["-", "-"], "NumpadDivide": ["/", "/"],
+          "NumpadEqual": ["=", "="], "NumpadComma": [",", ","]
+        }
+      },
+      "gb": {
+        "label": "UK",
+        "inherits": "us",
+        "keys": {
+          "Backquote": ["`", "¬", "¦"], "Digit2": ["2", "\""], "Digit3": ["3", "£"], "Digit4": ["4", "$", "€"],
+          "Quote": ["'", "@"], "Backslash": ["#", "~"], "IntlBackslash": ["\\", "|"], "KeyE": ["e", "E", "€"]
+        }
+      },
+      "de": {
+        "label": "German (QWERTZ)",
+        "inherits": "us",
+        "keys": {
+          "Backquote": ["^", "°"], "Digit2": ["2", "\"", "²"], "Digit3": ["3", "§", "³"], "Digit4": ["4", "$"],
+          "Digit6": ["6", "&"], "Digit7": ["7", "/", "{"], "Digit8": ["8", "(", "["], "Digit9": ["9", ")", "]"],
+          "Digit0": ["0", "=", "}"], "Minus": ["ß", "?", "\\"], "Equal": ["´", "`"], "KeyQ": ["q", "Q", "@"],
+          "KeyE": ["e", "E", "€"], "KeyY": ["z", "Z"], "KeyZ": ["y", "Y"], "KeyM": ["m", "M", "µ"],
+          "BracketLeft": ["ü", "Ü"], "BracketRight": ["+", "*", "~"], "Semicolon": ["ö", "Ö"],
+          "Quote": ["ä", "Ä"], "Backslash": ["#", "'"], "Comma": [",", ";"], "Period": [".", ":"],
+          "Slash": ["-", "_"], "IntlBackslash": ["<", ">", "|"]
+        }
+      },
+      "fr": {
+        "label": "French (AZERTY)",
+        "inherits": "us",
+        "keys": {
+          "Backquote": ["²", "²"], "Digit1": ["&", "1"], "Digit2": ["é", "2", "~"], "Digit3": ["\"", "3", "#"],
+          "Digit4": ["'", "4", "{"], "Digit5": ["(", "5", "["], "Digit6": ["-", "6", "|"],
+          "Digit7": ["è", "7", "`"], "Digit8": ["_", "8", "\\"], "Digit9": ["ç", "9", "^"],
+          "Digit0": ["à", "0", "@"], "Minus": [")", "°", "]"], "Equal": ["=", "+", "}"], "KeyQ": ["a", "A"],
+          "KeyW": ["z", "Z"], "KeyA": ["q", "Q"], "KeyZ": ["w", "W"], "KeyM": [",", "?"],
+          "KeyE": ["e", "E", "€"], "Semicolon": ["m", "M"], "Quote": ["ù", "%"], "BracketLeft": ["^", "¨"],
+          "BracketRight": ["$", "£", "¤"], "Backslash": ["*", "µ"], "Comma": [";", "."], "Period": [":", "/"],
+          "Slash": ["!", "§"], "IntlBackslash": ["<", ">"]
+        }
+      },
+      "es": {
+        "label": "Spanish",
+        "inherits": "us",
+        "keys": {
+          "Backquote": ["º", "ª", "\\"], "Digit1": ["1", "!", "|"], "Digit2": ["2", "\"", "@"],
+          "Digit3": ["3", "·", "#"], "Digit4": ["4", "$", "~"], "Digit6": ["6", "&", "¬"], "Digit7": ["7", "/"],
+          "Digit8": ["8", "("], "Digit9": ["9", ")"], "Digit0": ["0", "="], "Minus": ["'", "?"],
+          "Equal": ["¡", "¿"], "KeyE": ["e", "E", "€"], "BracketLeft": ["`", "^", "["],
+          "BracketRight": ["+", "*", "]"], "Semicolon": ["ñ", "Ñ"], "Quote": ["´", "¨", "{"],
+          "Backslash": ["ç", "Ç", "}"], "Comma": [",", ";"], "Period": [".", ":"], "Slash": ["-", "_"],
+          "IntlBackslash": ["<", ">"]
+        }
+      },
+      "it": {
+        "label": "Italian",
+        "inherits": "us",
+        "keys": {
+          "Backquote": ["\\", "|"], "Digit2": ["2", "\""], "Digit3": ["3", "£"], "Digit4": ["4", "$"],
+          "Digit6": ["6", "&"], "Digit7": ["7", "/"], "Digit8": ["8", "("], "Digit9": ["9", ")"],
+          "Digit0": ["0", "="], "Minus": ["'", "?"], "Equal": ["ì", "^"], "KeyE": ["e", "E", "€"],
+          "BracketLeft": ["è", "é", "["], "BracketRight": ["+", "*", "]"], "Semicolon": ["ò", "ç", "@"],
+          "Quote": ["à", "°", "#"], "Backslash": ["ù", "§"], "Comma": [",", ";"], "Period": [".", ":"],
+          "Slash": ["-", "_"], "IntlBackslash": ["<", ">"]
+        }
+      },
+      "sv": {
+        "label": "Swedish / Finnish",
+        "inherits": "us",
+        "keys": {
+          "Backquote": ["§", "½"], "Digit2": ["2", "\"", "@"], "Digit3": ["3", "#", "£"],
+          "Digit4": ["4", "¤", "$"], "Digit6": ["6", "&"], "Digit7": ["7", "/", "{"], "Digit8": ["8", "(", "["],
+          "Digit9": ["9", ")", "]"], "Digit0": ["0", "=", "}"], "Minus": ["+", "?", "\\"], "Equal": ["´", "`"],
+          "KeyE": ["e", "E", "€"], "BracketLeft": ["å", "Å"], "BracketRight": ["¨", "^", "~"],
+          "Semicolon": ["ö", "Ö"], "Quote": ["ä", "Ä"], "Backslash": ["'", "*"], "Comma": [",", ";"],
+          "Period": [".", ":"], "Slash": ["-", "_"], "IntlBackslash": ["<", ">", "|"]
+        }
+      },
+      "da": {
+        "label": "Danish",
+        "inherits": "sv",
+        "keys": {"Backquote": ["½", "§"], "Minus": ["+", "?"], "Equal": ["´", "`", "|"], "Semicolon": ["æ", "Æ"], "Quote": ["ø", "Ø"], "IntlBackslash": ["<", ">", "\\"]}
+      },
+      "nb": {
+        "label": "Norwegian",
+        "inherits": "sv",
+        "keys": {"Backquote": ["|", "§"], "Minus": ["+", "?"], "Equal": ["\\", "`", "´"], "Semicolon": ["ø", "Ø"], "Quote": ["æ", "Æ"], "IntlBackslash": ["<", ">"]}
+      }
+    }
+  }
 }

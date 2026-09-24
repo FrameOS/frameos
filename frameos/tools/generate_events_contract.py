@@ -5,6 +5,7 @@ Source of truth: docs/events-contract.json (prose: docs/events.md, conformance
 corpus: docs/event-fixtures.json). Outputs (all committed):
 
   frameos/src/frameos/events_gen.nim                    every Nim host (Linux, ESP32, wasm)
+  frameos/src/frameos/keyboard_gen.nim                  the keyboard tables (Linux and wasm: the hosts with a keyboard)
   embedded/esp32/main/fos_events_gen.h                  the ESP32's C paths
   frontend/src/utils/eventsContract.gen.ts              the shared SPA (editor, Monaco typings)
   frontend/schema/events.json                           the editor catalog (also read by the legacy
@@ -33,6 +34,7 @@ SOURCE = REPO / "docs" / "events-contract.json"
 CLOUD_CONTRACT = REPO / "docs" / "cloud-frames-contract.json"
 OUTPUTS = {
     "nim": REPO / "frameos" / "src" / "frameos" / "events_gen.nim",
+    "nim_keyboard": REPO / "frameos" / "src" / "frameos" / "keyboard_gen.nim",
     "c": REPO / "embedded" / "esp32" / "main" / "fos_events_gen.h",
     "ts_frontend": REPO / "frontend" / "src" / "utils" / "eventsContract.gen.ts",
     "catalog": REPO / "frontend" / "schema" / "events.json",
@@ -48,6 +50,7 @@ RENDER_AFTER = ["never", "always", "if-state-changed"]
 COALESCE = ["none", "latest"]
 LOG = ["full", "name-only", "none"]
 SCENE_STATE = ["read", "payload"]
+CODE_RE = re.compile(r"[A-Z][A-Za-z0-9]*")
 FIELD_TYPES = {
     # contract type -> TypeScript
     "string": "string",
@@ -113,6 +116,7 @@ def load():
         check_cloud("customEvents", custom["cloud"])
 
     seen = set()
+    by_name = {event.get("name"): event for event in doc["events"]}
     for event in doc["events"]:
         name = event.get("name")
         where = f"events.{name}"
@@ -157,6 +161,22 @@ def load():
                 fail(f"{where}.{fname}: needs a label and a required flag")
             if field.get("wire") not in (None, "pointer"):
                 fail(f"{where}.{fname}: the only wire form is \"pointer\"")
+            if "listenDefault" in field and (not isinstance(field["listenDefault"], str) or not event["listen"]):
+                fail(f"{where}.{fname}: listenDefault is the value a listener without a filter on this field hears")
+        if "synthesized" in event and (not isinstance(event["synthesized"], bool) or "driver" not in event["origins"]):
+            fail(f"{where}: `synthesized` marks an event the dispatcher makes out of others; it keeps the driver origin")
+        alias_of = event.get("aliasOf")
+        if alias_of is not None:
+            target = by_name.get(alias_of)
+            if target is None or target.get("aliasOf") is not None:
+                fail(f"{where}: aliasOf must name a contract event that is not itself an alias")
+            if target.get("class") != event["class"] or target.get("device") != event.get("device"):
+                fail(f"{where}: an alias has its target's class and device")
+            target_fields = {f["name"] for f in target.get("payload", [])}
+            if not field_names <= target_fields:
+                fail(f"{where}: an alias payload is a subset of {alias_of}'s ({sorted(field_names - target_fields)} is not)")
+            if event["dispatch"] or not event["listen"]:
+                fail(f"{where}: an alias is an old name a listener keeps hearing, nothing more")
         cloud = event.get("cloud")
         if ("cloud" in event["origins"]) != (cloud is not None):
             fail(f"{where}: the `cloud` origin and the `cloud` verb mapping come together")
@@ -171,6 +191,44 @@ def load():
             if "since" in schedule and not VERSION_RE.fullmatch(schedule["since"]):
                 fail(f"{where}: schedule.since must be a FrameOS version")
 
+    for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx")),
+                          ("buttons", ("longPressMs", "repeatMs"))):
+        for key in keys:
+            if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
+                fail(f"{section}.{key}: a positive integer")
+    if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
+        fail("gestures.directions: left, right, up, down")
+    buttons = doc["buttons"]
+    if not buttons.get("roles") or any(not NAME_RE.fullmatch(r) for r in buttons["roles"]):
+        fail("buttons.roles: camelCase identifiers")
+    if buttons.get("actions") != ["press", "longPress", "repeat", "release"]:
+        fail("buttons.actions: press, longPress, repeat, release")
+    for label, role in buttons["roleByLabel"].items():
+        if label != label.upper() or role not in buttons["roles"]:
+            fail(f"buttons.roleByLabel.{label}: an upper-case label and one of buttons.roles")
+    if not doc["pointer"].get("types") or any(not NAME_RE.fullmatch(t) for t in doc["pointer"]["types"]):
+        fail("pointer.types: camelCase identifiers")
+    keyboard = doc["keyboard"]
+    codes = set()
+    for linux, code in keyboard["codes"].items():
+        if not linux.isdigit() or not CODE_RE.fullmatch(code) or code in codes:
+            fail(f"keyboard.codes.{linux}: a Linux KEY_* number to one W3C code, once")
+        codes.add(code)
+    for code, key in keyboard["named"].items():
+        if code not in codes or not isinstance(key, str) or not key:
+            fail(f"keyboard.named.{code}: a code from keyboard.codes and its `key`")
+    if "us" not in keyboard["layouts"]:
+        fail("keyboard.layouts: `us` is the default layout")
+    for layout_id, layout in keyboard["layouts"].items():
+        if not re.fullmatch(r"[a-z]{2}(-[a-z]{2})?", layout_id) or not isinstance(layout.get("label"), str):
+            fail(f"keyboard.layouts.{layout_id}: a short id and a label")
+        if "inherits" in layout and layout["inherits"] not in keyboard["layouts"]:
+            fail(f"keyboard.layouts.{layout_id}: inherits an unknown layout")
+        for code, values in layout["keys"].items():
+            if code not in codes or code in keyboard["named"]:
+                fail(f"keyboard.layouts.{layout_id}.{code}: a printable code from keyboard.codes")
+            if not isinstance(values, list) or len(values) not in (2, 3) or any(not isinstance(v, str) for v in values):
+                fail(f"keyboard.layouts.{layout_id}.{code}: [unshifted, shifted, altGr?]")
     for key in doc["context"]["keys"]:
         if key.get("type") not in CONTEXT_TYPES:
             fail(f"context.{key.get('name')}: type must be one of {sorted(CONTEXT_TYPES)}")
@@ -213,8 +271,11 @@ def catalog(doc):
             entry["canListen"] = True
         if event["dispatch"]:
             entry["canDispatch"] = True
+        if event.get("aliasOf"):
+            entry["aliasOf"] = event["aliasOf"]
         entry["fields"] = [
-            {"name": f["name"], "label": f["label"], "type": f["type"], "required": f["required"]}
+            {"name": f["name"], "label": f["label"], "type": f["type"], "required": f["required"],
+             **({"listenDefault": f["listenDefault"]} if "listenDefault" in f else {})}
             for f in event.get("payload", [])
             if f.get("catalog", True)
         ]
@@ -290,12 +351,25 @@ def gen_nim(doc):
         "    coalesceLatest*: bool",
         "    log*: EventLogPolicy",
         "    endsRuntime*: bool ## the runtime does not survive it (a schedule must remember it fired)",
+        "    synthesized*: bool ## made by the dispatcher out of other events (a tap, a textInput)",
+        "    aliasOfIndex*: int ## the contract index of the event this one is an old name for, -1 for none",
         "    linux*, esp32*, wasm*: bool",
         "",
         "const",
         f"  EventsContractVersion* = {int(doc['version'])}",
         f"  PointerWireMax* = {int(doc['pointer']['wireMax'])}",
         f"  CustomEventMaxNameLength* = {int(doc['customEvents']['maxNameLength'])}",
+        "  ## How the dispatcher makes gestures out of pointerDown / pointerUp (docs/events.md).",
+        f"  GestureTapSlopPx* = {int(doc['gestures']['tapSlopPx'])}",
+        f"  GestureTapMs* = {int(doc['gestures']['tapMs'])}",
+        f"  GestureDoubleTapMs* = {int(doc['gestures']['doubleTapMs'])}",
+        f"  GestureLongPressMs* = {int(doc['gestures']['longPressMs'])}",
+        f"  GestureSwipeMinPx* = {int(doc['gestures']['swipeMinPx'])}",
+        "  ## A GPIO button held: `longPress` once, then `repeat` every so often.",
+        f"  ButtonLongPressMs* = {int(doc['buttons']['longPressMs'])}",
+        f"  ButtonRepeatMs* = {int(doc['buttons']['repeatMs'])}",
+        f"  ButtonRoles*: array[{len(doc['buttons']['roles'])}, string] = [{', '.join(nim_str(r) for r in doc['buttons']['roles'])}]",
+        f"  PointerTypes*: array[{len(doc['pointer']['types'])}, string] = [{', '.join(nim_str(t) for t in doc['pointer']['types'])}]",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",
@@ -317,12 +391,17 @@ def gen_nim(doc):
         out.append(nim_policy(event, "      ") + ",")
         if event.get("schedule", {}).get("endsRuntime"):
             out.append("      endsRuntime: true,")
+        if event.get("synthesized"):
+            out.append("      synthesized: true,")
+        alias_index = index_of(events, event["aliasOf"]) if event.get("aliasOf") else -1
+        out.append(f"      aliasOfIndex: {alias_index},")
         out.append(f"      {hosts}),")
     out.append("  ]")
     out.append("")
     out.append("  CustomEventPolicy* = EventPolicy(")
     out.append("    class: ecCustom, device: edNone, listen: true, dispatch: true,")
     out.append(nim_policy(doc["customEvents"]) + ",")
+    out.append("    aliasOfIndex: -1,")
     out.append("    " + ", ".join(f"{host}: true" for host in doc["hosts"]) + ")")
     out.append("")
     for name, lines in log_events(doc).items():
@@ -335,6 +414,121 @@ def gen_nim(doc):
     for index, event in enumerate(events):
         out.append(f"  of ev{camel(event['name'])}: {index}")
     out.append("  else: -1")
+    out.append("")
+    out.append("iterator eventAliases*(name: string): string =")
+    out.append("  ## The old names a listener may know `name` by; the dispatcher delivers each")
+    out.append("  ## one too, with that alias's own (smaller) payload.")
+    out.append("  case name")
+    for event in events:
+        aliases = [a["name"] for a in events if a.get("aliasOf") == event["name"]]
+        if aliases:
+            out.append(f"  of ev{camel(event['name'])}:")
+            for alias in aliases:
+                out.append(f"    yield ev{camel(alias)}")
+    out.append("  else: discard")
+    out.append("")
+    out.append("iterator eventPayloadKeys*(name: string): string =")
+    out.append("  ## The contract's payload fields of `name`, in order (nothing for a custom event).")
+    out.append("  case name")
+    for event in events:
+        if event.get("payload"):
+            out.append(f"  of ev{camel(event['name'])}:")
+            for field in event["payload"]:
+                out.append(f"    yield {nim_str(field['name'])}")
+    out.append("  else: discard")
+    out.append("")
+    out.append("proc eventListenDefault*(name, field: string): string =")
+    out.append("  ## What a listener of `name` with no filter on `field` hears: only events where")
+    out.append("  ## the field equals this (`button` without an `action` filter hears presses).")
+    out.append("  ## Empty: no such rule.")
+    out.append("  case name")
+    for event in events:
+        defaults = [f for f in event.get("payload", []) if "listenDefault" in f]
+        if defaults:
+            out.append(f"  of ev{camel(event['name'])}:")
+            out.append("    case field")
+            for field in defaults:
+                out.append(f"    of {nim_str(field['name'])}: {nim_str(field['listenDefault'])}")
+            out.append('    else: ""')
+    out.append('  else: ""')
+    out.append("")
+    out.append("proc buttonRoleForLabel*(upperLabel: string): string =")
+    out.append("  ## The default role of a GPIO button that has none configured, by its label")
+    out.append("  ## (upper-cased by the caller); empty when the label says nothing.")
+    out.append("  case upperLabel")
+    for label, role in doc["buttons"]["roleByLabel"].items():
+        out.append(f"  of {nim_str(label)}: {nim_str(role)}")
+    out.append('  else: ""')
+    return "\n".join(out) + "\n"
+
+
+def index_of(events, name):
+    for index, event in enumerate(events):
+        if event["name"] == name:
+            return index
+    fail(f"no event {name}")
+
+
+def resolved_layout(keyboard, layout_id):
+    """A layout's full table: what it inherits, then what it lists."""
+    layout = keyboard["layouts"][layout_id]
+    table = dict(resolved_layout(keyboard, layout["inherits"])) if "inherits" in layout else {}
+    if "inherits" not in layout:
+        for code in keyboard["codes"].values():
+            if code.startswith("Key") and len(code) == 4:
+                table[code] = [code[3].lower(), code[3], ""]
+    for code, values in layout["keys"].items():
+        table[code] = list(values) + [""] * (3 - len(values))
+    return table
+
+
+def gen_nim_keyboard(doc):
+    keyboard = doc["keyboard"]
+    layouts = list(keyboard["layouts"])
+    out = [f"# {BANNER}", "#",
+           "# The keyboard tables: a Linux key number to its W3C `code`, a code to the `key`",
+           "# it means when it is not printable, and per layout what a printable code",
+           "# means as (unshifted, shifted, altGr). Only the hosts with a keyboard compile",
+           "# this (frameos/input_state.nim); the ESP32 does not.", ""]
+    out.append("const")
+    out.append(f"  DefaultKeyboardLayout* = \"us\"")
+    out.append(f"  KeyboardLayoutIds*: array[{len(layouts)}, string] = [{', '.join(nim_str(l) for l in layouts)}]")
+    out.append("")
+    out.append("proc linuxKeyCode*(linuxCode: int): string =")
+    out.append("  ## The W3C KeyboardEvent.code of a Linux KEY_* number; empty when unknown.")
+    out.append("  case linuxCode")
+    for linux, code in keyboard["codes"].items():
+        out.append(f"  of {int(linux)}: {nim_str(code)}")
+    out.append('  else: ""')
+    out.append("")
+    out.append("proc keyNamedValue*(code: string): string =")
+    out.append("  ## The `key` of a code that is not printable (\"Enter\", \"ArrowLeft\"); empty for")
+    out.append("  ## a printable one, whose key is the layout's.")
+    out.append("  case code")
+    for code, key in keyboard["named"].items():
+        out.append(f"  of {nim_str(code)}: {nim_str(key)}")
+    out.append('  else: ""')
+    out.append("")
+    out.append("proc isKeyboardLayout*(layout: string): bool =")
+    out.append("  layout in KeyboardLayoutIds")
+    out.append("")
+    for layout_id in layouts:
+        out.append(f"proc layoutKey{camel(layout_id)}(code: string): (string, string, string) =")
+        out.append("  case code")
+        for code, values in sorted(resolved_layout(keyboard, layout_id).items()):
+            out.append(f"  of {nim_str(code)}: ({nim_str(values[0])}, {nim_str(values[1])}, {nim_str(values[2])})")
+        out.append('  else: ("", "", "")')
+        out.append("")
+    out.append("proc keyboardLayoutKey*(layout, code: string): (string, string, string) =")
+    out.append("  ## What a printable `code` means under `layout`: (unshifted, shifted, altGr);")
+    out.append("  ## empty strings for a code the layout has no character for. An unknown")
+    out.append("  ## layout is the default.")
+    out.append("  case layout")
+    for layout_id in layouts:
+        if layout_id == "us":
+            continue
+        out.append(f"  of {nim_str(layout_id)}: layoutKey{camel(layout_id)}(code)")
+    out.append("  else: layoutKeyUs(code)")
     return "\n".join(out) + "\n"
 
 
@@ -365,7 +559,12 @@ def gen_c(doc):
         f"#define FOS_POINTER_WIRE_MAX {int(doc['pointer']['wireMax'])}",
         f"#define FOS_CUSTOM_EVENT_MAX_NAME_LENGTH {int(doc['customEvents']['maxNameLength'])}",
         "",
+        "/* `button {action}`: the firmware reports the edges; longPress and repeat are the",
+        " * Nim dispatcher's (frameos/input_state.nim), like on every host. */",
     ]
+    for action in doc["buttons"]["actions"]:
+        out.append(f"#define FOS_BUTTON_ACTION_{upper_snake(action)} {c_str(action)}")
+    out.append("")
     for event in doc["events"]:
         out.append(f"#define FOS_EVENT_{upper_snake(event['name'])} {c_str(event['name'])}")
     out += ["", "typedef enum {"]
@@ -500,6 +699,8 @@ def spec_view(doc, event):
     view = {
         "class": event["class"],
         **({"device": event["device"]} if "device" in event else {}),
+        **({"aliasOf": event["aliasOf"]} if "aliasOf" in event else {}),
+        **({"synthesized": True} if event.get("synthesized") else {}),
         "listen": event["listen"],
         "dispatch": event["dispatch"],
         **({"sceneState": event["sceneState"]} if "sceneState" in event else {}),
@@ -534,6 +735,10 @@ def gen_ts_frontend(doc):
         "export interface ContractEventSpec {",
         "  class: EventClass",
         "  device?: EventDevice",
+        "  /** An old name of `aliasOf`: a listener keeps hearing it, the editor does not offer it. */",
+        "  aliasOf?: ContractEventName",
+        "  /** Made by the dispatcher out of other events (a tap, a textInput). */",
+        "  synthesized?: boolean",
         "  listen: boolean",
         "  dispatch: boolean",
         "  /** 'read': an event node offers the scene's state; 'payload': the payload IS the scene's state fields. */",
@@ -573,6 +778,16 @@ def gen_ts_frontend(doc):
         out.append(f"/** Log lines, not scene events (docs/events-contract.json `logEvents`). */")
         out.append(f"export const {name}LogEvents: readonly string[] = {ts_json(lines, None)}")
     out.append("")
+    out.append("/** GPIO button roles (`gpioButtons[].role`), and the default by label for a button without one. */")
+    out.append(f"export const buttonRoles: readonly string[] = {ts_json(doc['buttons']['roles'], None)}")
+    out.append(f"export const buttonRoleByLabel: Record<string, string> = {ts_json(doc['buttons']['roleByLabel'])}")
+    out.append(f"export const buttonActions: readonly string[] = {ts_json(doc['buttons']['actions'], None)}")
+    out.append("")
+    out.append("/** Keyboard layouts a frame's `keyboardLayout` setting can name. */")
+    out.append("export const keyboardLayouts: readonly { id: string; label: string }[] = "
+               + ts_json([{"id": k, "label": v["label"]} for k, v in doc["keyboard"]["layouts"].items()]))
+    out.append("export const defaultKeyboardLayout = 'us'")
+    out.append("")
     out.append("/** `context` keys per JavaScript sandbox. */")
     for sandbox in SANDBOXES:
         keys = [k["name"] for k in doc["context"]["keys"] if sandbox in k["sandboxes"]]
@@ -600,6 +815,7 @@ def names_where(doc, predicate):
 def gen_ts_wasm(doc):
     hosted = names_where(doc, lambda e: e["class"] in ("lifecycle", "scene-command"))
     pointer = names_where(doc, lambda e: e.get("device") == "pointer")
+    keyboard = names_where(doc, lambda e: e.get("device") == "keyboard")
     out = [
         f"// {BANNER}",
         "",
@@ -611,6 +827,9 @@ def gen_ts_wasm(doc):
         "",
         "/** Pointer input: sent by the canvas with a position, never by a button. */",
         f"export const POINTER_EVENT_NAMES: readonly string[] = {ts_json(pointer, None)}",
+        "",
+        "/** Keyboard input: sent by the focused canvas, never by a button. */",
+        f"export const KEYBOARD_EVENT_NAMES: readonly string[] = {ts_json(keyboard, None)}",
     ]
     return "\n".join(out) + "\n"
 
@@ -676,6 +895,15 @@ def gen_py(doc):
     device = names_where(doc, lambda e: e["class"] == "device-command")
     out.append("DEVICE_COMMAND_EVENTS: frozenset[str] = frozenset({" + ", ".join(json.dumps(n) for n in device) + "})")
     out.append("")
+    out.append("# The frame's input settings (frame.json `inputSettings`): the keyboard layout")
+    out.append("# ids of `keyboard.layouts`, `us` being the default, and the button roles a")
+    out.append("# `gpioButtons[].role` may carry (`buttons.roles`).")
+    out.append('DEFAULT_KEYBOARD_LAYOUT = "us"')
+    layouts = ", ".join(json.dumps(layout_id) for layout_id in doc["keyboard"]["layouts"])
+    out.append(f"KEYBOARD_LAYOUTS: tuple[str, ...] = ({layouts})")
+    roles = ", ".join(json.dumps(role) for role in doc["buttons"]["roles"])
+    out.append(f"BUTTON_ROLES: tuple[str, ...] = ({roles})")
+    out.append("")
     for name, lines in log_events(doc).items():
         out.append("# Log lines, not scene events (docs/events-contract.json `logEvents`).")
         items = ", ".join(json.dumps(line) for line in lines) + ("," if len(lines) == 1 else "")
@@ -685,6 +913,7 @@ def gen_py(doc):
 
 GENERATORS = {
     "nim": gen_nim,
+    "nim_keyboard": gen_nim_keyboard,
     "c": gen_c,
     "ts_frontend": gen_ts_frontend,
     "catalog": gen_catalog,

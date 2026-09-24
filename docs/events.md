@@ -113,7 +113,7 @@ spellings never stop working: store scenes are versioned and immutable.
 | Class | Events | Meaning |
 |---|---|---|
 | `lifecycle` | `init`, `open`, `render`, `close` | The host tells a scene where it is in its life. |
-| `input` | `keyDown`, `keyUp`, `mouseMove`, `mouseDown`, `mouseUp`, `wheel`, `button` | Something a person did. `device` says with what: `keyboard`, `pointer`, `button`. |
+| `input` | `pointerMove`, `pointerDown`, `pointerUp`, `pointerCancel`, `wheel`, `tap`, `doubleTap`, `longPress`, `swipe`, `keyDown`, `keyUp`, `textInput`, `button` — and the old names `mouseMove`, `mouseDown`, `mouseUp` | Something a person did. `device` says with what: `keyboard`, `pointer`, `button`. See [Input](#input). |
 | `scene-command` | `setSceneState`, `setCurrentScene`, `turnOn`, `turnOff` | Asks the host to do something for the scene; a scene may dispatch it. |
 | `device-command` | `metrics`, `reload`, `restart`, `reboot`, `uploadScenes` | Asks the runtime to do something to the device. Never delivered to a scene, never offered by the editor. |
 
@@ -159,7 +159,7 @@ event route and schedule validator. What it comes to:
   debugging tool).
 - The cloud sends what has a hub verb (`cloud.verb`). `scene_event {name,
   payload}` is the generic one: `button`, `setSceneState` and custom events
-  ride on it. Keys and pointers have none: the route answers 404
+  ride on it. Keys, pointers and gestures have none: the route answers 404
   `unsupported_event`. `cloud.since` is the FrameOS version whose frames know
   the verb; an older frame gets `cloud.before` where there is one.
 
@@ -184,29 +184,140 @@ A refused event is dropped and logged (`event:refused`,
 
 The lists for input events are still wide: a schedule or a scene may say
 `button`, because scenes in the wild use that to reuse a handler. Narrowing
-one is a line in the contract and a fixture.
+one is a line in the contract and a fixture. The browser preview (`preview`)
+says what a frame's drivers say: pointers, the wheel, keys.
 
 ### Payloads, units and the wire
 
 `payload` lists each field with its type and, where a number means something,
 its `unit`. `catalog: false` keeps a field out of the editor's filter and
-dispatch forms.
+dispatch forms. `listenDefault` on a field is what a listener with no filter
+on it hears: only events where the field equals that value.
 
-- **Pointer position.** A scene sees `mouseMove {x, y}` in **scene pixels**,
-  rotation and flip applied. On the wire — driver → host, preview → host,
-  `POST /event/mouseMove` — both axes run **0..32767** across the panel
-  (`pointer.wireMax`), whatever the device reports. The host converts.
-- `mouseDown` / `mouseUp` carry `button` only: 0 left, 1 right, 2 middle,
-  3 side, 4 extra. The position is the last `mouseMove`.
-- `wheel {deltaX, deltaY}` is in notches; `deltaY` is positive scrolling down.
-- `keyDown` / `keyUp` carry the Linux key name and number (`KEY_A`, 30).
-  Auto-repeat is dropped, not reported.
-- `button {pin, label, level}` is a press. No host sends a release.
+- **Pointer position.** Every pointer event a scene hears carries `x`, `y` in
+  **scene pixels**, rotation and flip applied. On the wire — driver → host,
+  preview → host, `POST /event/pointerMove` — both axes run **0..32767**
+  across the panel (`pointer.wireMax`), whatever the device reports. The host
+  converts, and a payload without a position is at the pointer's last one.
 - `setSceneState {state, render}` — `state` is applied to the scene's public
   state; `render: true` asks for a render afterwards. In the editor its
   dispatch form is the scene's own fields (`sceneState: "payload"`).
 - `setCurrentScene {sceneId, state}` — one that names the scene already
   showing applies `state` and renders, without a switch.
+- The input payloads are under [Input](#input).
+
+### Input
+
+What a person did reaches a scene through one piece of the dispatcher,
+`frameos/src/frameos/input_state.nim`, on every host: it keeps where each
+pointer is and what it holds, the one cursor a mouse moves, which modifier
+keys are down, what a key means under the frame's keyboard layout, and which
+GPIO buttons are held — and out of that makes the events below, so a driver,
+the preview or an HTTP request has to say only what it saw. Input is delivered
+to a scene **only under the names it listens for**; its payload is built at
+delivery, so a scene with no pointer listeners costs nothing per motion
+report.
+
+**Aliases.** `mouseMove`, `mouseDown` and `mouseUp` are the old names of
+`pointerMove`, `pointerDown` and `pointerUp` (`aliasOf` in the contract). A
+listener on an old name keeps hearing it, with the old, smaller payload
+(`mouseDown {button}`); a listener on the new name hears the new one. Both may
+listen, each hears its own. An old name arriving on the wire (a 2026.9.21
+preview bundle, a `POST /event/mouseMove`) is the new event. Aliases are
+forever: store scenes are versioned and immutable. The editor offers the new
+names.
+
+**Pointer.** `pointerMove {x, y, pointerId, pointerType, buttons}` on every
+motion report (`coalesce: latest`, per pointer). `pointerDown` / `pointerUp`
+add `button`: 0 left (and a touch, a pen tip), 1 right, 2 middle, 3 side,
+4 extra, 5 forward, 6 back, 7 task; `buttons` is the mask of what is held
+(`1 << button`). `pointerId` 0 is the one mouse cursor; a finger or a pen
+keeps an id while it is down (`pointerType`: `mouse`, `touch`, `pen`). Two
+fingers are two pointers. `pointerCancel {x, y, pointerId, pointerType}` is a
+pointer that was down and is lost without a release: the input lane overflowed
+between a down and its up, the device went away, the kernel dropped events. A
+scene holding a drag lets go. `wheel {deltaX, deltaY, x, y}` is in notches;
+`deltaY` is positive scrolling down.
+
+**The cursor.** A relative mouse reports motion only, so the dispatcher owns
+its position — in scene pixels, so it moves along the picture's axes on a
+rotated frame — clamps it to the picture, and emits `pointerMove` for pointer
+0. It starts at the centre and follows every pointer (a mouse picked up after
+a touch continues from where the finger was). On a Linux frame with a screen
+that redraws in a blink (a framebuffer, a HyperPixel) the runner draws it over
+the frame already on the panel, without re-running the scene, for
+`CursorHideMs` (5 s) after it last moved; never on e-paper or an upload target.
+
+**Gestures.** Made by the dispatcher from a pointer's primary button, with the
+contract's `gestures` numbers, so every host agrees: `tap {x, y, pointerId,
+pointerType}` — down and up within `tapSlopPx` and `tapMs`; `doubleTap` — a
+second tap within `doubleTapMs` of the first, in the same place (the first
+tap is delivered too); `longPress {…, durationMs}` — held `longPressMs`
+without moving, delivered while it is still held where the host ticks the
+dispatcher (the Linux runner and the preview do; the ESP32 asleep in a render
+does not, and delivers it on release), and then no `tap`; `swipe {direction,
+x, y, startX, startY, …}` — down and up at least `swipeMinPx` apart, in one of
+`left` / `right` / `up` / `down`. Gestures render `if-state-changed`, like a
+button; the raw pointer events never do.
+
+**Keyboard.** `keyDown {code, key, repeat, shift, ctrl, alt, meta,
+linuxCode?}` and `keyUp` (no `repeat`). `code` is the physical key as the W3C
+`KeyboardEvent.code` (`KeyA`, `ArrowLeft`, `Numpad1`) — layout-independent,
+and what a browser produces for free; the contract's `keyboard.codes` maps the
+Linux `KEY_*` number to it, and `linuxCode` keeps that number when a driver
+sent one. `key` is what the key means: a named key (`Enter`, `Shift`,
+`AltGraph`; `keyboard.named`) or the character it types under the frame's
+keyboard layout (`keyboard.layouts`, the `keyboardLayout` frame setting: `a`,
+`A`, `ä`, `@`), shift, caps lock and AltGr applied; `Unidentified` for a key
+the tables do not know (a gamepad button). Auto-repeat is a `keyDown` with
+`repeat: true`. `textInput {text}` follows every `keyDown` that types a
+character (no Ctrl / Meta / left-Alt chord) — made by the dispatcher when it
+mapped the key itself, sent by a browser preview from its own key. Dead keys
+and compose are not supported. On a Linux frame the evdev driver **grabs**
+keyboards (`EVIOCGRAB`) while the runtime runs, so the console never sees a
+key meant for a scene, Ctrl+Alt+Del included, and lets go when it stops;
+`inputSettings.grabKeyboard` (default on) turns that off. Keyboards and
+pointers plugged in after boot are found (inotify on `/dev/input`).
+
+**Buttons.** `button {pin, label, role, action, durationMs?, wake?, level}`.
+`action` is `press` on the edge, `longPress` once after `buttons.longPressMs`
+held, `repeat` every `buttons.repeatMs` after that (both from the dispatcher's
+tick; a host that cannot tick reports the hold on release), `release` with
+`durationMs`. **A listener with no `action` filter hears presses only**
+(`listenDefault`): every listener from before releases existed is exactly that,
+and must not run twice per press. `role` is what the button means —
+`buttons.roles`: `primary`, `secondary`, `next`, `prev`, `up`, `down`, `back`,
+`menu`, `refresh` — so a store scene filters on `role: "next"` instead of a
+silkscreen label: a frame configures one per button (`gpioButtons[].role`,
+Linux frames), and `buttons.roleByLabel` is the default for a button without
+one (`A` primary, `B` next, `C` prev, `D` back, `BOOT` primary, `KEY1` next,
+`LEFT` prev, `RIGHT` next, `OK` primary, `HOME` menu, `EXIT` back, …). `wake:
+true` is the replayed press that booted an ESP32 out of deep sleep; there is
+no hold to follow it. `level` is the line (0 pressed: the line is pulled up).
+
+**Privacy.** Key events are logged by name only (`log: name-only`), never with
+what was typed; pointer events not at all.
+
+**Hosts.** Pointer and keyboard events are described for every host and are
+`hosts.esp32: false`: no board in the tree has a keyboard or touch. The
+preview forwards the browser's pointer, wheel and keyboard from the focused
+canvas (`frameos/wasm/src/pointer.ts`, kept twice with
+`frontend/src/utils/previewPointer.ts`); a bundle from before input v2 says so
+(`ready` without `inputEvents`) and gets the old mouse events and no keys.
+
+**The driver boundary.** The Linux evdev driver sends input as a small C
+struct (`DriverInputEvent`, `frameos/driver_abi.nim`) through a value
+channel — nothing allocated on the way, nothing a second thread could hold —
+and a driver `.so` through the optional `frameos_driver_set_input_hook`
+symbol; a `.so` from before it keeps sending the old JSON events, which are
+aliases. `drivers/evdev/translate.nim` is the pure translator (kernel
+`input_event`s in, structs out; multitouch protocol B, pens, wheels, repeats)
+and `tests/test_translate.nim` its evtest dumps; `tests/test_input_state.nim`
+is the dispatcher's half.
+
+**Scenes to try it with:** `repo/scenes/samples/Touch test` and
+`Keyboard test` (also `e2e/scenes/inputTouch.json` and `inputKeyboard.json`,
+which the snapshot harness drives with their `e2eEvents`).
 
 ### Policy columns
 
@@ -216,8 +327,11 @@ dispatch forms.
   anything else makes the frame a keylogger. `none`: pointer events, one per
   motion report.
 - **`coalesce`** — `latest`: consecutive queued events of this name collapse
-  to the newest (`mouseMove`), and the first other event behind them is kept in
-  order.
+  to the newest (`pointerMove`, per pointer; a relative mouse's counts add
+  up), and the first other event behind them is kept in order. A full input
+  lane drops the newest event — except a `pointerUp` or `pointerCancel`, which
+  evicts a queued move instead, and when there is none, what is down gets a
+  `pointerCancel` at the next drain.
 - **`renderAfter`** — whether the frame renders once the event is handled,
   decided by the dispatcher when its queue is empty: `never` (pointer events: a
   frame does not render because a finger moved — a scene that wants a picture
@@ -232,6 +346,8 @@ dispatch forms.
   and keyboard events are described for every host and are
   `hosts.esp32: false`: no board in the tree has touch, and nothing is built
   for hardware that is not there.
+- **`aliasOf`** — an old name of another event; **`synthesized`** — made by
+  the dispatcher out of other events (a tap, a textInput). See [Input](#input).
 - **`schedule`** — the Schedule panel offers the event, under this label.
   `endsRuntime`: the runtime does not survive it, so the scheduler persists
   the minute it fired in, or it would fire again after the restart.

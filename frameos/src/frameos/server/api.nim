@@ -325,6 +325,7 @@ const frameApiKeyMap* = [
   ("timezone_updater", "timeZoneUpdates"),
   ("schedule", "schedule"),
   ("gpio_buttons", "gpioButtons"),
+  ("input_settings", "inputSettings"),
   ("control_code", "controlCode"),
   ("network", "network"),
   ("agent", "agent"),
@@ -650,7 +651,7 @@ const frameConfigListenerKeys = ["framePort", "bindHost", "httpsProxy"]
 # (network check, hotspot mode, Wi-Fi country): a reload cannot apply them.
 # Same rule the cloud's set_settings uses (CLOUD_SETTINGS_RESTART_KEYS),
 # extended to the keys the cloud cannot push at all.
-const frameConfigRestartKeys = ["device", "deviceConfig", "gpioButtons", "palette", "width", "height", "network"]
+const frameConfigRestartKeys = ["device", "deviceConfig", "gpioButtons", "inputSettings", "palette", "width", "height", "network"]
 
 proc canonicalDeviceConfig(node: JsonNode): JsonNode =
   ## One spelling of deviceConfig, so a save that only re-spells it is not a

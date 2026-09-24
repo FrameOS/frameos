@@ -150,17 +150,27 @@ if __name__ == '__main__':
     # scene: interpreter.nim reads a missing block as a black background and an
     # empty one as white. The interpreted half needs no stamp at all - absent is
     # exactly what it wants to be.
+    # A fixture that SAYS `execution: "interpreted"` is interpreted only: its
+    # code nodes are JavaScript with no Nim twin (`codeJS` and no `code`), so
+    # the legacy codegen has nothing to compile. It renders once, as the
+    # interpreter, and its snapshot carries no `_compiled` half to compare.
+    interpreted_only = {
+        scene_name
+        for scene_name, scene_data in scenes.items()
+        if (scene_data.get('settings') or {}).get('execution') == 'interpreted'
+    }
     compiled_scenes = {
         scene_name: {
             **scene_data,
             'settings': {**(scene_data.get('settings') or {}), 'execution': 'compiled'},
         }
         for scene_name, scene_data in scenes.items()
+        if scene_name not in interpreted_only
     }
 
     frame = Frame(
         name="Test frame",
-        scenes=[compiled_scenes[scene_data['id']] for scene_data in scene_list]
+        scenes=[compiled_scenes[scene_data['id']] for scene_data in scene_list if scene_data['id'] in compiled_scenes]
     )
 
     for scene_name, scene_data in compiled_scenes.items():

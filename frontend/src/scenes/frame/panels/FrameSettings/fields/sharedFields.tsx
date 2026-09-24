@@ -19,6 +19,7 @@ import {
   DEFAULT_TIMEZONE_UPDATE_URL,
 } from '../../../frameLogic'
 import type { Palette } from '../../../../../types'
+import { buttonRoleByLabel, buttonRoles, keyboardLayouts } from '../../../../../utils/eventsContract.gen'
 import { useFrameSettings } from '../frameSettingsContext'
 
 /**
@@ -119,7 +120,7 @@ export function GpioButtonsSection(): JSX.Element {
         {configuredGpioButtons ? (
           <div className="space-y-2">
             {configuredGpioButtons.map((button) => (
-              <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-2">
+              <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-3">
                 <div className="space-y-1 @md:flex @md:gap-2">
                   <Label className="@md:w-1/3">Pin</Label>
                   <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
@@ -127,6 +128,15 @@ export function GpioButtonsSection(): JSX.Element {
                 <div className="space-y-1 @md:flex @md:gap-2">
                   <Label className="@md:w-1/3">Label</Label>
                   <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
+                </div>
+                <div className="space-y-1 @md:flex @md:gap-2">
+                  <Label className="@md:w-1/3">Role</Label>
+                  <TextInput
+                    value={buttonRoleByLabel[button.label.trim().toUpperCase()] ?? ''}
+                    placeholder="none"
+                    readOnly
+                    className="cursor-default opacity-70"
+                  />
                 </div>
               </div>
             ))}
@@ -158,6 +168,29 @@ export function GpioButtonsSection(): JSX.Element {
                 </Field>
                 <Field name="label" label="Label">
                   <TextInput name="label" placeholder="A" />
+                </Field>
+                <Field
+                  name="role"
+                  label="Role"
+                  tooltip={
+                    <>
+                      What the button means to a scene: a store scene listens for <code>button</code> with a{' '}
+                      <code>role</code> filter (<code>next</code>, <code>back</code>, …) instead of the label printed on
+                      this board. Leave it empty for the default the label carries (A = primary, B = next, C = prev, D =
+                      back, …).
+                    </>
+                  }
+                >
+                  <Select
+                    name="role"
+                    options={[
+                      {
+                        value: '',
+                        label: `Default for the label${roleDefaultLabel(frameForm.gpio_buttons?.[index]?.label)}`,
+                      },
+                      ...buttonRoles.map((role) => ({ value: role, label: role })),
+                    ]}
+                  />
                 </Field>
               </div>
             </Group>
@@ -505,5 +538,57 @@ export function SaveAssetsField(): JSX.Element {
         </div>
       )}
     </Field>
+  )
+}
+
+function roleDefaultLabel(label: string | undefined): string {
+  const role = label ? buttonRoleByLabel[label.trim().toUpperCase()] : undefined
+  return role ? ` (${role})` : ''
+}
+
+/**
+ * How a person's input reaches a scene (frame.json `inputSettings`): the
+ * keyboard layout the runtime maps key codes through, and whether it grabs
+ * keyboards away from the console. Linux frames only.
+ */
+export function InputSettingsSection(): JSX.Element {
+  return (
+    <>
+      <H6 id="frame-settings-input">Input</H6>
+      <div className="pl-2 @md:pl-8 space-y-2">
+        <Group name="input_settings">
+          <Field
+            name="keyboardLayout"
+            label="Keyboard layout"
+            tooltip={
+              <>
+                A key reaches a scene as its physical <code>code</code> (<code>KeyA</code>, <code>ArrowLeft</code>) and
+                as the <code>key</code> it means under this layout (<code>a</code>, <code>A</code>, <code>ä</code>),
+                which is also what <code>textInput</code> carries. Dead keys and compose are not supported.
+              </>
+            }
+          >
+            <Select
+              name="keyboardLayout"
+              options={keyboardLayouts.map((layout) => ({ value: layout.id, label: layout.label }))}
+            />
+          </Field>
+          <Field
+            name="grabKeyboard"
+            label="Grab keyboards"
+            tooltip={
+              <>
+                While the runtime runs, a keyboard plugged into the frame is the scene&apos;s alone: the console never
+                sees its keys (Ctrl+Alt+Del included). Off, the console hears every key too. The keyboard is released
+                when the runtime stops, so a rescue console still works.
+              </>
+            }
+          >
+            <Switch name="grabKeyboard" fullWidth />
+          </Field>
+        </Group>
+        <p className="frameos-muted text-xs">The frame reads these at boot, so saving a change restarts the runtime.</p>
+      </div>
+    </>
   )
 }

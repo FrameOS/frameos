@@ -196,6 +196,28 @@ export function frameSupportsHardwareSettings(
   return frameSupportsSettingsFrom(hardwareFrameSettingsMinVersion, frameosVersion);
 }
 
+// The 2026.9.23 input batch: `input_settings` (keyboard layout + grab), and
+// the release that taught `gpio_buttons` items an optional `role`. The key
+// itself is older (2026.8.31), so its contract `since` cannot carry the
+// sub-key's floor; frameSettingsRefusal gates a `role` on this one by hand,
+// mirrored by the SPA (cloudFrameSettingsPayload strips roles below it).
+export const inputFrameSettingsMinVersion = "2026.9.23";
+export const inputFrameSettingKeys = new Set(contractSettingKeysSince("linux", inputFrameSettingsMinVersion));
+export const gpioButtonRolesMinVersion = inputFrameSettingsMinVersion;
+
+export function frameSupportsInputSettings(
+  frameosVersion: string | null | undefined,
+): boolean {
+  return frameSupportsSettingsFrom(inputFrameSettingsMinVersion, frameosVersion);
+}
+
+function gpioButtonsCarryRoles(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some((button) => Boolean(button) && typeof button === "object" && "role" in (button as object))
+  );
+}
+
 /**
  * Whether the frame's enrollment hardware report says esp32 (any variant —
  * "esp32-s3" etc). The chip's firmware speaks a narrower set_settings
@@ -256,6 +278,15 @@ export function frameSettingsRefusal(
   }
   if (checkContractSettings(settings, profile) !== null) {
     return { error: "invalid_settings" };
+  }
+  // A button `role` is a sub-key of a key older than it: Linux firmware
+  // between 2026.8.31 and the input batch refuses the whole push on it.
+  if (
+    profile === "linux" &&
+    gpioButtonsCarryRoles(settings.gpio_buttons) &&
+    !frameSupportsSettingsFrom(gpioButtonRolesMinVersion, frame.frameosVersion)
+  ) {
+    return { error: "settings_need_newer_firmware", minFrameosVersion: gpioButtonRolesMinVersion };
   }
   return null;
 }

@@ -226,6 +226,11 @@ proc postHook*(v: var MountpointsConfig) =
       items.add(item)
   v.items = items
 
+proc newHook*(v: var InputSettingsConfig) =
+  ## Keyboards are grabbed by default: the runtime is the only thing on the
+  ## frame that should hear them (docs/events.md).
+  v = InputSettingsConfig(keyboardLayout: "us", grabKeyboard: true)
+
 proc newHook*(v: var ErrorBehaviorConfig) =
   v = ErrorBehaviorConfig(mode: "show_error_retry", retrySeconds: 60, silentRetrySeconds: 60,
                           silentRetryForever: false, silentWindowMinutes: 10, showErrorRetrySeconds: 60)
@@ -293,6 +298,7 @@ proc newHook*(v: var FrameConfig) =
     gpioButtons: @[],
   )
   newHook(v.httpsProxy)
+  newHook(v.inputSettings)
   newHook(v.deviceConfig)
   newHook(v.timeZoneUpdates)
   newHook(v.schedule)
@@ -337,6 +343,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.js == nil: newHook(config.js)
   if config.errorBehavior == nil: newHook(config.errorBehavior)
   postHook(config.errorBehavior)
+  if config.inputSettings == nil: newHook(config.inputSettings)
   if config.assetsPath == "": config.assetsPath = DefaultAssetsPath
   config.assetsPath = config.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   if config.saveAssets == nil: config.saveAssets = %*false

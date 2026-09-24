@@ -179,10 +179,10 @@
       "parity": {"only": "linux", "why": "Pi driver knobs (partial refresh, VCOM, …); on the ESP32 the panel table carries them per board."}
     },
     "gpio_buttons": {
-      "$comment": "[{pin, label}] — the whole list, replaced; an empty list unbinds every button. The chip's table is smaller, and the firmware refuses (invalid_settings) any pin that is an SPI flash / PSRAM pad or already a driver's on that chip (fos_config_gpio_pin_reserved): the range here is chip-agnostic, the reservation is not.",
+      "$comment": "[{pin, label, role?}] — the whole list, replaced; an empty list unbinds every button. `role` (one of docs/events-contract.json `buttons.roles`) is what the button MEANS to a scene; without one the runtime derives it from the label (`buttons.roleByLabel`). Linux only, and only from 2026.9.23 (the release `input_settings` landed in): the profile's `since` stays 2026.8.31 because the key itself is older, so a provider sends `role` past THAT floor and strips it below — firmware in between refuses the whole push on the unknown item key (the cloud route and the SPA both gate on input_settings' since). The chip's rule has no `role`: the firmware stores `pin:label` lines and takes roles by label from the shared default table. The chip's table is smaller, and the firmware refuses (invalid_settings) any pin that is an SPI flash / PSRAM pad or already a driver's on that chip (fos_config_gpio_pin_reserved): the range here is chip-agnostic, the reservation is not.",
       "rule": {
         "type": "array",
-        "items": {"type": "object", "keys": {"pin": {"type": "int", "min": 0, "max": 48}, "label": {"type": "string", "format": "gpio_label"}}, "required": ["pin", "label"]},
+        "items": {"type": "object", "keys": {"pin": {"type": "int", "min": 0, "max": 48}, "label": {"type": "string", "format": "gpio_label"}, "role": {"type": "string", "enum": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]}}, "required": ["pin", "label"]},
         "maxItems": 16
       },
       "extraChecks": ["no pin appears twice"],
@@ -200,6 +200,19 @@
       "rule": {"type": "string", "minLen": 1, "maxLen": 64, "format": "driver_key"},
       "profiles": {"linux": {"since": "2026.9.22", "restart": true}},
       "parity": {"only": "linux", "why": "The ESP32 picks its panel together with the board's pin wiring (hardware preset over USB or the setup portal); a panel key pushed without the matching pins would drive a display that is not there, with no console attached to put it back."}
+    },
+    "input_settings": {
+      "$comment": "frame.json `inputSettings`: `keyboardLayout` (one of docs/events-contract.json `keyboard.layouts`; the default is `us`) maps a USB keyboard's physical keys onto the characters a scene sees, `grabKeyboard` takes keyboards away from the console while the runtime runs. Both read when the input drivers start, so a push restarts the runtime. The device REPLACES the stored object (a missing key falls back to its default: `us`, not grabbed), so a provider sends both keys; the reference SPA fills the defaults in.",
+      "rule": {
+        "type": "object",
+        "keys": {
+          "keyboardLayout": {"type": "string", "enum": ["us", "gb", "de", "fr", "es", "it", "sv", "da", "nb"]},
+          "grabKeyboard": {"type": "bool"}
+        },
+        "minKeys": 1
+      },
+      "profiles": {"linux": {"since": "2026.9.23", "restart": true}},
+      "parity": {"only": "linux", "why": "Keyboard and pointer input exist on the Linux runtime only (evdev): docs/events-contract.json lists every key*/pointer* event with `hosts.esp32: false`, so the chip has nothing to lay out or grab; its only input is GPIO buttons."}
     },
     "deep_sleep": {
       "rule": {"type": "bool"},

@@ -4,12 +4,7 @@
 // this package under ./assets — serve that directory same-origin and pass
 // `workerUrl: '<mount>/preview-worker.js'`. Version tracks the FrameOS
 // release the runtime was built from (versions.json in the FrameOS repo).
-export {
-  FrameOSPreview,
-  createFrameOSPreview,
-  type DeviceMemoryUsage,
-  type FrameOSPreviewOptions,
-} from './preview'
+export { FrameOSPreview, createFrameOSPreview, type DeviceMemoryUsage, type FrameOSPreviewOptions } from './preview'
 export {
   describeDeviceLimits,
   deviceLimitsFor,
@@ -29,11 +24,18 @@ export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOpti
 export { selectFieldOptions } from './options'
 export {
   POINTER_AXIS_MAX,
+  attachKeyboardInput,
   attachPointerInput,
+  keyPayload,
+  keyText,
   pointerAxis,
   pointerButton,
+  pointerButtonsMask,
+  pointerIdOf,
   pointerMovePayload,
   pointerPictureRect,
+  pointerTypeOf,
+  wheelNotches,
   type AttachPointerOptions,
   type PointerEventSink,
   type PointerRect,
@@ -46,13 +48,9 @@ export {
   refreshIntervalFieldIndex,
   sceneStateFields,
 } from './refreshInterval'
+export { coerceStateFieldValue, evaluateShowIf, stateFieldShowIfValues, visiblePublicStateFields } from './showIf'
 export {
-  coerceStateFieldValue,
-  evaluateShowIf,
-  stateFieldShowIfValues,
-  visiblePublicStateFields,
-} from './showIf'
-export {
+  KEYBOARD_EVENTS,
   LIFECYCLE_EVENTS,
   POINTER_EVENTS,
   sceneEventButtons,

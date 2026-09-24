@@ -62,6 +62,7 @@ type
     timeZoneUpdates*: TimeZoneUpdatesConfig
     schedule*: FrameSchedule
     gpioButtons*: seq[GPIOButton]
+    inputSettings*: InputSettingsConfig
     controlCode*: ControlCode
     network*: NetworkConfig
     agent*: AgentConfig
@@ -100,6 +101,13 @@ type
   GPIOButton* = ref object
     pin*: int
     label*: string
+    role*: string ## one of the contract's `buttons.roles`; empty = the default for the label
+
+  # Part of FrameConfig
+  InputSettingsConfig* = ref object
+    ## How a person's input reaches a scene (docs/events.md, "Input").
+    keyboardLayout*: string ## one of the contract's `keyboard.layouts`; empty = `us`
+    grabKeyboard*: bool     ## take keyboards away from the console while the runtime runs
 
   # Part of FrameConfig
   ControlCode* = ref object

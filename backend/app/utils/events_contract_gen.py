@@ -6,12 +6,12 @@ EVENTS_CONTRACT_VERSION = 1
 # key: what it is refused needs an admin session or the serverApiKey instead.
 REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {
     "driver": frozenset({"init", "open", "close", "turnOn", "turnOff", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
-    "preview": frozenset({"init", "open", "close", "keyDown", "keyUp", "wheel", "turnOn", "turnOff", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
+    "preview": frozenset({"init", "open", "close", "turnOn", "turnOff", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
     "scene": frozenset({"init", "open", "close", "reload", "restart", "reboot", "uploadScenes"}),
     "schedule": frozenset({"init", "open", "close", "uploadScenes"}),
     "http:write": frozenset({"init", "open", "close", "reload", "restart", "reboot", "uploadScenes"}),
     "http:admin": frozenset({}),
-    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "mouseMove", "mouseDown", "mouseUp", "wheel", "reload"}),
+    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "reload"}),
     "system": frozenset({}),
 }
 
@@ -19,6 +19,13 @@ REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {
 CUSTOM_EVENT_DECLARABLE_ORIGINS: frozenset[str] = frozenset({"schedule", "cloud"})
 
 DEVICE_COMMAND_EVENTS: frozenset[str] = frozenset({"metrics", "reload", "restart", "reboot", "uploadScenes"})
+
+# The frame's input settings (frame.json `inputSettings`): the keyboard layout
+# ids of `keyboard.layouts`, `us` being the default, and the button roles a
+# `gpioButtons[].role` may carry (`buttons.roles`).
+DEFAULT_KEYBOARD_LAYOUT = "us"
+KEYBOARD_LAYOUTS: tuple[str, ...] = ("us", "gb", "de", "fr", "es", "it", "sv", "da", "nb")
+BUTTON_ROLES: tuple[str, ...] = ("primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh")
 
 # Log lines, not scene events (docs/events-contract.json `logEvents`).
 SCENE_CHANGED_LOG_EVENTS: tuple[str, ...] = ("render:scene", "render:sceneChange", "event:setCurrentScene")

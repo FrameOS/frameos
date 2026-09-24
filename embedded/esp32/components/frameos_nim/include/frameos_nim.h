@@ -135,6 +135,11 @@ double frameos_nim_scene_interval(void);
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
+/* Time passing for the dispatcher's input state (a held button becomes a
+ * `longPress`, then `repeat`s): true when it made an event, in which case the
+ * render flag may be set. Tries the runtime lock once and does nothing when a
+ * render holds it — the hold is reported on release then. */
+bool frameos_nim_tick(void);
 /* Hand one event to the Nim dispatcher (frameos/event_loop.nim), which queues
  * it and drains the queue before this returns. `origin` is who said it: ONE
  * FOS_ORIGIN_* bit of main/fos_events_gen.h (this component cannot include

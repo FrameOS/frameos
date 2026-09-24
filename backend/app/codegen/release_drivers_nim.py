@@ -134,6 +134,7 @@ type
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
+    setInputHook: DriverSetInputHookProc
 
 let availableDriverSpecs: seq[DriverSpec] = @[{spec_lines}]
 
@@ -284,6 +285,14 @@ proc driverSpecsFor(frameOS: FrameOS): seq[DriverSpec] =
     if shouldLoadDriver(spec, frameOS):
       result.add(spec)
 
+proc hostInputEvent(event: ptr DriverInputEvent) {{.cdecl, gcsafe.}} =
+  ## Input as a struct from an input driver `.so` (frameos/driver_abi): copied
+  ## out of the borrowed pointer into the runner's value channel. The origin is
+  ## this entry point's to say, as with hostSendEvent.
+  if event.isNil:
+    return
+  hostChannels.sendInputEvent(event[])
+
 proc driverLibraryPath(spec: DriverSpec): string =
   getAppDir() / "drivers" / spec.libraryName
 
@@ -369,6 +378,11 @@ proc init*(frameOS: FrameOS) =
           "frameos_driver_earlier_render_seconds")
       loaded.detectedDisplaySize = loadOptionalSymbol[DriverDetectedDisplaySizeProc](library,
           "frameos_driver_detected_display_size")
+    # An input driver that speaks structs (frameos/driver_abi). Optional: a
+    # `.so` from before it keeps sending JSON events, which the host still takes.
+    loaded.setInputHook = loadOptionalSymbol[DriverSetInputHookProc](library, "frameos_driver_set_input_hook")
+    if not loaded.setInputHook.isNil:
+      loaded.setInputHook(hostInputEvent)
     if spec.canPng:
       loaded.toPng = loadRequiredSymbol[DriverToPngProc](library, spec.name, "frameos_driver_to_png")
     if spec.canTurnOnOff:

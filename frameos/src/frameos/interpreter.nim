@@ -1565,27 +1565,45 @@ proc eventFilterValue(value: JsonNode): string =
   else:
     return $value
 
-proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
-  if node.data.isNil or node.data.kind != JObject:
-    return true
-
+proc eventNodeMatchesPayload(node: DiagramNode, event: string, payload: JsonNode): bool =
   var hasLabelFilter = false
-  if node.data.hasKey("config") and node.data["config"].kind == JObject:
-    let config = node.data["config"]
-    for key, value in config.pairs:
-      let expected = eventFilterValue(value)
-      if expected.len > 0:
-        if key == "label":
-          hasLabelFilter = true
-        if not eventPayloadValueMatches(payload, key, expected):
-          return false
+  var filtered: seq[string]
+  if not node.data.isNil and node.data.kind == JObject:
+    if node.data.hasKey("config") and node.data["config"].kind == JObject:
+      let config = node.data["config"]
+      for key, value in config.pairs:
+        let expected = eventFilterValue(value)
+        if expected.len > 0:
+          filtered.add(key)
+          if key == "label":
+            hasLabelFilter = true
+          if not eventPayloadValueMatches(payload, key, expected):
+            return false
 
-  if not hasLabelFilter and node.data.hasKey("label"):
-    let expected = eventFilterValue(node.data["label"])
-    if expected.len > 0 and not eventPayloadValueMatches(payload, "label", expected):
+    if not hasLabelFilter and node.data.hasKey("label"):
+      let expected = eventFilterValue(node.data["label"])
+      if expected.len > 0 and not eventPayloadValueMatches(payload, "label", expected):
+        return false
+
+  # The contract's `listenDefault`: a `button` listener that does not filter on
+  # `action` hears presses only — every listener from before releases existed
+  # is exactly that, and must not run twice per press (docs/events.md). A
+  # payload without the field (a scene re-sending `{pin, label}`) is the default.
+  for key in eventPayloadKeys(event):
+    let default = eventListenDefault(event, key)
+    if default.len > 0 and key notin filtered and not payload.isNil and payload.kind == JObject and
+        payload.hasKey(key) and not eventPayloadValueMatches(payload, key, default):
       return false
 
   true
+
+proc sceneListensTo*(scene: FrameScene, event: string): bool =
+  ## Whether the scene has an event node for `event`. The dispatcher builds an
+  ## input event's payload only when this is true; a scene that is not
+  ## interpreted keeps every event, because nothing here can tell.
+  if scene.isNil or not (scene of InterpretedFrameScene):
+    return true
+  InterpretedFrameScene(scene).eventListeners.hasKey(event)
 
 proc runEventInner(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
@@ -1626,7 +1644,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     for nodeId in scene.eventListeners[context.event]:
       let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
       if nextNode != 0.NodeId and nextNode != -1.NodeId:
-        if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.payload):
+        if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.event, context.payload):
           listenersFiltered += 1
           let d = scene.nodes[nodeId].data
           if not d.isNil and d.kind == JObject:

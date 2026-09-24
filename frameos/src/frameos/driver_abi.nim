@@ -53,3 +53,49 @@ type
   DriverDetectedDisplaySizeProc* = proc(driver: pointer): uint64 {.cdecl.}
   DriverToPngProc* = proc(driver: pointer, rotate: cint, flip: cstring, length: ptr int): pointer {.cdecl.}
   DriverActionProc* = proc(driver: pointer) {.cdecl.}
+
+## Input, driver → host, as a C struct instead of JSON text: a pointer sends
+## hundreds of these a second, and a JSON tree per motion report was four
+## allocations of a tree per event (docs/event-system-analysis.md §2.2). The
+## host builds the scene's payload once, at delivery, and only when a listener
+## exists (frameos/input_state.nim). Values only, nothing to own on either side.
+##
+## OPTIONAL symbol, driver side: `frameos_driver_set_input_hook`. The host calls
+## it after `frameos_driver_init` when the library exports it; a driver built
+## before it existed keeps sending JSON through `HostSendEventProc` and the
+## host keeps understanding the old names (they are contract aliases).
+const
+  ## Pointer ids: 0 is the one mouse cursor every relative device moves; an
+  ## absolute device's contacts are numbered from its device id
+  ## (`deviceId * PointersPerDevice + 1 + slot`), so two touchscreens never
+  ## share one and a cancel can name a device's pointers.
+  PointersPerDevice* = 16
+
+type
+  DriverInputKind* = enum
+    dikNone = 0
+    dikPointerAbs = 1    ## x, y: 0..PointerWireMax across the panel
+    dikPointerRel = 2    ## x, y: motion in counts (a count is a pixel); the host owns the cursor
+    dikPointerDown = 3   ## code: the pointer button; x, y as dikPointerAbs when `hasPosition`
+    dikPointerUp = 4
+    dikPointerCancel = 5 ## the pointer went away without a release
+    dikWheel = 6         ## x, y: notches, DOM signs (down and right positive)
+    dikKeyDown = 7       ## code: the Linux KEY_* number; value 2 for auto-repeat
+    dikKeyUp = 8
+  DriverPointerType* = enum
+    dptMouse = 0
+    dptTouch = 1
+    dptPen = 2
+  DriverInputFlag* = enum
+    difHasPosition = 1
+  DriverInputEvent* {.bycopy.} = object
+    kind*: cint        ## DriverInputKind
+    deviceId*: cint    ## the driver's own numbering; a cancel for one device names it
+    pointerId*: cint   ## 0 for the one mouse cursor; a touch contact or pen keeps one while down
+    pointerType*: cint ## DriverPointerType
+    code*: cint        ## key number or pointer button
+    x*, y*: cint
+    value*: cint       ## key: 1 press, 2 repeat, 0 release
+    flags*: cint       ## DriverInputFlag bits
+  HostInputEventProc* = proc(event: ptr DriverInputEvent) {.cdecl, gcsafe.}
+  DriverSetInputHookProc* = proc(hook: HostInputEventProc) {.cdecl.}

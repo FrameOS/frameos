@@ -164,10 +164,10 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string,
         payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
       {.cast(gcsafe).}:
-        # Pointer input (mouseMove/mouseDown/mouseUp) comes from the page in
-        # the first place and arrives many times a second: like runner.nim,
-        # which keeps it out of the frame log, it is not echoed back.
-        if eventPolicy(event).device != edPointer:
+        # Pointer and keyboard input comes from the page in the first place
+        # and arrives many times a second: like runner.nim, which keeps it out
+        # of the frame log, it is not echoed back.
+        if eventPolicy(event).device notin {edPointer, edKeyboard}:
           jsEventHook(event.cstring, (if payload.isNil: "{}" else: $payload).cstring)
         # Queued, never run from inside the run that dispatched it — the rule
         # every host has (docs/events.md). frameos_wasm_event and the render
@@ -348,11 +348,27 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
         parseJson($payloadJson)
     # Everything the page sends is the `preview` origin; what that may say is
     # the contract's (docs/events-contract.json).
-    jsEventHook(eventName, ($payload).cstring)
+    if eventPolicy($eventName).device notin {edPointer, edKeyboard}:
+      jsEventHook(eventName, ($payload).cstring)
     host.send(eoPreview, $eventName, payload)
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
     false
+
+proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
+  ## Time passing with nothing sent — the worker calls this while a pointer is
+  ## held, so a long press is delivered while the finger is still down, as on
+  ## a frame. True when it made an event; ask frameos_wasm_render_requested.
+  try:
+    host.tick()
+  except Exception as e:
+    setLastError("tick failed: " & e.msg)
+    false
+
+proc frameos_wasm_pointers_down(): cint {.exportc, cdecl.} =
+  ## How many pointers the runtime believes are held: the worker ticks while
+  ## any is.
+  if host.events.isNil: 0.cint else: host.events.inputState.pointersDown.cint
 
 proc frameos_wasm_render_requested(): bool {.exportc, cdecl.} =
   host.renderRequested

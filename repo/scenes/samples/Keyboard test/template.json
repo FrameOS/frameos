@@ -1,0 +1,9 @@
+{
+  "name": "Keyboard test",
+  "description": "Type on a keyboard plugged into the frame: the scene shows the text, the last key and its modifiers, under the frame's keyboard layout.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

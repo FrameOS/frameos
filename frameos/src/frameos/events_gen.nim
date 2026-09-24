@@ -50,12 +50,25 @@ type
     coalesceLatest*: bool
     log*: EventLogPolicy
     endsRuntime*: bool ## the runtime does not survive it (a schedule must remember it fired)
+    synthesized*: bool ## made by the dispatcher out of other events (a tap, a textInput)
+    aliasOfIndex*: int ## the contract index of the event this one is an old name for, -1 for none
     linux*, esp32*, wasm*: bool
 
 const
   EventsContractVersion* = 1
   PointerWireMax* = 32767
   CustomEventMaxNameLength* = 63
+  ## How the dispatcher makes gestures out of pointerDown / pointerUp (docs/events.md).
+  GestureTapSlopPx* = 16
+  GestureTapMs* = 500
+  GestureDoubleTapMs* = 350
+  GestureLongPressMs* = 500
+  GestureSwipeMinPx* = 48
+  ## A GPIO button held: `longPress` once, then `repeat` every so often.
+  ButtonLongPressMs* = 500
+  ButtonRepeatMs* = 250
+  ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
+  PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 
@@ -65,9 +78,18 @@ const
   evClose* = "close"
   evKeyDown* = "keyDown"
   evKeyUp* = "keyUp"
+  evTextInput* = "textInput"
+  evPointerMove* = "pointerMove"
+  evPointerDown* = "pointerDown"
+  evPointerUp* = "pointerUp"
+  evPointerCancel* = "pointerCancel"
   evMouseMove* = "mouseMove"
   evMouseDown* = "mouseDown"
   evMouseUp* = "mouseUp"
+  evTap* = "tap"
+  evDoubleTap* = "doubleTap"
+  evLongPress* = "longPress"
+  evSwipe* = "swipe"
   evWheel* = "wheel"
   evTurnOn* = "turnOn"
   evTurnOff* = "turnOff"
@@ -80,16 +102,25 @@ const
   evReboot* = "reboot"
   evUploadScenes* = "uploadScenes"
 
-  ContractEventNames*: array[20, string] = [
+  ContractEventNames*: array[29, string] = [
     evInit,
     evRender,
     evOpen,
     evClose,
     evKeyDown,
     evKeyUp,
+    evTextInput,
+    evPointerMove,
+    evPointerDown,
+    evPointerUp,
+    evPointerCancel,
     evMouseMove,
     evMouseDown,
     evMouseUp,
+    evTap,
+    evDoubleTap,
+    evLongPress,
+    evSwipe,
     evWheel,
     evTurnOn,
     evTurnOff,
@@ -103,108 +134,187 @@ const
     evUploadScenes,
   ]
 
-  ContractEventPolicies*: array[20, EventPolicy] = [
+  ContractEventPolicies*: array[29, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # render
       class: ecLifecycle, device: edNone, listen: true, dispatch: true,
       origins: {eoSystem, eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # open
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # close
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # keyDown
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
-      origins: {eoDriver, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
-      linux: true, esp32: false, wasm: false),
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
     EventPolicy( # keyUp
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
-      origins: {eoDriver, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
-      linux: true, esp32: false, wasm: false),
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # textInput
+      class: ecInput, device: edKeyboard, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
+      synthesized: true,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # pointerMove
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: true, log: elNone,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # pointerDown
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # pointerUp
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # pointerCancel
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
     EventPolicy( # mouseMove
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: true, log: elNone,
+      aliasOfIndex: 7,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # mouseDown
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
+      aliasOfIndex: 8,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # mouseUp
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
+      aliasOfIndex: 9,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # tap
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      synthesized: true,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # doubleTap
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      synthesized: true,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # longPress
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      synthesized: true,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
+    EventPolicy( # swipe
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      synthesized: true,
+      aliasOfIndex: -1,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # wheel
       class: ecInput, device: edPointer, listen: true, dispatch: false,
-      origins: {eoDriver, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
-      linux: true, esp32: false, wasm: false),
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
     EventPolicy( # turnOn
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # turnOff
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # button
       class: ecInput, device: edButton, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setSceneState
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
       origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setCurrentScene
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
       origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # metrics
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: false, wasm: false),
     EventPolicy( # reload
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoSchedule, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
     EventPolicy( # restart
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       endsRuntime: true,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
     EventPolicy( # reboot
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       endsRuntime: true,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
     EventPolicy( # uploadScenes
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
   ]
 
@@ -212,6 +322,7 @@ const
     class: ecCustom, device: edNone, listen: true, dispatch: true,
     origins: {eoDriver, eoPreview, eoScene, eoHttpWrite, eoHttpAdmin, eoSystem},
     renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+    aliasOfIndex: -1,
     linux: true, esp32: true, wasm: true)
 
   SceneChangedLogEvents*: array[3, string] = ["render:scene", "render:sceneChange", "event:setCurrentScene"]
@@ -227,18 +338,185 @@ proc contractEventIndex*(name: string): int =
   of evClose: 3
   of evKeyDown: 4
   of evKeyUp: 5
-  of evMouseMove: 6
-  of evMouseDown: 7
-  of evMouseUp: 8
-  of evWheel: 9
-  of evTurnOn: 10
-  of evTurnOff: 11
-  of evButton: 12
-  of evSetSceneState: 13
-  of evSetCurrentScene: 14
-  of evMetrics: 15
-  of evReload: 16
-  of evRestart: 17
-  of evReboot: 18
-  of evUploadScenes: 19
+  of evTextInput: 6
+  of evPointerMove: 7
+  of evPointerDown: 8
+  of evPointerUp: 9
+  of evPointerCancel: 10
+  of evMouseMove: 11
+  of evMouseDown: 12
+  of evMouseUp: 13
+  of evTap: 14
+  of evDoubleTap: 15
+  of evLongPress: 16
+  of evSwipe: 17
+  of evWheel: 18
+  of evTurnOn: 19
+  of evTurnOff: 20
+  of evButton: 21
+  of evSetSceneState: 22
+  of evSetCurrentScene: 23
+  of evMetrics: 24
+  of evReload: 25
+  of evRestart: 26
+  of evReboot: 27
+  of evUploadScenes: 28
   else: -1
+
+iterator eventAliases*(name: string): string =
+  ## The old names a listener may know `name` by; the dispatcher delivers each
+  ## one too, with that alias's own (smaller) payload.
+  case name
+  of evPointerMove:
+    yield evMouseMove
+  of evPointerDown:
+    yield evMouseDown
+  of evPointerUp:
+    yield evMouseUp
+  else: discard
+
+iterator eventPayloadKeys*(name: string): string =
+  ## The contract's payload fields of `name`, in order (nothing for a custom event).
+  case name
+  of evOpen:
+    yield "sceneId"
+  of evKeyDown:
+    yield "code"
+    yield "key"
+    yield "repeat"
+    yield "shift"
+    yield "ctrl"
+    yield "alt"
+    yield "meta"
+    yield "linuxCode"
+  of evKeyUp:
+    yield "code"
+    yield "key"
+    yield "shift"
+    yield "ctrl"
+    yield "alt"
+    yield "meta"
+    yield "linuxCode"
+  of evTextInput:
+    yield "text"
+  of evPointerMove:
+    yield "x"
+    yield "y"
+    yield "pointerId"
+    yield "pointerType"
+    yield "buttons"
+  of evPointerDown:
+    yield "x"
+    yield "y"
+    yield "button"
+    yield "buttons"
+    yield "pointerId"
+    yield "pointerType"
+  of evPointerUp:
+    yield "x"
+    yield "y"
+    yield "button"
+    yield "buttons"
+    yield "pointerId"
+    yield "pointerType"
+  of evPointerCancel:
+    yield "x"
+    yield "y"
+    yield "pointerId"
+    yield "pointerType"
+  of evMouseMove:
+    yield "x"
+    yield "y"
+  of evMouseDown:
+    yield "button"
+  of evMouseUp:
+    yield "button"
+  of evTap:
+    yield "x"
+    yield "y"
+    yield "pointerId"
+    yield "pointerType"
+  of evDoubleTap:
+    yield "x"
+    yield "y"
+    yield "pointerId"
+    yield "pointerType"
+  of evLongPress:
+    yield "x"
+    yield "y"
+    yield "durationMs"
+    yield "pointerId"
+    yield "pointerType"
+  of evSwipe:
+    yield "direction"
+    yield "x"
+    yield "y"
+    yield "startX"
+    yield "startY"
+    yield "pointerId"
+    yield "pointerType"
+  of evWheel:
+    yield "deltaX"
+    yield "deltaY"
+    yield "x"
+    yield "y"
+  of evButton:
+    yield "pin"
+    yield "label"
+    yield "role"
+    yield "action"
+    yield "durationMs"
+    yield "wake"
+    yield "level"
+  of evSetSceneState:
+    yield "state"
+    yield "render"
+  of evSetCurrentScene:
+    yield "sceneId"
+    yield "state"
+  of evUploadScenes:
+    yield "scenes"
+    yield "sceneId"
+    yield "state"
+  else: discard
+
+proc eventListenDefault*(name, field: string): string =
+  ## What a listener of `name` with no filter on `field` hears: only events where
+  ## the field equals this (`button` without an `action` filter hears presses).
+  ## Empty: no such rule.
+  case name
+  of evButton:
+    case field
+    of "action": "press"
+    else: ""
+  else: ""
+
+proc buttonRoleForLabel*(upperLabel: string): string =
+  ## The default role of a GPIO button that has none configured, by its label
+  ## (upper-cased by the caller); empty when the label says nothing.
+  case upperLabel
+  of "A": "primary"
+  of "B": "next"
+  of "C": "prev"
+  of "D": "back"
+  of "BOOT": "primary"
+  of "KEY1": "next"
+  of "KEY2": "prev"
+  of "KEY3": "next"
+  of "BUTTON": "primary"
+  of "POWER": "primary"
+  of "OK": "primary"
+  of "ENTER": "primary"
+  of "SELECT": "primary"
+  of "HOME": "menu"
+  of "MENU": "menu"
+  of "EXIT": "back"
+  of "BACK": "back"
+  of "NEXT": "next"
+  of "RIGHT": "next"
+  of "PREV": "prev"
+  of "LEFT": "prev"
+  of "UP": "up"
+  of "DOWN": "down"
+  of "REFRESH": "refresh"
+  else: ""

@@ -138,6 +138,9 @@ const extendedFieldNames: Record<string, (typeof extendedCloudFrameSettingKeys)[
   offsetY: "control_code",
   qrCodeColor: "control_code",
   backgroundColor: "control_code",
+  // <Group name="input_settings"> (the input batch, 2026.9.23).
+  keyboardLayout: "input_settings",
+  grabKeyboard: "input_settings",
 };
 
 /**
@@ -250,9 +253,9 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
 
     const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
     expect(flip?.matches(":disabled")).toBe(true);
-    // Every gated batch says so — the extended one, the hardware one and the
-    // display driver.
-    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(3);
+    // Every gated batch says so — the extended one, the hardware one, the
+    // display driver and the input batch.
+    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(4);
   });
 
   it("offers the display driver on firmware that takes it, showing the one the frame reports", () => {

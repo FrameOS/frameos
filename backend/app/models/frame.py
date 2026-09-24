@@ -21,6 +21,7 @@ from app.drivers.devices import (
 )
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
+from app.utils.events_contract_gen import BUTTON_ROLES, DEFAULT_KEYBOARD_LAYOUT, KEYBOARD_LAYOUTS
 from app.utils.timezone import frame_timezone, stored_timezone
 from app.utils.frame_secrets import (
     deploy_snapshot,
@@ -296,6 +297,40 @@ def normalize_error_behavior(error_behavior: Any) -> dict:
     }
 
 
+# frame.json `inputSettings` (frameos/src/frameos/types.nim InputSettingsConfig):
+# the keyboard layout the evdev driver translates key codes with and whether
+# it grabs the keyboard from the console. Layout ids and button roles come
+# from docs/events-contract.json via the generated events_contract_gen.
+DEFAULT_INPUT_SETTINGS = {
+    "keyboardLayout": DEFAULT_KEYBOARD_LAYOUT,
+    "grabKeyboard": True,
+}
+
+
+def normalize_input_settings(input_settings: Any) -> dict:
+    config = input_settings if isinstance(input_settings, dict) else {}
+    layout = config.get("keyboardLayout")
+    if not isinstance(layout, str) or layout not in KEYBOARD_LAYOUTS:
+        layout = DEFAULT_INPUT_SETTINGS["keyboardLayout"]
+    grab = config.get("grabKeyboard", DEFAULT_INPUT_SETTINGS["grabKeyboard"])
+    return {
+        "keyboardLayout": layout,
+        "grabKeyboard": bool(DEFAULT_INPUT_SETTINGS["grabKeyboard"] if grab is None else grab),
+    }
+
+
+def frame_json_gpio_button(button: dict) -> dict:
+    """One `gpioButtons[]` entry of frame.json: pin, label and, when the frame
+    assigns one, the button's `role` (docs/events-contract.json buttons.roles;
+    an unknown role is dropped, the runtime then defaults by label)."""
+    pin = int(button.get("pin", 0))
+    result = {"pin": pin, "label": str(button.get("label", "Pin " + str(button.get("pin"))))}
+    role = str(button.get("role") or "").strip()
+    if role in BUTTON_ROLES:
+        result["role"] = role
+    return result
+
+
 def normalize_timezone_update_hour(value: Any) -> int:
     try:
         hour = int(value if value is not None else DEFAULT_TIMEZONE_UPDATE_HOUR)
@@ -401,6 +436,7 @@ class Frame(Base):
     agent = mapped_column(JSON, nullable=True)
     mountpoints = mapped_column(JSON, nullable=True)
     error_behavior = mapped_column(JSON, nullable=True)
+    input_settings = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
     # Service-settings groups (openAI, homeAssistant, …) that scenes from the
     # public scene store may read on this frame. A scene the owner authored is
@@ -478,6 +514,7 @@ class Frame(Base):
             'agent': self.agent,
             'mountpoints': normalize_mountpoints(self.mountpoints),
             'error_behavior': normalize_error_behavior(self.error_behavior),
+            'input_settings': normalize_input_settings(self.input_settings),
             'palette': self.palette,
             'service_setting_groups': self.service_setting_groups,
             'buildroot': self.buildroot,
@@ -654,6 +691,7 @@ async def new_frame(
         },
         mountpoints={"enabled": False, "items": []},
         error_behavior=DEFAULT_ERROR_BEHAVIOR.copy(),
+        input_settings=DEFAULT_INPUT_SETTINGS.copy(),
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "0 4 * * *"}
@@ -866,6 +904,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     agent = frame.agent or {}
     mountpoints = normalize_mountpoints(frame.mountpoints)
     error_behavior = normalize_error_behavior(frame.error_behavior)
+    input_settings = normalize_input_settings(frame.input_settings)
     frameos_version = get_versions().get("frameos")
     all_settings = get_settings_dict(db, project_id=frame.project_id)
     defaults = all_settings.get("defaults") or {}
@@ -916,10 +955,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "saveAssets": frame.save_assets,
         "schedule": frame.schedule,
         "gpioButtons": [
-            {
-                "pin": int(button.get("pin", 0)),
-                "label": str(button.get("label", "Pin " + str(button.get("pin"))))
-            }
+            frame_json_gpio_button(button)
             for button in gpio_buttons
             if int(button.get("pin", 0)) > 0
         ],
@@ -965,6 +1001,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "silentRetryForever": error_behavior["silent_retry_forever"],
             "silentWindowMinutes": error_behavior["silent_window_minutes"],
             "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
+        },
+        "inputSettings": {
+            "keyboardLayout": input_settings["keyboardLayout"],
+            "grabKeyboard": input_settings["grabKeyboard"],
         },
         "timeZoneUpdates": {
             "enabled": timezone_updater["enabled"],

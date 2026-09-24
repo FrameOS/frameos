@@ -412,6 +412,7 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'control_code',
   'schedule',
   'gpio_buttons',
+  'input_settings',
   // Service-settings groups granted to store-origin scenes on a self-hosted
   // frame (get_frame_json ships only those); a change here is a frame.json
   // change, so it counts towards "deploy needed".
@@ -443,6 +444,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   rpios: '2026.6.7',
   timezone_updater: '2026.6.7',
   embedded: '2026.6.26',
+  input_settings: '2026.9.23',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -539,6 +541,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   control_code: 'Control code',
   schedule: 'Schedule',
   gpio_buttons: 'GPIO buttons',
+  input_settings: 'Input',
   deep_sleep: 'Deep sleep between renders',
   deep_sleep_on_battery: 'Deep sleep on battery',
   wake_check_seconds: 'Wake-up check interval',

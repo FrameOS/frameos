@@ -251,7 +251,8 @@
    {
     "origin": "preview",
     "event": "wheel",
-    "allowed": false
+    "allowed": true,
+    "why": "The browser preview forwards the keyboard and the wheel of the focused canvas, as a frame's driver would."
    },
    {
     "origin": "cloud",
@@ -1843,7 +1844,7 @@
    },
    {
     "name": "renderAfter is the contract's",
-    "why": "`never` for pointer events even when a handler changes state (a scene that wants a picture dispatches render); `always` for render; `if-state-changed` for the rest.",
+    "why": "`never` for pointer events even when a handler changes state (a scene that wants a picture dispatches render); `always` for render; `if-state-changed` for the rest. Input reaches a scene only under the names it listens for (`keyUp` has a listener with nothing behind it; the `pointerDown` the `mouseDown` alias stands for has none, and is not run).",
     "scenes": [
      {
       "id": "fixtures/dispatcher/renderRule",
@@ -1902,6 +1903,13 @@
         "data": {
          "keyword": "render",
          "config": {}
+        }
+       },
+       {
+        "id": "e4",
+        "type": "event",
+        "data": {
+         "keyword": "keyUp"
         }
        }
       ],
@@ -2454,7 +2462,7 @@
    },
    {
     "name": "pointer moves coalesce, and input waits behind everything else",
-    "why": "`coalesce: latest` at enqueue: a move replaces the move it would queue behind. Two lanes: what a person did waits behind commands and scene traffic, in order within its lane.",
+    "why": "`coalesce: latest` at enqueue: a move replaces the move it would queue behind. Two lanes: what a person did waits behind commands and scene traffic, in order within its lane. The scene listens for `mouseMove`, the old name of `pointerMove`: it hears the alias with the alias's payload — the position in scene pixels — and not the new name, which nothing listens for.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/lanes",
@@ -2463,7 +2471,22 @@
        "execution": "interpreted",
        "refreshInterval": 300
       },
-      "nodes": [],
+      "nodes": [
+       {
+        "id": "l1",
+        "type": "event",
+        "data": {
+         "keyword": "mouseMove"
+        }
+       },
+       {
+        "id": "l2",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       }
+      ],
       "edges": [],
       "fields": [
        {

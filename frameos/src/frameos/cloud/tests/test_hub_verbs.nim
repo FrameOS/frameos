@@ -229,7 +229,8 @@ suite "cloud hub verb dispatcher":
         "palette": {"name": "Spectra", "colors": ["#000000", "#FFFFFF", "#ff0000", "#00ff00", "#0000ff", "#ffff00"],
                     "colorNames": ["black", "white", "red", "green", "blue", "yellow"]},
         "device_config": {"partial": true, "partialMaxAreaPercent": 25.5, "partialMaxRefreshesBeforeFull": 10},
-        "gpio_buttons": [{"pin": 5, "label": "A"}, {"pin": 6, "label": "B"}],
+        "gpio_buttons": [{"pin": 5, "label": "A", "role": "next"}, {"pin": 6, "label": "B"}],
+        "input_settings": {"keyboardLayout": "de", "grabKeyboard": true},
       },
     })
     check reply.ack{"ok"}.getBool(false) == true
@@ -239,12 +240,19 @@ suite "cloud hub verb dispatcher":
     check persisted{"device_config"}{"partial"}.getBool(false) == true
     check persisted{"device_config"}.len == 3 # nothing else rides along
     check persisted{"gpio_buttons"}.len == 2
+    # A button's role (2026.9.23) reaches frame.json as sent; a button
+    # without one keeps the label default.
+    check persisted{"gpio_buttons"}[0]{"role"}.getStr("") == "next"
+    check not persisted{"gpio_buttons"}[1].hasKey("role")
+    check persisted{"input_settings"}{"keyboardLayout"}.getStr("") == "de"
+    check persisted{"input_settings"}{"grabKeyboard"}.getBool(false) == true
     check recorded.events.len == 1
     check recorded.events[0][0] == "restart"
 
-    # Each of the three alone restarts too; the 2026.8.30 keys still reload.
+    # Each alone restarts too (the input drivers read them at start); the
+    # 2026.8.30 keys still reload.
     for settings in [%*{"palette": {"colors": []}}, %*{"device_config": {"partial": false}},
-                     %*{"gpio_buttons": []}]:
+                     %*{"gpio_buttons": []}, %*{"input_settings": {"grabKeyboard": false}}]:
       let one = Recorded()
       discard handleCloudVerb(makeContext(one), %*{"id": "h1", "type": "set_settings", "settings": settings})
       check one.events.len == 1 and one.events[0][0] == "restart"
@@ -369,6 +377,7 @@ suite "cloud hub verb dispatcher":
       "device_config": {"partial": true},
       "gpio_buttons": [{"pin": 5, "label": "A"}],
       "device": "pimoroni.hyperpixel4sq_touch",
+      "input_settings": {"keyboardLayout": "de", "grabKeyboard": true},
     }
     for key in CLOUD_SETTINGS_ALLOWLIST:
       check samples.hasKey(key)
