@@ -1566,17 +1566,23 @@ proc eventFilterValue(value: JsonNode): string =
     return $value
 
 proc eventNodeMatchesPayload(node: DiagramNode, event: string, payload: JsonNode): bool =
+  # The contract's `listenDefault`: a `button` listener that does not filter on
+  # `action` hears presses only — every listener from before releases existed
+  # is exactly that, and must not run twice per press (docs/events.md). A
+  # payload without the field (a scene re-sending `{pin, label}`) is the default.
+  let (defaultKey, default) = eventListenDefault(event)
+  var hasDefaultFilter = false
   var hasLabelFilter = false
-  var filtered: seq[string]
   if not node.data.isNil and node.data.kind == JObject:
     if node.data.hasKey("config") and node.data["config"].kind == JObject:
       let config = node.data["config"]
       for key, value in config.pairs:
         let expected = eventFilterValue(value)
         if expected.len > 0:
-          filtered.add(key)
           if key == "label":
             hasLabelFilter = true
+          if key == defaultKey:
+            hasDefaultFilter = true
           if not eventPayloadValueMatches(payload, key, expected):
             return false
 
@@ -1585,15 +1591,9 @@ proc eventNodeMatchesPayload(node: DiagramNode, event: string, payload: JsonNode
       if expected.len > 0 and not eventPayloadValueMatches(payload, "label", expected):
         return false
 
-  # The contract's `listenDefault`: a `button` listener that does not filter on
-  # `action` hears presses only — every listener from before releases existed
-  # is exactly that, and must not run twice per press (docs/events.md). A
-  # payload without the field (a scene re-sending `{pin, label}`) is the default.
-  for key in eventPayloadKeys(event):
-    let default = eventListenDefault(event, key)
-    if default.len > 0 and key notin filtered and not payload.isNil and payload.kind == JObject and
-        payload.hasKey(key) and not eventPayloadValueMatches(payload, key, default):
-      return false
+  if default.len > 0 and not hasDefaultFilter and not payload.isNil and payload.kind == JObject and
+      payload.hasKey(defaultKey) and not eventPayloadValueMatches(payload, defaultKey, default):
+    return false
 
   true
 

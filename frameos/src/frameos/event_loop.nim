@@ -52,9 +52,13 @@ type
     seq*: uint64      ## order of arrival at this loop
     tMono*: MonoTime  ## when it arrived
     fromRender*: bool ## dispatched by a render (or an `init` / `open` / `close`), or by a handler of such an event
-    hasInput*: bool   ## `input` is the message and `payload` nil: a driver's struct, no JSON yet
-    input*: DriverInputEvent
     preprocessed*: bool ## already through input_state (a tick's longPress): deliver as it is
+    when not defined(frameosEmbedded):
+      # A driver's struct (the Linux evdev thread), no JSON until a listener
+      # wants it. The one-task hosts have no drivers, and 256 lane slots of it
+      # would be 10 KB of an ESP32's RAM.
+      hasInput*: bool   ## `input` is the message and `payload` nil
+      input*: DriverInputEvent
 
   EventHost* = object
     ## The four things a host does for the dispatcher…
@@ -129,6 +133,10 @@ proc log(loop: EventLoop, entry: JsonNode) =
 
 # ------------------------------------------------------------------ enqueue
 
+proc isStructInput(envelope: EventEnvelope): bool =
+  when defined(frameosEmbedded): false
+  else: envelope.hasInput
+
 proc isPointerMoveEnvelope(envelope: EventEnvelope): bool =
   envelope.name == evPointerMove or envelope.name == evMouseMove
 
@@ -137,25 +145,28 @@ proc laneFull(loop: EventLoop, envelope: EventEnvelope, lane: var Deque[EventEnv
   ## pointer's life: a `pointerUp` or `pointerCancel` evicts the newest queued
   ## move to make room, and when there is none to evict, what is down gets a
   ## `pointerCancel` at the next drain, so a scene is never stuck "pressed".
-  if envelope.name == evPointerUp or envelope.name == evMouseUp or envelope.name == evPointerCancel:
-    var evicted = false
-    var kept: seq[EventEnvelope]
-    while lane.len > 0:
-      let last = lane.popLast()
-      if last.isPointerMoveEnvelope:
-        evicted = true
-        break
-      kept.add(last)
-    for index in countdown(kept.len - 1, 0):
-      lane.addLast(kept[index])
-    if evicted:
-      lane.addLast(envelope)
-      inc loop.dropped
-      return
-    loop.inputState.pointerInputLost = true
-  elif policy.device == edPointer:
-    loop.inputState.pointerInputLost = true
-  inc loop.dropped
+  when defined(frameosEmbedded):
+    inc loop.dropped
+  else:
+    if envelope.name == evPointerUp or envelope.name == evMouseUp or envelope.name == evPointerCancel:
+      var evicted = false
+      var kept: seq[EventEnvelope]
+      while lane.len > 0:
+        let last = lane.popLast()
+        if last.isPointerMoveEnvelope:
+          evicted = true
+          break
+        kept.add(last)
+      for index in countdown(kept.len - 1, 0):
+        lane.addLast(kept[index])
+      if evicted:
+        lane.addLast(envelope)
+        inc loop.dropped
+        return
+      loop.inputState.pointerInputLost = true
+    elif policy.device == edPointer:
+      loop.inputState.pointerInputLost = true
+    inc loop.dropped
 
 proc enqueue*(loop: EventLoop, origin: EventOrigin, name: string, payload: JsonNode,
               target = none(SceneId)) =
@@ -176,7 +187,7 @@ proc enqueue*(loop: EventLoop, origin: EventOrigin, name: string, payload: JsonN
   let lane = if policy.class == ecInput: addr loop.input else: addr loop.main
   if policy.coalesceLatest and lane[].len > 0 and lane[].peekLast.name == name and
       lane[].peekLast.target == target and lane[].peekLast.origin == origin and
-      not lane[].peekLast.hasInput and
+      not lane[].peekLast.isStructInput and
       lane[].peekLast.payload{"pointerId"}.getInt(0) == envelope.payload{"pointerId"}.getInt(0):
     lane[].peekLast = envelope
     return
@@ -185,42 +196,43 @@ proc enqueue*(loop: EventLoop, origin: EventOrigin, name: string, payload: JsonN
     return
   lane[].addLast(envelope)
 
-proc inputEventName(event: DriverInputEvent): string =
-  case DriverInputKind(event.kind)
-  of dikPointerAbs, dikPointerRel: evPointerMove
-  of dikPointerDown: evPointerDown
-  of dikPointerUp: evPointerUp
-  of dikPointerCancel: evPointerCancel
-  of dikWheel: evWheel
-  of dikKeyDown: evKeyDown
-  of dikKeyUp: evKeyUp
-  of dikNone: ""
+when not defined(frameosEmbedded):
+  proc inputEventName(event: DriverInputEvent): string =
+    case DriverInputKind(event.kind)
+    of dikPointerAbs, dikPointerRel: evPointerMove
+    of dikPointerDown: evPointerDown
+    of dikPointerUp: evPointerUp
+    of dikPointerCancel: evPointerCancel
+    of dikWheel: evWheel
+    of dikKeyDown: evKeyDown
+    of dikKeyUp: evKeyUp
+    of dikNone: ""
 
-proc enqueueInput*(loop: EventLoop, origin: EventOrigin, event: DriverInputEvent) =
-  ## One struct from an input driver: no JSON until a listener wants it. A
-  ## motion report replaces the queued one for the same pointer; a relative
-  ## mouse's counts add up, so a drag the panel refresh held back lands where
-  ## the hand is and not where it was a slot ago.
-  let name = inputEventName(event)
-  if name.len == 0:
-    return
-  let envelope = EventEnvelope(name: name, hasInput: true, input: event, origin: origin,
-    seq: loop.nextSeq, tMono: getMonoTime(), fromRender: loop.hostRunDepth > 0 or loop.handlingFromRender)
-  inc loop.nextSeq
-  if loop.input.len > 0 and loop.input.peekLast.hasInput and loop.input.peekLast.origin == origin:
-    let last = addr loop.input.peekLast
-    if last.input.kind == event.kind and event.kind == ord(dikPointerRel).cint:
-      last.input.x += event.x
-      last.input.y += event.y
+  proc enqueueInput*(loop: EventLoop, origin: EventOrigin, event: DriverInputEvent) =
+    ## One struct from an input driver: no JSON until a listener wants it. A
+    ## motion report replaces the queued one for the same pointer; a relative
+    ## mouse's counts add up, so a drag the panel refresh held back lands where
+    ## the hand is and not where it was a slot ago.
+    let name = inputEventName(event)
+    if name.len == 0:
       return
-    if last.input.kind == event.kind and event.kind == ord(dikPointerAbs).cint and
-        last.input.pointerId == event.pointerId:
-      last[] = envelope
+    let envelope = EventEnvelope(name: name, hasInput: true, input: event, origin: origin,
+      seq: loop.nextSeq, tMono: getMonoTime(), fromRender: loop.hostRunDepth > 0 or loop.handlingFromRender)
+    inc loop.nextSeq
+    if loop.input.len > 0 and loop.input.peekLast.hasInput and loop.input.peekLast.origin == origin:
+      let last = addr loop.input.peekLast
+      if last.input.kind == event.kind and event.kind == ord(dikPointerRel).cint:
+        last.input.x += event.x
+        last.input.y += event.y
+        return
+      if last.input.kind == event.kind and event.kind == ord(dikPointerAbs).cint and
+          last.input.pointerId == event.pointerId:
+        last[] = envelope
+        return
+    if loop.input.len >= loop.laneCapacity:
+      loop.laneFull(envelope, loop.input, eventPolicy(name))
       return
-  if loop.input.len >= loop.laneCapacity:
-    loop.laneFull(envelope, loop.input, eventPolicy(name))
-    return
-  loop.input.addLast(envelope)
+    loop.input.addLast(envelope)
 
 # ----------------------------------------------------------------- delivery
 
@@ -254,12 +266,14 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
   loop.host.sceneListens.isNil or loop.host.sceneListens(scene, name)
 
-proc aliasPayload(alias: string, payload: JsonNode): JsonNode =
-  ## The alias's own, smaller payload: the keys its contract row lists.
-  result = newJObject()
-  for key in eventPayloadKeys(alias):
-    if payload.hasKey(key):
-      result[key] = payload[key]
+when not defined(frameosEmbedded):
+  proc aliasPayload(alias: string, payload: JsonNode): JsonNode =
+    ## The alias's own, smaller payload: the keys its contract row lists.
+    result = newJObject()
+    for index in 0 ..< eventPayloadKeyCount(alias):
+      let key = eventPayloadKey(alias, index)
+      if payload.hasKey(key):
+        result[key] = payload[key]
 
 proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery, fromRender: bool): bool =
   ## An input event to the scene: under its name, and under each old name it
@@ -275,10 +289,15 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if loop.listens(scene, delivery.name):
     loop.runOnScene(scene, delivery.name, delivery.payload, eventPolicy(delivery.name), fromRender)
     result = true
-  for alias in eventAliases(delivery.name):
-    if loop.listens(scene, alias):
-      loop.runOnScene(scene, alias, aliasPayload(alias, delivery.payload), eventPolicy(alias), fromRender)
-      result = true
+  # The old names are pointer events' (docs/events-contract.json `aliasOf`),
+  # and the ESP32 has no pointer: leaving this out there leaves the generated
+  # alias and payload-key tables out of its image too.
+  when not defined(frameosEmbedded):
+    for index in 0 ..< eventAliasCount(delivery.name):
+      let alias = eventAlias(delivery.name, index)
+      if loop.listens(scene, alias):
+        loop.runOnScene(scene, alias, aliasPayload(alias, delivery.payload), eventPolicy(alias), fromRender)
+        result = true
 
 proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
   ## What a person did, through the input state: the position every pointer
@@ -287,8 +306,9 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
   var deliveries: seq[InputDelivery]
   if envelope.preprocessed:
     deliveries.add(InputDelivery(name: envelope.name, payload: envelope.payload, origin: envelope.origin))
-  elif envelope.hasInput:
-    loop.inputState.applyDriverInput(envelope.input, envelope.origin, envelope.tMono, deliveries)
+  elif envelope.isStructInput:
+    when not defined(frameosEmbedded):
+      loop.inputState.applyDriverInput(envelope.input, envelope.origin, envelope.tMono, deliveries)
   elif not loop.inputState.applyNamedInput(envelope.name, envelope.payload, envelope.origin,
       envelope.tMono, deliveries):
     return loop.deliver(envelope, eventPolicy(envelope.name))
@@ -342,13 +362,14 @@ proc drain*(loop: EventLoop, budget = DefaultDrainBudget): int =
     return 0
   loop.draining = true
   try:
-    if loop.inputState.pointerInputLost:
-      # The lane dropped pointer input: whatever is down lets go, ahead of
-      # everything else, so a drag does not resume from a position it never had.
-      var cancels: seq[InputDelivery]
-      loop.inputState.cancelPointers(eoDriver, cancels)
-      for cancel in cancels:
-        discard loop.deliverInput(none(SceneId), cancel, false)
+    when not defined(frameosEmbedded):
+      if loop.inputState.pointerInputLost:
+        # The lane dropped pointer input: whatever is down lets go, ahead of
+        # everything else, so a drag does not resume from a position it never had.
+        var cancels: seq[InputDelivery]
+        loop.inputState.cancelPointers(eoDriver, cancels)
+        for cancel in cancels:
+          discard loop.deliverInput(none(SceneId), cancel, false)
     while result < budget and loop.pending > 0:
       let envelope = if loop.main.len > 0: loop.main.popFirst() else: loop.input.popFirst()
       inc result

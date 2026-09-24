@@ -163,6 +163,8 @@ def load():
                 fail(f"{where}.{fname}: the only wire form is \"pointer\"")
             if "listenDefault" in field and (not isinstance(field["listenDefault"], str) or not event["listen"]):
                 fail(f"{where}.{fname}: listenDefault is the value a listener without a filter on this field hears")
+        if sum(1 for f in event.get("payload", []) if "listenDefault" in f) > 1:
+            fail(f"{where}: one listenDefault field per event (the generated lookup returns one)")
         if "synthesized" in event and (not isinstance(event["synthesized"], bool) or "driver" not in event["origins"]):
             fail(f"{where}: `synthesized` marks an event the dispatcher makes out of others; it keeps the driver origin")
         alias_of = event.get("aliasOf")
@@ -415,42 +417,61 @@ def gen_nim(doc):
         out.append(f"  of ev{camel(event['name'])}: {index}")
     out.append("  else: -1")
     out.append("")
-    out.append("iterator eventAliases*(name: string): string =")
-    out.append("  ## The old names a listener may know `name` by; the dispatcher delivers each")
-    out.append("  ## one too, with that alias's own (smaller) payload.")
+    # Procs, not iterators: an inline iterator copies its loop body into every
+    # call site once per `yield`, and with ~80 payload keys that was 20 KB of
+    # flash in the interpreter alone on the ESP32.
+    aliases_of = {event["name"]: [a["name"] for a in events if a.get("aliasOf") == event["name"]] for event in events}
+    out.append("proc eventAliasCount*(name: string): int =")
+    out.append("  ## How many old names a listener may know `name` by (eventAlias).")
     out.append("  case name")
     for event in events:
-        aliases = [a["name"] for a in events if a.get("aliasOf") == event["name"]]
-        if aliases:
-            out.append(f"  of ev{camel(event['name'])}:")
-            for alias in aliases:
-                out.append(f"    yield ev{camel(alias)}")
-    out.append("  else: discard")
+        if aliases_of[event["name"]]:
+            out.append(f"  of ev{camel(event['name'])}: {len(aliases_of[event['name']])}")
+    out.append("  else: 0")
     out.append("")
-    out.append("iterator eventPayloadKeys*(name: string): string =")
-    out.append("  ## The contract's payload fields of `name`, in order (nothing for a custom event).")
+    out.append("proc eventAlias*(name: string, index: int): string =")
+    out.append("  ## The old names of `name`, in order; the dispatcher delivers each one too,")
+    out.append("  ## with that alias's own (smaller) payload. Empty past eventAliasCount.")
+    out.append("  case name")
+    for event in events:
+        if aliases_of[event["name"]]:
+            out.append(f"  of ev{camel(event['name'])}:")
+            out.append("    case index")
+            for i, alias in enumerate(aliases_of[event["name"]]):
+                out.append(f"    of {i}: ev{camel(alias)}")
+            out.append('    else: ""')
+    out.append('  else: ""')
+    out.append("")
+    out.append("proc eventPayloadKeyCount*(name: string): int =")
+    out.append("  ## How many payload fields the contract lists for `name` (0 for a custom event).")
+    out.append("  case name")
+    for event in events:
+        if event.get("payload"):
+            out.append(f"  of ev{camel(event['name'])}: {len(event['payload'])}")
+    out.append("  else: 0")
+    out.append("")
+    out.append("proc eventPayloadKey*(name: string, index: int): string =")
+    out.append("  ## The contract's payload fields of `name`, in order. Empty past the count.")
     out.append("  case name")
     for event in events:
         if event.get("payload"):
             out.append(f"  of ev{camel(event['name'])}:")
-            for field in event["payload"]:
-                out.append(f"    yield {nim_str(field['name'])}")
-    out.append("  else: discard")
+            out.append("    case index")
+            for i, field in enumerate(event["payload"]):
+                out.append(f"    of {i}: {nim_str(field['name'])}")
+            out.append('    else: ""')
+    out.append('  else: ""')
     out.append("")
-    out.append("proc eventListenDefault*(name, field: string): string =")
-    out.append("  ## What a listener of `name` with no filter on `field` hears: only events where")
-    out.append("  ## the field equals this (`button` without an `action` filter hears presses).")
-    out.append("  ## Empty: no such rule.")
+    out.append("proc eventListenDefault*(name: string): (string, string) =")
+    out.append("  ## The one payload field of `name` with a `listenDefault`, and the value: a")
+    out.append("  ## listener with no filter on that field hears only events where it equals")
+    out.append("  ## this (`button` without an `action` filter hears presses). (\"\", \"\"): none.")
     out.append("  case name")
     for event in events:
         defaults = [f for f in event.get("payload", []) if "listenDefault" in f]
         if defaults:
-            out.append(f"  of ev{camel(event['name'])}:")
-            out.append("    case field")
-            for field in defaults:
-                out.append(f"    of {nim_str(field['name'])}: {nim_str(field['listenDefault'])}")
-            out.append('    else: ""')
-    out.append('  else: ""')
+            out.append(f"  of ev{camel(event['name'])}: ({nim_str(defaults[0]['name'])}, {nim_str(defaults[0]['listenDefault'])})")
+    out.append('  else: ("", "")')
     out.append("")
     out.append("proc buttonRoleForLabel*(upperLabel: string): string =")
     out.append("  ## The default role of a GPIO button that has none configured, by its label")

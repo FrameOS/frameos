@@ -363,133 +363,209 @@ proc contractEventIndex*(name: string): int =
   of evUploadScenes: 28
   else: -1
 
-iterator eventAliases*(name: string): string =
-  ## The old names a listener may know `name` by; the dispatcher delivers each
-  ## one too, with that alias's own (smaller) payload.
+proc eventAliasCount*(name: string): int =
+  ## How many old names a listener may know `name` by (eventAlias).
+  case name
+  of evPointerMove: 1
+  of evPointerDown: 1
+  of evPointerUp: 1
+  else: 0
+
+proc eventAlias*(name: string, index: int): string =
+  ## The old names of `name`, in order; the dispatcher delivers each one too,
+  ## with that alias's own (smaller) payload. Empty past eventAliasCount.
   case name
   of evPointerMove:
-    yield evMouseMove
+    case index
+    of 0: evMouseMove
+    else: ""
   of evPointerDown:
-    yield evMouseDown
+    case index
+    of 0: evMouseDown
+    else: ""
   of evPointerUp:
-    yield evMouseUp
-  else: discard
-
-iterator eventPayloadKeys*(name: string): string =
-  ## The contract's payload fields of `name`, in order (nothing for a custom event).
-  case name
-  of evOpen:
-    yield "sceneId"
-  of evKeyDown:
-    yield "code"
-    yield "key"
-    yield "repeat"
-    yield "shift"
-    yield "ctrl"
-    yield "alt"
-    yield "meta"
-    yield "linuxCode"
-  of evKeyUp:
-    yield "code"
-    yield "key"
-    yield "shift"
-    yield "ctrl"
-    yield "alt"
-    yield "meta"
-    yield "linuxCode"
-  of evTextInput:
-    yield "text"
-  of evPointerMove:
-    yield "x"
-    yield "y"
-    yield "pointerId"
-    yield "pointerType"
-    yield "buttons"
-  of evPointerDown:
-    yield "x"
-    yield "y"
-    yield "button"
-    yield "buttons"
-    yield "pointerId"
-    yield "pointerType"
-  of evPointerUp:
-    yield "x"
-    yield "y"
-    yield "button"
-    yield "buttons"
-    yield "pointerId"
-    yield "pointerType"
-  of evPointerCancel:
-    yield "x"
-    yield "y"
-    yield "pointerId"
-    yield "pointerType"
-  of evMouseMove:
-    yield "x"
-    yield "y"
-  of evMouseDown:
-    yield "button"
-  of evMouseUp:
-    yield "button"
-  of evTap:
-    yield "x"
-    yield "y"
-    yield "pointerId"
-    yield "pointerType"
-  of evDoubleTap:
-    yield "x"
-    yield "y"
-    yield "pointerId"
-    yield "pointerType"
-  of evLongPress:
-    yield "x"
-    yield "y"
-    yield "durationMs"
-    yield "pointerId"
-    yield "pointerType"
-  of evSwipe:
-    yield "direction"
-    yield "x"
-    yield "y"
-    yield "startX"
-    yield "startY"
-    yield "pointerId"
-    yield "pointerType"
-  of evWheel:
-    yield "deltaX"
-    yield "deltaY"
-    yield "x"
-    yield "y"
-  of evButton:
-    yield "pin"
-    yield "label"
-    yield "role"
-    yield "action"
-    yield "durationMs"
-    yield "wake"
-    yield "level"
-  of evSetSceneState:
-    yield "state"
-    yield "render"
-  of evSetCurrentScene:
-    yield "sceneId"
-    yield "state"
-  of evUploadScenes:
-    yield "scenes"
-    yield "sceneId"
-    yield "state"
-  else: discard
-
-proc eventListenDefault*(name, field: string): string =
-  ## What a listener of `name` with no filter on `field` hears: only events where
-  ## the field equals this (`button` without an `action` filter hears presses).
-  ## Empty: no such rule.
-  case name
-  of evButton:
-    case field
-    of "action": "press"
+    case index
+    of 0: evMouseUp
     else: ""
   else: ""
+
+proc eventPayloadKeyCount*(name: string): int =
+  ## How many payload fields the contract lists for `name` (0 for a custom event).
+  case name
+  of evOpen: 1
+  of evKeyDown: 8
+  of evKeyUp: 7
+  of evTextInput: 1
+  of evPointerMove: 5
+  of evPointerDown: 6
+  of evPointerUp: 6
+  of evPointerCancel: 4
+  of evMouseMove: 2
+  of evMouseDown: 1
+  of evMouseUp: 1
+  of evTap: 4
+  of evDoubleTap: 4
+  of evLongPress: 5
+  of evSwipe: 7
+  of evWheel: 4
+  of evButton: 7
+  of evSetSceneState: 2
+  of evSetCurrentScene: 2
+  of evUploadScenes: 3
+  else: 0
+
+proc eventPayloadKey*(name: string, index: int): string =
+  ## The contract's payload fields of `name`, in order. Empty past the count.
+  case name
+  of evOpen:
+    case index
+    of 0: "sceneId"
+    else: ""
+  of evKeyDown:
+    case index
+    of 0: "code"
+    of 1: "key"
+    of 2: "repeat"
+    of 3: "shift"
+    of 4: "ctrl"
+    of 5: "alt"
+    of 6: "meta"
+    of 7: "linuxCode"
+    else: ""
+  of evKeyUp:
+    case index
+    of 0: "code"
+    of 1: "key"
+    of 2: "shift"
+    of 3: "ctrl"
+    of 4: "alt"
+    of 5: "meta"
+    of 6: "linuxCode"
+    else: ""
+  of evTextInput:
+    case index
+    of 0: "text"
+    else: ""
+  of evPointerMove:
+    case index
+    of 0: "x"
+    of 1: "y"
+    of 2: "pointerId"
+    of 3: "pointerType"
+    of 4: "buttons"
+    else: ""
+  of evPointerDown:
+    case index
+    of 0: "x"
+    of 1: "y"
+    of 2: "button"
+    of 3: "buttons"
+    of 4: "pointerId"
+    of 5: "pointerType"
+    else: ""
+  of evPointerUp:
+    case index
+    of 0: "x"
+    of 1: "y"
+    of 2: "button"
+    of 3: "buttons"
+    of 4: "pointerId"
+    of 5: "pointerType"
+    else: ""
+  of evPointerCancel:
+    case index
+    of 0: "x"
+    of 1: "y"
+    of 2: "pointerId"
+    of 3: "pointerType"
+    else: ""
+  of evMouseMove:
+    case index
+    of 0: "x"
+    of 1: "y"
+    else: ""
+  of evMouseDown:
+    case index
+    of 0: "button"
+    else: ""
+  of evMouseUp:
+    case index
+    of 0: "button"
+    else: ""
+  of evTap:
+    case index
+    of 0: "x"
+    of 1: "y"
+    of 2: "pointerId"
+    of 3: "pointerType"
+    else: ""
+  of evDoubleTap:
+    case index
+    of 0: "x"
+    of 1: "y"
+    of 2: "pointerId"
+    of 3: "pointerType"
+    else: ""
+  of evLongPress:
+    case index
+    of 0: "x"
+    of 1: "y"
+    of 2: "durationMs"
+    of 3: "pointerId"
+    of 4: "pointerType"
+    else: ""
+  of evSwipe:
+    case index
+    of 0: "direction"
+    of 1: "x"
+    of 2: "y"
+    of 3: "startX"
+    of 4: "startY"
+    of 5: "pointerId"
+    of 6: "pointerType"
+    else: ""
+  of evWheel:
+    case index
+    of 0: "deltaX"
+    of 1: "deltaY"
+    of 2: "x"
+    of 3: "y"
+    else: ""
+  of evButton:
+    case index
+    of 0: "pin"
+    of 1: "label"
+    of 2: "role"
+    of 3: "action"
+    of 4: "durationMs"
+    of 5: "wake"
+    of 6: "level"
+    else: ""
+  of evSetSceneState:
+    case index
+    of 0: "state"
+    of 1: "render"
+    else: ""
+  of evSetCurrentScene:
+    case index
+    of 0: "sceneId"
+    of 1: "state"
+    else: ""
+  of evUploadScenes:
+    case index
+    of 0: "scenes"
+    of 1: "sceneId"
+    of 2: "state"
+    else: ""
+  else: ""
+
+proc eventListenDefault*(name: string): (string, string) =
+  ## The one payload field of `name` with a `listenDefault`, and the value: a
+  ## listener with no filter on that field hears only events where it equals
+  ## this (`button` without an `action` filter hears presses). ("", ""): none.
+  case name
+  of evButton: ("action", "press")
+  else: ("", "")
 
 proc buttonRoleForLabel*(upperLabel: string): string =
   ## The default role of a GPIO button that has none configured, by its label

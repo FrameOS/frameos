@@ -299,7 +299,12 @@ no hold to follow it. `level` is the line (0 pressed: the line is pulled up).
 what was typed; pointer events not at all.
 
 **Hosts.** Pointer and keyboard events are described for every host and are
-`hosts.esp32: false`: no board in the tree has a keyboard or touch. The
+`hosts.esp32: false`: no board in the tree has a keyboard or touch, so the
+ESP32 compiles only the button half of the input state (and none of the
+alias or keyboard tables) — the pointer, keyboard and gesture code is behind
+`when not defined(frameosEmbedded)`, and the contract's generated lookups are
+procs, never inline iterators (an iterator's loop body is copied per `yield`;
+with eighty payload keys that was 20 KB of flash in the interpreter). The
 preview forwards the browser's pointer, wheel and keyboard from the focused
 canvas (`frameos/wasm/src/pointer.ts`, kept twice with
 `frontend/src/utils/previewPointer.ts`); a bundle from before input v2 says so
