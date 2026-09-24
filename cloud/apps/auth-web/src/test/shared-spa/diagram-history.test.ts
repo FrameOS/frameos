@@ -21,6 +21,7 @@ vi.mock("../../../../../../frontend/src/scenes/frame/panels/Logs/logsLogic", asy
 });
 
 import { embedFrameLogic } from "../../../../../../frontend/src/embed/embedFrameLogic";
+import { frameEditorsLogic } from "../../../../../../frontend/src/scenes/frame/frameEditorsLogic";
 import { diagramLogic } from "../../../../../../frontend/src/scenes/frame/panels/Diagram/diagramLogic";
 
 const frameId = 1 as unknown as FrameType["id"];
@@ -140,6 +141,28 @@ describe("diagramLogic history", () => {
     expect(logic.values.canRedo).toBe(false);
     logic.actions.requestUndo();
     expect(logic.values.nodes).toHaveLength(1);
+  });
+
+  // The scene workspace never opens an editor tab (editScene): it SELECTS
+  // the shown scene (selectScene → selectedSceneId). The shortcut gate used
+  // to read only activeEditor, so on the workspace Cmd+Z after "Realign
+  // nodes" did nothing while the toolbar's undo button worked.
+  it("answers the shortcuts for the scene the workspace selected, and only that one", () => {
+    const logic = diagramLogic({ frameId, sceneId });
+    const unmountEditors = frameEditorsLogic({ frameId }).mount();
+    try {
+      logic.actions.setNodes([...logic.values.nodes, { ...renderNode, id: "second", position: { x: 10, y: 10 } }]);
+      frameEditorsLogic({ frameId }).actions.selectScene("some-other-scene");
+      keydown("z");
+      expect(logic.values.nodes).toHaveLength(2);
+      frameEditorsLogic({ frameId }).actions.selectScene(sceneId);
+      keydown("z");
+      expect(logic.values.nodes).toHaveLength(1);
+      keydown("z", { shiftKey: true });
+      expect(logic.values.nodes).toHaveLength(2);
+    } finally {
+      unmountEditors();
+    }
   });
 
   it("answers Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z", () => {
