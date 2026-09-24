@@ -71,13 +71,13 @@ export interface sceneUpdatesLogicActions {
   sceneUpdateFinished: (sceneId: string) => {
     sceneId: string
   }
+  scenesUpdateFinished: (sceneIds: string[]) => {
+    sceneIds: string[]
+  }
   updateSceneFromRepo: (sceneId: string) => {
     sceneId: string
   }
   updateScenesFromRepo: (sceneIds: string[]) => {
-    sceneIds: string[]
-  }
-  scenesUpdateFinished: (sceneIds: string[]) => {
     sceneIds: string[]
   }
 }
@@ -186,8 +186,8 @@ async function updateCloudScenes(
           ? 'This frame already has the latest version'
           : 'This frame already has the latest versions'
         : result.connected
-        ? `${what} on ${single ? 'its' : 'their'} way to the frame`
-        : `${what} queued — the frame takes ${single ? 'it' : 'them'} when it next connects`,
+          ? `${what} on ${single ? 'its' : 'their'} way to the frame`
+          : `${what} queued — the frame takes ${single ? 'it' : 'them'} when it next connects`,
     })
   } catch (error) {
     longRunningTasksModel.actions.taskFailed({
@@ -412,7 +412,7 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
           props.frameId,
           scenes,
           values.frame,
-          values.unsavedChanges ? values.frameForm.scenes ?? null : null,
+          values.unsavedChanges ? (values.frameForm.scenes ?? null) : null,
           (formScenes) => actions.setFrameFormValues({ scenes: formScenes })
         )
         return
@@ -434,7 +434,7 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
           props.frameId,
           [scene],
           values.frame,
-          values.unsavedChanges ? values.frameForm.scenes ?? null : null,
+          values.unsavedChanges ? (values.frameForm.scenes ?? null) : null,
           (scenes) => actions.setFrameFormValues({ scenes })
         )
         return
