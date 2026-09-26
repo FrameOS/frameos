@@ -904,7 +904,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     agent = frame.agent or {}
     mountpoints = normalize_mountpoints(frame.mountpoints)
     error_behavior = normalize_error_behavior(frame.error_behavior)
-    input_settings = normalize_input_settings(frame.input_settings)
+    # getattr: the release-image builder hands in its own frame stub
+    # (tools/buildroot-images/buildroot_images.py ReleaseImageFrame), which
+    # lists the fields by hand.
+    input_settings = normalize_input_settings(getattr(frame, "input_settings", None))
     frameos_version = get_versions().get("frameos")
     all_settings = get_settings_dict(db, project_id=frame.project_id)
     defaults = all_settings.get("defaults") or {}
