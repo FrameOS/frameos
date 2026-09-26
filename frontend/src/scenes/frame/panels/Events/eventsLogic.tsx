@@ -2,6 +2,7 @@ import { MakeLogicType, actions, connect, kea, key, listeners, path, props, redu
 import { AppConfigField, FrameEvent, FrameScene, FrameId } from '../../../../types'
 import { searchInText } from '../../../../utils/searchInText'
 import { frameEventsForScene, withCustomEventOrigin } from '../../../../utils/frameEvents'
+import { isAliasEvent } from '../../../../utils/eventsContract'
 import { customEventDeclarableOrigins, type EventOrigin } from '../../../../utils/eventsContract.gen'
 import { frameLogic } from '../../frameLogic'
 import type { FrameType } from '../../../../types'
@@ -295,7 +296,7 @@ export const eventsLogic = kea<eventsLogicType>([
       ): FrameEvent[] => {
         return (
           tab === 'listen'
-            ? frameEventsForScene(scene).filter((event) => event.canListen)
+            ? frameEventsForScene(scene).filter((event) => event.canListen && !isAliasEvent(event.name))
             : tab === 'dispatch'
             ? frameEventsForScene(scene).filter((event) => event.canDispatch)
             : []
@@ -313,7 +314,8 @@ export const eventsLogic = kea<eventsLogicType>([
           searchInText(search, event.name) || searchInText(search, event.description ?? '')
         const sceneEvents = frameEventsForScene(scene)
         return {
-          listen: sceneEvents.filter((event) => event.canListen).filter(matchesSearch).length,
+          listen: sceneEvents.filter((event) => event.canListen && !isAliasEvent(event.name)).filter(matchesSearch)
+            .length,
           dispatch: sceneEvents.filter((event) => event.canDispatch).filter(matchesSearch).length,
           custom: customEventRows.length,
         }

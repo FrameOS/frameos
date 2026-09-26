@@ -339,6 +339,13 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-gpio',
     surfaces: ['backend', 'frameAdmin'],
   },
+  {
+    key: 'input',
+    title: 'Input',
+    anchor: 'frame-settings-input',
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux'],
+    conditions: 'A full host OS only: no ESP32 board in the tree has a keyboard or a pointer (docs/events.md).',
+  },
 ]
 
 const specsByKey = new Map(frameSettingsSections.map((section) => [section.key, section]))

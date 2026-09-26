@@ -4,7 +4,7 @@
 // a canvas, and exposes events/state as callbacks.
 import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
-import { attachPointerInput } from './pointer'
+import { attachKeyboardInput, attachPointerInput } from './pointer'
 import type {
   FrameOSScene,
   PreviewAssetEntry,
@@ -108,7 +108,7 @@ export class FrameOSPreview {
   /** How the runtime's /srv/assets is backed (set once `ready` fires). */
   assetsInfo: PreviewAssetsInfo | null = null
   /** Which FrameOS version the runtime is (set once `ready` fires). */
-  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false }
+  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false, inputEvents: false }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
@@ -161,6 +161,7 @@ export class FrameOSPreview {
         this.runtimeInfo = {
           version: typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null,
           pointerEvents: msg.pointerEvents === true,
+          inputEvents: msg.inputEvents === true,
         }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
@@ -255,9 +256,7 @@ export class FrameOSPreview {
     // A view over the frame buffer when painting it as rendered; a copy when
     // dithering, so the kept frame stays full colour and switching panels
     // (or repainting on attach) never dithers an already dithered picture.
-    const pixels = panel
-      ? new Uint8ClampedArray(frame.buffer).slice()
-      : new Uint8ClampedArray(frame.buffer)
+    const pixels = panel ? new Uint8ClampedArray(frame.buffer).slice() : new Uint8ClampedArray(frame.buffer)
     if (panel) {
       ditherFrame(pixels, frame.width, frame.height, panel)
     }
@@ -275,16 +274,31 @@ export class FrameOSPreview {
   }
 
   /**
-   * Pass the pointer over `canvas` on to the scene as `mouseMove` /
-   * `mouseDown` / `mouseUp`, the events a frame's mouse or touchscreen sends
-   * (see ./pointer). Any canvas showing the frame will do — the one frames are
-   * painted onto, or a mirror of it. Nothing is forwarded to a runtime bundle
-   * that predates pointer input (`runtimeInfo.pointerEvents`). Returns the
-   * detach function; `destroy()` does not need it called first.
+   * Pass the pointer and the wheel over `canvas` on to the scene as
+   * `pointerMove` / `pointerDown` / `pointerUp` / `pointerCancel` / `wheel`,
+   * the events a frame's mouse or touchscreen sends (see ./pointer; a bundle
+   * from before input v2 gets `mouseMove` / `mouseDown` / `mouseUp`). Any
+   * canvas showing the frame will do — the one frames are painted onto, or a
+   * mirror of it. Nothing is forwarded to a runtime bundle that predates
+   * pointer input (`runtimeInfo.pointerEvents`). Returns the detach function;
+   * `destroy()` does not need it called first.
    */
   attachPointerInput(canvas: HTMLCanvasElement): () => void {
     return attachPointerInput(canvas, (name, payload) => this.sendEvent(name, payload), {
       enabled: () => !this.destroyed && this.runtimeInfo.pointerEvents,
+      inputV2: () => this.runtimeInfo.inputEvents,
+    })
+  }
+
+  /**
+   * Pass the keyboard, while `canvas` has the focus, on to the scene as
+   * `keyDown` / `keyUp` / `textInput` (see ./pointer). Give the canvas a
+   * `tabIndex`; a press on it focuses it. Nothing is forwarded to a bundle
+   * from before input v2 (`runtimeInfo.inputEvents`).
+   */
+  attachKeyboardInput(canvas: HTMLCanvasElement): () => void {
+    return attachKeyboardInput(canvas, (name, payload) => this.sendEvent(name, payload), {
+      enabled: () => !this.destroyed && this.runtimeInfo.inputEvents,
     })
   }
 
@@ -306,7 +320,11 @@ export class FrameOSPreview {
     this.worker?.postMessage({ type: 'setFastMode', enabled })
   }
 
-  private assetRequest(op: string, params: Record<string, unknown> = {}, transfer: Transferable[] = []): Promise<Record<string, any>> {
+  private assetRequest(
+    op: string,
+    params: Record<string, unknown> = {},
+    transfer: Transferable[] = []
+  ): Promise<Record<string, any>> {
     return new Promise((resolve, reject) => {
       if (!this.worker || this.destroyed) {
         reject(new Error('preview is not running'))

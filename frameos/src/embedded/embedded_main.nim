@@ -604,6 +604,19 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## redraw; clears the flag.
   takeRenderRequested()
 
+proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
+  ## Time passing for the dispatcher's input state (frameos/input_state.nim):
+  ## a held button becomes a `longPress`, then `repeat`s. True when an event
+  ## was made and delivered.
+  try:
+    tickInput()
+  except Defect as e:
+    log("input tick failed (defect): " & e.msg)
+    false
+  except CatchableError as e:
+    log("input tick failed: " & e.msg)
+    false
+
 proc fos_nim_scene_info_json_impl(): cstring {.exportc, cdecl.} =
   try:
     sceneInfoBuffer = sceneInfoJson()

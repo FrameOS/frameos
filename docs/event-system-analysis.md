@@ -730,21 +730,40 @@ a nil dereference in the host's `selectScene` that the preview had hidden,
 since wasm does not trap on address 1), the cloud and schedule paths have not
 (`docs/manual-testing-todo.md`).
 
-**P3 — input v2.** Pointer/keyboard/button payloads with aliases, host cursor,
-hotplug, grab, layouts, gestures, struct ABI, preview keyboard forwarding.
-Ship a touch-test and a keyboard-test scene in `repo/scenes/samples` and in
-the e2e snapshot harness (the recipe in `manual-testing-todo.md` currently
-refers to a scene that is not in the repo).
+**P3 — input v2.** Shipped: `docs/events.md` "Input" is the spec. The
+pointer, keyboard and button payloads of §4.5 (`pointerMove` / `pointerDown` /
+`pointerUp` / `pointerCancel` with position, id, type and `buttons`;
+`keyDown` / `keyUp` with the W3C `code`, the layout's `key`, `repeat` and the
+modifiers; `textInput`; `button {role, action, durationMs, wake}` with both
+edges on both hosts and `listenDefault: press`), the old names as forever
+aliases, gestures (`tap`, `doubleTap`, `longPress`, `swipe`) and the
+relative-mouse cursor in one shared `input_state.nim` the dispatcher feeds on
+every host (delivered only under the names a scene listens for, payload built
+at delivery), the runner-drawn cursor on framebuffer panels, the struct ABI
+(`DriverInputEvent`, a value channel, the optional
+`frameos_driver_set_input_hook` symbol), multitouch protocol B and pens in the
+translator, `poll()` + inotify hotplug and `EVIOCGRAB` in the evdev shell, the
+keyboard tables (`keyboard.codes` / `named` / `layouts` → `keyboard_gen.nim`),
+the preview's pointer v2 + wheel + keyboard forwarding behind the worker's
+`inputEvents` capability (with a tick while a pointer is held), the frame
+settings `inputSettings {keyboardLayout, grabKeyboard}` and
+`gpioButtons[].role` on both control planes, and the `Touch test` /
+`Keyboard test` samples plus `e2e/scenes/inputTouch` / `inputKeyboard` with
+the harness's `e2eEvents` injection. Left, on purpose: dead keys and compose;
+configured roles on the ESP32 (it gets the label defaults; its `pin:label`
+spec has no room for a third field yet); the gesture and cursor code has run
+in the preview and under tests, not on a Pi with a touchscreen or a mouse
+(`docs/manual-testing-todo.md`).
 
 **P4 — routing, focus, timers, the driver thread, the fast loop.** Lands
 together with ui-todo items 4–5; the dispatcher work here *is* the first half
 of those items.
 
-Cloud/backend parity (AGENTS.md): P0.7, P1 and P2 touch both planes — the
-contract generators, the event route/verb, the schedule validator and the
-shared SPA. P3's frame settings (`keyboardLayout`, button roles, grab) need the
-usual frame-key plumbing on both, including
-`FRAME_KEY_INTRODUCED_FRAMEOS_VERSION`.
+Cloud/backend parity (AGENTS.md): P0.7, P1, P2 and P3 touch both planes — the
+contract generators, the event route/verb, the schedule validator, the shared
+SPA, and P3's frame settings (`input_settings`, `gpio_buttons[].role`) with
+their `FRAME_KEY_INTRODUCED_FRAMEOS_VERSION` entry, the backend column and the
+cloud contract key.
 
 ## 6. Decisions
 

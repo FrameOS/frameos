@@ -244,7 +244,11 @@ def _normalized_gpio_buttons(buttons: list[dict] | None) -> list[dict]:
             pin = int(button.get("pin"))
         except (TypeError, ValueError):
             continue
-        normalized.append({"pin": pin, "label": str(button.get("label") or f"Pin {pin}")})
+        entry = {"pin": pin, "label": str(button.get("label") or f"Pin {pin}")}
+        role = str(button.get("role") or "").strip()
+        if role:
+            entry["role"] = role
+        normalized.append(entry)
     return normalized
 
 

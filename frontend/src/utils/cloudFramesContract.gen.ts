@@ -62,6 +62,10 @@ export const cloudFramesContractSettings = {
     "device": {
       "since": "2026.9.22",
       "restart": true
+    },
+    "input_settings": {
+      "since": "2026.9.23",
+      "restart": true
     }
   },
   "esp32": {

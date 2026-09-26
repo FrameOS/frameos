@@ -4,6 +4,23 @@ from typing import Any, Dict, List, Literal, Optional
 from .common import ImageTokenResponse
 from datetime import datetime
 
+from app.utils.events_contract_gen import KEYBOARD_LAYOUTS
+
+
+def _validate_input_settings(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return value
+    if not isinstance(value, dict):
+        raise ValueError('Input settings must be an object')
+    layout = value.get('keyboardLayout')
+    if layout is not None and layout not in KEYBOARD_LAYOUTS:
+        layouts = ', '.join(KEYBOARD_LAYOUTS)
+        raise ValueError(f"Unknown keyboard layout {layout!r}; one of: {layouts}")
+    grab = value.get('grabKeyboard')
+    if grab is not None and not isinstance(grab, bool):
+        raise ValueError('grabKeyboard must be true or false')
+    return value
+
 
 class FrameHttpsProxyCerts(BaseModel):
     server: Optional[str] = None
@@ -112,6 +129,7 @@ class FrameBase(BaseModel):
     agent: Optional[Dict[str, Any]]
     mountpoints: Optional[Dict[str, Any]]
     error_behavior: Optional[FrameErrorBehavior] = None
+    input_settings: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]]
     service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
@@ -161,6 +179,12 @@ class FrameCreateRequest(BaseModel):
     agent: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
     timezone: Optional[str] = None
+    input_settings: Optional[Dict[str, Any]] = None
+
+    @field_validator('input_settings')
+    @classmethod
+    def validate_input_settings(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _validate_input_settings(value)
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None
@@ -208,6 +232,7 @@ class FrameUpdateRequest(BaseModel):
     agent: Optional[Dict[str, Any]] = None
     mountpoints: Optional[Dict[str, Any]] = None
     error_behavior: Optional[FrameErrorBehavior] = None
+    input_settings: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
     service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
@@ -222,6 +247,11 @@ class FrameUpdateRequest(BaseModel):
         if value is not None and value < 1024:
             raise ValueError('Maximum HTTP response size must be at least 1024 bytes')
         return value
+
+    @field_validator('input_settings')
+    @classmethod
+    def validate_input_settings(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _validate_input_settings(value)
 
     @field_validator('frame_admin_auth')
     @classmethod

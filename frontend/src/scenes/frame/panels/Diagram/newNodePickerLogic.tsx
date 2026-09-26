@@ -39,6 +39,7 @@ import {
 import { confirmSceneBecomesCompiled } from '../../../../utils/sceneExecution'
 import { appCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { frameEventsForScene } from '../../../../utils/frameEvents'
+import { isAliasEvent } from '../../../../utils/eventsContract'
 import type { FrameScene, SceneApp } from '../../../../types'
 import type { StateField, TemplateType } from '../../../../types'
 import type { DeepPartial } from 'kea-forms/lib/types'
@@ -572,6 +573,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             })
           }
           for (const event of events) {
+            // An old name (`mouseDown` for `pointerDown`) keeps working on a
+            // scene that has it; a new listener gets the new name.
+            if (isAliasEvent(event.name)) {
+              continue
+            }
             options.push({
               label: event.name,
               value: `event/${event.name}`,

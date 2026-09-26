@@ -393,6 +393,20 @@ export const cloudFramesContract = {
             "label": {
               "type": "string",
               "format": "gpio_label"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "primary",
+                "secondary",
+                "next",
+                "prev",
+                "up",
+                "down",
+                "back",
+                "menu",
+                "refresh"
+              ]
             }
           },
           "required": [
@@ -448,6 +462,37 @@ export const cloudFramesContract = {
       "profiles": {
         "linux": {
           "since": "2026.9.22",
+          "restart": true
+        }
+      }
+    },
+    "input_settings": {
+      "rule": {
+        "type": "object",
+        "keys": {
+          "keyboardLayout": {
+            "type": "string",
+            "enum": [
+              "us",
+              "gb",
+              "de",
+              "fr",
+              "es",
+              "it",
+              "sv",
+              "da",
+              "nb"
+            ]
+          },
+          "grabKeyboard": {
+            "type": "bool"
+          }
+        },
+        "minKeys": 1
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.9.23",
           "restart": true
         }
       }

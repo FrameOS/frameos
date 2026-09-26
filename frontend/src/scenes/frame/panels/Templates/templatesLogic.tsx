@@ -137,7 +137,6 @@ export interface templatesLogicValues {
     ValidationErrorType
   >
   addingUrlToFrame: boolean
-  installingTemplateIds: Record<string, boolean>
   expanded: Record<string, boolean>
   favouriteTemplateIds: Set<string>
   favouriteTemplates: TemplateWithFavouriteId[]
@@ -146,6 +145,7 @@ export interface templatesLogicValues {
   installedTemplatesByName: {
     [k: string]: true
   }
+  installingTemplateIds: Record<string, boolean>
   isAddRepositoryFormSubmitting: boolean
   isAddRepositoryFormValid: boolean
   isAddTemplateUrlFormSubmitting: boolean
@@ -254,6 +254,12 @@ export interface templatesLogicActions {
   hideUploadTemplate: () => {
     value: true
   }
+  remoteInstallFinished: (installId: string) => {
+    installId: string
+  }
+  remoteInstallStarted: (installId: string) => {
+    installId: string
+  }
   resetAddRepositoryForm: (values?: { name: string; url: string }) => {
     values?: {
       name: string
@@ -328,12 +334,6 @@ export interface templatesLogicActions {
     values: DeepPartial<{
       url: string
     }>
-  }
-  remoteInstallStarted: (installId: string) => {
-    installId: string
-  }
-  remoteInstallFinished: (installId: string) => {
-    installId: string
   }
   setAddingUrlToFrame: (adding: boolean) => {
     adding: boolean

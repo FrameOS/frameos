@@ -87,20 +87,25 @@ describe("FrameOSPreview init", () => {
     // bundle is a release asset and the preview shows "runtime <version>");
     // a worker that names none reports null rather than an absent field.
     expect(onReady).toHaveBeenCalledWith({ currentSceneId: "scene-1" }, browserAssets, {
+      inputEvents: false,
       pointerEvents: false,
       version: null,
     });
     expect(preview.assetsInfo).toEqual(browserAssets);
     expect(preview.currentSceneId).toBe("scene-1");
-    expect(preview.runtimeInfo).toEqual({ pointerEvents: false, version: null });
+    expect(preview.runtimeInfo).toEqual({ inputEvents: false, pointerEvents: false, version: null });
   });
 
   it("names the runtime version the worker reports", () => {
     const onReady = vi.fn();
     const { preview, worker } = makePreview({ onReady });
     worker.reply({ runtimeVersion: "2026.9.2", type: "ready" });
-    expect(onReady).toHaveBeenLastCalledWith(undefined, null, { pointerEvents: false, version: "2026.9.2" });
-    expect(preview.runtimeInfo).toEqual({ pointerEvents: false, version: "2026.9.2" });
+    expect(onReady).toHaveBeenLastCalledWith(undefined, null, {
+      inputEvents: false,
+      pointerEvents: false,
+      version: "2026.9.2",
+    });
+    expect(preview.runtimeInfo).toEqual({ inputEvents: false, pointerEvents: false, version: "2026.9.2" });
   });
 });
 
@@ -176,6 +181,39 @@ describe("FrameOSPreview pointer input", () => {
     const afterDetach = worker.messages.length;
     canvas.dispatchEvent(pointer("pointerdown", { button: 0, buttons: 1, clientX: 210, clientY: 140 }));
     expect(worker.messages).toHaveLength(afterDetach);
+  });
+
+  it("sends a bundle that takes input v2 the pointer events with a position, and the keyboard", () => {
+    const { preview, worker } = makePreview();
+    const canvas = new FakeCanvas();
+    Object.assign(canvas, { tabIndex: 0, focus: vi.fn() });
+    preview.attachPointerInput(canvas as unknown as HTMLCanvasElement);
+    preview.attachKeyboardInput(canvas as unknown as HTMLCanvasElement);
+    worker.reply({ inputEvents: true, pointerEvents: true, runtimeVersion: "2026.9.23", type: "ready" });
+    expect(preview.runtimeInfo.inputEvents).toBe(true);
+    const sent = worker.messages.length;
+
+    canvas.dispatchEvent(pointer("pointerdown", { button: 0, buttons: 1, clientX: 210, clientY: 140 }));
+    canvas.dispatchEvent(pointer("pointerup", { button: 0, clientX: 210, clientY: 140 }));
+    canvas.dispatchEvent(
+      Object.assign(new Event("keydown", { cancelable: true }), {
+        code: "ArrowLeft", key: "ArrowLeft", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, repeat: false,
+      }),
+    );
+    const mouse = { pointerId: 0, pointerType: "mouse" };
+    expect(worker.messages.slice(sent)).toEqual([
+      { name: "pointerMove", payload: { x: 16384, y: 16384, ...mouse, buttons: 1 }, type: "event" },
+      { name: "pointerDown", payload: { x: 16384, y: 16384, ...mouse, buttons: 1, button: 0 }, type: "event" },
+      { name: "pointerMove", payload: { x: 16384, y: 16384, ...mouse, buttons: 0 }, type: "event" },
+      { name: "pointerUp", payload: { x: 16384, y: 16384, ...mouse, buttons: 0, button: 0 }, type: "event" },
+      {
+        name: "keyDown",
+        payload: { code: "ArrowLeft", key: "ArrowLeft", shift: false, ctrl: false, alt: false, meta: false, repeat: false },
+        type: "event",
+      },
+    ]);
+    // A press on the picture takes the focus, so the keys follow the pointer.
+    expect((canvas as unknown as { focus: ReturnType<typeof vi.fn> }).focus).toHaveBeenCalled();
   });
 
   it("names a second button by the driver's numbers, and lets go of all of them on a cancel", () => {

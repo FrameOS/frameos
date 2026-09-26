@@ -132,7 +132,9 @@ const CloudContractSettings* = @[
         KeyRule(name: "pin", rule:
           Rule(kind: rkInt, hasMin: true, min: 0.0, hasMax: true, max: 48.0)),
         KeyRule(name: "label", rule:
-          Rule(kind: rkString, format: sfGpioLabel))])]),
+          Rule(kind: rkString, format: sfGpioLabel)),
+        KeyRule(name: "role", rule:
+          Rule(kind: rkString, strEnum: @["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]))])]),
   profiles: @[
     ProfileSpec(profile: "linux", since: "2026.8.31", restart: true),
     ProfileSpec(profile: "esp32", since: "2026.8.31", restart: true, hasRule: true, rule:
@@ -146,6 +148,14 @@ const CloudContractSettings* = @[
     Rule(kind: rkString, minLen: 1, maxLen: 64, format: sfDriverKey),
   profiles: @[
     ProfileSpec(profile: "linux", since: "2026.9.22", restart: true)]),
+  SettingSpec(key: "input_settings", rule:
+    Rule(kind: rkObject, minKeys: 1, keys: @[
+      KeyRule(name: "keyboardLayout", rule:
+        Rule(kind: rkString, strEnum: @["us", "gb", "de", "fr", "es", "it", "sv", "da", "nb"])),
+      KeyRule(name: "grabKeyboard", rule:
+        Rule(kind: rkBool))]),
+  profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.9.23", restart: true)]),
   SettingSpec(key: "deep_sleep", rule:
     Rule(kind: rkBool),
   profiles: @[

@@ -1,0 +1,9 @@
+{
+  "name": "Touch test",
+  "description": "A dot follows your finger, pen or mouse, and the scene says which gesture it saw: tap, double tap, long press, swipe.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

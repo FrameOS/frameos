@@ -19,6 +19,13 @@ cd e2e
 ./run dataGradient # only scenes whose name contains "dataGradient"
 ```
 
+A fixture that says `settings.execution: "interpreted"` is rendered by the
+interpreter only (its code nodes are JavaScript with no Nim twin, so there is
+no compiled half to compare; the snapshot is `<id>.png` straight away), and a
+fixture's `e2eEvents` list is POSTed to the frame's `/event/<name>` after the
+first render, so an input scene (`inputTouch`, `inputKeyboard`) is snapshotted
+showing what it heard.
+
 `./run` hands off to the `Makefile`: `makescenes.py` compiles the fixture
 scenes in `scenes/` into `generated/`, a copy of `frameos/` is built with
 them (`make build` in `tmp/frameos`), then `makesnapshots.py` runs that

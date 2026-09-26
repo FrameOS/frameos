@@ -4,7 +4,11 @@ import { PowerSettingsFields } from '../../../../../components/PowerSettingsFiel
 import { Select } from '../../../../../components/Select'
 import { Switch } from '../../../../../components/Switch'
 import { TextInput } from '../../../../../components/TextInput'
-import { cloudDisplayDriverOptions, partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../../../../devices'
+import {
+  cloudDisplayDriverOptions,
+  partialRefreshDefaultsByDevice,
+  partialRefreshDevices,
+} from '../../../../../devices'
 import {
   displayDriverCloudFrameSettingsMinVersion,
   esp32ExtendedCloudFrameSettingsMinVersion,
@@ -12,6 +16,10 @@ import {
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingsMinVersion,
 } from '../../../../../utils/cloudFrameApi'
+import {
+  cloudFrameSupportsInputSettings,
+  inputCloudFrameSettingsMinVersion,
+} from '../../../../../utils/cloudFrameSettings'
 import type { FrameType } from '../../../../../types'
 import { FrameActionsMenu } from '../FrameActionsMenu'
 import { useFrameSettings } from '../frameSettingsContext'
@@ -20,6 +28,7 @@ import {
   ErrorBehaviorFields,
   FlipField,
   GpioButtonsSection,
+  InputSettingsSection,
   MaxHttpResponseBytesField,
   MetricsIntervalField,
   PaletteField,
@@ -281,6 +290,24 @@ export function CloudHardwareSection(): JSX.Element | null {
         ) : null}
       </SectionBody>
       <GpioButtonsSection />
+      <FrameSettingsSection sectionKey="input">
+        {cloudFrameSupportsInputSettings(frame.frameos_version) ? (
+          <InputSettingsSection />
+        ) : (
+          <>
+            <SectionHeading id="frame-settings-input" row>
+              Input
+            </SectionHeading>
+            <SectionBody>
+              <p className="frameos-muted text-sm">
+                {frame.frameos_version
+                  ? `The keyboard layout, keyboard grab and GPIO button roles need FrameOS ${inputCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to edit them here.`
+                  : `The keyboard layout, keyboard grab and GPIO button roles need FrameOS ${inputCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+              </p>
+            </SectionBody>
+          </>
+        )}
+      </FrameSettingsSection>
     </fieldset>
   )
 }

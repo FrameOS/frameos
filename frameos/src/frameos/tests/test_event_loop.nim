@@ -81,6 +81,9 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
       host.trace.add(if pinned in host.pinned: pinned else: line)
       runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload,
         hasImage: false, loopIndex: 0, loopKey: ".")),
+    # Input reaches a scene only under the names it listens for (runner.nim and
+    # single_scene_host.nim answer the same way): a `run` line is a listener.
+    sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
     log: proc (entry: JsonNode) =
       if entry{"event"}.getStr() == "event:refused":
         host.trace.add("refused " & entry["name"].getStr() & " " & entry["origin"].getStr() & " " &
@@ -175,12 +178,12 @@ block a_payload_is_an_object:
   doAssert hasStatePayload(%*{"sceneId": "a", "state": {}})
   let logs = new(seq[JsonNode])
   let host = newRecordingHost("fixtures/dispatcher/lanes".SceneId, logs)
-  host.pinned = @["run lanes button {}"]
+  host.pinned = @["""run lanes button {"pin":-1,"label":"","role":"","action":"press"}"""]
   host.loop.enqueue(eoHttpWrite, "button", %*[1, 2, 3])
   host.loop.enqueue(eoHttpWrite, "setCurrentScene", %*"fixtures/dispatcher/command")
   discard host.loop.drain()
-  # (the main lane runs ahead of input)
-  doAssert host.trace == @["select  failed", "run lanes button {}"], $host.trace
+  # (the main lane runs ahead of input; a button with nothing in it is a press of pin -1)
+  doAssert host.trace == @["select  failed", """run lanes button {"pin":-1,"label":"","role":"","action":"press"}"""], $host.trace
   localEventSink = nil
 
 block a_full_lane_drops_and_counts:

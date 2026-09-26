@@ -171,6 +171,8 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
     setFastMode,
     dismissFastRenderRequest,
     openPreviewAssets,
+    pressGpioButton,
+    releaseGpioButton,
   } = useActions(livePreviewLogic({ frameId }))
   const { scenes: frameScenes, previewingSceneId } = useValues(scenesLogic({ frameId }))
   const { previewScene } = useActions(scenesLogic({ frameId }))
@@ -318,7 +320,10 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
               ref={registerCanvas}
               width={previewDimensions.width}
               height={previewDimensions.height}
-              className="max-h-[50vh] max-w-full"
+              // Focusable: the keyboard goes to the scene while the picture has
+              // the focus (a click on it takes it).
+              tabIndex={0}
+              className="max-h-[50vh] max-w-full outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               style={{
                 imageRendering: 'pixelated',
                 // Taps and sideways drags are the scene's; a vertical swipe
@@ -449,12 +454,15 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
                 size="small"
                 color="secondary"
                 className="flex items-center gap-1"
-                title={`GPIO pin ${button.pin}`}
-                onClick={() =>
-                  // Same event the device's GPIO driver sends on a button
-                  // press (level 0 = falling edge).
-                  dispatchPreviewEvent('button', { pin: button.pin, label: button.label, level: 0 })
-                }
+                title={`GPIO pin ${button.pin} — hold for a long press`}
+                // The two edges the device's GPIO driver sends: a press (level
+                // 0, the line is pulled up) while the mouse button is down, the
+                // release when it comes up. The runtime makes the long press
+                // and the repeats out of the hold, as on a frame.
+                onPointerDown={() => pressGpioButton(button)}
+                onPointerUp={() => releaseGpioButton(button)}
+                onPointerLeave={() => releaseGpioButton(button)}
+                onPointerCancel={() => releaseGpioButton(button)}
               >
                 <CursorArrowRaysIcon className="h-4 w-4" />
                 {button.label || `GPIO ${button.pin}`}

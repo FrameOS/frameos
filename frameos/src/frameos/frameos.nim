@@ -296,6 +296,7 @@ proc start*(self: FrameOS) {.async.} =
       "url": self.frameConfig.timeZoneUpdates.url,
     },
     "gpioButtons": self.frameConfig.gpioButtons,
+    "inputSettings": self.frameConfig.inputSettings,
     "errorBehavior": {
       "mode": self.frameConfig.errorBehavior.mode,
       "retrySeconds": self.frameConfig.errorBehavior.retrySeconds,

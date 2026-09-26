@@ -253,6 +253,62 @@ def test_event_listener_filters_match_configured_payload_fields():
     assert 'eventPayloadValueMatches(context.payload, "code", "13")' in source
 
 
+def _button_listener_scene(config: dict) -> dict:
+    return {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [
+            {
+                "id": "event",
+                "type": "event",
+                "data": {"keyword": "button", "config": config},
+                "position": {"x": 0, "y": 0},
+            },
+            {"id": "clock", "type": "app", "data": {"keyword": "data/clock", "config": {}}, "position": {"x": 1, "y": 1}},
+        ],
+        "edges": [
+            {"source": "event", "sourceHandle": "next", "target": "clock", "targetHandle": "prev"},
+        ],
+        "fields": [],
+        "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
+    }
+
+
+PRESS_ONLY = '(not context.payload.hasKey("action") or eventPayloadValueMatches(context.payload, "action", "press"))'
+
+
+def test_button_listener_without_an_action_filter_fires_on_press_only():
+    """The catalog's `listenDefault` (docs/events-contract.json): a `button`
+    node that does not pick an action must not fire on every longPress,
+    repeat and release too — and a payload from before `action` still fires."""
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    source = write_scene_nim(frame, _button_listener_scene({"label": "A"}))
+
+    assert 'of "button":' in source
+    assert 'eventPayloadValueMatches(context.payload, "label", "A")' in source
+    assert PRESS_ONLY in source
+    assert f'if eventPayloadValueMatches(context.payload, "label", "A") and {PRESS_ONLY}:' in source
+
+
+def test_button_listener_with_an_action_filter_keeps_its_own():
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    source = write_scene_nim(frame, _button_listener_scene({"action": "release"}))
+
+    assert 'if eventPayloadValueMatches(context.payload, "action", "release"):' in source
+    assert PRESS_ONLY not in source
+    assert 'hasKey("action")' not in source
+
+
+def test_listen_default_is_the_only_condition_on_a_bare_button_listener():
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    source = write_scene_nim(frame, _button_listener_scene({}))
+
+    assert f'  if {PRESS_ONLY}:' in source
+
+
 def test_static_scene_registry_imports_compiled_scenes():
     frame = SimpleNamespace(
         scenes=[

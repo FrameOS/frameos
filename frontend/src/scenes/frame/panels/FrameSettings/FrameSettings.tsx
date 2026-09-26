@@ -5,7 +5,7 @@ import { frameLogic } from '../../frameLogic'
 import { Spinner } from '../../../../components/Spinner'
 import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { FrameSettingsProvider, useFrameSettings, type FrameSettingsProps } from './frameSettingsContext'
-import { GpioButtonsSection } from './fields/sharedFields'
+import { GpioButtonsSection, InputSettingsSection } from './fields/sharedFields'
 import { FrameSettingsSection } from './sections/FrameSettingsSection'
 import { SettingsHeaderActions } from './SettingsHeaderActions'
 import {
@@ -203,6 +203,9 @@ function FrameSettingsPanel(): JSX.Element {
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="gpio">
           <GpioButtonsSection />
+        </FrameSettingsSection>
+        <FrameSettingsSection sectionKey="input">
+          <InputSettingsSection />
         </FrameSettingsSection>
       </Form>
     </div>

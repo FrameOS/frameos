@@ -33,9 +33,15 @@
   },
   {
     "name": "keyDown",
-    "description": "When a key is pressed on a keyboard",
+    "description": "When a key is pressed on a keyboard (or held: `repeat`). `code` is the physical key (`KeyA`, `ArrowLeft`), `key` what it means under the frame's keyboard layout (`a`, `A`, `Enter`).",
     "canListen": true,
     "fields": [
+      {
+        "name": "code",
+        "label": "Code",
+        "type": "string",
+        "required": true
+      },
       {
         "name": "key",
         "label": "Key",
@@ -43,9 +49,27 @@
         "required": true
       },
       {
-        "name": "code",
-        "label": "Code",
-        "type": "integer",
+        "name": "shift",
+        "label": "Shift",
+        "type": "boolean",
+        "required": true
+      },
+      {
+        "name": "ctrl",
+        "label": "Ctrl",
+        "type": "boolean",
+        "required": true
+      },
+      {
+        "name": "alt",
+        "label": "Alt",
+        "type": "boolean",
+        "required": true
+      },
+      {
+        "name": "meta",
+        "label": "Meta",
+        "type": "boolean",
         "required": true
       }
     ]
@@ -56,23 +80,215 @@
     "canListen": true,
     "fields": [
       {
+        "name": "code",
+        "label": "Code",
+        "type": "string",
+        "required": true
+      },
+      {
         "name": "key",
         "label": "Key",
         "type": "string",
         "required": true
       },
       {
-        "name": "code",
-        "label": "Code",
+        "name": "shift",
+        "label": "Shift",
+        "type": "boolean",
+        "required": true
+      },
+      {
+        "name": "ctrl",
+        "label": "Ctrl",
+        "type": "boolean",
+        "required": true
+      },
+      {
+        "name": "alt",
+        "label": "Alt",
+        "type": "boolean",
+        "required": true
+      },
+      {
+        "name": "meta",
+        "label": "Meta",
+        "type": "boolean",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "textInput",
+    "description": "Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). Made by the dispatcher from `keyDown`; a preview forwards the browser's `beforeinput`.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "text",
+        "label": "Text",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "pointerMove",
+    "description": "When a pointer (a finger, a mouse, a pen) moves (not logged)",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "buttons",
+        "label": "Buttons held",
         "type": "integer",
         "required": true
       }
     ]
   },
   {
-    "name": "mouseMove",
-    "description": "When a mouse moves (not logged)",
+    "name": "pointerDown",
+    "description": "When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event.",
     "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "button",
+        "label": "Button",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "buttons",
+        "label": "Buttons held",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "pointerUp",
+    "description": "When a pointer button is released or a finger lifts (not logged)",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "button",
+        "label": "Button",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "buttons",
+        "label": "Buttons held",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "pointerCancel",
+    "description": "When a pointer that was down is lost without a release: the queue overflowed, the device went away. A scene holding a drag lets go.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "mouseMove",
+    "description": "When a mouse moves (not logged). An alias of `pointerMove` with its old payload.",
+    "canListen": true,
+    "aliasOf": "pointerMove",
     "fields": [
       {
         "name": "x",
@@ -90,8 +306,9 @@
   },
   {
     "name": "mouseDown",
-    "description": "When a mouse button is pressed (not logged)",
+    "description": "When a mouse button is pressed (not logged). An alias of `pointerDown` with its old payload.",
     "canListen": true,
+    "aliasOf": "pointerDown",
     "fields": [
       {
         "name": "button",
@@ -103,8 +320,9 @@
   },
   {
     "name": "mouseUp",
-    "description": "When a mouse button is released (not logged)",
+    "description": "When a mouse button is released (not logged). An alias of `pointerUp` with its old payload.",
     "canListen": true,
+    "aliasOf": "pointerUp",
     "fields": [
       {
         "name": "button",
@@ -115,8 +333,156 @@
     ]
   },
   {
+    "name": "tap",
+    "description": "A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "doubleTap",
+    "description": "A second `tap` in the same place within `gestures.doubleTapMs` of the first. The first tap is delivered too.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "longPress",
+    "description": "A pointer held in one place for `gestures.longPressMs`. Delivered while it is still held where the host ticks the dispatcher, on release otherwise; no `tap` follows it.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "durationMs",
+        "label": "Held for (ms)",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "swipe",
+    "description": "A press and a release at least `gestures.swipeMinPx` apart, in one of four directions.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "direction",
+        "label": "Direction",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "startX",
+        "label": "Start X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "startY",
+        "label": "Start Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
     "name": "wheel",
-    "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. Linux frames only.",
+    "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
     "canListen": true,
     "fields": [
       {
@@ -128,6 +494,18 @@
       {
         "name": "deltaY",
         "label": "Delta Y",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
         "type": "integer",
         "required": true
       }
@@ -149,7 +527,7 @@
   },
   {
     "name": "button",
-    "description": "When a GPIO button is pressed",
+    "description": "When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only.",
     "canListen": true,
     "fields": [
       {
@@ -165,10 +543,29 @@
         "required": true
       },
       {
-        "name": "level",
-        "label": "Level",
-        "type": "integer",
+        "name": "role",
+        "label": "Role",
+        "type": "string",
         "required": true
+      },
+      {
+        "name": "action",
+        "label": "Action",
+        "type": "string",
+        "required": true,
+        "listenDefault": "press"
+      },
+      {
+        "name": "durationMs",
+        "label": "Held for (ms)",
+        "type": "integer",
+        "required": false
+      },
+      {
+        "name": "wake",
+        "label": "Woke the device",
+        "type": "boolean",
+        "required": false
       }
     ]
   },
