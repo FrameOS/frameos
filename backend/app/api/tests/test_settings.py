@@ -59,6 +59,30 @@ async def test_set_settings_rejects_unknown_keys(async_client):
 
 
 @pytest.mark.asyncio
+async def test_settings_round_trip_survives_internal_rows(async_client, db):
+    """The settings table also holds `@system/...` markers (repositories.py
+    writes them on first boot) and legacy keys. The form posts back the whole
+    GET, so one of those in the GET turned every save into a 422."""
+    from app.models.settings import Settings
+
+    db.add(Settings(project_id=async_client.project_id, key="@system/repository_global_cleanup", value="true"))
+    db.add(Settings(project_id=async_client.project_id, key="some_legacy_key", value={"a": 1}))
+    db.commit()
+
+    response = await async_client.get('/api/settings')
+    assert response.status_code == 200
+    form = response.json()
+    assert "@system/repository_global_cleanup" not in form
+    assert "some_legacy_key" not in form
+
+    form["immich"] = {"url": "https://immich.example", "apiKey": "secret"}
+    response = await async_client.post('/api/settings', json=form)
+    assert response.status_code == 200, response.text
+    assert "@system/repository_global_cleanup" not in response.json()
+    assert db.query(Settings).filter_by(project_id=async_client.project_id, key="@system/repository_global_cleanup").first()
+
+
+@pytest.mark.asyncio
 async def test_settings_secrets_are_masked_by_default(async_client):
     response = await async_client.post(
         '/api/settings',

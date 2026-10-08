@@ -26,12 +26,20 @@ from app.utils.posthog import initialize_posthog
 from app.utils.settings_secrets import mask_settings, resolve_masked_settings
 from . import api_project
 
+def _form_settings(settings: dict) -> dict:
+    """Only the groups POST accepts. The settings table also holds internal
+    rows (`@system/...` markers from repositories.py, legacy keys), and the
+    form posts back everything it was given — so one of those in the GET made
+    every later save a 422."""
+    return {key: value for key, value in settings.items() if key in SettingsUpdateRequest.model_fields}
+
+
 @api_project.get("/settings", response_model=SettingsResponse)
 async def get_settings(reveal: str | None = None, db: Session = Depends(get_db)):
     """Secrets come back masked (app/utils/settings_secrets) — the form posts
     the mask back to keep a key. `?reveal=1` is for the in-browser wasm
     preview, which runs the scene here and needs the real bytes."""
-    settings = get_settings_dict(db, project_id=current_project_id())
+    settings = _form_settings(get_settings_dict(db, project_id=current_project_id()))
     return settings if reveal == "1" else mask_settings(settings)
 
 @api_project.post("/settings", response_model=SettingsResponse)
@@ -71,7 +79,7 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
         # Wake the sync service (it lives in the worker process) so it picks up
         # the new configuration and republishes discovery data.
         await redis.publish(HA_SYNC_CHANNEL, json.dumps({"event": "settings_changed", "project_id": project_id}))
-    return mask_settings(updated_settings)
+    return mask_settings(_form_settings(updated_settings))
 
 
 HA_SYNC_REPLY_TIMEOUT_SECONDS = 30.0

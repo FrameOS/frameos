@@ -8,6 +8,7 @@ import { isCloudMode } from '../utils/cloudMode'
 import { isFrameControlMode } from '../utils/frameControlMode'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPath } from '../utils/projectApi'
+import { onSettingsChanged } from '../utils/settingsInvalidation'
 import {
   createWasmPreviewQueue,
   wasmPreviewCacheKey,
@@ -44,9 +45,11 @@ interface CapturedFrame {
 
 // App settings (API keys etc.) for data apps, like livePreviewLogic fetches
 // per preview: one merged object on the cloud, assembled per frame by the
-// backend. Cached per key for the session; a failed fetch degrades to no
-// secrets for that render only.
+// backend. Cached per key until a settings save says otherwise (a key saved
+// after the first preview must reach the next one); a failed fetch degrades to
+// no secrets for that render only.
 const settingsJsonPromises = new Map<string, Promise<string>>()
+onSettingsChanged(() => settingsJsonPromises.clear())
 export function fetchSettingsJson(frameId: FrameId): Promise<string> {
   const cacheKey = isCloudMode() ? 'cloud' : `frame:${frameId}`
   let promise = settingsJsonPromises.get(cacheKey)
