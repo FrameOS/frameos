@@ -1,18 +1,10 @@
 /**
- * A Web Serial write that cannot hang forever.
+ * A Web Serial write that cannot hang forever. A board that is not reading its
+ * USB-Serial/JTAG port (other firmware, download mode) never accepts the
+ * bytes, and the pending write used to hold the USB command lock for good.
+ * On timeout the writer is aborted and the caller's cleanup runs.
  *
- * `writer.write()` resolves once the OS has taken the bytes. On a board whose
- * firmware is not reading its USB-Serial/JTAG endpoint (stock vendor
- * firmware, a chip sitting in ROM download mode, a crashed app) the endpoint
- * NAKs every OUT packet and that promise never settles. Every flow awaiting
- * it then hangs, and in the workspace that included the per-frame USB command
- * lock: the stuck command never released it, and every later command —
- * the "Flash" button included — logged "waiting for previous USB command to
- * finish" for good. A timed-out write aborts the writer (discarding what is
- * queued) and throws, so the caller's own cleanup runs and the lock frees.
- *
- * Deliberately a leaf module with no imports, like esp32WatchdogReset.ts: the
- * cloud enrollment flasher deep-imports it too.
+ * A leaf module with no imports: the cloud flasher deep-imports it.
  */
 
 // Slack per byte over the wire time at 115200 baud (~0.09 ms/byte): a 4 KB
@@ -23,9 +15,8 @@ const PER_BYTE_TIMEOUT_MS = 1
 export class SerialWriteTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(
-      `The board did not accept data over USB for ${Math.round(timeoutMs / 1000)} s — ` +
-        'it is not reading its serial port (not running FrameOS yet, or stuck). ' +
-        'Unplug it, plug it back in and try again.'
+      `The board stopped accepting data over USB for ${Math.round(timeoutMs / 1000)} s. ` +
+        'It may not be running FrameOS yet, or it is stuck. Unplug it, plug it back in and try again.'
     )
     this.name = 'SerialWriteTimeoutError'
   }

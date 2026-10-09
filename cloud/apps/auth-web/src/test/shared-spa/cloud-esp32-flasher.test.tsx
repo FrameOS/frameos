@@ -289,14 +289,21 @@ describe("wifiInputError", () => {
 });
 
 describe("bootWaitFailureMessage", () => {
-  // A 32 MB board formats a 24 MB /state partition on first boot (~3 min);
-  // telling that user to replug and reflash restarted the format every time.
+  // A 32 MB board formats a 24 MB /state partition on first boot (251 s on a
+  // reTerminal E1004); replugging restarts the format.
   it("says the board is still formatting rather than asking for a replug", () => {
     const message = bootWaitFailureMessage(
       "FrameOS 1.2.3 (idf v5.4) booting from ota_0\nW (912) SPIFFS: mount failed, -10025. formatting...\n",
     );
     expect(message).toMatch(/still formatting/);
+    expect(message).toMatch(/Leave it plugged in/);
     expect(message).not.toMatch(/retry is quick/);
+  });
+
+  it("tells a quiet boot to wait before it says to replug", () => {
+    const message = bootWaitFailureMessage("ESP-ROM:esp32s3-20210327\nrst:0x1 (POWERON),boot:0x8\n");
+    expect(message).toMatch(/console never answered/);
+    expect(message.indexOf("leave it plugged in")).toBeLessThan(message.indexOf("unplug"));
   });
 });
 
@@ -817,7 +824,7 @@ describe("Esp32CloudFlasher", () => {
       await screen.findByRole("alert", undefined, { timeout: 5000 }),
     ).toHaveProperty(
       "textContent",
-      expect.stringMatching(/Nothing at all arrived on this serial port/),
+      expect.stringMatching(/Nothing came back on this serial port/),
     );
     expect(screen.queryByTestId("esp32-flash-done")).toBeNull();
   });
@@ -835,7 +842,7 @@ describe("Esp32CloudFlasher", () => {
     clickFlash();
 
     const alert = await screen.findByRole("alert", undefined, { timeout: 5000 });
-    expect(alert.textContent).toMatch(/ESP32-S3 and ESP32-C3 only/);
+    expect(alert.textContent).toMatch(/only has firmware for the ESP32-S3 and ESP32-C3/);
     // Not a link problem: no slower retry, nothing written, no code spent.
     expect(esptool.calls.main).toHaveBeenCalledOnce();
     expect(esptool.calls.writeFlash).not.toHaveBeenCalled();

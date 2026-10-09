@@ -52,6 +52,7 @@ const PARTITION_ENTRY_MAGIC = 0x50aa
 const PARTITION_ENTRY_SIZE = 32
 const PARTITION_TYPE_DATA = 0x01
 const PARTITION_SUBTYPE_NVS = 0x02
+const PARTITION_SUBTYPE_SPIFFS = 0x82
 
 export function parseEsp32PartitionTable(table: Uint8Array): Esp32Partition[] {
   const view = new DataView(table.buffer, table.byteOffset, table.byteLength)
@@ -87,6 +88,21 @@ export function partitionTableFromMergedImage(image: Uint8Array): Esp32Partition
   return parseEsp32PartitionTable(
     image.subarray(ESP32_PARTITION_TABLE_OFFSET, ESP32_PARTITION_TABLE_OFFSET + ESP32_PARTITION_TABLE_SIZE)
   )
+}
+
+// A first boot formats the SPIFFS `state` partition before the console starts:
+// 251 s for 24 MB on a reTerminal E1004 (2026-10-10). Budget twice that rate on
+// top of the boot, so a bigger layout waits longer without a table to update.
+const FIRST_BOOT_BASE_WAIT_MS = 90000
+const STATE_FORMAT_WAIT_MS_PER_MB = 21000
+
+/** How long a board freshly flashed with this image may take to reach its console. */
+export function firstBootConsoleWaitMs(image: Uint8Array): number {
+  const state = partitionTableFromMergedImage(image).find(
+    (partition) => partition.type === PARTITION_TYPE_DATA && partition.subtype === PARTITION_SUBTYPE_SPIFFS
+  )
+  const stateMb = (state?.size ?? 0) / (1024 * 1024)
+  return FIRST_BOOT_BASE_WAIT_MS + Math.ceil(stateMb * STATE_FORMAT_WAIT_MS_PER_MB)
 }
 
 /**
@@ -254,8 +270,7 @@ export function releaseChipMismatch(chipName: string | null | undefined, platfor
     )
   }
   return (
-    `This board is ${chipName}, and FrameOS publishes firmware for the ESP32-S3 and ESP32-C3 only — ` +
-    'the image would not boot on it. Nothing was written.'
+    `This board is ${chipName}. FrameOS only has firmware for the ESP32-S3 and ESP32-C3, ` + 'so nothing was written.'
   )
 }
 

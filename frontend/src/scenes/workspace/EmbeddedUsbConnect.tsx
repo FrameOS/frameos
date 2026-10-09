@@ -20,34 +20,14 @@ import { EmbeddedReleaseFlasher } from './EmbeddedReleaseFlasher'
 import { EmbeddedUsbFirmwareUpdate } from './EmbeddedUsbFirmwareUpdate'
 import { embeddedUsbConnectLogic } from './embeddedUsbConnectLogic'
 
-// ONE USB action for an ESP32 frame, on both control planes.
-//
-// The deploy drawer used to offer three USB cards side by side — "Flash latest
-// release" (write the whole chip, then provision), "Update over USB" (write
-// around NVS, keep settings) and "USB setup" (console only) — which read cold
-// as the same thing (user, 2026-09-05, first time provisioning a C3: "we need
-// to make this much simpler"). The board itself already says which applies,
-// so this card asks it: connect, read `status` once over the USB API, and show
-// ONE next step from what came back (usbBoardIdentity.ts):
-//
-//   silent          blank board / other firmware / ROM download mode →
-//                   flash the release for its flash size and provision it
-//   unprovisioned   runs FrameOS, set up for no frame → apply this frame's
-//                   settings (no reflash)
-//   this frame      status line; "Update firmware, keep settings" and "Apply
-//                   settings" as the secondary actions
-//   other frame     say so; re-provisioning is an explicit, confirmed click
-//
-// The three flows keep their code (EmbeddedReleaseFlasher,
-// EmbeddedUsbFirmwareUpdate, and the Wi-Fi/restart/reset console verbs that
-// used to be EmbeddedUsbSetup); every decision lives in
-// embeddedUsbConnectLogic and this file is the template over it. It is the
-// same shape as the cloud's "Add frame" flasher (Esp32CloudFlasher): plug in,
-// one button, the browser does the rest.
-//
-// The cloud deploy drawer mounts the same card. There the "flash a blank
-// board" answer is the re-link panel underneath it (minting a claim token is
-// a cloud operation the shared bundle cannot do), so the card points at it.
+// The one USB card for an ESP32 frame, on both control planes. It reads the
+// board's `status` once and shows the next step (usbBoardIdentity.ts):
+//   silent         blank, other firmware or download mode: flash and set up
+//   unprovisioned  FrameOS with no frame: send this frame's settings
+//   this frame     status, firmware update, settings
+//   other frame    re-provision only after a confirm
+// Decisions live in embeddedUsbConnectLogic. On the cloud a blank board goes
+// to the re-link panel below the card instead.
 
 // fos_wifi_state_t in embedded/esp32/main/fos_wifi.h
 const WIFI_STATE_LABELS = ['offline', 'connecting', 'connected', 'captive portal'] as const
@@ -106,7 +86,7 @@ function WifiSection({ frame }: { frame: FrameType }): JSX.Element {
           {scanBusy ? 'Scanning' : 'Scan networks'}
         </button>
         <span className="frame-tool-muted text-xs leading-4">
-          The scan takes a few seconds and briefly drops the device's Wi-Fi.
+          Takes a few seconds. The board drops off Wi-Fi while it scans.
         </span>
       </div>
       {networks !== null ? (
@@ -181,8 +161,7 @@ function FirmwareUpdateSection({ frame, label }: { frame: FrameType; label: stri
     <div className="space-y-2">
       <SectionLabel>{label}</SectionLabel>
       <div className="frame-tool-muted text-xs leading-4">
-        Writes the latest published release around the board's settings partition, so it keeps its Wi-Fi, its identity
-        and every saved setting.
+        Installs the latest release. The board keeps its Wi-Fi and settings.
       </div>
       <EmbeddedUsbFirmwareUpdate frame={frame} onBusyChange={setUpdateBusy} label="Update firmware, keep settings" />
     </div>
@@ -249,11 +228,11 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
         <div className="text-sm leading-5 text-[color:var(--tool-strong)]">
           <span className="font-semibold">{identity.detail}</span>{' '}
           <span className="frame-tool-muted">
-            A blank board, one running other firmware, or one that reset into download mode all look like this.
+            It may be blank, running other firmware, or still starting up.
             {canProvision && releaseAvailable
-              ? ' Flash FrameOS onto it and set it up as this frame in one go:'
+              ? ' Flash FrameOS and set it up as this frame:'
               : cloudManaged
-              ? ' For a cloud frame, use “Re-link a wiped board” below — it flashes the release and enrolls the board as this frame in one go.'
+              ? ' To set it up as this frame, use “Re-link a wiped board” below.'
               : ''}
           </span>
         </div>
@@ -271,7 +250,7 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
             Read the board again
           </button>
           <span className="frame-tool-muted text-xs leading-4">
-            If the board is mid-boot, or the port picker listed two ports and this is the other one, try again.
+            Try again if the board was still starting, or pick the other port if there were two.
           </span>
         </div>
       </div>
@@ -282,13 +261,13 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
     return (
       <div className="space-y-3">
         <div className="text-sm leading-5 text-[color:var(--tool-strong)]">
-          <span className="font-semibold">This board runs {versionLine}, but is not set up as any frame yet.</span>{' '}
+          <span className="font-semibold">This board runs {versionLine} but is not set up as a frame yet.</span>{' '}
           <span className="frame-tool-muted">
             {canProvision
-              ? 'Send it this frame’s backend address, API key, panel, wiring and the rest of its settings over the cable:'
+              ? 'Send it this frame’s settings over USB:'
               : cloudManaged
-              ? 'Use “Re-link a wiped board” below to enroll it as this frame.'
-              : 'Provision it from the backend that manages this frame.'}
+              ? 'Use “Re-link a wiped board” below to set it up as this frame.'
+              : 'Set it up from the backend that manages this frame.'}
           </span>
         </div>
         {canProvision ? <ApplySettingsButton frame={frame} primary label="Set up as this frame" /> : null}
@@ -305,9 +284,9 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
             This board is {identity.label}, not “{frameName}”.
           </span>{' '}
           {canProvision
-            ? 'Nothing is changed until you say so. Re-provisioning makes it this frame and it stops being that one.'
+            ? 'Nothing changes unless you set it up as this frame. The other frame then loses it.'
             : cloudManaged
-            ? 'To make it this frame, use “Re-link a wiped board” below; that other frame loses the board.'
+            ? 'To use it as this frame, use “Re-link a wiped board” below. The other frame then loses it.'
             : ''}
         </div>
         {canProvision ? <ApplySettingsButton frame={frame} confirmForeign label="Re-provision as this frame" /> : null}
@@ -356,8 +335,7 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
         <div className="space-y-2">
           <SectionLabel>Settings</SectionLabel>
           <div className="frame-tool-muted text-xs leading-4">
-            Resend this frame’s backend address, API key, panel, wiring, buttons and hardware settings over USB and
-            restart — for when they changed here and the board is not on the network.
+            Send this frame’s settings to the board over USB and restart it. Useful when the board is offline.
           </div>
           <ApplySettingsButton frame={frame} label="Apply frame settings" />
         </div>
@@ -395,8 +373,6 @@ function MoreSection({ frame, manualFlashCommand }: { frame: FrameType; manualFl
         More
       </summary>
       <div className="mt-3 space-y-4">
-        {/* Wi-Fi shows inline above when this frame is off the network; here
-            it is the everything-else case. */}
         {boardRunsFrameOS && (!isThisFrame || (wifiConfigured && wifiConnected)) ? <WifiSection frame={frame} /> : null}
         {boardRunsFrameOS && !firmwareOutdated && (isThisFrame || isUnprovisioned) ? (
           <FirmwareUpdateSection
@@ -427,8 +403,8 @@ function MoreSection({ frame, manualFlashCommand }: { frame: FrameType; manualFl
           <div className="space-y-2">
             <SectionLabel>Start over</SectionLabel>
             <div className="frame-tool-muted text-xs leading-4">
-              Erase the whole chip, write the published release for its flash size and provision this frame from
-              scratch. Everything stored on the board is lost, including its Wi-Fi settings.
+              Erase the board, flash the latest release and set it up as this frame again. Everything on the board is
+              lost, including Wi-Fi.
             </div>
             <EmbeddedReleaseFlasher frame={frame} onBusyChange={setFlasherBusy} label="Erase & flash FrameOS again" />
           </div>
@@ -484,9 +460,7 @@ export function EmbeddedUsbConnect({
       <div>
         <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Connect over USB</div>
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Plug the board into this computer, connect, and the browser reads what is on it and offers the one thing to do
-          next — flash a blank board and set it up, finish setting up a fresh one, or update this frame. No network
-          needed.
+          Plug the board into this computer and connect. The browser checks what is on it and shows what to do next.
         </div>
       </div>
 
@@ -503,7 +477,7 @@ export function EmbeddedUsbConnect({
               : 'Connect over USB'}
           </button>
           <span className="frame-tool-muted text-xs leading-4">
-            If the port picker lists two ports, either works — “USB JTAG/serial debug unit” is the faster one.
+            If you see two ports, either works. “USB JTAG/serial debug unit” is faster.
           </span>
         </div>
       ) : (

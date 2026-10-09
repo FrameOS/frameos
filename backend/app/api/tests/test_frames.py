@@ -997,6 +997,39 @@ async def test_api_frame_get_image_returns_error_png_when_refresh_fails_without_
 
 
 @pytest.mark.asyncio
+async def test_api_frame_get_image_failure_is_logged_only_once_deployed(async_client, db, redis):
+    # A frame that was just added has no device answering yet: the failed
+    # fetch still returns the placeholder, but writes nothing to its log.
+    frame = await new_frame(db, redis, 'JustAddedFrame', 'frame70.local', 'localhost')
+    assert frame.status == 'uninitialized'
+    await redis.delete(frames_api._frame_image_cache_key(frame.id))
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        raise HTTPException(status_code=403, detail='Frame host is not allowed: frame70.local: does not resolve')
+
+    def fetch_errors() -> list[str]:
+        return [
+            entry.line
+            for entry in db.query(Log).filter(Log.frame_id == frame.id).all()
+            if entry.line.startswith('Error fetching image')
+        ]
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=1')
+    assert response.headers['x-frameos-image-state'] == 'error'
+    assert fetch_errors() == []
+
+    frame.status = 'ready'
+    frame.last_successful_deploy = {'frameos_version': '2026.10.0'}
+    db.add(frame)
+    db.commit()
+    await redis.delete(frames_api._frame_image_refresh_lock_key(frame.id))
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        await async_client.get(f'/api/frames/{frame.id}/image?t=2')
+    assert len(fetch_errors()) == 1
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_uses_redis_refresh_lock(async_client, db, redis):
     frame = await new_frame(db, redis, 'RedisLockedImageFrame', 'localhost', 'localhost')
     cache_key = frames_api._frame_image_cache_key(frame.id)
