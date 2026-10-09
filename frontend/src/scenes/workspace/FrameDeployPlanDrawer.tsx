@@ -122,11 +122,11 @@ function needsEsp32UsbJtagPortGuidance(frame: FrameType): boolean {
   const panel =
     frame.embedded?.layout?.ram?.panel || frame.embedded?.lastBoot?.panel || frame.device?.split('.').pop() || ''
   const hardwarePreset = frame.embedded?.hardwarePreset || frame.device_config?.hardwarePreset || ''
-  return (
-    panel === 'EPD_13in3e' ||
-    hardwarePreset === 'waveshare_esp32_s3_epaper_13_3e6' ||
-    frame.device === 'waveshare.EPD_13in3e'
-  )
+  // The reTerminal E1004 shares the 13.3" panel but has a single USB-UART port.
+  if (hardwarePreset) {
+    return hardwarePreset === 'waveshare_esp32_s3_epaper_13_3e6'
+  }
+  return panel === 'EPD_13in3e' || frame.device === 'waveshare.EPD_13in3e'
 }
 
 type EmbeddedFirmwareLayout = NonNullable<NonNullable<FrameType['embedded']>['layout']>

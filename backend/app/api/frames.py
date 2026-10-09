@@ -2497,6 +2497,13 @@ async def api_frame_get_image(
                 )
             return await _frame_image_placeholder_response(frame)
 
+        async def log_fetch_error(detail: str) -> None:
+            # A frame that was never deployed has no image to fetch yet, so
+            # the failure is expected and stays out of its log.
+            if frame.status == "uninitialized" and not frame.last_successful_deploy:
+                return
+            await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {detail}")
+
         # Use shared semaphore and client
         status = 0
         body = b""
@@ -2526,13 +2533,7 @@ async def api_frame_get_image(
                         media_type="image/png",
                         headers=await read_frame_sync_hint_headers(redis, frame.id),
                     )
-                await log(
-                    db,
-                    redis,
-                    id,
-                    "stderr",
-                    f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
-                )
+                await log_fetch_error(f"{status} {body.decode(errors='ignore')}")
                 return await _frame_image_error_response(frame, "Unable to fetch image", status)
 
         except httpx.ReadTimeout:
@@ -2542,13 +2543,7 @@ async def api_frame_get_image(
                     media_type="image/png",
                     headers=await read_frame_sync_hint_headers(redis, frame.id),
                 )
-            await log(
-                db,
-                redis,
-                id,
-                "stderr",
-                f"Error fetching image from frame {id}: request timeout",
-            )
+            await log_fetch_error("request timeout")
             return await _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
         except HTTPException as exc:
             if cached:
@@ -2557,13 +2552,7 @@ async def api_frame_get_image(
                     media_type="image/png",
                     headers=await read_frame_sync_hint_headers(redis, frame.id),
                 )
-            await log(
-                db,
-                redis,
-                id,
-                "stderr",
-                f"Error fetching image from frame {id}: {exc.status_code}: {exc.detail}",
-            )
+            await log_fetch_error(f"{exc.status_code}: {exc.detail}")
             return await _frame_image_error_response(frame, str(exc.detail), exc.status_code)
         except Exception as e:
             if cached:
@@ -2572,13 +2561,7 @@ async def api_frame_get_image(
                     media_type="image/png",
                     headers=await read_frame_sync_hint_headers(redis, frame.id),
                 )
-            await log(
-                db,
-                redis,
-                id,
-                "stderr",
-                f"Error fetching image from frame {id}: {str(e)}",
-            )
+            await log_fetch_error(str(e))
             return await _frame_image_error_response(frame, str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
         finally:
             if refresh_lock_acquired:
