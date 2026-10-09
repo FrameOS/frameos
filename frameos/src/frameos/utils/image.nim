@@ -1388,6 +1388,26 @@ const PointerAxisMax* = PointerWireMax
   ## input device reports (drivers/evdev/pointer.nim scales to it) — and
   ## whatever the browser preview's canvas measures.
 
+proc drawCursor*(image: Image, x, y: int) =
+  ## A mouse cursor at (x, y): the usual arrow, white with a black outline so
+  ## it reads on any picture, sized to the screen (a 4K panel's cursor is not
+  ## a 480-pixel panel's).
+  if image.isNil or image.width <= 0 or image.height <= 0:
+    return
+  let size = max(12.0, min(image.width, image.height).float / 24.0)
+  let path = newPath()
+  path.moveTo(0, 0)
+  path.lineTo(0, size * 1.0)
+  path.lineTo(size * 0.27, size * 0.77)
+  path.lineTo(size * 0.45, size * 1.12)
+  path.lineTo(size * 0.6, size * 1.05)
+  path.lineTo(size * 0.42, size * 0.7)
+  path.lineTo(size * 0.72, size * 0.7)
+  path.closePath()
+  let transform = translate(vec2(x.float32, y.float32))
+  image.fillPath(path, rgba(255, 255, 255, 255), transform)
+  image.strokePath(path, rgba(0, 0, 0, 255), transform, strokeWidth = max(1.0, size / 12.0))
+
 proc pointerToScenePoint*(pointerX, pointerY, width, height, rotate: int, flip: string): tuple[x: int, y: int] =
   ## A `mouseMove` position (0..PointerAxisMax across the `width` x `height`
   ## panel) as a pixel on the scene's canvas. The runner and the wasm preview

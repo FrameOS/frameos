@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
+  ArrowDownTrayIcon,
   ArrowUpTrayIcon,
   ArrowLeftIcon,
   ArrowUturnLeftIcon,
@@ -54,6 +55,7 @@ import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
+import { fleetUpdateLogic } from './fleetUpdateLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
@@ -199,7 +201,12 @@ function FrameTree(): JSX.Element {
             expandedFrameId={expandedFrameId}
             onSelect={handleFrameClick}
             onOpen={handleFrameDoubleClick}
-            action={<SidebarAddFrameButton />}
+            action={
+              <>
+                <SidebarUpdateAllButton />
+                <SidebarAddFrameButton />
+              </>
+            }
           />
           <FrameTreeGroup
             title="Inactive"
@@ -422,6 +429,39 @@ function SidebarAddFrameButton(): JSX.Element | null {
       className="frameos-icon-button flex h-5 w-5 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
     >
       <PlusIcon className="h-3.5 w-3.5" />
+    </button>
+  )
+}
+
+/**
+ * "Update all", between the Active title and the "+": shown while one or
+ * more active frames are only a FrameOS release behind with nothing queued
+ * for them yet, it asks each of them to update in turn (fleetUpdateLogic)
+ * and spins until the last request went out. A click while it spins does
+ * nothing.
+ */
+function SidebarUpdateAllButton(): JSX.Element | null {
+  const { framesNeedingUpdate, updatingAll, updateAllTitle } = useValues(fleetUpdateLogic)
+  const { updateAllFrames } = useActions(fleetUpdateLogic)
+
+  if (workspaceMode() === 'frameAdmin' || (framesNeedingUpdate.length === 0 && !updatingAll)) {
+    return null
+  }
+
+  const title = updatingAll ? 'Starting the updates, one frame at a time' : updateAllTitle
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-busy={updatingAll}
+      data-testid="sidebar-update-all"
+      disabled={updatingAll}
+      onClick={updateAllFrames}
+      className="frameos-icon-button flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-default disabled:hover:bg-transparent"
+    >
+      {updatingAll ? <Spinner className="h-3.5 w-3.5" /> : <ArrowDownTrayIcon className="h-3.5 w-3.5" />}
+      <span>Update all</span>
     </button>
   )
 }

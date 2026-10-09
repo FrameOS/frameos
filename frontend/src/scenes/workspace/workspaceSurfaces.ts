@@ -214,6 +214,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-qr',
     'frame-settings-assets',
     'frame-settings-gpio',
+    'frame-settings-input',
     'frame-settings-logs',
     'frame-settings-reboot',
   ],
@@ -242,6 +243,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-qr',
     'frame-settings-assets',
     'frame-settings-gpio',
+    'frame-settings-input',
     'frame-settings-logs',
   ],
   // A cloud-managed frame renders only what the cloud can actually save: the
@@ -261,6 +263,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-defaults',
     'frame-settings-error-behavior',
     'frame-settings-qr',
+    // Input (keyboard layout, keyboard grab, button roles): Linux frames on
+    // 2026.9.23 or newer, disabled with a note below that.
+    'frame-settings-input',
     'frame-settings-power',
     // The account's SSH keys, written into SD cards built for this frame
     // (cloud Linux frames only; FrameSettings skips it on an ESP32).

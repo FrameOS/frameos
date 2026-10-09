@@ -1,0 +1,376 @@
+{
+  "id": "inputKeyboard",
+  "name": "Keyboard test",
+  "nodes": [
+    {
+      "id": "68e1dcaf-c6e7-52f9-bff6-920107d5fca2",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "b498d1ac-a122-56bc-b32c-e95cdabc039d",
+      "type": "app",
+      "position": {
+        "x": 340,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "position": "left",
+          "vAlign": "top",
+          "fontSize": "32",
+          "fontColor": "#000000",
+          "borderWidth": "0",
+          "padding": "16"
+        }
+      },
+      "width": 300,
+      "height": 180
+    },
+    {
+      "id": "acf60ca0-34f7-5dea-9782-7eab8031c4ff",
+      "type": "code",
+      "position": {
+        "x": 340,
+        "y": -140
+      },
+      "data": {
+        "code": "",
+        "codeJS": "`${state.text || ''}_\\n\\nlast key: ${state.lastKey}\\n${state.count || 0} keys`",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "text",
+            "type": "string"
+          }
+        ]
+      },
+      "width": 300,
+      "height": 110
+    },
+    {
+      "id": "fcb9a54b-1c7e-5f2f-a72d-1935b6669cea",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 300
+      },
+      "data": {
+        "keyword": "keyDown"
+      },
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "3fb7cec5-d866-5ded-b03f-0afb736ff967",
+      "type": "app",
+      "position": {
+        "x": 340,
+        "y": 300
+      },
+      "data": {
+        "keyword": "logic/setAsState",
+        "config": {
+          "stateKey": "lastKey"
+        }
+      },
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "14fb89d4-45d0-59ee-b4a1-cf83693325dc",
+      "type": "code",
+      "position": {
+        "x": 340,
+        "y": 180
+      },
+      "data": {
+        "code": "",
+        "codeJS": "`${context.payload.ctrl ? 'Ctrl+' : ''}${context.payload.alt ? 'Alt+' : ''}${context.payload.meta ? 'Meta+' : ''}${context.payload.key} (${context.payload.code}${context.payload.repeat ? ', repeat' : ''})`",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "valueJson",
+            "type": "json"
+          }
+        ]
+      },
+      "width": 300,
+      "height": 110
+    },
+    {
+      "id": "cea433c5-cb5a-545e-9216-6f1ae769aa5b",
+      "type": "app",
+      "position": {
+        "x": 700,
+        "y": 300
+      },
+      "data": {
+        "keyword": "logic/setAsState",
+        "config": {
+          "stateKey": "text"
+        }
+      },
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "16031593-4f88-5972-815d-a95707a5d04f",
+      "type": "code",
+      "position": {
+        "x": 700,
+        "y": 180
+      },
+      "data": {
+        "code": "",
+        "codeJS": "context.payload.key === 'Backspace' ? String(state.text || '').slice(0, -1) : context.payload.key === 'Enter' ? (state.text || '') + '\\n' : context.payload.key === 'Escape' ? '' : (state.text || '')",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "valueJson",
+            "type": "json"
+          }
+        ]
+      },
+      "width": 300,
+      "height": 110
+    },
+    {
+      "id": "f5e5a728-d380-51e4-b7cf-3cb3eba81ecd",
+      "type": "app",
+      "position": {
+        "x": 1060,
+        "y": 300
+      },
+      "data": {
+        "keyword": "logic/setAsState",
+        "config": {
+          "stateKey": "count"
+        }
+      },
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "c76f4e32-b84a-58bb-bc6f-a9f2ec26c7e1",
+      "type": "code",
+      "position": {
+        "x": 1060,
+        "y": 180
+      },
+      "data": {
+        "code": "",
+        "codeJS": "(state.count || 0) + 1",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "valueJson",
+            "type": "json"
+          }
+        ]
+      },
+      "width": 300,
+      "height": 110
+    },
+    {
+      "id": "ff23286c-8103-5830-b4e7-7970103e1b63",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 600
+      },
+      "data": {
+        "keyword": "textInput"
+      },
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "87c318ef-0647-5756-9b86-1dce89f6883a",
+      "type": "app",
+      "position": {
+        "x": 340,
+        "y": 600
+      },
+      "data": {
+        "keyword": "logic/setAsState",
+        "config": {
+          "stateKey": "text"
+        }
+      },
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "5768a05a-8b4a-50f6-81e9-f9cfcfa39b99",
+      "type": "code",
+      "position": {
+        "x": 340,
+        "y": 480
+      },
+      "data": {
+        "code": "",
+        "codeJS": "(state.text || '') + context.payload.text",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "valueJson",
+            "type": "json"
+          }
+        ]
+      },
+      "width": 300,
+      "height": 110
+    }
+  ],
+  "edges": [
+    {
+      "id": "7a886d03-6fc3-5d66-bda5-1a9d8c82e748",
+      "source": "68e1dcaf-c6e7-52f9-bff6-920107d5fca2",
+      "sourceHandle": "next",
+      "target": "b498d1ac-a122-56bc-b32c-e95cdabc039d",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "60b70849-5d18-5ec2-bde9-2779c270d490",
+      "source": "acf60ca0-34f7-5dea-9782-7eab8031c4ff",
+      "sourceHandle": "fieldOutput",
+      "target": "b498d1ac-a122-56bc-b32c-e95cdabc039d",
+      "targetHandle": "fieldInput/text",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "3918745c-54db-54bc-8a9e-31fc503f3ab8",
+      "source": "fcb9a54b-1c7e-5f2f-a72d-1935b6669cea",
+      "sourceHandle": "next",
+      "target": "3fb7cec5-d866-5ded-b03f-0afb736ff967",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "a54221a6-0cef-544f-90a7-7640feca3c47",
+      "source": "14fb89d4-45d0-59ee-b4a1-cf83693325dc",
+      "sourceHandle": "fieldOutput",
+      "target": "3fb7cec5-d866-5ded-b03f-0afb736ff967",
+      "targetHandle": "fieldInput/valueJson",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "da834daf-8889-59f8-aac5-903da807d7b2",
+      "source": "3fb7cec5-d866-5ded-b03f-0afb736ff967",
+      "sourceHandle": "next",
+      "target": "cea433c5-cb5a-545e-9216-6f1ae769aa5b",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "47622198-8405-5723-ab9f-d6e50308e5ee",
+      "source": "16031593-4f88-5972-815d-a95707a5d04f",
+      "sourceHandle": "fieldOutput",
+      "target": "cea433c5-cb5a-545e-9216-6f1ae769aa5b",
+      "targetHandle": "fieldInput/valueJson",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "73c7096a-05bc-5bcc-a9bf-677d25047b99",
+      "source": "cea433c5-cb5a-545e-9216-6f1ae769aa5b",
+      "sourceHandle": "next",
+      "target": "f5e5a728-d380-51e4-b7cf-3cb3eba81ecd",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "dc5d99a9-a1ed-5855-b91c-eed3e12ac740",
+      "source": "c76f4e32-b84a-58bb-bc6f-a9f2ec26c7e1",
+      "sourceHandle": "fieldOutput",
+      "target": "f5e5a728-d380-51e4-b7cf-3cb3eba81ecd",
+      "targetHandle": "fieldInput/valueJson",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "b6aad091-5b47-5532-8a5e-a1ba16ee6954",
+      "source": "ff23286c-8103-5830-b4e7-7970103e1b63",
+      "sourceHandle": "next",
+      "target": "87c318ef-0647-5756-9b86-1dce89f6883a",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "e8ea8fa8-8e53-5bc7-bcb4-6759e15ad0b6",
+      "source": "5768a05a-8b4a-50f6-81e9-f9cfcfa39b99",
+      "sourceHandle": "fieldOutput",
+      "target": "87c318ef-0647-5756-9b86-1dce89f6883a",
+      "targetHandle": "fieldInput/valueJson",
+      "type": "codeNodeEdge"
+    }
+  ],
+  "fields": [
+    {
+      "name": "text",
+      "label": "Typed text",
+      "type": "string",
+      "value": "",
+      "access": "public",
+      "persist": "memory"
+    },
+    {
+      "name": "lastKey",
+      "label": "Last key",
+      "type": "string",
+      "value": "Type on a keyboard plugged into the frame",
+      "access": "public",
+      "persist": "memory"
+    },
+    {
+      "name": "count",
+      "label": "Keys seen",
+      "type": "integer",
+      "value": "0",
+      "access": "public",
+      "persist": "memory"
+    }
+  ],
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#ffffff"
+  },
+  "e2eEvents": [
+    {
+      "event": "keyDown",
+      "payload": {
+        "code": "KeyH",
+        "shift": true
+      }
+    },
+    {
+      "event": "keyDown",
+      "payload": {
+        "code": "KeyI"
+      }
+    },
+    {
+      "event": "keyDown",
+      "payload": {
+        "code": "Digit1",
+        "shift": true
+      }
+    },
+    {
+      "event": "keyDown",
+      "payload": {
+        "code": "ArrowLeft"
+      }
+    }
+  ]
+}

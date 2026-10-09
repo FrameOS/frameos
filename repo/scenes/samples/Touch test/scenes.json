@@ -1,0 +1,1681 @@
+[
+  {
+    "id": "touch-test",
+    "name": "Touch test",
+    "nodes": [
+      {
+        "id": "349de295-1046-54bb-9e2a-9734a5e20b96",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "c514f821-ae7e-5f11-8ad1-0aecf05f07a0",
+        "type": "app",
+        "position": {
+          "x": 340,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/svg",
+          "config": {
+            "placement": "cover"
+          }
+        },
+        "width": 300,
+        "height": 180
+      },
+      {
+        "id": "fdf5996c-b3b4-52e5-b34a-d029abd09ad4",
+        "type": "code",
+        "position": {
+          "x": 340,
+          "y": -140
+        },
+        "data": {
+          "code": "",
+          "codeJS": "`<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${context.imageWidth}\" height=\"${context.imageHeight}\" viewBox=\"0 0 ${context.imageWidth} ${context.imageHeight}\"><rect x=\"0\" y=\"0\" width=\"${context.imageWidth}\" height=\"${context.imageHeight}\" fill=\"#ffffff\"/><line x1=\"${state.x}\" y1=\"0\" x2=\"${state.x}\" y2=\"${context.imageHeight}\" stroke=\"#c8c8c8\" stroke-width=\"1\"/><line x1=\"0\" y1=\"${state.y}\" x2=\"${context.imageWidth}\" y2=\"${state.y}\" stroke=\"#c8c8c8\" stroke-width=\"1\"/><circle cx=\"${state.x}\" cy=\"${state.y}\" r=\"${Math.max(6, Math.round(Math.min(context.imageWidth, context.imageHeight) / 24))}\" fill=\"${state.down ? '#d13c3c' : '#2f6fe0'}\"/></svg>`",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "svg",
+              "type": "string"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "06895e68-615c-555f-a840-d1700df85b35",
+        "type": "app",
+        "position": {
+          "x": 700,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "position": "left",
+            "vAlign": "top",
+            "fontSize": "28",
+            "fontColor": "#000000",
+            "borderWidth": "0",
+            "padding": "12"
+          }
+        },
+        "width": 300,
+        "height": 180
+      },
+      {
+        "id": "8f868933-5f2f-52ef-b7da-c116b08a260f",
+        "type": "code",
+        "position": {
+          "x": 700,
+          "y": -140
+        },
+        "data": {
+          "code": "",
+          "codeJS": "`${state.last}\\nx ${state.x}  y ${state.y}\\n${state.count} events`",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "f537bcb0-39bb-5825-9f4a-38bd2d4af434",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 300
+        },
+        "data": {
+          "keyword": "pointerDown"
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "652cd745-a63f-5d32-bb8c-8c7a023ba89a",
+        "type": "app",
+        "position": {
+          "x": 340,
+          "y": 300
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "x"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "3b7b4e62-a62d-5b4c-a6e6-399fc3861e97",
+        "type": "code",
+        "position": {
+          "x": 340,
+          "y": 180
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.x",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "b9099314-747b-53c2-8a60-44bdd17c24ff",
+        "type": "app",
+        "position": {
+          "x": 700,
+          "y": 300
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "y"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "03c413ef-d9d6-5294-b68a-346ea2eacb2c",
+        "type": "code",
+        "position": {
+          "x": 700,
+          "y": 180
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.y",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "ae16b60f-fabe-5f5e-b9eb-392ddc748946",
+        "type": "app",
+        "position": {
+          "x": 1060,
+          "y": 300
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "last"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "1b3d04b1-1238-59a9-b960-57a3c55ad4e5",
+        "type": "code",
+        "position": {
+          "x": 1060,
+          "y": 180
+        },
+        "data": {
+          "code": "",
+          "codeJS": "`pointerDown (${context.payload.pointerType} ${context.payload.pointerId}, button ${context.payload.button})`",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "04a2f7c3-9b1d-572e-8d8d-ef0e5894200e",
+        "type": "app",
+        "position": {
+          "x": 1420,
+          "y": 300
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "count"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "2a056915-9722-5525-a391-295d501da476",
+        "type": "code",
+        "position": {
+          "x": 1420,
+          "y": 180
+        },
+        "data": {
+          "code": "",
+          "codeJS": "(state.count || 0) + 1",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "8baa54d0-6b7c-56e9-9616-88b773f3fed7",
+        "type": "app",
+        "position": {
+          "x": 1780,
+          "y": 300
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "down"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "099a5efb-4b7b-5632-9266-92a3278c2ab2",
+        "type": "code",
+        "position": {
+          "x": 1780,
+          "y": 180
+        },
+        "data": {
+          "code": "",
+          "codeJS": "true",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "529435ab-ce73-59e1-ae9e-18f4e7ff9581",
+        "type": "dispatch",
+        "position": {
+          "x": 2140,
+          "y": 300
+        },
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "width": 260,
+        "height": 40
+      },
+      {
+        "id": "dd5fad8f-cc8f-5806-aa4b-4dec4f60946e",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 600
+        },
+        "data": {
+          "keyword": "pointerUp"
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "dca15f0f-a096-5d0d-b5ac-9079565b69f2",
+        "type": "app",
+        "position": {
+          "x": 340,
+          "y": 600
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "x"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "b92b0fee-dfdc-5f14-849b-f73db91573a5",
+        "type": "code",
+        "position": {
+          "x": 340,
+          "y": 480
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.x",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "7a37156c-2cdd-52f0-9038-4240ddb8df5a",
+        "type": "app",
+        "position": {
+          "x": 700,
+          "y": 600
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "y"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "0c93b8d9-3e5f-56ac-a15e-2401b05453ad",
+        "type": "code",
+        "position": {
+          "x": 700,
+          "y": 480
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.y",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "ed2e0ad7-01e0-585d-94c8-be7871e5bb18",
+        "type": "app",
+        "position": {
+          "x": 1060,
+          "y": 600
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "last"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "eca21b37-0f70-5dbd-80b0-dbcd8ac17bab",
+        "type": "code",
+        "position": {
+          "x": 1060,
+          "y": 480
+        },
+        "data": {
+          "code": "",
+          "codeJS": "`pointerUp (${context.payload.pointerType} ${context.payload.pointerId})`",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "01159b96-f1f0-579c-a1ae-4baf425ac154",
+        "type": "app",
+        "position": {
+          "x": 1420,
+          "y": 600
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "count"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "595a3c84-52ac-5ed5-bb7d-101ad552e5de",
+        "type": "code",
+        "position": {
+          "x": 1420,
+          "y": 480
+        },
+        "data": {
+          "code": "",
+          "codeJS": "(state.count || 0) + 1",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "3eb6d341-3f23-5bd8-9453-14ca8c545e61",
+        "type": "app",
+        "position": {
+          "x": 1780,
+          "y": 600
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "down"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "b9759e74-49ff-5247-966b-739912eddf17",
+        "type": "code",
+        "position": {
+          "x": 1780,
+          "y": 480
+        },
+        "data": {
+          "code": "",
+          "codeJS": "false",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "c14d9b51-0a63-55bc-87d9-ea992d445567",
+        "type": "dispatch",
+        "position": {
+          "x": 2140,
+          "y": 600
+        },
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "width": 260,
+        "height": 40
+      },
+      {
+        "id": "53fc13a6-5a61-5715-b493-03256c9fed30",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 900
+        },
+        "data": {
+          "keyword": "tap"
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "81cafe16-7888-5863-b9df-9db68d41e7a0",
+        "type": "app",
+        "position": {
+          "x": 340,
+          "y": 900
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "x"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "1ba1a6ff-dbda-5c8d-ba18-ff0ff45d7bb8",
+        "type": "code",
+        "position": {
+          "x": 340,
+          "y": 780
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.x",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "c1986ded-c303-58e2-9095-09e75fa68371",
+        "type": "app",
+        "position": {
+          "x": 700,
+          "y": 900
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "y"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "73ae4933-3120-595c-ad2c-488be70283de",
+        "type": "code",
+        "position": {
+          "x": 700,
+          "y": 780
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.y",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "49f5a2df-7e8b-54f3-9347-5e12e33cad8f",
+        "type": "app",
+        "position": {
+          "x": 1060,
+          "y": 900
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "last"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "086ab4c7-6bdb-5abf-8369-fc2b44b5b42b",
+        "type": "code",
+        "position": {
+          "x": 1060,
+          "y": 780
+        },
+        "data": {
+          "code": "",
+          "codeJS": "'tap'",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "48b548a9-dc6a-53a5-a309-1fe4a519b9c1",
+        "type": "app",
+        "position": {
+          "x": 1420,
+          "y": 900
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "count"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "7f423b18-9931-5430-a0e2-ad0566507cf1",
+        "type": "code",
+        "position": {
+          "x": 1420,
+          "y": 780
+        },
+        "data": {
+          "code": "",
+          "codeJS": "(state.count || 0) + 1",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "2683ca94-6df4-5b4e-aef7-0c3a03de5a61",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1200
+        },
+        "data": {
+          "keyword": "doubleTap"
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "13a1db86-378c-5685-87fb-7ca765f9095b",
+        "type": "app",
+        "position": {
+          "x": 340,
+          "y": 1200
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "x"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "e9b40dce-ceaa-5f0a-b737-ed437f706c07",
+        "type": "code",
+        "position": {
+          "x": 340,
+          "y": 1080
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.x",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "726512eb-ff84-5b3f-8e47-39a7c9415b55",
+        "type": "app",
+        "position": {
+          "x": 700,
+          "y": 1200
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "y"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "59df4709-bcbd-51b6-a9d3-aacd1685269c",
+        "type": "code",
+        "position": {
+          "x": 700,
+          "y": 1080
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.y",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "e2578971-035e-51de-b1c5-dc78ddb495d8",
+        "type": "app",
+        "position": {
+          "x": 1060,
+          "y": 1200
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "last"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "74389bf2-2047-5948-85d2-58a60a4f3ac5",
+        "type": "code",
+        "position": {
+          "x": 1060,
+          "y": 1080
+        },
+        "data": {
+          "code": "",
+          "codeJS": "'doubleTap'",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "2a3bc775-d6fb-53ae-a5eb-2b65b7d6a7cb",
+        "type": "app",
+        "position": {
+          "x": 1420,
+          "y": 1200
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "count"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "7534eee4-80fc-5735-8c0b-d4d6d2cc2fde",
+        "type": "code",
+        "position": {
+          "x": 1420,
+          "y": 1080
+        },
+        "data": {
+          "code": "",
+          "codeJS": "(state.count || 0) + 1",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "5403d2e2-4057-55be-b5a3-881e7ac34e50",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1500
+        },
+        "data": {
+          "keyword": "longPress"
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "a3cca1f4-664e-5b90-86c7-c68eedfd9735",
+        "type": "app",
+        "position": {
+          "x": 340,
+          "y": 1500
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "x"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "a4119015-3edc-58b3-9602-c8b8a9b809ad",
+        "type": "code",
+        "position": {
+          "x": 340,
+          "y": 1380
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.x",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "c63f12e5-9fd1-55c2-bbc3-433a27e0c288",
+        "type": "app",
+        "position": {
+          "x": 700,
+          "y": 1500
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "y"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "1f02444b-8520-5605-a0b4-3e4b6f862a57",
+        "type": "code",
+        "position": {
+          "x": 700,
+          "y": 1380
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.y",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "8ca1570f-f530-5a8f-90d0-580f67626988",
+        "type": "app",
+        "position": {
+          "x": 1060,
+          "y": 1500
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "last"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "3c98a2b8-7c0c-5e9f-b7bd-135e3556906f",
+        "type": "code",
+        "position": {
+          "x": 1060,
+          "y": 1380
+        },
+        "data": {
+          "code": "",
+          "codeJS": "`longPress (${context.payload.durationMs} ms)`",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "13380e88-52bb-5a01-871d-b4ba18099c66",
+        "type": "app",
+        "position": {
+          "x": 1420,
+          "y": 1500
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "count"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "2404e3c2-9bb1-5757-b215-ff02c93ce404",
+        "type": "code",
+        "position": {
+          "x": 1420,
+          "y": 1380
+        },
+        "data": {
+          "code": "",
+          "codeJS": "(state.count || 0) + 1",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "42457173-bdae-59e0-836d-ce148ec42318",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1800
+        },
+        "data": {
+          "keyword": "swipe"
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "7cddf0e7-98aa-5c5e-aa7d-171e1c84828b",
+        "type": "app",
+        "position": {
+          "x": 340,
+          "y": 1800
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "x"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "90bd8014-98d0-5e3e-8fb1-8075e987e6db",
+        "type": "code",
+        "position": {
+          "x": 340,
+          "y": 1680
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.x",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "29fd6705-4f72-5e30-bc96-f46edfdc3e2a",
+        "type": "app",
+        "position": {
+          "x": 700,
+          "y": 1800
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "y"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "5aa34a83-5d8e-51e4-a0d4-ca38b4f8cca8",
+        "type": "code",
+        "position": {
+          "x": 700,
+          "y": 1680
+        },
+        "data": {
+          "code": "",
+          "codeJS": "context.payload.y",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "2c357ec9-e583-5786-ba04-7e4f6a5fd851",
+        "type": "app",
+        "position": {
+          "x": 1060,
+          "y": 1800
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "last"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "5939fc2f-da95-59e3-92f1-350937300924",
+        "type": "code",
+        "position": {
+          "x": 1060,
+          "y": 1680
+        },
+        "data": {
+          "code": "",
+          "codeJS": "`swipe ${context.payload.direction}`",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      },
+      {
+        "id": "8cc37ce2-13e3-569f-8f28-109805c54adc",
+        "type": "app",
+        "position": {
+          "x": 1420,
+          "y": 1800
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "count"
+          }
+        },
+        "width": 260,
+        "height": 120
+      },
+      {
+        "id": "eaa26774-1cce-520d-aaa6-c6c62df36750",
+        "type": "code",
+        "position": {
+          "x": 1420,
+          "y": 1680
+        },
+        "data": {
+          "code": "",
+          "codeJS": "(state.count || 0) + 1",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "valueJson",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 300,
+        "height": 110
+      }
+    ],
+    "edges": [
+      {
+        "id": "9a3d2c6d-052c-5690-a5f4-02572301f960",
+        "source": "349de295-1046-54bb-9e2a-9734a5e20b96",
+        "sourceHandle": "next",
+        "target": "c514f821-ae7e-5f11-8ad1-0aecf05f07a0",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "79afab9a-6c01-5063-8069-e11223055b45",
+        "source": "fdf5996c-b3b4-52e5-b34a-d029abd09ad4",
+        "sourceHandle": "fieldOutput",
+        "target": "c514f821-ae7e-5f11-8ad1-0aecf05f07a0",
+        "targetHandle": "fieldInput/svg",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "067ba9d6-8b5f-5b0f-904a-1fe661e76ed2",
+        "source": "c514f821-ae7e-5f11-8ad1-0aecf05f07a0",
+        "sourceHandle": "next",
+        "target": "06895e68-615c-555f-a840-d1700df85b35",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "5e754199-a35c-5d05-a979-121ef6c89b70",
+        "source": "8f868933-5f2f-52ef-b7da-c116b08a260f",
+        "sourceHandle": "fieldOutput",
+        "target": "06895e68-615c-555f-a840-d1700df85b35",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "304a2de4-ae33-547f-bb7f-79dff77e09ff",
+        "source": "f537bcb0-39bb-5825-9f4a-38bd2d4af434",
+        "sourceHandle": "next",
+        "target": "652cd745-a63f-5d32-bb8c-8c7a023ba89a",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "468b7217-30af-5ca0-ac09-8c9ffd8db1b3",
+        "source": "3b7b4e62-a62d-5b4c-a6e6-399fc3861e97",
+        "sourceHandle": "fieldOutput",
+        "target": "652cd745-a63f-5d32-bb8c-8c7a023ba89a",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "c1d1b3d6-ab1c-543b-ba72-3f72bebc061b",
+        "source": "652cd745-a63f-5d32-bb8c-8c7a023ba89a",
+        "sourceHandle": "next",
+        "target": "b9099314-747b-53c2-8a60-44bdd17c24ff",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6dee917f-8423-5f67-a2e9-34a531cab83e",
+        "source": "03c413ef-d9d6-5294-b68a-346ea2eacb2c",
+        "sourceHandle": "fieldOutput",
+        "target": "b9099314-747b-53c2-8a60-44bdd17c24ff",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "64ded207-3648-521b-a1b6-8223b0aace06",
+        "source": "b9099314-747b-53c2-8a60-44bdd17c24ff",
+        "sourceHandle": "next",
+        "target": "ae16b60f-fabe-5f5e-b9eb-392ddc748946",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "dfaecc08-0733-51e5-946c-319ebdaf6bc9",
+        "source": "1b3d04b1-1238-59a9-b960-57a3c55ad4e5",
+        "sourceHandle": "fieldOutput",
+        "target": "ae16b60f-fabe-5f5e-b9eb-392ddc748946",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "7454ef65-655b-57cd-beb1-ad68efa89d3b",
+        "source": "ae16b60f-fabe-5f5e-b9eb-392ddc748946",
+        "sourceHandle": "next",
+        "target": "04a2f7c3-9b1d-572e-8d8d-ef0e5894200e",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "a1679db1-8535-5f0f-8b7c-01e28a3860e6",
+        "source": "2a056915-9722-5525-a391-295d501da476",
+        "sourceHandle": "fieldOutput",
+        "target": "04a2f7c3-9b1d-572e-8d8d-ef0e5894200e",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "9f815f8e-af19-597a-9c81-c0a446c0c921",
+        "source": "04a2f7c3-9b1d-572e-8d8d-ef0e5894200e",
+        "sourceHandle": "next",
+        "target": "8baa54d0-6b7c-56e9-9616-88b773f3fed7",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "549b48eb-d12f-524d-8366-de9a04eb9e23",
+        "source": "099a5efb-4b7b-5632-9266-92a3278c2ab2",
+        "sourceHandle": "fieldOutput",
+        "target": "8baa54d0-6b7c-56e9-9616-88b773f3fed7",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "270a99a1-41a4-5793-9d1b-2698ae08f1af",
+        "source": "8baa54d0-6b7c-56e9-9616-88b773f3fed7",
+        "sourceHandle": "next",
+        "target": "529435ab-ce73-59e1-ae9e-18f4e7ff9581",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "7d0629f4-74eb-5eff-8f09-a8d981762e4b",
+        "source": "dd5fad8f-cc8f-5806-aa4b-4dec4f60946e",
+        "sourceHandle": "next",
+        "target": "dca15f0f-a096-5d0d-b5ac-9079565b69f2",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "d61159ba-cf63-5e0f-8583-9cb9a9dd85fa",
+        "source": "b92b0fee-dfdc-5f14-849b-f73db91573a5",
+        "sourceHandle": "fieldOutput",
+        "target": "dca15f0f-a096-5d0d-b5ac-9079565b69f2",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "b36471ae-f9c1-5529-826e-7002beaa89a8",
+        "source": "dca15f0f-a096-5d0d-b5ac-9079565b69f2",
+        "sourceHandle": "next",
+        "target": "7a37156c-2cdd-52f0-9038-4240ddb8df5a",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6bc80ea2-1cdf-5d82-8686-f4cadffb71a2",
+        "source": "0c93b8d9-3e5f-56ac-a15e-2401b05453ad",
+        "sourceHandle": "fieldOutput",
+        "target": "7a37156c-2cdd-52f0-9038-4240ddb8df5a",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "5c892750-b834-5476-aa37-7f5763892fb1",
+        "source": "7a37156c-2cdd-52f0-9038-4240ddb8df5a",
+        "sourceHandle": "next",
+        "target": "ed2e0ad7-01e0-585d-94c8-be7871e5bb18",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "4f434156-c5c0-5d24-b7f7-b5cccdf0423b",
+        "source": "eca21b37-0f70-5dbd-80b0-dbcd8ac17bab",
+        "sourceHandle": "fieldOutput",
+        "target": "ed2e0ad7-01e0-585d-94c8-be7871e5bb18",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "ce7b837b-6d52-538d-831a-473b94713f14",
+        "source": "ed2e0ad7-01e0-585d-94c8-be7871e5bb18",
+        "sourceHandle": "next",
+        "target": "01159b96-f1f0-579c-a1ae-4baf425ac154",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "5a79c951-c5e2-5978-b6d1-ec0c361b29c1",
+        "source": "595a3c84-52ac-5ed5-bb7d-101ad552e5de",
+        "sourceHandle": "fieldOutput",
+        "target": "01159b96-f1f0-579c-a1ae-4baf425ac154",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "84904deb-b493-515d-be31-cd9f8829b61b",
+        "source": "01159b96-f1f0-579c-a1ae-4baf425ac154",
+        "sourceHandle": "next",
+        "target": "3eb6d341-3f23-5bd8-9453-14ca8c545e61",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "b178a999-1a09-56bd-8e22-873d3bef52bb",
+        "source": "b9759e74-49ff-5247-966b-739912eddf17",
+        "sourceHandle": "fieldOutput",
+        "target": "3eb6d341-3f23-5bd8-9453-14ca8c545e61",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "29f88ed9-24ca-59c4-b97a-034b60a0e68c",
+        "source": "3eb6d341-3f23-5bd8-9453-14ca8c545e61",
+        "sourceHandle": "next",
+        "target": "c14d9b51-0a63-55bc-87d9-ea992d445567",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "5052a297-6b6f-555e-843b-c677ac2a614c",
+        "source": "53fc13a6-5a61-5715-b493-03256c9fed30",
+        "sourceHandle": "next",
+        "target": "81cafe16-7888-5863-b9df-9db68d41e7a0",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "d88dd004-1993-5f13-8faf-29dd957344cc",
+        "source": "1ba1a6ff-dbda-5c8d-ba18-ff0ff45d7bb8",
+        "sourceHandle": "fieldOutput",
+        "target": "81cafe16-7888-5863-b9df-9db68d41e7a0",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "24e1c7ac-afdd-5eb9-b4f7-beac02605bf2",
+        "source": "81cafe16-7888-5863-b9df-9db68d41e7a0",
+        "sourceHandle": "next",
+        "target": "c1986ded-c303-58e2-9095-09e75fa68371",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "aa82275b-8b24-55bb-9bd4-2e90dfa39787",
+        "source": "73ae4933-3120-595c-ad2c-488be70283de",
+        "sourceHandle": "fieldOutput",
+        "target": "c1986ded-c303-58e2-9095-09e75fa68371",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "9e77dbb2-fef0-535a-886d-79ea43ddfb50",
+        "source": "c1986ded-c303-58e2-9095-09e75fa68371",
+        "sourceHandle": "next",
+        "target": "49f5a2df-7e8b-54f3-9347-5e12e33cad8f",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "19b1e42b-5455-5392-9467-6c4c6a82f32b",
+        "source": "086ab4c7-6bdb-5abf-8369-fc2b44b5b42b",
+        "sourceHandle": "fieldOutput",
+        "target": "49f5a2df-7e8b-54f3-9347-5e12e33cad8f",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "d95159d5-4deb-515a-bd5b-57545c4fbb37",
+        "source": "49f5a2df-7e8b-54f3-9347-5e12e33cad8f",
+        "sourceHandle": "next",
+        "target": "48b548a9-dc6a-53a5-a309-1fe4a519b9c1",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "c30b35bf-fb1d-59c8-92fc-6935d9941014",
+        "source": "7f423b18-9931-5430-a0e2-ad0566507cf1",
+        "sourceHandle": "fieldOutput",
+        "target": "48b548a9-dc6a-53a5-a309-1fe4a519b9c1",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "78925a7b-bf65-52c6-903f-97c53cf56160",
+        "source": "2683ca94-6df4-5b4e-aef7-0c3a03de5a61",
+        "sourceHandle": "next",
+        "target": "13a1db86-378c-5685-87fb-7ca765f9095b",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "64cf27ee-b55f-5531-96ab-38d876f1f70e",
+        "source": "e9b40dce-ceaa-5f0a-b737-ed437f706c07",
+        "sourceHandle": "fieldOutput",
+        "target": "13a1db86-378c-5685-87fb-7ca765f9095b",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "adfb8fdc-32b4-5386-89ec-da80153735eb",
+        "source": "13a1db86-378c-5685-87fb-7ca765f9095b",
+        "sourceHandle": "next",
+        "target": "726512eb-ff84-5b3f-8e47-39a7c9415b55",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "b6e1b15a-8807-5654-95d3-939e556114b8",
+        "source": "59df4709-bcbd-51b6-a9d3-aacd1685269c",
+        "sourceHandle": "fieldOutput",
+        "target": "726512eb-ff84-5b3f-8e47-39a7c9415b55",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "1e13c069-5975-57f4-8109-c094915e6c39",
+        "source": "726512eb-ff84-5b3f-8e47-39a7c9415b55",
+        "sourceHandle": "next",
+        "target": "e2578971-035e-51de-b1c5-dc78ddb495d8",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "7183e8a1-e861-5acb-b4f2-d3ba749b727a",
+        "source": "74389bf2-2047-5948-85d2-58a60a4f3ac5",
+        "sourceHandle": "fieldOutput",
+        "target": "e2578971-035e-51de-b1c5-dc78ddb495d8",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "366b4dc4-5ecd-527f-9830-6a1f9c446388",
+        "source": "e2578971-035e-51de-b1c5-dc78ddb495d8",
+        "sourceHandle": "next",
+        "target": "2a3bc775-d6fb-53ae-a5eb-2b65b7d6a7cb",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "8b28564f-6f9c-5efa-ac1c-5d05b1fe55c4",
+        "source": "7534eee4-80fc-5735-8c0b-d4d6d2cc2fde",
+        "sourceHandle": "fieldOutput",
+        "target": "2a3bc775-d6fb-53ae-a5eb-2b65b7d6a7cb",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "a101c7ea-0ea8-5610-9202-8a026228994a",
+        "source": "5403d2e2-4057-55be-b5a3-881e7ac34e50",
+        "sourceHandle": "next",
+        "target": "a3cca1f4-664e-5b90-86c7-c68eedfd9735",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "1017fa75-b108-55be-8696-34d4ff40bd8e",
+        "source": "a4119015-3edc-58b3-9602-c8b8a9b809ad",
+        "sourceHandle": "fieldOutput",
+        "target": "a3cca1f4-664e-5b90-86c7-c68eedfd9735",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "75cabbb1-119e-5740-b43b-1a7de35b594e",
+        "source": "a3cca1f4-664e-5b90-86c7-c68eedfd9735",
+        "sourceHandle": "next",
+        "target": "c63f12e5-9fd1-55c2-bbc3-433a27e0c288",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "0659de27-d89e-5c2e-b4d4-f0d16b8cb7c6",
+        "source": "1f02444b-8520-5605-a0b4-3e4b6f862a57",
+        "sourceHandle": "fieldOutput",
+        "target": "c63f12e5-9fd1-55c2-bbc3-433a27e0c288",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "5ef622c6-e3dd-539f-8b23-80ae5259b3a6",
+        "source": "c63f12e5-9fd1-55c2-bbc3-433a27e0c288",
+        "sourceHandle": "next",
+        "target": "8ca1570f-f530-5a8f-90d0-580f67626988",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "a50f6143-f292-565d-85c5-515bfa5bb596",
+        "source": "3c98a2b8-7c0c-5e9f-b7bd-135e3556906f",
+        "sourceHandle": "fieldOutput",
+        "target": "8ca1570f-f530-5a8f-90d0-580f67626988",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "e6d090ed-174d-5b01-a0cb-6ee10895e6b5",
+        "source": "8ca1570f-f530-5a8f-90d0-580f67626988",
+        "sourceHandle": "next",
+        "target": "13380e88-52bb-5a01-871d-b4ba18099c66",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "aa7c049b-4b78-5fd0-bdb4-b9c5342d56ed",
+        "source": "2404e3c2-9bb1-5757-b215-ff02c93ce404",
+        "sourceHandle": "fieldOutput",
+        "target": "13380e88-52bb-5a01-871d-b4ba18099c66",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "96d42ef9-7a17-5dcb-9f3f-55dadeb82ecb",
+        "source": "42457173-bdae-59e0-836d-ce148ec42318",
+        "sourceHandle": "next",
+        "target": "7cddf0e7-98aa-5c5e-aa7d-171e1c84828b",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "976e4da6-1273-5a91-b151-bd156d9e1583",
+        "source": "90bd8014-98d0-5e3e-8fb1-8075e987e6db",
+        "sourceHandle": "fieldOutput",
+        "target": "7cddf0e7-98aa-5c5e-aa7d-171e1c84828b",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "c9204305-11fd-5c85-8505-10f0461a9a87",
+        "source": "7cddf0e7-98aa-5c5e-aa7d-171e1c84828b",
+        "sourceHandle": "next",
+        "target": "29fd6705-4f72-5e30-bc96-f46edfdc3e2a",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "172270cd-3065-5d86-964a-0b9b8a8080cf",
+        "source": "5aa34a83-5d8e-51e4-a0d4-ca38b4f8cca8",
+        "sourceHandle": "fieldOutput",
+        "target": "29fd6705-4f72-5e30-bc96-f46edfdc3e2a",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "2b44ec88-1d6b-544a-975e-cc3f3d2f9b0d",
+        "source": "29fd6705-4f72-5e30-bc96-f46edfdc3e2a",
+        "sourceHandle": "next",
+        "target": "2c357ec9-e583-5786-ba04-7e4f6a5fd851",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "33c78f5c-109f-5cce-92fe-f375a25002d7",
+        "source": "5939fc2f-da95-59e3-92f1-350937300924",
+        "sourceHandle": "fieldOutput",
+        "target": "2c357ec9-e583-5786-ba04-7e4f6a5fd851",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "eaa1578d-a202-563f-9cd1-e543a80fb672",
+        "source": "2c357ec9-e583-5786-ba04-7e4f6a5fd851",
+        "sourceHandle": "next",
+        "target": "8cc37ce2-13e3-569f-8f28-109805c54adc",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "4e395821-3589-5122-b619-d9a01224bf9d",
+        "source": "eaa26774-1cce-520d-aaa6-c6c62df36750",
+        "sourceHandle": "fieldOutput",
+        "target": "8cc37ce2-13e3-569f-8f28-109805c54adc",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "value": "0",
+        "access": "public",
+        "persist": "memory"
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "value": "0",
+        "access": "public",
+        "persist": "memory"
+      },
+      {
+        "name": "down",
+        "label": "Pointer down",
+        "type": "boolean",
+        "value": "false",
+        "access": "public",
+        "persist": "memory"
+      },
+      {
+        "name": "last",
+        "label": "Last event",
+        "type": "string",
+        "value": "Touch, click or drag the picture",
+        "access": "public",
+        "persist": "memory"
+      },
+      {
+        "name": "count",
+        "label": "Events seen",
+        "type": "integer",
+        "value": "0",
+        "access": "public",
+        "persist": "memory"
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#ffffff"
+    }
+  }
+]

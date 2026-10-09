@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from app.api import frame_sync, frames as frames_api
 from app.utils.embedded_assets import AssetListing
 from app.models import new_frame
-from app.models.frame import Frame, frame_has_shell_access
+from app.models.frame import Frame, frame_has_shell_access, get_frame_json
 from app.models.log import Log
 from app.models.metrics import METRICS_RETAINED_PER_FRAME, Metrics
 from app.models.scene_image import SceneImage
@@ -1488,6 +1488,69 @@ async def test_api_frame_update_max_http_response_bytes(async_client, db, redis)
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.max_http_response_bytes == 32 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_input_settings(async_client, db, redis):
+    frame = await new_frame(db, redis, 'InputFrame', 'localhost', 'localhost')
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={"input_settings": {"keyboardLayout": "de", "grabKeyboard": False}},
+    )
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.input_settings == {"keyboardLayout": "de", "grabKeyboard": False}
+    assert updated_frame.to_dict()["input_settings"] == {"keyboardLayout": "de", "grabKeyboard": False}
+
+    resp = await async_client.get(f'/api/frames/{frame.id}')
+    assert resp.status_code == 200
+    assert resp.json()["frame"]["input_settings"] == {"keyboardLayout": "de", "grabKeyboard": False}
+
+    # A partial object is stored whole: the missing half is the default.
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"input_settings": {"keyboardLayout": "fr"}})
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).input_settings == {"keyboardLayout": "fr", "grabKeyboard": True}
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_input_settings_rejects_unknown_layout(async_client, db, redis):
+    frame = await new_frame(db, redis, 'InputFrame', 'localhost', 'localhost')
+    frame.input_settings = {"keyboardLayout": "gb", "grabKeyboard": True}
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"input_settings": {"keyboardLayout": "dvorak"}})
+    assert resp.status_code == 422
+    assert "Unknown keyboard layout 'dvorak'" in json.dumps(resp.json())
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"input_settings": {"grabKeyboard": "yes"}})
+    assert resp.status_code == 422
+    assert "grabKeyboard must be true or false" in json.dumps(resp.json())
+
+    db.expire_all()
+    assert db.get(Frame, frame.id).input_settings == {"keyboardLayout": "gb", "grabKeyboard": True}
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_gpio_button_role_survives_to_frame_json(async_client, db, redis):
+    frame = await new_frame(db, redis, 'ButtonFrame', 'localhost', 'localhost')
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={"gpio_buttons": [{"pin": 5, "label": "A", "role": "next"}, {"pin": 6, "label": "B"}]},
+    )
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.gpio_buttons == [{"pin": 5, "label": "A", "role": "next"}, {"pin": 6, "label": "B"}]
+    assert get_frame_json(db, updated_frame)["gpioButtons"] == [
+        {"pin": 5, "label": "A", "role": "next"},
+        {"pin": 6, "label": "B"},
+    ]
+    assert frame_sync._sync_gpio_buttons(updated_frame.gpio_buttons) == [
+        {"pin": 5, "label": "A", "role": "next"},
+        {"pin": 6, "label": "B"},
+    ]
 
 
 @pytest.mark.asyncio

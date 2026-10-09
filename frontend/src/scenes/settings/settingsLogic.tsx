@@ -18,7 +18,7 @@ import { FrameOSSettings, SSHKeyEntry } from '../../types'
 import { apiFetch, logApiError } from '../../utils/apiFetch'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
 import { normalizeSshKeys } from '../../utils/sshKeys'
-import { onSettingsChanged } from '../../utils/settingsInvalidation'
+import { notifySettingsChanged, onSettingsChanged } from '../../utils/settingsInvalidation'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
 import { isFrameControlMode } from '../../utils/frameControlMode'
@@ -463,9 +463,11 @@ export const settingsLogic = kea<settingsLogicType>([
           headers: { 'Content-Type': 'application/json' },
         })
         if (!response.ok) {
-          throw new Error('Failed to update frame')
+          throw new Error('Failed to update settings')
         }
         actions.resetSettings(setDefaultSettings(await response.json()))
+        // The wasm preview caches the stored keys; drop them.
+        notifySettingsChanged()
       },
     },
     customFontsForm: {

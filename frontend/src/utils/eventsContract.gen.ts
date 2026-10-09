@@ -19,9 +19,18 @@ export type ContractEventName =
   | 'close'
   | 'keyDown'
   | 'keyUp'
+  | 'textInput'
+  | 'pointerMove'
+  | 'pointerDown'
+  | 'pointerUp'
+  | 'pointerCancel'
   | 'mouseMove'
   | 'mouseDown'
   | 'mouseUp'
+  | 'tap'
+  | 'doubleTap'
+  | 'longPress'
+  | 'swipe'
   | 'wheel'
   | 'turnOn'
   | 'turnOff'
@@ -37,6 +46,10 @@ export type ContractEventName =
 export interface ContractEventSpec {
   class: EventClass
   device?: EventDevice
+  /** An old name of `aliasOf`: a listener keeps hearing it, the editor does not offer it. */
+  aliasOf?: ContractEventName
+  /** Made by the dispatcher out of other events (a tap, a textInput). */
+  synthesized?: boolean
   listen: boolean
   dispatch: boolean
   /** 'read': an event node offers the scene's state; 'payload': the payload IS the scene's state fields. */
@@ -148,6 +161,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "dispatch": false,
     "origins": [
       "driver",
+      "preview",
       "scene",
       "schedule",
       "http:write",
@@ -160,7 +174,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "hosts": {
       "linux": true,
       "esp32": false,
-      "wasm": false
+      "wasm": true
     }
   },
   "keyUp": {
@@ -170,6 +184,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "dispatch": false,
     "origins": [
       "driver",
+      "preview",
       "scene",
       "schedule",
       "http:write",
@@ -182,12 +197,134 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "hosts": {
       "linux": true,
       "esp32": false,
-      "wasm": false
+      "wasm": true
     }
+  },
+  "textInput": {
+    "class": "input",
+    "device": "keyboard",
+    "synthesized": true,
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "name-only",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "pointerMove": {
+    "class": "input",
+    "device": "pointer",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "latest",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "pointerDown": {
+    "class": "input",
+    "device": "pointer",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "pointerUp": {
+    "class": "input",
+    "device": "pointer",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "pointerCancel": {
+    "class": "input",
+    "device": "pointer",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
   },
   "mouseMove": {
     "class": "input",
     "device": "pointer",
+    "aliasOf": "pointerMove",
     "listen": true,
     "dispatch": false,
     "origins": [
@@ -211,6 +348,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
   "mouseDown": {
     "class": "input",
     "device": "pointer",
+    "aliasOf": "pointerDown",
     "listen": true,
     "dispatch": false,
     "origins": [
@@ -234,6 +372,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
   "mouseUp": {
     "class": "input",
     "device": "pointer",
+    "aliasOf": "pointerUp",
     "listen": true,
     "dispatch": false,
     "origins": [
@@ -254,13 +393,15 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "wasm": true
     }
   },
-  "wheel": {
+  "tap": {
     "class": "input",
     "device": "pointer",
+    "synthesized": true,
     "listen": true,
     "dispatch": false,
     "origins": [
       "driver",
+      "preview",
       "scene",
       "schedule",
       "http:write",
@@ -273,7 +414,106 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "hosts": {
       "linux": true,
       "esp32": false,
-      "wasm": false
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "doubleTap": {
+    "class": "input",
+    "device": "pointer",
+    "synthesized": true,
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "longPress": {
+    "class": "input",
+    "device": "pointer",
+    "synthesized": true,
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "swipe": {
+    "class": "input",
+    "device": "pointer",
+    "synthesized": true,
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.9.23"
+  },
+  "wheel": {
+    "class": "input",
+    "device": "pointer",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
     },
     "since": "2026.9.21"
   },
@@ -565,6 +805,77 @@ export const sceneChangedLogEvents: readonly string[] = ["render:scene", "render
 /** Log lines, not scene events (docs/events-contract.json `logEvents`). */
 export const sceneStateChangedLogEvents: readonly string[] = ["event:setSceneState", "event:setCurrentScene", "event:uploadScenes"]
 
+/** GPIO button roles (`gpioButtons[].role`), and the default by label for a button without one. */
+export const buttonRoles: readonly string[] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
+export const buttonRoleByLabel: Record<string, string> = {
+  "A": "primary",
+  "B": "next",
+  "C": "prev",
+  "D": "back",
+  "BOOT": "primary",
+  "KEY1": "next",
+  "KEY2": "prev",
+  "KEY3": "next",
+  "BUTTON": "primary",
+  "POWER": "primary",
+  "OK": "primary",
+  "ENTER": "primary",
+  "SELECT": "primary",
+  "HOME": "menu",
+  "MENU": "menu",
+  "EXIT": "back",
+  "BACK": "back",
+  "NEXT": "next",
+  "RIGHT": "next",
+  "PREV": "prev",
+  "LEFT": "prev",
+  "UP": "up",
+  "DOWN": "down",
+  "REFRESH": "refresh"
+}
+export const buttonActions: readonly string[] = ["press", "longPress", "repeat", "release"]
+
+/** Keyboard layouts a frame's `keyboardLayout` setting can name. */
+export const keyboardLayouts: readonly { id: string; label: string }[] = [
+  {
+    "id": "us",
+    "label": "US (QWERTY)"
+  },
+  {
+    "id": "gb",
+    "label": "UK"
+  },
+  {
+    "id": "de",
+    "label": "German (QWERTZ)"
+  },
+  {
+    "id": "fr",
+    "label": "French (AZERTY)"
+  },
+  {
+    "id": "es",
+    "label": "Spanish"
+  },
+  {
+    "id": "it",
+    "label": "Italian"
+  },
+  {
+    "id": "sv",
+    "label": "Swedish / Finnish"
+  },
+  {
+    "id": "da",
+    "label": "Danish"
+  },
+  {
+    "id": "nb",
+    "label": "Norwegian"
+  }
+]
+export const defaultKeyboardLayout = 'us'
+
 /** `context` keys per JavaScript sandbox. */
 export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight"]
 export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight"]
@@ -580,24 +891,42 @@ interface FrameOSEventPayloads {
   open: { sceneId: string };
   /** When the frame switches away from the scene to another one. Carries no payload. */
   close: Record<string, never>;
-  /** When a key is pressed on a keyboard */
-  keyDown: { key: string; code: number };
+  /** When a key is pressed on a keyboard (or held: \`repeat\`). \`code\` is the physical key (\`KeyA\`, \`ArrowLeft\`), \`key\` what it means under the frame's keyboard layout (\`a\`, \`A\`, \`Enter\`). */
+  keyDown: { code: string; key: string; repeat: boolean; shift: boolean; ctrl: boolean; alt: boolean; meta: boolean; linuxCode?: number };
   /** When a key is released on a keyboard */
-  keyUp: { key: string; code: number };
-  /** When a mouse moves (not logged) */
+  keyUp: { code: string; key: string; shift: boolean; ctrl: boolean; alt: boolean; meta: boolean; linuxCode?: number };
+  /** Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). Made by the dispatcher from \`keyDown\`; a preview forwards the browser's \`beforeinput\`. */
+  textInput: { text: string };
+  /** When a pointer (a finger, a mouse, a pen) moves (not logged) */
+  pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number };
+  /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. */
+  pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string };
+  /** When a pointer button is released or a finger lifts (not logged) */
+  pointerUp: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string };
+  /** When a pointer that was down is lost without a release: the queue overflowed, the device went away. A scene holding a drag lets go. */
+  pointerCancel: { x: number; y: number; pointerId: number; pointerType: string };
+  /** When a mouse moves (not logged). An alias of \`pointerMove\` with its old payload. */
   mouseMove: { x: number; y: number };
-  /** When a mouse button is pressed (not logged) */
+  /** When a mouse button is pressed (not logged). An alias of \`pointerDown\` with its old payload. */
   mouseDown: { button: number };
-  /** When a mouse button is released (not logged) */
+  /** When a mouse button is released (not logged). An alias of \`pointerUp\` with its old payload. */
   mouseUp: { button: number };
-  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. Linux frames only. */
-  wheel: { deltaX: number; deltaY: number };
+  /** A press and release in one place, within \`gestures.tapMs\`. Made by the dispatcher from \`pointerDown\` / \`pointerUp\` on every host. */
+  tap: { x: number; y: number; pointerId: number; pointerType: string };
+  /** A second \`tap\` in the same place within \`gestures.doubleTapMs\` of the first. The first tap is delivered too. */
+  doubleTap: { x: number; y: number; pointerId: number; pointerType: string };
+  /** A pointer held in one place for \`gestures.longPressMs\`. Delivered while it is still held where the host ticks the dispatcher, on release otherwise; no \`tap\` follows it. */
+  longPress: { x: number; y: number; durationMs: number; pointerId: number; pointerType: string };
+  /** A press and a release at least \`gestures.swipeMinPx\` apart, in one of four directions. */
+  swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
+  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
+  wheel: { deltaX: number; deltaY: number; x: number; y: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;
   /** Turn the screen off */
   turnOff: Record<string, never>;
-  /** When a GPIO button is pressed */
-  button: { pin: number; label: string; level: number };
+  /** When a GPIO button is pressed, held or released. A listener with no \`action\` filter hears presses only. */
+  button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; level?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
   /** Switch the frame to another scene. An optional \`state\` object is applied to that scene's public state. */

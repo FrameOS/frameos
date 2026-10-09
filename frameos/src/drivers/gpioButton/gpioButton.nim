@@ -5,7 +5,10 @@ import frameos/channels
 
 const debounce = 100000
 const lineFlag = LG_SET_PULL_UP
-const edge = LG_FALLING_EDGE
+# Both edges: a scene hears the release too, with how long the key was held,
+# and the dispatcher makes `longPress` and `repeat` out of the hold
+# (frameos/input_state.nim). The line is pulled up, so a press is level 0.
+const edge = LG_BOTH_EDGES
 
 let pinLabels = newTable[int, string]()
 
@@ -21,7 +24,8 @@ proc alertsHandler(num_alerts: cint, alerts: lgGpioAlert_p, userdata: pointer) {
     let gpio = alerts[i].report.gpio.int
     let level = alerts[i].report.level.int
     let label = pinLabels.getOrDefault(gpio)
-    sendEvent("button", %*{"pin": gpio, "label": label, "level": level}, eoDriver)
+    sendEvent("button", %*{"pin": gpio, "label": label, "level": level,
+      "action": (if level == 0: "press" else: "release")}, eoDriver)
 
 proc determineGPIODevice(): int =
   try:
@@ -54,7 +58,9 @@ proc init*(frameOS: DriverContext): Driver =
     if lgGpioClaimInput(h, lineFlag.cint, button.pin.cint) < 0:
       log(&"Unable to claim GPIO {button.pin} for input")
       continue
-    let res = lgGpioClaimAlert(h, 0, edge.cint, button.pin.cint, -1)
+    # The line flags go with the alert claim: lgGpioClaimAlert frees the line
+    # and requests it again, and the pull-up from the input claim went with it.
+    let res = lgGpioClaimAlert(h, lineFlag.cint, edge.cint, button.pin.cint, -1)
     if res < 0:
       log(&"Unable to claim GPIO {button.pin} for alerts: {lguErrorText(res)}")
       continue

@@ -66,6 +66,7 @@ extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char 
 extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
+extern bool fos_nim_tick_impl(void);
 /* `origin` is the event's FOS_ORIGIN_* bit (main/fos_events_gen.h): who said
  * it, stamped by the producer's entry point and never read from the payload. */
 extern bool fos_nim_send_event_impl(unsigned int origin, const char *event, const char *payload_json);
@@ -856,6 +857,22 @@ bool frameos_nim_render_requested(void)
     bool requested = fos_nim_render_requested_impl();
     nim_lock_give();
     return requested;
+}
+
+bool frameos_nim_tick(void)
+{
+    if (!s_nim_ready) return false;
+    if (!nim_lock_take_for(0)) return false;
+    bool made = false;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        made = fos_nim_tick_impl();
+    } else {
+        nim_oom_abort_note("input tick");
+    }
+    s_nim_oom_jmp_armed = false;
+    nim_lock_give();
+    return made;
 }
 
 bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char *payload_json,

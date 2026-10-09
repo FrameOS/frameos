@@ -4,10 +4,12 @@
 // the Linux runtime and the ESP32 firmware read the same document, so the
 // SPA can never offer a key the device would refuse the whole push on.
 //
-// Deliberately import-free beyond the generated table: the cloud's shared-spa
+// Deliberately import-free beyond the generated tables: the cloud's shared-spa
 // tests run this in node, and the SPA's type barrel drags in reactflow and
-// the whole device catalogue.
+// the whole device catalogue. The events table supplies the button roles and
+// keyboard layouts (docs/events-contract.json) so no list of them lives here.
 import { cloudFramesContractSettings } from './cloudFramesContract.gen'
+import { buttonRoles, defaultKeyboardLayout, keyboardLayouts } from './eventsContract.gen'
 
 // The keys a client may SEND: companion keys (the ESP32's tzdata slice) are
 // attached by the cloud and never bound by the form, so they are not part of
@@ -90,6 +92,26 @@ export function cloudFrameSupportsDisplayDriverSetting(frameosVersion: string | 
   return cloudFrameSupportsSettingsFrom(displayDriverCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** Firmware from here on takes the input batch, and a `role` per GPIO button. */
+export const inputCloudFrameSettingsMinVersion = '2026.9.23'
+
+/**
+ * `input_settings` (Pi/Linux only: the ESP32 has no keyboard or pointer):
+ * `{keyboardLayout, grabKeyboard}`, read when the input drivers start, so a
+ * push restarts the runtime. The same release taught `gpio_buttons` items an
+ * optional `role`; older firmware refuses the whole push on that item key,
+ * so cloudFrameSettingsPayload sends roles only when this batch is in the
+ * key list it is given. Callers gate on cloudFrameSupportsInputSettings.
+ */
+export const inputCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(inputCloudFrameSettingsMinVersion)
+
+export function cloudFrameSupportsInputSettings(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(inputCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/** The layout ids a cloud push may name (docs/events-contract.json `keyboard.layouts`). */
+export const cloudKeyboardLayoutIds: readonly string[] = keyboardLayouts.map((layout) => layout.id)
+
 /**
  * Power-management keys only the ESP32 firmware consumes. The Linux runtime
  * refuses the whole verb on them, so callers include them only for esp32
@@ -170,6 +192,7 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...extendedCloudFrameSettingKeys,
     ...hardwareCloudFrameSettingKeys,
     ...displayDriverCloudFrameSettingKeys,
+    ...inputCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )
@@ -456,23 +479,32 @@ export function cloudPartialRefreshPayload(value: unknown): Record<string, unkno
 }
 
 /**
- * gpio_buttons: [{pin, label}] with pins as integers and labels trimmed.
- * Rows the form left blank (no pin) are skipped; a row with a pin but an
- * unusable label or a duplicate pin drops the whole list from the push,
- * since the device refuses it and would take every other setting down.
- * An empty list IS sent — it unbinds every button.
+ * gpio_buttons: [{pin, label, role?}] with pins as integers and labels
+ * trimmed. Rows the form left blank (no pin) are skipped; a row with a pin
+ * but an unusable label or a duplicate pin drops the whole list from the
+ * push, since the device refuses it and would take every other setting
+ * down. An empty list IS sent — it unbinds every button.
+ *
+ * `role` (one of the events contract's button roles) rides along only with
+ * `roles: true` — firmware before inputCloudFrameSettingsMinVersion refuses
+ * the whole push on the item key — and a value outside the list is dropped
+ * (the frame then derives the role from the label) rather than sent.
  */
-export function cloudGpioButtonsPayload(value: unknown): Record<string, unknown>[] | undefined {
+export function cloudGpioButtonsPayload(
+  value: unknown,
+  options: { roles?: boolean } = {}
+): Record<string, unknown>[] | undefined {
   if (!Array.isArray(value)) {
     return undefined
   }
+  const withRoles = options.roles ?? true
   const out: Record<string, unknown>[] = []
   const pins = new Set<number>()
   for (const row of value) {
     if (!row || typeof row !== 'object') {
       continue
     }
-    const { pin, label } = row as { pin?: unknown; label?: unknown }
+    const { pin, label, role } = row as { pin?: unknown; label?: unknown; role?: unknown }
     if (pin === undefined || pin === null || pin === '') {
       continue
     }
@@ -485,9 +517,33 @@ export function cloudGpioButtonsPayload(value: unknown): Record<string, unknown>
       return undefined
     }
     pins.add(parsedPin)
-    out.push({ pin: parsedPin, label: trimmedLabel })
+    const button: Record<string, unknown> = { pin: parsedPin, label: trimmedLabel }
+    if (withRoles && typeof role === 'string' && buttonRoles.includes(role)) {
+      button.role = role
+    }
+    out.push(button)
   }
   return out
+}
+
+/**
+ * input_settings: `{keyboardLayout, grabKeyboard}` from the form's strings.
+ * The device REPLACES its stored object with what is sent (a missing key is
+ * that key's default), so both keys always go: an unknown layout falls back
+ * to the default (`us`), grabKeyboard to false. Undefined when the form
+ * holds nothing at all — the key is then left out of the push.
+ */
+export function cloudInputSettingsPayload(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  const form = value as { keyboardLayout?: unknown; grabKeyboard?: unknown }
+  const keyboardLayout =
+    typeof form.keyboardLayout === 'string' && cloudKeyboardLayoutIds.includes(form.keyboardLayout)
+      ? form.keyboardLayout
+      : defaultKeyboardLayout
+  const grabKeyboard = form.grabKeyboard === true || form.grabKeyboard === 'true'
+  return { keyboardLayout, grabKeyboard }
 }
 
 /**
@@ -500,6 +556,9 @@ export function cloudFrameSettingsPayload(
   keys: readonly CloudFrameSettingKey[] = cloudFrameSettingKeys
 ): Record<string, unknown> {
   const settings: Record<string, unknown> = {}
+  // Button roles arrived with the input batch (inputCloudFrameSettingsMinVersion):
+  // a key list that carries it is one built for firmware that takes them.
+  const roles = inputCloudFrameSettingKeys.some((key) => keys.includes(key))
   for (const key of keys) {
     const value = frame[key]
     if (value === undefined || value === null) {
@@ -510,6 +569,9 @@ export function cloudFrameSettingsPayload(
     }
     let converted: unknown
     switch (key) {
+      case 'input_settings':
+        converted = cloudInputSettingsPayload(value)
+        break
       case 'control_code':
         converted = cloudControlCodePayload(value)
         break
@@ -529,7 +591,7 @@ export function cloudFrameSettingsPayload(
         converted = cloudPartialRefreshPayload(value)
         break
       case 'gpio_buttons':
-        converted = cloudGpioButtonsPayload(value)
+        converted = cloudGpioButtonsPayload(value, { roles })
         break
       default:
         // The form keeps numbers as strings; the control plane type-checks them.

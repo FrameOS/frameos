@@ -600,6 +600,15 @@ proc setLastImage*(image: Image) =
     lastImage = copy(image)
     lastImagePresent = true
 
+proc getLastImageCopy*(): Image =
+  ## The last rendered picture, unrotated and unflipped (as `setLastImage`
+  ## stored it), for a caller that wants to draw over it — the runner's cursor
+  ## overlay. nil before the first render.
+  if not lastImagePresent:
+    return nil
+  withLock lastImageLock:
+    result = copy(lastImage)
+
 proc getLastImagePng*(): string =
   if not lastImagePresent:
     raise newException(Exception, "No image rendered yet")

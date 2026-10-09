@@ -370,6 +370,37 @@ export function cloudUndeployedChangeDetails(
   return details
 }
 
+/**
+ * The FrameOS upgrade a saved frame is waiting for, when that upgrade is
+ * the ONLY thing it is behind on — the dashboard's "upgrade" label
+ * (FrameDashboardStatusLine) computed from the row alone, for the sidebar's
+ * "Update all" (fleetUpdateLogic), which cannot mount a frameLogic per
+ * frame. Same inputs as the `undeployedChangeDetails` selector: the cloud
+ * compares the device's version with the latest published release, the
+ * backend the deploy baseline with the version it was built with. A frame
+ * whose deploy would also carry scene or settings changes is not "just an
+ * upgrade", and a frame whose version was never reported is an install, not
+ * an upgrade: null for both.
+ */
+export function pendingFrameosUpgrade(
+  frame: FrameType | null | undefined,
+  latestPublishedRelease: string | null
+): NonNullable<ChangeDetail['frameosVersionChange']> | null {
+  if (!frame || frame.archived) {
+    return null
+  }
+  const details = isCloudManagedFrame(frame)
+    ? cloudUndeployedChangeDetails(frame, latestPublishedRelease)
+    : isInFrameAdminMode()
+    ? []
+    : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
+  if (details.length === 0 || !details.every((change) => change.frameosVersionChange || change.remoteVersionChange)) {
+    return null
+  }
+  const upgrade = details.find((change) => change.frameosVersionChange?.kind === 'upgrade')?.frameosVersionChange
+  return upgrade?.previousVersion ? upgrade : null
+}
+
 export const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
@@ -412,6 +443,7 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'control_code',
   'schedule',
   'gpio_buttons',
+  'input_settings',
   // Service-settings groups granted to store-origin scenes on a self-hosted
   // frame (get_frame_json ships only those); a change here is a frame.json
   // change, so it counts towards "deploy needed".
@@ -443,6 +475,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   rpios: '2026.6.7',
   timezone_updater: '2026.6.7',
   embedded: '2026.6.26',
+  input_settings: '2026.9.23',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -539,6 +572,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   control_code: 'Control code',
   schedule: 'Schedule',
   gpio_buttons: 'GPIO buttons',
+  input_settings: 'Input',
   deep_sleep: 'Deep sleep between renders',
   deep_sleep_on_battery: 'Deep sleep on battery',
   wake_check_seconds: 'Wake-up check interval',

@@ -95,6 +95,7 @@ def test_single_plane_settings_carry_a_parity_reason():
     by_plane = {}
     for spec in single.values():
         by_plane[spec["parity"]["only"]] = by_plane.get(spec["parity"]["only"], 0) + 1
-    # 9 since `device` (2026.9.22, docs/convergence-todo.md §6).
-    assert by_plane.get("linux", 0) <= 9, by_plane
+    # 10 since `input_settings` (2026.9.23: keyboards and pointers are the
+    # Linux runtime's, docs/convergence-todo.md §6).
+    assert by_plane.get("linux", 0) <= 10, by_plane
     assert by_plane.get("esp32", 0) <= 7, by_plane

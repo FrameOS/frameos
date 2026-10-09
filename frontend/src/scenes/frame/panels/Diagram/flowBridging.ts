@@ -6,7 +6,7 @@ import type { DiagramEdge } from '../../../../types'
 // helpers here close the gap: for every chain that enters the deleted set
 // and leaves it again, one new next→prev edge joins the surviving ends.
 
-function isFlowEdge(edge: DiagramEdge): boolean {
+export function isFlowEdge(edge: DiagramEdge): boolean {
   return edge.sourceHandle === 'next' || edge.targetHandle === 'prev'
 }
 

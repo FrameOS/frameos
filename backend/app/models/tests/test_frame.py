@@ -9,6 +9,7 @@ from app.models.frame import (
     get_frame_json,
     new_frame,
     normalize_error_behavior,
+    normalize_input_settings,
     normalize_frame_admin_auth,
     normalize_reboot_crontab,
     update_frame,
@@ -265,6 +266,54 @@ async def test_get_frame_json_includes_error_behavior(_mock_publish, db, redis):
         "showErrorRetrySeconds": 90,
     }
 
+
+def test_normalize_input_settings_defaults_and_sanitizes_values():
+    assert normalize_input_settings(None) == {"keyboardLayout": "us", "grabKeyboard": True}
+    assert normalize_input_settings({}) == {"keyboardLayout": "us", "grabKeyboard": True}
+    assert normalize_input_settings({"keyboardLayout": "de"}) == {"keyboardLayout": "de", "grabKeyboard": True}
+    assert normalize_input_settings({"keyboardLayout": "dvorak", "grabKeyboard": False}) == {
+        "keyboardLayout": "us",
+        "grabKeyboard": False,
+    }
+    assert normalize_input_settings("nope") == {"keyboardLayout": "us", "grabKeyboard": True}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_input_settings_default_when_unset(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    assert frame.to_dict()["input_settings"] == {"keyboardLayout": "us", "grabKeyboard": True}
+
+    frame.input_settings = None
+    assert get_frame_json(db, frame)["inputSettings"] == {"keyboardLayout": "us", "grabKeyboard": True}
+
+    # Partial: the missing half is the default, an unknown layout falls back.
+    frame.input_settings = {"grabKeyboard": False}
+    assert get_frame_json(db, frame)["inputSettings"] == {"keyboardLayout": "us", "grabKeyboard": False}
+    frame.input_settings = {"keyboardLayout": "gb"}
+    assert get_frame_json(db, frame)["inputSettings"] == {"keyboardLayout": "gb", "grabKeyboard": True}
+    frame.input_settings = {"keyboardLayout": "qwertz", "grabKeyboard": True}
+    assert get_frame_json(db, frame)["inputSettings"] == {"keyboardLayout": "us", "grabKeyboard": True}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_gpio_buttons_carry_a_known_role_only(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.gpio_buttons = [
+        {"pin": 5, "label": "A", "role": "next"},
+        {"pin": 6, "label": "B"},
+        {"pin": 13, "label": "C", "role": ""},
+        {"pin": 19, "label": "D", "role": "launch-missiles"},
+        {"pin": 0, "label": "unset"},
+    ]
+
+    assert get_frame_json(db, frame)["gpioButtons"] == [
+        {"pin": 5, "label": "A", "role": "next"},
+        {"pin": 6, "label": "B"},
+        {"pin": 13, "label": "C"},
+        {"pin": 19, "label": "D"},
+    ]
 
 
 @pytest.mark.asyncio

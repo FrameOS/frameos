@@ -380,6 +380,25 @@ class SceneWriter:
 
         return filters
 
+    def event_listen_defaults_for_node(self, event: str, node: dict) -> list[tuple[str, str]]:
+        """The catalog's `listenDefault`s the listener did not override: a
+        `button` node with no `action` filter fires on `press` only (and on a
+        payload from before the field existed), not on every longPress,
+        repeat and release too. Generic per field name / default."""
+        schema = self.event_schema_for(event)
+        if not schema:
+            return []
+        filtered = {key for key, _ in self.event_filter_pairs_for_node(node)}
+        defaults: list[tuple[str, str]] = []
+        for field in schema.get("fields", []) or []:
+            if not isinstance(field, dict):
+                continue
+            name = str(field.get("name") or "")
+            default = field.get("listenDefault")
+            if name and default not in (None, "") and name not in filtered:
+                defaults.append((name, str(default)))
+        return defaults
+
     def event_filter_value(self, value) -> str:
         if value is None:
             return ""
@@ -1207,13 +1226,19 @@ class SceneWriter:
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
                 filter_pairs = self.event_filter_pairs_for_node(node)
+                default_pairs = self.event_listen_defaults_for_node(event, node)
 
-                if filter_pairs:
+                if filter_pairs or default_pairs:
                     condition = " and ".join(
                         [
                             'eventPayloadValueMatches(context.payload, '
                             f'"{sanitize_nim_string(key)}", "{sanitize_nim_string(value)}")'
                             for key, value in filter_pairs
+                        ] + [
+                            f'(not context.payload.hasKey("{sanitize_nim_string(key)}") or '
+                            'eventPayloadValueMatches(context.payload, '
+                            f'"{sanitize_nim_string(key)}", "{sanitize_nim_string(value)}"))'
+                            for key, value in default_pairs
                         ]
                     )
                     self.run_event_lines += [

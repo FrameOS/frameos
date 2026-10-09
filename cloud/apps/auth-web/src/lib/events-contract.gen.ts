@@ -3,7 +3,7 @@
 export const customEventMaxNameLength = 63;
 
 /** Every built-in event name. Any other name is a custom scene event. */
-export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "mouseMove", "mouseDown", "mouseUp", "wheel", "turnOn", "turnOff", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"];
+export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "turnOn", "turnOff", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"];
 
 export type CloudEventRoute = {
   verb: string;

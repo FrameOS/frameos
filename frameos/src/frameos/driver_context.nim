@@ -20,6 +20,7 @@ type
   GPIOButton* {.acyclic.} = ref object
     pin*: int
     label*: string
+    role*: string
 
   PinOverrides* {.acyclic.} = ref object
     ## GPIO remap for SPI panel drivers; -1 = keep the driver's default pin.
@@ -45,6 +46,7 @@ type
     height*: int
     deviceConfig*: DeviceConfig
     gpioButtons*: seq[GPIOButton]
+    grabKeyboard*: bool ## inputSettings.grabKeyboard: the evdev driver takes keyboards from the console
     palette*: PaletteConfig
 
   DriverLogger* {.acyclic.} = ref object

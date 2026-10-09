@@ -61,6 +61,8 @@
     "src/test/shared-spa/scene-state-logic.test.ts",
     // Same story: imports frameLogic for the service-keys change detail.
     "src/test/shared-spa/frame-service-keys-change.test.ts",
+    // Same story: fleetUpdateLogic reaches frameLogic and decorators/frame.tsx.
+    "src/test/shared-spa/fleet-update.test.ts",
     // Same story: the preview key gate reaches utils/sceneApps through secretSettings.
     "src/test/shared-spa/preview-key-consent.test.ts",
     // Same story: frameStatusGroups imports decorators/frame.tsx, which

@@ -36,6 +36,17 @@ export function isPointerEvent(name: string | null | undefined): boolean {
   return contractEventSpec(name)?.device === 'pointer'
 }
 
+/** Keyboard input: sent by the focused canvas itself, with a `code`. */
+export function isKeyboardEvent(name: string | null | undefined): boolean {
+  return contractEventSpec(name)?.device === 'keyboard'
+}
+
+/** An old name of another event (`mouseDown` for `pointerDown`): a listener
+ * keeps hearing it forever, but the editor offers the new name. */
+export function isAliasEvent(name: string | null | undefined): boolean {
+  return contractEventSpec(name)?.aliasOf !== undefined
+}
+
 /** An event whose payload IS the scene's state fields (`setSceneState`): its
  * dispatch node is configured with the scene's fields, not the event's. */
 export function eventPayloadIsSceneState(name: string | null | undefined): boolean {

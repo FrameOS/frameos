@@ -5,7 +5,7 @@
 // tested here is that the readers agree with the contract and each other.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { LIFECYCLE_EVENTS, POINTER_EVENTS, sceneEventButtons } from "frameos-wasm";
+import { KEYBOARD_EVENTS, LIFECYCLE_EVENTS, POINTER_EVENTS, sceneEventButtons } from "frameos-wasm";
 import {
   appContextKeys,
   codeContextKeys,
@@ -17,7 +17,7 @@ import {
   contractEventSpec,
   eventOffersSceneState,
   eventPayloadIsSceneState,
-  isHostEvent,
+  isHostEvent, isKeyboardEvent,
   isPointerEvent,
   logEventIsSceneChange,
   logEventIsSceneStateChange,
@@ -103,22 +103,28 @@ describe("preview buttons", () => {
     for (const event of contract.events) {
       expect(LIFECYCLE_EVENTS.has(event.name), event.name).toBe(isHostEvent(event.name));
       expect(POINTER_EVENTS.has(event.name), event.name).toBe(isPointerEvent(event.name));
+      expect(KEYBOARD_EVENTS.has(event.name), event.name).toBe(isKeyboardEvent(event.name));
     }
-    expect([...POINTER_EVENTS]).toEqual(["mouseMove", "mouseDown", "mouseUp", "wheel"]);
+    expect([...POINTER_EVENTS]).toEqual([
+      "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp",
+      "tap", "doubleTap", "longPress", "swipe", "wheel",
+    ]);
+    expect([...KEYBOARD_EVENTS]).toEqual(["keyDown", "keyUp", "textInput"]);
     // turnOn / turnOff are scene commands: both lists used to forget them.
     expect(isHostEvent("turnOn") && isHostEvent("turnOff")).toBe(true);
   });
 
-  it("a button, a key and a custom event get a button; host and pointer events do not", () => {
+  it("a button and a custom event get a button; host, pointer and keyboard events do not", () => {
     const node = (id: string, keyword: string) => ({ id, type: "event", data: { keyword } });
-    const names = ["init", "render", "open", "close", "setSceneState", "turnOn", "mouseMove", "wheel", "button", "keyDown", "nextPage"];
+    const names = ["init", "render", "open", "close", "setSceneState", "turnOn", "mouseMove", "pointerDown", "tap", "wheel", "button", "keyDown", "textInput", "nextPage"];
     const buttons = sceneEventButtons({
       id: "s",
       name: "s",
       nodes: names.map((name, index) => node(String(index), name)),
       edges: [],
     } as unknown as Parameters<typeof sceneEventButtons>[0]);
-    expect(buttons.map((button) => button.keyword)).toEqual(["button", "keyDown", "nextPage"]);
+    // The canvas sends keys itself (a button could only send a key with no code).
+    expect(buttons.map((button) => button.keyword)).toEqual(["button", "nextPage"]);
   });
 });
 

@@ -11,6 +11,7 @@ import frameos/config
 import frameos/device_setup
 import frameos/event_log
 import frameos/event_loop
+import frameos/interpreter
 import frameos/display_detect
 import frameos/driver_render_hint
 import frameos/render_stats
@@ -32,6 +33,8 @@ import frameos/watchdog
 import drivers/drivers as drivers
 
 proc sceneEvents*(self: RunnerThread): EventLoop
+proc cursorCanShow(self: RunnerThread): bool
+proc presentCursor(self: RunnerThread)
 
 # How fast must a scene render to be condidered fast. Two in a row pauses logging for 10s.
 const FAST_SCENE_CUTOFF_SECONDS = 0.5
@@ -46,6 +49,8 @@ const DRIVER_RETRY_MIN_SECONDS = 0.25
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
 const RENDER_SLEEP_SLICE_MS = 100.0
+# The sleep slice while a mouse cursor is on the panel: how often it can move.
+const CURSOR_SLEEP_SLICE_MS = 33.0
 
 var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
 
@@ -571,7 +576,14 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
             reclaimRenderMemory()
             self.logger.log(%*{"event": "render:driver:drew",
               "device": self.frameConfig.device})
-        let nextSleepMs = min(remainingSleepMs, RENDER_SLEEP_SLICE_MS)
+        # A relative mouse moved: draw the cursor over the frame already on
+        # the panel, without re-running the scene (frameos/input_state.nim
+        # owns the position). Only where a cursor makes sense: a screen that
+        # can redraw in a blink, never e-paper or an upload target.
+        if self.cursorCanShow and self.sceneEvents.inputState.takeCursorDirty():
+          self.presentCursor()
+        let nextSleepMs = min(remainingSleepMs,
+          if self.sceneEvents.inputState.cursorVisible: CURSOR_SLEEP_SLICE_MS else: RENDER_SLEEP_SLICE_MS)
         await sleepAsync(nextSleepMs)
         remainingSleepMs -= nextSleepMs
       if not driverRetryImage.isNil:
@@ -587,6 +599,37 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       except Exception:
         discard
       await sleepAsync(RENDER_SLEEP_SLICE_MS)
+
+proc cursorCanShow(self: RunnerThread): bool =
+  ## A drawn cursor belongs on a screen that redraws in a blink. E-paper holds
+  ## a picture for seconds per refresh, and an upload target or a headless
+  ## frame has no screen at all.
+  let device = self.frameConfig.device
+  not (device.startsWith("waveshare.") or device.startsWith("pimoroni.inky") or device.startsWith("inky") or
+    device == "web_only" or device == "http.upload" or device == "wasm" or device.len == 0)
+
+proc presentCursor(self: RunnerThread) =
+  ## The last frame with the cursor drawn over it, to the panel. The held
+  ## copy is unrotated and unflipped (setLastImage), so the cursor — in scene
+  ## pixels, like every pointer position — goes on before the panel transform.
+  let image = getLastImageCopy()
+  if image.isNil:
+    return
+  let state = addr self.sceneEvents.inputState
+  if state[].cursorVisible:
+    drawCursor(image, state[].cursorX, state[].cursorY)
+  case self.frameConfig.flip:
+  of "horizontal": image.flipHorizontal()
+  of "vertical": image.flipVertical()
+  of "both":
+    image.flipHorizontal()
+    image.flipVertical()
+  else: discard
+  try:
+    drivers.render(image.rotateDegrees(self.frameConfig.rotate))
+    noteDriverRendered()
+  except Exception as e:
+    self.logger.log(%*{"event": "render:cursor:error", "error": $e.msg})
 
 proc runSceneEvent(self: RunnerThread, scene: FrameScene, event: string, payload: JsonNode) =
   ## One run of `event` on a scene this runner holds: the dispatcher's way in
@@ -747,6 +790,7 @@ proc sceneEvents*(self: RunnerThread): EventLoop =
             "sceneId": sceneId.string}),
       runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
         self.runSceneEvent(scene, event, payload),
+      sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
       log: proc (entry: JsonNode) = self.logSignal(entry),
     ), self.frameConfig)
     # On this thread an event goes straight into the queue (channels.nim).
@@ -786,6 +830,15 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
       if not received:
         break
       events.enqueue(msg[3], msg[1], msg[2], msg[0])
+    # What the input drivers sent as structs: no JSON until a listener wants it.
+    while events.pending < events.laneCapacity:
+      let (received, input) = inputChannel.tryRecv()
+      if not received:
+        break
+      events.enqueueInput(eoDriver, input)
+    # Time passing for what is held: a long press, a button's repeats, the
+    # cursor hiding. Cheap when nothing is.
+    discard events.tick()
 
     # One burst. Both loops share one thread, and a scene whose event handler
     # re-dispatches keeps the queue non-empty forever — so the dispatcher hands

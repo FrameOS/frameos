@@ -47,11 +47,21 @@ proc `=destroy`(spool: SpoolObj) =
   ## that refers to it means a scene that drops the value mid-render does not
   ## leave the file behind — boot sweeps exist for crashes, not for the normal
   ## path.
-  if spool.kind == skFile and spool.owned and spool.path.len > 0:
-    try:
-      removeFile(spool.path)
-    except CatchableError:
-      discard
+  ##
+  ## A user `=destroy` REPLACES the generated one: the fields are ours to free.
+  ## Leaving them out leaked every in-memory body whole — an uncached
+  ## downloadUrl at a 0.2 s interval took a 470 MB Pi to the watchdog in two
+  ## hours.
+  case spool.kind
+  of skMemory:
+    `=destroy`(spool.data)
+  of skFile:
+    if spool.owned and spool.path.len > 0:
+      try:
+        removeFile(spool.path)
+      except CatchableError:
+        discard
+    `=destroy`(spool.path)
 
 type
   ImageSpoolObj = object
@@ -74,6 +84,7 @@ proc `=destroy`(spool: ImageSpoolObj) =
       removeFile(spool.path)
     except CatchableError:
       discard
+  `=destroy`(spool.path)
 
 proc newImageSpool*(path: string, width, height: int, owned = true): ImageSpool =
   ImageSpool(path: path, width: width, height: height, owned: owned)

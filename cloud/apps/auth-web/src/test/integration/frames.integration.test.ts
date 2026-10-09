@@ -2155,6 +2155,7 @@ describe("frame management API", () => {
         "device_config",
         "gpio_buttons",
         "device",
+        "input_settings",
         "deep_sleep",
         "deep_sleep_on_battery",
         "wake_check_seconds",
@@ -2297,6 +2298,34 @@ describe("frame management API", () => {
     // A driver key is a name, never something a shell or a path could read.
     const shellDriver = await push({ device: "framebuffer; reboot" });
     expect(shellDriver.status).toBe(400);
+    // The input batch (2026.9.23) has its own floor, and so does a button
+    // `role` — a sub-key of the older gpio_buttons that firmware in between
+    // refuses the whole push on.
+    const inputTooEarly = await push({ input_settings: { keyboardLayout: "de", grabKeyboard: true } });
+    expect(inputTooEarly.status).toBe(400);
+    expect((await inputTooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.9.23",
+    });
+    const roleTooEarly = await push({ gpio_buttons: [{ pin: 5, label: "A", role: "next" }] });
+    expect(roleTooEarly.status).toBe(400);
+    expect((await roleTooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.9.23",
+    });
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.9.23" })
+      .where(eq(frames.id, frame_id));
+    const input = await push({
+      input_settings: { keyboardLayout: "de", grabKeyboard: true },
+      gpio_buttons: [{ pin: 5, label: "A", role: "next" }],
+    });
+    expect(input.status).toBe(200);
+    const badLayout = await push({ input_settings: { keyboardLayout: "qwertz" } });
+    expect(badLayout.status).toBe(400);
+    const badRole = await push({ gpio_buttons: [{ pin: 5, label: "A", role: "jump" }] });
+    expect(badRole.status).toBe(400);
     // …and round-trip through the frame summary in the device's spelling.
     const [pushed] = await db.select().from(frames).where(eq(frames.id, frame_id));
     expect(pushed?.settings).toMatchObject({
@@ -2304,6 +2333,8 @@ describe("frame management API", () => {
       metrics_interval: 0,
       timezone_updater: { enabled: false, hour: 4 },
       device: "pimoroni.hyperpixel4sq_touch",
+      input_settings: { keyboardLayout: "de", grabKeyboard: true },
+      gpio_buttons: [{ pin: 5, label: "A", role: "next" }],
     });
   });
 

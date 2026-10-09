@@ -69,6 +69,8 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     forcePreviewRender,
     openPreviewImage,
     setPreviewSettings,
+    pressGpioButton,
+    releaseGpioButton,
   } = useActions(livePreviewLogic({ frameId }))
   const { apps } = useValues(appsModel)
 
@@ -251,7 +253,8 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
           }}
           width={previewDimensions.width}
           height={previewDimensions.height}
-          className="max-h-[40vh] max-w-full rounded-lg border border-slate-500/20"
+          tabIndex={0}
+          className="max-h-[40vh] max-w-full rounded-lg border border-slate-500/20 outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           style={{
             imageRendering: 'pixelated',
             // Taps and sideways drags are the scene's; a vertical swipe still
@@ -383,8 +386,11 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
             size="small"
             color="secondary"
             className="flex items-center gap-1"
-            title={`GPIO pin ${button.pin}`}
-            onClick={() => dispatchPreviewEvent('button', { pin: button.pin, label: button.label, level: 0 })}
+            title={`GPIO pin ${button.pin} — hold for a long press`}
+            onPointerDown={() => pressGpioButton(button)}
+            onPointerUp={() => releaseGpioButton(button)}
+            onPointerLeave={() => releaseGpioButton(button)}
+            onPointerCancel={() => releaseGpioButton(button)}
           >
             <CursorArrowRaysIcon className="h-4 w-4" />
             {button.label || `GPIO ${button.pin}`}

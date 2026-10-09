@@ -47,6 +47,31 @@ when defined(frameosDriverLibrary):
   proc sendEventOwned*(event: string, payload: sink JsonNode, origin: EventOrigin) {.gcsafe.} =
     sendEvent(event, payload, origin)
 
+  var sharedHostInputHook: HostInputEventProc
+
+  proc setSharedHostInputHook*(hook: HostInputEventProc) =
+    sharedHostInputHook = hook
+
+  proc sendInputEvent*(event: DriverInputEvent) {.gcsafe.} =
+    ## Input as a struct (frameos/driver_abi). A host from before the hook
+    ## existed gets the old JSON events instead, positions included; what the
+    ## old host cannot take — a relative mouse's counts, which it has no cursor
+    ## for — goes nowhere.
+    if not sharedHostInputHook.isNil:
+      var copy = event
+      sharedHostInputHook(addr copy)
+      return
+    case DriverInputKind(event.kind)
+    of dikPointerAbs: sendEvent("mouseMove", %*{"x": event.x.int, "y": event.y.int}, eoDriver)
+    of dikPointerDown: sendEvent("mouseDown", %*{"button": event.code.int}, eoDriver)
+    of dikPointerUp: sendEvent("mouseUp", %*{"button": event.code.int}, eoDriver)
+    of dikWheel: sendEvent("wheel", %*{"deltaX": event.x.int, "deltaY": event.y.int}, eoDriver)
+    of dikKeyDown, dikKeyUp:
+      if event.value != 2:
+        sendEvent(if event.kind == ord(dikKeyDown).cint: "keyDown" else: "keyUp",
+          %*{"key": "", "code": event.code.int}, eoDriver)
+    of dikPointerRel, dikPointerCancel, dikNone: discard
+
   proc log*(event: JsonNode) {.gcsafe.} =
     if not sharedHostLogHook.isNil:
       let eventText = $event
@@ -89,6 +114,10 @@ elif defined(frameosEmbedded) or defined(frameosWasm):
 
   proc sendEventOwned*(event: string, payload: sink JsonNode, origin: EventOrigin) {.gcsafe.} =
     sendEvent(event, payload, origin)
+
+  proc sendInputEvent*(event: DriverInputEvent) {.gcsafe.} =
+    ## No input drivers on these hosts: the page and the firmware send JSON.
+    discard
 
   proc log*(eventPayload: JsonNode) {.gcsafe.} =
     if not embeddedLogHook.isNil:
@@ -185,6 +214,18 @@ else:
     ## the tree up: pass a fresh parse with `move`, keep no reference to it or
     ## to any node inside it.
     discard queueEvent(none(SceneId), event, payload, origin, owned = true)
+
+  # Input from a driver as a plain struct (frameos/driver_abi): values only, so
+  # a mouse at 1000 Hz allocates nothing on its way to the runner, and nothing
+  # of it is a ref two threads could hold. Bounded like eventChannel; the
+  # runner drains it into the dispatcher's input lane (event_loop.enqueueInput),
+  # which coalesces moves and never drops a release without a cancel.
+  var inputChannel*: Channel[DriverInputEvent]
+  inputChannel.open(1000)
+
+  proc sendInputEvent*(event: DriverInputEvent) {.gcsafe.} =
+    if not inputChannel.trySend(event):
+      atomicInc(eventsDroppedCounter)
 
   # Log
 

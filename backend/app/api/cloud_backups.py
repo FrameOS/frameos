@@ -94,6 +94,7 @@ FRAME_RESTORE_FIELDS = (
     "agent",
     "mountpoints",
     "error_behavior",
+    "input_settings",
     "palette",
     "buildroot",
     "embedded",

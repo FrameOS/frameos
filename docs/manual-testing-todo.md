@@ -18,9 +18,10 @@ it was removed; setup now strips its config.txt block from old cards.
 Bench notes from the passes so far (Pi 5 + 4.0 Touch, Zero 2 W + Round
 touch, both 2026-09-19):
 
-- The touch-test scene is `mouseMove` → state, `mouseUp` → redraw a dot. Test
-  orientation at an OFF-diagonal point: a transposed axis is invisible on
-  the diagonal, and that mistake has been made once.
+- The touch-test scene is `repo/scenes/samples/Touch test` (install it from
+  the samples): a dot follows the pointer and the scene names the gesture it
+  saw. Test orientation at an OFF-diagonal point: a transposed axis is
+  invisible on the diagonal, and that mistake has been made once.
 - `dtparam=i2c_arm=on` makes `drm-rp1-dpi` fail with no fb0 (GPIO 2/3 are
   DPI pins) — setup writes `i2c_arm=off` and `spi=off` for that reason; a
   later `dtoverlay=i2c-gpio` silently re-points the touch bus at GPIO 23/24.
@@ -41,6 +42,21 @@ touch, both 2026-09-19):
   Pi Zero W and a Pi 5).
 - [ ] **Touch on a rotated frame:** at `rotate` 90 / 270 the touch-test dot
   is still under the finger (rotate 0 passed on the Pi 5).
+- [ ] **Input v2 on a Pi (2026.9.23, `docs/events.md` "Input"; run in the
+  preview and under tests, never on hardware):** with a USB mouse on a
+  framebuffer / HyperPixel frame the drawn cursor moves along the picture's
+  axes at `rotate` 0 and 90, hides 5 s after the last motion, and a click of
+  it is a `pointerDown` at the cursor; on the Touch test the gestures come
+  out right (`tap`, `doubleTap`, `longPress` while still held, `swipe left`);
+  two fingers are two `pointerId`s; a keyboard plugged in AFTER boot is found
+  (`driver:evdev … listening`), is grabbed (`grabbed: true`; Ctrl+Alt+Del does
+  nothing), and the Keyboard test shows `Shift+H` as `H` under the `us` layout
+  and `z` for KEY_Y under `de` (`inputSettings.keyboardLayout`); a GPIO button
+  held 500 ms logs a `longPress` then `repeat`s and the release carries
+  `durationMs`, and the Counter sample still counts one per press. On an
+  ESP32 (E1002 bench): a press logs `action: press`, the release `release`
+  with `durationMs`, and a scene's `button` listener without an `action`
+  filter runs once per press.
 - [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
   driver). The write the driver makes (`echo 1 > /sys/class/graphics/fb0/blank`)
   was run by hand as uid 990 and took `bl_power` 0 → 4 and DPMS On → Off.

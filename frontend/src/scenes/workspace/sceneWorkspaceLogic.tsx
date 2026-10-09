@@ -1,4 +1,4 @@
-import { MakeLogicType, afterMount, kea, key, path, props } from 'kea'
+import { MakeLogicType, afterMount, connect, kea, key, path, props } from 'kea'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { parseRouteFrameId } from '../../utils/frameId'
 import { workspaceLogic } from './workspaceLogic'
@@ -15,10 +15,21 @@ export interface sceneWorkspaceLogicMeta {
 
 export type sceneWorkspaceLogicType = MakeLogicType<{}, {}, SceneWorkspaceLogicProps> & sceneWorkspaceLogicMeta
 
+/** The frame's editors logic for a route that names a frame; nothing for the frameless /scenes route. */
+export function routeFrameEditors(routeFrameId?: string | null): ReturnType<typeof frameEditorsLogic>[] {
+  const frameId = parseRouteFrameId(routeFrameId)
+  return frameId ? [frameEditorsLogic({ frameId })] : []
+}
+
 export const sceneWorkspaceLogic = kea<sceneWorkspaceLogicType>([
   path(['src', 'scenes', 'workspace', 'sceneWorkspaceLogic']),
   props({} as SceneWorkspaceLogicProps),
   key((props) => `${props.routeFrameId ?? 'none'}:${props.routeSceneId ?? 'none'}`),
+  // Keep the frame's editors logic mounted for the route's lifetime: the
+  // selectScene below is what scopes the diagram's keyboard shortcuts to the
+  // shown scene, and an action dispatched at an unmounted logic is dropped
+  // (Cmd+Z did nothing on the scene workspace until something else mounted it).
+  connect((props: SceneWorkspaceLogicProps) => ({ logic: routeFrameEditors(props.routeFrameId) })),
   afterMount(({ props }) => {
     const frameId = parseRouteFrameId(props.routeFrameId)
     const sceneId = props.routeSceneId ?? null

@@ -213,12 +213,37 @@ def ensure_frameos_running(process):
         message += f"\nLast frameos log lines:\n{log_tail}"
     raise RuntimeError(message)
 
+def send_event(port, name, payload):
+    """POST /event/<name>: the frame's HTTP API with `public` access, the
+    `http:write` origin of docs/events-contract.json."""
+    response = requests.post(f"http://localhost:{port}/event/{name}", json=payload, timeout=5)
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to send {name}: HTTP {response.status_code}")
+
+def scene_e2e_events(scene_id):
+    """The `e2eEvents` of a scene fixture (e2e/scenes/<id>.json): events the
+    harness sends after the first render, snapshotting the render they cause.
+    That is how an input scene shows what it heard rather than its idle face."""
+    base_id = scene_id.removesuffix("_interpreted")
+    path = Path("./scenes") / f"{base_id}.json"
+    if not path.exists():
+        return []
+    return json.loads(path.read_text()).get("e2eEvents") or []
+
 def set_scene_and_wait_for_upload(port, receiver, scene_id):
     receiver.clear()
     set_scene(port, scene_id)
     upload = receiver.wait_for_upload()
     if not upload["body"]:
         raise RuntimeError(f"Received empty HTTP upload for scene {scene_id}")
+    events = scene_e2e_events(scene_id)
+    if events:
+        receiver.clear()
+        for event in events:
+            send_event(port, event["event"], event.get("payload") or {})
+        upload = receiver.wait_for_upload()
+        if not upload["body"]:
+            raise RuntimeError(f"Received empty HTTP upload for scene {scene_id} after its events")
     return upload
 
 def wait_for_frameos_server(process, port, timeout=15):
@@ -290,10 +315,14 @@ def main():
 
         for scene_file in files:
             base_id = scene_file.stem
-            for (scene_id, filename) in [
-                (base_id, base_id + '_compiled'), 
-                (base_id + '_interpreted', base_id + '_interpreted')
-            ]:
+            # A fixture that says `execution: "interpreted"` has no compiled
+            # twin (makescenes.py): one render, snapshotted under its own name.
+            interpreted_only = (json.loads(scene_file.read_text()).get('settings') or {}).get('execution') == 'interpreted'
+            variants = [(base_id + '_interpreted', base_id)] if interpreted_only else [
+                (base_id, base_id + '_compiled'),
+                (base_id + '_interpreted', base_id + '_interpreted'),
+            ]
+            for (scene_id, filename) in variants:
                 print(f"🍿 Processing scene: {scene_id}")
                 ensure_frameos_running(process)
 
@@ -318,6 +347,13 @@ def main():
                 image_hash = headers.get("X-FrameOS-Image-Hash", "unknown")
                 image_size = headers.get("X-FrameOS-Image-Bytes", str(len(upload["body"])))
                 print(f"Snapshot captured from HTTP upload: {snapshot_path} ({image_size} bytes, hash {image_hash})")
+            if interpreted_only:
+                if (snapshots_dir / f"{base_id}.png").exists():
+                    print(f"✅ Snapshot captured for interpreted-only scene {base_id}")
+                else:
+                    print(f"❌ Missing snapshot for scene {base_id}")
+                    failures += 1
+                continue
             # compare files: base_id + '_compiled' and base_id + '_interpreted'
             compiled_path = snapshots_dir / f"{base_id}_compiled.png"
             interpreted_path = snapshots_dir / f"{base_id}_interpreted.png"

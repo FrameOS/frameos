@@ -350,6 +350,7 @@ export interface FrameType {
   }
   schedule?: FrameSchedule
   gpio_buttons?: GPIOButton[]
+  input_settings?: InputSettings
   network?: {
     wifiSSID?: string
     wifiPassword?: string
@@ -498,6 +499,17 @@ export interface NewFrameFormType {
 export interface GPIOButton {
   pin: number
   label: string
+  /** What the button means to a scene (`button {role}`): one of the event
+   * contract's `buttons.roles`. Empty: the default for the label. */
+  role?: string
+}
+
+/** How a person's input reaches a scene (frame.json `inputSettings`). */
+export interface InputSettings {
+  /** One of the event contract's `keyboard.layouts`; the default is `us`. */
+  keyboardLayout?: string
+  /** Take keyboards away from the console while the runtime runs (default on). */
+  grabKeyboard?: boolean
 }
 
 export interface FrameSchedule {

@@ -59,6 +59,7 @@ from app.models.frame import (
     new_frame,
     delete_frame,
     normalize_error_behavior,
+    normalize_input_settings,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
     record_successful_deploy,
@@ -541,6 +542,8 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
         refresh_tls_certificate_validity_dates(preview)
     if "error_behavior" in update_data:
         preview.error_behavior = normalize_error_behavior(preview.error_behavior)
+    if "input_settings" in update_data:
+        preview.input_settings = normalize_input_settings(preview.input_settings)
 
     old_mode = frame.mode
     if data.mode == "buildroot" or ((preview.mode or "rpios") == "buildroot" and "buildroot" in update_data):
@@ -559,6 +562,7 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
         result["gpio_buttons"] = preview.gpio_buttons
         result["https_proxy"] = normalize_https_proxy(preview.https_proxy)
         result["error_behavior"] = normalize_error_behavior(preview.error_behavior)
+        result["input_settings"] = normalize_input_settings(preview.input_settings)
         result["ssh_user"] = preview.ssh_user
         return result
 
@@ -4062,6 +4066,8 @@ async def api_frame_update_endpoint(
         refresh_tls_certificate_validity_dates(frame)
     if "error_behavior" in update_data:
         frame.error_behavior = normalize_error_behavior(frame.error_behavior)
+    if "input_settings" in update_data:
+        frame.input_settings = normalize_input_settings(frame.input_settings)
 
     if data.mode == "buildroot" or ((frame.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         try:
@@ -4176,6 +4182,8 @@ async def api_frame_new(
             frame.embedded = dict(data.embedded)
         if data.gpio_buttons is not None:
             frame.gpio_buttons = list(data.gpio_buttons)
+        if data.input_settings is not None:
+            frame.input_settings = normalize_input_settings(data.input_settings)
         apply_device_config_defaults(frame)
         apply_device_gpio_button_defaults(frame)
 

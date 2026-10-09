@@ -9,6 +9,11 @@ import {
   cloudFrameSupportsHardwareSettings,
   cloudFrameSupportsDisplayDriverSetting,
   cloudGpioButtonsPayload,
+  cloudInputSettingsPayload,
+  cloudKeyboardLayoutIds,
+  cloudFrameSupportsInputSettings,
+  inputCloudFrameSettingKeys,
+  inputCloudFrameSettingsMinVersion,
   displayDriverCloudFrameSettingKeys,
   displayDriverCloudFrameSettingsMinVersion,
   cloudPalettePayload,
@@ -46,8 +51,13 @@ import {
   extendedFrameSettingsMinVersion,
   frameSupportsExtendedSettings,
   frameSupportsHardwareSettings,
+  frameSupportsInputSettings,
+  frameSettingsRefusal,
+  gpioButtonRolesMinVersion,
   hardwareFrameSettingKeys,
   hardwareFrameSettingsMinVersion,
+  inputFrameSettingKeys,
+  inputFrameSettingsMinVersion,
 } from "../../lib/frames";
 
 // Save and Render in the shared SPA used to POST /api/frames/{id} and
@@ -325,6 +335,95 @@ describe("cloud settings push", () => {
         cloudFrameSettingKeysForVersion("2026.9.22"),
       ),
     ).toEqual({ device: "pimoroni.hyperpixel4sq_touch" });
+  });
+
+  it("gates the input batch and button roles on their floor, Pi/Linux only", () => {
+    expect([...inputCloudFrameSettingKeys]).toEqual(["input_settings"]);
+    expect(new Set(inputCloudFrameSettingKeys)).toEqual(inputFrameSettingKeys);
+    expect(inputCloudFrameSettingsMinVersion).toBe("2026.9.23");
+    expect(inputFrameSettingsMinVersion).toBe(inputCloudFrameSettingsMinVersion);
+    expect(gpioButtonRolesMinVersion).toBe(inputCloudFrameSettingsMinVersion);
+    expect(esp32SettableKeys.has("input_settings")).toBe(false);
+    for (const version of ["2026.9.22", "2026.9.23", "2026.10.0", "unknown", null, ""]) {
+      expect(cloudFrameSupportsInputSettings(version), `${version}`).toBe(frameSupportsInputSettings(version));
+    }
+    expect(cloudFrameSupportsInputSettings("2026.9.22")).toBe(false);
+    expect(cloudFrameSupportsInputSettings("2026.9.23")).toBe(true);
+    expect(cloudFrameSettingKeysForVersion("2026.9.22")).not.toContain("input_settings");
+    expect(cloudFrameSettingKeysForVersion("2026.9.23")).toContain("input_settings");
+
+    // The layouts are the events contract's, never a list of this module's own.
+    expect(cloudKeyboardLayoutIds).toEqual(["us", "gb", "de", "fr", "es", "it", "sv", "da", "nb"]);
+    // The device replaces the whole object, so both keys always go; an
+    // unknown layout and an unset grab are their defaults.
+    expect(cloudInputSettingsPayload({ keyboardLayout: "de", grabKeyboard: "true" })).toEqual({
+      keyboardLayout: "de",
+      grabKeyboard: true,
+    });
+    expect(cloudInputSettingsPayload({ keyboardLayout: "qwertz" })).toEqual({ keyboardLayout: "us", grabKeyboard: false });
+    expect(cloudInputSettingsPayload("de")).toBeUndefined();
+    expect(allowedFrameSettings.get("input_settings")?.({ keyboardLayout: "de", grabKeyboard: true })).toBe(true);
+    expect(allowedFrameSettings.get("input_settings")?.({ keyboardLayout: "qwertz" })).toBe(false);
+    expect(allowedFrameSettings.get("input_settings")?.({})).toBe(false);
+
+    // A role rides a button only in a push built for input-batch firmware:
+    // the item key is refused whole by 2026.8.31 … 2026.9.22 runtimes.
+    const buttons = [
+      { pin: 5, label: "A", role: "next" },
+      { pin: 6, label: "B", role: "jump" },
+      { pin: 7, label: "C", role: "" },
+      { pin: 8, label: "D" },
+    ];
+    expect(cloudGpioButtonsPayload(buttons)).toEqual([
+      { pin: 5, label: "A", role: "next" },
+      { pin: 6, label: "B" },
+      { pin: 7, label: "C" },
+      { pin: 8, label: "D" },
+    ]);
+    expect(cloudGpioButtonsPayload(buttons, { roles: false })).toEqual([
+      { pin: 5, label: "A" },
+      { pin: 6, label: "B" },
+      { pin: 7, label: "C" },
+      { pin: 8, label: "D" },
+    ]);
+    const form = { gpio_buttons: buttons, input_settings: { keyboardLayout: "gb", grabKeyboard: false } };
+    expect(cloudFrameSettingsPayload(form, cloudFrameSettingKeysForVersion("2026.9.22"))).toEqual({
+      gpio_buttons: [
+        { pin: 5, label: "A" },
+        { pin: 6, label: "B" },
+        { pin: 7, label: "C" },
+        { pin: 8, label: "D" },
+      ],
+    });
+    const current = cloudFrameSettingsPayload(form, cloudFrameSettingKeysForVersion("2026.9.23"));
+    expect(current).toEqual({
+      gpio_buttons: [
+        { pin: 5, label: "A", role: "next" },
+        { pin: 6, label: "B" },
+        { pin: 7, label: "C" },
+        { pin: 8, label: "D" },
+      ],
+      input_settings: { keyboardLayout: "gb", grabKeyboard: false },
+    });
+    for (const [key, value] of Object.entries(current)) {
+      expect(allowedFrameSettings.get(key)?.(value), key).toBe(true);
+    }
+    // The route's verdict agrees: a role is "newer firmware" below the floor
+    // and fine above it, on Linux; an ESP32 refuses the item key outright.
+    const linux = (frameosVersion: string) => ({ frameosVersion, hardware: { platform: "pi" } });
+    const withRole = { gpio_buttons: [{ pin: 5, label: "A", role: "next" }] };
+    expect(frameSettingsRefusal(linux("2026.9.22"), withRole)).toEqual({
+      error: "settings_need_newer_firmware",
+      minFrameosVersion: "2026.9.23",
+    });
+    expect(frameSettingsRefusal(linux("2026.9.22"), { gpio_buttons: [{ pin: 5, label: "A" }] })).toBeNull();
+    expect(frameSettingsRefusal(linux("2026.9.23"), withRole)).toBeNull();
+    expect(frameSettingsRefusal(linux("2026.9.23"), { gpio_buttons: [{ pin: 5, label: "A", role: "jump" }] })).toEqual({
+      error: "invalid_settings",
+    });
+    expect(frameSettingsRefusal({ frameosVersion: "2026.9.23", hardware: { platform: "esp32-s3" } }, withRole)).toEqual({
+      error: "invalid_settings",
+    });
   });
 
   it("only includes the extended batch for firmware that knows it", () => {

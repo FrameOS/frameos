@@ -120,6 +120,10 @@ proc sceneStateJson*(): string =
 proc takeRenderRequested*(): bool =
   host.takeRenderRequested()
 
+proc tickInput*(): bool =
+  ## Time passing with nothing sent (single_scene_host.tick).
+  host.tick()
+
 proc originFromMask(mask: cuint): Option[EventOrigin] =
   ## The firmware names an origin by its bit in fos_events_gen.h
   ## (`FOS_ORIGIN_*` = 1 shl the origin's place in the contract) — the same

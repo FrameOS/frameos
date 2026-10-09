@@ -90,7 +90,13 @@
   readable) — a green preview check says nothing about one. On the ESP32 the C edge is `embedded/esp32/main/fos_events.c`
   (one function for HTTP, schedule, cloud, console and buttons). New behaviour
   gets a case in the `dispatcher` section of `docs/event-fixtures.json`
-  (`test_event_loop.nim` runs it).
+  (`test_event_loop.nim` runs it). **Input** (pointers, keys, buttons) goes
+  through `frameos/src/frameos/input_state.nim` — the cursor, the modifiers,
+  the keyboard layout, the gestures, the button holds — and reaches a scene only
+  under the names it listens for, old names (`mouseMove`) included as contract
+  aliases; the driver side is a struct (`driver_abi.nim`), never JSON per motion
+  report. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
+  evdev translator's `test_translate.nim` are where a rule gets its test.
 
 ## AI scene chat: change the prompt/linter, then run the evals
 

@@ -94,7 +94,8 @@ suite "cloud verb contract fixtures":
     check CLOUD_SETTINGS_ALLOWLIST == profileAllowlist("linux")
     check "deep_sleep" notin CLOUD_SETTINGS_ALLOWLIST
     check "flip" in CLOUD_SETTINGS_ALLOWLIST
-    check CLOUD_SETTINGS_RESTART_KEYS == @["palette", "device_config", "gpio_buttons", "device"]
+    check CLOUD_SETTINGS_RESTART_KEYS == @["palette", "device_config", "gpio_buttons", "device", "input_settings"]
+    check "input_settings" in CLOUD_SETTINGS_ALLOWLIST
 
   test "every verb the dispatcher serves is in the contract, and vice versa":
     for spec in CloudContractVerbs:

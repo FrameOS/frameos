@@ -574,13 +574,16 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
   of "button":
     # A GPIO press (drivers/gpioButton, or the ESP32's fos_buttons): remember
     # it for the bottom bar and redraw now rather than at the next interval.
-    self.state["lastButton"] = %*{
-      "pin": context.payload{"pin"}.getInt(-1),
-      "label": context.payload{"label"}.getStr(""),
-      "level": context.payload{"level"}.getInt(-1),
-      "at": epochTime(),
-    }
-    sendEvent("render", %*{}, eoScene)
+    # The release, the long press and the repeats are not news for the bar.
+    if context.payload{"action"}.getStr("press") == "press":
+      self.state["lastButton"] = %*{
+        "pin": context.payload{"pin"}.getInt(-1),
+        "label": context.payload{"label"}.getStr(""),
+        "role": context.payload{"role"}.getStr(""),
+        "level": context.payload{"level"}.getInt(-1),
+        "at": epochTime(),
+      }
+      sendEvent("render", %*{}, eoScene)
   else:
     discard
 

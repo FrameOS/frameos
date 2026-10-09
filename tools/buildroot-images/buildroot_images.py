@@ -71,6 +71,7 @@ from app.tasks.buildroot_platforms import (  # noqa: E402
 )
 from app.models.frame import (  # noqa: E402
     DEFAULT_ERROR_BEHAVIOR,
+    DEFAULT_INPUT_SETTINGS,
     DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     get_frame_json,
 )
@@ -384,6 +385,7 @@ class ReleaseImageFrame:
     )
     mountpoints: dict[str, Any] = field(default_factory=lambda: {"enabled": False, "items": []})
     error_behavior: dict[str, Any] = field(default_factory=lambda: DEFAULT_ERROR_BEHAVIOR.copy())
+    input_settings: dict[str, Any] = field(default_factory=lambda: DEFAULT_INPUT_SETTINGS.copy())
     palette: dict[str, Any] = field(default_factory=dict)
     buildroot: dict[str, Any] = field(default_factory=lambda: {"platform": SUPPORTED_BUILDROOT_PLATFORM})
     rpios: dict[str, Any] | None = None

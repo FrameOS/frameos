@@ -25,6 +25,7 @@ from app.models.frame import (
     new_frame,
     normalize_frame_admin_auth,
     normalize_error_behavior,
+    normalize_input_settings,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
     record_successful_deploy,
@@ -240,6 +241,7 @@ FRAME_SYNC_LABELS = {
     "control_code": "Control code",
     "gpio_buttons": "GPIO buttons",
     "error_behavior": "Error behavior",
+    "input_settings": "Input",
 }
 
 
@@ -383,6 +385,9 @@ def _sync_gpio_buttons(value: Any) -> list[dict[str, Any]] | None:
         label = str(raw_button.get("label") or "").strip()
         if label and label != f"Pin {pin}":
             button["label"] = label
+        role = str(raw_button.get("role") or "").strip()
+        if role:
+            button["role"] = role
         buttons.append(button)
     return buttons or None
 
@@ -396,6 +401,12 @@ def _sync_mountpoints(value: Any) -> dict[str, Any] | None:
 def _sync_error_behavior(value: Any) -> dict[str, Any] | None:
     normalized = normalize_error_behavior(value)
     default = normalize_error_behavior(None)
+    return None if _sync_values_equal(normalized, default) else normalized
+
+
+def _sync_input_settings(value: Any) -> dict[str, Any] | None:
+    normalized = normalize_input_settings(value)
+    default = normalize_input_settings(None)
     return None if _sync_values_equal(normalized, default) else normalized
 
 
@@ -420,6 +431,8 @@ def _sync_frame_value(key: str, value: Any) -> Any:
         return _sync_mountpoints(value)
     if key == "error_behavior":
         return _sync_error_behavior(value)
+    if key == "input_settings":
+        return _sync_input_settings(value)
     if key == "palette":
         return _sync_compact_mapping(value)
     if key == "frame_admin_auth":
@@ -1311,6 +1324,8 @@ def _apply_sync_frame_update(frame: Frame, update_data: dict[str, Any]) -> None:
         refresh_tls_certificate_validity_dates(frame)
     if "error_behavior" in update_data:
         frame.error_behavior = normalize_error_behavior(frame.error_behavior)
+    if "input_settings" in update_data:
+        frame.input_settings = normalize_input_settings(frame.input_settings)
 
     if frame.mode == "buildroot" or ((frame.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         ensure_buildroot_frame_defaults(frame, (frame.buildroot or {}).get("platform"))
@@ -1432,6 +1447,8 @@ def _sync_frame_push_off_value(key: str, value: Any) -> Any:
         return {"enabled": False}
     if key == "error_behavior":
         return normalize_error_behavior(value)
+    if key == "input_settings":
+        return normalize_input_settings(value)
     if key == "palette":
         return {}
     return None

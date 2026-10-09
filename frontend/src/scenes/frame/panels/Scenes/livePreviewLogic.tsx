@@ -15,8 +15,8 @@ import { router } from 'kea-router'
 
 import { FrameScene, GPIOButton, RepositoryType, TemplateType, FrameId } from '../../../../types'
 import { openCanvasImageInNewTab } from '../../../../utils/objectUrl'
-import { attachPointerInput } from '../../../../utils/previewPointer'
-import { isHostEvent, isPointerEvent } from '../../../../utils/eventsContract'
+import { attachKeyboardInput, attachPointerInput } from '../../../../utils/previewPointer'
+import { isHostEvent, isKeyboardEvent, isPointerEvent } from '../../../../utils/eventsContract'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { assetUrl } from '../../../../utils/assetUrl'
 import { isCloudMode } from '../../../../utils/cloudMode'
@@ -281,6 +281,9 @@ export interface livePreviewLogicActions {
   openPreviewImage: () => {
     value: true
   }
+  pressGpioButton: (button: GPIOButton) => {
+    button: GPIOButton
+  }
   previewAssetsChanged: () => {
     value: true
   }
@@ -315,6 +318,9 @@ export interface livePreviewLogicActions {
   }
   registerCanvas: (canvas: HTMLCanvasElement | null) => {
     canvas: HTMLCanvasElement | null
+  }
+  releaseGpioButton: (button: GPIOButton) => {
+    button: GPIOButton
   }
   resetFastRender: () => {
     value: true
@@ -394,6 +400,8 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     }),
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
+    pressGpioButton: (button: GPIOButton) => ({ button }),
+    releaseGpioButton: (button: GPIOButton) => ({ button }),
     openPreviewImage: true,
     previewReady: true,
     // `count` frames arrived since the last report (the page coalesces);
@@ -659,9 +667,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           const data = (node.data ?? {}) as Record<string, any>
           const keyword = String(data.keyword ?? '')
           // Not a button: what the host sends on its own (lifecycle events and
-          // scene commands), and pointer input — the canvas sends that itself,
-          // with a position (utils/previewPointer). Both are the contract's.
-          if (!keyword || isHostEvent(keyword) || isPointerEvent(keyword)) {
+          // scene commands), and pointer and keyboard input — the canvas sends
+          // those itself, with a position or a key (utils/previewPointer).
+          if (!keyword || isHostEvent(keyword) || isPointerEvent(keyword) || isKeyboardEvent(keyword)) {
             continue
           }
           const label = data.config?.label ?? data.label ?? null
@@ -827,6 +835,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       }
       cache.worker = worker
       cache.pointerEvents = false
+      cache.inputEvents = false
       const assetRequester = createAssetRequester(worker)
       cache.assetRequester = assetRequester
       cache.assetRequest = assetRequester.request
@@ -845,6 +854,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
             // older one (a pinned release, a stale build) would hand scenes
             // raw 0..32767 coordinates and render on every move.
             cache.pointerEvents = msg.pointerEvents === true
+            // Input v2 (2026.9.23): pointer events with a position, the
+            // wheel, the keyboard. An older bundle gets the old mouse events.
+            cache.inputEvents = msg.inputEvents === true
             actions.previewReady()
             break
           case 'frame': {
@@ -1017,13 +1029,20 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     registerCanvas: ({ canvas }) => {
       cache.canvas = canvas
       drawFrame(cache)
-      // The pointer over the canvas is the scene's: mouseMove / mouseDown /
-      // mouseUp, shaped the way a frame's evdev driver sends them.
+      // The pointer over the canvas and the keyboard while it has the focus
+      // are the scene's, shaped the way a frame's evdev driver sends them.
       cache.detachPointer?.()
+      cache.detachKeyboard?.()
+      const send = (name: string, payload: Record<string, unknown>): void =>
+        cache.worker?.postMessage({ type: 'event', name, payload })
       cache.detachPointer = canvas
-        ? attachPointerInput(canvas, (name, payload) => cache.worker?.postMessage({ type: 'event', name, payload }), {
+        ? attachPointerInput(canvas, send, {
             enabled: () => cache.pointerEvents === true,
+            inputV2: () => cache.inputEvents === true,
           })
+        : null
+      cache.detachKeyboard = canvas
+        ? attachKeyboardInput(canvas, send, { enabled: () => cache.inputEvents === true })
         : null
     },
     openPreviewImage: () => {
@@ -1033,6 +1052,33 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     },
     dispatchPreviewEvent: ({ name, payload }) => {
       cache.worker?.postMessage({ type: 'event', name, payload })
+    },
+    // A GPIO button in the preview is held like a real one: the press edge on
+    // pointer down, the release edge on pointer up (level 0 is pressed — the
+    // line is pulled up). The runtime adds the role, the long press and the
+    // repeats, and the release's `durationMs`.
+    pressGpioButton: ({ button }) => {
+      cache.heldGpioPins = cache.heldGpioPins ?? new Set<number>()
+      if (cache.heldGpioPins.has(button.pin)) {
+        return
+      }
+      cache.heldGpioPins.add(button.pin)
+      cache.worker?.postMessage({
+        type: 'event',
+        name: 'button',
+        payload: { pin: button.pin, label: button.label, level: 0, action: 'press' },
+      })
+    },
+    releaseGpioButton: ({ button }) => {
+      if (!cache.heldGpioPins?.has(button.pin)) {
+        return
+      }
+      cache.heldGpioPins.delete(button.pin)
+      cache.worker?.postMessage({
+        type: 'event',
+        name: 'button',
+        payload: { pin: button.pin, label: button.label, level: 1, action: 'release' },
+      })
     },
     forcePreviewRender: () => {
       // The worker got a snapshot of the scenes when the preview opened; if

@@ -73,6 +73,7 @@ bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, cha
 double frameos_nim_scene_interval(void) { return 0; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
+bool frameos_nim_tick(void) { return false; }
 bool frameos_nim_send_event(uint32_t origin, const char *event, const char *payload_json)
 {
     (void)origin; (void)event; (void)payload_json;

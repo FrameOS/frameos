@@ -7,4 +7,7 @@ export const POINTER_WIRE_MAX = 32767
 export const HOST_EVENT_NAMES: readonly string[] = ["init", "render", "open", "close", "turnOn", "turnOff", "setSceneState", "setCurrentScene"]
 
 /** Pointer input: sent by the canvas with a position, never by a button. */
-export const POINTER_EVENT_NAMES: readonly string[] = ["mouseMove", "mouseDown", "mouseUp", "wheel"]
+export const POINTER_EVENT_NAMES: readonly string[] = ["pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel"]
+
+/** Keyboard input: sent by the focused canvas, never by a button. */
+export const KEYBOARD_EVENT_NAMES: readonly string[] = ["keyDown", "keyUp", "textInput"]

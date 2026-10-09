@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  attachKeyboardInput,
   attachPointerInput,
   coerceStateFieldValue,
   describeDeviceLimits,
@@ -146,11 +147,24 @@ function forwardPointer(
   canvas: HTMLCanvasElement,
   previewRef: RefObject<FrameOSPreview | null>,
 ): () => void {
-  return attachPointerInput(
+  const detachPointer = attachPointerInput(
     canvas,
     (name, payload) => previewRef.current?.sendEvent(name, payload),
-    { enabled: () => previewRef.current?.runtimeInfo?.pointerEvents === true },
+    {
+      enabled: () => previewRef.current?.runtimeInfo?.pointerEvents === true,
+      inputV2: () => previewRef.current?.runtimeInfo?.inputEvents === true,
+    },
   );
+  // The keyboard too, while the canvas has the focus (a click on it takes it).
+  const detachKeyboard = attachKeyboardInput(
+    canvas,
+    (name, payload) => previewRef.current?.sendEvent(name, payload),
+    { enabled: () => previewRef.current?.runtimeInfo?.inputEvents === true },
+  );
+  return () => {
+    detachPointer();
+    detachKeyboard();
+  };
 }
 
 // Runs a scene in the browser through the frameos-wasm runtime: canvas,
@@ -1202,6 +1216,8 @@ export function SceneLivePreviewPanel({
             height={viewport.height}
             ref={canvasRef}
             role="img"
+            // Focusable: keys go to the scene while the picture has the focus.
+            tabIndex={0}
             width={viewport.width}
           />
         </div>

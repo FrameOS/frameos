@@ -206,6 +206,7 @@ proc start*(host: SingleSceneHost) =
     runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
       runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload,
         loopIndex: 0, loopKey: ".")),
+    sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
     log: proc (entry: JsonNode) =
       if not host.logEntry.isNil:
         host.logEntry(entry),
@@ -217,7 +218,19 @@ proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: J
   if host.events.isNil:
     host.say("event " & event & " dropped: runtime not ready")
     return false
+  discard host.events.tick()
   host.events.dispatchNow(origin, event, payload)
+
+proc tick*(host: SingleSceneHost): bool =
+  ## Time passing with nothing sent: a held pointer or button becomes a long
+  ## press (frameos/input_state.nim). The platform calls this from its idle
+  ## loop; true when something came of it and a render may be wanted.
+  if host.events.isNil:
+    return false
+  if host.events.tick() == 0:
+    return false
+  discard host.events.drain()
+  true
 
 proc queue*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: JsonNode,
             target = none(SceneId)) =
@@ -232,4 +245,5 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   ## `render` among it is one more pass.
   host.events.hostRun:
     result = interpreter.render(host.scene, context)
+  discard host.events.tick()
   discard host.events.drain()

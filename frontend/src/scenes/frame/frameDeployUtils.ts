@@ -739,3 +739,25 @@ export function buildDeployRecommendation(
       'No pending changes require rebuilding FrameOS, so a fast deploy (reload) is enough to bring the frame up to date.',
   }
 }
+
+export function embeddedFlashSize(frame: FrameType): '2MB' | '4MB' | '8MB' | '16MB' | '32MB' {
+  const raw = frame.embedded?.layout?.flash?.flashSize ?? frame.embedded?.flashSize ?? '8MB'
+  const normalized = typeof raw === 'string' ? raw.trim().toUpperCase().replace(/\s+/g, '') : '8MB'
+  return normalized === '2MB' ||
+    normalized === '4MB' ||
+    normalized === '8MB' ||
+    normalized === '16MB' ||
+    normalized === '32MB'
+    ? normalized
+    : '8MB'
+}
+
+/** Whether the board's flash layout has two app slots: 2/4 MB profiles cannot take a release over the air. */
+export function embeddedOtaSupported(frame: FrameType): boolean {
+  const layoutSupport = frame.embedded?.layout?.flash?.otaSupported
+  if (typeof layoutSupport === 'boolean') {
+    return layoutSupport
+  }
+  const flashSize = embeddedFlashSize(frame)
+  return flashSize !== '2MB' && flashSize !== '4MB'
+}

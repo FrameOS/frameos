@@ -20,6 +20,7 @@
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events.h"
+#include "fos_events_gen.h"
 #include "fos_wake.h"
 #include "frameos_nim.h"
 
@@ -31,7 +32,7 @@ static const char *TAG = "fos_buttons";
 
 typedef struct {
     int pin;
-    int level;
+    int level; /* 0: pressed (the line is pulled up), 1: released */
     bool wake; /* the press that woke the chip from deep sleep, replayed */
     char label[FOS_GPIO_BUTTON_LABEL_LEN];
 } fos_button_event_t;
@@ -90,7 +91,7 @@ static void enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
     if (!wake) fos_client_wake_for_events();
 }
 
-static void enqueue_press(const fos_gpio_button_t *button, int level)
+static void enqueue_edge(const fos_gpio_button_t *button, int level)
 {
     enqueue_event(button, level, false);
 }
@@ -118,11 +119,16 @@ static void buttons_task(void *arg)
             if (now_ms - s_last_change_ms[i] < BUTTON_DEBOUNCE_MS) {
                 continue;
             }
+            /* Both edges: the release too, so the Nim dispatcher can say how
+             * long the key was held and make `longPress` and `repeat` out of
+             * the hold (frameos/input_state.nim), the same on every host. A
+             * key held at boot was "sent" already; its release is real. */
             if (level == 0 && !s_press_sent[i]) {
                 s_press_sent[i] = true;
-                enqueue_press(button, level);
-            } else if (level != 0) {
+                enqueue_edge(button, level);
+            } else if (level != 0 && s_press_sent[i]) {
                 s_press_sent[i] = false;
+                enqueue_edge(button, level);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
@@ -232,9 +238,15 @@ void fos_buttons_process_events(void)
     while (xQueueReceive(s_queue, &event, 0) == pdTRUE) {
         char label[sizeof(event.label) * 2];
         json_escape(event.label, label, sizeof(label));
-        char payload[96];
-        snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"%s\",\"level\":%d}",
-                 event.pin, label, event.level);
+        /* An edge and nothing more: `action` is which one, `wake` whether it
+         * booted the chip. The role, the hold's `longPress` / `repeat` and the
+         * release's `durationMs` are the Nim dispatcher's (input_state.nim). */
+        char payload[160];
+        snprintf(payload, sizeof(payload),
+                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s}",
+                 event.pin, label, event.level,
+                 event.level == 0 ? FOS_BUTTON_ACTION_PRESS : FOS_BUTTON_ACTION_RELEASE,
+                 event.wake ? ",\"wake\":true" : "");
         /* `driver`: a press is hardware talking, and the contract lets it say
          * input and nothing else. fos_events.c hands it to the scene and asks
          * for the render when a listener took it; this is the render task, so
@@ -244,16 +256,23 @@ void fos_buttons_process_events(void)
          * leave no trace anywhere a user can see. When a scene ignores it the
          * interpreter says so (runEvent:noListenerMatched), but that only
          * helps if you can first tell the press was registered at all. */
-        char line[224];
+        char line[256];
         snprintf(line, sizeof(line),
                  "{\"event\":\"button\",\"source\":\"esp32\",\"pin\":%d,"
-                 "\"label\":\"%s\",\"level\":%d,\"dispatched\":%s,\"wake\":%s}",
-                 event.pin, label, event.level, dispatched ? "true" : "false",
-                 event.wake ? "true" : "false");
+                 "\"label\":\"%s\",\"level\":%d,\"action\":\"%s\",\"dispatched\":%s,\"wake\":%s}",
+                 event.pin, label, event.level,
+                 event.level == 0 ? FOS_BUTTON_ACTION_PRESS : FOS_BUTTON_ACTION_RELEASE,
+                 dispatched ? "true" : "false", event.wake ? "true" : "false");
         frameos_nim_log_hook(line);
         if (!dispatched) {
             ESP_LOGW(TAG, "button event not delivered: no scene runtime, or no scene to hear it");
         }
+    }
+    /* Time passing for a key still held: the dispatcher makes `longPress` and
+     * `repeat` out of it. This runs on the render task's wait slices, so a
+     * long press lands while the finger is still down. */
+    if (frameos_nim_tick()) {
+        fos_client_wake_for_events();
     }
 }
 

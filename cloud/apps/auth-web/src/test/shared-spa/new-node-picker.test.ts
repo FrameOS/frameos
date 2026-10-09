@@ -44,6 +44,17 @@ const weatherApp: AppConfig = {
   fields: [{ name: "city", type: "string", label: "City", value: "" }],
 } as unknown as AppConfig;
 
+// A string-in, string-out data app: what gets spliced INTO a data edge.
+const upperApp: AppConfig = {
+  name: "Uppercase",
+  category: "data",
+  fields: [
+    { name: "count", type: "integer", label: "Count", value: 1 },
+    { name: "text", type: "string", label: "Text", value: "" },
+  ],
+  output: [{ name: "text", type: "string" }],
+} as unknown as AppConfig;
+
 const scene = {
   id: sceneId,
   name: "Picker",
@@ -117,7 +128,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("null", { status: 404 })));
   initKea({ memoryRouter: true });
   appsModel.mount();
-  appsModel.actions.loadAppsSuccess({ weather: weatherApp });
+  appsModel.actions.loadAppsSuccess({ weather: weatherApp, upper: upperApp });
   framesModel.mount();
   framesModel.actions.addFrame(frame as FrameType);
   embedFrameLogic({ frameId }).mount();
@@ -213,6 +224,15 @@ describe("newNodePickerLogic.selectNewNodeOption", () => {
     expect(edgeSummary()).toContain("code1.fieldOutput->NEW.codeField/out");
   });
 
+  it("offers the apps whose fields take the output's type", () => {
+    picker().actions.openNewNodePicker(0, 0, 100, 200, "code1", "fieldOutput", "source");
+    const values = picker().values.allNewNodeOptions.map((candidate) => candidate.value);
+    expect(values).toContain("code");
+    expect(values).toContain("app/upper");
+    expect(values).toContain("app/weather");
+    expect(picker().values.allNewNodeOptions.find((candidate) => candidate.value === "app/upper")?.keyword).toBe("out");
+  });
+
   it("does nothing for a disabled option", async () => {
     await picker().asyncActions.selectNewNodeOption(
       from(CANVAS_NODE_ID, "", "canvas"),
@@ -220,5 +240,88 @@ describe("newNodePickerLogic.selectNewNodeOption", () => {
     );
     expect(insertedNodes()).toHaveLength(0);
     expect(diagram().values.canUndo).toBe(false);
+  });
+});
+
+// A data edge already on the dragged handle: the new node is spliced in
+// between, from either side, the way a runnable app slots into next/prev.
+describe("newNodePickerLogic.selectNewNodeOption on a connected data handle", () => {
+  const dataEdge = { id: "e-out-city", source: "code1", sourceHandle: "fieldOutput", target: "weather", targetHandle: "fieldInput/city" };
+
+  beforeEach(() => {
+    diagram().actions.setEdges([...diagram().values.rawEdges, dataEdge]);
+    expect(edgeSummary()).toEqual(["code1.fieldOutput->weather.fieldInput/city", "render.next->weather.prev"]);
+  });
+
+  it("splices an app pulled out of an output: it takes the value and hands it on", async () => {
+    await picker().asyncActions.selectNewNodeOption(from("code1", "fieldOutput", "source"), option("app/upper", "out"));
+    expect(insertedNodes().map((node) => node.type)).toEqual(["app"]);
+    expect(edgeSummary()).toEqual([
+      "NEW.fieldOutput->weather.fieldInput/city",
+      "code1.fieldOutput->NEW.fieldInput/text",
+      "render.next->weather.prev",
+    ]);
+    expect(sceneInForm().edges).toHaveLength(3);
+
+    diagram().actions.requestUndo();
+    expect(insertedNodes()).toHaveLength(0);
+    expect(edgeSummary()).toEqual(["code1.fieldOutput->weather.fieldInput/city", "render.next->weather.prev"]);
+  });
+
+  it("splices a code node pulled out of an output", async () => {
+    await picker().asyncActions.selectNewNodeOption(from("code1", "fieldOutput", "source"), option("code", "out"));
+    expect(edgeSummary()).toEqual([
+      "NEW.fieldOutput->weather.fieldInput/city",
+      "code1.fieldOutput->NEW.codeField/out",
+      "render.next->weather.prev",
+    ]);
+  });
+
+  it("keeps the old edge when the app pulled out of an output hands nothing on", async () => {
+    await picker().asyncActions.selectNewNodeOption(from("code1", "fieldOutput", "source"), option("app/weather", "out"));
+    expect(edgeSummary()).toEqual([
+      "code1.fieldOutput->NEW.fieldInput/city",
+      "code1.fieldOutput->weather.fieldInput/city",
+      "render.next->weather.prev",
+    ]);
+  });
+
+  it("splices an app pulled out of an input: the old source feeds it", async () => {
+    await picker().asyncActions.selectNewNodeOption(from("weather", "fieldInput/city", "target"), option("app/upper", "city"));
+    expect(edgeSummary()).toEqual([
+      "NEW.fieldOutput->weather.fieldInput/city",
+      "code1.fieldOutput->NEW.fieldInput/text",
+      "render.next->weather.prev",
+    ]);
+  });
+
+  it("replaces a source the new node cannot take", async () => {
+    await picker().asyncActions.selectNewNodeOption(from("weather", "fieldInput/city", "target"), option("state", "city"));
+    expect(edgeSummary()).toEqual(["NEW.fieldOutput->weather.fieldInput/city", "render.next->weather.prev"]);
+  });
+
+  it("splices a code node pulled out of an input fed by a state field", async () => {
+    embedFrameLogic({ frameId }).actions.updateScene(sceneId, {
+      fields: [{ name: "city", label: "City", type: "string", persist: "disk", access: "public" }],
+    });
+    diagram().actions.setNodesAndEdges(
+      [...diagram().values.nodes, { id: "cityState", type: "state", position: { x: 0, y: 300 }, data: { keyword: "city" } } as DiagramNode],
+      [
+        ...diagram().values.rawEdges.filter((edge) => edge.id !== dataEdge.id),
+        { id: "e-state-city", source: "cityState", sourceHandle: "stateOutput", target: "weather", targetHandle: "fieldInput/city" },
+      ]
+    );
+    await picker().asyncActions.selectNewNodeOption(from("weather", "fieldInput/city", "target"), option("code", "city"));
+    const node = insertedNodes().find((candidate) => candidate.id !== "cityState")!;
+    expect((node.data as CodeNodeData).codeArgs).toEqual([{ name: "city", type: "string" }]);
+    const summary = diagram()
+      .values.rawEdges.map((edge) => `${edge.source}.${edge.sourceHandle}->${edge.target}.${edge.targetHandle}`)
+      .map((edge) => edge.replace(node.id, "NEW"))
+      .sort();
+    expect(summary).toEqual([
+      "NEW.fieldOutput->weather.fieldInput/city",
+      "cityState.stateOutput->NEW.codeField/city",
+      "render.next->weather.prev",
+    ]);
   });
 });

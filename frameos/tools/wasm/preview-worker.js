@@ -772,6 +772,9 @@ async function init(msg) {
       browserAssets: browserAssetsInfo(),
       runtimeVersion: runtimeVersion(),
       pointerEvents: true,
+      // Input v2 (2026.9.23): pointer events with a position, the wheel, the
+      // keyboard, and the runtime's own gestures and long presses.
+      inputEvents: typeof Module._frameos_wasm_tick === 'function',
     })
     renderNow()
   } catch (e) {
@@ -793,37 +796,65 @@ function dispatchEvent(name, payload) {
   renderSoonIfRequested()
 }
 
-// A drag posts a mouseMove per animation frame, and they pile up behind a
-// render that takes longer than that. Replaying each one is pointless, so only
-// the newest of a burst reaches the scene — what runner.nim does with the
-// moves its evdev thread queued. The move is held for one turn of the event
-// loop (the queued messages behind it arrive first) and flushed ahead of any
-// other event, so a mouseDown still lands where the pointer is.
-let pendingMove = null
+// A drag posts a move per animation frame, and they pile up behind a render
+// that takes longer than that. Replaying each one is pointless, so only the
+// newest of a burst reaches the scene, per pointer (two fingers each keep
+// theirs) — what the dispatcher does with the moves a frame's evdev thread
+// queued. A move is held for one turn of the event loop (the queued messages
+// behind it arrive first) and flushed ahead of any other event, so a press
+// still lands where the pointer is.
+const pendingMoves = new Map()
 let pendingMoveTimer = null
 
-function flushPendingMove() {
+function flushPendingMoves() {
   if (pendingMoveTimer) {
     clearTimeout(pendingMoveTimer)
     pendingMoveTimer = null
   }
-  if (pendingMove) {
-    const payload = pendingMove
-    pendingMove = null
-    dispatchEvent('mouseMove', payload)
+  for (const [name, payload] of pendingMoves.values()) {
+    dispatchEvent(name, payload)
+  }
+  pendingMoves.clear()
+}
+
+// While a pointer is held, the runtime is ticked so a long press is delivered
+// while the finger is still down, as on a frame (frameos_wasm_tick).
+let tickTimer = null
+
+function tickWhileHeld() {
+  if (!Module || typeof Module._frameos_wasm_tick !== 'function') {
+    return
+  }
+  try {
+    if (call('frameos_wasm_tick', 'boolean', [], [])) {
+      renderSoonIfRequested()
+    }
+    if (call('frameos_wasm_pointers_down', 'number', [], []) <= 0) {
+      clearInterval(tickTimer)
+      tickTimer = null
+    }
+  } catch (e) {
+    post({ type: 'error', message: 'tick failed: ' + e })
+    clearInterval(tickTimer)
+    tickTimer = null
   }
 }
 
 function handleEvent(name, payload) {
-  if (name === 'mouseMove') {
-    pendingMove = payload || {}
+  if (name === 'mouseMove' || name === 'pointerMove') {
+    const pointerId = payload && typeof payload.pointerId === 'number' ? payload.pointerId : 0
+    pendingMoves.set(pointerId, [name, payload || {}])
     if (!pendingMoveTimer) {
-      pendingMoveTimer = setTimeout(flushPendingMove, 0)
+      pendingMoveTimer = setTimeout(flushPendingMoves, 0)
     }
     return
   }
-  flushPendingMove()
+  flushPendingMoves()
   dispatchEvent(name, payload)
+  if ((name === 'pointerDown' || name === 'mouseDown') && tickTimer === null && Module &&
+      typeof Module._frameos_wasm_tick === 'function') {
+    tickTimer = setInterval(tickWhileHeld, 100)
+  }
 }
 
 self.onmessage = (ev) => {
