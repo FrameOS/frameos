@@ -6,6 +6,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  bootWaitFailureMessage,
   browserTimeZone,
   describeSerialPort,
   Esp32CloudFlasher,
@@ -26,12 +27,14 @@ const esptool = vi.hoisted(() => {
     // 8 MB, 0x18 = 16 MB — esptool's DETECTED_FLASH_SIZES). null = the
     // fake loader has no readFlashId at all, like an older esptool-js.
     flashId: null as number | null,
+    // What esptool says it is talking to (esptool-js CHIP_NAME).
+    chipName: "ESP32-S3",
   };
   return {
     calls,
     module: {
       ESPLoader: class {
-        chip = { CHIP_NAME: "ESP32-S3" };
+        chip = { CHIP_NAME: calls.chipName };
         DETECTED_FLASH_SIZES = { 0x16: "4MB", 0x17: "8MB", 0x18: "16MB", 0x19: "32MB" };
         after() {
           return Promise.resolve();
@@ -262,6 +265,7 @@ afterEach(() => {
   esptool.calls.writeFlash.mockReset();
   esptool.calls.writeFlash.mockImplementation(() => Promise.resolve());
   esptool.calls.flashId = null;
+  esptool.calls.chipName = "ESP32-S3";
   esptool.calls.disconnects = 0;
   vi.unstubAllGlobals();
   delete (navigator as { serial?: unknown }).serial;
@@ -281,6 +285,18 @@ describe("wifiInputError", () => {
   it("enforces the 802.11 length limits", () => {
     expect(wifiInputError("x".repeat(33), "")).toMatch(/at most 32/);
     expect(wifiInputError("MyNet", "x".repeat(65))).toMatch(/at most 64/);
+  });
+});
+
+describe("bootWaitFailureMessage", () => {
+  // A 32 MB board formats a 24 MB /state partition on first boot (~3 min);
+  // telling that user to replug and reflash restarted the format every time.
+  it("says the board is still formatting rather than asking for a replug", () => {
+    const message = bootWaitFailureMessage(
+      "FrameOS 1.2.3 (idf v5.4) booting from ota_0\nW (912) SPIFFS: mount failed, -10025. formatting...\n",
+    );
+    expect(message).toMatch(/still formatting/);
+    expect(message).not.toMatch(/retry is quick/);
   });
 });
 
@@ -804,6 +820,26 @@ describe("Esp32CloudFlasher", () => {
       expect.stringMatching(/Nothing at all arrived on this serial port/),
     );
     expect(screen.queryByTestId("esp32-flash-done")).toBeNull();
+  });
+
+  it("refuses to write an S3 image onto a classic ESP32", async () => {
+    // The image used to follow the hardware picker alone: a classic ESP32
+    // took the S3 image, "flashed" fine, and boot-looped in its ROM for good.
+    mockCloudApi();
+    esptool.calls.chipName = "ESP32";
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await fillRequiredFields();
+
+    clickFlash();
+
+    const alert = await screen.findByRole("alert", undefined, { timeout: 5000 });
+    expect(alert.textContent).toMatch(/ESP32-S3 and ESP32-C3 only/);
+    // Not a link problem: no slower retry, nothing written, no code spent.
+    expect(esptool.calls.main).toHaveBeenCalledOnce();
+    expect(esptool.calls.writeFlash).not.toHaveBeenCalled();
+    expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");
   });
 
   it("flashes the image built for the board's flash layout when the release has it", async () => {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { detectFlashSize, layoutMatchedPlatform } from "../../../../../../frontend/src/scenes/workspace/embeddedFlashImage";
+import {
+  detectFlashSize,
+  layoutMatchedPlatform,
+  releaseChipMismatch,
+} from "../../../../../../frontend/src/scenes/workspace/embeddedFlashImage";
 
 // The self-hosted release flasher picks its image from the flash size esptool
 // reads off the chip, not from the frame record (a 4 MB C3 on a frame left at
@@ -47,5 +51,27 @@ describe("detectFlashSize", () => {
       })
     ).toBeNull();
     expect(await detectFlashSize({})).toBeNull();
+  });
+});
+
+describe("releaseChipMismatch", () => {
+  // The image used to follow the configured hardware alone: a C3 or a classic
+  // ESP32 got the S3 image written over it and boot-looped in the ROM.
+  it("lets the matching chip through, and a chip esptool could not name", () => {
+    expect(releaseChipMismatch("ESP32-S3", "esp32-s3-generic")).toBeNull();
+    expect(releaseChipMismatch("ESP32-S3", "esp32-s3-32mb")).toBeNull();
+    expect(releaseChipMismatch("ESP32-C3", "esp32-c3-generic")).toBeNull();
+    expect(releaseChipMismatch(undefined, "esp32-s3-generic")).toBeNull();
+    expect(releaseChipMismatch("", "esp32-s3-generic")).toBeNull();
+  });
+
+  it("refuses the other supported chip's image and names the fix", () => {
+    expect(releaseChipMismatch("ESP32-C3", "esp32-s3-generic")).toMatch(/ESP32-C3.*built for the ESP32-S3/);
+    expect(releaseChipMismatch("ESP32-S3", "esp32-c3-8mb")).toMatch(/ESP32-S3.*built for the ESP32-C3/);
+  });
+
+  it("refuses chips FrameOS publishes no firmware for", () => {
+    expect(releaseChipMismatch("ESP32", "esp32-s3-generic")).toMatch(/ESP32-S3 and ESP32-C3 only/);
+    expect(releaseChipMismatch("ESP32-S2", "esp32-s3-generic")).toMatch(/ESP32-S3 and ESP32-C3 only/);
   });
 });

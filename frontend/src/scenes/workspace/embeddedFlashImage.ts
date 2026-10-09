@@ -227,6 +227,38 @@ export function layoutMatchedPlatform(
   return assets?.some((asset) => asset.platform === candidate) ? candidate : chipPlatform
 }
 
+/**
+ * Why `platform`'s image must not go onto the chip esptool just detected, or
+ * null when it may. Releases publish ESP32-S3 and ESP32-C3 images only, and
+ * the image used to be picked from the frame's configured hardware (or the
+ * board chosen in the cloud picker) alone: a C3 or a classic ESP32 got the S3
+ * image written over it, and its ROM then boot-looped printing its banner
+ * ("invalid header") for good — a flash that "worked" on a board that never
+ * ran FrameOS. A chip esptool could not name is let through; the image header
+ * check in the ROM is the last word then.
+ */
+export function releaseChipMismatch(chipName: string | null | undefined, platform: string): string | null {
+  const chip = (chipName ?? '').trim().toUpperCase()
+  if (!chip) {
+    return null
+  }
+  const imageChip = platform.startsWith('esp32-c3') ? 'ESP32-C3' : platform.startsWith('esp32-s3') ? 'ESP32-S3' : null
+  if (imageChip === null || chip.startsWith(imageChip)) {
+    return null
+  }
+  if (chip.startsWith('ESP32-S3') || chip.startsWith('ESP32-C3')) {
+    const kind = chip.startsWith('ESP32-S3') ? 'an ESP32-S3' : 'an ESP32-C3'
+    return (
+      `This board is ${kind}, but the ${platform} image is built for the ${imageChip}. ` +
+      `Pick hardware that uses ${kind} (or change the frame's board), then flash again. Nothing was written.`
+    )
+  }
+  return (
+    `This board is ${chipName}, and FrameOS publishes firmware for the ESP32-S3 and ESP32-C3 only — ` +
+    'the image would not boot on it. Nothing was written.'
+  )
+}
+
 /** esptool-js reads the SPI flash id once the stub is up; the size lives in
  * its third byte (esptool's DETECTED_FLASH_SIZES table). null when the board
  * or the library cannot say — the generic image is always a valid answer. */
