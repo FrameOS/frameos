@@ -16,6 +16,7 @@ import {
   deviceLayoutMatchesPlan,
   esp32NvsPartition,
   firmwareUpdateWritePlan,
+  firstBootConsoleWaitMs,
   layoutPlatformForPartitions,
   parseEsp32PartitionTable,
   partitionTableFlashMb,
@@ -205,5 +206,29 @@ describe("layoutPlatformForPartitions", () => {
     expect(layoutPlatformForPartitions("esp32-c3", layout32, assets)).toBe("esp32-c3-generic");
     expect(layoutPlatformForPartitions("esp32-s3", layout32, undefined)).toBe("esp32-s3-generic");
     expect(layoutPlatformForPartitions("esp32-s3", [], assets)).toBe("esp32-s3-generic");
+  });
+});
+
+describe("firstBootConsoleWaitMs", () => {
+  // The first boot formats the state partition before the console answers:
+  // 251 s for 24 MB on a reTerminal E1004. The wait follows the partition in
+  // the image, so a layout nobody has listed yet still gets enough time.
+  const withState = (megabytes: number) =>
+    mergedImage([
+      ...defaultLayout,
+      { name: "state", type: 1, subtype: 0x82, offset: 0x800000, size: megabytes * 1024 * 1024 },
+    ]);
+
+  it("covers the measured 24 MB format with room to spare", () => {
+    expect(firstBootConsoleWaitMs(withState(24))).toBeGreaterThanOrEqual(2 * 251000);
+  });
+
+  it("grows with the state partition", () => {
+    expect(firstBootConsoleWaitMs(withState(1))).toBeLessThan(firstBootConsoleWaitMs(withState(8)));
+    expect(firstBootConsoleWaitMs(withState(56))).toBeGreaterThan(2 * firstBootConsoleWaitMs(withState(24)) - 120000);
+  });
+
+  it("still waits for the boot when the image has no state partition", () => {
+    expect(firstBootConsoleWaitMs(mergedImage())).toBe(90000);
   });
 });

@@ -33,13 +33,11 @@ export type FlashLogTerminal = IEspLoaderTerminal & { flush: () => void }
 type TraceableTransportInternals = { trace: (message: string) => void; lastTraceTime?: number }
 
 export const POST_FLASH_BOOT_WAIT_MS = 7000
-// First boot after an erase-all flash formats the 24MB SPIFFS state
-// partition before the console starts — measured ~180s on a XIAO ESP32-S3
-// with 32MB flash. Wait well past that.
+// A flash that kept the state partition only waits for the boot itself; one
+// that wrote a fresh layout passes firstBootConsoleWaitMs(image).
 const POST_FLASH_USB_READY_TIMEOUT_MS = 360000
 const POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS = 8000
 const POST_FLASH_USB_READY_POLL_MS = 2500
-const POST_FLASH_USB_RESET_HINT_MS = 240000
 const POST_FLASH_SCENE_UPLOAD_ATTEMPTS = 3
 const POST_FLASH_SCENE_UPLOAD_RETRY_MS = 3000
 
@@ -196,7 +194,7 @@ export function recordTransportTrace(frameId: FrameId, transport: EspTransport):
     // before the image is written, and then the flash fails and says so.
     if (rebootExpected && /device has been lost|unrecoverable serial port error/i.test(message)) {
       rebootExpected = false
-      appendBrowserFlashLog(frameId, 'The board dropped off USB — it is rebooting into the new firmware.')
+      appendBrowserFlashLog(frameId, 'The board dropped off USB while restarting into the new firmware.')
     }
     originalTrace(message)
   }
@@ -271,16 +269,21 @@ export async function waitForUsbApiReadyAfterFlash(
   frame: FrameType,
   port: SerialPort,
   onStatus: (message: string) => void,
-  // The storage-format warning is specific to a flash that wiped the state
-  // partition; a flow that kept it (the USB firmware update) says so instead.
-  initialMessage = 'Waiting for board USB API. A brand-new or fully erased board formats its storage first (~3 minutes).'
+  initialMessage?: string,
+  timeoutMs = POST_FLASH_USB_READY_TIMEOUT_MS
 ): Promise<SerialPort> {
   const started = Date.now()
-  const deadline = started + POST_FLASH_USB_READY_TIMEOUT_MS
+  const deadline = started + timeoutMs
+  const resetHintAt = started + timeoutMs / 2
   let attempt = 0
   let lastError: unknown = null
   let resetHintShown = false
-  onStatus(initialMessage)
+  onStatus(
+    initialMessage ??
+      `Waiting for the board to start. On its first boot it formats its storage, which can take up to ${Math.ceil(
+        timeoutMs / 60000
+      )} minutes. Keep it plugged in.`
+  )
 
   while (Date.now() < deadline) {
     attempt += 1
@@ -318,10 +321,10 @@ export async function waitForUsbApiReadyAfterFlash(
             : `Waiting for the board to boot (attempt ${attempt}, ${waited}s): ${detail}`
         )
       }
-      if (!resetHintShown && Date.now() - started > POST_FLASH_USB_RESET_HINT_MS) {
+      if (!resetHintShown && Date.now() > resetHintAt) {
         resetHintShown = true
         onStatus(
-          'Board still not responding after the storage-format window. Try pressing its RESET button — it may be stuck in download mode.'
+          'The board is still not answering. If it stays quiet, press its RESET button: it may be stuck in download mode.'
         )
       }
       await sleep(Math.min(POST_FLASH_USB_READY_POLL_MS, Math.max(0, deadline - Date.now())))

@@ -228,9 +228,7 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
       <div>
         <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Firmware footprint</div>
         {!flash && !ram ? (
-          <div className="frame-tool-muted mt-1 text-sm leading-5">
-            Waiting for firmware layout metadata from the backend.
-          </div>
+          <div className="frame-tool-muted mt-1 text-sm leading-5">Loading the flash layout.</div>
         ) : null}
       </div>
 
@@ -2258,32 +2256,29 @@ function OtaUpdateCard({
 }): JSX.Element {
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
-          <div className="frame-tool-muted mt-1 text-sm leading-5">
-            {otaSupported ? (
-              <>
-                Ask the frame to install the latest published FrameOS release. It downloads the signed image for its
-                flash layout through this backend, verifies the release signature, and reboots into it; progress shows
-                up in Logs as <code>ota:backend</code> lines.
-                {online ? '' : ' Needs the frame on the network.'}
-              </>
-            ) : (
-              'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'
-            )}
-          </div>
+      <div>
+        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
+        <div className="frame-tool-muted mt-1 text-sm leading-5">
+          {otaSupported ? (
+            <>
+              Install the latest FrameOS release over Wi-Fi. The frame downloads it, checks the signature and restarts.
+              Progress shows up in Logs.
+              {online ? '' : ' The frame has to be online.'}
+            </>
+          ) : (
+            'This board has room for only one firmware copy, so update it over USB.'
+          )}
         </div>
-        <button
-          type="button"
-          onClick={onOtaUpdate}
-          disabled={disabled || !otaSupported}
-          className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-        >
-          <CloudArrowUpIcon className="h-4 w-4" />
-          Update over the air
-        </button>
       </div>
+      <button
+        type="button"
+        onClick={onOtaUpdate}
+        disabled={disabled || !otaSupported}
+        className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+      >
+        <CloudArrowUpIcon className="h-4 w-4" />
+        Update over the air
+      </button>
     </div>
   )
 }
@@ -2390,21 +2385,18 @@ function EmbeddedFirmwareSection({
       ) : isPicoPlatform ? null : (
         <>
           <div className="frame-tool-muted text-sm leading-5">
-            Every ESP32 board runs the same signed FrameOS release image. Over USB the browser flashes it and tells the
-            board which frame it is; the rest — scenes, service keys, the HTTPS certificate — arrives from this backend
-            once the board is on Wi-Fi.
+            Flash FrameOS onto the board from this browser over USB. Scenes and settings follow over Wi-Fi once it is
+            online.
             {showUsbJtagPortGuidance ? (
               <span className="mt-2 block">
-                The 13.3&quot; ESP32 board can appear as two serial ports and either works.
+                This board shows up as two serial ports. Either works, but
                 <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> is
-                the fast one (logs, previews and scene uploads at USB speed);
-                <span className="font-semibold text-[color:var(--tool-strong)]"> USB Single Serial</span> is the
-                board&apos;s USB-UART bridge at 115200 baud, so uploads take longer there.
+                much faster than
+                <span className="font-semibold text-[color:var(--tool-strong)]"> USB Single Serial</span>.
               </span>
             ) : null}
           </div>
-          {/* Over the air first when the frame is online — it is the button that
-              needs no cable — then the one USB action. */}
+          {/* Over the air first when the frame is online: it needs no cable. */}
           {frame.status === 'ready' || frame.status === 'deploying' ? (
             <OtaUpdateCard onOtaUpdate={onOtaUpdate} otaSupported={otaSupported} disabled={releaseFlashBusy} online />
           ) : null}
@@ -2995,9 +2987,8 @@ function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
       <DrawerHeading>Scenes over USB</DrawerHeading>
       <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Copies the workspace's current scenes onto the board over the cable, so it can render them with no network at
-          all. Settings stay cloud-delivered: the frame picks them up — and confirms the scenes — the next time it
-          connects.
+          Copy this frame's scenes onto the board over USB, so it can show them without a network. Settings arrive the
+          next time it goes online.
         </div>
         {!usbConnected ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -3040,24 +3031,18 @@ function CloudUsbDeployView({ frame, onBack }: { frame: FrameType; onBack?: () =
         </DrawerHeading>
         <div className="frame-tool-card space-y-2 rounded-[22px] p-4">
           <div className="frame-tool-muted text-sm leading-5">
-            Everything here talks to the board over its USB serial port, straight from this browser — it works with no
-            network at all.
+            These talk to the board over USB from this browser. No network needed.
           </div>
           {showUsbJtagPortGuidance ? (
             <div className="frame-tool-muted text-xs leading-4">
-              This board can appear as two serial ports and either works.{' '}
-              <span className="font-semibold text-[color:var(--tool-strong)]">USB JTAG/serial debug unit</span> is the
-              fast one; <span className="font-semibold text-[color:var(--tool-strong)]">USB Single Serial</span> is the
-              board&apos;s USB-UART bridge at 115200 baud.
+              This board shows up as two serial ports. Either works, but{' '}
+              <span className="font-semibold text-[color:var(--tool-strong)]">USB JTAG/serial debug unit</span> is much
+              faster than <span className="font-semibold text-[color:var(--tool-strong)]">USB Single Serial</span>.
             </div>
           ) : null}
         </div>
       </section>
 
-      {/* One USB action (EmbeddedUsbConnect): connect, read the board, and
-          show the step that applies — firmware kept in step for this frame,
-          Wi-Fi when it is off the network, and a pointer at the re-link panel
-          below for a blank or foreign board. Scenes follow as their own card. */}
       <section className="space-y-2">
         <EmbeddedUsbConnect frame={frame} />
       </section>

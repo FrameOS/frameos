@@ -863,14 +863,7 @@ async function runEmbeddedUsbApiCommandLocked(
     })
     let result: EmbeddedUsbApiCommandResult
     try {
-      result = await runUsbApiCommandOnPort(
-        port,
-        command,
-        payload,
-        options?.timeoutMs,
-        appendCommandLogText,
-        keepOpen
-      )
+      result = await runUsbApiCommandOnPort(port, command, payload, options?.timeoutMs, appendCommandLogText, keepOpen)
     } catch (error) {
       const replacement = isSerialPortGoneError(error) ? await resolveLiveSerialPort(port) : null
       if (!replacement || replacement === port) {
@@ -887,14 +880,7 @@ async function runEmbeddedUsbApiCommandLocked(
       appendUsbLine(frameId, `[USB API] USB device re-enumerated; retrying ${label} on the new port`)
       port = replacement
       appendSelectedUsbPort(frameId, port)
-      result = await runUsbApiCommandOnPort(
-        port,
-        command,
-        payload,
-        options?.timeoutMs,
-        appendCommandLogText,
-        keepOpen
-      )
+      result = await runUsbApiCommandOnPort(port, command, payload, options?.timeoutMs, appendCommandLogText, keepOpen)
     }
     flushCommandLogText()
     if (!options?.probe) {
@@ -965,11 +951,8 @@ async function readUsbLogs(session: UsbLogSession): Promise<void> {
       await closePort(session.port)
     }
     if (session.stopRequested && session.keepPortOpen) {
-      // A hand-off to a USB command, not the end of the session: the command
-      // reports its own state and resumes the stream after. Reporting "idle"
-      // here told the Connect card the board was gone; it reset, and when the
-      // stream resumed it probed the "new" board again — a `status` probe
-      // loop that never let the USB queue go idle, so Flash never started.
+      // A hand-off to a USB command, not the end of the session: reporting
+      // "idle" here read as an unplug and re-armed the board probe forever.
       return
     }
     embeddedUsbLogsModel.actions.setUsbLogStreamState(session.frameId, {
@@ -1039,14 +1022,8 @@ export async function sendEmbeddedUsbConsoleCommand(frameId: FrameId, command: s
 
 /**
  * Stop the log stream and hand back its port. `keepPortOpen` is for a USB
- * command that takes the port over and gives it straight back: closing and
- * reopening the port around every command toggles DTR/RTS, and on a board
- * whose USB-C goes to the chip's own USB-Serial/JTAG (any bare ESP32-S3) that
- * resets the chip (`rst:0x15 (USB_UART_CHIP_RESET)`). A command sent to a
- * board that just reset times out while it boots, the next queued command
- * resets it again, and the board never gets past its ROM banner — the
- * "waiting for previous USB command to finish" loop. The flashers still need
- * the port closed: esptool opens it itself.
+ * command that borrows the port: reopening it toggles DTR/RTS, which resets
+ * an ESP32-S3 on its own USB. The flashers still need it closed for esptool.
  */
 export async function stopEmbeddedUsbLogStream(
   frameId: FrameId,
@@ -1077,9 +1054,8 @@ export async function stopEmbeddedUsbLogStream(
   return session.port
 }
 
-/** `reuseOpenPort`: the port was just handed over open by a USB command (or
- * the post-reboot probe); keep it open rather than close/reopen it, which
- * resets an ESP32-S3 on its own USB (see stopEmbeddedUsbLogStream). */
+/** `reuseOpenPort`: keep a port a USB command just handed back open instead
+ * of reopening it (see stopEmbeddedUsbLogStream). */
 export async function startEmbeddedUsbLogStream(
   frameId: FrameId,
   port?: SerialPort,
@@ -1094,9 +1070,7 @@ export async function startEmbeddedUsbLogStream(
     return false
   }
 
-  // Only a running session needs stopping: stopping none reports "idle", and
-  // a stream resumed after a USB command would flash "idle" between the two —
-  // which the Connect card reads as the board being unplugged.
+  // Stopping no session reports "idle", which reads as an unplug.
   if (sessions.has(frameId)) {
     await stopEmbeddedUsbLogStream(frameId)
   }

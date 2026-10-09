@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 
 import {
   detectFlashSize,
+  firstBootConsoleWaitMs,
   layoutMatchedPlatform,
   releaseChipMismatch,
 } from '../../../frontend/src/scenes/workspace/embeddedFlashImage'
@@ -155,23 +156,9 @@ export function describeSerialPort(info: { usbVendorId?: number } | undefined): 
 const consolePrompt = 'frameos>'
 // cmd_wifi prints "wifi credentials saved, restarting..." before esp_restart().
 const rebootNotice = 'restarting'
-// A first boot on a blank board formats the /state SPIFFS partition before
-// fos_console_start() runs (main.c: fos_scenes_init precedes the console).
-// That partition is the rest of the chip: 1 MB on the generic 8 MB layout,
-// but 8 MB on a 16 MB board and 24 MB on a 32 MB one (partitions_ota_*.csv) —
-// every Seeed reTerminal, and the boards layoutMatchedPlatform picks the big
-// layouts for. The 24 MB format takes ~3 minutes (measured on a 32 MB XIAO
-// ESP32-S3; the workspace flasher waits 360 s for the same reason,
-// POST_FLASH_USB_READY_TIMEOUT_MS). A 90 s budget gave up mid-format on every
-// 32 MB board, and the retry reflashed, reset and restarted the format, so
-// those boards could never enroll. Waiting longer costs nothing when the
-// prompt comes early, because the wait is probed (see bootProbeIntervalMs).
-const bootPromptTimeoutMs = 360000
-// A port that has said nothing at all by now is the wrong port or a dead
-// board, not a slow format (the boot banner precedes the format) — say so
-// instead of sitting out the whole budget.
+// No bytes at all by now means the wrong port or a dead board, not a slow
+// format: the boot banner comes before the format starts.
 const bootSilenceTimeoutMs = 90000
-// How often the wait reports that it is still waiting.
 const bootProgressIntervalMs = 30000
 // A bare newline makes fos_console.c print a fresh prompt without running
 // anything (console_feed_byte → empty run_console_line → console_prompt).
@@ -200,44 +187,43 @@ const resetBannerPattern = /rst:0x[0-9a-f]+/gi
 const bootLoopResetCount = 3
 
 export function bootWaitFailureMessage(bootLog: string): string {
-  const retry = 'Unplug the board, plug it back in and try again'
   if (bootLog.includes(romDownloadModeMarker)) {
     return (
-      'The board reset into ROM download mode instead of starting the firmware (its log says "waiting for download"), ' +
-      'so nothing was provisioned. Tap its RESET button — or unplug it and plug it back in — without holding BOOT, ' +
-      'then try again.'
+      'The board started in download mode instead of running FrameOS, so it was not set up. ' +
+      'Press its RESET button (or unplug it and plug it back in) without holding BOOT, then try again.'
     )
   }
   const crash = crashPattern.exec(bootLog)
   if (crash) {
     return (
-      `The firmware crashed while booting (${crash[0].trim()}), so nothing was provisioned. ` +
-      'Try again; if it crashes the same way every time, report the line above.'
+      `The firmware crashed while starting (${crash[0].trim()}), so the board was not set up. ` +
+      'Try again. If it crashes the same way every time, please report that line.'
     )
   }
   const resets = bootLog.match(resetBannerPattern)?.length ?? 0
   if (resets >= bootLoopResetCount) {
     return (
-      `The board keeps resetting (${resets} boots seen) and never reached its FrameOS console, so nothing was provisioned. ` +
-      'A weak USB supply does this — try another cable or port, plug it straight into the computer, and try again.'
+      `The board keeps restarting (${resets} times) and never reached its FrameOS console, so it was not set up. ` +
+      'This usually means weak USB power. Try another cable or port, plug it straight into the computer, and try again.'
     )
   }
   if (bootLog.trim().length === 0) {
     return (
-      'Nothing at all arrived on this serial port after the reset, so nothing was provisioned. ' +
-      'If the port picker lists several ports, try the other one ("USB JTAG/serial debug unit" or "USB Single Serial" — ' +
-      `the console answers on both); otherwise ${retry.toLowerCase()}.`
+      'Nothing came back on this serial port, so the board was not set up. ' +
+      'If the port picker listed two ports, try the other one. Otherwise unplug the board, plug it back in and try again.'
     )
   }
   if (bootLog.includes(storageFormatMarker)) {
+    // Unplugging mid-format starts the format over.
     return (
-      'The board was still formatting its storage when the wait ran out, so nothing was provisioned. ' +
-      'Leave it plugged in for a few more minutes so the format can finish, then try again.'
+      'The board was still formatting its storage when the wait ran out, so it was not set up. ' +
+      'Leave it plugged in for 10 minutes so the format can finish, then try again.'
     )
   }
   return (
-    'The board booted but its FrameOS console prompt never appeared, so nothing was provisioned. ' +
-    `${retry}.`
+    'The board started but its FrameOS console never answered, so it was not set up. ' +
+    'It may still be formatting its storage: leave it plugged in for 10 minutes and try again. ' +
+    'If that fails too, unplug it, plug it back in and try again.'
   )
 }
 
@@ -442,7 +428,8 @@ async function downloadFirmware(asset: FirmwareAsset, log: (line: string) => voi
 async function provisionOverSerial(
   port: SerialPortLike,
   commands: ConsoleCommand[],
-  log: (line: string) => void
+  log: (line: string) => void,
+  bootTimeoutMs: number
 ): Promise<void> {
   const writer = port.writable?.getWriter()
   const reader = port.readable?.getReader()
@@ -503,9 +490,13 @@ async function provisionOverSerial(
     // Wait for the console to come up after reset (boot logs then prompt),
     // poking it with an empty line every couple of seconds so a prompt the
     // bridge dropped while the port was closed is not the only chance.
-    log('Waiting for the FrameOS console…')
+    log(
+      `Waiting for the FrameOS console. On its first boot the board formats its storage, which can take up to ${Math.ceil(
+        bootTimeoutMs / 60000
+      )} minutes. Keep it plugged in.`
+    )
     const bootStarted = Date.now()
-    const bootDeadline = bootStarted + bootPromptTimeoutMs
+    const bootDeadline = bootStarted + bootTimeoutMs
     const newline = new TextEncoder().encode('\n')
     let bannerSeen = false
     let formatSeen = false
@@ -533,7 +524,7 @@ async function provisionOverSerial(
       }
       if (!formatSeen && buffer.includes(storageFormatMarker)) {
         formatSeen = true
-        log('First boot: the board is formatting its scene storage — this can take up to ~3 minutes…')
+        log('The board is formatting its storage. This takes a few minutes.')
       }
       if (promptSeen) {
         break
@@ -572,7 +563,7 @@ async function provisionOverSerial(
           `The frame never acknowledged \`${command.display}\`, so it is not fully provisioned. Try flashing again.`
         )
       }
-      log('(No reboot confirmation seen — the board may have reset before it finished printing.)')
+      log('(No restart confirmation seen. The board may have restarted before it printed one.)')
     }
   } finally {
     // Hand the streams back even when a step threw, or the port stays locked
@@ -1016,7 +1007,7 @@ export function Esp32CloudFlasher({
       }
       log('Waiting for the board to come back after reset…')
       const consolePort = await openConsolePort(serial, port)
-      await provisionOverSerial(consolePort, commands, log)
+      await provisionOverSerial(consolePort, commands, log, firmware ? firstBootConsoleWaitMs(firmware.bytes) : 90000)
 
       setPhase('done')
       log(

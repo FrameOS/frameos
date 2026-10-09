@@ -71,7 +71,7 @@ describe("releaseChipMismatch", () => {
   });
 
   it("refuses chips FrameOS publishes no firmware for", () => {
-    expect(releaseChipMismatch("ESP32", "esp32-s3-generic")).toMatch(/ESP32-S3 and ESP32-C3 only/);
-    expect(releaseChipMismatch("ESP32-S2", "esp32-s3-generic")).toMatch(/ESP32-S3 and ESP32-C3 only/);
+    expect(releaseChipMismatch("ESP32", "esp32-s3-generic")).toMatch(/only has firmware for the ESP32-S3 and ESP32-C3/);
+    expect(releaseChipMismatch("ESP32-S2", "esp32-s3-generic")).toMatch(/only has firmware for the ESP32-S3 and ESP32-C3/);
   });
 });

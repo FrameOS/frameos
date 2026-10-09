@@ -20,7 +20,12 @@ import { framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/
 import type { FrameId, FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
-import { detectFlashSize, layoutMatchedPlatform, releaseChipMismatch } from './embeddedFlashImage'
+import {
+  detectFlashSize,
+  firstBootConsoleWaitMs,
+  layoutMatchedPlatform,
+  releaseChipMismatch,
+} from './embeddedFlashImage'
 import {
   downloadReleaseFirmware,
   fetchReleaseFirmwareListing,
@@ -258,6 +263,7 @@ export function EmbeddedReleaseFlasher({
     let traceRecorder: FlashTraceRecorder | null = null
     let flashed = false
     let detectedFlashSize: string | null = null
+    let firstBootWaitMs: number | undefined
     let flashSizeDiffersFromFrame = false
     const setFlashMessage = (nextMessage: string | null): void => {
       setMessage(nextMessage)
@@ -337,6 +343,7 @@ export function EmbeddedReleaseFlasher({
         )
       }
       const firmware = await downloadReleaseFirmware(releasePlatform, setFlashMessage, listing)
+      firstBootWaitMs = firstBootConsoleWaitMs(firmware.bytes)
 
       setPhase('flashing')
       setFlashMessage(`Flashing ${firmware.name} to ${chip}`)
@@ -405,7 +412,7 @@ export function EmbeddedReleaseFlasher({
             await recordDetectedFlashSize(frame, detectedFlashSize, setFlashMessage)
           }
           await sleep(POST_FLASH_BOOT_WAIT_MS)
-          port = await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
+          port = await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage, undefined, firstBootWaitMs)
           const { skipped } = await provisionOverUsb(frame.id, plan, port, setMessage)
           appendBrowserFlashLog(
             frame.id,
@@ -452,8 +459,8 @@ export function EmbeddedReleaseFlasher({
           setPhase('error')
           const detail = error instanceof Error ? error.message : String(error)
           setFlashMessage(
-            `Firmware written, but provisioning did not finish: ${detail} The board is running FrameOS — ` +
-              'flash again to retry, or set the remaining values from "Set up over USB".'
+            `Firmware written, but setup did not finish: ${detail} The board runs FrameOS now. ` +
+              'Use “Read the board again” to finish setting it up, or flash again.'
           )
         }
         const logStreamStarted = await startEmbeddedUsbLogStream(frame.id, port)
