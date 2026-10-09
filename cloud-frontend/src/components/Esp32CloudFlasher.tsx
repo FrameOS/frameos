@@ -2,8 +2,13 @@ import { ArrowRightIcon, BoltIcon, CheckCircleIcon, CpuChipIcon } from '@heroico
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
-import { detectFlashSize, layoutMatchedPlatform } from '../../../frontend/src/scenes/workspace/embeddedFlashImage'
+import {
+  detectFlashSize,
+  layoutMatchedPlatform,
+  releaseChipMismatch,
+} from '../../../frontend/src/scenes/workspace/embeddedFlashImage'
 import { watchdogResetAfterFlash } from '../../../frontend/src/scenes/workspace/esp32WatchdogReset'
+import { writeWithTimeout } from '../../../frontend/src/scenes/workspace/serialWrite'
 import { loadEsptool } from '../lib/esptool'
 import { fetchReleaseListing, releaseLookupErrorFromResponse } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
@@ -150,14 +155,24 @@ export function describeSerialPort(info: { usbVendorId?: number } | undefined): 
 const consolePrompt = 'frameos>'
 // cmd_wifi prints "wifi credentials saved, restarting..." before esp_restart().
 const rebootNotice = 'restarting'
-// A first boot on a blank board formats the 1 MB /state SPIFFS partition
-// before fos_console_start() runs (main.c: fos_scenes_init precedes the
-// console) — 10-20 s of flash erases on top of the usual ~5 s boot, and a
-// Wi-Fi retry on a re-enrolled board adds its connect timeout. The old 20 s
-// budget lost exactly the first flash of a new board and passed the retry,
-// which reads as "flaky USB". Waiting longer costs nothing when the prompt
-// comes early, because the wait is probed (see bootProbeIntervalMs).
-const bootPromptTimeoutMs = 90000
+// A first boot on a blank board formats the /state SPIFFS partition before
+// fos_console_start() runs (main.c: fos_scenes_init precedes the console).
+// That partition is the rest of the chip: 1 MB on the generic 8 MB layout,
+// but 8 MB on a 16 MB board and 24 MB on a 32 MB one (partitions_ota_*.csv) —
+// every Seeed reTerminal, and the boards layoutMatchedPlatform picks the big
+// layouts for. The 24 MB format takes ~3 minutes (measured on a 32 MB XIAO
+// ESP32-S3; the workspace flasher waits 360 s for the same reason,
+// POST_FLASH_USB_READY_TIMEOUT_MS). A 90 s budget gave up mid-format on every
+// 32 MB board, and the retry reflashed, reset and restarted the format, so
+// those boards could never enroll. Waiting longer costs nothing when the
+// prompt comes early, because the wait is probed (see bootProbeIntervalMs).
+const bootPromptTimeoutMs = 360000
+// A port that has said nothing at all by now is the wrong port or a dead
+// board, not a slow format (the boot banner precedes the format) — say so
+// instead of sitting out the whole budget.
+const bootSilenceTimeoutMs = 90000
+// How often the wait reports that it is still waiting.
+const bootProgressIntervalMs = 30000
 // A bare newline makes fos_console.c print a fresh prompt without running
 // anything (console_feed_byte → empty run_console_line → console_prompt).
 // Sending one every couple of seconds means the boot-time prompt does not
@@ -214,9 +229,15 @@ export function bootWaitFailureMessage(bootLog: string): string {
       `the console answers on both); otherwise ${retry.toLowerCase()}.`
     )
   }
+  if (bootLog.includes(storageFormatMarker)) {
+    return (
+      'The board was still formatting its storage when the wait ran out, so nothing was provisioned. ' +
+      'Leave it plugged in for a few more minutes so the format can finish, then try again.'
+    )
+  }
   return (
     'The board booted but its FrameOS console prompt never appeared, so nothing was provisioned. ' +
-    `${retry} — the firmware is already on the board, so the retry is quick.`
+    `${retry}.`
   )
 }
 
@@ -483,15 +504,24 @@ async function provisionOverSerial(
     // poking it with an empty line every couple of seconds so a prompt the
     // bridge dropped while the port was closed is not the only chance.
     log('Waiting for the FrameOS console…')
-    const bootDeadline = Date.now() + bootPromptTimeoutMs
+    const bootStarted = Date.now()
+    const bootDeadline = bootStarted + bootPromptTimeoutMs
     const newline = new TextEncoder().encode('\n')
     let bannerSeen = false
     let formatSeen = false
     let promptSeen = false
+    let nextProgressAt = bootStarted + bootProgressIntervalMs
     for (;;) {
       const remaining = bootDeadline - Date.now()
       if (remaining <= 0) {
         break
+      }
+      if (buffer.length === 0 && Date.now() - bootStarted >= bootSilenceTimeoutMs) {
+        break
+      }
+      if (Date.now() >= nextProgressAt) {
+        nextProgressAt += bootProgressIntervalMs
+        log(`Still waiting for the console (${Math.round((Date.now() - bootStarted) / 1000)} s)…`)
       }
       promptSeen = await readUntil(consolePrompt, Math.min(bootProbeIntervalMs, remaining))
       if (!bannerSeen) {
@@ -503,7 +533,7 @@ async function provisionOverSerial(
       }
       if (!formatSeen && buffer.includes(storageFormatMarker)) {
         formatSeen = true
-        log('First boot: the board is formatting its scene storage — this takes a little while…')
+        log('First boot: the board is formatting its scene storage — this can take up to ~3 minutes…')
       }
       if (promptSeen) {
         break
@@ -513,7 +543,7 @@ async function provisionOverSerial(
         // forever; no point in waiting out the budget either way.
         break
       }
-      await writer.write(newline)
+      await writeWithTimeout(writer, newline)
     }
     if (!promptSeen) {
       throw new Error(bootWaitFailureMessage(buffer))
@@ -524,7 +554,7 @@ async function provisionOverSerial(
     for (const command of commands) {
       log(`> ${command.display}`)
       buffer = ''
-      await writer.write(new TextEncoder().encode(command.text + '\n'))
+      await writeWithTimeout(writer, new TextEncoder().encode(command.text + '\n'))
       if (command.expect === undefined) {
         continue
       }
@@ -799,6 +829,7 @@ export function Esp32CloudFlasher({
       ]
       let flashed = false
       let lastError: unknown
+      let wrongChip: Error | null = null
       for (const [index, attempt] of attempts.entries()) {
         if (index > 0) {
           log(`Retrying at ${attempt.baudrate} baud (${attempt.label})…`)
@@ -813,6 +844,14 @@ export function Esp32CloudFlasher({
         try {
           await loader.main()
           log(`Connected: ${loader.chip?.CHIP_NAME ?? 'ESP32'}`)
+          // Before anything is downloaded or written: the wrong chip's image
+          // flashes "fine" and then boot-loops in the ROM for good. Not a
+          // link problem, so no slower retry either.
+          const chipMismatch = releaseChipMismatch(loader.chip?.CHIP_NAME, firmwarePlatform)
+          if (chipMismatch) {
+            wrongChip = new Error(chipMismatch)
+            throw wrongChip
+          }
           const flashSize = await detectFlashSize(loader)
           const platform = layoutMatchedPlatform(firmwarePlatform, flashSize, release.assets)
           if (flashSize) {
@@ -871,6 +910,9 @@ export function Esp32CloudFlasher({
         }
         if (flashed) {
           break
+        }
+        if (wrongChip) {
+          throw wrongChip
         }
       }
       if (!flashed) {

@@ -2,6 +2,7 @@ import { MakeLogicType, actions, kea, listeners, path, reducers } from 'kea'
 
 import type { LogType, FrameId } from '../types'
 import { webSerialSupported, webSerialUnavailableReason } from '../utils/webSerial'
+import { writeWithTimeout } from '../scenes/workspace/serialWrite'
 
 export type EmbeddedUsbLogStreamStatus = 'idle' | 'selecting' | 'connecting' | 'streaming' | 'stopping' | 'error'
 
@@ -41,12 +42,15 @@ let nextUsbLogId = -1
 interface UsbLogSession {
   frameId: FrameId
   port: SerialPort
-  reader?: ReadableStreamDefaultReader<Uint8Array>
+  reader?: ReadableStreamDefaultReader<Uint8Array> | undefined
   readLoop?: Promise<void>
   stopRequested: boolean
   pendingLine: string
   logFilter: (line: string) => string | null
   failureMessage?: string
+  // Set when the stream is stopped only to hand its port to a USB command:
+  // the port then stays open (see stopEmbeddedUsbLogStream).
+  keepPortOpen?: boolean
 }
 
 const sessions = new Map<FrameId, UsbLogSession>()
@@ -151,10 +155,15 @@ function flushUsbText(session: UsbLogSession): void {
   session.pendingLine = ''
 }
 
+// port.close() waits for the writable to drain; a write the board never
+// accepted (serialWrite.ts) can hold that up, and this runs inside the USB
+// command lock. Past this, give up on a clean close and let the lock go.
+const PORT_CLOSE_TIMEOUT_MS = 5000
+
 async function closePort(port: SerialPort): Promise<void> {
   try {
     if (port.readable || port.writable) {
-      await port.close()
+      await Promise.race([port.close(), sleep(PORT_CLOSE_TIMEOUT_MS)])
     }
   } catch (error) {}
 }
@@ -248,6 +257,9 @@ export async function resolveLiveSerialPort(original: SerialPort): Promise<Seria
     return null
   }
   const replacement = connected[0]
+  if (!replacement) {
+    return null
+  }
   serialPortReconnectEligible.set(replacement, true)
   return replacement
 }
@@ -457,10 +469,10 @@ function parseUsbCommandResult(command: string, text: string): EmbeddedUsbApiCom
     return {
       command: responseCommand,
       bytes: decodeUsbBase64Payload(payload, Number(beginMatch[2]) || 0),
-      metadata,
+      ...(metadata ? { metadata } : {}),
     }
   }
-  return { command: responseCommand, text: payload, metadata }
+  return { command: responseCommand, text: payload, ...(metadata ? { metadata } : {}) }
 }
 
 // A ~1 MB image payload arrives in hundreds of serial chunks; running the
@@ -551,15 +563,15 @@ export function createUsbProtocolLogFilter(): (line: string) => string | null {
 
     const begin = line.match(/^__FRAMEOS_USB_BEGIN__\s+(\S+)\s+(\d+)\s+(\S+)/)
     if (begin) {
-      payloadCommand = begin[1]
+      payloadCommand = begin[1] ?? ''
       payloadBudget = Number(begin[2]) + USB_PAYLOAD_SUPPRESSION_SLACK
-      payloadEncoding = begin[3]
+      payloadEncoding = begin[3] ?? ''
       payloadText = ''
       return null
     }
     const error = line.match(/^__FRAMEOS_USB_ERROR__\s+(\S+)\s+(.*)$/)
     if (error) {
-      return `${error[1]} failed: ${error[2].trim()}`
+      return `${error[1]} failed: ${(error[2] ?? '').trim()}`
     }
     if (/^__FRAMEOS_USB_(OK|READY|END)__\b/.test(line)) {
       return null
@@ -570,7 +582,7 @@ export function createUsbProtocolLogFilter(): (line: string) => string | null {
 
 async function writeUsbPayload(writer: WritableStreamDefaultWriter<Uint8Array>, payload: Uint8Array): Promise<void> {
   for (let offset = 0; offset < payload.byteLength; offset += USB_PAYLOAD_CHUNK_SIZE) {
-    await writer.write(payload.slice(offset, Math.min(payload.byteLength, offset + USB_PAYLOAD_CHUNK_SIZE)))
+    await writeWithTimeout(writer, payload.slice(offset, Math.min(payload.byteLength, offset + USB_PAYLOAD_CHUNK_SIZE)))
   }
 }
 
@@ -578,7 +590,7 @@ async function readWithTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMs: number
 ): Promise<ReadableStreamReadResult<Uint8Array> | null> {
-  let timeoutHandle: ReturnType<typeof window.setTimeout> | null = null
+  let timeoutHandle: number | null = null
   try {
     return await Promise.race([
       reader.read(),
@@ -630,7 +642,7 @@ async function runUsbApiCommandOnPort(
     }
     reader = port.readable.getReader()
     writer = port.writable.getWriter()
-    await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\n`))
+    await writeWithTimeout(writer, encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\n`))
     if (payload) {
       const readyDeadline = Date.now() + Math.min(timeoutMs, USB_PAYLOAD_READY_TIMEOUT_MS)
       let payloadReady = false
@@ -764,7 +776,7 @@ async function reconnectAfterExpectedUsbReboot(
   )
   appendSelectedUsbPort(frameId, livePort)
   if (resumeLogStream) {
-    await startEmbeddedUsbLogStream(frameId, livePort)
+    await startEmbeddedUsbLogStream(frameId, livePort, { reuseOpenPort: true })
   } else {
     await closePort(livePort)
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
@@ -797,7 +809,10 @@ async function runEmbeddedUsbApiCommandLocked(
     throw new Error(webSerialUnavailableReason('Talking to the board'))
   }
   const hadLogStream = sessions.has(frameId)
-  const stoppedPort = hadLogStream ? await stopEmbeddedUsbLogStream(frameId) : null
+  const stoppedPort = hadLogStream ? await stopEmbeddedUsbLogStream(frameId, { keepPortOpen: true }) : null
+  // A port taken from the log stream is open at the console baud already;
+  // closing it to "reset" the baud would reset the chip instead.
+  const keepOpen = options?.keepOpen === true || hadLogStream
   let port = options?.port || stoppedPort || lastPorts.get(frameId) || null
   if (!port && options?.promptIfNeeded) {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
@@ -854,7 +869,7 @@ async function runEmbeddedUsbApiCommandLocked(
         payload,
         options?.timeoutMs,
         appendCommandLogText,
-        options?.keepOpen
+        keepOpen
       )
     } catch (error) {
       const replacement = isSerialPortGoneError(error) ? await resolveLiveSerialPort(port) : null
@@ -878,7 +893,7 @@ async function runEmbeddedUsbApiCommandLocked(
         payload,
         options?.timeoutMs,
         appendCommandLogText,
-        options?.keepOpen
+        keepOpen
       )
     }
     flushCommandLogText()
@@ -897,7 +912,7 @@ async function runEmbeddedUsbApiCommandLocked(
     if (rebootAcknowledged) {
       await reconnectAfterExpectedUsbReboot(frameId, port, hadLogStream)
     } else if (hadLogStream) {
-      await startEmbeddedUsbLogStream(frameId, port)
+      await startEmbeddedUsbLogStream(frameId, port, { reuseOpenPort: true })
     } else {
       if (!options?.keepOpen) {
         await closePort(port)
@@ -946,7 +961,17 @@ async function readUsbLogs(session: UsbLogSession): Promise<void> {
     if (sessions.get(session.frameId) === session) {
       sessions.delete(session.frameId)
     }
-    await closePort(session.port)
+    if (!session.keepPortOpen) {
+      await closePort(session.port)
+    }
+    if (session.stopRequested && session.keepPortOpen) {
+      // A hand-off to a USB command, not the end of the session: the command
+      // reports its own state and resumes the stream after. Reporting "idle"
+      // here told the Connect card the board was gone; it reset, and when the
+      // stream resumed it probed the "new" board again — a `status` probe
+      // loop that never let the USB queue go idle, so Flash never started.
+      return
+    }
     embeddedUsbLogsModel.actions.setUsbLogStreamState(session.frameId, {
       error: session.stopRequested ? null : session.failureMessage || 'USB serial log stream ended.',
       message: session.stopRequested ? 'USB serial log stream stopped.' : null,
@@ -1003,7 +1028,7 @@ export async function sendEmbeddedUsbConsoleCommand(frameId: FrameId, command: s
   }
   const writer = writable.getWriter()
   try {
-    await writer.write(new TextEncoder().encode(line + '\n'))
+    await writeWithTimeout(writer, new TextEncoder().encode(line + '\n'))
   } catch (error) {
     throw new Error(serialErrorMessage(error))
   } finally {
@@ -1012,7 +1037,21 @@ export async function sendEmbeddedUsbConsoleCommand(frameId: FrameId, command: s
   appendEmbeddedUsbLogLine(frameId, `> ${line}`)
 }
 
-export async function stopEmbeddedUsbLogStream(frameId: FrameId): Promise<SerialPort | null> {
+/**
+ * Stop the log stream and hand back its port. `keepPortOpen` is for a USB
+ * command that takes the port over and gives it straight back: closing and
+ * reopening the port around every command toggles DTR/RTS, and on a board
+ * whose USB-C goes to the chip's own USB-Serial/JTAG (any bare ESP32-S3) that
+ * resets the chip (`rst:0x15 (USB_UART_CHIP_RESET)`). A command sent to a
+ * board that just reset times out while it boots, the next queued command
+ * resets it again, and the board never gets past its ROM banner — the
+ * "waiting for previous USB command to finish" loop. The flashers still need
+ * the port closed: esptool opens it itself.
+ */
+export async function stopEmbeddedUsbLogStream(
+  frameId: FrameId,
+  options?: { keepPortOpen?: boolean }
+): Promise<SerialPort | null> {
   const session = sessions.get(frameId)
   if (!session) {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
@@ -1028,6 +1067,7 @@ export async function stopEmbeddedUsbLogStream(frameId: FrameId): Promise<Serial
     status: 'stopping',
   })
   session.stopRequested = true
+  session.keepPortOpen = options?.keepPortOpen === true
   try {
     await session.reader?.cancel()
   } catch (error) {}
@@ -1037,7 +1077,14 @@ export async function stopEmbeddedUsbLogStream(frameId: FrameId): Promise<Serial
   return session.port
 }
 
-export async function startEmbeddedUsbLogStream(frameId: FrameId, port?: SerialPort): Promise<boolean> {
+/** `reuseOpenPort`: the port was just handed over open by a USB command (or
+ * the post-reboot probe); keep it open rather than close/reopen it, which
+ * resets an ESP32-S3 on its own USB (see stopEmbeddedUsbLogStream). */
+export async function startEmbeddedUsbLogStream(
+  frameId: FrameId,
+  port?: SerialPort,
+  options?: { reuseOpenPort?: boolean }
+): Promise<boolean> {
   if (!webSerialSupported()) {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
       error: webSerialUnavailableReason('Streaming USB logs'),
@@ -1047,7 +1094,12 @@ export async function startEmbeddedUsbLogStream(frameId: FrameId, port?: SerialP
     return false
   }
 
-  await stopEmbeddedUsbLogStream(frameId)
+  // Only a running session needs stopping: stopping none reports "idle", and
+  // a stream resumed after a USB command would flash "idle" between the two —
+  // which the Connect card reads as the board being unplugged.
+  if (sessions.has(frameId)) {
+    await stopEmbeddedUsbLogStream(frameId)
+  }
 
   let selectedPort = port
   try {
@@ -1063,7 +1115,7 @@ export async function startEmbeddedUsbLogStream(frameId: FrameId, port?: SerialP
       message: 'Opening USB serial log stream.',
       status: 'connecting',
     })
-    await openPort(selectedPort, { resetBaud: true })
+    await openPort(selectedPort, { resetBaud: !(options?.reuseOpenPort && port) })
     appendSelectedUsbPort(frameId, selectedPort)
 
     const session: UsbLogSession = {
@@ -1365,7 +1417,7 @@ export async function usbLogsTail(frameId: FrameId): Promise<EmbeddedUsbLogEntry
       if (!match) {
         return { epoch: null, line }
       }
-      return { epoch: match[1] === '-' ? null : Number(match[1]), line: match[2] }
+      return { epoch: match[1] === '-' ? null : Number(match[1]), line: match[2] ?? '' }
     })
 }
 

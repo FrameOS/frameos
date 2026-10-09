@@ -554,7 +554,9 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
       if (frameId !== props.frameId) {
         return
       }
-      if (!values.connected && !values.flowBusy) {
+      // Not while our own probe holds the port: it pauses the stream, and
+      // resetting here cleared `probing`/`probed` mid-probe and re-armed it.
+      if (!values.connected && !values.flowBusy && !values.probing) {
         if (values.identity !== null || values.probed) {
           actions.resetSession()
         }

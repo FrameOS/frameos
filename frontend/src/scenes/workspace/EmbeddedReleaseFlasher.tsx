@@ -20,7 +20,7 @@ import { framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/
 import type { FrameId, FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
-import { detectFlashSize, layoutMatchedPlatform } from './embeddedFlashImage'
+import { detectFlashSize, layoutMatchedPlatform, releaseChipMismatch } from './embeddedFlashImage'
 import {
   downloadReleaseFirmware,
   fetchReleaseFirmwareListing,
@@ -317,6 +317,12 @@ export function EmbeddedReleaseFlasher({
       const releasePlatform = detectedFlashSize
         ? layoutMatchedPlatform(releaseFirmwarePlatform(frame), detectedFlashSize, listing.assets)
         : configuredPlatform
+      // The image is for the frame's configured chip; a board with a different
+      // one flashes "fine" and then boot-loops in the ROM for good.
+      const chipMismatch = releaseChipMismatch(loader.chip?.CHIP_NAME, releasePlatform)
+      if (chipMismatch) {
+        throw new Error(chipMismatch)
+      }
       if (!detectedFlashSize) {
         setFlashMessage(
           `Could not read the board's flash size; using the ${releasePlatform} image this frame is configured for.`
