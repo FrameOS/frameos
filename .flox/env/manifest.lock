@@ -4,7 +4,8 @@
     "schema-version": "1.10.0",
     "install": {
       "cacert": {
-        "pkg-path": "cacert"
+        "pkg-path": "cacert",
+        "outputs": "all"
       },
       "coreutils": {
         "pkg-path": "coreutils",
@@ -37,7 +38,8 @@
         "pkg-path": "nimble"
       },
       "nodejs": {
-        "pkg-path": "nodejs_22"
+        "pkg-path": "nodejs_22",
+        "outputs": "all"
       },
       "openssl": {
         "pkg-path": "openssl",
@@ -157,6 +159,39 @@
     {
       "attr_path": "cacert",
       "broken": false,
+      "derivation": "/nix/store/pjd9l06y1nfqhs756wq6nj7icfyr0xzz-nss-cacert-3.117.drv",
+      "description": "Bundle of X.509 certificates of public Certificate Authorities (CA)",
+      "install_id": "cacert",
+      "license": "MPL-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "nss-cacert-3.117",
+      "pname": "cacert",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:36.305901Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.117",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "hashed": "/nix/store/xkay0nhlkxpjp8kckvgbql4az19hybvj-nss-cacert-3.117-hashed",
+        "out": "/nix/store/py61p3laplm8iycscxbd9h0x03rz355v-nss-cacert-3.117",
+        "p11kit": "/nix/store/n0ymnq2sqifi9d5lchabim8y5yr4p3mb-nss-cacert-3.117-p11kit",
+        "unbundled": "/nix/store/kid9bf8gjspwsgiq9rw107y12bx5dxfy-nss-cacert-3.117-unbundled"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "cacert",
+      "broken": false,
       "derivation": "/nix/store/gcd16ycnbgpzpdkicj5r0rd0pjcl5d8s-nss-cacert-3.117.drv",
       "description": "Bundle of X.509 certificates of public Certificate Authorities (CA)",
       "install_id": "cacert",
@@ -253,6 +288,37 @@
         "out": "/nix/store/843ahdalwl120986c7ilk5q1c47biyap-coreutils-9.8"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/im3fjlb1r6qq90p4wf61b0x90my4vqyc-coreutils-9.8.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "coreutils-9.8",
+      "pname": "coreutils",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:36.578642Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.8",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "info": "/nix/store/5lwyqgyd3xf0hg8rd26shj9malp9lpqw-coreutils-9.8-info",
+        "out": "/nix/store/i5j9js9ip06p0qjfrgrlv127bz4pdhy5-coreutils-9.8"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
@@ -369,6 +435,41 @@
     {
       "attr_path": "curl",
       "broken": false,
+      "derivation": "/nix/store/z0ggwjwqa06qyh0dfjaicm12rvpzja8n-curl-8.17.0.drv",
+      "description": "Command line tool for transferring files with URL syntax",
+      "install_id": "curl",
+      "license": "curl",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "curl-8.17.0",
+      "pname": "curl",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:36.622345Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "8.17.0",
+      "outputs_to_install": [
+        "bin",
+        "man"
+      ],
+      "outputs": {
+        "bin": "/nix/store/swwbf9z6y6naa0p98yk29cw8hvdl0597-curl-8.17.0-bin",
+        "dev": "/nix/store/zzircp96p8v4xpl118zh87jmjyd4vzry-curl-8.17.0-dev",
+        "devdoc": "/nix/store/jxrqijqd7i7zir6pxr7mf9nx5r7n854h-curl-8.17.0-devdoc",
+        "man": "/nix/store/ffci3204mhijf9zjk5fmqcm7nb5yi8gn-curl-8.17.0-man",
+        "out": "/nix/store/d1gac0xciwjbf1wvmnx6d8myg3k738kb-curl-8.17.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "curl",
+      "broken": false,
       "derivation": "/nix/store/n8c5jb25xlpc9isxrdyb0jad8pdy07d7-curl-8.17.0.drv",
       "description": "Command line tool for transferring files with URL syntax",
       "install_id": "curl",
@@ -476,6 +577,39 @@
     {
       "attr_path": "gcc",
       "broken": false,
+      "derivation": "/nix/store/xf3jsaabs5zg3i5wx15y3yk6mfyn6jrw-gcc-wrapper-15.2.0.drv",
+      "description": "GNU Compiler Collection, version 15.2.0 (wrapper script)",
+      "install_id": "gcc",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "gcc-wrapper-15.2.0",
+      "pname": "gcc",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:37.188721Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "15.2.0",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "info": "/nix/store/zb55nrn2w6nd97vxgwn8j9xsb1s114mv-gcc-wrapper-15.2.0-info",
+        "man": "/nix/store/32lvjag88g789138a1z93bid19cs63ih-gcc-wrapper-15.2.0-man",
+        "out": "/nix/store/gda582qvway6j4vzb59mcj0gyd27hn74-gcc-wrapper-15.2.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "gcc",
+      "broken": false,
       "derivation": "/nix/store/dish9i36nqkzkdhwy5r2h3fcdnd252wg-gcc-wrapper-15.2.0.drv",
       "description": "GNU Compiler Collection, version 15.2.0 (wrapper script)",
       "install_id": "gcc",
@@ -568,6 +702,37 @@
         "out": "/nix/store/mfbr42w740arf759n51nhki221lang5z-git-2.52.0"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "git",
+      "broken": false,
+      "derivation": "/nix/store/6yp8dis2w3zglnbvkf8g0qji07j11bnl-git-2.52.0.drv",
+      "description": "Distributed version control system",
+      "install_id": "git",
+      "license": "GPL-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "git-2.52.0",
+      "pname": "git",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:37.272705Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.52.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/a9903b6q3clvx61l8drkpr262fb5qmik-git-2.52.0-doc",
+        "out": "/nix/store/0lxp1s4hb0xb0di1a5jg08rr8hk0cvz8-git-2.52.0"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
@@ -669,6 +834,39 @@
         "out": "/nix/store/644anc4jyqal79d739mwr5bxznb1i5qx-gnumake-4.4.1"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "gnumake",
+      "broken": false,
+      "derivation": "/nix/store/2v7zdb79wj91xd2pgpm3hs7bvc16w62i-gnumake-4.4.1.drv",
+      "description": "Tool to control the generation of non-source files from sources",
+      "install_id": "gnumake",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "gnumake-4.4.1",
+      "pname": "gnumake",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:37.412883Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "4.4.1",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "info": "/nix/store/rbyz3pnr7n8wprrhy588siv2csisr5va-gnumake-4.4.1-info",
+        "man": "/nix/store/rv8sy3pwwdn90a5vzk47rm5rx8q040dc-gnumake-4.4.1-man",
+        "out": "/nix/store/w1zxhygdjxaff1rrp6na4qkh9x4aks8p-gnumake-4.4.1"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
@@ -779,6 +977,40 @@
     {
       "attr_path": "libffi",
       "broken": false,
+      "derivation": "/nix/store/4hkyycfyg96sjv3746ajn2iphc4lmkaj-libffi-40.drv",
+      "description": "Foreign function call interface library",
+      "install_id": "libffi",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "libffi-40",
+      "pname": "libffi",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:53.492486Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "40",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/a3yqa0mhvwyvs0dj1lvqalmcaflq4myn-libffi-40-dev",
+        "info": "/nix/store/07gk00xr019vzpzpw077hz866apg3qn8-libffi-40-info",
+        "man": "/nix/store/199gqf8lvj02cvqcfsl6nsdzs1qhjrfc-libffi-40-man",
+        "out": "/nix/store/dwvj0hab3zcjky08rl79qjzhqclyx2dw-libffi-40"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "libffi",
+      "broken": false,
       "derivation": "/nix/store/m7hrbyjc35ppzbh35vq792zhppmpzijr-libffi-3.5.2.drv",
       "description": "Foreign function call interface library",
       "install_id": "libffi",
@@ -876,6 +1108,36 @@
     {
       "attr_path": "nim",
       "broken": false,
+      "derivation": "/nix/store/yqj2xipcff6n0f94zpjkk54v42ar6vv4-x86_64-apple-darwin-nim-wrapper-2.2.4.drv",
+      "description": "Statically typed, imperative programming language (x86_64-apple-darwin wrapper)",
+      "install_id": "nim",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "x86_64-apple-darwin-nim-wrapper-2.2.4",
+      "pname": "nim",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:58.504076Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.2.4",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/67ra06rs4010j18i8q7p7p492v9qpq7k-x86_64-apple-darwin-nim-wrapper-2.2.4"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nim",
+      "broken": false,
       "derivation": "/nix/store/37vmja6rmrdznypbrizsm6akgcm65dwr-x86_64-unknown-linux-gnu-nim-wrapper-2.2.4.drv",
       "description": "Statically typed, imperative programming language (x86_64-unknown-linux-gnu wrapper)",
       "install_id": "nim",
@@ -960,6 +1222,36 @@
         "out": "/nix/store/3zaf4i0vg2ah06naw1s65x4ws61986rc-nimble-0.20.1"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nimble",
+      "broken": false,
+      "derivation": "/nix/store/s9yy47gh6h9w4kw63nv7hhayx2d2ng00-nimble-0.20.1.drv",
+      "description": "Package manager for the Nim programming language",
+      "install_id": "nimble",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "nimble-0.20.1",
+      "pname": "nimble",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:58.524043Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.20.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/zvix7b9wpyg855isd1b82g2v5i0y7vr7-nimble-0.20.1"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
@@ -1054,6 +1346,38 @@
         "out": "/nix/store/7i0syr6kw3bz87hqpngkwp0zkzsdd7h9-nodejs-22.22.0"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nodejs_22",
+      "broken": false,
+      "derivation": "/nix/store/c7jrl9grh8lihjjss50xxxzhw5f5flcz-nodejs-22.22.0.drv",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "install_id": "nodejs",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "nodejs-22.22.0",
+      "pname": "nodejs_22",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:59.635966Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "22.22.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/dmw051cm6g9xadv6rd3sr98aph2k5h2d-nodejs-22.22.0-dev",
+        "libv8": "/nix/store/jn4izxmibz80cv3rssapf4by3x6491wr-nodejs-22.22.0-libv8",
+        "out": "/nix/store/cws429hrqc4c04m3g4c4nl0k881i984w-nodejs-22.22.0"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
@@ -1165,6 +1489,41 @@
     {
       "attr_path": "openssl",
       "broken": false,
+      "derivation": "/nix/store/91jsfa9bhbk6fy2bz75vzc5k0g7y0nkx-openssl-3.6.0.drv",
+      "description": "Cryptographic library that implements the SSL and TLS protocols",
+      "install_id": "openssl",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "openssl-3.6.0",
+      "pname": "openssl",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:50:04.705874Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.6.0",
+      "outputs_to_install": [
+        "bin",
+        "man"
+      ],
+      "outputs": {
+        "bin": "/nix/store/qihwsjg6qfi4f39plkwrf7wnffqjg9r7-openssl-3.6.0-bin",
+        "dev": "/nix/store/m9iminbnhj61ig95kv025yzqcnazgl7h-openssl-3.6.0-dev",
+        "doc": "/nix/store/cpc2ksbs996yy8ywgdcld0d2nmlymvvk-openssl-3.6.0-doc",
+        "man": "/nix/store/q3j5bmmslgcmzlai2xvfgvr1f98fmn1w-openssl-3.6.0-man",
+        "out": "/nix/store/ymihgs2ggi6hvlypx737wgvgwzvyp3bd-openssl-3.6.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "openssl",
+      "broken": false,
       "derivation": "/nix/store/j6zyf8s0916hx8qlksf9pvbzkbz51j5x-openssl-3.6.0.drv",
       "description": "Cryptographic library that implements the SSL and TLS protocols",
       "install_id": "openssl",
@@ -1270,6 +1629,39 @@
     {
       "attr_path": "pkg-config",
       "broken": false,
+      "derivation": "/nix/store/cib1fanhdxjv2k172yr4s57589js963f-pkg-config-wrapper-0.29.2.drv",
+      "description": "Tool that allows packages to find out information about other packages (wrapper script)",
+      "install_id": "pkg-config",
+      "license": "GPL-2.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "pkg-config-wrapper-0.29.2",
+      "pname": "pkg-config",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:50:13.257321Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.29.2",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/dj8ri1s06mazbwd7gci34f14q9lwpzhw-pkg-config-wrapper-0.29.2-doc",
+        "man": "/nix/store/m0zlngn7f3kz3vwlrn89s648qws9nd44-pkg-config-wrapper-0.29.2-man",
+        "out": "/nix/store/kc1h0p3np0kcz1yqd605cds0yhb2gf1j-pkg-config-wrapper-0.29.2"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "pkg-config",
+      "broken": false,
       "derivation": "/nix/store/8mcsnv7isj69m42gmfwppcxqc6s7m4fx-pkg-config-wrapper-0.29.2.drv",
       "description": "Tool that allows packages to find out information about other packages (wrapper script)",
       "install_id": "pkg-config",
@@ -1358,6 +1750,36 @@
         "out": "/nix/store/v0hvwsn642v04v43i1cp6wpw659mk0fh-pnpm-10.28.0"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "pnpm",
+      "broken": false,
+      "derivation": "/nix/store/japv9r16h51zfpmqy2zpnin95fcglzxs-pnpm-10.28.0.drv",
+      "description": "Fast, disk space efficient package manager for JavaScript",
+      "install_id": "pnpm",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "pnpm-10.28.0",
+      "pname": "pnpm",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:50:13.726912Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "10.28.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/37719x03mhk4f155zxvajh4z35yilg3v-pnpm-10.28.0"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
@@ -1473,6 +1895,45 @@
     {
       "attr_path": "postgresql",
       "broken": false,
+      "derivation": "/nix/store/rmvk3sphbih8lrzm1m4vfmfmx94wzbql-postgresql-17.7.drv",
+      "description": "Powerful, open source object-relational database system",
+      "install_id": "postgresql",
+      "license": "PostgreSQL",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "postgresql-17.7",
+      "pname": "postgresql",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:50:13.888600Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "17.7",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/x9n4zsrf6w58q5nv4dn1k0sdfh7ij0m1-postgresql-17.7-dev",
+        "doc": "/nix/store/xb6273jkz7z53f5jslp3r05hhk9im7hd-postgresql-17.7-doc",
+        "jit": "/nix/store/88qzagg7g7ml1hanjfbzy7izgg9jn6ms-postgresql-17.7-jit",
+        "lib": "/nix/store/zskadb0lrlr10lvz3km5qix08s5gd6rh-postgresql-17.7-lib",
+        "man": "/nix/store/a7n49b2xgpazzkxazbbz5azbcgqwc5c1-postgresql-17.7-man",
+        "out": "/nix/store/knah3fbhsvy10k6vmq5h10rs8zq5fkq0-postgresql-17.7",
+        "plperl": "/nix/store/sih8xbyl6i42zh5xavs0hnazpvx6wkgc-postgresql-17.7-plperl",
+        "plpython3": "/nix/store/vza2y572p75laww7idjg1bcnc8k7k15z-postgresql-17.7-plpython3",
+        "pltcl": "/nix/store/1p37i9g824zl3kva154jdjngxrrbhh09-postgresql-17.7-pltcl"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "postgresql",
+      "broken": false,
       "derivation": "/nix/store/vy472q5fc2ki7348cqwqc6wh3sdijw7m-postgresql-17.7.drv",
       "description": "Powerful, open source object-relational database system",
       "install_id": "postgresql",
@@ -1575,6 +2036,36 @@
     {
       "attr_path": "python312",
       "broken": false,
+      "derivation": "/nix/store/ma0f86zc9jigvwr89x5xsiprqd4vscv8-python3-3.12.12.drv",
+      "description": "High-level dynamically-typed programming language",
+      "install_id": "python",
+      "license": "Python-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "python3-3.12.12",
+      "pname": "python312",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:50:15.457077Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "python3-3.12.12",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/izh5ff9bjyz5sr7siaypz3333rfzifz0-python3-3.12.12"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "python312",
+      "broken": false,
       "derivation": "/nix/store/y1dwjv81xf8bxxi5mnxl041skv7qi775-python3-3.12.12.drv",
       "description": "High-level dynamically-typed programming language",
       "install_id": "python",
@@ -1660,6 +2151,36 @@
         "out": "/nix/store/x0sby0gaqdi9g776grsnbza24wqiq5dx-redis-8.2.3"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "redis",
+      "broken": false,
+      "derivation": "/nix/store/wfmhdfkq3qq268s1qsf38r441qwgpp6i-redis-8.2.3.drv",
+      "description": "Open source, advanced key-value store",
+      "install_id": "redis",
+      "license": "AGPL-3.0-only",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "redis-8.2.3",
+      "pname": "redis",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:50:57.997309Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "8.2.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/ilvxpg4bhhnllm92s41yydqpq8bfw0sx-redis-8.2.3"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
@@ -1760,6 +2281,41 @@
         "out": "/nix/store/w54lmld8cnjwvk5nvr9xc280rmz7vi9x-xz-5.8.1"
       },
       "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "xz",
+      "broken": false,
+      "derivation": "/nix/store/2rdaxzy7wiicpjci0lw313z7j1hgcs7m-xz-5.8.1.drv",
+      "description": "General-purpose data compression software, successor of LZMA",
+      "install_id": "xz",
+      "license": "[ GPL-2.0-or-later, LGPL-2.1-or-later ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "xz-5.8.1",
+      "pname": "xz",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:52:10.839512Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "5.8.1",
+      "outputs_to_install": [
+        "bin",
+        "man"
+      ],
+      "outputs": {
+        "bin": "/nix/store/agc0c3hjhnj9b0rj80rhdjrcjm29rsy4-xz-5.8.1-bin",
+        "dev": "/nix/store/28hx2c5f5l1yzmzxv1b6pm3lg4z4d4lb-xz-5.8.1-dev",
+        "doc": "/nix/store/fnf1s77bw3lbcnq4zi3qq273k1mcp467-xz-5.8.1-doc",
+        "man": "/nix/store/4jk3lvipga6npp2hfr3caagyvw2iqxw0-xz-5.8.1-man",
+        "out": "/nix/store/1k5pv9rs83bx2xl4149j15886xdyh224-xz-5.8.1"
+      },
+      "system": "x86_64-darwin",
       "group": "toplevel",
       "priority": 5
     },
