@@ -86,9 +86,12 @@ time:
 CI runs four shards. Same-repo pull requests run with `--update-snapshots`
 and "Commit Frontend Visual Snapshots" pushes changed PNGs to the PR branch
 as "FrameOS Bot"; forked PRs and pushes to `main` only compare. So **a
-visual job failing on CI is never a pixel diff**: read the log for the
+visual job failing on a PR is never a pixel diff**: read the log for the
 frontend-error assertion (any console error, e.g. a 404'd resource) or the
-`prepare` step that threw.
+`prepare` step that threw. On `main` it is the opposite: a UI change
+committed straight to `main` leaves "Run Tests" red there until a same-repo
+PR carries the refreshed PNGs. Open one from `main`, let the bot commit the
+snapshots to it, merge.
 
 ## Rules
 

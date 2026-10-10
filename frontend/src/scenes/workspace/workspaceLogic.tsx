@@ -1319,7 +1319,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
       expanded,
     }),
   }),
-  reducers({
+  // Function form on purpose: the defaults run when the logic is built, not
+  // when this module loads. The cloud bundle seeds the theme from the shared
+  // cookie between the two (cloudThemeSync), and this module is in its main
+  // chunk since the USB redeploy panel imports embeddedUsbConnectLogic; an
+  // object literal read localStorage before the seed and every dark cloud
+  // workspace came up light (2026-10-10).
+  reducers(() => ({
     search: [
       '',
       {
@@ -1565,7 +1571,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         },
       },
     ],
-  }),
+  })),
   selectors({
     selectedFrame: [
       (s) => [s.frames, s.selectedFrameId, s.activeFramesList, s.framesList],
