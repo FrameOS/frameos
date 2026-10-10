@@ -314,6 +314,9 @@ class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
     cache: Optional[FrameAssetsCacheResponse] = None
     storage: Optional[FrameAssetsStorageResponse] = None
+    # Echoed when the request named one folder (`?folder=`): the listing is
+    # then that folder's direct children, not the whole tree.
+    folder: Optional[str] = None
 
 
 class FramePingResponse(BaseModel):

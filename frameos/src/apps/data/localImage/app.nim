@@ -8,6 +8,8 @@ import strformat
 import random
 import frameos/utils/image
 import frameos/utils/app_images
+import frameos/utils/asset_colors
+import frameos/utils/dither
 import frameos/utils/exif
 import frameos/utils/paths
 import frameos/apps
@@ -207,10 +209,25 @@ proc get*(self: App, context: ExecutionContext): Image =
   if self.appConfig.counterStateKey != "":
     self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
 
+  # A photo may carry its own colour profile (utils/asset_colors: the
+  # `<image>.frameos.json` sidecar the Assets panel writes). Its palette
+  # override is left for the panel dither — sticky until the next image or
+  # the next scene, because this app's output is cached for minutes.
+  let colorProfile = loadAssetColorProfile(path)
+  if colorProfile.isSome and colorProfile.get().hasPaletteOverride():
+    setRenderPaletteOverride(colorProfile.get().palette)
+  else:
+    clearRenderPaletteOverride()
+  let adjustColors = colorProfile.isSome and colorProfile.get().hasAdjustments()
+
   # When the consumer draws this image full-frame onto the canvas, decode
   # straight into the canvas: peak memory stays at decode intermediates
   # instead of canvas + full decoded copy + compressed file.
-  if not decodeTarget.isNil:
+  #
+  # With a colour profile to apply, only a fit that covers the whole target
+  # goes this way: `contain` leaves earlier canvas content around the photo,
+  # and the adjustments must not touch that.
+  if not decodeTarget.isNil and not (adjustColors and decodeScalingMode == "contain"):
     try:
       if readImageIntoTarget(path, decodeTarget, decodeScalingMode):
         nextImage = some(decodeTarget)
@@ -229,6 +246,12 @@ proc get*(self: App, context: ExecutionContext): Image =
       return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg, decodeTarget)
 
   let image = nextImage.get()
+  if adjustColors:
+    try:
+      applyAssetColors(image, colorProfile.get())
+      self.log("Applied the colour profile: " & sidecarPathFor(path))
+    except CatchableError as e:
+      self.logError("Could not apply the colour profile " & sidecarPathFor(path) & ": " & e.msg)
   if self.appConfig.metadataStateKey != "":
     var metadata = %*{
       "path": path,

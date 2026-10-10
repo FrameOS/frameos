@@ -28,7 +28,15 @@ import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWith
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
 import { consumeFontSyncStream, isFontSyncStream } from '../../../../utils/fontSyncStream'
-import { normalizeAssetPath, normalizeAssetsPath, withRenamedAsset, withoutDeletedAsset } from './assetPaths'
+import {
+  assetPathKey,
+  normalizeAssetPath,
+  normalizeAssetsPath,
+  withRenamedAsset,
+  withoutDeletedAsset,
+} from './assetPaths'
+import { isSidecarPath, sidecarImagePath, sidecarPathFor } from '../../../../utils/assetColors/profile'
+import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
 import type { FrameType } from '../../../../types'
 
 export interface AssetsLogicProps {
@@ -42,6 +50,8 @@ export interface AssetNode {
   size?: number
   mtime?: number
   children: Record<string, AssetNode>
+  /** Folders only: whether this folder's own listing has been fetched. */
+  loaded?: boolean
 }
 
 export interface AssetStats {
@@ -76,6 +86,9 @@ function virtualQuotaBytes(frame: { device_config?: Record<string, any> | null }
 
 interface FrameAssetsResponse {
   assets: AssetType[]
+  /** Set when the server answered `?folder=`: the entries are that folder's
+   * direct children. Absent on an older server, which lists everything. */
+  folder?: string
   cache?: {
     refreshing?: boolean
     retry_after?: number
@@ -97,12 +110,51 @@ function storageMountedFromResponse(data: FrameAssetsResponse): boolean | null {
   return typeof mounted === 'boolean' ? mounted : null
 }
 
-function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
+/** The folder an asset key sits in ('' for the root). */
+export function parentFolderKey(key: string): string {
+  const index = key.lastIndexOf('/')
+  return index < 0 ? '' : key.slice(0, index)
+}
+
+/**
+ * One folder's fresh listing merged into what is already known: its direct
+ * children are replaced, everything else (other folders, the subtrees under
+ * this one) is kept. Paths keep each source's own spelling.
+ */
+export function mergeFolderListing(
+  assets: AssetType[],
+  folderKey: string,
+  entries: AssetType[],
+  assetsPath?: string
+): AssetType[] {
+  const kept = assets.filter((asset) => {
+    const key = assetPathKey(asset.path, assetsPath)
+    return key === '' || parentFolderKey(key) !== folderKey
+  })
+  const seen = new Set(kept.map((asset) => assetPathKey(asset.path, assetsPath)))
+  for (const entry of entries) {
+    const key = assetPathKey(entry.path, assetsPath)
+    if (!key || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    kept.push(entry)
+  }
+  return kept
+}
+
+function buildAssetTree(
+  assets: AssetType[],
+  rootName: string,
+  loadedFolders: Record<string, true> = {},
+  allFoldersLoaded = true
+): AssetNode {
   const root: AssetNode = {
     name: rootName,
     path: '',
     isFolder: true,
     children: {},
+    loaded: allFoldersLoaded || Boolean(loadedFolders['']),
   }
 
   for (const asset of assets) {
@@ -133,6 +185,14 @@ function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
     currentNode.size = asset.size
     currentNode.mtime = asset.mtime
   }
+  const markLoaded = (node: AssetNode): void => {
+    if (!node.isFolder) {
+      return
+    }
+    node.loaded = allFoldersLoaded || Boolean(loadedFolders[node.path])
+    Object.values(node.children).forEach(markLoaded)
+  }
+  markLoaded(root)
   return root
 }
 
@@ -201,7 +261,33 @@ export function nodeHasPlayableImages(node: AssetNode): boolean {
     return hasImageExtension(node.name)
   }
 
+  // A folder whose listing has not been fetched yet may well hold photos:
+  // the slideshow scene copes with an empty one, a hidden button does not.
+  if (node.loaded === false && !isSystemAssetPath(node.path)) {
+    return true
+  }
   return Object.values(node.children).some(nodeHasPlayableImages)
+}
+
+/** The keys ('photos/cat.jpg') of every image a colour-profile sidecar sits next to. */
+export function colorProfileKeysOf(assets: AssetType[], assetsPath?: string): Set<string> {
+  const keys = new Set<string>()
+  for (const asset of assets) {
+    if (asset.is_dir) {
+      continue
+    }
+    const image = sidecarImagePath(assetPathKey(asset.path, assetsPath))
+    if (image) {
+      keys.add(image)
+    }
+  }
+  return keys
+}
+
+/** The listing's own spelling of an image's sidecar, when it has one. */
+function sidecarEntryFor(assets: AssetType[], imagePath: string, assetsPath?: string): AssetType | null {
+  const wanted = sidecarPathFor(assetPathKey(imagePath, assetsPath))
+  return assets.find((asset) => assetPathKey(asset.path, assetsPath) === wanted) ?? null
 }
 
 function latestDiskStats(metrics: MetricsType[]): DiskStats | null {
@@ -264,6 +350,7 @@ function errorMessage(error: unknown, fallback: string): string {
 export interface assetsLogicValues {
   frame: FrameType // frameLogic
   sortedMetrics: MetricsType[] // metricsLogic
+  allFoldersLoaded: boolean
   assetStats: AssetStats
   assetSync: boolean
   assetSyncLoading: boolean
@@ -277,7 +364,10 @@ export interface assetsLogicValues {
     path: string
     size: number
   }[]
+  colorProfileKeys: Set<string>
   diskStats: DiskStats | null
+  foldersLoading: Record<string, boolean>
+  loadedFolders: Record<string, true>
   showHiddenFiles: boolean
   showSystemFolders: boolean
   storageMounted: boolean | null
@@ -311,8 +401,21 @@ export interface assetsLogicActions {
   deleteAsset: (path: string) => {
     path: string
   }
+  ensureFolderLoaded: (path: string) => {
+    path: string
+  }
   filesToUpload: (files: string[]) => {
     files: string[]
+  }
+  folderLoaded: (
+    folder: string,
+    entries: AssetType[]
+  ) => {
+    entries: AssetType[]
+    folder: string
+  }
+  fullListingLoaded: () => {
+    value: true
   }
   loadAssets: () => any
   loadAssetsFailure: (
@@ -328,6 +431,9 @@ export interface assetsLogicActions {
   ) => {
     assets: AssetType[]
     payload?: any
+  }
+  loadFolder: (path: string) => {
+    path: string
   }
   refreshAssets: () => any
   refreshAssetsFailure: (
@@ -353,6 +459,13 @@ export interface assetsLogicActions {
   }
   setAssetsRefreshing: (assetsRefreshing: boolean) => {
     assetsRefreshing: boolean
+  }
+  setFolderLoading: (
+    path: string,
+    loading: boolean
+  ) => {
+    loading: boolean
+    path: string
   }
   setStorageMounted: (storageMounted: boolean | null) => {
     storageMounted: boolean | null
@@ -428,8 +541,11 @@ export interface assetsLogicMeta {
       }[],
       frame: FrameType,
       showSystemFolders: boolean,
-      showHiddenFiles: boolean
+      showHiddenFiles: boolean,
+      loadedFolders: Record<string, true>,
+      allFoldersLoaded: boolean
     ) => AssetNode
+    colorProfileKeys: (assets: AssetType[], frame: FrameType) => Set<string>
     assetStats: (assetTree: AssetNode) => AssetStats
     storageUnmounted: (storageMounted: boolean | null) => boolean
     diskStats: (
@@ -472,6 +588,12 @@ export const assetsLogic = kea<assetsLogicType>([
     createFolder: (path: string) => ({ path }),
     toggleShowSystemFolders: true,
     toggleShowHiddenFiles: true,
+    // A folder at a time: the tree asks for a folder when it is opened.
+    ensureFolderLoaded: (path: string) => ({ path }),
+    loadFolder: (path: string) => ({ path }),
+    setFolderLoading: (path: string, loading: boolean) => ({ path, loading }),
+    folderLoaded: (folder: string, entries: AssetType[]) => ({ folder, entries }),
+    fullListingLoaded: true,
   }),
   loaders(({ actions, cache, props, values }) => ({
     assets: [
@@ -479,9 +601,12 @@ export const assetsLogic = kea<assetsLogicType>([
       {
         loadAssets: async () => {
           try {
-            const response = await apiFetch(frameAssetsApiPath(props.frameId))
+            // The root folder only. A server that knows `folder=` answers
+            // with the root's direct children and echoes the key; an older
+            // one lists everything, which is just as welcome.
+            const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?folder=`)
             if (!response.ok) {
-              throw new Error('Failed to fetch assets')
+              throw new Error(await responseErrorMessage(response, 'Failed to fetch assets'))
             }
             const data = (await response.json()) as FrameAssetsResponse
             window.clearTimeout(cache.reloadTimer)
@@ -498,11 +623,20 @@ export const assetsLogic = kea<assetsLogicType>([
             if (data.cache?.refreshing && data.assets.length === 0 && values.assets.length > 0) {
               return values.assets
             }
+            if (typeof data.folder === 'string') {
+              actions.folderLoaded('', data.assets)
+              return mergeFolderListing(values.assets, '', data.assets, values.frame.assets_path)
+            }
+            actions.fullListingLoaded()
             return data.assets as AssetType[]
           } catch (error) {
             actions.setAssetsRefreshing(false)
             console.error(error)
-            // A transient fetch failure must not wipe the listing.
+            // A transient fetch failure must not wipe the listing — but an
+            // empty panel saying "0 files" would be a lie, so say so.
+            if (values.assets.length === 0) {
+              reportAssetFailure(props.frameId, 'Listing assets', errorMessage(error, 'Failed to list the assets'))
+            }
             return values.assets
           }
         },
@@ -510,7 +644,7 @@ export const assetsLogic = kea<assetsLogicType>([
           try {
             window.clearTimeout(cache.reloadTimer)
             actions.setAssetsRefreshing(true)
-            const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?refresh=1`)
+            const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?refresh=1&folder=`)
             if (!response.ok) {
               throw new Error('Failed to refresh assets')
             }
@@ -527,6 +661,13 @@ export const assetsLogic = kea<assetsLogicType>([
             if (data.cache?.refreshing && data.assets.length === 0 && values.assets.length > 0) {
               return values.assets
             }
+            if (typeof data.folder === 'string') {
+              // The open folders are re-read one by one (see the listener on
+              // folderLoaded), so only the root is fresh here.
+              actions.folderLoaded('', data.assets)
+              return mergeFolderListing(values.assets, '', data.assets, values.frame.assets_path)
+            }
+            actions.fullListingLoaded()
             return data.assets as AssetType[]
           } catch (error) {
             actions.setAssetsRefreshing(false)
@@ -618,6 +759,34 @@ export const assetsLogic = kea<assetsLogicType>([
         setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
       },
     ],
+    // Which folders' own listings have been fetched. A server without
+    // `folder=` support answers with everything at once (fullListingLoaded).
+    loadedFolders: [
+      {} as Record<string, true>,
+      {
+        folderLoaded: (state, { folder }) => (state[folder] ? state : { ...state, [folder]: true }),
+        refreshAssets: () => ({}),
+      },
+    ],
+    allFoldersLoaded: [
+      false,
+      {
+        fullListingLoaded: () => true,
+        folderLoaded: () => false,
+      },
+    ],
+    foldersLoading: [
+      {} as Record<string, boolean>,
+      {
+        setFolderLoading: (state, { path, loading }) => {
+          if (!loading) {
+            const { [path]: _, ...rest } = state
+            return rest
+          }
+          return state[path] ? state : { ...state, [path]: true }
+        },
+      },
+    ],
     // null until something reports it, and null forever for the frames that
     // never do — see storageMountedFromResponse.
     storageMounted: [
@@ -700,12 +869,14 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetTree: [
-      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders, s.showHiddenFiles],
+      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders, s.showHiddenFiles, s.loadedFolders, s.allFoldersLoaded],
       (
         cleanedAssets: assetsLogicValues['cleanedAssets'],
         frame: assetsLogicValues['frame'],
         showSystemFolders: assetsLogicValues['showSystemFolders'],
-        showHiddenFiles: assetsLogicValues['showHiddenFiles']
+        showHiddenFiles: assetsLogicValues['showHiddenFiles'],
+        loadedFolders: assetsLogicValues['loadedFolders'],
+        allFoldersLoaded: assetsLogicValues['allFoldersLoaded']
       ) => {
         const visibleAssets = cleanedAssets.filter((asset) => {
           // The FrameOS-owned folders (.frameos, .thumbs) keep their own
@@ -713,10 +884,20 @@ export const assetsLogic = kea<assetsLogicType>([
           if (isSystemAssetPath(asset.path)) {
             return showSystemFolders
           }
+          // A photo's colour-profile sidecar is shown as an icon on the
+          // photo's row, not as a file of its own.
+          if (isSidecarPath(asset.path)) {
+            return showHiddenFiles
+          }
           return showHiddenFiles || !isHiddenOrJunkAssetPath(asset.path)
         })
-        return buildAssetTree(visibleAssets, frame.assets_path ?? '/srv/assets')
+        return buildAssetTree(visibleAssets, frame.assets_path ?? '/srv/assets', loadedFolders, allFoldersLoaded)
       },
+    ],
+    colorProfileKeys: [
+      (s) => [s.assets, s.frame],
+      (assets: assetsLogicValues['assets'], frame: assetsLogicValues['frame']): Set<string> =>
+        colorProfileKeysOf(assets, frame.assets_path),
     ],
     assetStats: [(s) => [s.assetTree], (assetTree: assetsLogicValues['assetTree']) => collectAssetStats(assetTree)],
     storageUnmounted: [
@@ -752,6 +933,74 @@ export const assetsLogic = kea<assetsLogicType>([
     ],
   }),
   listeners(({ actions, props, values, cache }) => ({
+    ensureFolderLoaded: ({ path }) => {
+      const key = assetPathKey(path, values.frame.assets_path)
+      if (values.allFoldersLoaded || values.loadedFolders[key] || values.foldersLoading[key]) {
+        return
+      }
+      actions.loadFolder(key)
+    },
+    loadFolder: async ({ path }) => {
+      const key = assetPathKey(path, values.frame.assets_path)
+      actions.setFolderLoading(key, true)
+      try {
+        const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?folder=${encodeURIComponent(key)}`)
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, 'Failed to list the folder'))
+        }
+        const data = (await response.json()) as FrameAssetsResponse
+        if (typeof data.folder === 'string') {
+          actions.loadAssetsSuccess(mergeFolderListing(values.assets, key, data.assets, values.frame.assets_path))
+          actions.folderLoaded(key, data.assets)
+        } else {
+          // An older server lists everything: take it all.
+          actions.loadAssetsSuccess(data.assets)
+          actions.fullListingLoaded()
+        }
+      } catch (error) {
+        console.error(error)
+        reportAssetFailure(props.frameId, 'Listing folder', errorMessage(error, 'Failed to list the folder'))
+      } finally {
+        actions.setFolderLoading(key, false)
+      }
+    },
+    // Folders left open last time are read as soon as their parent is, so
+    // the tree comes back the way it was left.
+    folderLoaded: ({ folder, entries }) => {
+      const expansion = workspaceLogic.values.frameAssetFolderExpansion
+      for (const entry of entries) {
+        if (!entry.is_dir) {
+          continue
+        }
+        const key = assetPathKey(entry.path, values.frame.assets_path)
+        if (!key || parentFolderKey(key) !== folder) {
+          continue
+        }
+        // A folder the tree does not show (.frameos, .thumbs, OS junk) is
+        // not worth a request, however it was left last time it was shown.
+        if (
+          isSystemAssetPath(key) ? !values.showSystemFolders : !values.showHiddenFiles && isHiddenOrJunkAssetPath(key)
+        ) {
+          continue
+        }
+        if (expansion[frameAssetFolderExpansionKey(props.frameId, key)]) {
+          actions.ensureFolderLoaded(key)
+        }
+      }
+    },
+    [workspaceLogic.actionTypes.setFrameAssetFolderExpanded]: ({
+      frameId,
+      path,
+      expanded,
+    }: {
+      frameId: FrameId
+      path: string
+      expanded: boolean
+    }) => {
+      if (expanded && frameId === props.frameId) {
+        actions.ensureFolderLoaded(path)
+      }
+    },
     uploadDroppedFiles: async ({ path, files }) => {
       if (files.length === 0) {
         return
@@ -934,6 +1183,11 @@ export const assetsLogic = kea<assetsLogicType>([
           throw new Error(await responseErrorMessage(response, 'Failed to delete asset'))
         }
         actions.assetDeleted(path, values.frame.assets_path)
+        // A photo's colour profile goes with the photo.
+        const sidecar = sidecarEntryFor(values.assets, path, values.frame.assets_path)
+        if (sidecar) {
+          actions.deleteAsset(sidecarPathFor(path))
+        }
       } catch (error) {
         console.error(error)
         reportAssetFailure(props.frameId, 'Deleting asset', errorMessage(error, 'Failed to delete asset'))
@@ -949,6 +1203,11 @@ export const assetsLogic = kea<assetsLogicType>([
           throw new Error(await responseErrorMessage(response, 'Failed to rename asset'))
         }
         actions.assetRenamed(oldPath, newPath, values.frame.assets_path)
+        // A photo's colour profile goes with the photo.
+        const sidecar = sidecarEntryFor(values.assets, oldPath, values.frame.assets_path)
+        if (sidecar) {
+          actions.renameAsset(sidecarPathFor(oldPath), sidecarPathFor(newPath))
+        }
       } catch (error) {
         console.error(error)
         reportAssetFailure(props.frameId, 'Renaming asset', errorMessage(error, 'Failed to rename asset'))
@@ -963,7 +1222,12 @@ export const assetsLogic = kea<assetsLogicType>([
         if (!response.ok) {
           throw new Error(await responseErrorMessage(response, 'Failed to create folder'))
         }
-        actions.loadAssets()
+        const parent = parentFolderKey(assetPathKey(path, values.frame.assets_path))
+        if (values.allFoldersLoaded) {
+          actions.loadAssets()
+        } else {
+          actions.loadFolder(parent)
+        }
       } catch (error) {
         console.error(error)
         reportAssetFailure(props.frameId, 'Creating folder', errorMessage(error, 'Failed to create folder'))

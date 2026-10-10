@@ -1958,6 +1958,73 @@ async def _admin_api_asset_file_response(
     )
 
 
+# One SSH thumbnail at a time per frame: each one is an md5sum plus an scp
+# on pooled connections, and a burst of them is what made sshd drop the
+# connections (MaxStartups). Keyed by frame id, process-local.
+_ssh_thumbnail_slots: dict[int, asyncio.Semaphore] = {}
+
+
+def _ssh_thumbnail_slot(frame_id: int) -> asyncio.Semaphore:
+    slot = _ssh_thumbnail_slots.get(frame_id)
+    if slot is None:
+        slot = asyncio.Semaphore(1)
+        _ssh_thumbnail_slots[frame_id] = slot
+    return slot
+
+
+async def _ssh_thumbnail_response(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    assets_path: str,
+    full_path: str,
+) -> StreamingResponse:
+    """A thumbnail for a frame reached over SSH or the Remote: the original's
+    md5 names a redis cache entry; a miss renders the preview here from the
+    original (no image FrameOS ships has ImageMagick to run)."""
+    md5_key = f"asset-md5:{full_path}"
+    cached_md5 = await redis.get(md5_key)
+    if cached_md5:
+        full_md5 = cached_md5.decode() if isinstance(cached_md5, bytes) else cached_md5
+    else:
+        full_md5, exists = await _remote_file_md5(db, redis, frame, full_path)
+        if not full_md5:
+            _bad_request("Invalid asset path")
+        await redis.set(md5_key, full_md5, ex=86400 * 30)
+
+    # Keyed by format as well as content: caches written before frames
+    # generated PNGs hold JPEG bytes, and serving those under the PNG
+    # media type below would hand the browser a lie.
+    cache_key = f"asset:thumb:png:{full_md5}"
+    if cached := await redis.get(cache_key):
+        data = cached
+    else:
+        thumb_root = os.path.join(assets_path, ".thumbs")
+        thumb_rel = full_md5 + THUMBNAIL_FILE_SUFFIX
+        thumb_full = os.path.normpath(os.path.join(thumb_root, thumb_rel))
+
+        try:
+            data = await _remote_download_file(db, redis, frame, thumb_full)
+            await redis.set(cache_key, data, ex=86400 * 30)
+        except Exception:
+            # The frame renders its own thumbnails now (Pixie, in-process),
+            # so the fallback is no longer a shell on the device: no image
+            # FrameOS ships has ImageMagick to run, and asking a frame for
+            # a shell to resize a photo was never a fair trade. Pull the
+            # original once and render the preview here.
+            original = await _remote_download_file(db, redis, frame, full_path)
+            try:
+                data = await asyncio.to_thread(render_thumbnail_png, original)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail=f"Could not generate a thumbnail: {exc}",
+                ) from exc
+            await redis.set(cache_key, data, ex=86400 * 30)
+
+    return StreamingResponse(io.BytesIO(data), media_type=THUMBNAIL_CONTENT_TYPE)
+
+
 @api_open.get("/projects/{project_id}/frames/{id:int}/asset")
 async def api_frame_get_asset(
     project_id: int,
@@ -2023,47 +2090,28 @@ async def api_frame_get_asset(
         )
 
     if thumb:
-        md5_key = f"asset-md5:{full_path}"
-        cached_md5 = await redis.get(md5_key)
-        if cached_md5:
-            full_md5 = cached_md5.decode() if isinstance(cached_md5, bytes) else cached_md5
-        else:
-            full_md5, exists = await _remote_file_md5(db, redis, frame, full_path)
-            if not full_md5:
-                _bad_request("Invalid asset path")
-            await redis.set(md5_key, full_md5, ex=86400 * 30)
-
-        # Keyed by format as well as content: caches written before frames
-        # generated PNGs hold JPEG bytes, and serving those under the PNG
-        # media type below would hand the browser a lie.
-        cache_key = f"asset:thumb:png:{full_md5}"
-        if cached := await redis.get(cache_key):
-            data = cached
-        else:
-            thumb_root = os.path.join(assets_path, ".thumbs")
-            thumb_rel = full_md5 + THUMBNAIL_FILE_SUFFIX
-            thumb_full = os.path.normpath(os.path.join(thumb_root, thumb_rel))
-
+        # The runtime renders and caches thumbnails itself (admin_api_assets:
+        # one HTTP GET, PNG). It used to be SSH only here: an md5sum, an scp
+        # of a cache file the runtime no longer writes under that name, then
+        # an scp of the original — three fresh SSH connections per thumbnail,
+        # five thumbnails at a time, which tripped sshd's MaxStartups and left
+        # every thumbnail spinning into a 30 s timeout (2026-10-10, frame 35).
+        # A frame whose admin session the backend holds answers over HTTP;
+        # SSH is the fallback, one thumbnail at a time per frame.
+        if _frame_admin_api_available(frame):
             try:
-                data = await _remote_download_file(db, redis, frame, thumb_full)
-                await redis.set(cache_key, data, ex=86400 * 30)
+                data, device_content_type = await admin_api_assets.download_asset(
+                    frame, redis, full_path, thumb=True
+                )
+                media_type = device_content_type.split(";", 1)[0].strip() or THUMBNAIL_CONTENT_TYPE
+                return StreamingResponse(io.BytesIO(data), media_type=media_type)
+            except HTTPException as exc:
+                if exc.status_code == HTTPStatus.NOT_FOUND:
+                    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
             except Exception:
-                # The frame renders its own thumbnails now (Pixie, in-process),
-                # so the fallback is no longer a shell on the device: no image
-                # FrameOS ships has ImageMagick to run, and asking a frame for
-                # a shell to resize a photo was never a fair trade. Pull the
-                # original once and render the preview here.
-                original = await _remote_download_file(db, redis, frame, full_path)
-                try:
-                    data = await asyncio.to_thread(render_thumbnail_png, original)
-                except Exception as exc:
-                    raise HTTPException(
-                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                        detail=f"Could not generate a thumbnail: {exc}",
-                    ) from exc
-                await redis.set(cache_key, data, ex=86400 * 30)
-
-        return StreamingResponse(io.BytesIO(data), media_type=THUMBNAIL_CONTENT_TYPE)
+                pass
+        async with _ssh_thumbnail_slot(frame.id):
+            return await _ssh_thumbnail_response(db, redis, frame, assets_path, full_path)
 
     if await _use_remote(frame, redis):
         try:
@@ -2697,6 +2745,12 @@ async def _load_frame_assets(
         # Linux frame reached over its admin API lists through that.
         return _as_asset_listing(await _device_assets(frame).list_assets(frame, redis))
 
+    if _frame_admin_api_available(frame):
+        try:
+            return await admin_api_assets.list_assets(frame, redis)
+        except Exception:
+            pass
+
     if await _use_remote(frame, redis):
         assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
@@ -2727,6 +2781,108 @@ async def _load_frame_assets(
             })
     assets.sort(key=lambda a: a["path"])
     return _as_asset_listing(assets)
+
+
+def _frame_admin_api_available(frame: Frame) -> bool:
+    """A Linux frame this backend also holds an admin session for. Its
+    runtime serves listings and thumbnails over plain HTTP, which beats an
+    SSH connection per request (and keeps working while sshd is throttling
+    us, which a burst of thumbnails has caused)."""
+    if not frame_has_shell_access(frame):
+        return False
+    auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    return bool(auth["enabled"] and auth["user"] and auth["pass"])
+
+
+def _normalize_asset_folder(assets_path: str, folder: str) -> str:
+    """The absolute path of one folder under the assets root, from the
+    relative spelling the panel sends ("" or "." for the root)."""
+    rel = (folder or "").strip().replace("\\", "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    rel = rel.strip("/")
+    if rel in ("", "."):
+        return os.path.normpath(assets_path)
+    full = os.path.normpath(os.path.join(assets_path, rel))
+    normalized_assets_path = os.path.normpath(assets_path)
+    if full != normalized_assets_path and not full.startswith(normalized_assets_path + os.sep):
+        _bad_request("Invalid folder")
+    return full
+
+
+def _direct_children(assets: list[dict[str, Any]], folder_full: str) -> list[dict[str, Any]]:
+    """The entries of a full listing that sit directly in *folder_full*."""
+    prefix = folder_full.rstrip("/") + "/"
+    children = []
+    for asset in assets:
+        path = str(asset.get("path") or "")
+        if not path.startswith(prefix):
+            continue
+        if "/" in path[len(prefix):]:
+            continue
+        children.append(asset)
+    return children
+
+
+async def _load_frame_assets_folder(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    assets_path: str,
+    folder_full: str,
+) -> list[dict[str, Any]]:
+    """One folder's direct children. Over SSH this is a bounded `find`, the
+    reason the panel loads a folder at a time: a card with thousands of
+    photos used to be walked whole (and its listing polled) on every visit.
+    The other sources answer with a full listing in one call anyway, so the
+    folder is cut out of that."""
+    if _assets_over_device_http(frame):
+        listing = await _load_frame_assets(db, redis, frame, assets_path)
+        return _direct_children(listing.assets, folder_full)
+
+    # A frame whose admin session the backend holds lists its own folder
+    # over one HTTP GET (the runtime walks the directory itself); SSH and the
+    # Remote are the fallback, as for thumbnails above.
+    if _frame_admin_api_available(frame):
+        try:
+            return await admin_api_assets.list_assets_folder(frame, redis, folder_full)
+        except Exception:
+            pass
+
+    if await _use_remote(frame, redis):
+        listing = await _load_frame_assets(db, redis, frame, assets_path)
+        return _direct_children(listing.assets, folder_full)
+
+    ssh = await get_ssh_connection(db, redis, frame)
+    try:
+        cmd = (
+            f"find {shlex.quote(folder_full)} -mindepth 1 -maxdepth 1 "
+            f"-exec stat --printf='%F|%s|%Y|%n\\n' {{}} +"
+        )
+        output: list[str] = []
+        await exec_command(db, redis, frame, ssh, cmd, output, log_output=False, raise_on_error=False)
+    finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
+
+    assets: list[dict[str, Any]] = []
+    for line in output:
+        if not line:
+            continue
+        parts = line.split("|", 3)
+        if len(parts) != 4:
+            continue
+        ftype, size, mtime, path = parts
+        try:
+            assets.append({
+                "path": path.strip(),
+                "size": int(size),
+                "mtime": int(mtime),
+                "is_dir": ftype == "directory",
+            })
+        except ValueError:
+            continue
+    assets.sort(key=lambda a: str(a["path"]))
+    return assets
 
 
 async def _refresh_frame_assets_cache(
@@ -2817,6 +2973,7 @@ def _frame_assets_cache_meta(
 async def api_frame_get_assets(
     id: int,
     refresh: bool = Query(False),
+    folder: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -2825,6 +2982,18 @@ async def api_frame_get_assets(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     assets_path = frame.assets_path or "/srv/assets"
+    if folder is not None:
+        # One folder at a time, uncached: the panel asks for a folder when it
+        # is opened, and the answer says which folder it is so an older
+        # server's full listing (no `folder` key) is still told apart.
+        folder_full = _normalize_asset_folder(assets_path, folder)
+        assets = await _load_frame_assets_folder(db, redis, frame, assets_path, folder_full)
+        return {
+            "assets": assets,
+            "folder": folder,
+            "storage": None,
+            "cache": _frame_assets_cache_meta(cached=False, refreshing=False, fetched_at=time.time()),
+        }
     cache_key = _frame_assets_cache_key(frame.id, assets_path)
     lock_key = _frame_assets_cache_lock_key(frame.id, assets_path)
     cached = None if refresh else await _read_frame_assets_cache(redis, cache_key)

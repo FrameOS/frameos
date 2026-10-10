@@ -443,6 +443,7 @@ import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
 import frameos/driver_render_hint
+import frameos/utils/dither
 {newline.join(setup_imports)}
 
 type
@@ -461,6 +462,7 @@ type
     render: DriverRenderProc
     earlierRender: DriverEarlierRenderProc
     detectedDisplaySize: DriverDetectedDisplaySizeProc
+    setRenderPalette: DriverSetRenderPaletteProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
@@ -588,6 +590,10 @@ proc init*(frameOS: FrameOS) =
           "frameos_driver_earlier_render_seconds")
       loaded.detectedDisplaySize = loadOptionalSymbol[DriverDetectedDisplaySizeProc](library,
           "frameos_driver_detected_display_size")
+      # A photo's own dither palette (frameos/utils/asset_colors). Optional:
+      # a `.so` from before it keeps the panel's built-in palette.
+      loaded.setRenderPalette = loadOptionalSymbol[DriverSetRenderPaletteProc](library,
+          "frameos_driver_set_render_palette")
     # An input driver that speaks structs (frameos/driver_abi). Optional: a
     # `.so` from before it keeps sending JSON events, which the host still takes.
     loaded.setInputHook = loadOptionalSymbol[DriverSetInputHookProc](library, "frameos_driver_set_input_hook")
@@ -603,8 +609,20 @@ proc init*(frameOS: FrameOS) =
     hostChannels.log(%*{{"event": "driver:shared", "driver": spec.name, "path": path, "loaded": true}})
 
 proc render*(image: Image) =
+  # The host's copy of the palette override (frameos/utils/dither), flattened
+  # into ints the library's own copy is set from before every render; a
+  # count of 0 clears it. Values only, borrowed for the call.
+  var paletteInts: seq[cint] = @[]
+  for color in renderPaletteOverride:
+    paletteInts.add(color[0].cint)
+    paletteInts.add(color[1].cint)
+    paletteInts.add(color[2].cint)
+  let paletteCount = cint(paletteInts.len div 3)
   for driver in loadedDrivers:
     if driver.spec.canRender and not driver.render.isNil:
+      if not driver.setRenderPalette.isNil:
+        driver.setRenderPalette(driver.instance,
+          (if paletteCount > 0: paletteInts[0].addr else: nil), paletteCount)
       driver.render(driver.instance, cast[pointer](image))
       # "Call me back sooner than the interval" — the library's own copy of
       # the request (frameos/driver_render_hint), folded into ours. Polled
@@ -706,6 +724,18 @@ proc frameos_driver_detected_display_size*(driver: pointer): uint64 {{.cdecl, ex
   ## frameos/driver_render_hint. Read once, cleared on read, like the
   ## earlier-render request above.
   packDetectedDisplaySize()
+
+proc frameos_driver_set_render_palette*(driver: pointer, colors: ptr cint, count: cint) {{.cdecl, exportc, dynlib.}} =
+  ## Host -> driver: the palette the next render dithers against, `count`
+  ## colours as `count * 3` ints borrowed for the call, 0 to clear — into
+  ## THIS library's copy of frameos/utils/dither `renderPaletteOverride`,
+  ## which the render procs read through `activePalette`.
+  var palette: seq[(int, int, int)] = @[]
+  if not colors.isNil and count > 0:
+    let values = cast[ptr UncheckedArray[cint]](colors)
+    for i in 0 ..< count.int:
+      palette.add((values[i * 3].int, values[i * 3 + 1].int, values[i * 3 + 2].int))
+  setRenderPaletteOverride(palette)
 """
 
     png_proc = ""
@@ -747,6 +777,7 @@ import frameos/channels
 import frameos/driver_context
 import frameos/driver_abi
 import frameos/driver_render_hint
+import frameos/utils/dither
 import drivers/{driver.import_path} as {driver.name}Driver
 {setup_import}
 

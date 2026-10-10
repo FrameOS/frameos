@@ -461,6 +461,29 @@ proc frameAssetsPayload*(): JsonNode =
 
   return %*assets
 
+proc frameAssetsFolderPayload*(folder: string): JsonNode =
+  ## The direct children of one folder (`""` for the root), the shape the
+  ## Assets panel loads a folder at a time with; absolute paths like the
+  ## full listing. Raises ValueError for a path outside the assets root.
+  let folderPath = resolveAssetPath(folder, allowRoot = true)
+  var assets: seq[JsonNode] = @[]
+  if not dirExists(folderPath):
+    return %*[]
+  for kind, path in walkDir(folderPath, relative = false):
+    if kind notin {pcDir, pcFile}:
+      continue
+    try:
+      let info = getFileInfo(path)
+      assets.add(%*{
+        "path": path,
+        "size": if kind == pcFile: info.size else: BiggestInt(0),
+        "mtime": info.lastWriteTime.toUnix(),
+        "is_dir": kind == pcDir,
+      })
+    except CatchableError:
+      discard
+  return %*assets
+
 proc writeThumbnail*(sourcePath, thumbPath: string) =
   ## Renders one cached thumbnail, in-process and inside the render memory
   ## budget: the decode is asked for no more than a thumbnail's worth of
@@ -672,6 +695,15 @@ proc addAdminApiAssetRoutes*(router: var Router) =
     {.gcsafe.}:
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
+      elif request.queryParams.contains("folder"):
+        # One folder at a time (`folder=` names it, "" is the root): what
+        # the Assets panel asks for, so a card with thousands of photos is
+        # not walked whole on every visit.
+        let folder = request.queryParams.getOrDefault("folder", "")
+        try:
+          jsonResponse(request, Http200, %*{"assets": frameAssetsFolderPayload(folder), "folder": folder})
+        except ValueError as e:
+          jsonResponse(request, Http400, %*{"detail": e.msg})
       else:
         jsonResponse(request, Http200, %*{"assets": frameAssetsPayload()})
   )

@@ -3,6 +3,8 @@ import pixie
 
 import ../app
 import frameos/types
+import frameos/utils/asset_colors
+import frameos/utils/dither
 import frameos/utils/exif
 
 type LogStore = ref object
@@ -69,6 +71,39 @@ suite "data/localImage app":
     check scene.state["meta"]["filename"].getStr() == "middle.ppm"
     discard app.get(ExecutionContext(hasImage: false))
     check scene.state["meta"]["filename"].getStr() == "zeta.ppm"
+
+  test "a sidecar colour profile is applied and its palette left for the dither":
+    let root = uniqueTempDir("frameos-local-image-colors")
+    defer: removeDir(root)
+    writePpm(root / "a-plain.ppm", 60, 60, 60)
+    writePpm(root / "b-graded.ppm", 60, 60, 60)
+    writeFile(sidecarPathFor(root / "b-graded.ppm"),
+      """{"version": 1, "colors": {"exposure": 1, "palette": ["#000000", "#ffffff"]}}""")
+    # Sidecars are never images, whatever they are named after.
+    writeFile(root / "c-stray.ppm.frameos.json", """{"version": 1, "colors": {}}""")
+
+    let logs = LogStore(items: @[])
+    let scene = FrameScene(state: %*{}, logger: newLogger(logs))
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(path: root, order: "alphabetical", counterStateKey: "", metadataStateKey: "meta", search: ""),
+    )
+    clearRenderPaletteOverride()
+    let plain = app.get(ExecutionContext(hasImage: false))
+    check scene.state["meta"]["filename"].getStr() == "a-plain.ppm"
+    check plain.unsafe[0, 0].r == 60
+    check renderPaletteOverride.len == 0
+
+    let graded = app.get(ExecutionContext(hasImage: false))
+    check scene.state["meta"]["filename"].getStr() == "b-graded.ppm"
+    check graded.unsafe[0, 0].r == 120
+    check renderPaletteOverride == @[(0, 0, 0), (255, 255, 255)]
+    check scene.state["meta"]["total"].getInt() == 2
+
+    # The next photo without a profile drops the override again.
+    discard app.get(ExecutionContext(hasImage: false))
+    check renderPaletteOverride.len == 0
 
   test "discovery excludes internal dirs and non-images and metadata/counter are updated":
     let root = uniqueTempDir("frameos-local-image")

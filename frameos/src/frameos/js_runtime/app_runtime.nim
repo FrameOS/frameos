@@ -9,6 +9,8 @@ import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/app_images
+import frameos/utils/asset_colors
+import frameos/utils/dither
 import frameos/utils/image
 import frameos/utils/paths
 import frameos/utils/system
@@ -432,6 +434,15 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let image = readImageWithDisplayBounds(full)
       if image.isNil:
         return jsNull(ctx)
+      # The photo's own colour profile, if the Assets panel wrote one
+      # (utils/asset_colors) — the same treatment data/localImage gives it.
+      let colorProfile = loadAssetColorProfile(full)
+      if colorProfile.isSome:
+        if colorProfile.get().hasPaletteOverride():
+          setRenderPaletteOverride(colorProfile.get().palette)
+        else:
+          clearRenderPaletteOverride()
+        applyAssetColors(image, colorProfile.get())
       return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
     else:
       frameos_apps.logError(e.owner, "JS app assets: unknown operation: " & opStr)

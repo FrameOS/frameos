@@ -21,6 +21,8 @@ import frameos/cloud/link_state
 import frameos/logger
 import frameos/metrics
 import frameos/types
+import frameos/utils/asset_colors
+import frameos/utils/dither
 import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
@@ -301,6 +303,10 @@ proc dispatchOpen(self: RunnerThread, exportedScene: ExportedScene, scene: Frame
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
+  # What a photo's `auto` colour fit aims for (utils/asset_colors): the
+  # panel's measured palette, as far as the device name tells it.
+  setAssetColorsPanelPalette(panelPaletteForDevice(self.frameConfig.device,
+    if self.frameConfig.palette.isNil: @[] else: self.frameConfig.palette.colors))
   var timer = getMonoTime()
   var driverTimer = getMonoTime()
   var sleepDuration = 0.0
@@ -345,6 +351,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         sceneChangedThisCycle = true
         var sceneInitialized = true
         self.logSignal(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
+        # A photo's own dither palette (utils/asset_colors) outlives the
+        # render that loaded it, not the scene that showed it.
+        clearRenderPaletteOverride()
         # Persist the active scene context early in boot, then stop writing it
         # after a few successful renders to reduce SD card writes.
         if shouldPersistBootGuardContextForScene(sceneId.string, successfulSceneRenders):

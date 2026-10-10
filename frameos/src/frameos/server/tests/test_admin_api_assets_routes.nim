@@ -86,6 +86,36 @@ suite "Server admin api asset helpers":
     check sawDir
     check sawFile
 
+  test "frameAssetsFolderPayload lists one folder's direct children":
+    let tempRoot = getTempDir() / "frameos-api-assets-folder"
+    removeDir(tempRoot)
+    createDir(tempRoot / "nested" / "deeper")
+    writeFile(tempRoot / "top.txt", "top")
+    writeFile(tempRoot / "nested" / "image.txt", "hello")
+    writeFile(tempRoot / "nested" / "deeper" / "far.txt", "far")
+    globalFrameConfig = baseConfig(tempRoot)
+
+    var rootPaths: seq[string] = @[]
+    for item in frameAssetsFolderPayload("").items:
+      rootPaths.add(item{"path"}.getStr())
+    check rootPaths.len == 2
+    check (tempRoot / "nested") in rootPaths
+    check (tempRoot / "top.txt") in rootPaths
+
+    var nestedPaths: seq[string] = @[]
+    for item in frameAssetsFolderPayload("nested").items:
+      nestedPaths.add(item{"path"}.getStr())
+      if item{"path"}.getStr() == tempRoot / "nested" / "deeper":
+        check item{"is_dir"}.getBool()
+    check nestedPaths.len == 2
+    check (tempRoot / "nested" / "deeper") in nestedPaths
+    check not ((tempRoot / "nested" / "deeper" / "far.txt") in nestedPaths)
+
+    check frameAssetsFolderPayload("missing").len == 0
+    expect ValueError:
+      discard frameAssetsFolderPayload("../outside")
+    removeDir(tempRoot)
+
   test "getAssetPayload validates path missing and raw file content":
     let tempRoot = getTempDir() / "frameos-api-asset-payload"
     createDir(tempRoot)
