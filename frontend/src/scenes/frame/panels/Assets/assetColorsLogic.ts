@@ -1,5 +1,6 @@
 import { MakeLogicType, actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
+import { actionToUrl, router, urlToAction } from 'kea-router'
 
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
@@ -77,6 +78,20 @@ export function deviceLabelFor(device: string | null | undefined): string {
     }
   }
   return ''
+}
+
+/** The `?colors=<path>` search param that names the open editor, so the URL can be shared and reloaded. */
+const COLORS_SEARCH_PARAM = 'colors'
+
+function colorsPathFromSearch(search: Record<string, unknown>): string | null {
+  const raw = Array.isArray(search[COLORS_SEARCH_PARAM])
+    ? (search[COLORS_SEARCH_PARAM] as unknown[])[0]
+    : search[COLORS_SEARCH_PARAM]
+  // kea-router number-ifies numeric query values; a path is always text.
+  if (raw === undefined || raw === null || raw === '') {
+    return null
+  }
+  return String(raw)
 }
 
 /** The panel's render size in scene space (a rotated panel swaps the two). */
@@ -535,6 +550,31 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
       ): boolean => isDirty && !!source && !savedProfileLoading,
     ],
   }),
+  // The open editor lives in the URL (`?colors=<path>`): a reload or a
+  // shared link lands on the same photo, and the panel's own navigation
+  // (which drops the param) closes it. The echo of our own push is a no-op:
+  // the param already names the open photo.
+  actionToUrl(() => ({
+    openEditor: ({ imagePath }) => [
+      router.values.location.pathname,
+      { ...router.values.searchParams, [COLORS_SEARCH_PARAM]: imagePath },
+      router.values.hashParams,
+    ],
+    closeEditor: () => {
+      const { [COLORS_SEARCH_PARAM]: _, ...search } = router.values.searchParams
+      return [router.values.location.pathname, search, router.values.hashParams]
+    },
+  })),
+  urlToAction(({ actions, values }) => ({
+    '*': (_, search) => {
+      const imagePath = colorsPathFromSearch(search ?? {})
+      if (imagePath && imagePath !== values.imagePath) {
+        actions.openEditor(imagePath)
+      } else if (!imagePath && values.imagePath) {
+        actions.closeEditor()
+      }
+    },
+  })),
   listeners(({ actions, values, cache }) => ({
     // The Auto preset depends on the photo as placed and on the palette it
     // is dithered to, so it is recomputed when any of those change.

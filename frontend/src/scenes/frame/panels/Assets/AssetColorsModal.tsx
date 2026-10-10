@@ -129,7 +129,7 @@ function Preview({ frameId }: { frameId: FrameId }): JSX.Element {
       ) : (
         <canvas
           ref={canvasRef}
-          className="max-h-[calc(100dvh-16rem)] max-w-full object-contain"
+          className="max-h-[calc(100dvh-20rem)] max-w-full object-contain"
           style={{ imageRendering: showDithered ? 'pixelated' : 'auto' }}
         />
       )}
@@ -195,8 +195,7 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
       }
       onClose={closeEditor}
       panelClassName="max-w-[1240px]"
-      bodyClassName="max-h-[calc(100dvh-11rem)]"
-      align="top"
+      fullHeight
       footer={
         <div className="frameos-divider flex flex-wrap items-center gap-2 border-t p-4">
           <Button color="secondary" size="small" onClick={resetProfile} disabled={isDefault}>

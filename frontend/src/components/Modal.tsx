@@ -19,6 +19,12 @@ export interface ModalProps {
    * the viewport so a dialog with changing content doesn't jump around.
    */
   align?: 'center' | 'top'
+  /**
+   * Pin the dialog to the viewport height: the header and footer stay put
+   * and only the body scrolls. Without it a tall dialog grows past the
+   * viewport and the page behind it scrolls instead of the dialog.
+   */
+  fullHeight?: boolean
 }
 
 export function Modal({
@@ -31,6 +37,7 @@ export function Modal({
   panelClassName,
   bodyClassName,
   align,
+  fullHeight,
 }: ModalProps): ReactElement {
   const isOpen = open === undefined || open
   return (
@@ -38,12 +45,24 @@ export function Modal({
       <div className="fixed inset-0 z-[120] bg-slate-950/35 backdrop-blur-sm" />
       <div
         className={clsx(
-          'justify-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-[130] outline-none focus:outline-none',
-          align === 'top' ? 'items-start pt-[8vh]' : 'items-center'
+          'justify-center flex overflow-x-hidden fixed inset-0 z-[130] outline-none focus:outline-none',
+          fullHeight ? 'items-stretch overflow-hidden p-4' : 'overflow-y-auto',
+          !fullHeight && (align === 'top' ? 'items-start pt-[8vh]' : 'items-center')
         )}
       >
-        <Dialog.Panel className={clsx('relative w-auto my-6 mx-auto w-full', panelClassName ?? 'max-w-[767px]')}>
-          <div className="frameos-panel border border-white/80 rounded-[24px] shadow-2xl relative flex flex-col bg-white/95 outline-none focus:outline-none backdrop-blur-xl">
+        <Dialog.Panel
+          className={clsx(
+            'relative w-auto mx-auto w-full',
+            fullHeight ? 'my-0 h-full min-h-0' : 'my-6',
+            panelClassName ?? 'max-w-[767px]'
+          )}
+        >
+          <div
+            className={clsx(
+              'frameos-panel border border-white/80 rounded-[24px] shadow-2xl relative flex flex-col bg-white/95 outline-none focus:outline-none backdrop-blur-xl',
+              fullHeight && 'h-full min-h-0'
+            )}
+          >
             <>
               {title ? (
                 <div className="frameos-divider flex items-start justify-between p-5 border-b border-solid rounded-t-[24px]">
@@ -58,7 +77,9 @@ export function Modal({
                   ) : null}
                 </div>
               ) : null}
-              <div className={clsx('overflow-y-auto', bodyClassName ?? 'max-h-[70vh]')}>{children}</div>
+              <div className={clsx('overflow-y-auto', fullHeight ? 'flex-1 min-h-0' : bodyClassName ?? 'max-h-[70vh]')}>
+                {children}
+              </div>
               {footer}
             </>
           </div>
