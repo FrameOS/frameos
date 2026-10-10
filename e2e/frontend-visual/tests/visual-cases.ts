@@ -305,7 +305,7 @@ export const visualCases: VisualCase[] = [
     // opens on (the frame's own automatic fit), and the photo as the panel
     // dithered it before there were colour controls.
     id: 'frame-asset-colors',
-    title: 'Frame asset colours editor',
+    title: 'Frame asset colors editor',
     path: assetColorsEditorPath,
     viewports: ['mid', 'full'],
     setup: mockAssetColorsEditor,
