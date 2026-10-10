@@ -19,10 +19,15 @@ import {
 import {
   cloudFrameSupportsInputSettings,
   inputCloudFrameSettingsMinVersion,
+  cloudFrameSupportsColors,
+  colorsCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32Colors,
+  esp32ColorsCloudFrameSettingsMinVersion,
 } from '../../../../../utils/cloudFrameSettings'
 import type { FrameType } from '../../../../../types'
 import { FrameActionsMenu } from '../FrameActionsMenu'
 import { useFrameSettings } from '../frameSettingsContext'
+import { ColorsSection } from '../fields/colorsSection'
 import {
   ControlCodeFields,
   ErrorBehaviorFields,
@@ -308,6 +313,24 @@ export function CloudHardwareSection(): JSX.Element | null {
           </>
         )}
       </FrameSettingsSection>
+      <FrameSettingsSection sectionKey="colors">
+        {cloudFrameSupportsColors(frame.frameos_version) ? (
+          <ColorsSection />
+        ) : (
+          <>
+            <SectionHeading id="frame-settings-colors" row>
+              Colors
+            </SectionHeading>
+            <SectionBody>
+              <p className="frameos-muted text-sm">
+                {frame.frameos_version
+                  ? `The automatic fit and the colour correction need FrameOS ${colorsCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to edit them here.`
+                  : `The automatic fit and the colour correction need FrameOS ${colorsCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+              </p>
+            </SectionBody>
+          </>
+        )}
+      </FrameSettingsSection>
     </fieldset>
   )
 }
@@ -373,6 +396,24 @@ export function CloudEsp32Sections(): JSX.Element | null {
         </SectionBody>
         <GpioButtonsSection />
       </fieldset>
+      <FrameSettingsSection sectionKey="colors">
+        {cloudFrameSupportsEsp32Colors(frame.frameos_version) ? (
+          <ColorsSection />
+        ) : (
+          <>
+            <SectionHeading id="frame-settings-colors" row>
+              Colors
+            </SectionHeading>
+            <SectionBody>
+              <p className="frameos-muted text-sm">
+                {frame.frameos_version
+                  ? `The automatic fit and the colour correction need firmware ${esp32ColorsCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the firmware to edit them here.`
+                  : `The automatic fit and the colour correction need firmware ${esp32ColorsCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+              </p>
+            </SectionBody>
+          </>
+        )}
+      </FrameSettingsSection>
     </>
   )
 }

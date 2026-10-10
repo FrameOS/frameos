@@ -23,6 +23,10 @@
 #define FOS_GPIO_BUTTON_LABEL_LEN 32
 #define FOS_GPIO_BUTTONS_SPEC_LEN 384
 #define FOS_ASSETS_PATH_LEN 128
+/* frame.json's `colors` block as compact JSON (docs/asset-color-profiles.md):
+ * the automatic fit switch and the frame-wide correction. Big enough for
+ * every slider spelled out; "" = the runtime's defaults. */
+#define FOS_COLORS_LEN 640
 
 typedef enum {
     FOS_RENDER_LOCAL = 0,  /* render scenes on-device with the Nim runtime */
@@ -84,6 +88,9 @@ typedef struct {
                                     * fit for image consumers that do not place
                                     * the image themselves (since #321 a node's
                                     * own placement wins); "cover" by default */
+    char colors[FOS_COLORS_LEN];   /* `{"autoFit":"off","global":{...}}`, "" = defaults;
+                                    * pushed into the Nim runtime every pass like
+                                    * scaling_mode, so it applies live */
     uint32_t max_http_response_bytes;
     uint32_t http_spill_force_bytes; /* debug: HTTP bodies over this many buffered
                                       * bytes spill to storage even with PSRAM

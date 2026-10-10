@@ -150,11 +150,7 @@ function PathPickerModal({
     >
       <div className="space-y-3 p-5">
         <div className="flex flex-wrap items-center gap-1 text-sm">
-          <button
-            className="frameos-primary-text hover:underline"
-            onClick={() => setCurrentPath('')}
-            title={rootLabel}
-          >
+          <button className="frameos-primary-text hover:underline" onClick={() => setCurrentPath('')} title={rootLabel}>
             {rootLabel}
           </button>
           {breadcrumbParts.map((part, index) => (

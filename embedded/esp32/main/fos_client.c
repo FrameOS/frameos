@@ -1448,6 +1448,9 @@ static void client_task(void *arg)
         /* Fallback fit for consumers without their own placement — settings
          * sync, cloud set_settings and the console all write it live. */
         frameos_nim_set_scaling_mode(config->scaling_mode);
+        /* The colours block (automatic fit switch, frame-wide correction):
+         * same contract, the Nim side re-parses only when the text changed. */
+        frameos_nim_set_colors(config->colors);
         /* Same contract for the zone name: live, one string per pass. */
         frameos_nim_set_time_zone(config->time_zone);
 

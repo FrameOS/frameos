@@ -19,11 +19,13 @@ import {
   FolderOpenIcon,
 } from '@heroicons/react/24/outline'
 import {
+  AdjustmentsHorizontalIcon,
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
   ArrowPathIcon,
   PlayIcon,
   PencilSquareIcon,
+  SwatchIcon,
   TrashIcon,
   FolderPlusIcon,
 } from '@heroicons/react/24/solid'
@@ -38,6 +40,8 @@ import { isEmbeddedHardwareFrame, isVirtualFrame, workspaceMode } from '../../..
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
 import type { FrameId } from '../../../../types'
+import { AssetColorsModal } from './AssetColorsModal'
+import { assetColorsLogic } from './assetColorsLogic'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -107,6 +111,9 @@ function TreeNode({
   showHiddenFiles,
   toggleShowHiddenFiles,
   readOnly,
+  colorProfileKeys,
+  foldersLoading,
+  openColorEditor,
 }: {
   node: AssetNode
   frameId: FrameId
@@ -127,6 +134,10 @@ function TreeNode({
    * every mutation affordance disappears — browse, thumbs, download and the
    * run-image-scene buttons stay. */
   readOnly: boolean
+  /** Images with a colour-profile sidecar next to them ('photos/cat.jpg'). */
+  colorProfileKeys: Set<string>
+  foldersLoading: Record<string, boolean>
+  openColorEditor: (path: string) => void
 }): JSX.Element {
   // An esp32 serves these thumbnails from the device itself — one small HTTP
   // server on a microcontroller that also has a render loop to run. Asking for
@@ -193,16 +204,20 @@ function TreeNode({
               <FolderIcon className="asset-row-icon frameos-folder-icon h-5 w-5 shrink-0" />
             )}
             <span className="truncate font-medium">{node.name || '/'}</span>
-            <span className="asset-folder-count frame-tool-muted shrink-0 text-xs">
-              {Object.keys(node.children).length} items
-            </span>
+            {foldersLoading[node.path] ? (
+              <Spinner className="h-3 w-3 shrink-0" />
+            ) : node.loaded === false ? null : (
+              <span className="asset-folder-count frame-tool-muted shrink-0 text-xs">
+                {Object.keys(node.children).length} items
+              </span>
+            )}
           </button>
           <div className={assetRowActionsClassName}>
             {hasPlayableImages ? (
               <button
                 type="button"
                 className={playSceneButtonClassName}
-                title="Play all images in this folder"
+                title="Start slideshow"
                 onClick={() => createImageFolderScene(node.path)}
               >
                 <PlayIcon className="h-4 w-4" />
@@ -232,7 +247,7 @@ function TreeNode({
                     },
                 hasPlayableImages
                   ? {
-                      label: 'Play all images in this folder',
+                      label: 'Start slideshow',
                       icon: <PlayIcon className="w-5 h-5" />,
                       onClick: () => createImageFolderScene(node.path),
                     }
@@ -313,6 +328,9 @@ function TreeNode({
                 showHiddenFiles={showHiddenFiles}
                 toggleShowHiddenFiles={toggleShowHiddenFiles}
                 readOnly={readOnly}
+                colorProfileKeys={colorProfileKeys}
+                foldersLoading={foldersLoading}
+                openColorEditor={openColorEditor}
               />
             ))}
           </div>
@@ -325,6 +343,7 @@ function TreeNode({
     const opensInline = opensAsBrowserImage(node.name)
     const isPlayableImage = nodeHasPlayableImages(node)
     const isUploading = node.mtime === -1
+    const hasColorProfile = colorProfileKeys.has(node.path)
     return (
       <div
         className={clsx(
@@ -375,7 +394,17 @@ function TreeNode({
         ) : node.size === -2 && node.mtime === -2 ? (
           <span className="text-red-500">Upload error</span>
         ) : null}
-        <div className={assetRowActionsClassName}>
+        <div className={clsx(assetRowActionsClassName, hasThumbnail && !readOnly && 'w-[7.5rem]')}>
+          {hasThumbnail && !readOnly ? (
+            <button
+              type="button"
+              className={clsx(playSceneButtonClassName, 'asset-colors-button', hasColorProfile && 'text-amber-500')}
+              title={hasColorProfile ? 'This photo has its own colors. Edit them' : 'Set colors'}
+              onClick={() => openColorEditor(node.path)}
+            >
+              {hasColorProfile ? <SwatchIcon className="h-4 w-4" /> : <AdjustmentsHorizontalIcon className="h-4 w-4" />}
+            </button>
+          ) : null}
           {isPlayableImage ? (
             <button
               type="button"
@@ -397,6 +426,17 @@ function TreeNode({
                       label: 'Run image scene',
                       icon: <PlayIcon className="w-4 h-4" />,
                       onClick: () => createImageScene(node.path),
+                    }
+                  : null,
+                hasThumbnail && !readOnly
+                  ? {
+                      label: hasColorProfile ? 'Edit colors' : 'Set colors',
+                      icon: hasColorProfile ? (
+                        <SwatchIcon className="w-4 h-4" />
+                      ) : (
+                        <AdjustmentsHorizontalIcon className="w-4 h-4" />
+                      ),
+                      onClick: () => openColorEditor(node.path),
                     }
                   : null,
                 {
@@ -647,7 +687,11 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     showSystemFolders,
     showHiddenFiles,
     storageUnmounted,
+    colorProfileKeys,
+    foldersLoading,
   } = useValues(assetsLogic(assetsLogicProps))
+  useMountedLogic(assetColorsLogic(assetsLogicProps))
+  const { openEditor: openColorEditor } = useActions(assetColorsLogic(assetsLogicProps))
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
@@ -761,9 +805,13 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             showHiddenFiles={showHiddenFiles}
             toggleShowHiddenFiles={toggleShowHiddenFiles}
             readOnly={readOnly}
+            colorProfileKeys={colorProfileKeys}
+            foldersLoading={foldersLoading}
+            openColorEditor={openColorEditor}
           />
         </div>
       )}
+      <AssetColorsModal frameId={frame.id} />
     </div>
   )
 }

@@ -4,7 +4,13 @@
 // this package under ./assets — serve that directory same-origin and pass
 // `workerUrl: '<mount>/preview-worker.js'`. Version tracks the FrameOS
 // release the runtime was built from (versions.json in the FrameOS repo).
-export { FrameOSPreview, createFrameOSPreview, type DeviceMemoryUsage, type FrameOSPreviewOptions } from './preview'
+export {
+  FrameOSPreview,
+  createFrameOSPreview,
+  type BeforeDitherHook,
+  type DeviceMemoryUsage,
+  type FrameOSPreviewOptions,
+} from './preview'
 export {
   describeDeviceLimits,
   deviceLimitsFor,

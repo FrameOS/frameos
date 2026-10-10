@@ -298,3 +298,34 @@ export function sniffImageContentType(content: Buffer): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * The entries of a device listing (relative paths) that sit directly in
+ * `folder` ("" for the root). Used by the assets route; unit-tested in src/test/frame-assets-folder.test.ts.
+ */
+export function directChildren(assets: unknown[], folder: string): unknown[] {
+  let key = folder.trim().replace(/\\/g, "/");
+  while (key.startsWith("./")) {
+    key = key.slice(2);
+  }
+  key = key.replace(/^\/+/, "").replace(/\/+$/, "");
+  const prefix = key === "" || key === "." ? "" : `${key}/`;
+  return assets.filter((asset) => {
+    if (!asset || typeof asset !== "object") {
+      return false;
+    }
+    const raw = (asset as { path?: unknown }).path;
+    if (typeof raw !== "string") {
+      return false;
+    }
+    let path = raw;
+    while (path.startsWith("./")) {
+      path = path.slice(2);
+    }
+    path = path.replace(/^\/+/, "");
+    if (!path.startsWith(prefix) || path.length === prefix.length) {
+      return false;
+    }
+    return !path.slice(prefix.length).includes("/");
+  });
+}

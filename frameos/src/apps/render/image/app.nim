@@ -3,6 +3,7 @@ import pixie
 import options
 import frameos/apps
 import frameos/types
+import frameos/utils/asset_colors
 import frameos/utils/image
 
 type
@@ -27,7 +28,10 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     if sourceImage.isNil:
       raise newException(Exception, "No image provided.")
     if sourceImage == image:
-      # The producer already decoded straight into this canvas.
+      # The producer already decoded straight into this canvas. The fit then
+      # covers the whole of it (a fitted decode is cover or stretch; contain
+      # with a profile takes the other path, see data/localImage).
+      applyAutoFitToDrawn(image, 0, 0, image.width, image.height)
       return
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend
@@ -53,6 +57,11 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       else: NormalBlend
     scaleAndDrawImage(image, sourceImage, self.appConfig.placement, self.appConfig.offsetX,
         self.appConfig.offsetY, blendMode)
+    # Every image from every source lands here: the frame's automatic fit
+    # into the panel's range is applied to the rectangle it covers.
+    let rect = drawnImageRect(image.width, image.height, sourceImage.width, sourceImage.height,
+      self.appConfig.placement, self.appConfig.offsetX, self.appConfig.offsetY)
+    applyAutoFitToDrawn(image, rect.x, rect.y, rect.width, rect.height, sourceImage)
   except Exception as e:
     let message = &"Error rendering image: {e.msg}"
     self.logError(message)

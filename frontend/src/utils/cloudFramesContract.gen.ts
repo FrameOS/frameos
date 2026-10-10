@@ -51,6 +51,9 @@ export const cloudFramesContractSettings = {
       "since": "2026.8.31",
       "restart": true
     },
+    "colors": {
+      "since": "2026.10.2"
+    },
     "device_config": {
       "since": "2026.8.31",
       "restart": true
@@ -95,6 +98,9 @@ export const cloudFramesContractSettings = {
     "max_http_response_bytes": {
       "since": "2026.8.31",
       "restart": true
+    },
+    "colors": {
+      "since": "2026.10.2"
     },
     "gpio_buttons": {
       "since": "2026.8.31",

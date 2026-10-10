@@ -319,9 +319,12 @@ describe("the esp32 cloud device profile", () => {
     // and offered all cloud sections — most scrolling to an anchor that is
     // never rendered. The compact block itself keeps no nav entry (the old
     // "Info" link pointed at the form the panel opens on anyway).
+    // Power and, since the firmware took the `colors` block (2026.10.2),
+    // Colors — the two sections CloudEsp32Sections renders.
     expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-power", esp32Frame)).toBe(true);
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-colors", esp32Frame)).toBe(true);
     for (const section of allowedFrameSettingsSections.cloud) {
-      if (section === "frame-settings-power") continue;
+      if (section === "frame-settings-power" || section === "frame-settings-colors") continue;
       expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame)).toBe(false);
     }
     // A cloud Pi still gets the full form, so its nav is untouched — except

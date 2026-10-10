@@ -51,6 +51,11 @@ type
   ## OPTIONAL symbol, same rules as above: the display geometry a driver found
   ## after init (frameos/driver_render_hint), width << 32 | height, 0 = none.
   DriverDetectedDisplaySizeProc* = proc(driver: pointer): uint64 {.cdecl.}
+  ## OPTIONAL symbol, host → driver: the palette the next render dithers
+  ## against (frameos/utils/dither `renderPaletteOverride`), `count` colours
+  ## as `count * 3` ints borrowed for the call, 0 to go back to the panel's
+  ## own. A `.so` from before it keeps its built-in palette.
+  DriverSetRenderPaletteProc* = proc(driver: pointer, colors: ptr cint, count: cint) {.cdecl.}
   DriverToPngProc* = proc(driver: pointer, rotate: cint, flip: cstring, length: ptr int): pointer {.cdecl.}
   DriverActionProc* = proc(driver: pointer) {.cdecl.}
 

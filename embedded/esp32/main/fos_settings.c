@@ -515,6 +515,21 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    /* `colors` (docs/asset-color-profiles.md): kept as compact JSON and
+     * pushed into the Nim runtime every pass like scalingMode, so it applies
+     * live. An empty object is the defaults; a block too big for the slot is
+     * ignored rather than truncated into something that no longer parses. */
+    const cJSON *colors = cJSON_GetObjectItem(frame, "colors");
+    if (cJSON_IsObject(colors)) {
+        char *printed = cJSON_GetArraySize(colors) > 0 ? cJSON_PrintUnformatted(colors) : NULL;
+        const char *next = printed != NULL ? printed : "";
+        if (strlen(next) < sizeof(config->colors) && strcmp(config->colors, next) != 0) {
+            strlcpy(config->colors, next, sizeof(config->colors));
+            changed = true;
+        }
+        free(printed);
+    }
+
     const cJSON *max_http = cJSON_GetObjectItem(frame, "maxHttpResponseBytes");
     if (cJSON_IsNumber(max_http) && max_http->valuedouble >= 1024 &&
         max_http->valuedouble <= 512.0 * 1024 * 1024 &&
@@ -645,6 +660,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (strcmp(before->scaling_mode, after->scaling_mode) != 0) {
         change_append(out, out_len, "scaling_mode", after->scaling_mode);
+    }
+    if (strcmp(before->colors, after->colors) != 0) {
+        change_append(out, out_len, "colors", after->colors[0] ? "set" : "default");
     }
     if (strcmp(before->time_zone, after->time_zone) != 0) {
         change_append(out, out_len, "timezone", after->time_zone);

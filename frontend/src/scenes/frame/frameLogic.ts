@@ -459,6 +459,7 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'mountpoints',
   'error_behavior',
   'palette',
+  'colors',
   'buildroot',
   'embedded',
   'rpios',
@@ -476,6 +477,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   timezone_updater: '2026.6.7',
   embedded: '2026.6.26',
   input_settings: '2026.9.23',
+  colors: '2026.10.2',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -584,6 +586,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   mountpoints: 'Mountpoints',
   error_behavior: 'Global error handling',
   palette: 'Palette',
+  colors: 'Colors',
   buildroot: 'Buildroot settings',
   embedded: 'Embedded settings',
   rpios: 'Raspberry Pi OS settings',

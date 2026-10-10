@@ -40,6 +40,7 @@ static void load_defaults(void)
     s_config.render_mode = (fos_render_mode_t)FRAMEOS_DEFAULT_RENDER_MODE;
     s_config.rotate = FRAMEOS_DEFAULT_ROTATE;
     strlcpy(s_config.scaling_mode, FRAMEOS_DEFAULT_SCALING_MODE, sizeof(s_config.scaling_mode));
+    s_config.colors[0] = '\0';
     strlcpy(s_config.time_zone, FRAMEOS_DEFAULT_TIME_ZONE, sizeof(s_config.time_zone));
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
@@ -180,6 +181,10 @@ esp_err_t fos_config_init(void)
     if (nvs_get_str(nvs, "time_zone", s_config.time_zone, &tz_len) != ESP_OK) {
         s_config.time_zone[0] = '\0';
     }
+    size_t colors_len = sizeof(s_config.colors);
+    if (nvs_get_str(nvs, "colors", s_config.colors, &colors_len) != ESP_OK) {
+        s_config.colors[0] = '\0';
+    }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
@@ -277,6 +282,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u32(nvs, "interval", s_config.interval_sec), "interval");
     FOS_NVS_SET(nvs_set_u16(nvs, "rotate", s_config.rotate), "rotate");
     FOS_NVS_SET(nvs_set_str(nvs, "scaling", s_config.scaling_mode), "scaling");
+    FOS_NVS_SET(nvs_set_str(nvs, "colors", s_config.colors), "colors");
     FOS_NVS_SET(nvs_set_str(nvs, "time_zone", s_config.time_zone), "time_zone");
     FOS_NVS_SET(nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes), "max_http");
     FOS_NVS_SET(nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes), "spill_force");

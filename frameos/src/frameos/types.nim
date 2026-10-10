@@ -69,6 +69,10 @@ type
     mountpoints*: MountpointsConfig
     errorBehavior*: ErrorBehaviorConfig
     palette*: PaletteConfig
+    ## `{"autoFit": "default"|"on"|"off", "global": {...}}`: the automatic
+    ## fit of drawn images into the panel's range and the frame-wide colour
+    ## correction (utils/asset_colors, docs/asset-color-profiles.md).
+    colors*: JsonNode
     js*: JsRuntimeConfig
 
   # Part of FrameConfig
@@ -548,6 +552,8 @@ type
     scenes*: Table[SceneId, FrameScene]
     currentSceneId*: SceneId
     lastRenderAt*: float
+    ## The `colors` block as last parsed (runner.refreshFrameColorSettings).
+    frameColorSettingsText*: string
     when not defined(frameosEmbedded) and not defined(frameosWasm):
       sleepFuture*: Option[Future[void]]
     isRendering*: bool = false

@@ -352,6 +352,158 @@ export const cloudFramesContract = {
         "colorNames, when present, has exactly as many entries as colors"
       ]
     },
+    "colors": {
+      "rule": {
+        "type": "object",
+        "keys": {
+          "autoFit": {
+            "type": "string",
+            "enum": [
+              "default",
+              "on",
+              "off"
+            ]
+          },
+          "global": {
+            "type": "object",
+            "keys": {
+              "exposure": {
+                "type": "number",
+                "min": -3,
+                "max": 3
+              },
+              "contrast": {
+                "type": "number",
+                "min": -100,
+                "max": 100
+              },
+              "whites": {
+                "type": "number",
+                "min": -100,
+                "max": 100
+              },
+              "blacks": {
+                "type": "number",
+                "min": -100,
+                "max": 100
+              },
+              "saturation": {
+                "type": "number",
+                "min": -100,
+                "max": 100
+              },
+              "shadows": {
+                "type": "object",
+                "keys": {
+                  "luminance": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "r": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "g": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "b": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  }
+                }
+              },
+              "midtones": {
+                "type": "object",
+                "keys": {
+                  "luminance": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "r": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "g": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "b": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  }
+                }
+              },
+              "highlights": {
+                "type": "object",
+                "keys": {
+                  "luminance": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "r": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "g": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  },
+                  "b": {
+                    "type": "number",
+                    "min": -100,
+                    "max": 100
+                  }
+                }
+              },
+              "hues": {
+                "type": "map",
+                "keyMaxLen": 16,
+                "values": {
+                  "type": "object",
+                  "keys": {
+                    "hue": {
+                      "type": "number",
+                      "min": -180,
+                      "max": 180
+                    },
+                    "saturation": {
+                      "type": "number",
+                      "min": -100,
+                      "max": 100
+                    },
+                    "luminance": {
+                      "type": "number",
+                      "min": -100,
+                      "max": 100
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.10.2"
+        },
+        "esp32": {
+          "since": "2026.10.2"
+        }
+      }
+    },
     "device_config": {
       "rule": {
         "type": "object",

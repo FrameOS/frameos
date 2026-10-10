@@ -387,6 +387,7 @@ class ReleaseImageFrame:
     error_behavior: dict[str, Any] = field(default_factory=lambda: DEFAULT_ERROR_BEHAVIOR.copy())
     input_settings: dict[str, Any] = field(default_factory=lambda: DEFAULT_INPUT_SETTINGS.copy())
     palette: dict[str, Any] = field(default_factory=dict)
+    colors: dict[str, Any] = field(default_factory=dict)
     buildroot: dict[str, Any] = field(default_factory=lambda: {"platform": SUPPORTED_BUILDROOT_PLATFORM})
     rpios: dict[str, Any] | None = None
     terminal_history: list[str] = field(default_factory=list)

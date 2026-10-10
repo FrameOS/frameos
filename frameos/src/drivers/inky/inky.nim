@@ -127,19 +127,19 @@ proc imageForPanel(self: Driver, image: Image): Image =
   result.scaleAndDrawImage(image, "contain")
 
 proc renderSevenColor*(self: Driver, image: Image) =
-  let pixels = ditherPaletteIndexed(image, saturated7ColorPalette)
+  let pixels = ditherPaletteIndexed(image, activePalette(saturated7ColorPalette))
   setLastPixels(pixels)
   self.notifyImageAvailable()
   renderPacked(self.panel, pixels)
 
 proc renderSpectraSixColor*(self: Driver, image: Image) =
-  let pixels = ditherPaletteIndexed(image, if self.palette.isSome(): self.palette.get() else: spectra6ColorPalette)
+  let pixels = ditherPaletteIndexed(image, activePalette(if self.palette.isSome(): self.palette.get() else: spectra6ColorPalette))
   setLastPixels(pixels)
   self.notifyImageAvailable()
   renderPacked(self.panel, pixels)
 
 proc renderFourColor*(self: Driver, image: Image) =
-  let pixels = ditherPaletteIndexed(image, saturated4ColorPalette)
+  let pixels = ditherPaletteIndexed(image, activePalette(saturated4ColorPalette))
   setLastPixels(pixels)
   self.notifyImageAvailable()
   renderPacked(self.panel, pixels)

@@ -179,3 +179,26 @@ suite "row-streamed dither equals the in-place reference":
         for i in 0 ..< w * h:
           let reference = max(0, min(maxLevel, round(gray[i]).int))
           check streamed[i] == reference
+
+suite "render palette override":
+  test "activePalette is the default until a matching override is set":
+    clearRenderPaletteOverride()
+    check activePalette(saturated7ColorPalette) == saturated7ColorPalette
+    let six = @[(1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6)]
+    setRenderPaletteOverride(six)
+    # Six colours against the seven-entry Spectra table: the hole goes back
+    # at index 4, so the packed indices still skip it.
+    let spectra = activePalette(spectra6ColorPalette)
+    check spectra.len == 7
+    check spectra[0 ..< 4] == six[0 ..< 4]
+    check spectra[4] == (999, 999, 999)
+    check spectra[5 ..< 7] == six[4 ..< 6]
+    # A six-colour override is not for a seven-colour panel.
+    check activePalette(saturated7ColorPalette) == saturated7ColorPalette
+    check activePalette(saturated4ColorPalette) == saturated4ColorPalette
+    let seven = saturated7ColorPalette[0 ..< 6] & @[(9, 9, 9)]
+    setRenderPaletteOverride(seven)
+    check activePalette(saturated7ColorPalette) == seven
+    clearRenderPaletteOverride()
+    check activePalette(spectra6ColorPalette) == spectra6ColorPalette
+

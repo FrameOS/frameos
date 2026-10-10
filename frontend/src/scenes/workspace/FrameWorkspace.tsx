@@ -298,6 +298,7 @@ const allFrameSettingsSections = [
   { id: 'frame-settings-defaults', label: 'Defaults' },
   { id: 'frame-settings-error-behavior', label: 'Global errors' },
   { id: 'frame-settings-palette', label: 'Palette' },
+  { id: 'frame-settings-colors', label: 'Colors' },
   { id: 'frame-settings-qr', label: 'QR code' },
   { id: 'frame-settings-assets', label: 'Assets' },
   { id: 'frame-settings-gpio', label: 'GPIO' },

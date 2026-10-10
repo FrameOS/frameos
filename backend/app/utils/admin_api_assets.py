@@ -137,6 +137,43 @@ async def list_assets(frame: Frame, redis: Redis) -> AssetListing:
     return AssetListing(assets=assets, mounted=None)
 
 
+async def list_assets_folder(frame: Frame, redis: Redis, folder_full: str) -> list[dict[str, Any]]:
+    """The direct children of one folder, absolute paths, sorted. A runtime
+    that knows ``?folder=`` answers with just those (and echoes ``folder``);
+    an older one lists everything, which is cut down here."""
+    root = posixpath.normpath(assets_root(frame))
+    rel = to_relative_asset_path(frame, folder_full)
+    status, body, _headers = await _admin_request(
+        frame, redis, path=f"/api/frames/{_DEVICE_FRAME_ID}/assets?folder={_quote_rel(rel)}"
+    )
+    if status != HTTPStatus.OK:
+        raise _device_error(status, body)
+    payload = _parse_payload(body)
+    if not payload and body.strip() not in (b"", b"{}"):
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Frame returned an invalid asset listing")
+    folder_norm = posixpath.normpath(folder_full)
+    prefix = folder_norm.rstrip("/") + "/"
+    assets: list[dict[str, Any]] = []
+    for entry in payload.get("assets") or []:
+        if not isinstance(entry, dict):
+            continue
+        full = _absolute_device_path(root, entry.get("path"))
+        if full is None:
+            continue
+        if "folder" not in payload and (not full.startswith(prefix) or "/" in full[len(prefix):]):
+            continue
+        size = entry.get("size")
+        mtime = entry.get("mtime")
+        assets.append({
+            "path": full,
+            "size": int(size) if isinstance(size, (int, float)) and not isinstance(size, bool) else 0,
+            "mtime": int(mtime) if isinstance(mtime, (int, float)) and not isinstance(mtime, bool) else 0,
+            "is_dir": bool(entry.get("is_dir")),
+        })
+    assets.sort(key=lambda a: str(a["path"]))
+    return assets
+
+
 async def download_asset(
     frame: Frame, redis: Redis, full_path: str, *, thumb: bool = False
 ) -> tuple[bytes, str]:

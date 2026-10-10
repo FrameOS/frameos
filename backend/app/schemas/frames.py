@@ -131,6 +131,7 @@ class FrameBase(BaseModel):
     error_behavior: Optional[FrameErrorBehavior] = None
     input_settings: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]]
+    colors: Optional[Dict[str, Any]] = None
     service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
@@ -234,6 +235,7 @@ class FrameUpdateRequest(BaseModel):
     error_behavior: Optional[FrameErrorBehavior] = None
     input_settings: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
+    colors: Optional[Dict[str, Any]] = None
     service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
@@ -314,6 +316,9 @@ class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
     cache: Optional[FrameAssetsCacheResponse] = None
     storage: Optional[FrameAssetsStorageResponse] = None
+    # Echoed when the request named one folder (`?folder=`): the listing is
+    # then that folder's direct children, not the whole tree.
+    folder: Optional[str] = None
 
 
 class FramePingResponse(BaseModel):

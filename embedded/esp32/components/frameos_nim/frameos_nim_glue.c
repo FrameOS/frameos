@@ -60,6 +60,7 @@ extern void fos_nim_apply_service_settings_impl(const char *json);
 extern void fos_nim_set_debug_impl(int enabled);
 extern void fos_nim_set_fusion_impl(int enabled);
 extern void fos_nim_set_scaling_mode_impl(const char *mode);
+extern void fos_nim_set_colors_impl(const char *json);
 extern void fos_nim_set_status_info_impl(const char *info_json);
 extern void fos_nim_set_time_zone_impl(const char *time_zone);
 extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char *time_zone);
@@ -799,6 +800,14 @@ void frameos_nim_set_scaling_mode(const char *mode)
     if (!s_nim_ready || mode == NULL || mode[0] == '\0') return;
     if (!nim_lock_take()) return;
     fos_nim_set_scaling_mode_impl(mode);
+    nim_lock_give();
+}
+
+void frameos_nim_set_colors(const char *json)
+{
+    if (!s_nim_ready || json == NULL) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_colors_impl(json);
     nim_lock_give();
 }
 

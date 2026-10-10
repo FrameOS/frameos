@@ -2,6 +2,7 @@ import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { frameAssets, frameCommands } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
+import { directChildren } from "../../../../../src/lib/frame-asset-cache";
 import {
   enqueueFrameCommand,
   frameForAccount,
@@ -110,8 +111,15 @@ export async function GET(
   // A pending command on a disconnected frame is not "refreshing" — nothing
   // will answer until the frame redials, so the panel must not poll for it.
   const refreshing = frame.connected && (enqueued || Boolean(outstanding));
+  // The panel loads a folder at a time (`folder=`, "" for the root). The hub
+  // holds the device's whole listing in one row, so the folder is cut out
+  // of that; the echoed `folder` key is how the panel tells this answer from
+  // an older server's full listing.
+  const folder = request.nextUrl.searchParams.get("folder");
+  const payload = Array.isArray(listing?.payload) ? listing.payload : [];
   return NextResponse.json({
-    assets: listing?.payload ?? [],
+    assets: folder === null ? payload : directChildren(payload, folder),
+    ...(folder === null ? {} : { folder }),
     ...(listing?.truncated ? { truncated: true } : {}),
     ...(refreshing ? { cache: { refreshing: true, retry_after: 2 } } : {}),
   });

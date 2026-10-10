@@ -116,6 +116,64 @@ const CloudContractSettings* = @[
           Rule(kind: rkString, maxLen: 32)]))]),
   profiles: @[
     ProfileSpec(profile: "linux", since: "2026.8.31", restart: true)]),
+  SettingSpec(key: "colors", rule:
+    Rule(kind: rkObject, keys: @[
+      KeyRule(name: "autoFit", rule:
+        Rule(kind: rkString, strEnum: @["default", "on", "off"])),
+      KeyRule(name: "global", rule:
+        Rule(kind: rkObject, keys: @[
+          KeyRule(name: "exposure", rule:
+            Rule(kind: rkNumber, hasMin: true, min: -3.0, hasMax: true, max: 3.0)),
+          KeyRule(name: "contrast", rule:
+            Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+          KeyRule(name: "whites", rule:
+            Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+          KeyRule(name: "blacks", rule:
+            Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+          KeyRule(name: "saturation", rule:
+            Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+          KeyRule(name: "shadows", rule:
+            Rule(kind: rkObject, keys: @[
+              KeyRule(name: "luminance", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "r", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "g", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "b", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0))])),
+          KeyRule(name: "midtones", rule:
+            Rule(kind: rkObject, keys: @[
+              KeyRule(name: "luminance", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "r", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "g", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "b", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0))])),
+          KeyRule(name: "highlights", rule:
+            Rule(kind: rkObject, keys: @[
+              KeyRule(name: "luminance", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "r", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "g", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+              KeyRule(name: "b", rule:
+                Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0))])),
+          KeyRule(name: "hues", rule:
+            Rule(kind: rkMap, keyMaxLen: 16, children: @[
+              Rule(kind: rkObject, keys: @[
+                KeyRule(name: "hue", rule:
+                  Rule(kind: rkNumber, hasMin: true, min: -180.0, hasMax: true, max: 180.0)),
+                KeyRule(name: "saturation", rule:
+                  Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0)),
+                KeyRule(name: "luminance", rule:
+                  Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0))])]))]))]),
+  profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.10.2"),
+    ProfileSpec(profile: "esp32", since: "2026.10.2")]),
   SettingSpec(key: "device_config", rule:
     Rule(kind: rkObject, minKeys: 1, keys: @[
       KeyRule(name: "partial", rule:

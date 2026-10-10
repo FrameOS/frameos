@@ -378,6 +378,7 @@ suite "cloud hub verb dispatcher":
       "gpio_buttons": [{"pin": 5, "label": "A"}],
       "device": "pimoroni.hyperpixel4sq_touch",
       "input_settings": {"keyboardLayout": "de", "grabKeyboard": true},
+      "colors": {"autoFit": "on", "global": {"exposure": 0.5}},
     }
     for key in CLOUD_SETTINGS_ALLOWLIST:
       check samples.hasKey(key)

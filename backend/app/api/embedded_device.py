@@ -474,6 +474,10 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # Applied live on the device (no restart); default and validation in
         # embedded_scaling_mode_for_frame.
         "scalingMode": embedded_scaling_mode_for_frame(frame),
+        # frame.json's `colors` block (docs/asset-color-profiles.md): kept as
+        # compact JSON on the device and applied live, no restart. Older
+        # firmware ignores the key.
+        "colors": frame.colors or {},
         # IANA zone name plus that zone's tzdata slice (app.utils.tz_slice,
         # ~1.5 KB): firmware from 2026.8.34 loads the slice into chrono and
         # keeps its own clock, QuickJS Date and the schedule in the zone

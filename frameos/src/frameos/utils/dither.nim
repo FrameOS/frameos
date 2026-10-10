@@ -60,6 +60,49 @@ const saturated7ColorPalette* = @[
   (177, 106, 73),  # orange-brown
 ]
 
+# ------------------------------------------------------------ palette override
+#
+# A photo can carry its own dither palette (utils/asset_colors: the sidecar's
+# `palette`). The image app that loads it leaves the colours here, and every
+# palette dither on this thread — the Pi drivers, the ESP32 packer — picks
+# them up through `activePalette` until another image sets or clears them or
+# the scene changes (runner / single_scene_host). Sticky on purpose: the app's
+# output is cached for minutes, and a per-pass flag would hold only for the
+# render that decoded the file.
+#
+# A driver `.so` has its own copy of this variable (frameos/driver_abi), so
+# the host hands the colours over before each render through the optional
+# `frameos_driver_set_render_palette` symbol. Values only: a seq of ints.
+
+var renderPaletteOverride* {.threadvar.}: seq[(int, int, int)]
+
+proc setRenderPaletteOverride*(colors: seq[(int, int, int)]) =
+  renderPaletteOverride = colors
+
+proc clearRenderPaletteOverride*() =
+  renderPaletteOverride = @[]
+
+proc paletteHasHole(palette: seq[(int, int, int)], index: int): bool =
+  index < palette.len and palette[index][0] >= 999
+
+proc activePalette*(default: seq[(int, int, int)]): seq[(int, int, int)] =
+  ## The override when it names as many colours as `default` — the Spectra
+  ## table's `(999, 999, 999)` placeholder at index 4 is not a colour, so a
+  ## six-colour override fits the seven-entry table with the hole put back.
+  ## Anything else (an override meant for another panel, nothing set) is the
+  ## default.
+  let override = renderPaletteOverride
+  if override.len == 0:
+    return default
+  if override.len == default.len:
+    return override
+  if default.len == override.len + 1 and default.paletteHasHole(4):
+    result = override[0 ..< 4]
+    result.add(default[4])
+    result.add(override[4 ..< override.len])
+    return result
+  default
+
 proc clip8(value: int): uint8 {.inline.} =
   if value < 0: return 0
   elif value > 255: return 255

@@ -164,6 +164,30 @@
       "profiles": {"linux": {"since": "2026.8.31", "restart": true}},
       "parity": {"only": "linux", "why": "Custom dithering palette for the Pi renderer; ESP32 panels dither to their driver's fixed palette."}
     },
+    "colors": {
+      "$comment": "frame.json's colors: the automatic fit of drawn images into the panel's range (default = on when the panel dithers to a palette) and a frame-wide colour correction with the sidecar's slider set (docs/asset-color-profiles.md).",
+      "rule": {
+        "type": "object",
+        "keys": {
+          "autoFit": {"type": "string", "enum": ["default", "on", "off"]},
+          "global": {
+            "type": "object",
+            "keys": {
+              "exposure": {"type": "number", "min": -3, "max": 3},
+              "contrast": {"type": "number", "min": -100, "max": 100},
+              "whites": {"type": "number", "min": -100, "max": 100},
+              "blacks": {"type": "number", "min": -100, "max": 100},
+              "saturation": {"type": "number", "min": -100, "max": 100},
+              "shadows": {"type": "object", "keys": {"luminance": {"type": "number", "min": -100, "max": 100}, "r": {"type": "number", "min": -100, "max": 100}, "g": {"type": "number", "min": -100, "max": 100}, "b": {"type": "number", "min": -100, "max": 100}}},
+              "midtones": {"type": "object", "keys": {"luminance": {"type": "number", "min": -100, "max": 100}, "r": {"type": "number", "min": -100, "max": 100}, "g": {"type": "number", "min": -100, "max": 100}, "b": {"type": "number", "min": -100, "max": 100}}},
+              "highlights": {"type": "object", "keys": {"luminance": {"type": "number", "min": -100, "max": 100}, "r": {"type": "number", "min": -100, "max": 100}, "g": {"type": "number", "min": -100, "max": 100}, "b": {"type": "number", "min": -100, "max": 100}}},
+              "hues": {"type": "map", "keyMaxLen": 16, "values": {"type": "object", "keys": {"hue": {"type": "number", "min": -180, "max": 180}, "saturation": {"type": "number", "min": -100, "max": 100}, "luminance": {"type": "number", "min": -100, "max": 100}}}}
+            }
+          }
+        }
+      },
+      "profiles": {"linux": {"since": "2026.10.2"}, "esp32": {"since": "2026.10.2"}}
+    },
     "device_config": {
       "$comment": "STRICTLY the partial-refresh policy; the rest of deviceConfig is hardware wiring and stays the device's own (the persist path patches).",
       "rule": {

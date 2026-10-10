@@ -211,6 +211,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-defaults',
     'frame-settings-error-behavior',
     'frame-settings-palette',
+    'frame-settings-colors',
     'frame-settings-qr',
     'frame-settings-assets',
     'frame-settings-gpio',
@@ -240,6 +241,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-defaults',
     'frame-settings-error-behavior',
     'frame-settings-palette',
+    'frame-settings-colors',
     'frame-settings-qr',
     'frame-settings-assets',
     'frame-settings-gpio',
@@ -266,6 +268,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // Input (keyboard layout, keyboard grab, button roles): Linux frames on
     // 2026.9.23 or newer, disabled with a note below that.
     'frame-settings-input',
+    // Colors (automatic fit, frame-wide correction): Linux frames on
+    // 2026.10.2 or newer, disabled with a note below that.
+    'frame-settings-colors',
     'frame-settings-power',
     // The account's SSH keys, written into SD cards built for this frame
     // (cloud Linux frames only; FrameSettings skips it on an ESP32).
@@ -757,7 +762,7 @@ export function frameSupportsUsbSerialConsole(
  * no nav entry: an "Info" link pointing at the form the panel opens on was
  * pure noise.
  */
-const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-power']
+const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-power', 'frame-settings-colors']
 
 /**
  * Sections only ESP32 frames render — for everyone else the anchor does not

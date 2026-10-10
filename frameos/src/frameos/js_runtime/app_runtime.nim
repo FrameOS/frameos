@@ -9,6 +9,8 @@ import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/app_images
+import frameos/utils/asset_colors
+import frameos/utils/dither
 import frameos/utils/image
 import frameos/utils/paths
 import frameos/utils/system
@@ -432,6 +434,17 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let image = readImageWithDisplayBounds(full)
       if image.isNil:
         return jsNull(ctx)
+      # The photo's own colour profile, if the Assets panel wrote one
+      # (utils/asset_colors) — the same treatment data/localImage gives it.
+      let colorProfile = loadAssetColorProfile(full)
+      if colorProfile.isSome:
+        if colorProfile.get().hasPaletteOverride():
+          setRenderPaletteOverride(colorProfile.get().palette)
+        else:
+          clearRenderPaletteOverride()
+        if colorProfile.get().hasAdjustments():
+          applyAssetColors(image, colorProfile.get())
+          markImageGraded(image)
       return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
     else:
       frameos_apps.logError(e.owner, "JS app assets: unknown operation: " & opStr)
@@ -1601,7 +1614,11 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
     if runtime.category == "render":
       let value = toValue(runtime, owner, context, payload, "image")
       if value.kind == fkImage and not value.asImage().isNil:
-        context.image.draw(value.asImage())
+        let drawn = value.asImage()
+        context.image.draw(drawn)
+        # A render app's image lands at the origin, its own size.
+        applyAutoFitToDrawn(context.image, 0, 0, min(drawn.width, context.image.width),
+          min(drawn.height, context.image.height), drawn)
   finally:
     runtime.clearTransientImages()
 

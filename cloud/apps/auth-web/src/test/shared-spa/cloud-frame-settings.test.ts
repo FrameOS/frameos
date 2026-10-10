@@ -13,6 +13,12 @@ import {
   cloudKeyboardLayoutIds,
   cloudFrameSupportsInputSettings,
   inputCloudFrameSettingKeys,
+  cloudFrameSupportsColors,
+  colorsCloudFrameSettingKeys,
+  colorsCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32Colors,
+  esp32ColorsCloudFrameSettingKeys,
+  esp32ColorsCloudFrameSettingsMinVersion,
   inputCloudFrameSettingsMinVersion,
   displayDriverCloudFrameSettingKeys,
   displayDriverCloudFrameSettingsMinVersion,
@@ -58,6 +64,11 @@ import {
   hardwareFrameSettingsMinVersion,
   inputFrameSettingKeys,
   inputFrameSettingsMinVersion,
+  colorsFrameSettingKeys,
+  colorsFrameSettingsMinVersion,
+  frameSupportsColorsSettings,
+  esp32ColorsFrameSettingKeys,
+  esp32ColorsFrameSettingsMinVersion,
 } from "../../lib/frames";
 
 // Save and Render in the shared SPA used to POST /api/frames/{id} and
@@ -113,7 +124,8 @@ describe("cloud settings push", () => {
       (key) =>
         !esp32ExtendedFrameSettingKeys.has(key) &&
         !esp32TimeZoneFrameSettingKeys.has(key) &&
-        !esp32BatteryEnablePinFrameSettingKeys.has(key),
+        !esp32BatteryEnablePinFrameSettingKeys.has(key) &&
+        !esp32ColorsFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -335,6 +347,37 @@ describe("cloud settings push", () => {
         cloudFrameSettingKeysForVersion("2026.9.22"),
       ),
     ).toEqual({ device: "pimoroni.hyperpixel4sq_touch" });
+  });
+
+  it("gates the colours batch on its floor, Pi/Linux only", () => {
+    expect([...colorsCloudFrameSettingKeys]).toEqual(["colors"]);
+    expect(new Set(colorsCloudFrameSettingKeys)).toEqual(colorsFrameSettingKeys);
+    expect(colorsCloudFrameSettingsMinVersion).toBe("2026.10.2");
+    expect(colorsFrameSettingsMinVersion).toBe(colorsCloudFrameSettingsMinVersion);
+    // Both planes, each behind its own floor: the ESP32 keeps the block in
+    // its settings slot and applies it live.
+    expect(esp32SettableKeys.has("colors")).toBe(true);
+    expect([...esp32ColorsCloudFrameSettingKeys]).toEqual(["colors"]);
+    expect(new Set(esp32ColorsCloudFrameSettingKeys)).toEqual(esp32ColorsFrameSettingKeys);
+    expect(esp32ColorsCloudFrameSettingsMinVersion).toBe(esp32ColorsFrameSettingsMinVersion);
+    expect(cloudFrameSupportsEsp32Colors("2026.10.1")).toBe(false);
+    expect(cloudFrameSupportsEsp32Colors("2026.10.2")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.1")).not.toContain("colors");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.2")).toContain("colors");
+    for (const version of ["2026.10.1", "2026.10.2", "2026.11.0", "unknown", null, ""]) {
+      expect(cloudFrameSupportsColors(version), `${version}`).toBe(frameSupportsColorsSettings(version));
+    }
+    expect(cloudFrameSettingKeysForVersion("2026.10.1")).not.toContain("colors");
+    expect(cloudFrameSettingKeysForVersion("2026.10.2")).toContain("colors");
+    // The block goes as is: the device validates it against the contract.
+    const payload = cloudFrameSettingsPayload(
+      { colors: { autoFit: "off", global: { whites: -20 } } },
+      cloudFrameSettingKeysForVersion("2026.10.2"),
+    );
+    expect(payload.colors).toEqual({ autoFit: "off", global: { whites: -20 } });
+    expect(allowedFrameSettings.get("colors")?.({ autoFit: "off", global: { whites: -20 } })).toBe(true);
+    expect(allowedFrameSettings.get("colors")?.({ autoFit: "sometimes" })).toBe(false);
+    expect(allowedFrameSettings.get("colors")?.({ global: { hues: { red: { hue: 400 } } } })).toBe(false);
   });
 
   it("gates the input batch and button roles on their floor, Pi/Linux only", () => {

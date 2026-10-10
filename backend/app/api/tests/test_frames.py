@@ -4387,3 +4387,202 @@ async def test_api_frame_metrics_reboot_markers_never_exceed_the_marker_cap(asyn
         (datetime(2026, 6, 2, 3, 0, 0) + timedelta(minutes=index)).replace(tzinfo=timezone.utc).isoformat()
         for index in (7, 8, 9)
     ]
+
+
+# ---------------------------------------------------------------------------
+# Assets: a folder at a time, and thumbnails over the admin API
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_folder_runs_a_bounded_find_over_ssh(async_client, db, redis):
+    frame = await new_frame(db, redis, 'FolderAssetsFrame', 'localhost', 'localhost')
+    commands: list[str] = []
+
+    async def fake_exec(db_, redis_, frame_, ssh, command, output=None, **kwargs):
+        commands.append(command)
+        output.extend([
+            "directory|4096|1000|/srv/assets/photos/trip",
+            "regular file|123|2000|/srv/assets/photos/cat.jpg",
+            "regular file|45|2001|/srv/assets/photos/cat.jpg.frameos.json",
+            "",
+        ])
+        return 0
+
+    with patch("app.api.frames.get_ssh_connection", new=AsyncMock(return_value=object())), patch(
+        "app.api.frames.remove_ssh_connection", new=AsyncMock()
+    ), patch("app.api.frames.exec_command", new=AsyncMock(side_effect=fake_exec)), patch(
+        "app.api.frames._load_frame_assets", new=AsyncMock()
+    ) as load_all:
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?folder=photos')
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["folder"] == "photos"
+    assert [a["path"] for a in payload["assets"]] == [
+        "/srv/assets/photos/cat.jpg",
+        "/srv/assets/photos/cat.jpg.frameos.json",
+        "/srv/assets/photos/trip",
+    ]
+    assert payload["assets"][2]["is_dir"] is True
+    # The whole tree is never walked for one folder.
+    load_all.assert_not_awaited()
+    assert len(commands) == 1
+    assert commands[0].startswith("find /srv/assets/photos -mindepth 1 -maxdepth 1 ")
+
+    # The root is "" and a folder outside the assets directory is refused.
+    with patch("app.api.frames.get_ssh_connection", new=AsyncMock(return_value=object())), patch(
+        "app.api.frames.remove_ssh_connection", new=AsyncMock()
+    ), patch("app.api.frames.exec_command", new=AsyncMock(side_effect=fake_exec)):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?folder=')
+    assert response.status_code == 200
+    assert commands[-1].startswith("find /srv/assets -mindepth 1 -maxdepth 1 ")
+    response = await async_client.get(f'/api/frames/{frame.id}/assets?folder=../etc')
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_folder_cuts_the_folder_out_of_a_device_listing(async_client, db, redis):
+    frame = await new_frame(db, redis, 'FolderDeviceFrame', 'localhost', 'localhost')
+    listing = AssetListing(assets=[
+        {"path": "/srv/assets/fonts", "size": 0, "mtime": 1, "is_dir": True},
+        {"path": "/srv/assets/photos", "size": 0, "mtime": 1, "is_dir": True},
+        {"path": "/srv/assets/photos/cat.jpg", "size": 5, "mtime": 2, "is_dir": False},
+        {"path": "/srv/assets/photos/trip", "size": 0, "mtime": 1, "is_dir": True},
+        {"path": "/srv/assets/photos/trip/beach.jpg", "size": 7, "mtime": 2, "is_dir": False},
+    ])
+    with patch("app.api.frames._use_remote", new=AsyncMock(return_value=True)), patch(
+        "app.api.frames._load_frame_assets", new=AsyncMock(return_value=listing)
+    ):
+        root = await async_client.get(f'/api/frames/{frame.id}/assets?folder=')
+        photos = await async_client.get(f'/api/frames/{frame.id}/assets?folder=photos')
+    assert [a["path"] for a in root.json()["assets"]] == ["/srv/assets/fonts", "/srv/assets/photos"]
+    assert [a["path"] for a in photos.json()["assets"]] == ["/srv/assets/photos/cat.jpg", "/srv/assets/photos/trip"]
+    assert photos.json()["folder"] == "photos"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_asset_thumb_asks_the_runtime_over_the_admin_api(async_client, db, redis):
+    frame = await new_frame(db, redis, 'ThumbFrame', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    db.add(frame)
+    db.commit()
+    calls: list[str] = []
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method='GET', body=None, headers=None, timeout=None):
+        calls.append(path)
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1/asset?path=photos%2Fcat.jpg&thumb=1'
+        return 200, b'PNG-THUMB', {'content-type': 'image/png'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)), patch(
+        'app.utils.admin_api_assets._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)
+    ), patch('app.api.frames.get_ssh_connection', new=AsyncMock(side_effect=AssertionError('no SSH for a thumbnail'))):
+        response = await async_client.get(
+            f'/api/projects/{async_client.project_id}/frames/{frame.id}/asset?path=photos/cat.jpg&thumb=1'
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.content == b'PNG-THUMB'
+    assert response.headers['content-type'] == 'image/png'
+    assert calls[-1] == '/api/frames/1/asset?path=photos%2Fcat.jpg&thumb=1'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_asset_thumb_falls_back_to_ssh_when_the_admin_api_is_down(async_client, db, redis):
+    frame = await new_frame(db, redis, 'ThumbFallbackFrame', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    db.add(frame)
+    db.commit()
+    original = io.BytesIO()
+    Image.new('RGB', (40, 30), (10, 20, 30)).save(original, format='PNG')
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=ConnectionError('refused'))), patch(
+        'app.utils.admin_api_assets._fetch_frame_http_bytes', new=AsyncMock(side_effect=ConnectionError('refused'))
+    ), patch('app.api.frames._remote_file_md5', new=AsyncMock(return_value=('abc123', True))), patch(
+        'app.api.frames._remote_download_file', new=AsyncMock(return_value=original.getvalue())
+    ):
+        await redis.delete('asset:thumb:png:abc123', '/srv/assets/photos/cat.png')
+        response = await async_client.get(
+            f'/api/projects/{async_client.project_id}/frames/{frame.id}/asset?path=photos/cat.png&thumb=1'
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.headers['content-type'] == 'image/png'
+    with Image.open(io.BytesIO(response.content)) as thumbnail:
+        assert thumbnail.format == 'PNG'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_asset_thumb_without_an_admin_session_goes_straight_to_ssh(async_client, db, redis):
+    frame = await new_frame(db, redis, 'ThumbSshFrame', 'localhost', 'localhost')
+    await redis.delete('asset-md5:/srv/assets/photos/cat.png', 'asset:thumb:png:def456')
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=AssertionError('no admin API'))), patch(
+        'app.api.frames._remote_file_md5', new=AsyncMock(return_value=('def456', True))
+    ), patch('app.api.frames._remote_download_file', new=AsyncMock(side_effect=[Exception('no cached thumb'), b'x'])), patch(
+        'app.api.frames.render_thumbnail_png', new=lambda data: b'PNG-FROM-ORIGINAL'
+    ):
+        response = await async_client.get(
+            f'/api/projects/{async_client.project_id}/frames/{frame.id}/asset?path=photos/cat.png&thumb=1'
+        )
+    assert response.status_code == 200, response.text
+    assert response.content == b'PNG-FROM-ORIGINAL'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_folder_prefers_the_admin_api_and_cuts_an_old_runtimes_full_listing(
+    async_client, db, redis
+):
+    frame = await new_frame(db, redis, 'FolderAdminFrame', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    db.add(frame)
+    db.commit()
+    paths: list[str] = []
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method='GET', body=None, headers=None, timeout=None):
+        paths.append(path)
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1/assets?folder=photos'
+        # A runtime from before `folder=`: everything, absolute paths.
+        return 200, json.dumps({'assets': [
+            {'path': '/srv/assets/fonts', 'size': 0, 'mtime': 1, 'is_dir': True},
+            {'path': '/srv/assets/photos', 'size': 0, 'mtime': 1, 'is_dir': True},
+            {'path': '/srv/assets/photos/cat.jpg', 'size': 5, 'mtime': 2, 'is_dir': False},
+            {'path': '/srv/assets/photos/trip', 'size': 0, 'mtime': 1, 'is_dir': True},
+            {'path': '/srv/assets/photos/trip/beach.jpg', 'size': 7, 'mtime': 2, 'is_dir': False},
+        ]}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)), patch(
+        'app.utils.admin_api_assets._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)
+    ), patch('app.api.frames.get_ssh_connection', new=AsyncMock(side_effect=AssertionError('no SSH for a listing'))):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?folder=photos')
+
+    assert response.status_code == 200, response.text
+    assert [a['path'] for a in response.json()['assets']] == ['/srv/assets/photos/cat.jpg', '/srv/assets/photos/trip']
+    assert paths[-1] == '/api/frames/1/assets?folder=photos'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_folder_falls_back_to_ssh_when_the_admin_api_is_down(async_client, db, redis):
+    frame = await new_frame(db, redis, 'FolderFallbackFrame', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    db.add(frame)
+    db.commit()
+
+    async def fake_exec(db_, redis_, frame_, ssh, command, output=None, **kwargs):
+        output.append("regular file|5|2|/srv/assets/photos/cat.jpg")
+        return 0
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=ConnectionError('refused'))), patch(
+        'app.utils.admin_api_assets._fetch_frame_http_bytes', new=AsyncMock(side_effect=ConnectionError('refused'))
+    ), patch('app.api.frames.get_ssh_connection', new=AsyncMock(return_value=object())), patch(
+        'app.api.frames.remove_ssh_connection', new=AsyncMock()
+    ), patch('app.api.frames.exec_command', new=AsyncMock(side_effect=fake_exec)):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?folder=photos')
+
+    assert response.status_code == 200, response.text
+    assert [a['path'] for a in response.json()['assets']] == ['/srv/assets/photos/cat.jpg']

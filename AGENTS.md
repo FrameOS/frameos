@@ -110,6 +110,24 @@
   :3000, the local DB filled by `scripts/import-store-scenes.mjs`, and
   `OPENAI_API_KEY`). See `cloud/apps/auth-web/evals/README.md`.
 
+## Per-photo colour profiles: `docs/asset-color-profiles.md` is the contract
+
+- A photo may carry a `<image>.frameos.json` sidecar (exposure, white point,
+  tonal tints, per-hue HSL, an optional
+  dither palette). `frameos/src/frameos/utils/asset_colors.nim` applies it on
+  every runtime; `frontend/src/utils/assetColors/` previews it with a port of
+  the panel dither. The two are pinned to the same parity vectors
+  (`test_asset_colors.nim`, `shared-spa/asset-colors.test.ts`): change the
+  arithmetic on one side and the other, and refresh both vectors. The name
+  is deliberately not dot-prefixed (device write paths refuse hidden names).
+- The frame itself fits every drawn image into its palette's range by default
+  (frame.json `colors.autoFit`, applied by the CONSUMER — `apps/render/image`
+  and the JS draw call — on the rectangle it drew, never by the producer, whose
+  output is cached) and runs a frame-wide `colors.global` correction on the
+  finished canvas. A new control-plane key goes through the cloud contract
+  (`docs/cloud-frames-contract.json` + generator), the backend column, the SPA
+  key lists AND the settings nav list in `FrameWorkspace.tsx`.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】
