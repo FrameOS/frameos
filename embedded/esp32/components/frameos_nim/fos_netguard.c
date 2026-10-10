@@ -48,7 +48,7 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 #define NETGUARD_LOCK() portENTER_CRITICAL(&s_lock)
 #define NETGUARD_UNLOCK() portEXIT_CRITICAL(&s_lock)
 #else
-#include <unistd.h>
+#include <time.h>
 #define NETGUARD_LOCK() ((void)0)
 #define NETGUARD_UNLOCK() ((void)0)
 #endif
@@ -424,7 +424,10 @@ static void netguard_sleep_ms(unsigned ms)
 #ifdef ESP_PLATFORM
     vTaskDelay(pdMS_TO_TICKS(ms));
 #else
-    usleep(ms * 1000u);
+    /* nanosleep, not usleep: the strict-mode _POSIX_C_SOURCE above (the host
+     * test build) leaves usleep undeclared on glibc. */
+    struct timespec pause = { .tv_sec = ms / 1000u, .tv_nsec = (long)(ms % 1000u) * 1000000L };
+    nanosleep(&pause, NULL);
 #endif
 }
 
