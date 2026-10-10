@@ -2759,7 +2759,7 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
   // Nothing to send and the device already acked the last push: the button
   // still works (a re-send is idempotent) but it is not what this screen is
   // asking you to do, so it stops competing with the firmware upgrade next
-  // to it for the one primary-coloured slot.
+  // to it for the one primary-colored slot.
   const inSync =
     unsavedChangeDetails.length === 0 &&
     Boolean(frame.assigned_checksum) &&

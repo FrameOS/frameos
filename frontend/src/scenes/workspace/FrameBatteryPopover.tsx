@@ -246,7 +246,7 @@ function BatteryPanel({ frame, percent }: { frame: FrameType; percent: number })
   )
 }
 
-/** A large battery glyph, filled to `percent` in the charge band's colour. */
+/** A large battery glyph, filled to `percent` in the charge band's color. */
 function BatteryGraphic({ percent, tone, pluggedIn }: { percent: number; tone: BatteryTone; pluggedIn: boolean }) {
   // viewBox 64×32: body 56×28 at (1,2) with a 2px stroke, cap 5×12 on the right, fill inset by 4.
   const fillWidth = Math.max(0, (48 * percent) / 100)
@@ -368,7 +368,7 @@ function downsample(samples: BatterySample[]): BatterySample[] {
 /**
  * Charge over time, the history drawn solid and the forecasts dashed from
  * the newest reading down to empty: the current cadence in the charge
- * band's colour, the slider's pick in blue. A day past the further forecast
+ * band's color, the slider's pick in blue. A day past the further forecast
  * (or a day of nothing) is the right edge, so the axis always has room.
  */
 function BatteryChart({

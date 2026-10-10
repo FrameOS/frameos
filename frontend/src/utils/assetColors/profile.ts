@@ -1,5 +1,5 @@
 /**
- * Per-image colour profiles: the `<image>.frameos.json` sidecar.
+ * Per-image color profiles: the `<image>.frameos.json` sidecar.
  *
  * The TypeScript half of `frameos/src/frameos/utils/asset_colors.nim`. The
  * runtime reads this file next to a photo and applies it before the panel

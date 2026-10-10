@@ -57,8 +57,8 @@ export const metricChartThemes: Record<MetricChartThemeName, MetricChartTheme> =
 }
 
 /**
- * Recolours series for a theme. Returns the input itself when there is
- * nothing to recolour: the chart components memoise on series identity,
+ * Recolors series for a theme. Returns the input itself when there is
+ * nothing to recolor: the chart components memoise on series identity,
  * and a fresh array per render would re-derive every scale and path.
  */
 export function themeMetricSeries<T extends MetricSeries>(series: T[], chartTheme: MetricChartTheme): T[] {

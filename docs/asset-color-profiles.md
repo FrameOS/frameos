@@ -1,4 +1,4 @@
-# Per-photo colour profiles (`<image>.frameos.json`)
+# Per-photo color profiles (`<image>.frameos.json`)
 
 A photo in the assets folder may sit next to a small JSON sidecar that says
 how it should be graded before the panel dither sees it. The Assets panel's
@@ -15,7 +15,7 @@ stay in step:
 
 ## Why
 
-A six-colour Spectra panel's measured white is `#b2c1c0` (178, 193, 192).
+A six-color Spectra panel's measured white is `#b2c1c0` (178, 193, 192).
 Everything in a photo brighter than that quantises to solid white and the
 diffused error is clipped away: the highlights go flat. Pulling **Whites**
 down, or switching on **Auto**, keeps the photo inside the range the panel can
@@ -97,8 +97,8 @@ it draws. `frame.json`'s `colors` block:
 ```
 
 * `autoFit`: `default` (on when the panel dithers to a palette, off on a
-  full-colour display), `on` or `off`. On a Pi the palette comes from the
-  device name plus a six-colour custom palette (`panelPaletteForDevice`), on
+  full-color display), `on` or `off`. On a Pi the palette comes from the
+  device name plus a six-color custom palette (`panelPaletteForDevice`), on
   the ESP32 from the display format at render time.
 * `global`: the sidecar's slider set without a palette, applied once to the
   whole finished canvas on every display, after the fit. Neutral by default.
@@ -140,7 +140,7 @@ NVS), fed from the backend's settings poll (`frame.colors`) or the cloud's
 `scalingMode` (`fos_nim_set_colors`), so it applies live.
 
 The cloud's scene preview (scenes.frameos.net) does the same on the finished
-frame while a panel is chosen: **Auto colours** (on by default) and a
+frame while a panel is chosen: **Auto colors** (on by default) and a
 **Fine tuning** slider set run through the `beforeDither` hook of
 `frameos-wasm`'s `FrameOSPreview` before the browser-side dither. The
 preview has only the finished frame, so the whole picture stands in for the
@@ -148,12 +148,12 @@ photo; both are display only and remembered per browser.
 
 ## The dither palette override
 
-`palette` replaces the colours the panel dither quantises against, for this
+`palette` replaces the colors the panel dither quantises against, for this
 photo only. The runtime leaves it in `renderPaletteOverride`
 (`utils/dither.nim`) when the photo is loaded; every palette dither on the
 render thread picks it up through `activePalette(default)`, which also puts
 the Spectra table's `(999, 999, 999)` placeholder back at index 4 for a
-six-colour override. It is **sticky** until the next photo without one is
+six-color override. It is **sticky** until the next photo without one is
 loaded or the scene changes (`runner.nim`, `single_scene_host.nim`), because
 the image app's output is cached for minutes and a per-pass flag would hold
 only for the render that decoded the file. On a Pi the override crosses the
@@ -164,10 +164,10 @@ not dither.
 
 Under the per-photo override sits the frame's own palette (frame.json
 `palette`, the Palette section of the settings panel): the Pi driver reads it
-at init, the ESP32 keeps the colour list in its config (`fos_config_t.palette`,
+at init, the ESP32 keeps the color list in its config (`fos_config_t.palette`,
 pushed into the runtime every pass like `colors`) and fits it onto the
 panel's table with the same `fitPaletteOverride` the per-photo path uses —
-so a six-colour list lands on a Spectra panel with the hole put back. The
+so a six-color list lands on a Spectra panel with the hole put back. The
 automatic fit aims for that palette too (`panelPaletteForFormat`). Cloud and
 backend push it from firmware 2026.10.4 on (`docs/cloud-frames-contract.json`).
 
@@ -180,7 +180,7 @@ backend push it from firmware 2026.10.4 on (`docs/cloud-frames-contract.json`).
 * Thumbnails are **not** adjusted: the `.thumbs/` cache is keyed on the image
   alone, and the preview belongs in the editor.
 * The panel palette the editor previews with comes from the device name
-  (`devicePalette.ts`, with a six-colour custom palette winning on a Spectra
+  (`devicePalette.ts`, with a six-color custom palette winning on a Spectra
   panel) — the same table as the runtime's `panelPaletteForDevice`.
 
 ## The Assets panel
@@ -196,6 +196,6 @@ backend push it from firmware 2026.10.4 on (`docs/cloud-frames-contract.json`).
   the ordinary asset upload; Remove colors deletes it.
 * Settings → **Colors** (right under Palette) holds the frame's `colors`
   block on the backend, the on-device panel and the cloud (either profile on
-  2026.10.2 or newer): the "Auto colour correction" select, and "Fine tuning"
+  2026.10.2 or newer): the "Auto color correction" select, and "Fine tuning"
   (the global sliders, previewed on the frame's current image) behind a
   toggle, folded by default.

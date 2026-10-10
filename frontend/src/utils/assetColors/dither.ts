@@ -78,7 +78,7 @@ export function ditherPaletteIndices(
       const imageR = curRow[x * 3] ?? 0
       const imageG = curRow[x * 3 + 1] ?? 0
       const imageB = curRow[x * 3 + 2] ?? 0
-      // The jitter moves only which palette colour is picked; the error the
+      // The jitter moves only which palette color is picked; the error the
       // neighbours inherit is measured against the true value.
       const jitter = jitterAmp > 0 ? ditherJitterFor(rowIndex + x, jitterAmp) : 0
       const pickR = clip8(imageR + jitter)
@@ -120,7 +120,7 @@ export function ditherPaletteIndices(
 
 /**
  * Dithers RGBA pixels to the palette and paints the result as the palette's
- * own colours (what the panel shows) into `out`, which may be `pixels`.
+ * own colors (what the panel shows) into `out`, which may be `pixels`.
  */
 export function ditherToPalette(
   pixels: Uint8ClampedArray | Uint8Array,

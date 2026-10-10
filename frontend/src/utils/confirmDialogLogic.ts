@@ -17,7 +17,7 @@ export interface ConfirmDialogRequest {
   confirmLabel?: string
   /** Defaults to "Cancel". */
   cancelLabel?: string
-  /** Renders the confirm button in the danger colour and focuses Cancel. */
+  /** Renders the confirm button in the danger color and focuses Cancel. */
   danger?: boolean
   /**
    * The work a confirmation starts. The dialog stays up while it runs — the

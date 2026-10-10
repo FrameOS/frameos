@@ -157,7 +157,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-palette',
     surfaces: ['cloudEsp32'],
     conditions:
-      'Disabled below esp32PaletteCloudFrameSettingsMinVersion (2026.10.4); the colour field renders only for a panel in withCustomPalette (the Spectra 6 panels), the others get a line saying the palette is fixed.',
+      'Disabled below esp32PaletteCloudFrameSettingsMinVersion (2026.10.4); the color field renders only for a panel in withCustomPalette (the Spectra 6 panels), the others get a line saying the palette is fixed.',
   },
   {
     key: 'cloud-esp32-gpio',

@@ -167,14 +167,14 @@ export function ColorsSection(): JSX.Element {
       <div className="pl-2 @md:pl-8 space-y-3">
         <label className="flex flex-wrap items-center gap-2 text-sm">
           <span className="flex items-center gap-1 @md:w-1/3">
-            Auto colour correction
+            Auto color correction
             <Tooltip
               title={
                 <>
                   Before an image is dithered, the frame moves its black and white points so the image&apos;s tones fit
                   the range the panel can show. A Spectra panel&apos;s white is darker than a photo&apos;s, so without
                   this the brightest parts come out as flat white. It applies to every image the frame draws, from any
-                  source, and resizes nothing. A photo with its own colours (Assets → Set colors) keeps them instead.
+                  source, and resizes nothing. A photo with its own colors (Assets → Set colors) keeps them instead.
                 </>
               }
             />
@@ -198,7 +198,7 @@ export function ColorsSection(): JSX.Element {
         <p className="frameos-muted text-xs">
           {hasPalette
             ? 'Default is on here: this panel dithers to a fixed set of inks. Off shows the image as it is.'
-            : 'Default is off here: this display shows full colour, so there is nothing to fit. Always on still applies it.'}
+            : 'Default is off here: this display shows full color, so there is nothing to fit. Always on still applies it.'}
         </p>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="flex items-center gap-1">
@@ -206,8 +206,8 @@ export function ColorsSection(): JSX.Element {
             <Tooltip
               title={
                 <>
-                  A frame-wide colour correction with the same sliders as the photo editor: exposure, contrast, white
-                  and black points, saturation, tints per tonal range and per hue. Applied to the whole picture on every
+                  A frame-wide color correction with the same sliders as the photo editor: exposure, contrast, white and
+                  black points, saturation, tints per tonal range and per hue. Applied to the whole picture on every
                   display, after the automatic correction, and previewed on the frame&apos;s current image dithered as
                   the panel will show it.
                 </>

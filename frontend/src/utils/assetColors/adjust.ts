@@ -1,5 +1,5 @@
 /**
- * The colour pipeline, mirrored line for line from
+ * The color pipeline, mirrored line for line from
  * `frameos/src/frameos/utils/asset_colors.nim` (`adjustPixel`, `autoFitFor`).
  * The order is the order a photographer reasons in: exposure, the end
  * points, contrast, the tonal tints, saturation, then the per-hue
@@ -207,7 +207,7 @@ export function adjustPixel(profile: AssetColorProfile, r0: number, g0: number, 
     })
     const h = hsl.h + hueShift
     const s = clamp01(hsl.s * Math.max(1 + satScale, 0))
-    // Luminance moves only coloured pixels: a grey has no hue to belong to.
+    // Luminance moves only colored pixels: a grey has no hue to belong to.
     const l = clamp01(hsl.l + lumShift * 0.3 * hsl.s)
     const rgb = hslToRgb(h, s, l)
     r = clamp01(rgb[0])
@@ -279,7 +279,7 @@ export function autoEndPoints(
 }
 
 /**
- * Adjusts RGBA pixels in place. Alpha is kept; the colours are taken as
+ * Adjusts RGBA pixels in place. Alpha is kept; the colors are taken as
  * straight, like the runtime does.
  */
 export function applyAssetColors(pixels: Uint8ClampedArray | Uint8Array, profile: AssetColorProfile): void {

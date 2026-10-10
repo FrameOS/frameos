@@ -1,5 +1,5 @@
 /**
- * Is this RGBA pixel buffer one flat colour (or fully transparent)?
+ * Is this RGBA pixel buffer one flat color (or fully transparent)?
  *
  * Old and broken scene saves uploaded a cover before anything was drawn: a
  * valid image, entirely white or black. In a list that reads as a missing

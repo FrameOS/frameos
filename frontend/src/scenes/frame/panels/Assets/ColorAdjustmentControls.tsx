@@ -74,7 +74,7 @@ export function ColorSection({ title, children }: { title: string; children: Rea
 }
 
 /**
- * The Lightroom-style slider set: light, tones, colours. One component for
+ * The Lightroom-style slider set: light, tones, colors. One component for
  * the photo editor (Assets panel) and the frame-wide correction (Settings),
  * so the two never drift apart in what a slider means.
  */
@@ -176,7 +176,7 @@ export function ColorAdjustmentControls({
           min={-180}
           max={180}
           onChange={(value) => setHue('hue', value)}
-          hint="Degrees around the colour wheel"
+          hint="Degrees around the color wheel"
         />
         <Slider label="Saturation" value={hue.saturation} onChange={(value) => setHue('saturation', value)} />
         <Slider label="Luminance" value={hue.luminance} onChange={(value) => setHue('luminance', value)} />

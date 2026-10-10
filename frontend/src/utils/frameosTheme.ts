@@ -3,8 +3,8 @@ import { isCloudMode } from './cloudMode'
 
 export type FrameosTheme = 'light' | 'dark'
 
-// Four icons, not two: the glyph colour has to contrast with the TAB STRIP,
-// and "am I on localhost" picks whether the three squares keep their colours.
+// Four icons, not two: the glyph color has to contrast with the TAB STRIP,
+// and "am I on localhost" picks whether the three squares keep their colors.
 // A developer usually has the real deployment open in another tab; the
 // monochrome icon is what tells the two apart at a glance.
 //
@@ -18,13 +18,13 @@ export type FrameosTheme = 'light' | 'dark'
 // Keep in sync with the inline pre-paint scripts in frontend/src/index.html
 // and cloud-frontend/src/index.html — they run before this module loads and
 // have to reach the same answer, or the icon visibly flips on boot.
-const backendFaviconPaths: Record<FrameosTheme, { colour: string; mono: string }> = {
-  light: { colour: '/img/logo-2/logo.svg', mono: '/img/logo-2/logo-black.svg' },
-  dark: { colour: '/img/logo-2/logo-white-colors.svg', mono: '/img/logo-2/logo-white.svg' },
+const backendFaviconPaths: Record<FrameosTheme, { color: string; mono: string }> = {
+  light: { color: '/img/logo-2/logo.svg', mono: '/img/logo-2/logo-black.svg' },
+  dark: { color: '/img/logo-2/logo-white-colors.svg', mono: '/img/logo-2/logo-white.svg' },
 }
-const cloudFaviconPaths: Record<FrameosTheme, { colour: string; mono: string }> = {
-  light: { colour: '/logo-light.svg', mono: '/logo-light-mono.svg' },
-  dark: { colour: '/logo-dark.svg', mono: '/logo-dark-mono.svg' },
+const cloudFaviconPaths: Record<FrameosTheme, { color: string; mono: string }> = {
+  light: { color: '/logo-light.svg', mono: '/logo-light-mono.svg' },
+  dark: { color: '/logo-dark.svg', mono: '/logo-dark-mono.svg' },
 }
 
 const darkChromeQuery = '(prefers-color-scheme: dark)'
@@ -48,7 +48,7 @@ export function isLocalFrameosHost(hostname?: string): boolean {
 }
 
 /**
- * Which icon the BROWSER's own colours call for.
+ * Which icon the BROWSER's own colors call for.
  *
  * Deliberately not the workspace theme. A favicon is painted into the tab
  * strip, not into the page, so the only thing it has to contrast with is the
@@ -84,7 +84,7 @@ export function applyFrameosFavicon(): void {
   const scheme: FrameosTheme = prefersDarkChrome() ? 'dark' : 'light'
   const cloud = isCloudMode()
   const paths = (cloud ? cloudFaviconPaths : backendFaviconPaths)[scheme]
-  const path = isLocalFrameosHost() ? paths.mono : paths.colour
+  const path = isLocalFrameosHost() ? paths.mono : paths.color
   // assetUrl would prefix the assets base (/frames-app); the cloud icons are
   // root-served on purpose so /frames and the account pages share one file.
   const href = cloud ? path : assetUrl(path)

@@ -134,7 +134,7 @@ function TreeNode({
    * every mutation affordance disappears — browse, thumbs, download and the
    * run-image-scene buttons stay. */
   readOnly: boolean
-  /** Images with a colour-profile sidecar next to them ('photos/cat.jpg'). */
+  /** Images with a color-profile sidecar next to them ('photos/cat.jpg'). */
   colorProfileKeys: Set<string>
   foldersLoading: Record<string, boolean>
   openColorEditor: (path: string) => void

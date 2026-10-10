@@ -326,8 +326,8 @@ export function CloudHardwareSection(): JSX.Element | null {
             <SectionBody>
               <p className="frameos-muted text-sm">
                 {frame.frameos_version
-                  ? `The automatic fit and the colour correction need FrameOS ${colorsCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to edit them here.`
-                  : `The automatic fit and the colour correction need FrameOS ${colorsCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+                  ? `The automatic fit and the color correction need FrameOS ${colorsCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to edit them here.`
+                  : `The automatic fit and the color correction need FrameOS ${colorsCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
               </p>
             </SectionBody>
           </>
@@ -400,7 +400,7 @@ export function CloudEsp32Sections(): JSX.Element | null {
         <GpioButtonsSection />
       </fieldset>
       {/* Firmware ≥ 2026.10.4 (esp32PaletteCloudFrameSettingKeys): the
-          colour list the packer dithers to. Only the Spectra panels have one
+          color list the packer dithers to. Only the Spectra panels have one
           to edit (withCustomPalette); the rest say so. */}
       <FrameSettingsSection sectionKey="cloud-esp32-palette">
         <fieldset disabled={!cloudFrameSupportsEsp32Palette(frame.frameos_version)} className="min-w-0 space-y-4">
@@ -416,7 +416,7 @@ export function CloudEsp32Sections(): JSX.Element | null {
               </p>
             ) : palette ? (
               <p className="frameos-muted text-sm">
-                The colours the panel dithers to. Applied on the next render; the automatic fit in Colors aims for them
+                The colors the panel dithers to. Applied on the next render; the automatic fit in Colors aims for them
                 too.
               </p>
             ) : (
@@ -437,8 +437,8 @@ export function CloudEsp32Sections(): JSX.Element | null {
             <SectionBody>
               <p className="frameos-muted text-sm">
                 {frame.frameos_version
-                  ? `The automatic fit and the colour correction need firmware ${esp32ColorsCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the firmware to edit them here.`
-                  : `The automatic fit and the colour correction need firmware ${esp32ColorsCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+                  ? `The automatic fit and the color correction need firmware ${esp32ColorsCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the firmware to edit them here.`
+                  : `The automatic fit and the color correction need firmware ${esp32ColorsCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
               </p>
             </SectionBody>
           </>

@@ -451,7 +451,7 @@ function renderTaskLogLine(log: LongRunningTaskLog, formattedLine: string, theme
 
 /**
  * One log line the way the Logs panel draws it: tone dot, timestamp, the
- * line in its type's colour. The collapsed toast shows the latest line this
+ * line in its type's color. The collapsed toast shows the latest line this
  * way on a single row (`truncate`); the expanded list wraps.
  */
 function TaskLogLine({
@@ -765,7 +765,7 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
         </div>
       ) : null}
       {/* The log strip spans the whole toast: collapsed it is the latest
-          line, expanded the scrolling list — same background, same colours
+          line, expanded the scrolling list — same background, same colors
           as the Logs panel either way. */}
       {task.expanded ? (
         <div className={logStripClass}>

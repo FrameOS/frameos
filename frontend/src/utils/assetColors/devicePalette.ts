@@ -1,10 +1,10 @@
 /**
  * The palette a frame's panel dithers to, as far as the editor can tell from
  * the frame row: the measured tables from `frameos/src/frameos/utils/dither.nim`
- * (`spectra6ColorPalette` etc.), with a six-colour custom palette on a
+ * (`spectra6ColorPalette` etc.), with a six-color custom palette on a
  * Spectra panel winning, as it does in the drivers. The device side of this
  * is `panelPaletteForDevice` in `utils/asset_colors.nim`; keep the two in
- * step. Null means "no palette dither" (full-colour displays, unknown
+ * step. Null means "no palette dither" (full-color displays, unknown
  * hardware): the editor then previews the adjustments alone.
  */
 import type { FrameType } from '../../types'
@@ -143,7 +143,7 @@ export function visiblePalette(palette: RgbTriplet[] | null): RgbTriplet[] {
   return (palette || []).filter(([r]) => r < 999)
 }
 
-/** The six colours of a frame's custom Spectra palette, when it has one. */
+/** The six colors of a frame's custom Spectra palette, when it has one. */
 export function customPaletteOf(frame: Pick<FrameType, 'palette'>): RgbTriplet[] | null {
   const colors = frame.palette?.colors
   if (!colors || colors.length !== 6) {
@@ -155,7 +155,7 @@ export function customPaletteOf(frame: Pick<FrameType, 'palette'>): RgbTriplet[]
 
 /**
  * `deviceLabel` is the catalog label ("… 4 Grayscale", "… 7 Color"), which
- * tells the greyscale and seven-colour families apart where the name alone
+ * tells the greyscale and seven-color families apart where the name alone
  * does not; the caller looks it up (devices.ts) so this module stays free
  * of UI imports.
  */

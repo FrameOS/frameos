@@ -57,7 +57,7 @@ function profileOf(colors: Record<string, unknown>) {
   return profile;
 }
 
-describe("asset colour profiles", () => {
+describe("asset color profiles", () => {
   it("names the sidecar after the image", () => {
     expect(sidecarPathFor("photos/cat.jpg")).toBe("photos/cat.jpg.frameos.json");
     expect(sidecarImagePath("photos/cat.jpg.frameos.json")).toBe("photos/cat.jpg");
@@ -169,7 +169,7 @@ describe("panel dither port", () => {
     ]);
   });
 
-  it("paints the palette's own colours and never the placeholder", () => {
+  it("paints the palette's own colors and never the placeholder", () => {
     const pixels = gradient(8, 4);
     const out = new Uint8ClampedArray(pixels.length);
     ditherToPalette(pixels, 8, 4, SPECTRA6_PALETTE, out);
@@ -197,7 +197,7 @@ describe("panel palette for a frame", () => {
     expect(panelPaletteKindForDevice("web_only")).toBe("none");
   });
 
-  it("prefers a frame's six-colour custom palette on a Spectra panel", () => {
+  it("prefers a frame's six-color custom palette on a Spectra panel", () => {
     const custom = ["#000000", "#ffffff", "#ffff00", "#ff0000", "#0000ff", "#00ff00"];
     const palette = panelPaletteForFrame({ device: "waveshare.EPD_7in3e", palette: { colors: custom } });
     expect(palette).toHaveLength(7);
@@ -210,7 +210,7 @@ describe("panel palette for a frame", () => {
       [0, 0, 255],
       [0, 255, 0],
     ]);
-    // Not on a seven-colour one.
+    // Not on a seven-color one.
     expect(panelPaletteForFrame({ device: "waveshare.EPD_7in3f", palette: { colors: custom } })).toHaveLength(7);
     expect(panelPaletteForFrame({ device: "waveshare.EPD_7in3f", palette: { colors: custom } })?.[4]).toEqual([
       156, 72, 75,

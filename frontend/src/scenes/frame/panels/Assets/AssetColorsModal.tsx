@@ -278,7 +278,7 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
                 </span>
               ))}
               {paletteColors.length === 0 ? (
-                <span className="frame-tool-muted text-xs">This display shows full colour; nothing to dither to.</span>
+                <span className="frame-tool-muted text-xs">This display shows full color; nothing to dither to.</span>
               ) : null}
             </div>
           </ColorSection>

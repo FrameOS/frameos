@@ -2,7 +2,7 @@ import clsx from 'clsx'
 
 export type BatteryTone = 'full' | 'ok' | 'low' | 'critical'
 
-/** Colour band for a charge level: green down to 50, amber to 20, red below. */
+/** Color band for a charge level: green down to 50, amber to 20, red below. */
 export function batteryTone(percent: number): BatteryTone {
   if (percent >= 80) {
     return 'full'
@@ -44,7 +44,7 @@ export function batteryTitle(percent: number): string {
 }
 
 /**
- * A battery glyph filled to `percent`, coloured by charge band, with the
+ * A battery glyph filled to `percent`, colored by charge band, with the
  * percentage next to it and (optionally) a thin progress bar underneath.
  */
 export function BatteryIndicator({

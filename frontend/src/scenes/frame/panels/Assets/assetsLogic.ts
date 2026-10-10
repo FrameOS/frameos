@@ -196,7 +196,7 @@ function buildAssetTree(
   return root
 }
 
-/** Files the panel shows a thumbnail for, and the colours editor can open. */
+/** Files the panel shows a thumbnail for, and the colors editor can open. */
 const thumbnailImagePattern = /\.(png|jpe?g|gif|bmp|webp)$/i
 export function isThumbnailAssetName(name: string): boolean {
   return thumbnailImagePattern.test(name)
@@ -275,7 +275,7 @@ export function nodeHasPlayableImages(node: AssetNode): boolean {
   return Object.values(node.children).some(nodeHasPlayableImages)
 }
 
-/** The keys ('photos/cat.jpg') of every image a colour-profile sidecar sits next to. */
+/** The keys ('photos/cat.jpg') of every image a color-profile sidecar sits next to. */
 export function colorProfileKeysOf(assets: AssetType[], assetsPath?: string): Set<string> {
   const keys = new Set<string>()
   for (const asset of assets) {
@@ -890,7 +890,7 @@ export const assetsLogic = kea<assetsLogicType>([
           if (isSystemAssetPath(asset.path)) {
             return showSystemFolders
           }
-          // A photo's colour-profile sidecar is shown as an icon on the
+          // A photo's color-profile sidecar is shown as an icon on the
           // photo's row, not as a file of its own.
           if (isSidecarPath(asset.path)) {
             return showHiddenFiles
@@ -1189,7 +1189,7 @@ export const assetsLogic = kea<assetsLogicType>([
           throw new Error(await responseErrorMessage(response, 'Failed to delete asset'))
         }
         actions.assetDeleted(path, values.frame.assets_path)
-        // A photo's colour profile goes with the photo.
+        // A photo's color profile goes with the photo.
         const sidecar = sidecarEntryFor(values.assets, path, values.frame.assets_path)
         if (sidecar) {
           actions.deleteAsset(sidecarPathFor(path))
@@ -1209,7 +1209,7 @@ export const assetsLogic = kea<assetsLogicType>([
           throw new Error(await responseErrorMessage(response, 'Failed to rename asset'))
         }
         actions.assetRenamed(oldPath, newPath, values.frame.assets_path)
-        // A photo's colour profile goes with the photo.
+        // A photo's color profile goes with the photo.
         const sidecar = sidecarEntryFor(values.assets, oldPath, values.frame.assets_path)
         if (sidecar) {
           actions.renameAsset(sidecarPathFor(oldPath), sidecarPathFor(newPath))

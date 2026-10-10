@@ -214,7 +214,7 @@ export function cloudFrameSupportsEsp32Colors(frameosVersion: string | null | un
 }
 
 /**
- * 2026.10.4: `palette` on the ESP32 — the colour list its packer dithers to
+ * 2026.10.4: `palette` on the ESP32 — the color list its packer dithers to
  * and the automatic fit aims for, applied on the next render. Below the
  * floor the firmware refuses the whole push, so the form sends it only from
  * here on (esp32CloudFrameSettingKeysForVersion) and the Palette section
@@ -463,9 +463,9 @@ export function cloudSaveAssetsPayload(value: unknown): boolean | Record<string,
 }
 
 /**
- * palette: the SPA's Palette ({name?, colors, colorNames?}) with every colour
- * a "#rrggbb". One unparseable colour drops the whole palette from the push
- * (a partial palette would shift every colour after it on the panel).
+ * palette: the SPA's Palette ({name?, colors, colorNames?}) with every color
+ * a "#rrggbb". One unparseable color drops the whole palette from the push
+ * (a partial palette would shift every color after it on the panel).
  * Undefined when there is nothing to send.
  */
 export function cloudPalettePayload(value: unknown): Record<string, unknown> | undefined {
