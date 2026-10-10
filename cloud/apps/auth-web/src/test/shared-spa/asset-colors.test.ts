@@ -77,6 +77,7 @@ describe("asset colour profiles", () => {
     expect(profile.exposure).toBe(1.5);
     expect(profile.contrast).toBe(100);
     expect(profile.whites).toBe(-40);
+    expect(parseAssetColorProfile({ version: 1, colors: { hues: { red: { hue: 400 } } } })?.hues.red.hue).toBe(180);
     expect(profile.shadows).toEqual({ luminance: 10, r: -5, g: 0, b: 0 });
     expect(profile.hues.blue.saturation).toBe(30);
     expect(profile.palette?.[0]).toEqual([0x19, 0x14, 0x26]);
@@ -119,8 +120,8 @@ describe("asset colour profiles", () => {
     const pixels = gradient(4, 3);
     applyAssetColors(pixels, profile);
     expect(rgbOf(pixels)).toEqual([
-      0, 0, 192, 109, 0, 142, 248, 8, 130, 247, 14, 128, 0, 160, 108, 87, 177, 95, 240, 175, 130, 248, 180, 135, 0, 238,
-      77, 94, 255, 71, 243, 255, 110, 255, 255, 114,
+      0, 0, 192, 109, 0, 142, 248, 8, 109, 247, 14, 105, 0, 160, 83, 116, 177, 87, 240, 190, 130, 248, 198, 135, 0, 238,
+      1, 190, 255, 71, 252, 255, 110, 255, 255, 114,
     ]);
   });
 

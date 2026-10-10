@@ -28,7 +28,7 @@ export interface ToneRange {
   b: number
 }
 
-/** -100 .. 100 each. */
+/** `hue` is a rotation in degrees (-180 .. 180); the other two are -100 .. 100. */
 export interface HueRange {
   hue: number
   saturation: number
@@ -139,7 +139,7 @@ function toneOf(value: unknown): ToneRange {
 function hueOf(value: unknown): HueRange {
   const node = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   return {
-    hue: clampSlider(node.hue),
+    hue: clampSlider(node.hue, -180, 180),
     saturation: clampSlider(node.saturation),
     luminance: clampSlider(node.luminance),
   }

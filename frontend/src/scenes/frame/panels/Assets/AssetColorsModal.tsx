@@ -339,7 +339,14 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
               })}
               <span className="frame-tool-muted ml-1 self-center text-xs capitalize">{selectedHue}</span>
             </div>
-            <Slider label="Hue" value={hue.hue} onChange={(value) => setHue(selectedHue, 'hue', value)} />
+            <Slider
+              label="Hue"
+              value={hue.hue}
+              min={-180}
+              max={180}
+              onChange={(value) => setHue(selectedHue, 'hue', value)}
+              hint="Degrees around the colour wheel"
+            />
             <Slider
               label="Saturation"
               value={hue.saturation}

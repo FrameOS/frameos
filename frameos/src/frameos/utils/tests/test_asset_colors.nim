@@ -111,7 +111,7 @@ suite "asset colour profiles":
     check p.r == 54 # 0.21 * 255
 
   test "hue ranges leave greys alone":
-    let profile = profileOf("""{"hues": {"red": {"hue": 100, "saturation": 100, "luminance": 100}}}""")
+    let profile = profileOf("""{"hues": {"red": {"hue": 30, "saturation": 100, "luminance": 100}}}""")
     let image = newImage(2, 1)
     image.unsafe[0, 0] = rgbx(128, 128, 128, 255)
     image.unsafe[1, 0] = rgbx(200, 40, 40, 255)
@@ -148,7 +148,7 @@ suite "asset colour profiles":
   test "parity vector for the frontend preview":
     # The same photo, profile and arithmetic as the TypeScript port; the
     # expected bytes are what the Nim pipeline produced when the port was
-    # written (2026-10-10, end points widened the same day). A change here
+    # written (2026-10-10; end points widened and hue made a degree rotation the same day). A change here
     # must be mirrored in adjust.ts.
     let profile = profileOf("""{"exposure": 0.4, "contrast": 25, "whites": -30, "blacks": 15,
       "saturation": 20, "shadows": {"luminance": -10, "b": 20}, "midtones": {"r": 10},
@@ -159,9 +159,9 @@ suite "asset colour profiles":
     let image = gradient(4, 3)
     applyAssetColors(image, profile)
     check pixelsOf(image) == @[
-      0, 0, 192, 109, 0, 142, 248, 8, 130, 247, 14, 128,
-      0, 160, 108, 87, 177, 95, 240, 175, 130, 248, 180, 135,
-      0, 238, 77, 94, 255, 71, 243, 255, 110, 255, 255, 114]
+      0, 0, 192, 109, 0, 142, 248, 8, 109, 247, 14, 105,
+      0, 160, 83, 116, 177, 87, 240, 190, 130, 248, 198, 135,
+      0, 238, 1, 190, 255, 71, 252, 255, 110, 255, 255, 114]
 
   test "dither parity vector for the frontend preview":
     # forEachPaletteDithered on the same gradient against the Spectra table

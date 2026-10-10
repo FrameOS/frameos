@@ -201,7 +201,7 @@ export function adjustPixel(profile: AssetColorProfile, r0: number, g0: number, 
         return
       }
       const hue = profile.hues[name]
-      hueShift += ((weight * hue.hue) / 100) * 30
+      hueShift += weight * hue.hue
       satScale += (weight * hue.saturation) / 100
       lumShift += (weight * hue.luminance) / 100
     })

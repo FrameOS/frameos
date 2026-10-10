@@ -45,8 +45,8 @@ type
     ## push it towards (or away from) red, green and blue.
     luminance*, r*, g*, b*: float
   HueRange* = object
-    ## -100 .. 100 each: a hue rotation (up to ±30°), a saturation scale
-    ## and a luminance shift for the colours near one hue centre.
+    ## A hue rotation in degrees (-180 .. 180), then a saturation scale and
+    ## a luminance shift (-100 .. 100) for the colours near one hue centre.
     hue*, saturation*, luminance*: float
   AssetColorProfile* = object
     exposure*: float   ## stops, -3 .. 3
@@ -167,7 +167,7 @@ proc parseAssetColorProfile*(root: JsonNode): Option[AssetColorProfile] =
   for i, name in HueRangeNames:
     let hue = if hues.isNil or hues.kind != JObject: nil else: hues{name}
     profile.hues[i] = HueRange(
-      hue: sliderOf(hue, "hue"),
+      hue: sliderOf(hue, "hue", -180.0, 180.0),
       saturation: sliderOf(hue, "saturation"),
       luminance: sliderOf(hue, "luminance"),
     )
@@ -327,7 +327,7 @@ proc adjustPixel*(profile: AssetColorProfile, r0, g0, b0: float): tuple[r, g, b:
     for i in 0 ..< 8:
       if weights[i] == 0.0:
         continue
-      hueShift += weights[i] * profile.hues[i].hue / 100.0 * 30.0
+      hueShift += weights[i] * profile.hues[i].hue
       satScale += weights[i] * profile.hues[i].saturation / 100.0
       lumShift += weights[i] * profile.hues[i].luminance / 100.0
     let

@@ -55,7 +55,8 @@ up as an image.
 
 Every key is optional and neutral when missing; unknown keys are ignored, so
 an older runtime reads a newer file. Sliders are `-100 .. 100` except
-`exposure` (stops, `-3 .. 3`). Hue ranges are `red, orange, yellow, green,
+`exposure` (stops, `-3 .. 3`) and each hue range's `hue` (degrees, `-180 ..
+180`). Hue ranges are `red, orange, yellow, green,
 aqua, blue, purple, magenta`. An `auto` key from the first editor build is
 ignored. `palette` is `["#rrggbb", …]` or `[[r, g, b],
 …]`; one bad entry voids the whole override. A sidecar over 64 KB, or one that
@@ -81,7 +82,7 @@ implementations):
 5. **Saturation** — `L + (v − L) × max(1 + saturation/100, 0)`. Clamp.
 6. **Hues** — in HSL, for pixels with saturation above 0.001: weights are a
    piecewise-linear interpolation between the neighbouring hue centres
-   (0, 30, 60, 120, 180, 240, 280, 320°). `hue` rotates up to ±30°,
+   (0, 30, 60, 120, 180, 240, 280, 320°). `hue` rotates by that many degrees,
    `saturation` scales, `luminance` shifts by `0.3 × S × Σ w·lum/100` (greys
    are untouched). Back to RGB, clamp.
 7. Round to 8 bits. Alpha is kept.
