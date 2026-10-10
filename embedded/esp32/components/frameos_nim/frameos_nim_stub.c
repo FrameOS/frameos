@@ -62,6 +62,7 @@ int frameos_nim_load_scenes(const char *json)
 void frameos_nim_set_debug(int enabled) { (void)enabled; }
 void frameos_nim_set_fusion(int enabled) { (void)enabled; }
 void frameos_nim_set_scaling_mode(const char *mode) { (void)mode; }
+void frameos_nim_set_colors(const char *json) { (void)json; }
 void frameos_nim_set_status_info(const char *info_json) { (void)info_json; }
 void frameos_nim_set_time_zone(const char *time_zone) { (void)time_zone; }
 bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, char *rule_out, size_t rule_len)

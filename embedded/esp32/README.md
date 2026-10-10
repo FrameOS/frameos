@@ -70,7 +70,10 @@ main/tests/               host tests for the IDF-free modules (plain `cc`, no ID
                           header carries its command line). The netguard, SD probe, board,
                           power, wake, battery-filter, version and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
-                          pytest suite (backend/app/tasks/tests/test_esp32_*.py); the contract
+                          pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
+                          checks that every frameos_nim.h function has a frameos_nim_stub.c
+                          twin: the C3 thin client links the stub, and only a release builds
+                          it); the contract
                           walker, JSON guard, upload limits, assets-path, URL guard, minisig,
                           config-parse and schedule catch-up tests run in the ESP32 job of
                           .github/workflows/e2e-docker.yml. Nothing else runs them, so a new
