@@ -265,8 +265,34 @@ jobs:
             echo "sha=$tip" >>"$GITHUB_OUTPUT"
             echo "proceed=true" >>"$GITHUB_OUTPUT"
           elif [ "$tip" != "$GITHUB_SHA" ]; then
+            # The release workflow pushes its `chore: version X` with the
+            # workflow token, which fires no push run: the only run that
+            # commit ever gets is the workflow_run above, and that one skips
+            # when the release fails. Standing down in its favour therefore
+            # left production on the commit BEFORE this merge until the next
+            # successful release (2026-10-10: #521 merged, the release failed
+            # on a C3 link error, and the cloud served the pre-#521 bundle
+            # for thirteen hours). When everything between us and the tip is
+            # such a bump, ship THIS commit — not the tip, whose versions.json
+            # names a release whose assets may not exist yet — and record it
+            # as `main`, which is what the live-ref check above reads.
+            bumps_only=true
+            while IFS= read -r line; do
+              case "$line" in
+                'git@frameos.net chore: version '*) ;;
+                *) bumps_only=false ;;
+              esac
+            done < <(git log --format='%ae %s' "$GITHUB_SHA..$tip")
+            if [ "$bumps_only" = true ]; then
+              echo "origin/main is now $tip, but only release version bumps separate it from $GITHUB_SHA, and a bump has no push run of its own; shipping $GITHUB_SHA." |
+                tee -a "$GITHUB_STEP_SUMMARY"
+              {
+                echo "sha=$GITHUB_SHA"
+                echo "target=$GITHUB_SHA"
+                echo "proceed=true"
+              } >>"$GITHUB_OUTPUT"
             # The same list as `on.push.paths` above; keep the two in step.
-            if git diff --name-only "$GITHUB_SHA" "$tip" | grep -qE \
+            elif git diff --name-only "$GITHUB_SHA" "$tip" | grep -qE \
                 '^(cloud/|frontend/|cloud-frontend/|repo/|frameos/wasm/|frameos/editor/|versions\.json$|release-assets/firmware-signing\.pub$|turbo\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.github/workflows/cloud-ci\.yml$)'; then
               echo "origin/main is now $tip, not $GITHUB_SHA, and that commit has its own run; leaving the deploy to it." |
                 tee -a "$GITHUB_STEP_SUMMARY"
@@ -282,6 +308,9 @@ jobs:
             echo "sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
             echo "proceed=true" >>"$GITHUB_OUTPUT"
           fi
+          # What deploy.sh is handed: `main` (resolved from the remote) unless
+          # the bump case above pinned a commit.
+          grep -q '^target=' "$GITHUB_OUTPUT" || echo "target=main" >>"$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         if: steps.freshness.outputs.proceed == 'true'
@@ -369,14 +398,17 @@ jobs:
 
       # The same script a human runs. `-- main` rather than the bare form so
       # the server records the ref as "main": that is what the branch check
-      # above reads on the next merge.
+      # above reads on the next merge. The bump case pins a commit instead,
+      # and FRAMEOS_CLOUD_DEPLOY_RELEASE_NAME keeps the record saying "main".
       - name: Deploy
         if: steps.live.outputs.proceed == 'true'
         working-directory: cloud
         env:
           FRAMEOS_CLOUD_DEPLOY_HOST: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_HOST }}
+          FRAMEOS_CLOUD_DEPLOY_RELEASE_NAME: main
+          DEPLOY_TARGET: ${{ steps.freshness.outputs.target }}
           # FRAMEOS_CLOUD_DEPLOY_SSH_KEY comes from the Configure SSH step.
-        run: pnpm deploy:prod -- main
+        run: pnpm deploy:prod -- "$DEPLOY_TARGET"
 
       - name: Summarise
         if: steps.live.outputs.proceed == 'true' && success()

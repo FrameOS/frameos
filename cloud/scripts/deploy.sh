@@ -34,7 +34,9 @@ someone else can check out, roll forward from, or revert to.
 Environment: FRAMEOS_CLOUD_DEPLOY_HOST, FRAMEOS_CLOUD_DEPLOY_SSH_KEY,
 FRAMEOS_CLOUD_DEPLOY_REMOTE (default origin),
 FRAMEOS_CLOUD_DEPLOY_DEFAULT_BRANCH (default main),
-FRAMEOS_CLOUD_DEPLOY_CHECK_URL, FRAMEOS_ACCOUNT_DEPLOY_CHECK_URL,
+FRAMEOS_CLOUD_DEPLOY_RELEASE_NAME (record the release under this name
+instead of the ref argument; cloud-ci.yml uses it to ship a pinned main
+commit as "main"), FRAMEOS_CLOUD_DEPLOY_CHECK_URL, FRAMEOS_ACCOUNT_DEPLOY_CHECK_URL,
 FRAMEOS_SCENES_DEPLOY_CHECK_URL.
 USAGE
 }
@@ -140,7 +142,12 @@ fi
 
 # What is about to be live, named as a person would name it. Prefer the ref
 # that was asked for; fall back to the branch that is checked out.
-if [ -n "$deploy_ref" ]; then
+# FRAMEOS_CLOUD_DEPLOY_RELEASE_NAME overrides the name only: cloud-ci.yml
+# ships a pinned main commit by sha when a release bump sits ahead of it,
+# and the server's branch guard must still read "main" afterwards.
+if [ -n "${FRAMEOS_CLOUD_DEPLOY_RELEASE_NAME:-}" ]; then
+  release_ref="$FRAMEOS_CLOUD_DEPLOY_RELEASE_NAME"
+elif [ -n "$deploy_ref" ]; then
   release_ref="$deploy_ref"
 elif [ "$original_ref" != "$head_sha" ]; then
   release_ref="$original_ref"
