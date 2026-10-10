@@ -1354,7 +1354,12 @@ local address — loopback (`127/8`, `::1`), RFC1918 (`10/8`, `172.16/12`,
 `0.0.0.0/8`, broadcast, IPv6 ULA — whether the URL names the address
 literally or a DNS name (redirects included) resolves to one. Blocked
 requests fail with `local network access is blocked on cloud-managed frames`
-in the scene logs. Two exceptions:
+in the scene logs. A name that does not resolve is not a block: the request
+still fails (nothing to classify, and the connect would resolve the name
+again), but as `could not resolve <host>`, on both runtimes; the ESP32 asks
+its resolver three times, a quarter second apart, before it says so, because
+the first lookup after a wake from deep sleep can fail while DHCP's DNS
+server is still settling. Two exceptions:
 
 - the provider's own API endpoint (exact `host:port` from the stored
   `provider_url`) stays reachable, so development providers on the LAN work —

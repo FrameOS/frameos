@@ -37,6 +37,7 @@
 
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 /* The policy is written by the cloud task and read by whichever task is
  * rendering, so the two words below need a lock. A spinlock rather than a
  * mutex because it is statically initialised: there is no init call to forget,
@@ -47,6 +48,7 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 #define NETGUARD_LOCK() portENTER_CRITICAL(&s_lock)
 #define NETGUARD_UNLOCK() portEXIT_CRITICAL(&s_lock)
 #else
+#include <unistd.h>
 #define NETGUARD_LOCK() ((void)0)
 #define NETGUARD_UNLOCK() ((void)0)
 #endif
@@ -409,14 +411,60 @@ static bool looks_numeric(const char *host)
     return true;
 }
 
+/* lwIP answers the first query after a Wi-Fi (re)association with a failure
+ * now and then: the DNS server has just been learned from DHCP, or the first
+ * UDP query is lost. A battery frame wakes, associates and fetches within the
+ * same few seconds, so one failed lookup was turning into an error screen
+ * that stayed up until the next wake. Three tries, a quarter second apart. */
+#define NETGUARD_RESOLVE_ATTEMPTS 3
+#define NETGUARD_RESOLVE_RETRY_MS 250
+
+static void netguard_sleep_ms(unsigned ms)
+{
+#ifdef ESP_PLATFORM
+    vTaskDelay(pdMS_TO_TICKS(ms));
+#else
+    usleep(ms * 1000u);
+#endif
+}
+
+static int netguard_getaddrinfo(const char *host, struct addrinfo **result)
+{
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int rc = -1;
+    for (int attempt = 0; attempt < NETGUARD_RESOLVE_ATTEMPTS; attempt++) {
+        if (attempt > 0) netguard_sleep_ms(NETGUARD_RESOLVE_RETRY_MS);
+        *result = NULL;
+        rc = getaddrinfo(host, NULL, &hints, result);
+        if (rc == 0 && *result != NULL) return 0;
+        if (*result != NULL) freeaddrinfo(*result);
+        *result = NULL;
+#ifndef ESP_PLATFORM
+        /* A definite "no such name" is not going to change in 250 ms; only
+         * the transient answers are worth a second query. lwIP reports
+         * every failure as EAI_FAIL, so on the device all three run. */
+        if (rc == EAI_NONAME) break;
+#endif
+    }
+    return rc == 0 ? -1 : rc;
+}
+
 bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len)
+{
+    return fos_netguard_check_url(url, reason, reason_len) == FOS_NETGUARD_ALLOWED;
+}
+
+fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, size_t reason_len)
 {
     if (reason != NULL && reason_len > 0) reason[0] = '\0';
 
     NETGUARD_LOCK();
     const bool blocking = s_block_local;
     NETGUARD_UNLOCK();
-    if (!blocking) return true;
+    if (!blocking) return FOS_NETGUARD_ALLOWED;
 
     char host[FOS_NETGUARD_HOST_LEN];
     int port = 0;
@@ -424,49 +472,45 @@ bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len)
         if (reason != NULL && reason_len > 0) {
             snprintf(reason, reason_len, "not an http(s) URL with a usable host");
         }
-        return false;
+        return FOS_NETGUARD_BLOCKED;
     }
-    if (exempt_match(host, port)) return true;
+    if (exempt_match(host, port)) return FOS_NETGUARD_ALLOWED;
 
     uint8_t v4[4];
     uint8_t v6[16];
     if (parse_ipv4(host, v4)) {
-        if (!ipv4_is_private(v4)) return true;
+        if (!ipv4_is_private(v4)) return FOS_NETGUARD_ALLOWED;
         if (reason != NULL && reason_len > 0) {
             snprintf(reason, reason_len, "%s is a private address", host);
         }
-        return false;
+        return FOS_NETGUARD_BLOCKED;
     }
     if (parse_ipv6(host, v6)) {
-        if (!ipv6_is_private(v6)) return true;
+        if (!ipv6_is_private(v6)) return FOS_NETGUARD_ALLOWED;
         if (reason != NULL && reason_len > 0) {
             snprintf(reason, reason_len, "%s is a private address", host);
         }
-        return false;
+        return FOS_NETGUARD_BLOCKED;
     }
     if (looks_numeric(host)) {
         if (reason != NULL && reason_len > 0) {
             snprintf(reason, reason_len, "%s is not a well-formed IP address", host);
         }
-        return false;
+        return FOS_NETGUARD_BLOCKED;
     }
 
     /* A name. Reject if ANY answer is private: a DNS-rebinding record set that
      * mixes one public and one RFC1918 address must not pass, and the
      * connect() that follows takes whichever the stack prefers. */
-    struct addrinfo hints;
     struct addrinfo *result = NULL;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, NULL, &hints, &result) != 0 || result == NULL) {
-        /* Unresolvable. The request is going to fail regardless, so the only
-         * question is which error the scene sees; say what we know. */
-        if (result != NULL) freeaddrinfo(result);
+    if (netguard_getaddrinfo(host, &result) != 0) {
+        /* Unresolvable after the retries. The request cannot proceed (we have
+         * nothing to classify), but this is a DNS failure, not a block, and
+         * the caller words it that way. */
         if (reason != NULL && reason_len > 0) {
-            snprintf(reason, reason_len, "%s did not resolve", host);
+            snprintf(reason, reason_len, "could not resolve %s", host);
         }
-        return false;
+        return FOS_NETGUARD_UNRESOLVED;
     }
 
     bool allowed = true;
@@ -499,5 +543,5 @@ bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len)
             snprintf(reason, reason_len, "%s resolves to a private address", host);
         }
     }
-    return allowed;
+    return allowed ? FOS_NETGUARD_ALLOWED : FOS_NETGUARD_BLOCKED;
 }

@@ -78,6 +78,18 @@ bool fos_netguard_is_private_ip(const char *ip);
  * address, not to example.com. */
 bool fos_netguard_parse_url(const char *url, char *host, size_t host_len, int *port);
 
+/* The three answers a URL can get while the deny is active. UNRESOLVED is a
+ * DNS failure, not a policy decision: the request cannot proceed (connect()
+ * would resolve the name again, which is the rebinding hole the check
+ * exists to close), but the scene should hear "could not resolve", the same
+ * words the Pi's client uses, not "blocked" - a public host that failed to
+ * resolve once after a wake from deep sleep is not the owner's router. */
+typedef enum {
+    FOS_NETGUARD_ALLOWED = 0,
+    FOS_NETGUARD_BLOCKED,
+    FOS_NETGUARD_UNRESOLVED,
+} fos_netguard_verdict_t;
+
 /* The check the HTTP client calls, once per hop (initial request and every
  * redirect). Returns true when the request may proceed: the policy is off, the
  * host:port is exempt, or every address the host resolves to is public.
@@ -89,6 +101,9 @@ bool fos_netguard_parse_url(const char *url, char *host, size_t host_len, int *p
  *
  * On a block, `reason` (when non-NULL) gets a short human-readable phrase for
  * the error surfaced to the scene. */
+fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, size_t reason_len);
+
+/* fos_netguard_check_url() == FOS_NETGUARD_ALLOWED. */
 bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len);
 
 #ifdef __cplusplus

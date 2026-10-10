@@ -1722,7 +1722,18 @@ static esp_http_client_handle_t http_open_request(
      * router. Checked before the client even exists; the redirect loop below
      * re-checks every hop, because a 302 to 192.168.1.1 is the same request. */
     char netguard_reason[96];
-    if (!fos_netguard_url_allowed(url, netguard_reason, sizeof(netguard_reason))) {
+    switch (fos_netguard_check_url(url, netguard_reason, sizeof(netguard_reason))) {
+    case FOS_NETGUARD_ALLOWED:
+        break;
+    case FOS_NETGUARD_UNRESOLVED:
+        /* A DNS failure, after the guard's own retries. Worded like the Pi's
+         * client ("Could not resolve host"): it is not the policy speaking,
+         * and a scene that shows the text must not tell the owner their
+         * gallery was blocked. */
+        ESP_LOGW(TAG, "%s %s: %s", method ? method : "GET", url ? url : "(null)", netguard_reason);
+        HTTP_OPEN_FAIL("%s", netguard_reason);
+    case FOS_NETGUARD_BLOCKED:
+    default:
         ESP_LOGW(TAG, "%s %s: blocked by the local-network policy: %s",
                  method ? method : "GET", url ? url : "(null)", netguard_reason);
         HTTP_OPEN_FAIL("local network access is blocked on cloud-managed frames (%s)",
@@ -1813,15 +1824,21 @@ static esp_http_client_handle_t http_open_request(
             drop_cross_origin_headers(client);
         }
         if (fos_netguard_policy_active()) {
-            bool redirect_ok = false;
+            fos_netguard_verdict_t verdict = FOS_NETGUARD_BLOCKED;
             netguard_reason[0] = '\0';
             if (!redirect_url_ok) {
                 strlcpy(netguard_reason, "redirect target unreadable", sizeof(netguard_reason));
             } else {
-                redirect_ok = fos_netguard_url_allowed(redirect_url, netguard_reason,
-                                                       sizeof(netguard_reason));
+                verdict = fos_netguard_check_url(redirect_url, netguard_reason,
+                                                 sizeof(netguard_reason));
             }
-            if (!redirect_ok) {
+            if (verdict == FOS_NETGUARD_UNRESOLVED) {
+                ESP_LOGW(TAG, "%s %s: redirect: %s", method ? method : "GET", url, netguard_reason);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                HTTP_OPEN_FAIL("redirect: %s", netguard_reason);
+            }
+            if (verdict != FOS_NETGUARD_ALLOWED) {
                 ESP_LOGW(TAG, "%s %s: redirect blocked by the local-network policy: %s",
                          method ? method : "GET", url, netguard_reason);
                 esp_http_client_close(client);
