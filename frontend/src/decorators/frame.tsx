@@ -178,6 +178,85 @@ export function frameUpgradeIsQueued(frame: FrameType): boolean {
   return frame.pending_command_types?.includes('notify_update_available') ?? false
 }
 
+export interface FrameFirmwareUpdateProgress {
+  /** 'running' while it downloads or installs, 'failed' on an error line. */
+  kind: 'running' | 'failed'
+  /** The frames list's status word: "updating firmware 42%", "rebooting into 2026.10.3", "update failed". */
+  label: string
+  /** The longer form for a tooltip: the version and the device's own detail. */
+  title: string
+  /** 0..100 while a download reports written/total, else null. */
+  percent: number | null
+}
+
+/** A download that has not reported for this long is not running any more. */
+const firmwareUpdateStaleMs = 15 * 60 * 1000
+/** A failure is worth a word for a while, then the row goes back to normal. */
+const firmwareUpdateFailureShownMs = 6 * 60 * 60 * 1000
+
+/**
+ * What the device said about its firmware update, read for the frames
+ * list (FrameDashboardStatusLine). The hub folds the `ota:<plane>` log
+ * lines into the row; before this they were visible only as log lines and
+ * a frame mid-download read "waiting to sync". null when nothing is going
+ * on, when the last line is too old to be believed, or when the device
+ * reported it was already up to date.
+ */
+export function frameFirmwareUpdateProgress(
+  frame: FrameType,
+  now: number = Date.now()
+): FrameFirmwareUpdateProgress | null {
+  const update = frame.firmware_update
+  if (!update || typeof update.status !== 'string') {
+    return null
+  }
+  const at = parseFrameTimestamp(update.at)
+  const age = Number.isFinite(at) ? now - at : Number.POSITIVE_INFINITY
+  const version = update.version ? ` ${update.version}` : ''
+  const detail = update.detail || ''
+  switch (update.status) {
+    case 'downloading':
+    case 'progress': {
+      if (age > firmwareUpdateStaleMs) {
+        return null
+      }
+      const match = /^(\d+)\/(\d+)$/.exec(detail)
+      const written = match ? Number(match[1]) : NaN
+      const total = match ? Number(match[2]) : NaN
+      const percent = total > 0 && written >= 0 ? Math.min(100, Math.round((written / total) * 100)) : null
+      return {
+        kind: 'running',
+        label: percent === null ? 'updating firmware' : `updating firmware ${percent}%`,
+        title: `Downloading FrameOS${version}${percent === null ? '' : ` (${percent}%)`}`,
+        percent,
+      }
+    }
+    case 'verified':
+      if (age > firmwareUpdateStaleMs) {
+        return null
+      }
+      return {
+        kind: 'running',
+        label: `rebooting into${version || ' the update'}`,
+        title: `Firmware verified; the frame restarts into FrameOS${version}`,
+        percent: 100,
+      }
+    case 'error':
+      if (age > firmwareUpdateFailureShownMs) {
+        return null
+      }
+      return {
+        kind: 'failed',
+        label: 'update failed',
+        title: `The firmware update failed: ${detail || 'unknown error'}. See the ota lines in Logs.`,
+        percent: null,
+      }
+    default:
+      // up-to-date, downgrade-refused, skipped: nothing in flight.
+      return null
+  }
+}
+
 export function frameCheckin(frame: FrameType, now: number = Date.now()): FrameCheckin | null {
   if (frame.connected === true || (frame.active_connections ?? 0) > 0) {
     return null

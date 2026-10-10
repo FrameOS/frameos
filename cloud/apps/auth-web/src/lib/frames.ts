@@ -746,6 +746,9 @@ export function frameSummary(
     next_wake_at: frame.nextWakeAt,
     next_render_at: frame.nextRenderAt,
     sleep_reason: frame.sleepReason,
+    // The device's last ota:<plane> line (hub recordFirmwareUpdate): what
+    // the frames list shows as "updating firmware 42%" while it runs.
+    firmware_update: frame.firmwareUpdate,
     linked_client_id: frame.linkedClientId,
     name: frame.name,
     scenes_checksum: frame.scenesChecksum,

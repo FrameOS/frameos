@@ -19,6 +19,7 @@ import {
   stateWithActiveScene,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateIsOver,
 } from "./protocol";
 
 describe("hashSecret (device token hashing)", () => {
@@ -363,6 +364,7 @@ describe("browser event shaping", () => {
       nextWakeAt: null,
       previewWatchedAt: null,
       sleepReason: null,
+      firmwareUpdate: null,
       publicKey: "pk",
       schedule: { events: [] },
       scenesChecksum: "have",
@@ -384,6 +386,7 @@ describe("browser event shaping", () => {
       connected: true,
       created_at: now,
       deployed_scene_state: { "store-a": { checksum: "aaa", version: 1 } },
+      firmware_update: null,
       frameos_version: "2026.8.1",
       hardware: { platform: "pi-zero2w" },
       id: "frame-uuid",
@@ -426,6 +429,7 @@ describe("browser event shaping", () => {
       nextWakeAt: null,
       previewWatchedAt: null,
       sleepReason: null,
+      firmwareUpdate: null,
       publicKey: "pk",
       schedule: null,
       scenesChecksum: null,
@@ -457,5 +461,26 @@ describe("browser event shaping", () => {
         providerClientMetadata: { requestedScopes: ["frame:managed"] },
       }).service_settings_enabled,
     ).toBe(false);
+  });
+});
+
+describe("firmwareUpdateIsOver", () => {
+  // The hub folds ota:<plane> lines into frames.firmware_update; the hello
+  // after the reboot decides whether that narrative is finished.
+  it("is over after a verified install, whatever version the hello reports", () => {
+    expect(firmwareUpdateIsOver({ status: "verified" }, "2026.10.1", "2026.10.1")).toBe(true);
+    expect(firmwareUpdateIsOver({ status: "verified" }, undefined, "2026.10.1")).toBe(true);
+  });
+  it("is over when the device comes back on a version the row did not know", () => {
+    expect(firmwareUpdateIsOver({ status: "error", detail: "x" }, "2026.10.3", "2026.10.1")).toBe(true);
+    expect(firmwareUpdateIsOver({ status: "progress" }, "2026.10.3", null)).toBe(true);
+  });
+  it("keeps a failure visible across a reconnect on the same version", () => {
+    expect(firmwareUpdateIsOver({ status: "error", detail: "x" }, "2026.10.1", "2026.10.1")).toBe(false);
+    expect(firmwareUpdateIsOver({ status: "error" }, undefined, "2026.10.1")).toBe(false);
+  });
+  it("has nothing to clear without a line", () => {
+    expect(firmwareUpdateIsOver(null, "2026.10.3", "2026.10.1")).toBe(false);
+    expect(firmwareUpdateIsOver(undefined, "2026.10.3", "2026.10.1")).toBe(false);
   });
 });

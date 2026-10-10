@@ -239,3 +239,26 @@ export function frameUpdateEvent(
 
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// When the hello that follows an OTA should drop the row's firmware_update:
+// the install was verified (the device rebooted into it), or the reported
+// version is not the one the row knew (a success the hub missed, or the
+// error belongs to a release that is no longer running).
+export function firmwareUpdateIsOver(
+  firmwareUpdate: unknown,
+  reportedVersion: unknown,
+  knownVersion: string | null | undefined,
+): boolean {
+  if (!firmwareUpdate || typeof firmwareUpdate !== "object") {
+    return false;
+  }
+  const status = (firmwareUpdate as { status?: unknown }).status;
+  if (status === "verified") {
+    return true;
+  }
+  return (
+    typeof reportedVersion === "string" &&
+    reportedVersion.length > 0 &&
+    reportedVersion !== (knownVersion ?? "")
+  );
+}

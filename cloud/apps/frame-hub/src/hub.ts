@@ -92,6 +92,7 @@ import {
   uuidPattern,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateIsOver,
 } from "./protocol";
 import {
   checkMemoryRateLimit,
@@ -910,6 +911,14 @@ export async function startFrameHub(
         ...(typeof hello.frameos_version === "string"
           ? { frameosVersion: hello.frameos_version.slice(0, 64) }
           : {}),
+        // The OTA narrative is over once the device is back: after a
+        // verified install, or with any new version, the row stops saying
+        // "updating". A failed attempt stays visible until a later hello
+        // reports a different version, so the error is not lost on the
+        // reconnect that follows it.
+        ...(firmwareUpdateIsOver(session.frame.firmwareUpdate, hello.frameos_version, session.frame.frameosVersion)
+          ? { firmwareUpdate: null }
+          : {}),
         ...(confirmed && helloState && acceptState(frameId, helloState)
           ? { lastState: helloState }
           : {}),
@@ -1625,6 +1634,60 @@ export async function startFrameHub(
         newLogEvent(session.frame.id, row),
       );
     }
+    await recordFirmwareUpdate(session, entries);
+  }
+
+  // The firmware narrates an OTA as structured `ota:<plane>` log lines
+  // (embedded/esp32/main/fos_ota.c: downloading <version>, progress
+  // <written>/<total> every 512 KB, verified, error <why>, up-to-date,
+  // downgrade-refused, skipped). Until these landed on the row, a frame
+  // half-way through a download still read "waiting to sync" in the list.
+  // The newest line of the batch wins; the hello after the reboot clears it
+  // (see the connect handler). Best effort like the rest of telemetry.
+  async function recordFirmwareUpdate(
+    session: DeviceSession,
+    entries: { timestamp: Date; payload: unknown }[],
+  ) {
+    let latest: Record<string, unknown> | null = null;
+    for (const entry of entries) {
+      const payload = entry.payload;
+      if (
+        isRecord(payload) &&
+        typeof payload.event === "string" &&
+        payload.event.startsWith("ota:") &&
+        typeof payload.status === "string"
+      ) {
+        latest = payload;
+      }
+    }
+    if (!latest) {
+      return;
+    }
+    const status = String(latest.status).slice(0, 32);
+    const detail =
+      typeof latest.detail === "string" ? latest.detail.slice(0, 160) : "";
+    const previous = isRecord(session.frame.firmwareUpdate)
+      ? session.frame.firmwareUpdate
+      : null;
+    const firmwareUpdate = {
+      at: new Date().toISOString(),
+      detail,
+      plane: String(latest.event).slice(4, 36),
+      status,
+      // The version rides the "downloading" line only; later lines keep it.
+      version:
+        status === "downloading"
+          ? detail
+          : typeof previous?.version === "string"
+            ? previous.version
+            : null,
+    };
+    session.frame = { ...session.frame, firmwareUpdate };
+    await db
+      .update(frames)
+      .set({ firmwareUpdate, updatedAt: new Date() })
+      .where(eq(frames.id, session.frame.id));
+    await broadcastFrameUpdate(session.frame.id);
   }
 
   async function handleMetrics(

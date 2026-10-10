@@ -958,6 +958,12 @@ export const frames = pgTable(
     nextWakeAt: timestamp("next_wake_at", { withTimezone: true }),
     nextRenderAt: timestamp("next_render_at", { withTimezone: true }),
     sleepReason: text("sleep_reason"),
+    // The device's last `ota:<plane>` log line, folded into the row by the
+    // hub so the frames list can say "updating firmware 42%" instead of
+    // "waiting to sync" while a download runs: {status, detail, plane, at,
+    // version?}. Cleared on the hello that follows a verified install (or
+    // any hello reporting a new version); a terminal error stays until then.
+    firmwareUpdate: jsonb("firmware_update"),
     // "Someone had this frame's images on screen, roughly now." Stamped by
     // every surface that renders a preview, throttled to one write per frame
     // per 30s, and read by the hub to decide whether a device's "render"

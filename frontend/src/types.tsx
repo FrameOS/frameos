@@ -150,6 +150,11 @@ export interface FrameType {
   next_wake_at?: string | null
   next_render_at?: string | null
   sleep_reason?: 'battery' | 'always' | 'battery_critical' | string | null
+  /** Cloud only: the device's last `ota:<plane>` log line, folded into the
+   * row by the hub while a firmware update runs (downloading, progress
+   * "<written>/<total>", verified, error <why>, …). Cleared on the hello
+   * after a verified install; see frameFirmwareUpdateProgress(). */
+  firmware_update?: FrameFirmwareUpdate | null
   /** Cloud only: the contract verbs still queued for the device (pending or
    * sent-but-unacked, unexpired), as the list and detail routes report them.
    * What lets the frames list say "upgrade queued" instead of offering the
@@ -628,6 +633,15 @@ export interface AiSceneLogType {
   status?: string
   stage?: string
   timestamp: string
+}
+
+export interface FrameFirmwareUpdate {
+  status: string
+  detail: string
+  plane?: string
+  version?: string | null
+  /** ISO instant the hub recorded the line. */
+  at: string
 }
 
 export interface AssetType {

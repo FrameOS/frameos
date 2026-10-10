@@ -74,6 +74,8 @@
     "src/test/shared-spa/frame-status-groups.test.ts",
     // Same story: the check-in helpers live in decorators/frame.tsx too.
     "src/test/shared-spa/frame-checkin.test.ts",
+    // Same story: the firmware-update progress reader lives there as well.
+    "src/test/shared-spa/frame-firmware-update.test.ts",
     // Same story: devices.ts imports the Option type from components/Select.tsx
     // (bare JSX namespace). Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/device-catalog-mirror.test.ts",
