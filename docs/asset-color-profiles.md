@@ -140,8 +140,8 @@ NVS), fed from the backend's settings poll (`frame.colors`) or the cloud's
 `scalingMode` (`fos_nim_set_colors`), so it applies live.
 
 The cloud's scene preview (scenes.frameos.net) does the same on the finished
-frame while a panel is chosen: **Fit photos** (on by default) and a
-**Correction** slider set run through the `beforeDither` hook of
+frame while a panel is chosen: **Auto colours** (on by default) and a
+**Fine tuning** slider set run through the `beforeDither` hook of
 `frameos-wasm`'s `FrameOSPreview` before the browser-side dither. The
 preview has only the finished frame, so the whole picture stands in for the
 photo; both are display only and remembered per browser.
@@ -185,6 +185,8 @@ not dither.
 * **Set colors** opens the editor (`?colors=<path>` in the URL); a photo that
   has a sidecar shows a swatch icon instead. Save uploads the sidecar through
   the ordinary asset upload; Remove colors deletes it.
-* Settings → **Colors** holds the frame's `colors` block on the backend, the
-  on-device panel and the cloud (either profile on 2026.10.2 or newer), with
-  the frame's current image as the preview.
+* Settings → **Colors** (right under Palette) holds the frame's `colors`
+  block on the backend, the on-device panel and the cloud (either profile on
+  2026.10.2 or newer): the "Auto colour correction" select, and "Fine tuning"
+  (the global sliders, previewed on the frame's current image) behind a
+  toggle, folded by default.

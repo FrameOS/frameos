@@ -1423,14 +1423,14 @@ export function SceneLivePreviewPanel({
         {/* What the frame does before its dither: fit the picture into the
             panel's range (on by default on the frame too) and the frame-wide
             correction. Both display only, both only while dithering. */}
-        <label className="viewport-controls__toggle" title="Move the picture's black and white points into the panel's range, as the frame does">
+        <label className="viewport-controls__toggle" title="Auto colour correction, as the frame does it before dithering: the picture's black and white points are moved into the range the panel can show. Nothing is resized.">
           <input
             checked={fitPhotos}
             disabled={panel === null}
             onChange={(event) => setFitPhotos(event.target.checked)}
             type="checkbox"
           />
-          Fit photos
+          Auto colours
         </label>
         <button
           aria-expanded={showCorrection}
@@ -1439,7 +1439,7 @@ export function SceneLivePreviewPanel({
           onClick={() => setShowCorrection((open) => !open)}
           type="button"
         >
-          {profileHasAdjustments(correction) ? "Correction (on)" : "Correction"}
+          {profileHasAdjustments(correction) ? "Fine tuning (on)" : "Fine tuning"}
         </button>
       </div>
       {showCorrection && panel !== null ? (
@@ -1451,7 +1451,7 @@ export function SceneLivePreviewPanel({
             onClick={() => setCorrection(defaultAssetColorProfile())}
             type="button"
           >
-            Reset correction
+            Reset fine tuning
           </button>
         </div>
       ) : null}

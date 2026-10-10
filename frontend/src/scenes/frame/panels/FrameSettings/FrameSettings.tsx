@@ -190,6 +190,9 @@ function FrameSettingsPanel(): JSX.Element {
         <FrameSettingsSection sectionKey="palette">
           <PaletteSection />
         </FrameSettingsSection>
+        <FrameSettingsSection sectionKey="colors">
+          <ColorsSection />
+        </FrameSettingsSection>
         <FrameSettingsSection sectionKey="qr">
           <QrControlCodeSection />
         </FrameSettingsSection>
@@ -207,9 +210,6 @@ function FrameSettingsPanel(): JSX.Element {
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="input">
           <InputSettingsSection />
-        </FrameSettingsSection>
-        <FrameSettingsSection sectionKey="colors">
-          <ColorsSection />
         </FrameSettingsSection>
       </Form>
     </div>

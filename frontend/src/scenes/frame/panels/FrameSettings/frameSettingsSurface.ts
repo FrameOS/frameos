@@ -306,6 +306,14 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     conditions: 'The heading always renders; panels without a palette get a line saying so.',
   },
   {
+    key: 'colors',
+    title: 'Colors',
+    anchor: 'frame-settings-colors',
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
+    conditions:
+      'Collapsed behind a summary line by default. The automatic fit and the frame-wide correction (docs/asset-color-profiles.md); a cloud frame needs 2026.10.2 or newer on either profile, older ones get a note.',
+  },
+  {
     key: 'qr',
     title: 'QR Control Code',
     anchor: 'frame-settings-qr',
@@ -345,14 +353,6 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-input',
     surfaces: ['backend', 'frameAdmin', 'cloudLinux'],
     conditions: 'A full host OS only: no ESP32 board in the tree has a keyboard or a pointer (docs/events.md).',
-  },
-  {
-    key: 'colors',
-    title: 'Colors',
-    anchor: 'frame-settings-colors',
-    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
-    conditions:
-      'The automatic fit and the frame-wide correction (docs/asset-color-profiles.md); a cloud frame needs 2026.10.2 or newer on either profile, older ones get a note.',
   },
 ]
 

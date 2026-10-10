@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '../../../../../components/Button'
+import { Tooltip } from '../../../../../components/Tooltip'
 import { H6 } from '../../../../../components/H6'
 import { Select } from '../../../../../components/Select'
 import { Spinner } from '../../../../../components/Spinner'
@@ -142,6 +144,11 @@ export function ColorsSection(): JSX.Element {
   const { frame, frameForm, setFrameFormValues } = useFrameSettings()
   const colors: FrameColors = frameForm.colors ?? frame.colors ?? {}
   const global = globalProfileOf(colors)
+  // The fine tuning (preview plus the slider set) is a lot of panel for a
+  // setting most frames never touch, so it opens folded; the auto
+  // correction switch is always in view.
+  const [showFineTuning, setShowFineTuning] = useState(false)
+  const tunedSliders = Object.keys(globalOfProfile(global)).length
   const panelPalette = panelPaletteForFrame(
     {
       device: frameForm.device ?? frame.device,
@@ -159,7 +166,19 @@ export function ColorsSection(): JSX.Element {
       <H6 id="frame-settings-colors">Colors</H6>
       <div className="pl-2 @md:pl-8 space-y-3">
         <label className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="@md:w-1/3">Fit photos to the panel</span>
+          <span className="flex items-center gap-1 @md:w-1/3">
+            Auto colour correction
+            <Tooltip
+              title={
+                <>
+                  Before an image is dithered, the frame moves its black and white points so the image&apos;s tones fit
+                  the range the panel can show. A Spectra panel&apos;s white is darker than a photo&apos;s, so without
+                  this the brightest parts come out as flat white. It applies to every image the frame draws, from any
+                  source, and resizes nothing. A photo with its own colours (Assets → Set colors) keeps them instead.
+                </>
+              }
+            />
+          </span>
           <Select
             value={colors.autoFit ?? 'default'}
             onChange={(value) =>
@@ -168,36 +187,53 @@ export function ColorsSection(): JSX.Element {
             options={[
               {
                 value: 'default',
-                label: hasPalette
-                  ? 'Default (on: this panel dithers to a palette)'
-                  : 'Default (off: full-colour display)',
+                label: hasPalette ? 'Default (on for this panel)' : 'Default (off for this display)',
               },
-              { value: 'on', label: 'On' },
+              { value: 'on', label: 'Always on' },
               { value: 'off', label: 'Off' },
             ]}
             className="min-w-0 flex-1"
           />
         </label>
         <p className="frameos-muted text-xs">
-          Every image the frame draws, from any source, has its white and black points moved so its range fits what the
-          panel can show. A photo with its own colours (Assets → Set colors) keeps them instead.
+          {hasPalette
+            ? 'Default is on here: this panel dithers to a fixed set of inks. Off shows the image as it is.'
+            : 'Default is off here: this display shows full colour, so there is nothing to fit. Always on still applies it.'}
         </p>
-        <div className="grid gap-3 @3xl:grid-cols-[minmax(0,1fr)_20rem]">
-          <FrameColorsPreview
-            frame={{ ...frame, ...frameForm, id: frame.id } as Partial<FrameType> & Pick<FrameType, 'id'>}
-            colors={colors}
-            global={global}
-          />
-          <div className="space-y-3">
-            <p className="frameos-muted text-xs">
-              The correction below applies to the whole picture on every display, after the fit.
-            </p>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="flex items-center gap-1">
+            Fine tuning
+            <Tooltip
+              title={
+                <>
+                  A frame-wide colour correction with the same sliders as the photo editor: exposure, contrast, white
+                  and black points, saturation, tints per tonal range and per hue. Applied to the whole picture on every
+                  display, after the automatic correction, and previewed on the frame&apos;s current image dithered as
+                  the panel will show it.
+                </>
+              }
+            />
+            <span className="frameos-muted text-xs">
+              ({tunedSliders === 0 ? 'nothing set' : `${tunedSliders} slider${tunedSliders === 1 ? '' : 's'} set`})
+            </span>
+          </span>
+          <Button size="small" color="secondary" onClick={() => setShowFineTuning(!showFineTuning)}>
+            {showFineTuning ? 'Hide fine tuning' : 'Show fine tuning'}
+          </Button>
+        </div>
+        {!showFineTuning ? null : (
+          <div className="grid gap-3 @3xl:grid-cols-[minmax(0,1fr)_20rem]">
+            <FrameColorsPreview
+              frame={{ ...frame, ...frameForm, id: frame.id } as Partial<FrameType> & Pick<FrameType, 'id'>}
+              colors={colors}
+              global={global}
+            />
             <ColorAdjustmentControls
               profile={global}
               onChange={(profile) => setColors({ ...colors, global: globalOfProfile(profile) })}
             />
           </div>
-        </div>
+        )}
       </div>
     </>
   )
