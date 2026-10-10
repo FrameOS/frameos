@@ -614,7 +614,7 @@ export function attachFrontendErrorCollector(page: Page): () => string[] {
   return () => errors
 }
 
-// The per-photo colour editor (Assets → Set colors) on a palette panel. The
+// The per-photo color editor (Assets → Set colors) on a palette panel. The
 // seeded frame 1 has no palette device, so the dither and the Auto preset
 // would both be off: the frame is re-served as a 7.3" Spectra 6 panel, the
 // listing holds one photo, and the photo's bytes come from a sample scene's

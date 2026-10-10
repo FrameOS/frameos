@@ -303,7 +303,7 @@ export const visualCases: VisualCase[] = [
   {
     // Assets → Set colors on a Spectra 6 panel: the Auto preset the editor
     // opens on (the frame's own automatic fit), and the photo as the panel
-    // dithered it before there were colour controls.
+    // dithered it before there were color controls.
     id: 'frame-asset-colors',
     title: 'Frame asset colors editor',
     path: assetColorsEditorPath,
