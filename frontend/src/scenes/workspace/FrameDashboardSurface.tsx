@@ -13,6 +13,7 @@ import {
   ClockIcon,
   CommandLineIcon,
   DocumentTextIcon,
+  PlayIcon,
   PlusIcon,
   SignalIcon,
   SparklesIcon,
@@ -21,7 +22,13 @@ import {
 
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
-import { frameHost, frameIsHealthy, frameStatus, frameUpgradeIsQueued } from '../../decorators/frame'
+import {
+  frameFirmwareUpdateProgress,
+  frameHost,
+  frameIsHealthy,
+  frameStatus,
+  frameUpgradeIsQueued,
+} from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
@@ -300,11 +307,25 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
   const { openChatDrawer } = useActions(workspaceLogic)
+  const { renderFrame } = useActions(framesModel)
+  // Same gate as the "…" menu's Re-render entry (workspaceSurfaces): the
+  // verb exists on every control plane but not for a virtual frame.
+  const canRender = frameMenuActionIsAllowed(workspaceMode(), 'render', frame)
 
   return (
     <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
       <HeaderMetrics frameId={frame.id} />
       <div className="frame-header-action-buttons flex shrink-0 items-center gap-1">
+        {canRender ? (
+          <button
+            type="button"
+            title="Re-render the current scene"
+            onClick={() => renderFrame(frame.id)}
+            className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <PlayIcon className="h-5 w-5" />
+          </button>
+        ) : null}
         <button
           type="button"
           title="Open AI chat"
@@ -405,8 +426,14 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   // notify_update_available verb is waiting for a frame that is asleep (or
   // off) — offering "upgrade" again reads as if the first click was lost.
   const upgradeQueued = onlyFrameosUpgrade && frameUpgradeIsQueued(frame)
+  // The device's own word while a firmware update runs (hub-folded ota
+  // lines): a download in progress is the one thing happening on this
+  // frame, so it outranks "upgrade queued" and "waiting to sync".
+  const firmwareProgress = frameFirmwareUpdateProgress(frame)
   const changeLabel = unsavedChanges
     ? 'unsaved'
+    : firmwareProgress
+    ? firmwareProgress.label
     : upgradeQueued
     ? 'upgrade queued'
     : onlyFrameosUpgrade
@@ -435,7 +462,13 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
             frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null,
             upgradeQueued ? 'pr-3' : null
           )}
-          title={upgradeQueued ? 'The upgrade is queued and applies when the frame next wakes' : undefined}
+          title={
+            firmwareProgress
+              ? firmwareProgress.title
+              : upgradeQueued
+              ? 'The upgrade is queued and applies when the frame next wakes'
+              : undefined
+          }
         >
           {changeLabel}
           {upgradeQueued ? <QueuedMarker /> : null}
