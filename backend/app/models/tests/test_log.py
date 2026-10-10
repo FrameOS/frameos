@@ -114,15 +114,33 @@ async def test_process_log_bootup(mock_pub, db, redis):
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_process_log_bootup_preserves_hostname_frame_host(mock_pub, db, redis):
-    frame = await new_frame(db, redis, "BootFrame", "espframe.local", "server_host")
+    frame = await new_frame(db, redis, "BootFrame", "espframe.lan", "server_host")
     frame.mode = "embedded"
     db.add(frame)
     db.commit()
 
-    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"})
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"}, ip="10.8.0.204")
 
     updated = db.get(Frame, frame.id)
-    assert updated.frame_host == "espframe.local"
+    assert updated.frame_host == "espframe.lan"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_replaces_an_embedded_mdns_name(mock_pub, db, redis):
+    """The ESP32 firmware answers no mDNS: its `.local` name never resolves,
+    and the backend could never fetch its image or reach its admin API."""
+    frame = await new_frame(db, redis, "BootFrame", "frame70.local", "server_host")
+    frame.mode = "embedded"
+    db.add(frame)
+    db.commit()
+
+    # Still only the address the request really came from.
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.9"}, ip="10.8.0.7")
+    assert db.get(Frame, frame.id).frame_host == "frame70.local"
+
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.9"}, ip="10.8.0.9")
+    assert db.get(Frame, frame.id).frame_host == "10.8.0.9"
 
 
 @pytest.mark.asyncio

@@ -54,6 +54,10 @@ def _is_ip_literal(value: Any) -> bool:
     return True
 
 
+def _is_mdns_name(host: str) -> bool:
+    return host.strip().lower().rstrip(".").endswith(".local")
+
+
 def _follow_boot_ip_enabled(frame: Frame) -> bool:
     embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
     return bool(embedded.get("followBootIp"))
@@ -70,7 +74,9 @@ def _accepted_boot_ip(frame: Frame, log: dict, ip: str | None) -> str | None:
     FRAMEOS_TRUSTED_PROXIES forwarded — never a header from an arbitrary
     LAN peer). An explicit
     `embedded.followBootIp` opt-in trusts the claim as-is; a hostname in
-    `frame_host` is never replaced.
+    `frame_host` is never replaced, except a `.local` one: the ESP32
+    firmware answers no mDNS, so that name (the `frame{id}.local` default
+    embedded frames get) can never resolve.
     """
     if (frame.mode or "rpios") != "embedded":
         return None
@@ -80,7 +86,7 @@ def _accepted_boot_ip(frame: Frame, log: dict, ip: str | None) -> str | None:
     if not claimed:
         return None
     current_host = frame.frame_host or ""
-    if current_host and not _is_ip_literal(current_host):
+    if current_host and not _is_ip_literal(current_host) and not _is_mdns_name(current_host):
         return None
     if claimed == current_host:
         return None
