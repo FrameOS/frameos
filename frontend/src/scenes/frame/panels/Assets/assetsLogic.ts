@@ -196,6 +196,12 @@ function buildAssetTree(
   return root
 }
 
+/** Files the panel shows a thumbnail for, and the colours editor can open. */
+const thumbnailImagePattern = /\.(png|jpe?g|gif|bmp|webp)$/i
+export function isThumbnailAssetName(name: string): boolean {
+  return thumbnailImagePattern.test(name)
+}
+
 const systemFolderNames = new Set(['.frameos', '.thumbs'])
 const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '*.qoi', '.ppm', '.svg']
 const normalizedImageExtensions = imageExtensions.map((extension) => extension.replace('*', '').toLowerCase())

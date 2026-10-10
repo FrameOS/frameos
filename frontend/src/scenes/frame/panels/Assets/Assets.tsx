@@ -9,6 +9,7 @@ import {
   type AssetNode,
   type AssetStats,
   type DiskStats,
+  isThumbnailAssetName,
 } from './assetsLogic'
 import {
   DocumentIcon,
@@ -42,6 +43,8 @@ import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace
 import type { FrameId } from '../../../../types'
 import { AssetColorsModal } from './AssetColorsModal'
 import { assetColorsLogic } from './assetColorsLogic'
+import { SlideshowSettingsModal } from './SlideshowSettingsModal'
+import { slideshowSettingsLogic } from './slideshowSettingsLogic'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -56,7 +59,6 @@ function humaniseSize(size: number) {
 const playSceneButtonClassName =
   'asset-play-button frameos-primary-outline-action shrink-0 rounded-lg border p-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const assetRowActionsClassName = 'asset-row-actions ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
-const thumbnailImagePattern = /\.(png|jpe?g|gif|bmp|webp)$/i
 const browserImagePattern = /\.(png|jpe?g|gif|bmp|webp|svg)$/i
 
 function formatDateFromSeconds(timestamp: number | null): string {
@@ -66,9 +68,7 @@ function formatDateFromSeconds(timestamp: number | null): string {
   return new Date(timestamp * 1000).toLocaleString()
 }
 
-function hasAssetThumbnail(name: string): boolean {
-  return thumbnailImagePattern.test(name)
-}
+const hasAssetThumbnail = isThumbnailAssetName
 
 function opensAsBrowserImage(name: string): boolean {
   return browserImagePattern.test(name)
@@ -409,7 +409,7 @@ function TreeNode({
             <button
               type="button"
               className={playSceneButtonClassName}
-              title="Run image scene"
+              title="Render image"
               onClick={() => createImageScene(node.path)}
             >
               <PlayIcon className="w-4 h-4" />
@@ -423,7 +423,7 @@ function TreeNode({
               [
                 isPlayableImage
                   ? {
-                      label: 'Run image scene',
+                      label: 'Render image',
                       icon: <PlayIcon className="w-4 h-4" />,
                       onClick: () => createImageScene(node.path),
                     }
@@ -552,6 +552,7 @@ function AssetsSummaryHeader({
   isReloading,
   onRefresh,
   onSync,
+  onSlideshowSettings,
 }: {
   rootName: string
   stats: AssetStats
@@ -561,6 +562,7 @@ function AssetsSummaryHeader({
   isReloading: boolean
   onRefresh: () => void
   onSync: () => void
+  onSlideshowSettings: () => void
 }): JSX.Element {
   const diskUsedPercent = diskStats ? Math.min(Math.max(diskStats.usedPercent, 0), 100) : null
   const statItems = [
@@ -605,6 +607,12 @@ function AssetsSummaryHeader({
                     icon: <DocumentArrowUpIcon className="w-5 h-5" />,
                   }
                 : null,
+              {
+                label: 'Default slideshow settings',
+                onClick: onSlideshowSettings,
+                icon: <PlayIcon className="w-5 h-5" />,
+                title: 'The seconds between images a new slideshow starts with',
+              },
             ].filter(Boolean) as DropdownMenuItem[]
           }
         />
@@ -692,6 +700,8 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   } = useValues(assetsLogic(assetsLogicProps))
   useMountedLogic(assetColorsLogic(assetsLogicProps))
   const { openEditor: openColorEditor } = useActions(assetColorsLogic(assetsLogicProps))
+  const { secondsBetweenImages } = useValues(slideshowSettingsLogic)
+  const { openSettings: openSlideshowSettings } = useActions(slideshowSettingsLogic)
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
@@ -757,7 +767,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     const folderPath = parts.join('/')
     const imageFolder = folderPath ? `${assetsPath}/${folderPath}` : assetsPath
     const sceneId = uuidv4()
-    const scene = buildLocalImageFolderScene(imageFolder, sceneId)
+    const scene = buildLocalImageFolderScene(imageFolder, sceneId, secondsBetweenImages)
     try {
       await sendEvent('uploadScenes', { scenes: [scene], sceneId })
     } catch (error) {
@@ -786,6 +796,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             isReloading={assetsLoading || assetsRefreshing}
             onRefresh={refreshAssets}
             onSync={handleSyncAssets}
+            onSlideshowSettings={openSlideshowSettings}
           />
           {storageUnmounted ? <StorageUnmountedNotice /> : null}
           <TreeNode
@@ -812,6 +823,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
         </div>
       )}
       <AssetColorsModal frameId={frame.id} />
+      <SlideshowSettingsModal />
     </div>
   )
 }

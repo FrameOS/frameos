@@ -406,7 +406,8 @@ export function buildLocalImageScene(imageFilename: string, imageFolder: string,
   }
 }
 
-export function buildLocalImageFolderScene(imageFolder: string, sceneId: string): FrameScene {
+/** `seconds`: how long each image stays (the Assets panel's default slideshow setting). */
+export function buildLocalImageFolderScene(imageFolder: string, sceneId: string, seconds?: number): FrameScene {
   const normalizedFolder = imageFolder.replace(/\/+$/, '') || '/srv/assets'
 
   return {
@@ -418,6 +419,9 @@ export function buildLocalImageFolderScene(imageFolder: string, sceneId: string)
       }
       if (field.name === 'search') {
         return { ...field, value: '' }
+      }
+      if (field.name === 'seconds' && typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0) {
+        return { ...field, value: String(seconds) }
       }
       return field
     }),

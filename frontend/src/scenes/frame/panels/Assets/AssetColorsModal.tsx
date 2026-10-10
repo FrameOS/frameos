@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import { useEffect, useRef } from 'react'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
@@ -80,6 +81,9 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
     savedProfileLoading,
     adjustmentMode,
     autoEndPoints,
+    imagePosition,
+    previousImagePath,
+    nextImagePath,
   } = useValues(logic)
   const {
     closeEditor,
@@ -93,6 +97,9 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
     resetProfile,
     saveProfile,
     removeProfile,
+    openPreviousImage,
+    openNextImage,
+    saveAndOpenNext,
   } = useActions(logic)
 
   if (!imagePath) {
@@ -126,6 +133,31 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
               Remove colors
             </Button>
           ) : null}
+          {imagePosition.count > 1 ? (
+            <div className="flex items-center gap-1">
+              <Button
+                color="secondary"
+                size="small"
+                onClick={openPreviousImage}
+                disabled={!previousImagePath}
+                title="Previous photo in this folder (unsaved changes are dropped)"
+              >
+                <ChevronLeftIcon className="h-4 w-4" />
+              </Button>
+              <span className="frame-tool-muted px-1 text-xs tabular-nums">
+                {imagePosition.index + 1} of {imagePosition.count}
+              </span>
+              <Button
+                color="secondary"
+                size="small"
+                onClick={openNextImage}
+                disabled={!nextImagePath}
+                title="Next photo in this folder (unsaved changes are dropped)"
+              >
+                <ChevronRightIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : null}
           <div className="ml-auto flex items-center gap-2">
             <Button color="secondary" size="small" onClick={closeEditor}>
               Cancel
@@ -133,6 +165,11 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
             <Button color="primary" size="small" onClick={saveProfile} disabled={!canSave}>
               {savedProfileLoading ? 'Loading' : 'Save'}
             </Button>
+            {nextImagePath ? (
+              <Button color="primary" size="small" onClick={saveAndOpenNext} disabled={!canSave}>
+                Save &amp; next
+              </Button>
+            ) : null}
           </div>
         </div>
       }
