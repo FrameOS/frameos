@@ -1,4 +1,6 @@
 import type { Page, Route } from '@playwright/test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 
 const fixedNow = '2026-05-23T12:00:00Z'
 const e2eInstallFrameNamePattern =
@@ -610,6 +612,79 @@ export function attachFrontendErrorCollector(page: Page): () => string[] {
     errors.push(text)
   })
   return () => errors
+}
+
+// The per-photo colour editor (Assets → Set colors) on a palette panel. The
+// seeded frame 1 has no palette device, so the dither and the Auto preset
+// would both be off: the frame is re-served as a 7.3" Spectra 6 panel, the
+// listing holds one photo, and the photo's bytes come from a sample scene's
+// cover in the repo. The sidecar lookup answers 404, which is "no profile".
+const assetColorsPhoto = 'images/hoverfly.jpg'
+export const assetColorsEditorPath = `/frames/1/assets?colors=${encodeURIComponent(assetColorsPhoto)}`
+
+export async function mockAssetColorsEditor(page: Page): Promise<void> {
+  const photoBytes = readFileSync(
+    join(__dirname, '..', '..', '..', 'repo', 'scenes', 'samples', 'Wikimedia Commons', 'image.jpg')
+  )
+  const asPalettePanel = (frame: any) =>
+    frame?.id === 1
+      ? { ...frame, device: 'waveshare.EPD_7in3e', width: 800, height: 480, rotate: 0, palette: null, colors: null }
+      : frame
+
+  await page.route(projectApiPathPattern('/frames'), async (route) => {
+    const response = await page.request.get(route.request().url())
+    const payload = withoutE2EInstallFrames(await response.json())
+    await route.fulfill({
+      response,
+      json: Array.isArray(payload?.frames) ? { ...payload, frames: payload.frames.map(asPalettePanel) } : payload,
+    })
+  })
+  await page.route(projectApiPathPattern('/frames/1'), async (route) => {
+    if (route.request().method() !== 'GET') {
+      return route.fallback()
+    }
+    const response = await page.request.get(route.request().url())
+    const payload = await response.json()
+    await route.fulfill({ response, json: { ...payload, frame: asPalettePanel(payload?.frame) } })
+  })
+  await page.route(
+    projectApiPathPattern('/frames/1/assets'),
+    fulfillJson({
+      assets: [
+        { path: 'images', size: 4096, mtime: 1_779_535_200, is_dir: true },
+        { path: assetColorsPhoto, size: 148_201, mtime: 1_779_535_200, is_dir: false },
+      ],
+    })
+  )
+  await page.route(projectApiPathPattern('/frames/1/asset'), async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('path') === assetColorsPhoto) {
+      return route.fulfill({ status: 200, contentType: 'image/jpeg', body: photoBytes })
+    }
+    return route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'Not found' }),
+    })
+  })
+}
+
+/** The editor has decoded the photo and drawn the dithered preview. */
+export async function waitForAssetColorsPreview(page: Page): Promise<void> {
+  const canvas = page.locator('canvas').first()
+  await canvas.waitFor({ state: 'visible' })
+  await page.waitForFunction(() => {
+    const el = document.querySelector('canvas')
+    return el instanceof HTMLCanvasElement && el.width > 0
+  })
+}
+
+export async function chooseAssetColorsAdjustments(page: Page, mode: 'none' | 'auto' | 'custom'): Promise<void> {
+  await page
+    .locator('select')
+    .filter({ has: page.locator('option[value="auto"]') })
+    .selectOption(mode)
+  await waitForAssetColorsPreview(page)
 }
 
 function fulfillJson(body: unknown): (route: Route) => Promise<void> {

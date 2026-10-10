@@ -1,5 +1,11 @@
 import type { Page } from '@playwright/test'
-import { mockCloudBackupsApi } from './visual-helpers'
+import {
+  assetColorsEditorPath,
+  chooseAssetColorsAdjustments,
+  mockAssetColorsEditor,
+  mockCloudBackupsApi,
+  waitForAssetColorsPreview,
+} from './visual-helpers'
 
 export type VisualTheme = 'light' | 'dark'
 export type VisualViewportName = 'mobile' | 'mid' | 'full'
@@ -293,6 +299,18 @@ export const visualCases: VisualCase[] = [
     path: '/frames/1/assets',
     fullPage: true,
     variants: [{ id: 'default' }],
+  },
+  {
+    // Assets → Set colors on a Spectra 6 panel: the Auto preset the editor
+    // opens on (the frame's own automatic fit), and the photo as the panel
+    // dithered it before there were colour controls.
+    id: 'frame-asset-colors',
+    title: 'Frame asset colours editor',
+    path: assetColorsEditorPath,
+    viewports: ['mid', 'full'],
+    setup: mockAssetColorsEditor,
+    ready: waitForAssetColorsPreview,
+    variants: [{ id: 'auto' }, { id: 'none', prepare: (page) => chooseAssetColorsAdjustments(page, 'none') }],
   },
   {
     id: 'frame-terminal',
