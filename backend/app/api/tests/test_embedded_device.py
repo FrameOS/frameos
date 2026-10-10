@@ -1,3 +1,4 @@
+import io
 import struct
 
 import httpx
@@ -283,6 +284,74 @@ async def test_render_end_to_end_wasm_scene(async_client, no_auth_client, db):
     ones = sum(bin(byte).count('1') for byte in payload[:4800])
     total_bits = 4800 * 8
     assert 0.05 < ones / total_bits < 0.95
+
+
+def bmp_bytes(size=(4, 2), color='white') -> bytes:
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new('RGB', size, color).save(out, format='BMP')
+    return out.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_image_push_requires_device_auth(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    other = await device_frame(async_client, db)
+    url = f'/api/frames/{frame.id}/embedded/image'
+    assert (await no_auth_client.post(url, content=bmp_bytes())).status_code == 401
+    assert (await no_auth_client.post(url, content=bmp_bytes(), headers=auth(other))).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_image_push_is_what_get_image_serves(async_client, no_auth_client, db, redis):
+    """A deep-sleeping ESP32 cannot be pulled from: once it pushes, the image
+    route serves the push and never tries the frame."""
+    from app.api import frames as frames_api
+
+    frame = await device_frame(async_client, db)
+    response = await no_auth_client.post(
+        f'/api/frames/{frame.id}/embedded/image?scene_id=scene-1',
+        content=bmp_bytes((4, 2), 'red'),
+        headers={**auth(frame), 'Content-Type': 'image/bmp'},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()['sceneId'] == 'scene-1'
+    cached = await redis.get(frames_api._frame_image_cache_key(frame.id))
+    assert cached.startswith(b'\x89PNG')
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'scene-1'
+
+    pull = AsyncMock(side_effect=AssertionError('a pushing frame is not pulled'))
+    with patch('app.api.frames._fetch_frame_http_bytes', pull):
+        image = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+    assert image.status_code == 200
+    assert image.content == cached
+    pull.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_image_push_rejects_what_is_not_an_image(async_client, no_auth_client, db, redis):
+    from app.api import frames as frames_api
+
+    frame = await device_frame(async_client, db)
+    url = f'/api/frames/{frame.id}/embedded/image'
+    assert (await no_auth_client.post(url, content=b'', headers=auth(frame))).status_code == 400
+    response = await no_auth_client.post(url, content=b'not a bitmap', headers=auth(frame))
+    assert response.status_code == 400
+    assert await redis.get(frames_api._frame_image_cache_key(frame.id)) is None
+    assert await redis.get(frames_api._frame_image_pushed_key(frame.id)) is None
+
+
+@pytest.mark.asyncio
+async def test_image_push_is_rate_limited(async_client, no_auth_client, db, redis):
+    from app.api.frames import EMBEDDED_IMAGE_PUSHES_PER_MINUTE
+
+    frame = await device_frame(async_client, db)
+    url = f'/api/frames/{frame.id}/embedded/image'
+    body = bmp_bytes()
+    for _ in range(EMBEDDED_IMAGE_PUSHES_PER_MINUTE):
+        assert (await no_auth_client.post(url, content=body, headers=auth(frame))).status_code == 200
+    assert (await no_auth_client.post(url, content=body, headers=auth(frame))).status_code == 429
 
 
 @pytest.mark.asyncio

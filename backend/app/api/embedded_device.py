@@ -24,6 +24,9 @@ token (same scheme as ``/api/log``). Device endpoints:
   array (interpreted scenes: QuickJS + AOT app library on-device). The
   ETag is the payload's sha256; devices poll with ``If-None-Match`` and get
   304 when nothing changed, so hot scene updates need no reflash.
+- ``POST /api/frames/{id}/embedded/image?scene_id=…`` — the image the panel
+  shows, pushed after a render (in ``frames.py``, next to the image cache it
+  fills and the ``GET …/image`` route that then serves it instead of pulling).
 
 Wire format for /render ("FOSB"): magic ``FOSB``, version u8 (1), pixel
 format u8 (see ``fos_pixel_format_t``), width u16le, height u16le, reserved

@@ -193,7 +193,7 @@ from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_
 from app.api.project_scope import project_get_or_404
 from app.api.firmware_release import latest_published_provisioning_assets
 from app.tenancy import current_project_id, get_user_project
-from . import api_project, api_open
+from . import api_project, api_open, api_public
 
 REMOTE_TASK_TRANSPORTS = {"auto", "remote", "agent", "ssh"}
 
@@ -2392,6 +2392,63 @@ async def api_frame_download_full_logs(id: int, db: Session = Depends(get_db)):
     )
 
 
+# Set while an embedded frame hands over its own image after each render
+# (api_embedded_device_image below). Refreshed on every push; a frame renders
+# at least weekly, so a frame that stopped pushing (an older firmware,
+# another backend) is pulled again after this.
+FRAME_IMAGE_PUSHED_TTL_SECONDS = 8 * 86400
+# A 4bpp BMP of the largest supported panel (1200x1600) is under 1 MB.
+MAX_EMBEDDED_IMAGE_BYTES = 8 * 1024 * 1024
+# Frames push only when the panel changed, at most every 10 s; this only
+# caps what a leaked key can make the backend decode.
+EMBEDDED_IMAGE_PUSHES_PER_MINUTE = 30
+
+
+def _frame_image_pushed_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:image:pushed"
+
+
+@api_public.post("/frames/{id:int}/embedded/image")
+async def api_embedded_device_image(
+    id: int,
+    request: Request,
+    scene_id: str | None = Query(None, max_length=256),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    authorization: str = Header(None),
+):
+    """The device hands over the image its panel now shows (the BMP its own
+    /image serves) after a render. Pulling /image fails for a frame that
+    deep-sleeps or cannot be routed to, and the device can always reach the
+    backend; once a frame pushes, the image route serves its push."""
+    from app.api.embedded_device import _embedded_frame_from_bearer
+    from app.utils.rate_limit import hit_rate_limit
+
+    frame = _embedded_frame_from_bearer(db, id, authorization)
+    if await hit_rate_limit(
+        redis, "embedded_image", str(frame.id), limit=EMBEDDED_IMAGE_PUSHES_PER_MINUTE, window_seconds=60
+    ):
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too many image pushes")
+    body = await read_body_limited(request, MAX_EMBEDDED_IMAGE_BYTES, "Image too large")
+    if not body:
+        _bad_request("Missing image payload")
+    try:
+        # Always decoded and re-encoded: what is stored is an image, whatever
+        # the device sent.
+        png = await asyncio.get_running_loop().run_in_executor(
+            None, _coerce_frame_image_to_png, body, {"content-type": "image/bmp"}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Not an image: {exc}")
+
+    if scene_id:
+        # The frame says which scene drew this image, as on a pull.
+        await redis.set(f"frame:{frame.id}:active_scene", scene_id)
+    await redis.set(_frame_image_pushed_key(frame.id), b"1", ex=FRAME_IMAGE_PUSHED_TTL_SECONDS)
+    image_info = await _store_frame_image(db, redis, frame, png, scene_id=scene_id or None)
+    return {"message": "Frame image updated", **image_info}
+
+
 @api_open.api_route("/projects/{project_id}/frames/{id:int}/image", methods=["GET", "HEAD"])
 async def api_frame_get_image(
     project_id: int,
@@ -2464,6 +2521,18 @@ async def api_frame_get_image(
             )
         else:
             return await _frame_image_placeholder_response(frame)
+
+    # A frame that pushes its image has already put what the panel shows in
+    # the cache. Pulling would only fail: it sleeps between renders, and has
+    # no mDNS name to be found by.
+    if await redis.get(_frame_image_pushed_key(frame.id)):
+        pushed = await _get_cached_frame_image(redis, cache_key)
+        if pushed:
+            return Response(
+                content=pushed,
+                media_type="image/png",
+                headers=await read_frame_sync_hint_headers(redis, frame.id),
+            )
 
     frame_image_lock = _get_frame_image_lock(id)
     waited_for_lock = frame_image_lock.locked()

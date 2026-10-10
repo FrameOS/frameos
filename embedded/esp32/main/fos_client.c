@@ -28,6 +28,7 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_framebuffer.h"
+#include "fos_http.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_power.h"
@@ -855,6 +856,159 @@ static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len)
     return ESP_OK;
 }
 
+/* ------------------------------------------------------------ image push */
+
+/* A self-hosted backend pulls GET /image only while it can find and reach
+ * the frame awake, which a deep-sleeping battery frame, a `.local` name
+ * (there is no mDNS) or a NAT in between all defeat. The frame reaches the
+ * backend fine (logs, scenes, settings), so after a render it hands over the
+ * image itself: the BMP the preview routes serve, streamed from the packed
+ * snapshot. The cloud gets the same image over its socket (image_get). */
+#define FOS_IMAGE_PUSH_TIMEOUT_MS 10000
+#define FOS_IMAGE_PUSH_CHUNK 4096
+/* A fast LCD or OLED scene renders every second; e-paper never gets close. */
+#define FOS_IMAGE_PUSH_MIN_INTERVAL_US (10LL * 1000000LL)
+
+/* The panel image the backend last accepted, kept across deep sleeps: an
+ * unchanged panel is not sent again, and a failed push is retried after the
+ * next render even when the panel did not change. */
+RTC_DATA_ATTR static uint8_t s_pushed_image_sha[FOS_DISPLAY_HASH_LEN];
+RTC_DATA_ATTR static bool s_pushed_image_valid;
+static int64_t s_last_image_push_us = 0;
+
+typedef struct {
+    esp_http_client_handle_t client;
+    size_t used;
+    bool failed;
+    uint8_t buf[FOS_IMAGE_PUSH_CHUNK];
+} image_push_t;
+
+static bool image_push_flush(image_push_t *push)
+{
+    size_t sent = 0;
+    while (sent < push->used) {
+        int w = esp_http_client_write(push->client, (const char *)push->buf + sent,
+                                      (int)(push->used - sent));
+        if (w <= 0) {
+            push->failed = true;
+            return false;
+        }
+        sent += (size_t)w;
+    }
+    push->used = 0;
+    return true;
+}
+
+static void image_push_begin(void *ctx, size_t total)
+{
+    image_push_t *push = (image_push_t *)ctx;
+    if (esp_http_client_open(push->client, (int)total) != ESP_OK) push->failed = true;
+}
+
+/* The stream writes one panel row at a time; batch them so a TLS record is
+ * not spent on every 600 bytes. */
+static bool image_push_write(void *ctx, const uint8_t *data, size_t len)
+{
+    image_push_t *push = (image_push_t *)ctx;
+    while (len > 0 && !push->failed) {
+        size_t take = sizeof(push->buf) - push->used;
+        if (take > len) take = len;
+        memcpy(push->buf + push->used, data, take);
+        push->used += take;
+        data += take;
+        len -= take;
+        if (push->used == sizeof(push->buf)) image_push_flush(push);
+    }
+    return !push->failed;
+}
+
+static void url_query_escape(const char *src, char *out, size_t out_len)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    size_t used = 0;
+    for (; src && *src && used + 4 < out_len; src++) {
+        unsigned char c = (unsigned char)*src;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            out[used++] = (char)c;
+        } else {
+            out[used++] = '%';
+            out[used++] = hex[c >> 4];
+            out[used++] = hex[c & 0x0F];
+        }
+    }
+    out[used] = '\0';
+}
+
+static void push_image_to_backend(const char *scene_id)
+{
+    fos_config_t *config = fos_config();
+    if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) return;
+    if (!fos_display_present() || !s_display_state_valid) return;
+    if (s_pushed_image_valid &&
+        memcmp(s_pushed_image_sha, s_display_state.sha256, FOS_DISPLAY_HASH_LEN) == 0) {
+        return;
+    }
+    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return;
+    int64_t now_us = esp_timer_get_time();
+    if (s_last_image_push_us != 0 && now_us - s_last_image_push_us < FOS_IMAGE_PUSH_MIN_INTERVAL_US) {
+        return;
+    }
+    /* No retained snapshot (a hash-only board): nothing to send. */
+    if (!fos_client_snapshot_info(NULL, NULL, NULL, NULL, NULL, NULL)) return;
+    s_last_image_push_us = now_us;
+
+    char scene_q[3 * 128 + 1];
+    url_query_escape(scene_id, scene_q, sizeof(scene_q));
+    char url[FOS_URL_LEN + sizeof(scene_q) + 64];
+    snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/image%s%s", config->backend_url,
+             (unsigned long)config->frame_id, scene_q[0] ? "?scene_id=" : "", scene_q);
+    char auth[FOS_STR_LEN + 16];
+    snprintf(auth, sizeof(auth), "Bearer %s", config->api_key);
+
+    image_push_t *push = calloc(1, sizeof(*push));
+    if (!push) return;
+    esp_http_client_config_t http_config = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = FOS_IMAGE_PUSH_TIMEOUT_MS,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 1024,
+    };
+    push->client = esp_http_client_init(&http_config);
+    if (!push->client) {
+        free(push);
+        return;
+    }
+    esp_http_client_set_header(push->client, "Authorization", auth);
+    esp_http_client_set_header(push->client, "Content-Type", "image/bmp");
+
+    static const fos_preview_sink_t sink = {
+        .begin = image_push_begin,
+        .write = image_push_write,
+    };
+    esp_err_t err = fos_http_preview_bmp_stream(&sink, push, 5000, NULL, 0);
+    if (err == ESP_OK && !image_push_flush(push)) err = ESP_FAIL;
+    int status = 0;
+    if (err == ESP_OK && !push->failed) {
+        esp_http_client_fetch_headers(push->client);
+        status = esp_http_client_get_status_code(push->client);
+    }
+    esp_http_client_close(push->client);
+    esp_http_client_cleanup(push->client);
+    free(push);
+
+    int64_t ms = (esp_timer_get_time() - now_us) / 1000;
+    if (status == 200) {
+        memcpy(s_pushed_image_sha, s_display_state.sha256, FOS_DISPLAY_HASH_LEN);
+        s_pushed_image_valid = true;
+        ESP_LOGI(TAG, "image pushed to the backend in %lld ms", ms);
+    } else {
+        ESP_LOGW(TAG, "image push to the backend failed (%s, HTTP %d, %lld ms)",
+                 esp_err_to_name(err), status, ms);
+    }
+}
+
 /* ------------------------------------------------------------- the loop */
 
 /* The facts behind the built-in status screen (frameos/utils/status_screen
@@ -1030,6 +1184,10 @@ static esp_err_t render_once(void)
         /* "I drew something new" — the provider decides whether anyone is
          * looking and fetches the image with image_get if so. */
         fos_cloud_announce_render(scene_id);
+    }
+    if (err == ESP_OK) {
+        /* Also on a skipped refresh: the last push may have failed. */
+        push_image_to_backend(scene_id);
     }
     /* Returns the reservation to the pool, or frees a one-off allocation —
      * including the Nim renderer's buffer on the local-render path. */

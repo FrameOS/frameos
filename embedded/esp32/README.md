@@ -263,6 +263,14 @@ device pulls whatever a console line cannot carry (its HTTPS certificate and
 key, the service API keys, the schedule) from `/embedded/settings` once it is
 on Wi-Fi.
 
+After a render the device posts the image its panel shows to
+`/embedded/image` (the BMP `/image` serves, streamed off the packed snapshot;
+an unchanged panel the backend already has is not sent again, and pushes
+are at least 10 s apart). The backend cannot pull it reliably: the frame
+deep-sleeps between renders and answers no mDNS, so its `frame<id>.local`
+default never resolves. That name gives way to the address the frame boots
+with. The cloud gets the same image with `image_get`.
+
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's
 `embedded_provisioning_plan` (`backend/app/tasks/embedded_firmware.py`) —
