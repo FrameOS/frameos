@@ -3,7 +3,9 @@
 A photo in the assets folder may sit next to a small JSON sidecar that says
 how it should be graded before the panel dither sees it. The Assets panel's
 **Set colors** editor writes the file and previews it; the runtime applies it
-whenever it loads that photo. The two implementations are mirrors and must
+whenever it loads that photo. The editor's **Auto** is a preset: it fills the
+Whites and Blacks sliders in from the photo's histogram, so a saved profile
+is always plain sliders and the runtime has nothing to measure. The two implementations are mirrors and must
 stay in step:
 
 | Side | Code | Pinned by |
@@ -46,7 +48,6 @@ up as an image.
       "red":   { "hue": 40, "saturation": -30, "luminance": 20 },
       "green": { "hue": -50, "saturation": 60, "luminance": -20 }
     },
-    "auto": true,
     "palette": ["#191426", "#b2c1c0", "#c7bb00", "#6b1119", "#18539a", "#2a5531"]
   }
 }
@@ -55,7 +56,8 @@ up as an image.
 Every key is optional and neutral when missing; unknown keys are ignored, so
 an older runtime reads a newer file. Sliders are `-100 .. 100` except
 `exposure` (stops, `-3 .. 3`). Hue ranges are `red, orange, yellow, green,
-aqua, blue, purple, magenta`. `palette` is `["#rrggbb", …]` or `[[r, g, b],
+aqua, blue, purple, magenta`. An `auto` key from the first editor build is
+ignored. `palette` is `["#rrggbb", …]` or `[[r, g, b],
 …]`; one bad entry voids the whole override. A sidecar over 64 KB, or one that
 does not parse, is treated as absent — a broken sidecar never takes the photo
 down with it.
@@ -65,28 +67,38 @@ down with it.
 Per pixel, channels as floats `0 .. 1`, in this order (`adjustPixel` in both
 implementations):
 
-1. **Auto** — the photo's luminance percentiles 0.5 and 99.5 (histogram over
-   the whole image, or over the fitted rectangle when decoding into the
-   canvas) are mapped linearly onto the darkest and brightest luminance of
-   the palette the photo will be dithered to (the sidecar's own `palette`,
-   else the panel's). Luminance weights are the dither's: `0.21 R + 0.72 G +
-   0.07 B`. Skipped when the range is under three levels.
-2. **Exposure** — `× 2^stops`.
-3. **Blacks / Whites** — `blackPoint = -blacks/100 × 0.2`, `whitePoint = 1 −
-   whites/100 × 0.2`, `v = (v − blackPoint) / max(whitePoint − blackPoint,
-   0.2)`. Negative whites pulls the highlights below the panel's white.
-4. **Contrast** — `(v − 0.5) × max(1 + contrast/100, 0) + 0.5`, then clamp.
-5. **Tones** — with `L` the luminance, weights `shadows = (1−L)²`,
+1. **Exposure** — `× 2^stops`.
+2. **Blacks / Whites** — `blackPoint = -blacks/100 × 0.4`, `whitePoint = 1 −
+   whites/100 × 0.4`, `v = (v − blackPoint) / max(whitePoint − blackPoint,
+   0.2)`. Negative whites pulls the highlights below the panel's white; a
+   white point of 1.4 is what a Spectra panel needs to take a photo's full
+   range, which is why the range is 0.4.
+3. **Contrast** — `(v − 0.5) × max(1 + contrast/100, 0) + 0.5`, then clamp.
+4. **Tones** — with `L` the luminance, weights `shadows = (1−L)²`,
    `highlights = L²`, `midtones = 1 − shadows − highlights`; each range adds
    `w × luminance/100 × 0.5` to every channel and `w × tint/100 × 0.35` to
    its own channel. Clamp.
-6. **Saturation** — `L + (v − L) × max(1 + saturation/100, 0)`. Clamp.
-7. **Hues** — in HSL, for pixels with saturation above 0.001: weights are a
+5. **Saturation** — `L + (v − L) × max(1 + saturation/100, 0)`. Clamp.
+6. **Hues** — in HSL, for pixels with saturation above 0.001: weights are a
    piecewise-linear interpolation between the neighbouring hue centres
    (0, 30, 60, 120, 180, 240, 280, 320°). `hue` rotates up to ±30°,
    `saturation` scales, `luminance` shifts by `0.3 × S × Σ w·lum/100` (greys
    are untouched). Back to RGB, clamp.
-8. Round to 8 bits. Alpha is kept.
+7. Round to 8 bits. Alpha is kept.
+
+## The Auto preset
+
+The editor's Adjustments select is **None** (every slider neutral), **Auto**
+or **Custom** (anything else); moving a slider after Auto lands on Custom by
+itself. Auto takes the photo as the panel will show it (placed at panel
+size), finds the luminance percentiles 0.5 and 99.5, and solves for the
+Whites and Blacks that map that range onto the darkest and brightest
+luminance of the palette the photo is dithered to (the sidecar's own
+`palette`, else the panel's): with `scale = (dstHi − dstLo) / (srcHi −
+srcLo)`, `blackPoint = srcLo − dstLo / scale`, `whitePoint = blackPoint +
+1 / scale`, then `blacks = −blackPoint / 0.4 × 100` and `whites = (1 −
+whitePoint) / 0.4 × 100`, clamped to the sliders. `autoEndPoints` in
+`adjust.ts`. Nothing of this reaches the runtime.
 
 ## The dither palette override
 
@@ -112,10 +124,9 @@ not dither.
 * The JS runtime's `loadAssetImage(path)` — same treatment.
 * Thumbnails are **not** adjusted: the `.thumbs/` cache is keyed on the image
   alone, and the preview belongs in the editor.
-* The panel palette for `auto` comes from the device name on a Pi
-  (`panelPaletteForDevice`, with a six-colour custom palette winning on a
-  Spectra panel) and from the display format on the ESP32. Unknown panels
-  stretch to `0 .. 1`.
+* The panel palette the editor previews with comes from the device name
+  (`devicePalette.ts`, with a six-colour custom palette winning on a Spectra
+  panel); the runtime never needs it.
 
 ## The Assets panel
 

@@ -21,7 +21,6 @@ import frameos/cloud/link_state
 import frameos/logger
 import frameos/metrics
 import frameos/types
-import frameos/utils/asset_colors
 import frameos/utils/dither
 import frameos/utils/image
 import frameos/utils/time
@@ -303,10 +302,6 @@ proc dispatchOpen(self: RunnerThread, exportedScene: ExportedScene, scene: Frame
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
-  # What a photo's `auto` colour fit aims for (utils/asset_colors): the
-  # panel's measured palette, as far as the device name tells it.
-  setAssetColorsPanelPalette(panelPaletteForDevice(self.frameConfig.device,
-    if self.frameConfig.palette.isNil: @[] else: self.frameConfig.palette.colors))
   var timer = getMonoTime()
   var driverTimer = getMonoTime()
   var sleepDuration = 0.0

@@ -1,10 +1,10 @@
 /**
  * The colour pipeline, mirrored line for line from
  * `frameos/src/frameos/utils/asset_colors.nim` (`adjustPixel`, `autoFitFor`).
- * The order is the order a photographer reasons in: fit to the panel (auto),
- * exposure, the end points, contrast, the tonal tints, saturation, then the
- * per-hue corrections. Channels are floats 0 .. 1 between steps and 8-bit
- * at the ends, like the runtime.
+ * The order is the order a photographer reasons in: exposure, the end
+ * points, contrast, the tonal tints, saturation, then the per-hue
+ * corrections. Channels are floats 0 .. 1 between steps and 8-bit at the
+ * ends, like the runtime.
  */
 import { HUE_RANGE_NAMES, type AssetColorProfile, type RgbTriplet, profileHasAdjustments } from './profile'
 
@@ -37,15 +37,12 @@ export function paletteRange(palette: RgbTriplet[] | null): { lo: number; hi: nu
   return hi <= lo ? { lo: 0, hi: 1 } : { lo, hi }
 }
 
-export interface AutoFit {
-  enabled: boolean
-  srcLo: number
-  srcHi: number
-  dstLo: number
-  dstHi: number
-}
-
-const NO_FIT: AutoFit = { enabled: false, srcLo: 0, srcHi: 1, dstLo: 0, dstHi: 1 }
+/**
+ * How far the end points travel at ±100: a white point of 1.4 is what a
+ * Spectra panel's white (luminance 0.74) needs to take a photo's full range,
+ * which is what the Auto preset asks for. `EndPointRange` in asset_colors.nim.
+ */
+export const END_POINT_RANGE = 0.4
 
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value
@@ -121,22 +118,10 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 }
 
 /** One pixel, channels 0 .. 1 in and out. */
-export function adjustPixel(
-  profile: AssetColorProfile,
-  fit: AutoFit,
-  r0: number,
-  g0: number,
-  b0: number
-): [number, number, number] {
+export function adjustPixel(profile: AssetColorProfile, r0: number, g0: number, b0: number): [number, number, number] {
   let r = r0
   let g = g0
   let b = b0
-  if (fit.enabled) {
-    const scale = (fit.dstHi - fit.dstLo) / (fit.srcHi - fit.srcLo)
-    r = fit.dstLo + (r - fit.srcLo) * scale
-    g = fit.dstLo + (g - fit.srcLo) * scale
-    b = fit.dstLo + (b - fit.srcLo) * scale
-  }
   if (profile.exposure !== 0) {
     const gain = Math.pow(2, profile.exposure)
     r *= gain
@@ -144,8 +129,8 @@ export function adjustPixel(
     b *= gain
   }
   if (profile.blacks !== 0 || profile.whites !== 0) {
-    const blackPoint = (-profile.blacks / 100) * 0.2
-    const whitePoint = 1 - (profile.whites / 100) * 0.2
+    const blackPoint = (-profile.blacks / 100) * END_POINT_RANGE
+    const whitePoint = 1 - (profile.whites / 100) * END_POINT_RANGE
     const span = Math.max(whitePoint - blackPoint, 0.2)
     r = (r - blackPoint) / span
     g = (g - blackPoint) / span
@@ -232,18 +217,26 @@ export function adjustPixel(
   return [r, g, b]
 }
 
+export interface AutoEndPoints {
+  whites: number
+  blacks: number
+}
+
 /**
- * The luminance percentiles (0.5 and 99.5) of the photo, mapped onto the
- * range of the palette it will be dithered to. `pixels` is RGBA, 8-bit.
+ * The Auto preset: the white and black points that map the photo's
+ * luminance (percentiles 0.5 and 99.5 of the RGBA pixels as the panel will
+ * show them) onto the darkest and brightest luminance of the palette it is
+ * dithered to. Expressed as the Whites / Blacks sliders, so the saved
+ * profile is plain sliders and the runtime has no histogram to run. Null
+ * for a flat image, or one whose range already fits.
  */
-export function autoFitFor(
+export function autoEndPoints(
   pixels: Uint8ClampedArray | Uint8Array,
-  profile: AssetColorProfile,
-  panelPalette: RgbTriplet[] | null
-): AutoFit {
+  palette: RgbTriplet[] | null
+): AutoEndPoints | null {
   const total = Math.floor(pixels.length / 4)
-  if (!profile.auto || total <= 0) {
-    return NO_FIT
+  if (total <= 0) {
+    return null
   }
   const histogram = new Int32Array(256)
   for (let i = 0; i < total; i++) {
@@ -269,31 +262,35 @@ export function autoFitFor(
     }
   }
   if (hi - lo < 3) {
-    return NO_FIT
+    return null
   }
-  const dst = paletteRange(profile.palette && profile.palette.length > 0 ? profile.palette : panelPalette)
-  return { enabled: true, srcLo: lo / 255, srcHi: hi / 255, dstLo: dst.lo, dstHi: dst.hi }
+  const src = { lo: lo / 255, hi: hi / 255 }
+  const dst = paletteRange(palette)
+  // v' = dstLo + (v - srcLo) * scale, written as the sliders' (v - bp) / span.
+  const scale = (dst.hi - dst.lo) / (src.hi - src.lo)
+  const span = 1 / scale
+  const blackPoint = src.lo - dst.lo / scale
+  const whitePoint = blackPoint + span
+  const clampSlider = (value: number): number => Math.max(-100, Math.min(100, Math.round(value)))
+  return {
+    blacks: clampSlider((-blackPoint / END_POINT_RANGE) * 100),
+    whites: clampSlider(((1 - whitePoint) / END_POINT_RANGE) * 100),
+  }
 }
 
 /**
  * Adjusts RGBA pixels in place. Alpha is kept; the colours are taken as
  * straight, like the runtime does.
  */
-export function applyAssetColors(
-  pixels: Uint8ClampedArray | Uint8Array,
-  profile: AssetColorProfile,
-  panelPalette: RgbTriplet[] | null
-): void {
+export function applyAssetColors(pixels: Uint8ClampedArray | Uint8Array, profile: AssetColorProfile): void {
   if (!profileHasAdjustments(profile)) {
     return
   }
-  const fit = autoFitFor(pixels, profile, panelPalette)
   const total = Math.floor(pixels.length / 4)
   for (let i = 0; i < total; i++) {
     const offset = i * 4
     const [r, g, b] = adjustPixel(
       profile,
-      fit,
       (pixels[offset] ?? 0) / 255,
       (pixels[offset + 1] ?? 0) / 255,
       (pixels[offset + 2] ?? 0) / 255

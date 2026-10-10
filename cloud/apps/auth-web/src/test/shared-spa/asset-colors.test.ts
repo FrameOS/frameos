@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAssetColors,
-  autoFitFor,
-  luminance,
+  autoEndPoints,
   paletteRange,
 } from "../../../../../../frontend/src/utils/assetColors/adjust";
 import {
@@ -95,7 +94,7 @@ describe("asset colour profiles", () => {
   it("leaves a photo alone without adjustments", () => {
     const pixels = gradient(6, 4);
     const before = rgbOf(pixels);
-    applyAssetColors(pixels, defaultAssetColorProfile(), SPECTRA6_PALETTE);
+    applyAssetColors(pixels, defaultAssetColorProfile());
     expect(rgbOf(pixels)).toEqual(before);
   });
 
@@ -118,30 +117,35 @@ describe("asset colour profiles", () => {
       },
     });
     const pixels = gradient(4, 3);
-    applyAssetColors(pixels, profile, SPECTRA6_PALETTE);
+    applyAssetColors(pixels, profile);
     expect(rgbOf(pixels)).toEqual([
-      0, 0, 196, 112, 0, 146, 248, 12, 133, 248, 12, 132, 0, 168, 110, 87, 186, 96, 250, 183, 134, 250, 183, 135, 0, 239,
-      82, 94, 255, 75, 254, 255, 118, 255, 255, 119,
+      0, 0, 192, 109, 0, 142, 248, 8, 130, 247, 14, 128, 0, 160, 108, 87, 177, 95, 240, 175, 130, 248, 180, 135, 0, 238,
+      77, 94, 255, 71, 243, 255, 110, 255, 255, 114,
     ]);
   });
 
   it("pulls the highlights under the panel's white with negative whites", () => {
     const pixels = new Uint8ClampedArray([255, 255, 255, 255]);
-    applyAssetColors(pixels, profileOf({ whites: -100 }), SPECTRA6_PALETTE);
-    expect(Array.from(pixels)).toEqual([213, 213, 213, 255]);
+    applyAssetColors(pixels, profileOf({ whites: -100 }));
+    expect(Array.from(pixels)).toEqual([182, 182, 182, 255]);
   });
 
-  it("auto fits the photo's range into the palette's range", () => {
-    const pixels = gradient(16, 16);
-    const fit = autoFitFor(pixels, profileOf({ auto: true }), SPECTRA6_PALETTE);
-    expect(fit.enabled).toBe(true);
+  it("turns the Auto preset into Whites and Blacks that fit the panel", () => {
     expect(paletteRange(SPECTRA6_PALETTE).hi).toBeCloseTo(0.744, 2);
-    applyAssetColors(pixels, profileOf({ auto: true }), SPECTRA6_PALETTE);
+    const pixels = gradient(16, 16);
+    const auto = autoEndPoints(pixels, SPECTRA6_PALETTE);
+    expect(auto).not.toBeNull();
+    // Brighter than the panel's white → pulled down; the floor lifted to the palette's black.
+    expect(auto!.whites).toBeLessThan(-50);
+    expect(auto!.blacks).toBeGreaterThan(0);
+    // Applying those sliders lands the brightest pixel near the panel's white.
+    applyAssetColors(pixels, { ...defaultAssetColorProfile(), ...auto! });
     const last = (16 * 16 - 1) * 4;
-    // What the Nim side produced for the same corners.
-    expect(Array.from(pixels.slice(0, 3))).toEqual([15, 15, 86]);
-    expect(Array.from(pixels.slice(last, last + 3))).toEqual([203, 203, 86]);
-    expect(luminance(203, 203, 86) / 255).toBeCloseTo(0.76, 1);
+    const lum = (0.21 * (pixels[last] ?? 0) + 0.72 * (pixels[last + 1] ?? 0) + 0.07 * (pixels[last + 2] ?? 0)) / 255;
+    expect(Math.abs(lum - 0.744)).toBeLessThan(0.06);
+    // A flat image has nothing to fit; `auto` in an old sidecar is ignored.
+    expect(autoEndPoints(new Uint8ClampedArray([9, 9, 9, 255, 9, 9, 9, 255]), SPECTRA6_PALETTE)).toBeNull();
+    expect(parseAssetColorProfile({ version: 1, colors: { auto: true } })).toEqual(defaultAssetColorProfile());
   });
 });
 

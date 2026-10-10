@@ -80,10 +80,10 @@ suite "asset colour profiles":
     image.unsafe[0, 0] = rgbx(255, 255, 255, 255)
     applyAssetColors(image, profile)
     let p = image.unsafe[0, 0]
-    # whitePoint = 1.2: 1 / 1.2 = 0.833 → 213
-    check p.r == 213
-    check p.g == 213
-    check p.b == 213
+    # whitePoint = 1.4: 1 / 1.4 = 0.714 → 182
+    check p.r == 182
+    check p.g == 182
+    check p.b == 182
     check p.a == 255
 
   test "positive blacks lift the shadows":
@@ -91,8 +91,8 @@ suite "asset colour profiles":
     let image = newImage(1, 1)
     image.unsafe[0, 0] = rgbx(0, 0, 0, 255)
     applyAssetColors(image, profile)
-    # blackPoint = -0.2: 0.2 / 1.2 = 0.167 → 43
-    check image.unsafe[0, 0].r == 43
+    # blackPoint = -0.4: 0.4 / 1.4 = 0.286 → 73
+    check image.unsafe[0, 0].r == 73
 
   test "exposure is in stops":
     let profile = profileOf("""{"exposure": 1}""")
@@ -122,27 +122,6 @@ suite "asset colour profiles":
     check red.g > 40
     check red.r >= 200
 
-  test "auto fits the photo's range into the panel palette's range":
-    setAssetColorsPanelPalette(spectra6ColorPalette)
-    let profile = profileOf("""{"auto": true}""")
-    let image = gradient(16, 16)
-    applyAssetColors(image, profile)
-    let range = paletteRange(assetColorsPanelPalette)
-    check range.hi < 0.8 and range.hi > 0.7
-    # The brightest corner used to be (255, 255, 96); its luminance now sits
-    # at the palette's white, not above it.
-    let bright = image.unsafe[15, 15]
-    let lum = luminance(bright.r.float, bright.g.float, bright.b.float) / 255.0
-    check abs(lum - range.hi) < 0.03
-    setAssetColorsPanelPalette(@[])
-
-  test "auto is a no-op on a flat image":
-    let profile = profileOf("""{"auto": true}""")
-    let image = newImage(4, 4)
-    image.fill(rgbx(100, 100, 100, 255))
-    applyAssetColors(image, profile)
-    check image.unsafe[2, 2] == rgbx(100, 100, 100, 255)
-
   test "a rectangle of a bigger canvas can be adjusted alone":
     let profile = profileOf("""{"exposure": 1}""")
     let canvas = newImage(4, 2)
@@ -151,19 +130,6 @@ suite "asset colour profiles":
     check canvas.unsafe[1, 0].r == 60
     check canvas.unsafe[2, 0].r == 120
     check canvas.unsafe[3, 1].r == 120
-
-  test "the panel palette follows the device name":
-    check panelPaletteForDevice("waveshare.EPD_13in3e").len == 6
-    check panelPaletteForDevice("pimoroni.inky_impression_7_2025").len == 6
-    check panelPaletteForDevice("pimoroni.inky_impression_7").len == 6
-    check panelPaletteForDevice("pimoroni.inky_impression_7_3") == saturated7ColorPalette
-    check panelPaletteForDevice("waveshare.EPD_7in3f") == saturated7ColorPalette
-    check panelPaletteForDevice("waveshare.EPD_2in13g") == saturated4ColorPalette
-    check panelPaletteForDevice("waveshare.EPD_7in5_V2").len == 0
-    check panelPaletteForDevice("framebuffer").len == 0
-    let custom = @[(1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6)]
-    check panelPaletteForDevice("waveshare.EPD_7in3e", custom) == custom
-    check panelPaletteForDevice("waveshare.EPD_7in3f", custom) == saturated7ColorPalette
 
   test "loading a sidecar from disk":
     let root = getTempDir() / "frameos-asset-colors-" & $getCurrentProcessId()
@@ -182,7 +148,8 @@ suite "asset colour profiles":
   test "parity vector for the frontend preview":
     # The same photo, profile and arithmetic as the TypeScript port; the
     # expected bytes are what the Nim pipeline produced when the port was
-    # written (2026-10-10). A change here must be mirrored in adjust.ts.
+    # written (2026-10-10, end points widened the same day). A change here
+    # must be mirrored in adjust.ts.
     let profile = profileOf("""{"exposure": 0.4, "contrast": 25, "whites": -30, "blacks": 15,
       "saturation": 20, "shadows": {"luminance": -10, "b": 20}, "midtones": {"r": 10},
       "highlights": {"luminance": 15, "g": -10},
@@ -192,9 +159,9 @@ suite "asset colour profiles":
     let image = gradient(4, 3)
     applyAssetColors(image, profile)
     check pixelsOf(image) == @[
-      0, 0, 196, 112, 0, 146, 248, 12, 133, 248, 12, 132,
-      0, 168, 110, 87, 186, 96, 250, 183, 134, 250, 183, 135,
-      0, 239, 82, 94, 255, 75, 254, 255, 118, 255, 255, 119]
+      0, 0, 192, 109, 0, 142, 248, 8, 130, 247, 14, 128,
+      0, 160, 108, 87, 177, 95, 240, 175, 130, 248, 180, 135,
+      0, 238, 77, 94, 255, 71, 243, 255, 110, 255, 255, 114]
 
   test "dither parity vector for the frontend preview":
     # forEachPaletteDithered on the same gradient against the Spectra table

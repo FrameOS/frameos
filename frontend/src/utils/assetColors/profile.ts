@@ -50,8 +50,6 @@ export interface AssetColorProfile {
   midtones: ToneRange
   highlights: ToneRange
   hues: Record<HueRangeName, HueRange>
-  /** Fit the photo's tonal range into the palette's range first. */
-  auto: boolean
   /** The dither palette for this photo, or null for the panel's own. */
   palette: RgbTriplet[] | null
 }
@@ -75,7 +73,6 @@ export function defaultAssetColorProfile(): AssetColorProfile {
     midtones: emptyToneRange(),
     highlights: emptyToneRange(),
     hues: Object.fromEntries(HUE_RANGE_NAMES.map((name) => [name, emptyHueRange()])) as Record<HueRangeName, HueRange>,
-    auto: false,
     palette: null,
   }
 }
@@ -100,7 +97,6 @@ function toneHasAdjustments(tone: ToneRange): boolean {
 /** Whether applying the profile could change a pixel (the palette aside). */
 export function profileHasAdjustments(profile: AssetColorProfile): boolean {
   if (
-    profile.auto ||
     profile.exposure !== 0 ||
     profile.contrast !== 0 ||
     profile.whites !== 0 ||
@@ -213,7 +209,6 @@ export function parseAssetColorProfile(root: unknown): AssetColorProfile | null 
       HueRangeName,
       HueRange
     >,
-    auto: node.auto === true,
     palette: parsePalette(node.palette),
   }
 }
@@ -240,9 +235,6 @@ export function serializeAssetColorProfile(profile: AssetColorProfile): string {
   }
   if (Object.keys(hues).length > 0) {
     colors.hues = hues
-  }
-  if (profile.auto) {
-    colors.auto = true
   }
   if (profile.palette && profile.palette.length > 0) {
     colors.palette = profile.palette.map(tripletToHex)

@@ -17,7 +17,6 @@ import pixie
 import embedded_scene
 import embedded_runtime
 from frameos/apps import applyServiceSettings
-import frameos/utils/asset_colors
 import frameos/utils/dither
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
@@ -271,15 +270,6 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
-proc panelPaletteForFormat(pixelFormat: int): seq[(int, int, int)] =
-  ## The palette a display format dithers to, for a photo's `auto` colour
-  ## fit (utils/asset_colors). Empty for the grey and two-colour formats.
-  case pixelFormat:
-  of 5: saturated4ColorPalette
-  of 6: saturated7ColorPalette
-  of 7: spectra6ColorPalette
-  else: @[]
-
 proc packImageForFormat(
     image: Image;
     buf: ptr UncheckedArray[uint8];
@@ -457,7 +447,6 @@ proc fos_nim_render_impl(
     # this render can schedule another pass.
     discard takeRenderRequested()
     refreshDecodeBudget()
-    setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image
@@ -531,7 +520,6 @@ proc fos_nim_render_alloc_impl(
   try:
     discard takeRenderRequested()
     refreshDecodeBudget()
-    setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image

@@ -4,8 +4,10 @@
 ## how it should be adjusted before the panel dither sees it: exposure,
 ## contrast, the black and white points, saturation, a tint per tonal range
 ## (shadows / midtones / highlights), hue, saturation and luminance per hue
-## range, an optional automatic fit to the panel's range, and optionally the
-## palette the dither should quantise this one photo against. The editor in
+## range, and optionally the palette the dither should quantise this one
+## photo against. The editor's "Auto" is a preset that fills the white and
+## black points in from the photo's histogram; the runtime only ever applies
+## sliders. The editor in
 ## the Assets panel (`frontend/src/utils/assetColors/`) writes the file and
 ## previews it with the same arithmetic; `docs/asset-color-profiles.md` is
 ## the contract for both sides. Keep the two in step: a slider that behaves
@@ -18,13 +20,12 @@
 ## Why it exists: a six-colour Spectra panel's measured white is (178, 193,
 ## 192). Everything in a photo brighter than that quantises to solid white,
 ## with the diffused error clipped away — the highlights are flat. Pulling
-## the white point down, or letting `auto` fit the photo into the panel's
-## range, puts the texture back; the rest is ordinary grading.
+## the white point down (the editor's Auto preset does it from the photo's
+## histogram) puts the texture back; the rest is ordinary grading.
 
 import std/[json, math, options, os, strutils]
 import pixie
 
-import ./dither
 
 const
   AssetColorSidecarSuffix* = ".frameos.json"
@@ -55,9 +56,6 @@ type
     saturation*: float ## -100 .. 100
     shadows*, midtones*, highlights*: ToneRange
     hues*: array[8, HueRange]
-    ## Fit the photo's tonal range into the panel palette's range before the
-    ## manual adjustments (percentiles 0.5 and 99.5 of the luminance).
-    auto*: bool
     ## The dither palette for this photo, or empty for the panel's own.
     palette*: seq[(int, int, int)]
 
@@ -69,7 +67,7 @@ proc isSidecarPath*(path: string): bool =
 
 proc hasAdjustments*(profile: AssetColorProfile): bool =
   ## Whether applying the profile could change a pixel.
-  if profile.auto or profile.exposure != 0 or profile.contrast != 0 or
+  if profile.exposure != 0 or profile.contrast != 0 or
       profile.whites != 0 or profile.blacks != 0 or profile.saturation != 0:
     return true
   for tone in [profile.shadows, profile.midtones, profile.highlights]:
@@ -163,7 +161,6 @@ proc parseAssetColorProfile*(root: JsonNode): Option[AssetColorProfile] =
     shadows: toneOf(colors, "shadows"),
     midtones: toneOf(colors, "midtones"),
     highlights: toneOf(colors, "highlights"),
-    auto: colors{"auto"}.getBool(false),
     palette: parsePalette(colors{"palette"}),
   )
   let hues = colors{"hues"}
@@ -190,78 +187,15 @@ proc loadAssetColorProfile*(imagePath: string): Option[AssetColorProfile] =
   except CatchableError:
     none(AssetColorProfile)
 
-# ------------------------------------------------------------ panel palette
-
-## The palette the panel dithers to, when the host knows it: the Linux
-## runner sets it from the device at boot, the ESP32 from the display format
-## at render. `auto` fits the photo into its range; a profile's own palette
-## takes precedence. Empty means "unknown": auto then stretches to 0 .. 1.
-var assetColorsPanelPalette* {.threadvar.}: seq[(int, int, int)]
-
-proc setAssetColorsPanelPalette*(colors: seq[(int, int, int)]) =
-  assetColorsPanelPalette = @[]
-  for color in colors:
-    # The Spectra table's placeholder entry is not a colour.
-    if color[0] < 999:
-      assetColorsPanelPalette.add(color)
-
-proc panelPaletteForDevice*(device: string, custom: seq[(int, int, int)] = @[]): seq[(int, int, int)] =
-  ## The measured palette a device dithers to, as far as the host can tell
-  ## without asking the driver: a six-colour custom palette on a Spectra
-  ## panel wins (that is what the driver uses too), then the panel family by
-  ## its name. Empty for panels the host cannot place — greyscale and
-  ## two-colour ones, full-colour displays — where auto simply stretches.
-  let name = device.toLowerAscii()
-  let spectra = name.endsWith("e") and (name.contains("13in3e") or name.contains("7in3e") or
-      name.contains("4in0e") or name.contains("photopainter")) or
-    name.contains("inky_impression_4_2025") or name.contains("inky_impression_4_spectra6") or
-    name.contains("inky_impression_7_2025") or name.contains("inky_impression_13") or
-    name == "pimoroni.inky_impression_7" or name == "pimoroni.inky_impression_4"
-  if spectra:
-    if custom.len == 6:
-      return custom
-    result = @[]
-    for color in spectra6ColorPalette:
-      if color[0] < 999:
-        result.add(color)
-    return result
-  if name.contains("7in3f") or name.contains("5in65f") or name.contains("4in01f") or
-      name.contains("inky_impression_4_7_color") or name.contains("inky_impression_5_7") or
-      name.contains("inky_impression_7_3") or name == "pimoroni.inky_impression":
-    return saturated7ColorPalette
-  if name.endsWith("g") and name.startsWith("waveshare.") or name.contains("inky_phat_4") or
-      name.contains("inky_what_4"):
-    return saturated4ColorPalette
-  @[]
-
 proc luminance*(r, g, b: float): float {.inline.} =
   LumR * r + LumG * g + LumB * b
-
-proc paletteRange*(palette: seq[(int, int, int)]): tuple[lo, hi: float] =
-  ## The darkest and brightest luminance a palette can show, 0 .. 1.
-  if palette.len == 0:
-    return (0.0, 1.0)
-  result = (1.0, 0.0)
-  for color in palette:
-    if color[0] >= 999:
-      continue
-    let lum = luminance(color[0].float, color[1].float, color[2].float) / 255.0
-    result.lo = min(result.lo, lum)
-    result.hi = max(result.hi, lum)
-  if result.hi <= result.lo:
-    result = (0.0, 1.0)
 
 # --------------------------------------------------------------- the maths
 #
 # Mirrored line for line by frontend/src/utils/assetColors/adjust.ts. The
-# order is the order a photographer expects to reason about: fit to the panel
-# (auto), exposure, the end points, contrast, the tonal tints, saturation,
-# then the per-hue corrections.
-
-type
-  AutoFit* = object
-    enabled*: bool
-    srcLo*, srcHi*, dstLo*, dstHi*: float
+# order is the order a photographer expects to reason about: exposure, the
+# end points, contrast, the tonal tints, saturation, then the per-hue
+# corrections.
 
 proc clamp01(value: float): float {.inline.} =
   if value < 0.0: 0.0 elif value > 1.0: 1.0 else: value
@@ -317,17 +251,18 @@ proc hslToRgb(h, s, l: float): tuple[r, g, b: float] =
     hk = h / 360.0
   (hueToRgb(p, q, hk + 1.0 / 3.0), hueToRgb(p, q, hk), hueToRgb(p, q, hk - 1.0 / 3.0))
 
-proc adjustPixel*(profile: AssetColorProfile, fit: AutoFit, r0, g0, b0: float): tuple[r, g, b: float] =
+const
+  ## How far the end points travel at ±100: a white point of 1.4 is what a
+  ## Spectra panel's white (luminance 0.74) needs to take a photo's full
+  ## range, which is what the editor's Auto preset asks for.
+  EndPointRange* = 0.4
+
+proc adjustPixel*(profile: AssetColorProfile, r0, g0, b0: float): tuple[r, g, b: float] =
   ## One pixel, channels 0 .. 1 in and out.
   var
     r = r0
     g = g0
     b = b0
-  if fit.enabled:
-    let scale = (fit.dstHi - fit.dstLo) / (fit.srcHi - fit.srcLo)
-    r = fit.dstLo + (r - fit.srcLo) * scale
-    g = fit.dstLo + (g - fit.srcLo) * scale
-    b = fit.dstLo + (b - fit.srcLo) * scale
   if profile.exposure != 0:
     let gain = pow(2.0, profile.exposure)
     r *= gain
@@ -335,8 +270,8 @@ proc adjustPixel*(profile: AssetColorProfile, fit: AutoFit, r0, g0, b0: float): 
     b *= gain
   if profile.blacks != 0 or profile.whites != 0:
     let
-      blackPoint = -profile.blacks / 100.0 * 0.2
-      whitePoint = 1.0 - profile.whites / 100.0 * 0.2
+      blackPoint = -profile.blacks / 100.0 * EndPointRange
+      whitePoint = 1.0 - profile.whites / 100.0 * EndPointRange
       span = max(whitePoint - blackPoint, 0.2)
     r = (r - blackPoint) / span
     g = (g - blackPoint) / span
@@ -406,55 +341,12 @@ proc adjustPixel*(profile: AssetColorProfile, fit: AutoFit, r0, g0, b0: float): 
     b = clamp01(rgb.b)
   (r, g, b)
 
-proc autoFitFor*(image: Image, profile: AssetColorProfile,
-    x0 = 0, y0 = 0, width = -1, height = -1): AutoFit =
-  ## The luminance percentiles (0.5 and 99.5) of the photo (or of one
-  ## rectangle of it), mapped onto the range of the palette it will be
-  ## dithered to.
-  if not profile.auto or image.isNil or image.width <= 0 or image.height <= 0:
-    return AutoFit(enabled: false)
-  let
-    xStart = max(0, x0)
-    yStart = max(0, y0)
-    xEnd = if width < 0: image.width else: min(image.width, x0 + width)
-    yEnd = if height < 0: image.height else: min(image.height, y0 + height)
-  if xEnd <= xStart or yEnd <= yStart:
-    return AutoFit(enabled: false)
-  var histogram: array[256, int]
-  for y in yStart ..< yEnd:
-    for x in xStart ..< xEnd:
-      let p = image.unsafe[x, y]
-      let lum = luminance(p.r.float, p.g.float, p.b.float)
-      histogram[max(0, min(255, lum.round().int))] += 1
-  let total = (xEnd - xStart) * (yEnd - yStart)
-  let
-    loCount = (total.float * 0.005).int
-    hiCount = (total.float * 0.995).int
-  var
-    seen = 0
-    lo = 0
-    hi = 255
-    loFound = false
-  for level in 0 .. 255:
-    seen += histogram[level]
-    if not loFound and seen > loCount:
-      lo = level
-      loFound = true
-    if seen >= hiCount:
-      hi = level
-      break
-  if hi - lo < 3:
-    return AutoFit(enabled: false)
-  let palette = if profile.palette.len > 0: profile.palette else: assetColorsPanelPalette
-  let dst = paletteRange(palette)
-  AutoFit(enabled: true, srcLo: lo.float / 255.0, srcHi: hi.float / 255.0, dstLo: dst.lo, dstHi: dst.hi)
-
 proc applyAssetColors*(image: Image, profile: AssetColorProfile,
     x0 = 0, y0 = 0, width = -1, height = -1) =
   ## Adjusts every pixel of `image` — or of one rectangle of it, for an image
   ## decoded straight into the render canvas that only owns the fitted part —
   ## in place. Alpha is kept; the colours are taken as straight (a photo has
-  ## no transparency to speak of). The auto fit measures the same rectangle.
+  ## no transparency to speak of).
   if image.isNil or image.width <= 0 or image.height <= 0 or not profile.hasAdjustments():
     return
   let
@@ -464,11 +356,10 @@ proc applyAssetColors*(image: Image, profile: AssetColorProfile,
     yEnd = if height < 0: image.height else: min(image.height, y0 + height)
   if xEnd <= xStart or yEnd <= yStart:
     return
-  let fit = autoFitFor(image, profile, x0, y0, width, height)
   for y in yStart ..< yEnd:
     for x in xStart ..< xEnd:
       let p = image.unsafe[x, y]
-      let adjusted = adjustPixel(profile, fit, p.r.float / 255.0, p.g.float / 255.0, p.b.float / 255.0)
+      let adjusted = adjustPixel(profile, p.r.float / 255.0, p.g.float / 255.0, p.b.float / 255.0)
       image.unsafe[x, y] = rgbx(
         uint8(max(0.0, min(255.0, (adjusted.r * 255.0).round()))),
         uint8(max(0.0, min(255.0, (adjusted.g * 255.0).round()))),

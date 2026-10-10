@@ -18,7 +18,7 @@ import {
   type ToneRangeName,
 } from '../../../../utils/assetColors/profile'
 import type { FrameId } from '../../../../types'
-import { assetColorsLogic, renderColorPreview } from './assetColorsLogic'
+import { type AdjustmentMode, assetColorsLogic, renderColorPreview } from './assetColorsLogic'
 
 const hueSwatches: Record<HueRangeName, string> = {
   red: '#e03131',
@@ -152,13 +152,15 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
     isDefault,
     hasSavedProfile,
     savedProfileLoading,
+    adjustmentMode,
+    autoEndPoints,
   } = useValues(logic)
   const {
     closeEditor,
     setSlider,
     setTone,
     setHue,
-    toggleAuto,
+    setAdjustmentMode,
     setPalette,
     setPaletteColor,
     setSelectedTone,
@@ -247,12 +249,23 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
 
         <div className="space-y-3">
           <Section title="Light">
-            <Switch
-              value={profile.auto}
-              onChange={toggleAuto}
-              label="Auto: fit the photo into the panel's range"
-              fullWidth
-            />
+            <label className="flex items-center gap-2 text-xs">
+              <span className="frame-tool-muted shrink-0">Adjustments</span>
+              <Select
+                value={adjustmentMode}
+                onChange={(value) => setAdjustmentMode(value as AdjustmentMode)}
+                options={[
+                  { value: 'none', label: 'None' },
+                  {
+                    value: 'auto',
+                    label: autoEndPoints ? 'Auto: fit the photo into the panel range' : 'Auto (nothing to fit)',
+                    disabled: !autoEndPoints,
+                  },
+                  { value: 'custom', label: 'Custom' },
+                ]}
+                className="min-w-0 flex-1"
+              />
+            </label>
             <Slider
               label="Exposure"
               value={profile.exposure}

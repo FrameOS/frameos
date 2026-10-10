@@ -113,7 +113,7 @@
 ## Per-photo colour profiles: `docs/asset-color-profiles.md` is the contract
 
 - A photo may carry a `<image>.frameos.json` sidecar (exposure, white point,
-  tonal tints, per-hue HSL, an `auto` fit to the panel's range, an optional
+  tonal tints, per-hue HSL, an optional
   dither palette). `frameos/src/frameos/utils/asset_colors.nim` applies it on
   every runtime; `frontend/src/utils/assetColors/` previews it with a port of
   the panel dither. The two are pinned to the same parity vectors
