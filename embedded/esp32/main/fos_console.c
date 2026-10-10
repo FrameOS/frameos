@@ -815,6 +815,15 @@ static int cmd_set(int argc, char **argv)
     return 0;
 }
 
+int fos_console_apply_setting(const char *key, const char *value)
+{
+    if (key == NULL || value == NULL) return 1;
+    /* cmd_set joins argv[2..] with spaces, so one argument carries a value
+     * with spaces intact. */
+    char *argv[] = {"set", (char *)key, (char *)value};
+    return cmd_set(3, argv);
+}
+
 static int cmd_wifi(int argc, char **argv)
 {
     if (argc < 2) {

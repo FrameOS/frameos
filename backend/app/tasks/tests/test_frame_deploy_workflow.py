@@ -1981,6 +1981,7 @@ async def test_execute_embedded_fast_uploads_scenes_then_reloads(monkeypatch: py
     await workflow._execute_embedded_fast(plan)
 
     assert calls == [
+        {"path": "/ping", "method": "GET", "body": None, "headers": None},
         {
             "path": "/uploadScenes",
             "method": "POST",
@@ -1993,6 +1994,83 @@ async def test_execute_embedded_fast_uploads_scenes_then_reloads(monkeypatch: py
     assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
     assert frame.last_successful_deploy_at is not None
     assert any("Embedded fast deploy complete" in message for _, message in logs)
+
+
+class FakeRedis:
+    def __init__(self):
+        self.values: dict[str, object] = {}
+
+    async def set(self, key, value, ex=None):
+        self.values[key] = value
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def delete(self, key):
+        self.values.pop(key, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("last_log_at", [None, "2026-06-14T00:14:41+00:00"])
+async def test_execute_embedded_fast_queues_for_a_frame_that_does_not_answer(
+    monkeypatch: pytest.MonkeyPatch, last_log_at
+):
+    """Asleep, or never checked in with this backend: the device pulls scenes
+    and settings on its next pass, so the deploy waits for that instead of
+    failing."""
+    from app.utils.embedded_scene_state import queued_deploy_key, take_queued_deploy
+
+    frame = SimpleNamespace(
+        id=61,
+        name="reTerminal",
+        mode="embedded",
+        status="ready",
+        scenes=[{"id": "scene-a", "nodes": []}],
+        last_log_at=last_log_at,
+        last_successful_deploy=None,
+        last_successful_deploy_at=None,
+    )
+    redis = FakeRedis()
+    workflow = FrameDeployWorkflow(
+        db=None, redis=redis, frame=frame, deployer=RecordingDeployer(), temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    calls: list[str] = []
+    logs: list[str] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        raise AssertionError("a queued deploy must not touch the frame's status")
+
+    async def fake_log(_db, _redis, _frame_id, _log_type: str, message: str):
+        logs.append(message)
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path: str, method: str, body=None, headers=None,
+                                          timeout=None):
+        calls.append(path)
+        raise OSError("timed out")
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+
+    plan = FrameDeployPlan(
+        mode="fast", frame_id=61, frame_name="reTerminal", build_id="build12345678",
+        frame_dict={"id": 61, "name": "reTerminal", "mode": "embedded"}, previous_frameos_version=None,
+        fast_deploy=SimpleNamespace(tls_settings_changed=False, reload_supported=True,
+                                    action="http_upload_scenes_reload"),
+    )
+
+    await workflow._execute_embedded_fast(plan)
+
+    assert workflow.queued is True
+    # Never checked in: nothing at its address is worth asking.
+    assert calls == ([] if last_log_at is None else ["/ping"])
+    assert frame.status == "ready"
+    assert frame.last_successful_deploy is None
+    assert queued_deploy_key(61) in redis.values
+    assert any("next check-in" in message for message in logs)
+    assert await take_queued_deploy(redis, 61) == {"id": 61, "name": "reTerminal", "mode": "embedded"}
+    assert await take_queued_deploy(redis, 61) is None
 
 
 @pytest.mark.asyncio
@@ -2035,6 +2113,8 @@ async def test_execute_embedded_fast_failure_includes_status_context(monkeypatch
         timeout=None,
     ):
         calls.append(path)
+        if path == "/ping":
+            return 200, b"pong", {}
         if path == "/status":
             return 200, json.dumps({
                 "version": "v2026.6.29-14-gd17bbe05",
@@ -2067,7 +2147,7 @@ async def test_execute_embedded_fast_failure_includes_status_context(monkeypatch
     with pytest.raises(RuntimeError) as exc:
         await workflow._execute_embedded_fast(plan)
 
-    assert calls == ["/uploadScenes", "/status"]
+    assert calls == ["/ping", "/uploadScenes", "/status"]
     assert "UNKNOWN ERROR" in str(exc.value)
     assert "version=v2026.6.29-14-gd17bbe05" in str(exc.value)
     assert "stateBytes=25165824" in str(exc.value)
@@ -2659,7 +2739,7 @@ async def test_execute_embedded_full_updates_waits_for_boot_and_uploads_scenes(
     await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
     assert "update-requested" in events
-    assert http_calls == ["/uploadScenes", "/reload"]
+    assert http_calls == ["/ping", "/uploadScenes", "/reload"]
     assert frame.status == "starting"
     assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
     assert frame.last_successful_deploy_at is not None
@@ -2704,13 +2784,13 @@ async def test_execute_embedded_full_always_waits_for_a_boot(monkeypatch: pytest
     assert "ota:backend" in str(exc.value)
     assert frame.status == "uninitialized"
     # Scenes are never uploaded to a frame that did not come back.
-    assert http_calls == []
+    assert http_calls == ["/ping"]
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_surfaces_an_unreachable_device(monkeypatch: pytest.MonkeyPatch):
-    """The OTA poke is a plain HTTP call to the board. Nothing is queued for
-    later, so a device that will not answer fails the deploy now."""
+async def test_execute_embedded_full_surfaces_a_refused_update(monkeypatch: pytest.MonkeyPatch):
+    """A frame that is awake but refuses the OTA poke fails the deploy now:
+    queuing is for a frame that cannot be reached at all."""
     frame = _embedded_workflow_frame()
     workflow = _embedded_workflow(frame)
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
@@ -2724,8 +2804,12 @@ async def test_execute_embedded_full_surfaces_an_unreachable_device(monkeypatch:
     async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
         raise ValueError("HTTP 503: busy rendering")
 
+    async def fake_fetch_frame_http_bytes(_frame, _redis, **_kwargs):
+        return 200, b"pong", {}
+
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
     monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
     with pytest.raises(RuntimeError) as exc:
@@ -2737,34 +2821,86 @@ async def test_execute_embedded_full_surfaces_an_unreachable_device(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_needs_a_device_that_has_reported_once(
+async def test_execute_embedded_full_queues_for_a_frame_that_never_checked_in(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """There is no first flash over the air: a board that has never spoken to
-    this backend has to be flashed over USB."""
-    frame = _embedded_workflow_frame(last_log_at=None)
+    """Nothing known about the firmware yet (no boot report): the update is
+    queued for its first check-in, and the log says what that depends on."""
+    from app.utils.embedded_device_requests import device_requests_payload
+
+    frame = _embedded_workflow_frame(last_log_at=None, device_requests=None)
     workflow = _embedded_workflow(frame)
-    requested: list[int] = []
+    workflow.redis = FakeRedis()
+    events: list[str] = []
+    _asleep(monkeypatch, events)
 
+    await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+
+    assert workflow.queued is True
+    assert device_requests_payload(frame)["ota"]["id"]
+    assert any("has not checked in with this backend yet" in message for message in events)
+    # Nothing ran: the row is left as it was.
+    assert frame.status == "ready"
+
+
+def _asleep(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     async def fake_update_frame(_db, _redis, _frame):
-        return _frame
+        raise AssertionError("a queued deploy must not touch the frame's status")
 
-    async def fake_log(_db, _redis, _frame_id, _type, _message):
-        return None
+    async def fake_log(_db, _redis, _frame_id, _type, message):
+        events.append(message)
 
-    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
-        requested.append(1)
-        return {"ok": True}
+    async def fake_request_update(*_args, **_kwargs):
+        raise AssertionError("nothing can be asked of a sleeping frame")
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, **_kwargs):
+        raise OSError("timed out")
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
     monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
 
-    with pytest.raises(RuntimeError, match="Flash the first firmware over USB"):
-        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
-    assert requested == []
-    assert frame.status == "uninitialized"
+@pytest.mark.asyncio
+async def test_execute_embedded_full_queues_the_update_for_a_sleeping_frame(monkeypatch: pytest.MonkeyPatch):
+    from app.utils.embedded_device_requests import QUEUED_REQUESTS_FIRMWARE_VERSION, device_requests_payload
+    from app.utils.embedded_scene_state import take_queued_deploy
+
+    frame = _embedded_workflow_frame(
+        embedded={"platform": "esp32-s3", "flashSize": "8MB",
+                  "lastBoot": {"frameosVersion": QUEUED_REQUESTS_FIRMWARE_VERSION}},
+        device_requests=None,
+    )
+    workflow = _embedded_workflow(frame)
+    workflow.redis = FakeRedis()
+    events: list[str] = []
+    _asleep(monkeypatch, events)
+
+    await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+
+    assert workflow.queued is True
+    assert frame.status == "ready"
+    assert device_requests_payload(frame)["ota"]["id"]
+    assert await take_queued_deploy(workflow.redis, 53) == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
+    assert any("installs the update at its next check-in" in message for message in events)
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_full_refuses_to_queue_for_old_firmware(monkeypatch: pytest.MonkeyPatch):
+    """Firmware before the queued requests would never read the update: say
+    so now instead of reporting it queued."""
+    frame = _embedded_workflow_frame(
+        embedded={"platform": "esp32-s3", "flashSize": "8MB", "lastBoot": {"frameosVersion": "2026.10.3"}},
+        device_requests=None,
+    )
+    workflow = _embedded_workflow(frame)
+    workflow.redis = FakeRedis()
+    _asleep(monkeypatch, [])
+
+    with pytest.raises(RuntimeError, match="older than"):
+        await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+    assert "ota" not in (frame.device_requests or {})
 
 
 @pytest.mark.asyncio

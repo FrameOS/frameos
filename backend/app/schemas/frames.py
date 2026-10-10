@@ -343,6 +343,11 @@ class FrameSetNextSceneRequest(BaseModel):
     fastDeploy: Optional[bool] = True
 
 
+class FrameSaveSceneStateRequest(BaseModel):
+    sceneId: str
+    state: Dict[str, Any]
+
+
 class FrameAdoptRequest(BaseModel):
     """Adopt a running standalone frame: read its canonical local API, import
     its config and scenes, and write this backend's server credentials back."""

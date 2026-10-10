@@ -1483,7 +1483,12 @@ async def test_request_embedded_firmware_update_refuses_a_4mb_board(async_client
 async def test_firmware_ota_route_requests_the_device_update(async_client, db):
     frame = await create_embedded_frame(async_client)
 
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+    # Awake: the route's reachability ping answers, so the update is asked
+    # for now (a frame that does not answer gets it queued instead —
+    # test_embedded_device_requests.py).
+    with patch('app.api.frames._fetch_frame_http_bytes', new_callable=AsyncMock) as ping, \
+            patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+        ping.return_value = (200, b'pong', {})
         fetch.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
 

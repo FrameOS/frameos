@@ -138,7 +138,8 @@ async def fast_deploy_frame_task(
             await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "started", "fast"))
         await workflow.execute(plan)
         if task_id:
-            await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", "fast"))
+            outcome = "queued" if workflow.queued else "fast"
+            await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", outcome))
     except (Exception, asyncio.CancelledError) as exc:
         # The workflow resets "deploying" itself for an Exception; a
         # cancelled job skips that, so the shared path resets it here.

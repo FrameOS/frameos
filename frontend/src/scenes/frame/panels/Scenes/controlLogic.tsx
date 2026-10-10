@@ -162,6 +162,20 @@ export function activationWasRedeploy(body: string): boolean {
   }
 }
 
+/** The self-hosted backend answers `queued: true` when an embedded frame was
+ * not reachable (deep sleep): the change is held and the frame picks it up on
+ * its next wake, so no render:done is coming to settle the button. */
+export function activationWasQueued(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { queued?: unknown } | null
+    return parsed?.queued === true
+  } catch {
+    return false
+  }
+}
+
+export const QUEUED_FOR_WAKE_DETAIL = 'saved — the frame applies it when it next wakes'
+
 export const controlLogic = kea<controlLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'controlLogic']),
   props({} as ControlLogicProps),
@@ -345,6 +359,7 @@ export const controlLogic = kea<controlLogicType>([
           }
         }
         let detail = scene?.name || sceneId
+        let queued = false
         if (!usbSucceeded) {
           const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
             method: 'POST',
@@ -357,7 +372,11 @@ export const controlLogic = kea<controlLogicType>([
           // The cloud answers `type: "set_scenes"` when the frame did not hold
           // the scene and got the assigned set re-pushed instead of a plain
           // select — a deploy, so say so rather than "activated".
-          if (activationWasRedeploy(await response.text())) {
+          const responseText = await response.text()
+          queued = activationWasQueued(responseText)
+          if (queued) {
+            detail = `${detail} — ${QUEUED_FOR_WAKE_DETAIL}`
+          } else if (activationWasRedeploy(responseText)) {
             detail = `${detail} — deployed, the frame shows it as soon as it syncs`
           }
         }
@@ -370,7 +389,7 @@ export const controlLogic = kea<controlLogicType>([
           status: 'success',
           detail,
         })
-        if (isCloudMode()) {
+        if (isCloudMode() || queued) {
           // The cloud queues the verb; the frame's render:done may never
           // reach this page. "Accepted" is as far as the button can see.
           actions.sceneActivationSettled(sceneId)

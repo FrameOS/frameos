@@ -584,7 +584,12 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
             frameId: log.frame_id,
             kind: 'deploy',
             status: 'success',
-            detail: deploySignal.detail === 'fast' ? 'Fast deploy completed' : 'Deploy completed',
+            detail:
+              deploySignal.detail === 'queued'
+                ? 'Queued — the frame picks it up on its next check-in'
+                : deploySignal.detail === 'fast'
+                ? 'Fast deploy completed'
+                : 'Deploy completed',
           })
         } else if (deploySignal.action === 'failed') {
           actions.taskFailed({

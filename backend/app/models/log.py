@@ -321,6 +321,14 @@ async def process_log(
             await redis.set(f"frame:{frame.id}:active_scene", scene_id)
 
     changes: dict[str, Any] = {}
+    if event == 'deploy:request' and (frame.mode or 'rpios') == 'embedded':
+        # The device acted on a queued firmware update: stop offering it, so a
+        # board re-flashed later does not replay it (utils/embedded_device_requests).
+        from app.utils.embedded_device_requests import requests_after_device_report
+
+        remaining = requests_after_device_report(frame, log)
+        if remaining is not False:
+            changes['device_requests'] = remaining
     if event == 'render':
         changes['status'] = 'preparing'
     if event == 'render:device':

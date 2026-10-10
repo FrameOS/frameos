@@ -48,9 +48,19 @@ from sqlalchemy.orm import Session
 from app.utils.tz_slice import tz_slice
 from app.database import get_db
 from app.drivers.devices import device_dimensions
-from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
+from app.models.frame import (
+    Frame,
+    get_frame_json,
+    normalize_frame_admin_auth,
+    normalize_https_proxy,
+    record_successful_deploy,
+    update_frame,
+)
+from app.models.log import new_log
 from app.redis import get_redis
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba
+from app.utils.embedded_device_requests import device_requests_payload
+from app.utils.embedded_scene_state import scene_request_headers, scenes_with_state, take_queued_deploy
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
     FOS_PIXEL_1BPP,
@@ -335,6 +345,7 @@ async def api_embedded_device_render(
             height,
             scene_id=await _active_scene_id(redis, frame),
             settings=embedded_settings_payload(db, frame),
+            scenes_override=scenes_with_state(frame),
         )
     except RenderQueueFull as exc:
         # Not a render failure but a full queue: the device keeps what it
@@ -368,8 +379,13 @@ def embedded_scenes_payload(frame: Frame) -> bytes:
     Embedded frames run every scene interpreted (there is no on-device
     compiler), so unlike Linux fast-deploy this does not filter on
     ``settings.execution``.
+
+    The scene state the backend holds for the frame rides along as field
+    defaults (utils/embedded_scene_state): the device keeps none across a
+    deep-sleep reset, and this pull is how a change made while it slept
+    reaches it.
     """
-    scenes = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
+    scenes = scenes_with_state(frame)
     return json.dumps(scenes, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
@@ -390,20 +406,37 @@ def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     return payload
 
 
+async def _record_queued_deploy(db: Session, redis, frame: Frame) -> None:
+    """A deploy queued while the frame slept lands with the device's next
+    pull — scenes (on-device rendering) or settings (every frame, the thin
+    client included), whichever comes first in its pass: now it counts as
+    deployed."""
+    queued = await take_queued_deploy(redis, frame.id)
+    if queued is not None:
+        record_successful_deploy(frame, queued)
+        await update_frame(db, redis, frame)
+        await new_log(db, redis, frame.id, "stdinfo",
+                      "The frame checked in and picked up the queued deploy")
+
+
 @api_public.get("/frames/{id:int}/embedded/scenes")
 async def api_embedded_device_scenes(
     id: int,
     db: Session = Depends(get_db),
+    redis=Depends(get_redis),
     authorization: str = Header(None),
     if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
+    await _record_queued_deploy(db, redis, frame)
     payload = embedded_scenes_payload(frame)
     etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+    # A queued scene switch rides on every answer, 304 included: the switch
+    # need not change the payload, and the device applies each request once.
+    headers = {"ETag": etag, **scene_request_headers(frame)}
     if if_none_match and if_none_match.strip() == etag:
-        return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
-    return Response(content=payload, media_type="application/json",
-                    headers={"ETag": etag})
+        return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
+    return Response(content=payload, media_type="application/json", headers=headers)
 
 
 def embedded_frame_settings(frame: Frame) -> dict:
@@ -541,10 +574,12 @@ def _frame_utc_offset_minutes(frame: Frame) -> int:
 async def api_embedded_device_settings(
     id: int,
     db: Session = Depends(get_db),
+    redis=Depends(get_redis),
     authorization: str = Header(None),
     if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
+    await _record_queued_deploy(db, redis, frame)
     payload_dict = {
         **embedded_settings_payload(db, frame),
         "frame": embedded_frame_settings(frame),
@@ -552,6 +587,12 @@ async def api_embedded_device_settings(
         # on-device (fos_schedule.c), same event model as the Pi scheduler.
         "schedule": frame.schedule if isinstance(frame.schedule, dict) else None,
     }
+    # Deploy requests waiting for this check-in: console settings and a
+    # firmware update (utils/embedded_device_requests). Older firmware
+    # ignores the key.
+    requests = device_requests_payload(frame)
+    if requests:
+        payload_dict["requests"] = requests
     payload = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True).encode("utf-8")
     # Same cheap-poll contract as /embedded/scenes: the ETag is the payload's
     # sha256, so an unchanged configuration costs the device a 304.

@@ -93,6 +93,7 @@ from app.schemas.frames import (
     FrameUpdateRequest,
     FramePingResponse,
     FrameSSHKeysUpdateRequest,
+    FrameSaveSceneStateRequest,
     FrameSetNextSceneRequest,
     FrameSyncApplyRequest,
     FrameAdoptRequest,
@@ -107,6 +108,19 @@ from app.utils.network import (
     is_safe_host,
 )
 from app.utils.embedded_render import RenderQueueFull
+from app.utils.embedded_device_requests import (
+    firmware_request_support,
+    unknown_firmware_note,
+    queue_ota_request,
+)
+from app.utils.embedded_scene_state import (
+    STATE_EVENTS,
+    clear_scene_request,
+    firmware_applies_scene_requests,
+    overlay_states_record,
+    queue_scene_request,
+    record_scene_state,
+)
 from app.utils.asset_headers import inert_asset_headers
 from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
 from app.utils.upload_limits import (
@@ -166,6 +180,7 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_auth
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
     embedded_firmware_layout_for_frame,
+    embedded_ota_supported_for_frame,
     normalize_embedded_platform,
     embedded_provisioning_plan,
     ensure_embedded_frame_defaults,
@@ -1352,7 +1367,7 @@ async def api_frame_get_states(
                 cache_key,
                 lock_key,
             )
-        state_record = _normalise_frame_states_payload(cached)
+        state_record = overlay_states_record(frame, _normalise_frame_states_payload(cached))
         if state_record.get("sceneId"):
             await redis.set(f"frame:{frame.id}:active_scene", state_record["sceneId"])
         return {
@@ -1372,8 +1387,10 @@ async def api_frame_get_states(
         lock_key,
     )
     return {
-        "sceneId": await _active_scene_id_from_cache(redis, frame.id),
-        "states": {},
+        **overlay_states_record(
+            frame,
+            {"sceneId": await _active_scene_id_from_cache(redis, frame.id), "states": {}},
+        ),
         "cache": _frame_states_cache_meta(
             cached=False,
             refreshing=refreshing,
@@ -1522,10 +1539,40 @@ async def api_frame_event(
             db, redis, frame, scenes_override=upload, scene_id=scene_id
         )
         return "OK"
+    # Embedded frames keep no scene state across a deep-sleep reset and are
+    # often asleep when this is sent: the backend holds the state and the
+    # device pulls it with its scenes on every wake (utils/embedded_scene_state).
+    # A scene switch is held as a one-shot request the firmware picks up on
+    # the same pull, when its firmware reads one.
+    held_scene_id: str | None = None
+    held_state: dict[str, Any] = {}
+    switch_queueable = False
+    if _is_embedded_frame(frame) and event in STATE_EVENTS and isinstance(body, dict):
+        held_scene_id = body.get("sceneId") if isinstance(body.get("sceneId"), str) else None
+        previous_scene_id = await _active_scene_id_from_cache(redis, frame.id)
+        if event == "setSceneState" and not held_scene_id:
+            held_scene_id = previous_scene_id
+        held_state = record_scene_state(frame, held_scene_id, body.get("state"))
+        if held_state:
+            db.add(frame)
+            db.commit()
+        if event == "setCurrentScene" and held_scene_id:
+            # Held state for the scene already showing (or not known to differ)
+            # needs no switch; a real switch needs firmware that reads requests.
+            switch_queueable = (bool(held_state) and previous_scene_id in ("", held_scene_id)) or (
+                firmware_applies_scene_requests(frame)
+                and any(isinstance(scene, dict) and scene.get("id") == held_scene_id for scene in frame.scenes or [])
+            )
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
         )
+        if event == "setCurrentScene" and held_scene_id and _is_embedded_frame(frame):
+            await redis.set(f"frame:{frame.id}:active_scene", held_scene_id)
+            if frame.scene_request:
+                clear_scene_request(frame)
+                db.add(frame)
+                db.commit()
         if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
             scene_id = body.get("sceneId") if isinstance(body, dict) else None
             await _mark_frame_states_cache_stale(
@@ -1534,13 +1581,26 @@ async def api_frame_event(
                 scene_id=scene_id if isinstance(scene_id, str) else None,
             )
         return "OK"
-    except HTTPException as exc:
-        await log(
-            db, redis, id, "stderr", f"Error on frame event {event}: {exc.detail}"
-        )
-        raise exc
-    except RuntimeError as exc:
-        await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
+    except (HTTPException, RuntimeError) as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        if switch_queueable or (held_state and event == "setSceneState"):
+            # Not an error for a frame that sleeps: what it needs is held.
+            if event == "setCurrentScene":
+                await redis.set(f"frame:{frame.id}:active_scene", held_scene_id)
+                queue_scene_request(frame, held_scene_id)
+                db.add(frame)
+                db.commit()
+            await _mark_frame_states_cache_stale(redis, frame, scene_id=held_scene_id)
+            await log(
+                db,
+                redis,
+                id,
+                "stdinfo",
+                f"Frame not reachable for {event} ({detail}); the scene state is saved and "
+                "applies when the frame next wakes and syncs",
+            )
+            return {"queued": True, "sceneId": held_scene_id, "state": held_state}
+        await log(db, redis, id, "stderr", f"Error on frame event {event}: {detail}")
         raise exc
 
 
@@ -3837,6 +3897,31 @@ async def api_frame_embedded_firmware_ota(
         _not_found()
     if (frame.mode or "rpios") != "embedded":
         _bad_request("OTA updates are only available for embedded frames")
+    if not embedded_ota_supported_for_frame(frame):
+        _bad_request("OTA updates are not available for the selected ESP32 flash size")
+
+    # A sleeping frame cannot be asked now; firmware that reads queued
+    # requests installs it at its next check-in instead
+    # (utils/embedded_device_requests).
+    try:
+        ping_status, _body, _headers = await _fetch_frame_http_bytes(
+            frame, redis, path="/ping", timeout=httpx.Timeout(EMBEDDED_PING_TIMEOUT_SECONDS)
+        )
+        reachable = 200 <= ping_status < 300
+    except Exception:
+        reachable = False
+    support = firmware_request_support(frame)
+    if not reachable and support != "no":
+        queue_ota_request(frame)
+        db.add(frame)
+        db.commit()
+        note = f" {unknown_firmware_note(frame)}" if support == "unknown" else ""
+        await log(db, redis, id, "stdinfo",
+                  f"Frame not reachable (asleep?): the firmware update is queued for its next check-in.{note}")
+        return {
+            "message": f"Firmware update queued — the frame installs it at its next check-in.{note}",
+            "queued": True,
+        }
 
     try:
         device_payload = await request_embedded_firmware_update(db, redis, frame)
@@ -4131,6 +4216,33 @@ async def api_frame_embedded_usb_deploy_complete(
     return {"message": "Success", "frame": frame.to_dict()}
 
 
+@api_project.post("/frames/{id:int}/scene_state")
+async def api_frame_save_scene_state(
+    id: int,
+    data: FrameSaveSceneStateRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Save a scene's public state without telling the frame. Embedded frames
+    only: the backend holds their scene state anyway and the device pulls it
+    on its next check-in (utils/embedded_scene_state); a Linux frame keeps its
+    own, so there is nothing to save it into but the device."""
+    frame = _project_frame(db, id) or _not_found()
+    if not _is_embedded_frame(frame):
+        _bad_request("Saving scene state without applying it is only available for embedded frames")
+    if not any(isinstance(scene, dict) and scene.get("id") == data.sceneId for scene in frame.scenes or []):
+        _bad_request(f"Scene {data.sceneId} not found on frame")
+    saved = record_scene_state(frame, data.sceneId, data.state)
+    db.add(frame)
+    db.commit()
+    await _mark_frame_states_cache_stale(redis, frame, scene_id=data.sceneId)
+    return {"queued": True, "sceneId": data.sceneId, "state": saved}
+
+
+# A frame that answers at all answers /ping at once; a sleeping one never does.
+EMBEDDED_PING_TIMEOUT_SECONDS = 5.0
+
+
 @api_project.post("/frames/{id:int}/set_next_scene")
 async def api_frame_set_next_scene(
     id: int,
@@ -4148,7 +4260,50 @@ async def api_frame_set_next_scene(
     if data.state is not None and not isinstance(data.state, dict):
         _bad_request("State must be an object")
 
-    if not _is_embedded_frame(frame) and not frame_has_shell_access(frame):
+    if _is_embedded_frame(frame):
+        # The scenes were saved before this call, and the device pulls them —
+        # with the held state folded in — on its next pass. A deep-sleeping
+        # frame is usually not there to be pushed to; that is not an error.
+        # The switch itself rides on that pull too (a one-shot request), also
+        # after a live deploy: its /reload forces the pull that carries it.
+        previous_scene_id = await _active_scene_id_from_cache(redis, frame.id)
+        record_scene_state(frame, data.sceneId, data.state or {})
+        queue_scene_request(frame, data.sceneId)
+        db.add(frame)
+        db.commit()
+        await redis.set(f"frame:{frame.id}:active_scene", data.sceneId)
+        await _mark_frame_states_cache_stale(redis, frame, scene_id=data.sceneId)
+        try:
+            status, _body, _headers = await _fetch_frame_http_bytes(
+                frame, redis, path="/ping", timeout=httpx.Timeout(EMBEDDED_PING_TIMEOUT_SECONDS)
+            )
+            reachable = 200 <= status < 300
+        except Exception:
+            reachable = False
+        if not reachable:
+            await log(
+                db,
+                redis,
+                id,
+                "stdinfo",
+                "Frame not reachable; the scene changes are saved and apply when the frame next wakes and syncs",
+            )
+            if data.sceneId != previous_scene_id and not firmware_applies_scene_requests(frame):
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail="The scene changes are saved, but this frame is not reachable and its firmware cannot "
+                    "switch scenes on wake. Update the frame's firmware, or activate the scene while it is awake.",
+                )
+            return {"message": "Scene changes saved; the frame applies them on its next wake", "queued": True}
+        try:
+            from app.tasks import fast_deploy_frame
+
+            await fast_deploy_frame(id, redis)
+        except Exception as e:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        return {"message": "Scene deploy queued"}
+
+    if not frame_has_shell_access(frame):
         # No shell to write the boot-scene files with: the deploy job pushes
         # the scenes over the frame's admin API and switches to this one once
         # the runtime has taken them (frame_sync.push_backend_state_to_device).

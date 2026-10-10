@@ -20,6 +20,8 @@ idf_component_register(
         "fos_status_screen.c"
         "fos_console.c"
         "fos_scenes.c"
+        "fos_scene_request.c"
+        "fos_device_request.c"
         "fos_events.c"
         "fos_schedule.c"
         "fos_settings.c"

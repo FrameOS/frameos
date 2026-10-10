@@ -19,7 +19,10 @@
 #include "nvs.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_console.h"
+#include "fos_device_request.h"
 #include "fos_mem.h"
+#include "fos_ota.h"
 #include "fos_schedule.h"
 #include "fos_tz.h"
 #include "fos_wifi.h"
@@ -368,6 +371,122 @@ static void log_settings_applied(const char *detail, const char *changed)
              "\"status\":\"applied\",\"detail\":\"%s\",\"changed\":\"%s\"}",
              detail ? detail : "", changed ? changed : "");
     frameos_nim_log_hook(line);
+}
+
+/* ------------------------------------------------- queued deploy requests
+ *
+ * fos_device_request.h has the shape. Each kind keeps the id it last applied
+ * in NVS, so a request runs once even though every pull repeats it until the
+ * backend has a newer one. */
+
+#define DEVICE_REQUEST_CONSOLE_NVS_KEY "req_console"
+#define DEVICE_REQUEST_OTA_NVS_KEY "req_ota"
+
+static void device_request_log(const char *kind, const char *status, const char *id, const char *detail)
+{
+    char line[320];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"deploy:request\",\"source\":\"esp32\",\"kind\":\"%s\","
+             "\"status\":\"%s\",\"id\":\"%s\",\"detail\":\"%s\"}",
+             kind, status, id ? id : "", detail ? detail : "");
+    frameos_nim_log_hook(line);
+}
+
+/* NEW when this request id has not been applied yet; the id is copied out. */
+static bool device_request_is_new(const cJSON *request, const char *nvs_key, const char *kind,
+                                  char *id_out, size_t id_out_len)
+{
+    if (!cJSON_IsObject(request)) return false;
+    const cJSON *id = cJSON_GetObjectItem(request, "id");
+    const char *request_id = cJSON_IsString(id) ? id->valuestring : NULL;
+    char applied[FOS_DEVICE_REQUEST_ID_LEN] = "";
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(applied);
+        if (nvs_get_str(nvs, nvs_key, applied, &len) != ESP_OK) applied[0] = '\0';
+        nvs_close(nvs);
+    }
+    switch (fos_device_request_decide(request_id, applied)) {
+    case FOS_DEVICE_REQUEST_APPLY:
+        strlcpy(id_out, request_id, id_out_len);
+        return true;
+    case FOS_DEVICE_REQUEST_INVALID:
+        device_request_log(kind, "error", "", "invalid-id");
+        return false;
+    default:
+        return false;
+    }
+}
+
+static void device_request_remember(const char *nvs_key, const char *id)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    if (nvs_set_str(nvs, nvs_key, id) == ESP_OK) nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+/* The console settings a deploy queued: each one through the console's own
+ * `set`, so validation and persistence are exactly what USB provisioning
+ * does. Returns true when anything was applied (the caller restarts: panel,
+ * pins, board preset and buttons are read at boot). */
+static bool apply_console_request(const cJSON *request)
+{
+    char id[FOS_DEVICE_REQUEST_ID_LEN];
+    if (!device_request_is_new(request, DEVICE_REQUEST_CONSOLE_NVS_KEY, "console", id, sizeof(id))) {
+        return false;
+    }
+    const cJSON *settings = cJSON_GetObjectItem(request, "settings");
+    int applied = 0, refused = 0, failed = 0;
+    char first_problem[48] = "";
+    const cJSON *list = cJSON_IsArray(settings) ? settings : NULL;
+    const cJSON *pair = NULL;
+    cJSON_ArrayForEach(pair, list) {
+        const cJSON *key = cJSON_GetArrayItem(pair, 0);
+        const cJSON *value = cJSON_GetArrayItem(pair, 1);
+        if (!cJSON_IsArray(pair) || !cJSON_IsString(key) || !cJSON_IsString(value)) {
+            failed++;
+            continue;
+        }
+        if (!fos_device_request_console_key_allowed(key->valuestring)) {
+            refused++;
+            if (!first_problem[0]) strlcpy(first_problem, key->valuestring, sizeof(first_problem));
+            continue;
+        }
+        if (fos_console_apply_setting(key->valuestring, value->valuestring) == 0) {
+            applied++;
+        } else {
+            failed++;
+            if (!first_problem[0]) strlcpy(first_problem, key->valuestring, sizeof(first_problem));
+        }
+    }
+    /* Remembered even when a value failed: the same list would fail the same
+     * way on every wake, and each attempt restarts the frame. The log says
+     * which key, and the next deploy is a new id. */
+    device_request_remember(DEVICE_REQUEST_CONSOLE_NVS_KEY, id);
+    char detail[128];
+    snprintf(detail, sizeof(detail), "applied=%d refused=%d failed=%d%s%s", applied, refused, failed,
+             first_problem[0] ? " first-problem=" : "", first_problem);
+    device_request_log("console", failed || refused ? "partial" : "applied", id, detail);
+    ESP_LOGI(TAG, "queued deploy settings %s: %s", id, detail);
+    return applied > 0;
+}
+
+/* A firmware update a deploy queued: what POST /api/action/ota does — reboot
+ * into the early updater, which checks the backend's release manifest. The id
+ * is remembered first, so an update that fails is not retried on every wake
+ * (a new request is a new id). */
+static bool apply_ota_request(const cJSON *request)
+{
+    char id[FOS_DEVICE_REQUEST_ID_LEN];
+    if (!device_request_is_new(request, DEVICE_REQUEST_OTA_NVS_KEY, "ota", id, sizeof(id))) {
+        return false;
+    }
+    device_request_remember(DEVICE_REQUEST_OTA_NVS_KEY, id);
+    esp_err_t err = fos_ota_request_check();
+    device_request_log("ota", err == ESP_OK ? "rebooting" : "error", id,
+                       err == ESP_OK ? "into the updater" : esp_err_to_name(err));
+    return err == ESP_OK;
 }
 
 /* Read at most `limit` bytes of the response body. Returns a NUL-terminated
@@ -968,6 +1087,12 @@ esp_err_t fos_settings_sync(bool force)
     } else if (cJSON_IsNull(schedule)) {
         fos_schedule_set_json(NULL, 0);
     }
+    /* Deploy requests are backend-only, like `frame`; applied below, after
+     * the live settings are saved (each console `set` persists the whole
+     * config, so it must not run against an unsaved half). */
+    cJSON *requests = source == SETTINGS_SOURCE_BACKEND
+                          ? cJSON_DetachItemFromObjectCaseSensitive(root, "requests")
+                          : NULL;
     cJSON_Delete(root);
 
     if (changed) {
@@ -984,15 +1109,31 @@ esp_err_t fos_settings_sync(bool force)
                  (unsigned)config->rotate, config->scaling_mode);
     }
     free(before);
+    bool console_applied = false;
+    bool ota_rebooting = false;
+    if (cJSON_IsObject(requests)) {
+        console_applied = apply_console_request(cJSON_GetObjectItem(requests, "console"));
+        ota_rebooting = apply_ota_request(cJSON_GetObjectItem(requests, "ota"));
+    }
+    cJSON_Delete(requests);
     if (response_etag[0]) {
         strlcpy(s_etag, response_etag, sizeof(s_etag));
     }
     if (source == SETTINGS_SOURCE_CLOUD) {
         s_cloud_next_pull_us = esp_timer_get_time() + SETTINGS_CLOUD_INTERVAL_US;
     }
+    if (ota_rebooting) {
+        /* The updater reboot is already scheduled; it applies everything a
+         * restart would. */
+        s_restart_after_apply = false;
+        return ESP_OK;
+    }
+    if (console_applied) {
+        s_restart_after_apply = true;
+    }
     if (s_restart_after_apply) {
         s_restart_after_apply = false;
-        ESP_LOGW(TAG, "settings need a restart (rotation, battery wiring, TLS or the HTTP cap); restarting");
+        ESP_LOGW(TAG, "settings need a restart (rotation, battery wiring, TLS, the HTTP cap or a deploy); restarting");
         if (xTaskCreate(settings_restart_task, "fos_set_restart", 2048, NULL, 5, NULL) != pdPASS) {
             esp_restart();
         }

@@ -2263,7 +2263,9 @@ function OtaUpdateCard({
             <>
               Install the latest FrameOS release over Wi-Fi. The frame downloads it, checks the signature and restarts.
               Progress shows up in Logs.
-              {online ? '' : ' The frame has to be online.'}
+              {online
+                ? ''
+                : ' If the frame is asleep, the update waits for its next check-in (FrameOS 2026.10.5 or newer on the frame).'}
             </>
           ) : (
             'This board has room for only one firmware copy, so update it over USB.'

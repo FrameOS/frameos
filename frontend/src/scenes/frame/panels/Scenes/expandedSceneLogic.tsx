@@ -1,11 +1,12 @@
-import { MakeLogicType, connect, kea, key, path, props, selectors } from 'kea'
+import { MakeLogicType, actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
 
 import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene, FrameType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { activationWasRedeploy, controlLogic } from './controlLogic'
+import { QUEUED_FOR_WAKE_DETAIL, activationWasQueued, activationWasRedeploy, controlLogic } from './controlLogic'
 import { isCloudMode } from '../../../../utils/cloudMode'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { socketLogic } from '../../../socketLogic'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
@@ -14,6 +15,28 @@ import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from
 import type { StateField } from '../../../../types'
 import type { TemplateType } from '../../../../types'
 import { sceneStateFields } from '../../../../utils/refreshInterval'
+
+/** The form's values for the fields the user can currently see, typed the
+ * way the frame stores them. Hidden fields keep their current values, matching
+ * the on-frame control page. */
+function stateFromForm(fields: StateField[], formValues: Record<string, any>): Record<string, any> {
+  const state: Record<string, any> = {}
+  for (const field of fields) {
+    if (field.name in formValues && field.access === 'public') {
+      if (field.type === 'boolean') {
+        // "false" in the form used to fall through to a `true` default.
+        state[field.name] = booleanFieldValue(formValues[field.name] ?? field.value)
+      } else if (field.type === 'integer') {
+        state[field.name] = parseInt(formValues[field.name] ?? field.value)
+      } else if (field.type === 'float') {
+        state[field.name] = parseFloat(formValues[field.name] ?? field.value)
+      } else {
+        state[field.name] = formValues[field.name] ?? field.value
+      }
+    }
+  }
+  return state
+}
 
 export interface ExpandedSceneLogicProps {
   frameId: FrameId
@@ -27,6 +50,7 @@ export interface expandedSceneLogicValues {
   states: Record<string, Record<string, any>> // controlLogic
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  canSaveWithoutApplying: boolean
   fields: StateField[]
   hasStateChanges: boolean
   isStateChangesSubmitting: boolean
@@ -70,6 +94,9 @@ export interface expandedSceneLogicActions {
   } // frameLogic
   resetStateChanges: (values?: Record<string, any>) => {
     values?: Record<string, any>
+  }
+  saveStateChanges: () => {
+    value: true
   }
   setStateChangesManualErrors: (errors: Record<string, any>) => {
     errors: Record<string, any>
@@ -118,6 +145,7 @@ export interface expandedSceneLogicMeta {
       stateChanges: Record<string, any>,
       arg: any
     ) => StateField[]
+    canSaveWithoutApplying: (frame: FrameType, visibleFields: StateField[]) => boolean
     scenesAsOptions: (scenes: FrameScene[] | undefined) => {
       label: string
       value: string
@@ -159,29 +187,11 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           detail: values.scene?.name || props.sceneId,
         })
         controlLogic({ frameId: props.frameId }).actions.sceneActivationStarted(props.sceneId)
-        const state: Record<string, any> = {}
-        // Only submit fields the user can currently see, matching the
-        // on-frame control page: hidden fields keep their current values
-        const fields = visiblePublicStateFields(
-          sceneStateFields(values.scene),
-          values.states[props.sceneId] ?? {},
+        const state = stateFromForm(
+          visiblePublicStateFields(sceneStateFields(values.scene), values.states[props.sceneId] ?? {}, formValues),
           formValues
         )
         try {
-          for (const field of fields) {
-            if (field.name in formValues && field.access === 'public') {
-              if (field.type === 'boolean') {
-                // "false" in the form used to fall through to a `true` default.
-                state[field.name] = booleanFieldValue(formValues[field.name] ?? field.value)
-              } else if (field.type === 'integer') {
-                state[field.name] = parseInt(formValues[field.name] ?? field.value)
-              } else if (field.type === 'float') {
-                state[field.name] = parseFloat(formValues[field.name] ?? field.value)
-              } else {
-                state[field.name] = formValues[field.name] ?? field.value
-              }
-            }
-          }
           const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -190,7 +200,9 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           if (!response.ok) {
             throw new Error('Failed to send scene activation event')
           }
-          const redeployed = activationWasRedeploy(await response.text())
+          const responseText = await response.text()
+          const redeployed = activationWasRedeploy(responseText)
+          const queued = activationWasQueued(responseText)
           controlLogic({ frameId: props.frameId }).actions.currentSceneChanged(props.sceneId)
           socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: props.sceneId } as FrameType)
           longRunningTasksModel.actions.finishTask({
@@ -198,11 +210,13 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
             kind: 'activate',
             sceneId: props.sceneId,
             status: 'success',
-            detail: redeployed
+            detail: queued
+              ? `${values.scene?.name || props.sceneId} — ${QUEUED_FOR_WAKE_DETAIL}`
+              : redeployed
               ? `${values.scene?.name || props.sceneId} — deployed, the frame shows it as soon as it syncs`
               : values.scene?.name || props.sceneId,
           })
-          if (isCloudMode()) {
+          if (isCloudMode() || queued) {
             controlLogic({ frameId: props.frameId }).actions.sceneActivationSettled(props.sceneId)
           }
         } catch (error) {
@@ -216,6 +230,55 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           throw error
         }
       },
+    },
+  })),
+  actions({
+    saveStateChanges: true,
+  }),
+  listeners(({ values, props, actions }) => ({
+    // Embedded frames: store the values with the backend and nothing else.
+    // The device pulls them on its next check-in, whether or not it is
+    // reachable now (backend utils/embedded_scene_state).
+    saveStateChanges: async () => {
+      const formValues = values.stateChanges
+      const state = stateFromForm(
+        visiblePublicStateFields(sceneStateFields(values.scene), values.states[props.sceneId] ?? {}, formValues),
+        formValues
+      )
+      const sceneName = values.scene?.name || props.sceneId
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'activate',
+        sceneId: props.sceneId,
+        title: 'Saving scene settings',
+        detail: sceneName,
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${props.frameId}/scene_state`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sceneId: props.sceneId, state }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to save the scene settings')
+        }
+        longRunningTasksModel.actions.finishTask({
+          frameId: props.frameId,
+          kind: 'activate',
+          sceneId: props.sceneId,
+          status: 'success',
+          detail: `${sceneName} — ${QUEUED_FOR_WAKE_DETAIL}`,
+        })
+        actions.resetStateChanges()
+        controlLogic({ frameId: props.frameId }).actions.sync()
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'activate',
+          sceneId: props.sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to save the scene settings',
+        })
+      }
     },
   })),
   selectors({
@@ -242,6 +305,13 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
         stateChanges: expandedSceneLogicValues['stateChanges'],
         sceneId
       ) => visiblePublicStateFields(fields, states[sceneId] ?? {}, stateChanges),
+    ],
+    // Only embedded frames take scene state from the backend on check-in; on
+    // a Linux frame the state lives on the device, so saving means applying.
+    canSaveWithoutApplying: [
+      (s) => [s.frame, s.visibleFields],
+      (frame: expandedSceneLogicValues['frame'], visibleFields: expandedSceneLogicValues['visibleFields']): boolean =>
+        frame?.mode === 'embedded' && !isCloudMode() && !isInFrameAdminMode() && visibleFields.length > 0,
     ],
     scenesAsOptions: [
       (s) => [s.scenes],

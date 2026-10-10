@@ -5,7 +5,7 @@ import { expandedSceneLogic } from './expandedSceneLogic'
 import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { Button } from '../../../../components/Button'
-import { controlLogic } from './controlLogic'
+import { QUEUED_FOR_WAKE_DETAIL, activationWasQueued, controlLogic } from './controlLogic'
 import { sceneIsActivating } from '../../../../utils/sceneActivation'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { StateFieldEdit } from './StateFieldEdit'
@@ -16,7 +16,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { deployCloudFrameScenes } from '../../../../utils/cloudFrameApi'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
-import { PlayIcon, EyeIcon } from '@heroicons/react/24/solid'
+import { PlayIcon, EyeIcon, ArrowDownTrayIcon } from '@heroicons/react/24/solid'
 import { WindowIcon } from '@heroicons/react/24/outline'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { livePreviewLogic, LIVE_PREVIEW_HASH_KEY } from './livePreviewLogic'
@@ -42,11 +42,15 @@ export function ExpandedScene({
   isUnsaved,
   isUndeployed,
 }: ExpandedSceneProps) {
-  const { stateChanges, visibleFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
+  const { stateChanges, visibleFields, canSaveWithoutApplying } = useValues(
+    expandedSceneLogic({ frameId, sceneId, scene })
+  )
   const { states, sceneId: currentSceneId, activatingSceneId } = useValues(controlLogic({ frameId }))
   const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
   const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
-  const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
+  const { submitStateChanges, resetStateChanges, saveStateChanges } = useActions(
+    expandedSceneLogic({ frameId, sceneId, scene })
+  )
   const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
   const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
   const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
@@ -170,6 +174,16 @@ export function ExpandedScene({
         if (!response.ok) {
           throw new Error('Failed to queue scene deploy')
         }
+        if (activationWasQueued(await response.text())) {
+          // An embedded frame asleep: no deploy runs, so no log will finish this task.
+          longRunningTasksModel.actions.finishTask({
+            frameId,
+            kind: 'deploy',
+            sceneId,
+            status: 'success',
+            detail: `${scene?.name || sceneId} — ${QUEUED_FOR_WAKE_DETAIL}`,
+          })
+        }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId,
@@ -208,6 +222,19 @@ export function ExpandedScene({
       loading: activating,
       onRun: () => void handleActivate(),
     },
+    // Embedded frames take their scene state from the backend on every
+    // check-in, so it can be saved now and applied whenever the frame wakes.
+    ...(canSaveWithoutApplying
+      ? [
+          {
+            key: 'save' as const,
+            label: 'Save',
+            description: 'Save these settings without contacting the frame; it applies them on its next check-in',
+            icon: <ArrowDownTrayIcon className="h-4 w-4 shrink-0" />,
+            onRun: saveStateChanges,
+          },
+        ]
+      : []),
     {
       key: 'preview-frame',
       label: 'Preview on frame',

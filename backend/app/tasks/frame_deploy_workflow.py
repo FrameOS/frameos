@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 import hashlib
+import httpx
 import json
 import os
 import shlex
@@ -59,6 +60,14 @@ from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
 from app.utils.versions import current_frameos_version, current_remote_version, version_tuple
+from app.utils.embedded_scene_state import queue_embedded_deploy
+from app.utils.embedded_device_requests import (
+    QUEUED_REQUESTS_FIRMWARE_VERSION,
+    firmware_request_support,
+    queue_console_request,
+    queue_ota_request,
+    unknown_firmware_note,
+)
 
 REMOTE_RUNTIME_APT_PACKAGES = ("hostapd",)
 # The last FrameOS release whose runtime ran Caddy as its HTTPS proxy. Newer
@@ -482,6 +491,9 @@ class FrameDeployWorkflow:
         # change is reported in `pending_mode_change` and applied by the
         # deploy itself. The deploy jobs keep the default and persist it.
         self.persist_detected_mode = persist_detected_mode
+        # Set when an embedded fast deploy found the frame unreachable and
+        # left the change for its next check-in instead of pushing it.
+        self.queued = False
         self.pending_mode_change: str | None = None
         self.binary_builder = binary_builder or FrameBinaryBuilder(
             db=db,
@@ -1145,18 +1157,75 @@ class FrameDeployWorkflow:
             message = body.decode("utf-8", errors="replace")
             raise RuntimeError(f"Reload failed with status {status}: {message}")
 
+    # A frame that answers at all answers /ping at once; a sleeping one never does.
+    EMBEDDED_PING_TIMEOUT_SECONDS = 5.0
+
+    async def _embedded_frame_answers(self, frame: Frame) -> bool:
+        if not getattr(frame, "last_log_at", None):
+            # Never checked in with this backend: whatever answers at its
+            # address (frame<id>.local resolves nowhere) is not this frame.
+            return False
+        try:
+            status, _body, _headers = await _fetch_frame_http_bytes(
+                frame,
+                self.redis,
+                path="/ping",
+                method="GET",
+                timeout=httpx.Timeout(self.EMBEDDED_PING_TIMEOUT_SECONDS),
+            )
+        except Exception:
+            return False
+        return 200 <= status < 300
+
+    def _persist_device_requests(self, frame: Frame) -> None:
+        if self.db is not None:
+            self.db.add(frame)
+            self.db.commit()
+
+    async def _queue_console_settings(self, frame: Frame) -> None:
+        """The settings only USB provisioning used to carry (board preset,
+        panel, pins, buttons, SD wiring, power…) ride the frame's next
+        settings pull (utils/embedded_device_requests). Never fails a deploy:
+        the scenes and live settings land regardless."""
+        try:
+            changed = queue_console_request(frame)
+            self._persist_device_requests(frame)
+        except Exception as exc:
+            await log(self.db, self.redis, int(frame.id), "stderr",
+                      f"{icon} Could not queue the frame's console settings: {exc}")
+            return
+        if changed:
+            await log(self.db, self.redis, int(frame.id), "stdinfo",
+                      f"{icon} Device settings (panel, pins, buttons, power…) changed: the frame applies them "
+                      "at its next check-in and restarts once")
+
     async def _execute_embedded_fast(self, plan: FrameDeployPlan) -> None:
         frame = self.frame
+        if not plan.fast_deploy:
+            raise RuntimeError("Fast deploy plan missing")
+        await self._queue_console_settings(frame)
+        if not await self._embedded_frame_answers(frame):
+            # The device pulls scenes and settings on every pass: nothing has
+            # to be pushed for this deploy to land, only waited for.
+            await queue_embedded_deploy(self.redis, int(frame.id), plan.frame_dict)
+            self.queued = True
+            await log(
+                self.db,
+                self.redis,
+                int(frame.id),
+                "stdinfo",
+                f"{icon} Frame not reachable (asleep, or not checked in yet): the deploy is queued and the "
+                "frame picks up the scenes and settings on its next check-in"
+                + ("" if getattr(frame, "last_log_at", None) else
+                   ". It has not checked in with this backend yet: if nothing arrives, check the backend URL "
+                   "and Wi-Fi on its USB console (`status`)"),
+            )
+            return
+
         frame.status = "deploying"
         await update_frame(self.db, self.redis, frame)
 
         try:
-            if not getattr(frame, "last_log_at", None):
-                raise RuntimeError(
-                    "Embedded fast deploy is available after the device has sent at least one boot or render log."
-                )
-            if not plan.fast_deploy:
-                raise RuntimeError("Fast deploy plan missing")
 
             await self._upload_embedded_scenes_and_reload(frame)
 
@@ -1182,15 +1251,36 @@ class FrameDeployWorkflow:
             raise RuntimeError("Embedded full deploy plan missing")
 
         frame = self.frame
+        await self._queue_console_settings(frame)
+        if not await self._embedded_frame_answers(frame):
+            support = firmware_request_support(frame)
+            if support == "no":
+                raise RuntimeError(
+                    "The frame is not reachable (asleep?), and its firmware is older than "
+                    f"{QUEUED_REQUESTS_FIRMWARE_VERSION}, which is the first that takes a queued update. "
+                    "Deploy while it is awake once; later updates can wait for it."
+                )
+            # Asleep: the update, the device settings and the scenes all wait
+            # for its next check-in (utils/embedded_device_requests).
+            queue_ota_request(frame)
+            self._persist_device_requests(frame)
+            await queue_embedded_deploy(self.redis, int(frame.id), plan.frame_dict)
+            self.queued = True
+            await log(
+                self.db,
+                self.redis,
+                int(frame.id),
+                "stdinfo",
+                f"{icon} Frame not reachable (asleep?): the firmware update, device settings and scenes are "
+                "queued; the frame installs the update at its next check-in."
+                + (f" {unknown_firmware_note(frame)}" if support == "unknown" else ""),
+            )
+            return
+
         frame.status = "deploying"
         await update_frame(self.db, self.redis, frame)
 
         try:
-            if not getattr(frame, "last_log_at", None):
-                raise RuntimeError(
-                    "Embedded full deploy is available after the device has sent at least one boot or "
-                    "render log. Flash the first firmware over USB from the deploy drawer."
-                )
 
             # 1. Deliver over the air: the device reboots into its updater,
             #    pulls this backend's relay of the release manifest and, when

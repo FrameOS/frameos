@@ -21,6 +21,7 @@
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_mem.h"
+#include "fos_scene_request.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 #include "nvs.h"
@@ -1244,14 +1245,70 @@ esp_err_t fos_scenes_set_json(const char *json, size_t len)
 
 /* ------------------------------------------------------------- backend */
 
-static esp_err_t collect_etag_handler(esp_http_client_event_t *evt)
+/* What the scenes answer carries besides its body: the payload's ETag and a
+ * scene switch the backend queued (fos_scene_request.h). */
+typedef struct {
+    char etag[ETAG_LEN];
+    char request_id[FOS_SCENE_REQUEST_ID_LEN + 1];
+    char request_scene[FOS_SCENE_REQUEST_SCENE_LEN + 1];
+} scenes_response_headers_t;
+
+static esp_err_t collect_headers_handler(esp_http_client_event_t *evt)
 {
-    if (evt->event_id == HTTP_EVENT_ON_HEADER &&
-        strcasecmp(evt->header_key, "ETag") == 0) {
-        char *etag_out = (char *)evt->user_data;
-        snprintf(etag_out, ETAG_LEN, "%s", evt->header_value);
+    if (evt->event_id != HTTP_EVENT_ON_HEADER) return ESP_OK;
+    scenes_response_headers_t *out = (scenes_response_headers_t *)evt->user_data;
+    /* One byte more than a valid value may hold, so a too-long one stays too
+     * long here and the decision refuses it instead of acting on a prefix. */
+    if (strcasecmp(evt->header_key, "ETag") == 0) {
+        snprintf(out->etag, sizeof(out->etag), "%s", evt->header_value);
+    } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene-Request-Id") == 0) {
+        snprintf(out->request_id, sizeof(out->request_id), "%s", evt->header_value);
+    } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene-Request-Scene") == 0) {
+        snprintf(out->request_scene, sizeof(out->request_scene), "%s", evt->header_value);
     }
     return ESP_OK;
+}
+
+/* The id of the last backend scene request applied, so each one is applied
+ * once: a switch made on the device afterwards (a button, the schedule) is
+ * not undone on every following wake. NVS, because every deep-sleep wake is a
+ * boot. Factory-reset clears it with the rest of the namespace. */
+#define SCENE_REQUEST_NVS_KEY "scene_req"
+
+static void apply_scene_request(const scenes_response_headers_t *headers)
+{
+    char applied[FOS_SCENE_REQUEST_ID_LEN] = "";
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(applied);
+        if (nvs_get_str(nvs, SCENE_REQUEST_NVS_KEY, applied, &len) != ESP_OK) applied[0] = '\0';
+        nvs_close(nvs);
+    }
+    switch (fos_scene_request_decide(headers->request_id, headers->request_scene, applied)) {
+    case FOS_SCENE_REQUEST_NONE:
+    case FOS_SCENE_REQUEST_SEEN:
+        return;
+    case FOS_SCENE_REQUEST_INVALID:
+        log_scene_event("scenes:request", "error", "backend", "", "invalid-request",
+                        0, 0, 0, ESP_ERR_INVALID_ARG);
+        return;
+    case FOS_SCENE_REQUEST_APPLY:
+        break;
+    }
+    /* Queued like any other selection; the render task applies it this same
+     * pass, after the payload (fos_client.c: sync, apply, then selection). An
+     * id the payload lacks fails there and is logged; the request still counts
+     * as applied — the backend only names scenes it serves. */
+    fos_scenes_select(headers->request_scene);
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) == ESP_OK) {
+        if (nvs_set_str(nvs, SCENE_REQUEST_NVS_KEY, headers->request_id) == ESP_OK) {
+            nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+    }
+    ESP_LOGI(TAG, "backend scene request %s: %s", headers->request_id, headers->request_scene);
+    log_scene_event("scenes:request", "ok", "backend", headers->request_scene, "queued",
+                    0, 0, 0, ESP_OK);
 }
 
 esp_err_t fos_scenes_sync(bool force)
@@ -1279,14 +1336,15 @@ esp_err_t fos_scenes_sync(bool force)
     char auth[FOS_STR_LEN + 16];
     snprintf(auth, sizeof(auth), "Bearer %s", config->api_key);
 
-    char response_etag[ETAG_LEN] = "";
+    scenes_response_headers_t response_headers = {0};
+    const char *response_etag = response_headers.etag;
     esp_http_client_config_t http_config = {
         .url = url,
         .timeout_ms = 30000,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 4096,
-        .event_handler = collect_etag_handler,
-        .user_data = response_etag,
+        .event_handler = collect_headers_handler,
+        .user_data = &response_headers,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (client == NULL) return ESP_FAIL;
@@ -1313,6 +1371,7 @@ esp_err_t fos_scenes_sync(bool force)
         }
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        apply_scene_request(&response_headers);
         return ESP_OK;
     }
     if (status != 200) {
@@ -1387,21 +1446,26 @@ esp_err_t fos_scenes_sync(bool force)
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, buf, total);
     if (err == ESP_OK) {
         save_etag(response_etag);
-        /* Backend-served payload: declare it before load_into_nim promotes
-         * the pending source, and persist it so the boot-time split (this
-         * path leaves the combined file for the next apply to split) records
-         * "backend" in the index. */
+        /* Backend-served payload: declare it before the apply promotes the
+         * pending source (the split writes it into the index), and persist it
+         * so a reboot before that apply still records "backend". */
         s_pending_source = FOS_SCENES_SOURCE_BACKEND;
         persist_scene_source(FOS_SCENES_SOURCE_BACKEND);
         ESP_LOGI(TAG, "scenes updated from backend (%u bytes, etag %s)",
                  (unsigned)total, response_etag[0] ? response_etag : "none");
         log_scene_event("scenes:sync", "updated", "backend", "", "stored",
                         total, 0, status, ESP_OK);
-        load_into_nim(buf, total, "backend");
+        /* Applied by fos_scenes_apply_pending, which the render task runs
+         * right after this: it re-splits the payload into per-scene files
+         * before activating one. Loading the whole payload here instead left
+         * the previous split on flash, so a scene switch in the same pass —
+         * the backend's queued request, a button — loaded a stale copy. */
+        s_pending = true;
     } else {
         log_scene_event("scenes:sync", "error", "backend", "", "store-failed",
                         total, 0, status, err);
     }
     free(buf);
+    if (err == ESP_OK) apply_scene_request(&response_headers);
     return err;
 }

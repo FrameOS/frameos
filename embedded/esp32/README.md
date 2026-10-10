@@ -32,6 +32,9 @@ main/                     boot orchestration + platform modules
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
+  fos_scene_request.c     the backend's queued scene switch, applied once per request id (host-tested)
+  fos_device_request.c    queued deploy requests (console settings, firmware update): once per id, and
+                          which console keys may arrive over the network (host-tested)
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
   fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
                           producer — /event/<name>, the schedule, the cloud verbs, the console's
@@ -68,7 +71,7 @@ partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M s
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, SD probe, board,
-                          power, wake, battery-filter, version and scene-event (contract table +
+                          power, wake, battery-filter, version, scene-request, device-request and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
                           checks that every frameos_nim.h function has a frameos_nim_stub.c
@@ -273,6 +276,40 @@ are at least 10 s apart). The backend cannot pull it reliably: the frame
 deep-sleeps between renders and answers no mDNS, so its `frame<id>.local`
 default never resolves. That name gives way to the address the frame boots
 with. The cloud gets the same image with `image_get`.
+
+The same holds the other way: a battery frame is rarely awake when the
+workspace changes something, and it keeps no scene state across a deep-sleep
+reset. So the backend holds both, on the `/embedded/scenes` pull the device
+makes at the start of every pass (ETag'd; a 304 when nothing changed):
+
+- **Scene state** ("Apply to active scene") is folded into the scene's field
+  defaults in that payload, so the next wake loads the scene with it and
+  every later boot starts from it. Works on any firmware.
+- **A scene switch** rides on every answer, 304 included, as
+  `X-FrameOS-Scene-Request-Id` / `X-FrameOS-Scene-Request-Scene`. The device
+  selects that scene in the same pass, before it renders, and keeps the id in
+  NVS (`scene_req`), so each request is applied once — a button or the
+  schedule moving on afterwards is not undone on the next wake. A switch that
+  reaches the frame live clears the held one. Since 2026.10.5; the backend
+  refuses a switch for an unreachable frame on older firmware rather than
+  report it queued.
+
+- **A deploy** needs nothing pushed for scenes and live settings: a fast
+  deploy to a frame that does not answer is queued and counts as deployed
+  when the device next pulls. What used to need the frame awake rides the
+  `/embedded/settings` answer as `requests` (`fos_device_request.h`):
+  `console`, the `set` list USB "Apply frame settings" sends (board preset,
+  panel, pins, buttons, SD wiring, power…) applied through the console's own
+  `set` and followed by one restart, with an id that is a hash of the list so
+  an unchanged deploy is not re-applied; and `ota`, a firmware update that
+  reboots into the updater, cleared by the backend once the device logs
+  `deploy:request` for it. What connects the frame to its control plane —
+  Wi-Fi, backend URL, API key, frame id — stays USB-only: refused by the
+  device whatever arrives. Since 2026.10.5, like the scene switch.
+
+A changed payload from that pull is applied through the same split as a USB
+upload (2026.10.5): it used to be loaded whole while the previous per-scene
+files stayed on flash, and a switch in the same pass loaded a stale copy.
 
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's

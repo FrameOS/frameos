@@ -442,6 +442,24 @@ class Frame(Base):
     # panel's range and the frame-wide colour correction
     # (docs/asset-color-profiles.md). NULL = the runtime's defaults.
     colors = mapped_column(JSON, nullable=True)
+    # Embedded (ESP32) frames only: the public scene state last applied from
+    # the workspace, {sceneId: {field: value}}. The firmware keeps no scene
+    # state across a deep-sleep reset, so the backend holds it and folds it
+    # into the field defaults of the /embedded/scenes payload the device pulls
+    # on every wake (api/embedded_device.py). That is also how a change made
+    # while the frame sleeps reaches it. Not part of to_dict/FrameUpdateRequest:
+    # a workspace save must not overwrite it with a stale copy.
+    scene_states = mapped_column(JSON, nullable=True)
+    # Embedded frames only: a scene switch the workspace made while the frame
+    # could not be reached, {"id": <new per activation>, "sceneId": …}. Sent
+    # as headers on every /embedded/scenes answer; the firmware applies each
+    # id once (fos_scene_request.h). Cleared when a switch reaches the frame
+    # live, so a stale request cannot undo it on the next wake.
+    scene_request = mapped_column(JSON, nullable=True)
+    # Embedded frames only: deploy requests waiting for the frame's next
+    # check-in — the console settings and a firmware update
+    # (utils/embedded_device_requests). Not in to_dict/FrameUpdateRequest.
+    device_requests = mapped_column(JSON, nullable=True)
     # Service-settings groups (openAI, homeAssistant, …) that scenes from the
     # public scene store may read on this frame. A scene the owner authored is
     # granted what its apps declare, as it always was; a store scene is

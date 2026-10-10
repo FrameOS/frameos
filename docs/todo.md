@@ -159,6 +159,20 @@ way, or make them work, with this.
 
 ---
 
+## ESP32 scene state across deep sleep: cloud side
+
+The self-hosted backend holds an ESP32 frame's scene state and serves it as
+field defaults on `/embedded/scenes`, and queues scene switches as one-shot
+request headers on that pull (`embedded/esp32/README.md`, "Provisioning from
+a self-hosted backend"; `backend/app/utils/embedded_scene_state.py`). The
+cloud does neither yet: its `set_current_scene` verb waits in the queue for
+the frame, but the state it carries lasts until the next deep-sleep reset,
+after which the scene starts from its defaults again. The fix there is the
+same idea: fold the held state into the `set_scenes` payload's field
+defaults.
+
+---
+
 ## Frame scene import (`scenes_get`)
 
 Open on the import of a frame's own scenes (`docs/cloud-frames.md`, "Scenes
