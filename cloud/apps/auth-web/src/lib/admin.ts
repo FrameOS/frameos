@@ -20,6 +20,7 @@ import {
   sessions,
   storeSceneReports,
   storeScenes,
+  backupRuns,
 } from "@frameos-cloud/db";
 import { NextResponse } from "next/server";
 import { hasDatabaseUrl } from "./env";
@@ -392,6 +393,8 @@ export type AdminOverview = {
   accounts: { superadmins: number; total: number; last7d: number };
   backends: ActiveTotal & { seen24h: number };
   backups: { bytes: number; count: number };
+  // The host's own off-box backups (backup_runs), successful runs only.
+  backupRuns: { count: number; last7d: number; lastAt: Date | null; lastBytes: number | null };
   frames: ActiveTotal & { connected: number; pending: number };
   openReports: number;
   sessions: number;
@@ -440,6 +443,21 @@ export async function getAdminOverview(
     })
     .from(clientBackups);
 
+  const [backupRunRow] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      last7d: sql<number>`count(*) filter (where ${backupRuns.finishedAt} > now() - interval '7 days')::int`,
+      lastAt: sql<Date | null>`max(${backupRuns.finishedAt})`,
+    })
+    .from(backupRuns)
+    .where(eq(backupRuns.ok, true));
+  const [lastDatabaseRun] = await db
+    .select({ bytes: backupRuns.bytes })
+    .from(backupRuns)
+    .where(and(eq(backupRuns.ok, true), eq(backupRuns.kind, "database")))
+    .orderBy(desc(backupRuns.finishedAt))
+    .limit(1);
+
   const [sceneRow] = await db
     .select({
       public: sql<number>`count(*) filter (where ${storeScenes.visibility} = 'public' and ${storeScenes.status} = 'active')::int`,
@@ -472,6 +490,12 @@ export async function getAdminOverview(
     backups: {
       bytes: Number(backupRow?.bytes ?? 0),
       count: backupRow?.count ?? 0,
+    },
+    backupRuns: {
+      count: backupRunRow?.count ?? 0,
+      last7d: backupRunRow?.last7d ?? 0,
+      lastAt: backupRunRow?.lastAt ? new Date(backupRunRow.lastAt) : null,
+      lastBytes: lastDatabaseRun?.bytes ?? null,
     },
     frames: {
       active: frameRow?.active ?? 0,

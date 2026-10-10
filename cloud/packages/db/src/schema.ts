@@ -291,6 +291,31 @@ export const auditEvents = pgTable(
 // absolute_expires_at is the hard ceiling a session can never outlive no
 // matter how active it is. last_used_at throttles the refresh so a busy tab
 // does not rewrite the row on every request.
+// One row per run of the host's off-box backups (cloud/ops/backup: the
+// nightly pg_dump + host tarball, the object-store copy), written by the
+// scripts themselves through psql when they finish. Admin's "Nightly
+// backups" tile counts them; nothing else reads the table. Not the
+// backups' content — that is on the Storage Box — and not client_backups,
+// which are the self-hosted backends' uploads.
+export const backupRuns = pgTable(
+  "backup_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // "database" (pg-backup.sh) or "objects" (object-store-backup.sh).
+    kind: text("kind").notNull(),
+    ok: boolean("ok").notNull(),
+    bytes: bigint("bytes", { mode: "number" }),
+    summary: text("summary"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    finishedIdx: index("backup_runs_finished_idx").on(table.finishedAt),
+  }),
+);
+
 export const sessions = pgTable(
   "sessions",
   {

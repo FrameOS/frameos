@@ -102,8 +102,20 @@ export default async function AdminPage() {
           <StatTile
             detail={formatBytes(overview.backups.bytes)}
             href="/admin/users"
-            label="Backups"
+            label="Backend backups"
             value={overview.backups.count}
+          />
+          <StatTile
+            detail={
+              overview.backupRuns.lastAt
+                ? `last ${formatDateTime(overview.backupRuns.lastAt)}${
+                    overview.backupRuns.lastBytes ? ` · ${formatBytes(overview.backupRuns.lastBytes)} dump` : ""
+                  } · ${overview.backupRuns.last7d} in 7 days`
+                : "no run recorded yet"
+            }
+            href="/admin/storage"
+            label="Nightly backups"
+            value={overview.backupRuns.count}
           />
           <StatTile
             detail={

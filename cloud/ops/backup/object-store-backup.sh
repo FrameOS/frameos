@@ -31,9 +31,21 @@ ping_healthcheck() {
   curl -fsS -m 10 --retry 3 -o /dev/null "${healthchecks_url}${1:-}" || true
 }
 
+# One row per run in the cloud's backup_runs table (see pg-backup.sh). The
+# URL stays off argv: libpq reads a connection URI from PGDATABASE as well.
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+record_run() {
+  # $1: ok (true|false), $2: summary
+  [ -n "${DATABASE_URL:-}" ] || return 0
+  PGDATABASE="$DATABASE_URL" psql -q -v ON_ERROR_STOP=1 -v kind=objects -v ok="$1" -v summary="$2" -v started="$started_at" <<'SQL' 2>/dev/null || echo "note: could not record the run in backup_runs (migration 0056 applied?)" >&2
+INSERT INTO backup_runs (kind, ok, summary, started_at)
+VALUES (:'kind', :'ok'::boolean, :'summary', :'started'::timestamptz);
+SQL
+}
 fail() {
   echo "object-store backup failed: $1" >&2
   ping_healthcheck "/fail"
+  record_run false "$1"
   exit 1
 }
 
@@ -74,4 +86,5 @@ echo "objects in store: ${source_count:-?}, objects in backup: ${backup_count:-?
 [ "${backup_count:-0}" -ge "$source_count" ] || fail "backup holds $backup_count objects, fewer than the store's $source_count"
 
 ping_healthcheck
+record_run true "ok objects=${source_count} backup=${backup_count} remote=${rclone_remote}"
 echo "Object store backup complete."

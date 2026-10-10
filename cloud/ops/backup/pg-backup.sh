@@ -122,11 +122,26 @@ ping() {
   curl -fsS -m 10 --retry 3 -o /dev/null --data-raw "${2:-}" "${healthchecks_url}${1}" || true
 }
 
+# One row per run in the cloud's backup_runs table (packages/db migration
+# 0056), so /admin can say how many backups exist and when the last one ran.
+# Best effort: a database that cannot take the row must not fail the backup
+# that was just shipped — and on a failed run the insert may well be the
+# thing that cannot connect.
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+record_run() {
+  # $1: ok (true|false), $2: bytes or "", $3: summary
+  psql -q -v ON_ERROR_STOP=1 -v kind=database -v ok="$1" -v bytes="${2:-}" -v summary="$3" -v started="$started_at" <<'SQL' 2>/dev/null || echo "note: could not record the run in backup_runs (migration 0056 applied?)" >&2
+INSERT INTO backup_runs (kind, ok, bytes, summary, started_at)
+VALUES (:'kind', :'ok'::boolean, NULLIF(:'bytes', '')::bigint, :'summary', :'started'::timestamptz);
+SQL
+}
+
 log_file="$(mktemp)"
 on_exit() {
   status=$?
   if [ "$status" -ne 0 ]; then
     ping /fail "$(tail -c 2000 "$log_file")"
+    record_run false "" "failed (exit $status): $(tail -c 500 "$log_file" | tr -d '\000')"
   fi
   rm -f "$log_file"
 }
@@ -338,3 +353,4 @@ fi
 summary="ok db=$(du -h "$db_file" | cut -f1) host=$(du -h "$host_file" | cut -f1) remote=$rclone_remote retention=${retention_days}d${box_summary}${pitr_summary}"
 echo "Backup complete: $summary"
 ping "" "$summary"
+record_run true "$(stat -c %s "$db_file" 2>/dev/null || echo "")" "$summary"

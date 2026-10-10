@@ -142,6 +142,16 @@ healthchecks.io check pages — when the live layer is stuck. Each success ping
 carries `pitr_latest=<type>@<age>h wal_max=<segment>` alongside the box
 capacity.
 
+Both scripts also write one row per run into the cloud's `backup_runs` table
+(packages/db migration 0056: kind `database` / `objects`, ok, dump bytes,
+the summary line, started/finished). That is what the admin overview's
+"Nightly backups" tile counts, with the last run's time. Best effort on the
+scripts' side: a database that cannot take the row prints a note and the
+backup still counts as shipped, so a tile that stops moving while the
+healthchecks pings stay green means the insert is failing (migration not
+applied, DATABASE_URL missing from the unit's environment), not the backup.
+`install.sh` has to be re-run on the host for a script change to land.
+
 Storage Box capacity: `rclone about storagebox:` (1 TiB box). The nightly
 job also appends `box_used`/`box_free` to every success ping — the
 healthchecks.io log doubles as a capacity history — and fails the run
