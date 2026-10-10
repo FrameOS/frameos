@@ -2183,6 +2183,7 @@ describe("frame management API", () => {
         "gpio_buttons",
         "timezone",
         "colors",
+        "palette",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {
@@ -2471,11 +2472,12 @@ describe("frame management API", () => {
   });
 
   it("refuses the settings an esp32 has no consumer for", async () => {
-    // The Pi/Linux hardware batch has no firmware consumer at all. The
+    // Partial refresh and flip have no firmware consumer at all. The
     // firmware refuses the whole verb on any of them; the route says so
     // first, so nothing is half-applied. (scaling_mode joined the settable
     // set when the firmware grew a consumer for it, debug in 2026.8.31,
-    // timezone in 2026.8.34 — gated on the reported version below.)
+    // timezone in 2026.8.34, palette in 2026.10.4 — gated on the reported
+    // version below.)
     const keys = deviceKeypair();
     await signIn();
     const claimToken = await mintToken("Desk esp32");
@@ -2488,11 +2490,7 @@ describe("frame management API", () => {
       routeParams(frame_id),
     );
 
-    for (const settings of [
-      { palette: { colors: ["#000000"] } },
-      { device_config: { partial: true } },
-      { flip: "horizontal" },
-    ]) {
+    for (const settings of [{ device_config: { partial: true } }, { flip: "horizontal" }]) {
       const refused = await pushFrameSettings(
         postJson(
           `/api/frames/${frame_id}/settings`,
@@ -2546,6 +2544,33 @@ describe("frame management API", () => {
     );
     expect(junkZone.status).toBe(400);
     expect(((await junkZone.json()) as { error: string }).error).toBe("setting_not_allowed");
+
+    // palette: the colour list the ESP32 packer dithers to since 2026.10.4,
+    // behind its own floor like the keys above.
+    await db.update(frames).set({ frameosVersion: "2026.10.3" }).where(eq(frames.id, frame_id));
+    const paletteTooEarly = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { palette: { colors: ["#000000", "#ffffff"] } } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(paletteTooEarly.status).toBe(400);
+    expect((await paletteTooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.10.4",
+    });
+    await db.update(frames).set({ frameosVersion: "2026.10.4" }).where(eq(frames.id, frame_id));
+    const paletteOk = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { palette: { colors: ["#000000", "#ffffff"] } } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(paletteOk.status).toBe(200);
   });
 
   it("refuses a mixed esp32 settings payload without applying the name", async () => {
