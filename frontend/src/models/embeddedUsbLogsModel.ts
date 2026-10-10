@@ -325,6 +325,17 @@ export function embeddedUsbApiCanUse(frameId: FrameId): boolean {
   return lastPort !== undefined && serialPortIsConnected(lastPort)
 }
 
+// Espressif's own USB-Serial/JTAG has no baud rate. Any other vendor is a
+// USB-UART bridge (the E10xx boards' CH340, a CH343, a CP210x) carrying the
+// console at USB_SERIAL_BAUD_RATE, where a 1200x1600 preview holds the
+// board's console for two minutes.
+const ESPRESSIF_USB_VENDOR_ID = 0x303a
+
+export function embeddedUsbLinkIsUartBridge(frameId: FrameId): boolean {
+  const port = sessions.get(frameId)?.port ?? lastPorts.get(frameId)
+  return port !== undefined && port.getInfo().usbVendorId !== ESPRESSIF_USB_VENDOR_ID
+}
+
 export function embeddedUsbApiCanPrompt(): boolean {
   return webSerialSupported()
 }
@@ -397,6 +408,8 @@ export class UsbPayloadCorruptedError extends Error {
   }
 }
 
+const USB_BASE64_LINE = /^[A-Za-z0-9+/=]*$/
+
 // Decode the BEGIN…END payload region defensively: whole lines that are not
 // pure base64 are interleaved log output and get dropped; the declared byte
 // length then verifies nothing else went missing (a print that glued itself
@@ -404,7 +417,7 @@ export class UsbPayloadCorruptedError extends Error {
 function decodeUsbBase64Payload(payload: string, declaredBytes: number): Uint8Array {
   const kept = payload
     .split(/\r?\n/)
-    .filter((line) => /^[A-Za-z0-9+/=]*$/.test(line))
+    .filter((line) => USB_BASE64_LINE.test(line))
     .join('')
   let bytes: Uint8Array
   try {
@@ -518,8 +531,25 @@ export function summarizeUsbStatusJson(text: string): string | null {
   return parts.join(' ')
 }
 
-// Slack over the declared payload size: base64 line breaks and the trailing
-// newline are not counted in it.
+/** Characters a payload puts on the wire, line breaks aside. BEGIN declares
+ * the decoded size; base64 sends 4 characters for every 3 bytes. */
+function usbPayloadTextLength(declaredBytes: number, encoding: string): number {
+  return encoding === 'base64' ? Math.ceil(declaredBytes / 3) * 4 : declaredBytes
+}
+
+// The slowest console link is a USB-UART bridge at the console baud (the
+// E1004's CH340): 11.5 KB/s, so a 1200x1600 preview (1.28 MB of base64) takes
+// about two minutes. A USB-Serial/JTAG console is far faster and finishes
+// early; this only bounds the wait once BEGIN has said how much is coming.
+const USB_SERIAL_BYTES_PER_SECOND = USB_SERIAL_BAUD_RATE / 10
+const USB_PAYLOAD_TRANSFER_MARGIN = 1.5
+
+export function usbPayloadTransferMs(declaredBytes: number, encoding: string): number {
+  const seconds = usbPayloadTextLength(declaredBytes, encoding) / USB_SERIAL_BYTES_PER_SECOND
+  return Math.ceil(seconds * USB_PAYLOAD_TRANSFER_MARGIN * 1000)
+}
+
+// Slack over the payload's character count, which is exact for base64.
 const USB_PAYLOAD_SUPPRESSION_SLACK = 1024
 const USB_PAYLOAD_SUMMARY_CHARS = 16384
 
@@ -527,8 +557,10 @@ const USB_PAYLOAD_SUMMARY_CHARS = 16384
  * The device console is a shared stdout: the usb_api wire protocol (BEGIN/END
  * markers, base64 or JSON payload bodies) lands in the same stream a person
  * reads in the logs panel. Strip the framing, drop payload bodies, and turn a
- * status dump into a single summary line. Stateful across lines, so each sink
- * (log stream, command mirror) needs its own instance.
+ * status dump into a single summary line. Stateful across lines: a frame's
+ * log stream and the commands that borrow its port share one instance
+ * (usbConsoleLogFilter), since a payload can start under one and end under
+ * the other.
  */
 export function createUsbProtocolLogFilter(): (line: string) => string | null {
   let payloadCommand: string | null = null
@@ -549,10 +581,14 @@ export function createUsbProtocolLogFilter(): (line: string) => string | null {
         endPayload()
         return summary ? `${command}: ${summary}` : null
       }
+      if (payloadEncoding === 'base64' && !USB_BASE64_LINE.test(line)) {
+        // Another task printed mid-transfer: a log line, not payload.
+        return line
+      }
       if (payloadEncoding === 'text' && payloadText.length < USB_PAYLOAD_SUMMARY_CHARS) {
         payloadText += line
       }
-      payloadBudget -= line.length + 1
+      payloadBudget -= line.length
       // A payload whose END never arrives (board reset mid-transfer) must not
       // swallow every log line that follows it.
       if (payloadBudget < 0) {
@@ -564,8 +600,8 @@ export function createUsbProtocolLogFilter(): (line: string) => string | null {
     const begin = line.match(/^__FRAMEOS_USB_BEGIN__\s+(\S+)\s+(\d+)\s+(\S+)/)
     if (begin) {
       payloadCommand = begin[1] ?? ''
-      payloadBudget = Number(begin[2]) + USB_PAYLOAD_SUPPRESSION_SLACK
       payloadEncoding = begin[3] ?? ''
+      payloadBudget = usbPayloadTextLength(Number(begin[2]), payloadEncoding) + USB_PAYLOAD_SUPPRESSION_SLACK
       payloadText = ''
       return null
     }
@@ -578,6 +614,20 @@ export function createUsbProtocolLogFilter(): (line: string) => string | null {
     }
     return line
   }
+}
+
+// A command that gives up mid-payload (a timeout) leaves the rest of it to
+// the log stream it hands the port back to. With a filter of its own, the
+// stream never saw that payload's BEGIN and logged every base64 line after.
+const usbConsoleLogFilters = new Map<FrameId, (line: string) => string | null>()
+
+function usbConsoleLogFilter(frameId: FrameId): (line: string) => string | null {
+  let filter = usbConsoleLogFilters.get(frameId)
+  if (!filter) {
+    filter = createUsbProtocolLogFilter()
+    usbConsoleLogFilters.set(frameId, filter)
+  }
+  return filter
 }
 
 async function writeUsbPayload(writer: WritableStreamDefaultWriter<Uint8Array>, payload: Uint8Array): Promise<void> {
@@ -623,10 +673,36 @@ async function runUsbApiCommandOnPort(
   // newline (the ERROR regex requires one), so once seen, keep parsing
   // until the parser produces a result.
   let parseArmed = false
+  // Once this command's BEGIN header declares its payload, the response may
+  // take as long as that payload needs on the wire (usbPayloadTransferMs).
+  const expectedCommand = usbApiResponseCommand(command)
+  let payloadDeadline = 0
+  let headerScanFrom = 0
+  const notePayloadHeader = (): void => {
+    while (payloadDeadline === 0) {
+      const at = received.indexOf('__FRAMEOS_USB_BEGIN__', headerScanFrom)
+      if (at < 0) {
+        // Overlap window: the marker can straddle the chunk boundary.
+        headerScanFrom = Math.max(headerScanFrom, received.length - 64)
+        return
+      }
+      const lineEnd = received.indexOf('\n', at)
+      if (lineEnd < 0) {
+        headerScanFrom = at
+        return
+      }
+      headerScanFrom = lineEnd + 1
+      const header = received.slice(at, lineEnd).match(/^__FRAMEOS_USB_BEGIN__\s+(\S+)\s+(\d+)\s+(\S+)/)
+      if (header?.[1] === expectedCommand) {
+        payloadDeadline = Date.now() + usbPayloadTransferMs(Number(header[2]), header[3] ?? '')
+      }
+    }
+  }
   const appendReceived = (value: Uint8Array): boolean => {
     const decoded = decoder.decode(value, { stream: true })
     received += decoded
     onText?.(decoded)
+    notePayloadHeader()
     if (!parseArmed && tailHasUsbTerminator(received, decoded.length)) {
       parseArmed = true
     }
@@ -677,9 +753,10 @@ async function runUsbApiCommandOnPort(
       }
       await writeUsbPayload(writer, payload)
     }
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      const remaining = Math.max(1, deadline - Date.now())
+    const timeoutDeadline = Date.now() + timeoutMs
+    const deadline = (): number => Math.max(timeoutDeadline, payloadDeadline)
+    while (Date.now() < deadline()) {
+      const remaining = Math.max(1, deadline() - Date.now())
       const chunk = await readWithTimeout(reader, remaining)
       if (chunk === null) {
         timedOut = true
@@ -836,22 +913,28 @@ async function runEmbeddedUsbApiCommandLocked(
       appendUsbLine(frameId, `[USB API] waiting for ${label} ready marker`)
     }
   }
-  const mirrorSerialText = options?.mirrorOutput !== false && usbApiResponseCommand(command) !== 'image'
-  const commandLogFilter = createUsbProtocolLogFilter()
+  // Unmirrored output still goes through the frame's filter, so the filter
+  // knows where a payload ends if the log stream has to see the rest of it.
+  const mirrorSerialText = options?.mirrorOutput !== false
+  const commandLogFilter = usbConsoleLogFilter(frameId)
+  const commandLogLine = (line: string): void => {
+    const visible = commandLogFilter(line)
+    if (mirrorSerialText && visible !== null) {
+      appendUsbLine(frameId, visible)
+    }
+  }
   let pendingCommandLogLine = ''
-  const appendCommandLogText = mirrorSerialText
-    ? (text: string): void => {
-        pendingCommandLogLine += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-        const lines = pendingCommandLogLine.split('\n')
-        pendingCommandLogLine = lines.pop() ?? ''
-        for (const line of lines) {
-          appendFilteredUsbLine(frameId, commandLogFilter, line)
-        }
-      }
-    : undefined
+  const appendCommandLogText = (text: string): void => {
+    pendingCommandLogLine += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const lines = pendingCommandLogLine.split('\n')
+    pendingCommandLogLine = lines.pop() ?? ''
+    for (const line of lines) {
+      commandLogLine(line)
+    }
+  }
   const flushCommandLogText = (): void => {
     if (pendingCommandLogLine) {
-      appendFilteredUsbLine(frameId, commandLogFilter, pendingCommandLogLine)
+      commandLogLine(pendingCommandLogLine)
       pendingCommandLogLine = ''
     }
   }
@@ -1094,7 +1177,7 @@ export async function startEmbeddedUsbLogStream(
 
     const session: UsbLogSession = {
       frameId,
-      logFilter: createUsbProtocolLogFilter(),
+      logFilter: usbConsoleLogFilter(frameId),
       pendingLine: '',
       port: selectedPort,
       stopRequested: false,

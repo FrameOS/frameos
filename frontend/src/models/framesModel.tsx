@@ -49,6 +49,7 @@ import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
 import {
   embeddedUsbApiCanUse,
+  embeddedUsbLinkIsUartBridge,
   embeddedUsbLogsModel,
   runEmbeddedUsbApiCommand,
   usbRestart,
@@ -317,8 +318,15 @@ function embeddedUsbImageSceneId(metadata?: string): string | null {
   return sceneId || null
 }
 
+// The preview is pulled over USB only where the link can carry it in
+// seconds. Through a USB-UART bridge it ties up the board's console for
+// minutes, so those frames' images come over the network.
+function embeddedUsbCanCarryImage(frameId: FrameId): boolean {
+  return embeddedUsbApiCanUse(frameId) && !embeddedUsbLinkIsUartBridge(frameId)
+}
+
 async function refreshEmbeddedUsbFrameImage(frameId: FrameId): Promise<void> {
-  if (embeddedUsbImageRefreshesInFlight.has(frameId) || !embeddedUsbApiCanUse(frameId)) {
+  if (embeddedUsbImageRefreshesInFlight.has(frameId) || !embeddedUsbCanCarryImage(frameId)) {
     return
   }
   embeddedUsbImageRefreshesInFlight.add(frameId)
@@ -397,7 +405,7 @@ export function scheduleEmbeddedUsbFrameImageRefresh(
   frameId: FrameId,
   delayMs: number = EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS
 ): void {
-  if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
+  if (!embeddedUsbCanCarryImage(frameId) || typeof window === 'undefined') {
     return
   }
   const existingTimer = embeddedUsbImageRefreshTimers.get(frameId)
