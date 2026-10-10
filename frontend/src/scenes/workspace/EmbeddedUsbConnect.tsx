@@ -27,7 +27,7 @@ import { embeddedUsbConnectLogic } from './embeddedUsbConnectLogic'
 //   this frame     status, firmware update, settings
 //   other frame    re-provision only after a confirm
 // Decisions live in embeddedUsbConnectLogic. On the cloud a blank board goes
-// to the re-link panel below the card instead.
+// to the redeploy panel below the card instead.
 
 // fos_wifi_state_t in embedded/esp32/main/fos_wifi.h
 const WIFI_STATE_LABELS = ['offline', 'connecting', 'connected', 'captive portal'] as const
@@ -232,7 +232,7 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
             {canProvision && releaseAvailable
               ? ' Flash FrameOS and set it up as this frame:'
               : cloudManaged
-              ? ' To set it up as this frame, use “Re-link a wiped board” below.'
+              ? ' To set it up as this frame, use “Redeploy to this board” below.'
               : ''}
           </span>
         </div>
@@ -266,7 +266,7 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
             {canProvision
               ? 'Send it this frame’s settings over USB:'
               : cloudManaged
-              ? 'Use “Re-link a wiped board” below to set it up as this frame.'
+              ? 'Use “Redeploy to this board” below to set it up as this frame.'
               : 'Set it up from the backend that manages this frame.'}
           </span>
         </div>
@@ -286,7 +286,7 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
           {canProvision
             ? 'Nothing changes unless you set it up as this frame. The other frame then loses it.'
             : cloudManaged
-            ? 'To use it as this frame, use “Re-link a wiped board” below. The other frame then loses it.'
+            ? 'To use it as this frame, use “Redeploy to this board” below. The other frame then loses it.'
             : ''}
         </div>
         {canProvision ? <ApplySettingsButton frame={frame} confirmForeign label="Re-provision as this frame" /> : null}

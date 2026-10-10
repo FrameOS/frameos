@@ -46,7 +46,7 @@ if (typeof window !== 'undefined') {
 registerAddFramePanel(CloudAddFrameDrawer)
 
 // Same handoff for the two per-frame enrollment operations the deploy drawer
-// offers — re-linking a wiped ESP32, and writing another SD card for a Pi.
+// offers — redeploying to a wiped ESP32, and writing another SD card for a Pi.
 // Both mint a claim token bound to an existing frame, which only this bundle
 // can do.
 registerFramePanel('usbRelink', CloudFrameUsbRelink)

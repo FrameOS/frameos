@@ -598,10 +598,21 @@ const controlClassName =
 
 export { browserTimeZone }
 
+export interface Esp32CloudFlasherPortHandoff {
+  // Called inside the click, before any other await. Returns the port a
+  // workspace USB session (the "Connect over USB" card's log stream) already
+  // holds, closed and ready for esptool, or null to prompt for one.
+  takeHeldPort: () => Promise<SerialPortLike | null>
+  // The flash is over, on every path. The port is closed; the caller may
+  // reopen it for its log stream. `null` when nothing was ever selected.
+  release: (port: SerialPortLike | null) => Promise<void>
+}
+
 export function Esp32CloudFlasher({
   cloudOrigin,
   reenrollFrame,
   sceneSourceFrameId,
+  portHandoff,
 }: {
   // Provisioned into the board's NVS as cloud_url, so it must be the
   // deployment's public URL, not whatever host the browser is pointed at.
@@ -616,6 +627,11 @@ export function Esp32CloudFlasher({
   // Rides on the claim code and is applied when the owner confirms the new
   // frame; ignored in re-enrollment mode, where the frame keeps its own.
   sceneSourceFrameId?: string | undefined
+  // Web Serial grants a port exclusively. On a frame's "Over USB" view the
+  // connect card's log stream usually holds the board already, and a second
+  // open() fails with "The port is already open" (2026-10-10). The handoff
+  // takes that port instead of prompting, and hands it back afterwards.
+  portHandoff?: Esp32CloudFlasherPortHandoff
 }): ReactElement {
   const [phase, setPhase] = useState<FlashPhase>('idle')
   // Each enrollment path names its own frame — the SD builder keeps its own
@@ -784,7 +800,16 @@ export function Esp32CloudFlasher({
     setError(undefined)
     setProgress(0)
     setKnownFrameIds(null)
+    let port: SerialPortLike | null = null
     try {
+      const serial = (navigator as unknown as { serial: WebSerialLike }).serial
+      // A port the workspace already holds comes first, inside the click:
+      // its log stream has to let go before anything else opens the board.
+      port = portHandoff ? await portHandoff.takeHeldPort() : null
+      if (port) {
+        log(`Using the connected board, ${describeSerialPort(port.getInfo?.())}.`)
+      }
+
       setPhase('fetching')
       // The listing up front (a release with nothing to flash fails here, before
       // the port prompt); the image itself only once the board has said how
@@ -794,10 +819,13 @@ export function Esp32CloudFlasher({
       let firmware: { platform: string; bytes: Uint8Array } | null = null
 
       setPhase('connecting')
-      log('Pick the USB serial port of your ESP32 — if several are listed, "USB JTAG/serial debug unit" is the faster one…')
-      const serial = (navigator as unknown as { serial: WebSerialLike }).serial
-      const port = await serial.requestPort()
-      log(`Selected ${describeSerialPort(port.getInfo?.())}.`)
+      if (!port) {
+        log(
+          'Pick the USB serial port of your ESP32 — if several are listed, "USB JTAG/serial debug unit" is the faster one…'
+        )
+        port = await serial.requestPort()
+        log(`Selected ${describeSerialPort(port.getInfo?.())}.`)
+      }
 
       setPhase('flashing')
       const { ESPLoader, Transport } = await loadEsptool()
@@ -1026,6 +1054,14 @@ export function Esp32CloudFlasher({
       log(`Error: ${message}`)
     } finally {
       busyRef.current = false
+      if (portHandoff) {
+        try {
+          await portHandoff.release(port)
+        } catch {
+          // The flash outcome is already reported; a log stream that would
+          // not reopen says so on its own card.
+        }
+      }
     }
   }
 

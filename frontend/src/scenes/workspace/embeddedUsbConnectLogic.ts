@@ -661,7 +661,7 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         !(await confirmDialog({
           title: `Factory reset "${values.frameName}"?`,
           message: values.cloudManaged
-            ? 'This erases the board’s Wi-Fi, hardware settings and its link to this account. It will not come back as this frame until you use “Re-link a wiped board”.\n\nTo install new firmware, use “Update firmware, keep settings” instead. This cannot be undone.'
+            ? 'This erases the board’s Wi-Fi, hardware settings and its link to this account. It will not come back as this frame until you use “Redeploy to this board”.\n\nTo install new firmware, use “Update firmware, keep settings” instead. This cannot be undone.'
             : 'This erases the board’s Wi-Fi, backend and hardware settings and restarts it. This cannot be undone.',
           confirmLabel: 'Factory reset',
           danger: true,
