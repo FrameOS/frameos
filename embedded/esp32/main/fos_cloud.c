@@ -2101,8 +2101,10 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * (interval_sec, picked up by the render loop's next pass, no reboot),
  * `name` (the DHCP hostname — the provider-side display name stays
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
- * once at init, so this one costs a reboot) and `scaling_mode` (a per-decode
- * fallback fit, applied live on the next render pass). The power keys —
+ * once at init, so this one costs a reboot), `scaling_mode` (a per-decode
+ * fallback fit, applied live on the next render pass) and `colors` (the
+ * automatic fit switch and the frame-wide correction, applied live the same
+ * way). The power keys —
  * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
@@ -2226,6 +2228,21 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         /* No reboot: a per-decode fallback, pushed into the Nim runtime by
          * fos_client on the next pass. */
         strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
+    }
+    const cJSON *colors = cJSON_GetObjectItem(settings, "colors");
+    if (colors != NULL) {
+        /* The contract already validated the shape; what is left is the slot.
+         * Kept as compact JSON, pushed into the Nim runtime by fos_client on
+         * the next pass — no reboot. */
+        char *printed = cJSON_GetArraySize(colors) > 0 ? cJSON_PrintUnformatted(colors) : NULL;
+        const char *next = printed != NULL ? printed : "";
+        if (strlen(next) >= sizeof(config->colors)) {
+            free(printed);
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        strlcpy(config->colors, next, sizeof(config->colors));
+        free(printed);
     }
     const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
     const cJSON *timezone_data = cJSON_GetObjectItem(settings, "timezone_data");

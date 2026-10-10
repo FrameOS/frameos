@@ -15,9 +15,20 @@ import {
   stateFieldShowIfValues,
   type FrameOSScene,
   type PanelPaletteKey,
+  type BeforeDitherHook,
   type SceneInfo,
   type StateField,
 } from "frameos-wasm";
+import { ColorAdjustmentControls } from "../../../../../frontend/src/scenes/frame/panels/Assets/ColorAdjustmentControls";
+import { applyAssetColors, autoEndPoints } from "../../../../../frontend/src/utils/assetColors/adjust";
+import {
+  defaultAssetColorProfile,
+  parseAssetColorProfile,
+  profileHasAdjustments,
+  serializeAssetColorProfile,
+  type AssetColorProfile,
+  type RgbTriplet,
+} from "../../../../../frontend/src/utils/assetColors/profile";
 import {
   Camera,
   CircleDollarSign,
@@ -96,6 +107,33 @@ const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
 /** Where the panel simulation is remembered (this browser). Empty means off;
  * anything else is a panelPalettes key. */
 const PANEL_STORAGE_KEY = "frameos.preview.panel";
+// What the frame itself does before its dither (docs/asset-color-profiles.md):
+// fit the picture into the panel's range, then a colour correction. Both are
+// previewed here on the finished frame; remembered per browser.
+const FIT_STORAGE_KEY = "frameos.preview.fitPhotos";
+const CORRECTION_STORAGE_KEY = "frameos.preview.correction";
+
+function beforeDitherFor(fitPhotos: boolean, correction: AssetColorProfile): BeforeDitherHook | null {
+  const corrects = profileHasAdjustments(correction);
+  if (!fitPhotos && !corrects) {
+    return null;
+  }
+  return (pixels, width, height, palette) => {
+    if (fitPhotos) {
+      // The frame fits each drawn image; the preview has only the finished
+      // frame, so the whole picture stands in for the photo.
+      const endPoints = autoEndPoints(pixels, palette as RgbTriplet[]);
+      if (endPoints) {
+        applyAssetColors(pixels, { ...defaultAssetColorProfile(), ...endPoints });
+      }
+    }
+    if (corrects) {
+      applyAssetColors(pixels, correction);
+    }
+    void width;
+    void height;
+  };
+}
 const DEVICE_STORAGE_KEY = "frameos.preview.device";
 
 /** Megabytes with one decimal below 10 — the scale these numbers live at. */
@@ -354,6 +392,38 @@ export function SceneLivePreviewPanel({
       // See above.
     }
   }
+  // "Fit photos" and the correction sliders: what the frame does to the
+  // picture before its dither, shown here the same way (display only).
+  const [fitPhotos, setFitPhotos] = useState(true);
+  const [correction, setCorrection] = useState<AssetColorProfile>(() => defaultAssetColorProfile());
+  const [showCorrection, setShowCorrection] = useState(false);
+  useEffect(() => {
+    try {
+      const fit = window.localStorage.getItem(FIT_STORAGE_KEY);
+      if (fit !== null) {
+        setFitPhotos(fit === "1");
+      }
+      const stored = window.localStorage.getItem(CORRECTION_STORAGE_KEY);
+      const parsed = stored ? parseAssetColorProfile(JSON.parse(stored)) : null;
+      if (parsed) {
+        setCorrection(parsed);
+      }
+    } catch {
+      // Storage blocked or stale: the controls still work for this session.
+    }
+  }, []);
+  const beforeDitherRef = useRef<BeforeDitherHook | null>(beforeDitherFor(fitPhotos, correction));
+  useEffect(() => {
+    const hook = beforeDitherFor(fitPhotos, correction);
+    beforeDitherRef.current = hook;
+    previewRef.current?.setBeforeDither(hook);
+    try {
+      window.localStorage.setItem(FIT_STORAGE_KEY, fitPhotos ? "1" : "0");
+      window.localStorage.setItem(CORRECTION_STORAGE_KEY, serializeAssetColorProfile(correction));
+    } catch {
+      // See above.
+    }
+  }, [fitPhotos, correction]);
 
   // "Device": run the runtime under a real device's memory ceiling, so a
   // scene too heavy for that frame fails here instead of on hardware. The
@@ -568,6 +638,7 @@ export function SceneLivePreviewPanel({
         proxyUrl: "/api/store/preview-proxy",
         fastMode,
         panelPalette: panelRef.current,
+        beforeDither: beforeDitherRef.current,
         deviceLimits: deviceLimitsFor(
           deviceRef.current,
           viewport.width,
@@ -1349,7 +1420,41 @@ export function SceneLivePreviewPanel({
             </option>
           ))}
         </select>
+        {/* What the frame does before its dither: fit the picture into the
+            panel's range (on by default on the frame too) and the frame-wide
+            correction. Both display only, both only while dithering. */}
+        <label className="viewport-controls__toggle" title="Move the picture's black and white points into the panel's range, as the frame does">
+          <input
+            checked={fitPhotos}
+            disabled={panel === null}
+            onChange={(event) => setFitPhotos(event.target.checked)}
+            type="checkbox"
+          />
+          Fit photos
+        </label>
+        <button
+          aria-expanded={showCorrection}
+          className="button button--subtle button--small"
+          disabled={panel === null}
+          onClick={() => setShowCorrection((open) => !open)}
+          type="button"
+        >
+          {profileHasAdjustments(correction) ? "Correction (on)" : "Correction"}
+        </button>
       </div>
+      {showCorrection && panel !== null ? (
+        <div className="viewport-controls viewport-controls--correction">
+          <ColorAdjustmentControls profile={correction} onChange={setCorrection} />
+          <button
+            className="button button--subtle button--small"
+            disabled={!profileHasAdjustments(correction)}
+            onClick={() => setCorrection(defaultAssetColorProfile())}
+            type="button"
+          >
+            Reset correction
+          </button>
+        </div>
+      ) : null}
       {/* "Memory limit": a browser has gigabytes and a frame has a few
           megabytes, and until now that difference only showed up on the
           device. Off by default — a preview that runs out of memory is a

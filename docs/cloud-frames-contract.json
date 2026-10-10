@@ -186,8 +186,7 @@
           }
         }
       },
-      "profiles": {"linux": {"since": "2026.10.2"}},
-      "parity": {"only": "linux", "why": "The ESP32 runs the automatic fit by default for its palette formats but does not take the setting yet: the colors block has no slot in its NVS settings cache (fos_settings.c), a follow-up."}
+      "profiles": {"linux": {"since": "2026.10.2"}, "esp32": {"since": "2026.10.2"}}
     },
     "device_config": {
       "$comment": "STRICTLY the partial-refresh policy; the rest of deviceConfig is hardware wiring and stays the device's own (the persist path patches).",

@@ -199,6 +199,20 @@ export function esp32CloudFrameSettingKeysForVersion(
   return keysForVersion(esp32Entries, frameosVersion) as CloudFrameSettingKey[]
 }
 
+/**
+ * 2026.10.2: the ESP32 firmware keeps the `colors` block (automatic fit
+ * switch, frame-wide correction) in its settings slot and applies it live,
+ * so the Pi's wire key reaches the chip too — behind its own floor.
+ */
+export const esp32ColorsCloudFrameSettingsMinVersion = '2026.10.2'
+export const esp32ColorsCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32ColorsCloudFrameSettingsMinVersion
+)
+
+export function cloudFrameSupportsEsp32Colors(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32ColorsCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** Every key any profile takes: what the form binds and diffs on. */
 export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.from(
   new Set<CloudFrameSettingKey>([

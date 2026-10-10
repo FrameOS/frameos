@@ -498,6 +498,9 @@ export const cloudFramesContract = {
       "profiles": {
         "linux": {
           "since": "2026.10.2"
+        },
+        "esp32": {
+          "since": "2026.10.2"
         }
       }
     },

@@ -762,7 +762,7 @@ export function frameSupportsUsbSerialConsole(
  * no nav entry: an "Info" link pointing at the form the panel opens on was
  * pure noise.
  */
-const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-power']
+const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-power', 'frame-settings-colors']
 
 /**
  * Sections only ESP32 frames render — for everyone else the anchor does not

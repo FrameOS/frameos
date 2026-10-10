@@ -172,7 +172,8 @@ const CloudContractSettings* = @[
                 KeyRule(name: "luminance", rule:
                   Rule(kind: rkNumber, hasMin: true, min: -100.0, hasMax: true, max: 100.0))])]))]))]),
   profiles: @[
-    ProfileSpec(profile: "linux", since: "2026.10.2")]),
+    ProfileSpec(profile: "linux", since: "2026.10.2"),
+    ProfileSpec(profile: "esp32", since: "2026.10.2")]),
   SettingSpec(key: "device_config", rule:
     Rule(kind: rkObject, minKeys: 1, keys: @[
       KeyRule(name: "partial", rule:

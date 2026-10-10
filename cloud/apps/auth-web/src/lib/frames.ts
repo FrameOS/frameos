@@ -392,6 +392,9 @@ export const esp32MaxGpioButtons = ruleNumber(contractSettingRule("gpio_buttons"
 export const esp32TimeZoneFrameSettingsMinVersion = "2026.8.34";
 export const esp32TimeZoneFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32TimeZoneFrameSettingsMinVersion));
 
+export const esp32ColorsFrameSettingsMinVersion = "2026.10.2";
+export const esp32ColorsFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32ColorsFrameSettingsMinVersion));
+
 export const esp32BatteryEnablePinFrameSettingsMinVersion = "2026.8.39";
 export const esp32BatteryEnablePinFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32BatteryEnablePinFrameSettingsMinVersion),

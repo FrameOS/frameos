@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useState } from 'react'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import {
   HUE_RANGE_NAMES,
   TONE_RANGE_NAMES,
@@ -41,7 +41,7 @@ export function Slider({
   max?: number
   step?: number
   hint?: string
-}): JSX.Element {
+}): ReactElement {
   const display = step < 1 ? value.toFixed(2).replace(/\.?0+$/, '') : String(value)
   return (
     <label className="block" title={hint}>
@@ -64,7 +64,7 @@ export function Slider({
   )
 }
 
-export function ColorSection({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+export function ColorSection({ title, children }: { title: string; children: ReactNode }): ReactElement {
   return (
     <div className="frame-tool-card rounded-2xl p-3">
       <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">{title}</div>
@@ -86,8 +86,8 @@ export function ColorAdjustmentControls({
   profile: AssetColorProfile
   onChange: (profile: AssetColorProfile) => void
   /** Rendered at the top of the Light section (the editor's adjustments select). */
-  lightHeader?: React.ReactNode
-}): JSX.Element {
+  lightHeader?: ReactNode
+}): ReactElement {
   // Which tone range and hue the sliders below show: view state only.
   const [selectedTone, setSelectedTone] = useState<ToneRangeName>('midtones')
   const [selectedHue, setSelectedHue] = useState<HueRangeName>('red')

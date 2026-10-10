@@ -134,9 +134,17 @@ Saving it untouched changes nothing; moving a slider opts the photo out.
 The Adjustments select is **None**, **Auto** or **Custom**, derived from the
 sliders.
 
-The ESP32 runs the fit by default for its palette formats but does not take
-the `colors` setting yet (no slot in its NVS settings cache), so it cannot be
-switched off or given a global correction there: a follow-up.
+The ESP32 keeps the block as compact JSON in its config (`fos_config_t.colors`,
+NVS), fed from the backend's settings poll (`frame.colors`) or the cloud's
+`set_settings`, and pushes it into the Nim runtime every pass like
+`scalingMode` (`fos_nim_set_colors`), so it applies live.
+
+The cloud's scene preview (scenes.frameos.net) does the same on the finished
+frame while a panel is chosen: **Fit photos** (on by default) and a
+**Correction** slider set run through the `beforeDither` hook of
+`frameos-wasm`'s `FrameOSPreview` before the browser-side dither. The
+preview has only the finished frame, so the whole picture stands in for the
+photo; both are display only and remembered per browser.
 
 ## The dither palette override
 
@@ -178,5 +186,5 @@ not dither.
   has a sidecar shows a swatch icon instead. Save uploads the sidecar through
   the ordinary asset upload; Remove colors deletes it.
 * Settings → **Colors** holds the frame's `colors` block on the backend, the
-  on-device panel and the cloud (Linux frames on 2026.10.2 or newer), with
+  on-device panel and the cloud (either profile on 2026.10.2 or newer), with
   the frame's current image as the preview.

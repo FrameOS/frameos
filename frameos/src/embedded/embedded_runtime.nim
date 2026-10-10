@@ -11,6 +11,7 @@ import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
 import frameos/types
+import frameos/utils/asset_colors
 import lib/tz
 import std/times
 import frameos/channels
@@ -166,6 +167,27 @@ proc fos_nim_set_scaling_mode_impl(mode: cstring) {.exportc, cdecl.} =
   ## contain/cover/stretch/center before calling.
   if not frameConfig.isNil and mode != nil and mode.len > 0:
     frameConfig.scalingMode = $mode
+
+var lastColorsJson: string
+
+proc fos_nim_set_colors_impl(json: cstring) {.exportc, cdecl.} =
+  ## frame.json's `colors` block (utils/asset_colors): the automatic fit
+  ## switch and the frame-wide correction. fos_client pushes the stored text
+  ## every render pass like scaling_mode; it is parsed only when it changed.
+  ## "" is the defaults. A block that does not parse keeps the previous one.
+  if json == nil:
+    return
+  let text = $json
+  if text == lastColorsJson:
+    return
+  try:
+    let node = if text.len == 0: newJObject() else: parseJson(text)
+    if not frameConfig.isNil:
+      frameConfig.colors = node
+    setFrameColorSettings(parseFrameColorSettings(node))
+    lastColorsJson = text
+  except CatchableError as e:
+    log("colors: ignored, does not parse: " & e.msg)
 
 proc fos_nim_set_time_zone_impl(timeZone: cstring) {.exportc, cdecl.} =
   ## The frame's IANA zone name: what scenes pass on (the weather app's

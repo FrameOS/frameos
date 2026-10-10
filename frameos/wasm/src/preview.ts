@@ -21,6 +21,27 @@ export interface DeviceMemoryUsage {
   peakBytes: number
 }
 
+/** RGBA pixels of one frame, the panel's palette (placeholder entries included). */
+export type BeforeDitherHook = (
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  palette: readonly (readonly [number, number, number])[]
+) => void
+
+/** A panel's palette as colours: grey panels spelled out as their levels. */
+function panelColors(panel: NonNullable<ReturnType<typeof panelPaletteFor>>): readonly (readonly [number, number, number])[] {
+  if ('grayLevels' in panel) {
+    const levels: [number, number, number][] = []
+    for (let i = 0; i <= panel.grayLevels; i++) {
+      const value = Math.round((i * 255) / panel.grayLevels)
+      levels.push([value, value, value])
+    }
+    return levels
+  }
+  return panel.colors
+}
+
 export interface FrameOSPreviewOptions {
   /** URL of the module worker script: `<assets>/preview-worker.js`. The
    * frameos.js/frameos.wasm files must live next to it (same directory) —
@@ -62,6 +83,11 @@ export interface FrameOSPreviewOptions {
    * inks or greys (see ./dither). Display only — the scene renders in full
    * colour either way. Null (the default) paints the frame as rendered. */
   panelPalette?: PanelPaletteKey | null
+  /** Runs on a copy of the frame's pixels right before the panel dither
+   * (only when a panel palette is set): the place to do what the frame
+   * itself does to a picture before dithering — fit it into the palette's
+   * range, apply a colour correction. Display only, like the dither. */
+  beforeDither?: BeforeDitherHook | null
   onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
   onFrame?: (frame: PreviewFrame) => void
   onState?: (state: Record<string, unknown>) => void
@@ -117,6 +143,8 @@ export class FrameOSPreview {
   fastMode: boolean
   /** The panel frames are shown through, or null for the true colours. */
   panelPalette: PanelPaletteKey | null
+  /** What runs on the pixels before the panel dither (see the option). */
+  beforeDither: BeforeDitherHook | null
 
   constructor(options: FrameOSPreviewOptions) {
     this.options = options
@@ -124,6 +152,7 @@ export class FrameOSPreview {
     this.currentSceneId = options.sceneId ?? null
     this.fastMode = Boolean(options.fastMode)
     this.panelPalette = options.panelPalette ?? null
+    this.beforeDither = options.beforeDither ?? null
 
     this.worker = new Worker(options.workerUrl, { type: 'module' })
     this.worker.onerror = (event: ErrorEvent) => {
@@ -236,6 +265,12 @@ export class FrameOSPreview {
     this.paint()
   }
 
+  /** Replace the pre-dither hook and repaint the kept frame through it. */
+  setBeforeDither(hook: BeforeDitherHook | null): void {
+    this.beforeDither = hook
+    this.paint()
+  }
+
   private paint(): void {
     const canvas = this.canvas
     const frame = this.pendingFrame
@@ -258,6 +293,9 @@ export class FrameOSPreview {
     // (or repainting on attach) never dithers an already dithered picture.
     const pixels = panel ? new Uint8ClampedArray(frame.buffer).slice() : new Uint8ClampedArray(frame.buffer)
     if (panel) {
+      if (this.beforeDither) {
+        this.beforeDither(pixels, frame.width, frame.height, panelColors(panel))
+      }
       ditherFrame(pixels, frame.width, frame.height, panel)
     }
     context.putImageData(new ImageData(pixels, frame.width, frame.height), 0, 0)

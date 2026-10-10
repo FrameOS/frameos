@@ -350,9 +350,9 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     key: 'colors',
     title: 'Colors',
     anchor: 'frame-settings-colors',
-    surfaces: ['backend', 'frameAdmin', 'cloudLinux'],
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
     conditions:
-      'The automatic fit and the frame-wide correction (docs/asset-color-profiles.md); a cloud Linux frame needs 2026.10.2 or newer, older ones get a note. The ESP32 runs the automatic fit by default and has no slot for the setting yet.',
+      'The automatic fit and the frame-wide correction (docs/asset-color-profiles.md); a cloud frame needs 2026.10.2 or newer on either profile, older ones get a note.',
   },
 ]
 
