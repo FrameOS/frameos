@@ -2156,6 +2156,7 @@ describe("frame management API", () => {
         "gpio_buttons",
         "device",
         "input_settings",
+        "colors",
         "deep_sleep",
         "deep_sleep_on_battery",
         "wake_check_seconds",
@@ -2181,6 +2182,7 @@ describe("frame management API", () => {
         "max_http_response_bytes",
         "gpio_buttons",
         "timezone",
+        "colors",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {
