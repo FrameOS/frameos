@@ -438,6 +438,10 @@ class Frame(Base):
     error_behavior = mapped_column(JSON, nullable=True)
     input_settings = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
+    # frame.json's `colors`: the automatic fit of drawn images into the
+    # panel's range and the frame-wide colour correction
+    # (docs/asset-color-profiles.md). NULL = the runtime's defaults.
+    colors = mapped_column(JSON, nullable=True)
     # Service-settings groups (openAI, homeAssistant, …) that scenes from the
     # public scene store may read on this frame. A scene the owner authored is
     # granted what its apps declare, as it always was; a store scene is
@@ -516,6 +520,7 @@ class Frame(Base):
             'error_behavior': normalize_error_behavior(self.error_behavior),
             'input_settings': normalize_input_settings(self.input_settings),
             'palette': self.palette,
+            'colors': self.colors,
             'service_setting_groups': self.service_setting_groups,
             'buildroot': self.buildroot,
             'embedded': self.embedded,
@@ -963,6 +968,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             if int(button.get("pin", 0)) > 0
         ],
         "palette": frame.palette or {},
+        "colors": frame.colors or {},
         # "nix": frame.nix or {}, # We don't need this in the json. It's only used for building the system.
         "controlCode": {
             "enabled": frame.control_code.get('enabled', 'false') == 'true',

@@ -433,7 +433,7 @@ def _sync_frame_value(key: str, value: Any) -> Any:
         return _sync_error_behavior(value)
     if key == "input_settings":
         return _sync_input_settings(value)
-    if key == "palette":
+    if key in ("palette", "colors"):
         return _sync_compact_mapping(value)
     if key == "frame_admin_auth":
         return _sync_prune_empty(normalize_frame_admin_auth(value))
@@ -1449,7 +1449,7 @@ def _sync_frame_push_off_value(key: str, value: Any) -> Any:
         return normalize_error_behavior(value)
     if key == "input_settings":
         return normalize_input_settings(value)
-    if key == "palette":
+    if key in ("palette", "colors"):
         return {}
     return None
 

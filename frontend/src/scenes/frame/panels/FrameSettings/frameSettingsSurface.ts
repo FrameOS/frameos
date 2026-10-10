@@ -346,6 +346,14 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     surfaces: ['backend', 'frameAdmin', 'cloudLinux'],
     conditions: 'A full host OS only: no ESP32 board in the tree has a keyboard or a pointer (docs/events.md).',
   },
+  {
+    key: 'colors',
+    title: 'Colors',
+    anchor: 'frame-settings-colors',
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux'],
+    conditions:
+      'The automatic fit and the frame-wide correction (docs/asset-color-profiles.md); a cloud Linux frame needs 2026.10.2 or newer, older ones get a note. The ESP32 runs the automatic fit by default and has no slot for the setting yet.',
+  },
 ]
 
 const specsByKey = new Map(frameSettingsSections.map((section) => [section.key, section]))

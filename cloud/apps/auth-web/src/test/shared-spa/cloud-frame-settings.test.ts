@@ -13,6 +13,9 @@ import {
   cloudKeyboardLayoutIds,
   cloudFrameSupportsInputSettings,
   inputCloudFrameSettingKeys,
+  cloudFrameSupportsColors,
+  colorsCloudFrameSettingKeys,
+  colorsCloudFrameSettingsMinVersion,
   inputCloudFrameSettingsMinVersion,
   displayDriverCloudFrameSettingKeys,
   displayDriverCloudFrameSettingsMinVersion,
@@ -58,6 +61,9 @@ import {
   hardwareFrameSettingsMinVersion,
   inputFrameSettingKeys,
   inputFrameSettingsMinVersion,
+  colorsFrameSettingKeys,
+  colorsFrameSettingsMinVersion,
+  frameSupportsColorsSettings,
 } from "../../lib/frames";
 
 // Save and Render in the shared SPA used to POST /api/frames/{id} and
@@ -335,6 +341,28 @@ describe("cloud settings push", () => {
         cloudFrameSettingKeysForVersion("2026.9.22"),
       ),
     ).toEqual({ device: "pimoroni.hyperpixel4sq_touch" });
+  });
+
+  it("gates the colours batch on its floor, Pi/Linux only", () => {
+    expect([...colorsCloudFrameSettingKeys]).toEqual(["colors"]);
+    expect(new Set(colorsCloudFrameSettingKeys)).toEqual(colorsFrameSettingKeys);
+    expect(colorsCloudFrameSettingsMinVersion).toBe("2026.10.2");
+    expect(colorsFrameSettingsMinVersion).toBe(colorsCloudFrameSettingsMinVersion);
+    expect(esp32SettableKeys.has("colors")).toBe(false);
+    for (const version of ["2026.10.1", "2026.10.2", "2026.11.0", "unknown", null, ""]) {
+      expect(cloudFrameSupportsColors(version), `${version}`).toBe(frameSupportsColorsSettings(version));
+    }
+    expect(cloudFrameSettingKeysForVersion("2026.10.1")).not.toContain("colors");
+    expect(cloudFrameSettingKeysForVersion("2026.10.2")).toContain("colors");
+    // The block goes as is: the device validates it against the contract.
+    const payload = cloudFrameSettingsPayload(
+      { colors: { autoFit: "off", global: { whites: -20 } } },
+      cloudFrameSettingKeysForVersion("2026.10.2"),
+    );
+    expect(payload.colors).toEqual({ autoFit: "off", global: { whites: -20 } });
+    expect(allowedFrameSettings.get("colors")?.({ autoFit: "off", global: { whites: -20 } })).toBe(true);
+    expect(allowedFrameSettings.get("colors")?.({ autoFit: "sometimes" })).toBe(false);
+    expect(allowedFrameSettings.get("colors")?.({ global: { hues: { red: { hue: 400 } } } })).toBe(false);
   });
 
   it("gates the input batch and button roles on their floor, Pi/Linux only", () => {

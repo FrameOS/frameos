@@ -331,6 +331,7 @@ const frameApiKeyMap* = [
   ("agent", "agent"),
   ("mountpoints", "mountpoints"),
   ("palette", "palette"),
+  ("colors", "colors"),
   ("interval", "interval"),
   ("background_color", "backgroundColor"),
   ("color", "color"),

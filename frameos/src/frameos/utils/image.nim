@@ -1634,6 +1634,65 @@ when defined(frameosEmbedded):
           srcImage.getPixel(srcImage.dataIndex(srcX, srcY))))
     true
 
+proc drawnImageRect*(targetWidth, targetHeight, srcWidth, srcHeight: int, scalingMode: string,
+    offsetX: int = 0, offsetY: int = 0): tuple[x, y, width, height: int] =
+  ## The rectangle of the target that `scaleAndDrawImage` with the same
+  ## arguments paints, clipped to the target — what the colour fit on a
+  ## drawn image (utils/asset_colors) works on. Same arithmetic as the draw
+  ## below, mode for mode.
+  if targetWidth <= 0 or targetHeight <= 0 or srcWidth <= 0 or srcHeight <= 0:
+    return (0, 0, 0, 0)
+  var x, y, w, h: float
+  if srcWidth == targetWidth and srcHeight == targetHeight:
+    (x, y, w, h) = (offsetX.float, offsetY.float, srcWidth.float, srcHeight.float)
+  else:
+    case scalingMode
+    of "cover":
+      let ratio = max(targetWidth / srcWidth, targetHeight / srcHeight)
+      let scaledWidth = srcWidth.float * ratio
+      let scaledHeight = srcHeight.float * ratio
+      x = -(scaledWidth - targetWidth.float) / 2 + offsetX.float
+      y = -(scaledHeight - targetHeight.float) / 2 + offsetY.float
+      (w, h) = (scaledWidth, scaledHeight)
+    of "contain":
+      let ratio = min(targetWidth / srcWidth, targetHeight / srcHeight)
+      w = srcWidth.float * ratio
+      h = srcHeight.float * ratio
+      x = (targetWidth.float - w) / 2
+      y = (targetHeight.float - h) / 2
+    of "stretch", "tiled":
+      (x, y, w, h) = (0.0, 0.0, targetWidth.float, targetHeight.float)
+    of "top-left":
+      (x, y, w, h) = (offsetX.float, offsetY.float, srcWidth.float, srcHeight.float)
+    of "top-center":
+      (x, y, w, h) = (((targetWidth - srcWidth) div 2 + offsetX).float, offsetY.float, srcWidth.float, srcHeight.float)
+    of "top-right":
+      (x, y, w, h) = ((targetWidth - srcWidth + offsetX).float, offsetY.float, srcWidth.float, srcHeight.float)
+    of "center-left":
+      (x, y, w, h) = (offsetX.float, ((targetHeight - srcHeight) div 2 + offsetY).float, srcWidth.float, srcHeight.float)
+    of "center-right":
+      (x, y, w, h) = ((targetWidth - srcWidth + offsetX).float, ((targetHeight - srcHeight) div 2 + offsetY).float,
+        srcWidth.float, srcHeight.float)
+    of "bottom-left":
+      (x, y, w, h) = (offsetX.float, (targetHeight - srcHeight + offsetY).float, srcWidth.float, srcHeight.float)
+    of "bottom-center":
+      (x, y, w, h) = (((targetWidth - srcWidth) div 2 + offsetX).float, (targetHeight - srcHeight + offsetY).float,
+        srcWidth.float, srcHeight.float)
+    of "bottom-right":
+      (x, y, w, h) = ((targetWidth - srcWidth + offsetX).float, (targetHeight - srcHeight + offsetY).float,
+        srcWidth.float, srcHeight.float)
+    else: # "center"
+      (x, y, w, h) = (((targetWidth - srcWidth) div 2 + offsetX).float, ((targetHeight - srcHeight) div 2 + offsetY).float,
+        srcWidth.float, srcHeight.float)
+  let
+    left = max(0, x.floor.int)
+    top = max(0, y.floor.int)
+    right = min(targetWidth, (x + w).ceil.int)
+    bottom = min(targetHeight, (y + h).ceil.int)
+  if right <= left or bottom <= top:
+    return (0, 0, 0, 0)
+  (left, top, right - left, bottom - top)
+
 proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string, offsetX: int = 0,
     offsetY: int = 0, blendMode: BlendMode = OverwriteBlend) {.raises: [PixieError].} =
   if srcImage.width == targetImage.width and srcImage.height ==

@@ -6,6 +6,7 @@ import { Spinner } from '../../../../components/Spinner'
 import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { FrameSettingsProvider, useFrameSettings, type FrameSettingsProps } from './frameSettingsContext'
 import { GpioButtonsSection, InputSettingsSection } from './fields/sharedFields'
+import { ColorsSection } from './fields/colorsSection'
 import { FrameSettingsSection } from './sections/FrameSettingsSection'
 import { SettingsHeaderActions } from './SettingsHeaderActions'
 import {
@@ -206,6 +207,9 @@ function FrameSettingsPanel(): JSX.Element {
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="input">
           <InputSettingsSection />
+        </FrameSettingsSection>
+        <FrameSettingsSection sectionKey="colors">
+          <ColorsSection />
         </FrameSettingsSection>
       </Form>
     </div>

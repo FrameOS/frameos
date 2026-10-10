@@ -211,6 +211,19 @@ export function frameSupportsInputSettings(
   return frameSupportsSettingsFrom(inputFrameSettingsMinVersion, frameosVersion);
 }
 
+// The 2026.10.2 colours batch: `colors` (the automatic fit of drawn images
+// into the panel's range, and a frame-wide correction), read on every
+// render, no restart. Pi/Linux only for now: the ESP32 fits by default but
+// has no settings slot for the block yet.
+export const colorsFrameSettingsMinVersion = "2026.10.2";
+export const colorsFrameSettingKeys = new Set(contractSettingKeysSince("linux", colorsFrameSettingsMinVersion));
+
+export function frameSupportsColorsSettings(
+  frameosVersion: string | null | undefined,
+): boolean {
+  return frameSupportsSettingsFrom(colorsFrameSettingsMinVersion, frameosVersion);
+}
+
 function gpioButtonsCarryRoles(value: unknown): boolean {
   return (
     Array.isArray(value) &&

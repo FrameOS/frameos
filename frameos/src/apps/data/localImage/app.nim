@@ -208,6 +208,9 @@ proc get*(self: App, context: ExecutionContext): Image =
   self.counter = (self.counter + 1) mod len(self.images)
   if self.appConfig.counterStateKey != "":
     self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
+  # A canvas handed over for an into-target decode is a fresh one each
+  # render; a mark left on it by an earlier photo must not outlive it.
+  unmarkImageGraded(decodeTarget)
 
   # A photo may carry its own colour profile (utils/asset_colors: the
   # `<image>.frameos.json` sidecar the Assets panel writes). Its palette
@@ -249,6 +252,8 @@ proc get*(self: App, context: ExecutionContext): Image =
   if adjustColors:
     try:
       applyAssetColors(image, colorProfile.get())
+      # Explicit sliders stand; the consumer's automatic fit skips this one.
+      markImageGraded(image)
       self.log("Applied the colour profile: " & sidecarPathFor(path))
     except CatchableError as e:
       self.logError("Could not apply the colour profile " & sidecarPathFor(path) & ": " & e.msg)

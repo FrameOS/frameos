@@ -302,6 +302,7 @@ const allFrameSettingsSections = [
   { id: 'frame-settings-assets', label: 'Assets' },
   { id: 'frame-settings-gpio', label: 'GPIO' },
   { id: 'frame-settings-input', label: 'Input' },
+  { id: 'frame-settings-colors', label: 'Colors' },
   { id: 'frame-settings-logs', label: 'Logs' },
   { id: 'frame-settings-reboot', label: 'Reboot' },
 ]

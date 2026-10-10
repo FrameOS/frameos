@@ -3,6 +3,7 @@ import pixie
 
 import ../asset_colors
 import ../dither
+import ../image
 
 proc gradient(width, height: int): Image =
   ## A deterministic test photo: red ramps across, green ramps down, blue
@@ -173,3 +174,124 @@ suite "asset colour profiles":
       indices.add(index)
     check indices == @[0, 0, 0, 3, 3, 3, 3, 3, 5, 5, 5, 5, 1, 3, 1, 3,
       6, 6, 1, 2, 1, 1, 2, 1, 5, 6, 6, 1, 2, 1, 2, 1]
+
+suite "the frame's automatic fit":
+  setup:
+    setAssetColorsPanelPalette(spectra6ColorPalette)
+    setFrameColorSettings(parseFrameColorSettings(nil))
+    clearGradedImages()
+
+  test "the panel palette follows the device name":
+    check panelPaletteForDevice("waveshare.EPD_13in3e").len == 6
+    check panelPaletteForDevice("pimoroni.inky_impression_7_2025").len == 6
+    check panelPaletteForDevice("pimoroni.inky_impression_7").len == 6
+    check panelPaletteForDevice("pimoroni.inky_impression_7_3") == saturated7ColorPalette
+    check panelPaletteForDevice("waveshare.EPD_7in3f") == saturated7ColorPalette
+    check panelPaletteForDevice("waveshare.EPD_2in13g") == saturated4ColorPalette
+    check panelPaletteForDevice("waveshare.EPD_7in5_V2").len == 0
+    check panelPaletteForDevice("framebuffer").len == 0
+    let custom = @[(1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6)]
+    check panelPaletteForDevice("waveshare.EPD_7in3e", custom) == custom
+    check panelPaletteForDevice("waveshare.EPD_7in3f", custom) == saturated7ColorPalette
+
+  test "the end points map the photo's range onto the palette's":
+    let image = gradient(16, 16)
+    let endPoints = autoEndPoints(image, 0, 0, 16, 16, assetColorsPanelPalette)
+    check endPoints.isSome
+    # Brighter than the panel's white → pulled down; the floor lifted to the
+    # palette's black.
+    check endPoints.get().whites < -50
+    check endPoints.get().blacks > 0
+    var profile = AssetColorProfile()
+    profile.whites = endPoints.get().whites
+    profile.blacks = endPoints.get().blacks
+    applyAssetColors(image, profile)
+    let bright = image.unsafe[15, 15]
+    let lum = luminance(bright.r.float, bright.g.float, bright.b.float) / 255.0
+    check abs(lum - paletteRange(assetColorsPanelPalette).hi) < 0.06
+    # A flat rectangle has nothing to fit.
+    let flat = newImage(4, 4)
+    flat.fill(rgbx(100, 100, 100, 255))
+    check autoEndPoints(flat, 0, 0, 4, 4, assetColorsPanelPalette).isNone
+
+  test "the lookup table is the float pipeline, level for level":
+    let profile = profileOf("""{"exposure": 0.3, "contrast": 20, "whites": -40, "blacks": 10}""")
+    check profile.isLinearProfile()
+    let lut = linearLut(profile)
+    for level in 0 .. 255:
+      let v = level.float / 255.0
+      let viaFloat = adjustPixel(profile, v, v, v)
+      check lut[level] == uint8(max(0.0, min(255.0, (viaFloat.r * 255.0).round())))
+    check not profileOf("""{"saturation": 5}""").isLinearProfile()
+    check not profileOf("""{"hues": {"red": {"hue": 5}}}""").isLinearProfile()
+
+  test "a drawn photo is fitted by default on a palette panel and left alone elsewhere":
+    let canvas = gradient(16, 16)
+    let before = pixelsOf(canvas)
+    applyAutoFitToDrawn(canvas, 0, 0, 16, 16)
+    check pixelsOf(canvas) != before
+    # Off by default without a palette (an HDMI frame)…
+    setAssetColorsPanelPalette(@[])
+    let hdmi = gradient(16, 16)
+    applyAutoFitToDrawn(hdmi, 0, 0, 16, 16)
+    check pixelsOf(hdmi) == before
+    # …unless asked for, and never when switched off.
+    setFrameColorSettings(parseFrameColorSettings(parseJson("""{"autoFit": "on"}""")))
+    applyAutoFitToDrawn(hdmi, 0, 0, 16, 16)
+    check pixelsOf(hdmi) != before
+    setAssetColorsPanelPalette(spectra6ColorPalette)
+    setFrameColorSettings(parseFrameColorSettings(parseJson("""{"autoFit": "off"}""")))
+    let off = gradient(16, 16)
+    applyAutoFitToDrawn(off, 0, 0, 16, 16)
+    check pixelsOf(off) == before
+
+  test "only the drawn rectangle is fitted":
+    let canvas = newImage(8, 4)
+    canvas.fill(rgbx(255, 255, 255, 255))
+    for y in 0 ..< 4:
+      for x in 0 ..< 4:
+        canvas.unsafe[x, y] = rgbx(uint8(x * 80), uint8(y * 80), 255, 255)
+    applyAutoFitToDrawn(canvas, 0, 0, 4, 4)
+    check canvas.unsafe[6, 2] == rgbx(255, 255, 255, 255)
+    check canvas.unsafe[3, 3] != rgbx(240, 240, 255, 255)
+
+  test "a photo graded by its sidecar is not fitted on top":
+    let graded = gradient(16, 16)
+    markImageGraded(graded)
+    check isImageGraded(graded)
+    let canvas = gradient(16, 16)
+    let before = pixelsOf(canvas)
+    applyAutoFitToDrawn(canvas, 0, 0, 16, 16, graded)
+    check pixelsOf(canvas) == before
+    unmarkImageGraded(graded)
+    check not isImageGraded(graded)
+    applyAutoFitToDrawn(canvas, 0, 0, 16, 16, graded)
+    check pixelsOf(canvas) != before
+    markImageGraded(graded)
+    clearGradedImages()
+    check not isImageGraded(graded)
+
+  test "the global correction runs on the whole canvas, on any display":
+    setAssetColorsPanelPalette(@[])
+    setFrameColorSettings(parseFrameColorSettings(parseJson("""{"global": {"exposure": 1}}""")))
+    check frameColorSettings.global.exposure == 1
+    check frameColorSettings.global.palette.len == 0
+    let canvas = newImage(2, 1)
+    canvas.fill(rgbx(60, 60, 60, 255))
+    applyGlobalColorCorrection(canvas)
+    check canvas.unsafe[1, 0].r == 120
+    # Neutral settings touch nothing.
+    setFrameColorSettings(parseFrameColorSettings(parseJson("""{"autoFit": "nonsense", "global": {}}""")))
+    check frameColorSettings.autoFit == "default"
+    applyGlobalColorCorrection(canvas)
+    check canvas.unsafe[1, 0].r == 120
+
+  test "the drawn rectangle follows the placement":
+    check drawnImageRect(800, 480, 1600, 1200, "cover") == (0, 0, 800, 480)
+    check drawnImageRect(800, 480, 400, 400, "contain") == (160, 0, 480, 480)
+    check drawnImageRect(800, 480, 400, 400, "stretch") == (0, 0, 800, 480)
+    check drawnImageRect(800, 480, 100, 50, "center") == (350, 215, 100, 50)
+    check drawnImageRect(800, 480, 100, 50, "top-left", 10, 20) == (10, 20, 100, 50)
+    check drawnImageRect(800, 480, 100, 50, "bottom-right") == (700, 430, 100, 50)
+    check drawnImageRect(800, 480, 800, 480, "cover", 100, 0) == (100, 0, 700, 480)
+    check drawnImageRect(800, 480, 100, 50, "top-left", 900, 0) == (0, 0, 0, 0)

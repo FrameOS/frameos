@@ -202,6 +202,7 @@ export interface assetColorsLogicValues {
   autoEndPoints: AutoEndPoints | null
   canSave: boolean
   fit: PreviewFit
+  frameAutoFitActive: boolean
   hasSavedProfile: boolean
   imagePath: string | null
   imageSize: {
@@ -356,6 +357,7 @@ export interface assetColorsLogicMeta {
       height: number
       width: number
     }
+    frameAutoFitActive: (frameForm: Partial<FrameType>, frame: FrameType, panelPalette: RgbTriplet[] | null) => boolean
     hasSavedProfile: (imagePath: string | null, colorProfileKeys: Set<string>, frame: FrameType) => boolean
     isDefault: (profile: AssetColorProfile) => boolean
     adjustmentMode: (profile: AssetColorProfile, autoEndPoints: AutoEndPoints | null) => AdjustmentMode
@@ -515,6 +517,17 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
           rotate: frameForm.rotate ?? frame.rotate,
         }),
     ],
+    frameAutoFitActive: [
+      (s) => [s.frameForm, s.frame, s.panelPalette],
+      (
+        frameForm: assetColorsLogicValues['frameForm'],
+        frame: assetColorsLogicValues['frame'],
+        panelPalette: assetColorsLogicValues['panelPalette']
+      ): boolean => {
+        const mode = (frameForm.colors ?? frame.colors)?.autoFit ?? 'default'
+        return mode === 'on' || (mode !== 'off' && visiblePalette(panelPalette).length > 0)
+      },
+    ],
     hasSavedProfile: [
       (s) => [s.imagePath, s.colorProfileKeys, s.frame],
       (
@@ -593,14 +606,26 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
         values.profile.palette && values.profile.palette.length > 0
           ? values.profile.palette
           : visiblePalette(values.panelPalette)
-      actions.setAutoEndPoints(
-        computeAutoEndPoints(work, source, {
-          width: values.imageSize.width,
-          height: values.imageSize.height,
-          fit: values.fit,
-          palette: palette.length > 0 ? palette : null,
-        })
-      )
+      const endPoints = computeAutoEndPoints(work, source, {
+        width: values.imageSize.width,
+        height: values.imageSize.height,
+        fit: values.fit,
+        palette: palette.length > 0 ? palette : null,
+      })
+      actions.setAutoEndPoints(endPoints)
+      // A photo without a sidecar starts where the frame would show it: the
+      // frame's own automatic fit, when it is on for this panel. Saving the
+      // preset untouched changes nothing on the frame; moving a slider is
+      // what opts the photo out.
+      if (
+        endPoints &&
+        values.frameAutoFitActive &&
+        !values.hasSavedProfile &&
+        !values.savedProfileLoading &&
+        values.isDefault
+      ) {
+        actions.setProfile(autoProfileFor(values.profile, endPoints))
+      }
     },
     setAdjustmentMode: ({ mode }) => {
       if (mode === 'none') {

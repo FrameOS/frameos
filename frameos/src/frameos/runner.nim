@@ -21,6 +21,7 @@ import frameos/cloud/link_state
 import frameos/logger
 import frameos/metrics
 import frameos/types
+import frameos/utils/asset_colors
 import frameos/utils/dither
 import frameos/utils/image
 import frameos/utils/time
@@ -181,11 +182,23 @@ proc configureControlCode(self: RunnerThread) =
     self.controlCodeRender = nil
     self.controlCodeData = nil
 
+proc refreshFrameColorSettings(self: RunnerThread) =
+  ## frame.json's `colors` block and the panel palette the automatic fit aims
+  ## for (utils/asset_colors), re-read each pass so a settings save lands
+  ## without a restart. Parsed only when the JSON text changed.
+  let text = if self.frameConfig.colors.isNil: "" else: $self.frameConfig.colors
+  if text != self.frameColorSettingsText:
+    self.frameColorSettingsText = text
+    setFrameColorSettings(parseFrameColorSettings(self.frameConfig.colors))
+  setAssetColorsPanelPalette(panelPaletteForDevice(self.frameConfig.device,
+    if self.frameConfig.palette.isNil: @[] else: self.frameConfig.palette.colors))
+
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
   let sceneTimer = getMonoTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
   refreshDecodeBudget()
+  self.refreshFrameColorSettings()
   markRuntimeStart("render", scene.id.string, "render", requiredWidth, requiredHeight)
   self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
       "sceneId": scene.id.string})
@@ -243,6 +256,9 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       scaleAndDrawImage(outImage, image, self.frameConfig.scalingMode)
     else:
       outImage = image
+    # The frame-wide colour correction, on every display, before the image
+    # is stored and shown.
+    applyGlobalColorCorrection(outImage)
     setLastImage(outImage)
     # The local-presence code, if one is pending. Drawn AFTER the render is
     # stored (setLastImage copies), so it reaches the panel only: the whole
@@ -347,8 +363,10 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         var sceneInitialized = true
         self.logSignal(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
         # A photo's own dither palette (utils/asset_colors) outlives the
-        # render that loaded it, not the scene that showed it.
+        # render that loaded it, not the scene that showed it; same for the
+        # marks on the photos a sidecar graded.
         clearRenderPaletteOverride()
+        clearGradedImages()
         # Persist the active scene context early in boot, then stop writing it
         # after a few successful renders to reduce SD card writes.
         if shouldPersistBootGuardContextForScene(sceneId.string, successfulSceneRenders):

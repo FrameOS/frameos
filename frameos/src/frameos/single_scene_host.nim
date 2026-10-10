@@ -19,6 +19,7 @@ import pixie
 import ./event_loop
 import ./interpreter
 import ./types
+import ./utils/asset_colors
 import ./utils/dither
 import ./js_runtime/app_runtime
 import ./js_runtime/runtime as jsRuntime
@@ -127,8 +128,10 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
   if host.sceneId.isSome and host.sceneId.get() != sceneId:
     host.lifecycle("close", %*{})
     # A photo's own dither palette (utils/asset_colors) outlives the render
-    # that loaded it, not the scene that showed it.
+    # that loaded it, not the scene that showed it; same for the marks on
+    # the photos a sidecar graded.
     clearRenderPaletteOverride()
+    clearGradedImages()
   if drop:
     host.dropScene()
   host.sceneId = some(sceneId)

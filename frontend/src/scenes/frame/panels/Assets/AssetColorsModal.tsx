@@ -1,5 +1,4 @@
 import { useActions, useValues } from 'kea'
-import clsx from 'clsx'
 import { useEffect, useRef } from 'react'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
@@ -9,81 +8,10 @@ import { Spinner } from '../../../../components/Spinner'
 import { Switch } from '../../../../components/Switch'
 import { spectraPalettes } from '../../../../devices'
 import { visiblePalette } from '../../../../utils/assetColors/devicePalette'
-import {
-  HUE_RANGE_NAMES,
-  TONE_RANGE_NAMES,
-  hexToTriplet,
-  tripletToHex,
-  type HueRangeName,
-  type ToneRangeName,
-} from '../../../../utils/assetColors/profile'
+import { hexToTriplet, tripletToHex } from '../../../../utils/assetColors/profile'
+import { ColorAdjustmentControls, ColorSection } from './ColorAdjustmentControls'
 import type { FrameId } from '../../../../types'
 import { type AdjustmentMode, assetColorsLogic, renderColorPreview } from './assetColorsLogic'
-
-const hueSwatches: Record<HueRangeName, string> = {
-  red: '#e03131',
-  orange: '#f08c00',
-  yellow: '#f5d90a',
-  green: '#2f9e44',
-  aqua: '#15aabf',
-  blue: '#1c7ed6',
-  purple: '#7048e8',
-  magenta: '#d6336c',
-}
-
-const toneLabels: Record<ToneRangeName, string> = {
-  shadows: 'Shadows',
-  midtones: 'Midtones',
-  highlights: 'Highlights',
-}
-
-function Slider({
-  label,
-  value,
-  onChange,
-  min = -100,
-  max = 100,
-  step = 1,
-  hint,
-}: {
-  label: string
-  value: number
-  onChange: (value: number) => void
-  min?: number
-  max?: number
-  step?: number
-  hint?: string
-}): JSX.Element {
-  const display = step < 1 ? value.toFixed(2).replace(/\.?0+$/, '') : String(value)
-  return (
-    <label className="block" title={hint}>
-      <span className="flex items-center justify-between text-xs">
-        <span className="frame-tool-muted">{label}</span>
-        <span className={clsx('tabular-nums', value !== 0 ? 'font-semibold' : 'frame-tool-muted')}>{display}</span>
-      </span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        onDoubleClick={() => onChange(0)}
-        aria-label={label}
-        className="mt-0.5 w-full accent-blue-500"
-      />
-    </label>
-  )
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
-  return (
-    <div className="frame-tool-card rounded-2xl p-3">
-      <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">{title}</div>
-      <div className="space-y-2">{children}</div>
-    </div>
-  )
-}
 
 /** The panel-sized preview, repainted whenever a slider moves. */
 function Preview({ frameId }: { frameId: FrameId }): JSX.Element {
@@ -143,8 +71,6 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
     imagePath,
     profile,
     panelPalette,
-    selectedTone,
-    selectedHue,
     showDithered,
     showAdjusted,
     fit,
@@ -157,14 +83,10 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
   } = useValues(logic)
   const {
     closeEditor,
-    setSlider,
-    setTone,
-    setHue,
+    setProfile,
     setAdjustmentMode,
     setPalette,
     setPaletteColor,
-    setSelectedTone,
-    setSelectedHue,
     setShowDithered,
     setShowAdjusted,
     setFit,
@@ -181,8 +103,6 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
   const panelColors = visiblePalette(panelPalette)
   const customPalette = profile.palette
   const paletteColors = customPalette ?? panelColors
-  const tone = profile[selectedTone]
-  const hue = profile.hues[selectedHue]
   const presets = panelColors.length === 6 ? spectraPalettes : []
 
   return (
@@ -247,119 +167,31 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
         </div>
 
         <div className="space-y-3">
-          <Section title="Light">
-            <label className="flex items-center gap-2 text-xs">
-              <span className="frame-tool-muted shrink-0">Adjustments</span>
-              <Select
-                value={adjustmentMode}
-                onChange={(value) => setAdjustmentMode(value as AdjustmentMode)}
-                options={[
-                  { value: 'none', label: 'None' },
-                  {
-                    value: 'auto',
-                    label: autoEndPoints ? 'Auto: fit the photo into the panel range' : 'Auto (nothing to fit)',
-                    disabled: !autoEndPoints,
-                  },
-                  { value: 'custom', label: 'Custom' },
-                ]}
-                className="min-w-0 flex-1"
-              />
-            </label>
-            <Slider
-              label="Exposure"
-              value={profile.exposure}
-              min={-3}
-              max={3}
-              step={0.05}
-              onChange={(value) => setSlider('exposure', value)}
-            />
-            <Slider label="Contrast" value={profile.contrast} onChange={(value) => setSlider('contrast', value)} />
-            <Slider
-              label="Whites"
-              value={profile.whites}
-              onChange={(value) => setSlider('whites', value)}
-              hint="Negative keeps detail in the highlights"
-            />
-            <Slider label="Blacks" value={profile.blacks} onChange={(value) => setSlider('blacks', value)} />
-            <Slider
-              label="Saturation"
-              value={profile.saturation}
-              onChange={(value) => setSlider('saturation', value)}
-            />
-          </Section>
+          <ColorAdjustmentControls
+            profile={profile}
+            onChange={setProfile}
+            lightHeader={
+              <label className="flex items-center gap-2 text-xs">
+                <span className="frame-tool-muted shrink-0">Adjustments</span>
+                <Select
+                  value={adjustmentMode}
+                  onChange={(value) => setAdjustmentMode(value as AdjustmentMode)}
+                  options={[
+                    { value: 'none', label: 'None' },
+                    {
+                      value: 'auto',
+                      label: autoEndPoints ? 'Auto: fit the photo into the panel range' : 'Auto (nothing to fit)',
+                      disabled: !autoEndPoints,
+                    },
+                    { value: 'custom', label: 'Custom' },
+                  ]}
+                  className="min-w-0 flex-1"
+                />
+              </label>
+            }
+          />
 
-          <Section title="Tones">
-            <div className="flex gap-1">
-              {TONE_RANGE_NAMES.map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => setSelectedTone(name)}
-                  className={clsx(
-                    'flex-1 rounded-lg border px-2 py-1 text-xs transition',
-                    selectedTone === name
-                      ? 'frameos-primary-outline-action font-semibold'
-                      : 'frame-tool-muted border-transparent hover:underline'
-                  )}
-                >
-                  {toneLabels[name]}
-                </button>
-              ))}
-            </div>
-            <Slider
-              label="Brightness"
-              value={tone.luminance}
-              onChange={(value) => setTone(selectedTone, 'luminance', value)}
-            />
-            <Slider label="Red" value={tone.r} onChange={(value) => setTone(selectedTone, 'r', value)} />
-            <Slider label="Green" value={tone.g} onChange={(value) => setTone(selectedTone, 'g', value)} />
-            <Slider label="Blue" value={tone.b} onChange={(value) => setTone(selectedTone, 'b', value)} />
-          </Section>
-
-          <Section title="Colors">
-            <div className="flex flex-wrap gap-1.5">
-              {HUE_RANGE_NAMES.map((name) => {
-                const range = profile.hues[name]
-                const touched = range.hue !== 0 || range.saturation !== 0 || range.luminance !== 0
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    title={name}
-                    aria-label={name}
-                    onClick={() => setSelectedHue(name)}
-                    className={clsx(
-                      'h-6 w-6 rounded-full border-2 transition',
-                      selectedHue === name ? 'scale-110 border-white ring-2 ring-blue-400' : 'border-transparent',
-                      touched && 'shadow-[0_0_0_2px_rgba(255,255,255,0.6)]'
-                    )}
-                    style={{ backgroundColor: hueSwatches[name] }}
-                  />
-                )
-              })}
-              <span className="frame-tool-muted ml-1 self-center text-xs capitalize">{selectedHue}</span>
-            </div>
-            <Slider
-              label="Hue"
-              value={hue.hue}
-              min={-180}
-              max={180}
-              onChange={(value) => setHue(selectedHue, 'hue', value)}
-              hint="Degrees around the colour wheel"
-            />
-            <Slider
-              label="Saturation"
-              value={hue.saturation}
-              onChange={(value) => setHue(selectedHue, 'saturation', value)}
-            />
-            <Slider
-              label="Luminance"
-              value={hue.luminance}
-              onChange={(value) => setHue(selectedHue, 'luminance', value)}
-            />
-          </Section>
-
-          <Section title="Dither palette">
+          <ColorSection title="Dither palette">
             <Switch
               value={!!customPalette}
               onChange={(value) => setPalette(value ? paletteColors.map((color) => [...color] as typeof color) : null)}
@@ -412,7 +244,7 @@ export function AssetColorsModal({ frameId }: { frameId: FrameId }): JSX.Element
                 <span className="frame-tool-muted text-xs">This display shows full colour; nothing to dither to.</span>
               ) : null}
             </div>
-          </Section>
+          </ColorSection>
         </div>
       </div>
     </Modal>

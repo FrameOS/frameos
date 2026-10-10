@@ -442,7 +442,9 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
           setRenderPaletteOverride(colorProfile.get().palette)
         else:
           clearRenderPaletteOverride()
-        applyAssetColors(image, colorProfile.get())
+        if colorProfile.get().hasAdjustments():
+          applyAssetColors(image, colorProfile.get())
+          markImageGraded(image)
       return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
     else:
       frameos_apps.logError(e.owner, "JS app assets: unknown operation: " & opStr)
@@ -1612,7 +1614,11 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
     if runtime.category == "render":
       let value = toValue(runtime, owner, context, payload, "image")
       if value.kind == fkImage and not value.asImage().isNil:
-        context.image.draw(value.asImage())
+        let drawn = value.asImage()
+        context.image.draw(drawn)
+        # A render app's image lands at the origin, its own size.
+        applyAutoFitToDrawn(context.image, 0, 0, min(drawn.width, context.image.width),
+          min(drawn.height, context.image.height), drawn)
   finally:
     runtime.clearTransientImages()
 

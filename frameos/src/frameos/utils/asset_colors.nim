@@ -26,6 +26,8 @@
 import std/[json, math, options, os, strutils]
 import pixie
 
+import ./dither
+
 
 const
   AssetColorSidecarSuffix* = ".frameos.json"
@@ -34,6 +36,10 @@ const
   ## Hue range centres, degrees, in the order the sidecar lists them.
   HueRangeNames* = ["red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"]
   HueRangeCentres = [0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 280.0, 320.0]
+  ## How far the end points travel at ±100: a white point of 1.4 is what a
+  ## Spectra panel's white (luminance 0.74) needs to take a photo's full
+  ## range, which is what the automatic fit asks for.
+  EndPointRange* = 0.4
   # The grey weights the dither uses (utils/dither: toGrayscaleFloat).
   LumR = 0.21
   LumG = 0.72
@@ -144,15 +150,10 @@ proc parsePalette(node: JsonNode): seq[(int, int, int)] =
     else:
       return @[]
 
-proc parseAssetColorProfile*(root: JsonNode): Option[AssetColorProfile] =
-  ## `{"version": 1, "colors": {...}}`. Unknown keys are ignored, missing
-  ## ones are neutral, so an older runtime reads a newer file.
-  if root.isNil or root.kind != JObject:
-    return none(AssetColorProfile)
-  let colors = root{"colors"}
-  if colors.isNil or colors.kind != JObject:
-    return none(AssetColorProfile)
-  var profile = AssetColorProfile(
+proc parseAssetColorAdjustments*(colors: JsonNode): AssetColorProfile =
+  ## The `colors` object alone (the sidecar's inner object, or frame.json's
+  ## `colors.global`). Missing keys are neutral; unknown keys are ignored.
+  result = AssetColorProfile(
     exposure: sliderOf(colors, "exposure", -3.0, 3.0),
     contrast: sliderOf(colors, "contrast"),
     whites: sliderOf(colors, "whites"),
@@ -161,17 +162,26 @@ proc parseAssetColorProfile*(root: JsonNode): Option[AssetColorProfile] =
     shadows: toneOf(colors, "shadows"),
     midtones: toneOf(colors, "midtones"),
     highlights: toneOf(colors, "highlights"),
-    palette: parsePalette(colors{"palette"}),
+    palette: parsePalette(if colors.isNil: nil else: colors{"palette"}),
   )
-  let hues = colors{"hues"}
+  let hues = if colors.isNil or colors.kind != JObject: nil else: colors{"hues"}
   for i, name in HueRangeNames:
     let hue = if hues.isNil or hues.kind != JObject: nil else: hues{name}
-    profile.hues[i] = HueRange(
+    result.hues[i] = HueRange(
       hue: sliderOf(hue, "hue", -180.0, 180.0),
       saturation: sliderOf(hue, "saturation"),
       luminance: sliderOf(hue, "luminance"),
     )
-  some(profile)
+
+proc parseAssetColorProfile*(root: JsonNode): Option[AssetColorProfile] =
+  ## `{"version": 1, "colors": {...}}`. Unknown keys are ignored, missing
+  ## ones are neutral, so an older runtime reads a newer file.
+  if root.isNil or root.kind != JObject:
+    return none(AssetColorProfile)
+  let colors = root{"colors"}
+  if colors.isNil or colors.kind != JObject:
+    return none(AssetColorProfile)
+  some(parseAssetColorAdjustments(colors))
 
 proc loadAssetColorProfile*(imagePath: string): Option[AssetColorProfile] =
   ## The profile next to `imagePath`, or none when there is no sidecar or it
@@ -189,6 +199,204 @@ proc loadAssetColorProfile*(imagePath: string): Option[AssetColorProfile] =
 
 proc luminance*(r, g, b: float): float {.inline.} =
   LumR * r + LumG * g + LumB * b
+
+proc paletteRange*(palette: seq[(int, int, int)]): tuple[lo, hi: float] =
+  ## The darkest and brightest luminance a palette can show, 0 .. 1.
+  if palette.len == 0:
+    return (0.0, 1.0)
+  result = (1.0, 0.0)
+  for color in palette:
+    if color[0] >= 999:
+      continue
+    let lum = luminance(color[0].float, color[1].float, color[2].float) / 255.0
+    result.lo = min(result.lo, lum)
+    result.hi = max(result.hi, lum)
+  if result.hi <= result.lo:
+    result = (0.0, 1.0)
+
+# ------------------------------------------------------------ panel palette
+
+## The palette the panel dithers to, as far as the host knows it: the Linux
+## runner sets it from the device name at boot, the ESP32 from the display
+## format at render. The automatic fit aims for its range; empty means "no
+## palette" (a full-colour display), where the fit is off by default.
+var assetColorsPanelPalette* {.threadvar.}: seq[(int, int, int)]
+
+proc setAssetColorsPanelPalette*(colors: seq[(int, int, int)]) =
+  assetColorsPanelPalette = @[]
+  for color in colors:
+    # The Spectra table's placeholder entry is not a colour.
+    if color[0] < 999:
+      assetColorsPanelPalette.add(color)
+
+proc panelPaletteForDevice*(device: string, custom: seq[(int, int, int)] = @[]): seq[(int, int, int)] =
+  ## The measured palette a device dithers to, as far as the host can tell
+  ## without asking the driver: a six-colour custom palette on a Spectra
+  ## panel wins (that is what the driver uses too), then the panel family by
+  ## its name. Empty for panels the host cannot place — greyscale and
+  ## two-colour ones, full-colour displays — where the fit stays off unless
+  ## asked for. Mirrors `panelPaletteKindForDevice` in devicePalette.ts.
+  let name = device.toLowerAscii()
+  let spectra = name.endsWith("e") and (name.contains("13in3e") or name.contains("7in3e") or
+      name.contains("4in0e") or name.contains("photopainter")) or
+    name.contains("inky_impression_4_2025") or name.contains("inky_impression_4_spectra6") or
+    name.contains("inky_impression_7_2025") or name.contains("inky_impression_13") or
+    name == "pimoroni.inky_impression_7" or name == "pimoroni.inky_impression_4"
+  if spectra:
+    if custom.len == 6:
+      return custom
+    result = @[]
+    for color in spectra6ColorPalette:
+      if color[0] < 999:
+        result.add(color)
+    return result
+  if name.contains("7in3f") or name.contains("5in65f") or name.contains("4in01f") or
+      name.contains("inky_impression_4_7_color") or name.contains("inky_impression_5_7") or
+      name.contains("inky_impression_7_3") or name == "pimoroni.inky_impression":
+    return saturated7ColorPalette
+  if name.endsWith("g") and name.startsWith("waveshare.") or name.contains("inky_phat_4") or
+      name.contains("inky_what_4"):
+    return saturated4ColorPalette
+  @[]
+
+# ------------------------------------------------------- frame colour rules
+#
+# frame.json's `colors` block: `{"autoFit": "default" | "on" | "off",
+# "global": {<the sidecar's colours object>}}`. The automatic fit runs on
+# every image drawn onto the canvas (apps/render/image, the JS runtime) and
+# maps the photo's range onto the panel palette's; `default` means on when
+# the panel has a palette. The global correction runs once on the finished
+# canvas, on every display. Both live in thread-local values the host sets
+# from its config (runner.nim per pass, embedded_main per render).
+
+type
+  FrameColorSettings* = object
+    autoFit*: string ## "default", "on" or "off"
+    global*: AssetColorProfile
+
+var frameColorSettings* {.threadvar.}: FrameColorSettings
+
+proc parseFrameColorSettings*(node: JsonNode): FrameColorSettings =
+  result = FrameColorSettings(autoFit: "default")
+  if node.isNil or node.kind != JObject:
+    return
+  let mode = node{"autoFit"}.getStr("default")
+  result.autoFit = if mode in ["on", "off"]: mode else: "default"
+  let global = node{"global"}
+  if not global.isNil and global.kind == JObject:
+    result.global = parseAssetColorAdjustments(global)
+    result.global.palette = @[] # a global correction has no palette of its own
+
+proc setFrameColorSettings*(settings: FrameColorSettings) =
+  frameColorSettings = settings
+
+proc autoFitActive*(): bool =
+  ## Whether images drawn from now on get the automatic fit.
+  case frameColorSettings.autoFit
+  of "on": true
+  of "off": false
+  else: assetColorsPanelPalette.len > 0
+
+# ------------------------------------------------------- the automatic fit
+
+proc autoEndPoints*(image: Image, x0, y0, width, height: int,
+    palette: seq[(int, int, int)]): Option[tuple[whites, blacks: float]] =
+  ## The Whites and Blacks that map the luminance percentiles 0.5 and 99.5
+  ## of one rectangle onto the darkest and brightest luminance of `palette`
+  ## — the editor's Auto preset, as the frontend's `autoEndPoints` computes
+  ## it, so a saved preset and the frame's own fit agree. None for a flat
+  ## rectangle (nothing to fit).
+  if image.isNil or width <= 0 or height <= 0:
+    return none(tuple[whites, blacks: float])
+  let
+    xStart = max(0, x0)
+    yStart = max(0, y0)
+    xEnd = min(image.width, x0 + width)
+    yEnd = min(image.height, y0 + height)
+  if xEnd <= xStart or yEnd <= yStart:
+    return none(tuple[whites, blacks: float])
+  var histogram: array[256, int]
+  for y in yStart ..< yEnd:
+    for x in xStart ..< xEnd:
+      let p = image.unsafe[x, y]
+      let lum = luminance(p.r.float, p.g.float, p.b.float)
+      histogram[max(0, min(255, lum.round().int))] += 1
+  let total = (xEnd - xStart) * (yEnd - yStart)
+  let
+    loCount = (total.float * 0.005).int
+    hiCount = (total.float * 0.995).int
+  var
+    seen = 0
+    lo = 0
+    hi = 255
+    loFound = false
+  for level in 0 .. 255:
+    seen += histogram[level]
+    if not loFound and seen > loCount:
+      lo = level
+      loFound = true
+    if seen >= hiCount:
+      hi = level
+      break
+  if hi - lo < 3:
+    return none(tuple[whites, blacks: float])
+  let
+    src = (lo: lo.float / 255.0, hi: hi.float / 255.0)
+    dst = paletteRange(palette)
+    scale = (dst.hi - dst.lo) / (src.hi - src.lo)
+    span = 1.0 / scale
+    blackPoint = src.lo - dst.lo / scale
+    whitePoint = blackPoint + span
+  proc clampSlider(value: float): float = max(-100.0, min(100.0, value.round()))
+  some((
+    whites: clampSlider((1.0 - whitePoint) / EndPointRange * 100.0),
+    blacks: clampSlider(-blackPoint / EndPointRange * 100.0),
+  ))
+
+# ----------------------------------------------------- graded image marks
+#
+# A photo whose sidecar the producer already applied must not get the
+# automatic fit on top. The producer marks the image it graded; the consumer
+# asks before fitting. Weak pointers in a small ring, cleared on a scene
+# change: a stale entry can only ever match an image some other app produced
+# later at the same address, and all that does is skip one fit.
+
+const GradedImageSlots = 16
+var
+  gradedImages {.threadvar.}: array[GradedImageSlots, pointer]
+  gradedImageNext {.threadvar.}: int
+
+proc markImageGraded*(image: Image) =
+  if image.isNil:
+    return
+  let key = cast[pointer](image)
+  for slot in gradedImages:
+    if slot == key:
+      return
+  gradedImages[gradedImageNext] = key
+  gradedImageNext = (gradedImageNext + 1) mod GradedImageSlots
+
+proc unmarkImageGraded*(image: Image) =
+  if image.isNil:
+    return
+  let key = cast[pointer](image)
+  for i in 0 ..< GradedImageSlots:
+    if gradedImages[i] == key:
+      gradedImages[i] = nil
+
+proc isImageGraded*(image: Image): bool =
+  if image.isNil:
+    return false
+  let key = cast[pointer](image)
+  for slot in gradedImages:
+    if slot == key:
+      return true
+  false
+
+proc clearGradedImages*() =
+  for i in 0 ..< GradedImageSlots:
+    gradedImages[i] = nil
+  gradedImageNext = 0
 
 # --------------------------------------------------------------- the maths
 #
@@ -250,12 +458,6 @@ proc hslToRgb(h, s, l: float): tuple[r, g, b: float] =
     p = 2.0 * l - q
     hk = h / 360.0
   (hueToRgb(p, q, hk + 1.0 / 3.0), hueToRgb(p, q, hk), hueToRgb(p, q, hk - 1.0 / 3.0))
-
-const
-  ## How far the end points travel at ±100: a white point of 1.4 is what a
-  ## Spectra panel's white (luminance 0.74) needs to take a photo's full
-  ## range, which is what the editor's Auto preset asks for.
-  EndPointRange* = 0.4
 
 proc adjustPixel*(profile: AssetColorProfile, r0, g0, b0: float): tuple[r, g, b: float] =
   ## One pixel, channels 0 .. 1 in and out.
@@ -341,6 +543,28 @@ proc adjustPixel*(profile: AssetColorProfile, r0, g0, b0: float): tuple[r, g, b:
     b = clamp01(rgb.b)
   (r, g, b)
 
+proc isLinearProfile*(profile: AssetColorProfile): bool =
+  ## Only the per-channel steps (exposure, the end points, contrast): the
+  ## same map for every channel, so a 256-entry table replaces the float
+  ## pipeline. The automatic fit is always linear.
+  if profile.saturation != 0:
+    return false
+  for tone in [profile.shadows, profile.midtones, profile.highlights]:
+    if tone.luminance != 0 or tone.r != 0 or tone.g != 0 or tone.b != 0:
+      return false
+  for hue in profile.hues:
+    if hue.hue != 0 or hue.saturation != 0 or hue.luminance != 0:
+      return false
+  true
+
+proc linearLut*(profile: AssetColorProfile): array[256, uint8] =
+  ## The 8-bit map a linear profile is: `adjustPixel` evaluated once per
+  ## level, so the two never disagree.
+  for level in 0 .. 255:
+    let v = level.float / 255.0
+    let adjusted = adjustPixel(profile, v, v, v)
+    result[level] = uint8(max(0.0, min(255.0, (adjusted.r * 255.0).round())))
+
 proc applyAssetColors*(image: Image, profile: AssetColorProfile,
     x0 = 0, y0 = 0, width = -1, height = -1) =
   ## Adjusts every pixel of `image` — or of one rectangle of it, for an image
@@ -356,6 +580,15 @@ proc applyAssetColors*(image: Image, profile: AssetColorProfile,
     yEnd = if height < 0: image.height else: min(image.height, y0 + height)
   if xEnd <= xStart or yEnd <= yStart:
     return
+  if profile.isLinearProfile():
+    # Three table lookups per pixel: what makes the fit affordable on every
+    # render of a 13.3" panel on an ESP32.
+    let lut = linearLut(profile)
+    for y in yStart ..< yEnd:
+      for x in xStart ..< xEnd:
+        let p = image.unsafe[x, y]
+        image.unsafe[x, y] = rgbx(lut[p.r], lut[p.g], lut[p.b], p.a)
+    return
   for y in yStart ..< yEnd:
     for x in xStart ..< xEnd:
       let p = image.unsafe[x, y]
@@ -366,3 +599,30 @@ proc applyAssetColors*(image: Image, profile: AssetColorProfile,
         uint8(max(0.0, min(255.0, (adjusted.b * 255.0).round()))),
         p.a,
       )
+
+# ----------------------------------------------------------------- hooks
+
+proc applyAutoFitToDrawn*(canvas: Image, x0, y0, width, height: int, source: Image = nil) =
+  ## The consumer's half: called by whoever just drew an image onto the
+  ## canvas, with the rectangle it landed on. Fits that rectangle into the
+  ## panel's range when the frame asks for it and the source was not graded
+  ## by its own sidecar. Nothing is allocated beyond a histogram.
+  if canvas.isNil or not autoFitActive():
+    return
+  if not source.isNil and isImageGraded(source):
+    return
+  if source.isNil and isImageGraded(canvas):
+    return
+  let endPoints = autoEndPoints(canvas, x0, y0, width, height, assetColorsPanelPalette)
+  if endPoints.isNone:
+    return
+  var profile = AssetColorProfile()
+  profile.whites = endPoints.get().whites
+  profile.blacks = endPoints.get().blacks
+  applyAssetColors(canvas, profile, x0, y0, width, height)
+
+proc applyGlobalColorCorrection*(canvas: Image) =
+  ## The frame-wide correction, once per render on the finished canvas.
+  if canvas.isNil or not frameColorSettings.global.hasAdjustments():
+    return
+  applyAssetColors(canvas, frameColorSettings.global)

@@ -87,19 +87,56 @@ implementations):
    are untouched). Back to RGB, clamp.
 7. Round to 8 bits. Alpha is kept.
 
-## The Auto preset
+## The automatic fit (on the frame, by default)
 
-The editor's Adjustments select is **None** (every slider neutral), **Auto**
-or **Custom** (anything else); moving a slider after Auto lands on Custom by
-itself. Auto takes the photo as the panel will show it (placed at panel
-size), finds the luminance percentiles 0.5 and 99.5, and solves for the
-Whites and Blacks that map that range onto the darkest and brightest
-luminance of the palette the photo is dithered to (the sidecar's own
-`palette`, else the panel's): with `scale = (dstHi − dstLo) / (srcHi −
-srcLo)`, `blackPoint = srcLo − dstLo / scale`, `whitePoint = blackPoint +
-1 / scale`, then `blacks = −blackPoint / 0.4 × 100` and `whites = (1 −
-whitePoint) / 0.4 × 100`, clamped to the sliders. `autoEndPoints` in
-`adjust.ts`. Nothing of this reaches the runtime.
+A palette panel cannot show a photo's whites, so the frame fits every image
+it draws. `frame.json`'s `colors` block:
+
+```json
+{ "autoFit": "default", "global": { "whites": -10, "hues": { "blue": { "saturation": 20 } } } }
+```
+
+* `autoFit`: `default` (on when the panel dithers to a palette, off on a
+  full-colour display), `on` or `off`. On a Pi the palette comes from the
+  device name plus a six-colour custom palette (`panelPaletteForDevice`), on
+  the ESP32 from the display format at render time.
+* `global`: the sidecar's slider set without a palette, applied once to the
+  whole finished canvas on every display, after the fit. Neutral by default.
+
+The fit is applied by the **consumer**, not the producer: `apps/render/image`
+and the JS runtime's draw call fit the rectangle the image landed on, right
+after drawing it (`applyAutoFitToDrawn`). That covers every source — a local
+file, a URL, Immich, OpenAI, a JS app's own fetch — and is idempotent, since
+the canvas is new each render while a producer's output is cached for
+minutes. It takes the rectangle's luminance percentiles 0.5 and 99.5 and
+solves for the Whites and Blacks that map that range onto the palette's
+(`autoEndPoints`, the same arithmetic as the editor's Auto preset):
+
+    scale = (dstHi − dstLo) / (srcHi − srcLo)
+    blackPoint = srcLo − dstLo / scale,  whitePoint = blackPoint + 1 / scale
+    blacks = −blackPoint / 0.4 × 100,    whites = (1 − whitePoint) / 0.4 × 100
+
+A linear profile (exposure, end points, contrast — the fit always is) runs
+as one 256-entry lookup table per channel (`linearLut`), three lookups per
+pixel, which is what makes it affordable on every render of a 13.3" panel on
+an ESP32. Nothing is allocated beyond a 1 KB histogram; there is no second
+canvas and no second pass.
+
+A photo whose sidecar the producer applied is marked (`markImageGraded`, a
+ring of weak pointers cleared on a scene change) and the consumer skips the
+fit for it: explicit sliders win. Non-photos drawn through `render/image`
+(QR codes, icons, charts) are fitted too; pure black and white are
+unaffected, mid-greys compress a little, by choice.
+
+In the editor, a photo without a sidecar opens on the Auto preset when the
+frame's fit is on for its panel: what it shows is what the frame does.
+Saving it untouched changes nothing; moving a slider opts the photo out.
+The Adjustments select is **None**, **Auto** or **Custom**, derived from the
+sliders.
+
+The ESP32 runs the fit by default for its palette formats but does not take
+the `colors` setting yet (no slot in its NVS settings cache), so it cannot be
+switched off or given a global correction there: a follow-up.
 
 ## The dither palette override
 
@@ -127,7 +164,7 @@ not dither.
   alone, and the preview belongs in the editor.
 * The panel palette the editor previews with comes from the device name
   (`devicePalette.ts`, with a six-colour custom palette winning on a Spectra
-  panel); the runtime never needs it.
+  panel) — the same table as the runtime's `panelPaletteForDevice`.
 
 ## The Assets panel
 
@@ -137,6 +174,9 @@ not dither.
   backend prefers a frame's admin API for listings and thumbnails and falls
   back to SSH (one thumbnail at a time per frame — a burst of them tripped
   sshd's MaxStartups and left every thumbnail spinning).
-* **Set colors** opens the editor; a photo that has a sidecar shows a swatch
-  icon instead. Save uploads the sidecar through the ordinary asset upload;
-  Remove colors deletes it.
+* **Set colors** opens the editor (`?colors=<path>` in the URL); a photo that
+  has a sidecar shows a swatch icon instead. Save uploads the sidecar through
+  the ordinary asset upload; Remove colors deletes it.
+* Settings → **Colors** holds the frame's `colors` block on the backend, the
+  on-device panel and the cloud (Linux frames on 2026.10.2 or newer), with
+  the frame's current image as the preview.

@@ -17,6 +17,7 @@ import pixie
 import embedded_scene
 import embedded_runtime
 from frameos/apps import applyServiceSettings
+import frameos/utils/asset_colors
 import frameos/utils/dither
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
@@ -264,9 +265,21 @@ proc fos_nim_set_status_info_impl(infoJson: cstring) {.exportc, cdecl.} =
   if infoJson != nil and infoJson.len > 0:
     setStatusInfo($infoJson)
 
+proc panelPaletteForFormat(pixelFormat: int): seq[(int, int, int)] =
+  ## The palette a display format dithers to: what the automatic fit of
+  ## drawn images aims for (utils/asset_colors). Empty for the grey and
+  ## two-colour formats, where the fit stays off unless asked for.
+  case pixelFormat:
+  of 5: saturated4ColorPalette
+  of 6: saturated7ColorPalette
+  of 7: spectra6ColorPalette
+  else: @[]
+
 proc renderFrameImage(): tuple[image: Image, source: string] =
   let interpreted = renderCurrentScene()
   if interpreted.isSome:
+    # The frame-wide colour correction, once on the finished canvas.
+    applyGlobalColorCorrection(interpreted.get())
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
@@ -447,6 +460,7 @@ proc fos_nim_render_impl(
     # this render can schedule another pass.
     discard takeRenderRequested()
     refreshDecodeBudget()
+    setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image
@@ -520,6 +534,7 @@ proc fos_nim_render_alloc_impl(
   try:
     discard takeRenderRequested()
     refreshDecodeBudget()
+    setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image

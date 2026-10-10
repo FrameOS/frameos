@@ -375,6 +375,7 @@ export interface FrameType {
   mountpoints?: FrameMountpointsConfig
   error_behavior?: FrameErrorBehavior
   palette?: Palette
+  colors?: FrameColors
   buildroot?: FrameBuildrootConfig
   embedded?: FrameEmbeddedConfig
   rpios?: FrameRpiOSConfig
@@ -505,6 +506,41 @@ export interface GPIOButton {
 }
 
 /** How a person's input reaches a scene (frame.json `inputSettings`). */
+/** One tonal range of the frame-wide correction, -100 .. 100 each. */
+export interface FrameColorTone {
+  luminance?: number
+  r?: number
+  g?: number
+  b?: number
+}
+
+/** One hue range of the frame-wide correction: degrees, then -100 .. 100. */
+export interface FrameColorHue {
+  hue?: number
+  saturation?: number
+  luminance?: number
+}
+
+/** The frame-wide correction: the sidecar's slider set without a palette (docs/asset-color-profiles.md). */
+export interface FrameColorGlobal {
+  exposure?: number
+  contrast?: number
+  whites?: number
+  blacks?: number
+  saturation?: number
+  shadows?: FrameColorTone
+  midtones?: FrameColorTone
+  highlights?: FrameColorTone
+  hues?: Record<string, FrameColorHue>
+}
+
+/** frame.json's `colors` (docs/asset-color-profiles.md). */
+export interface FrameColors {
+  /** The automatic fit of drawn images into the panel's range: `default` = on when the panel dithers to a palette. */
+  autoFit?: 'default' | 'on' | 'off'
+  global?: FrameColorGlobal
+}
+
 export interface InputSettings {
   /** One of the event contract's `keyboard.layouts`; the default is `us`. */
   keyboardLayout?: string

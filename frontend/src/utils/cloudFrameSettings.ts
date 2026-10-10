@@ -109,6 +109,20 @@ export function cloudFrameSupportsInputSettings(frameosVersion: string | null | 
   return cloudFrameSupportsSettingsFrom(inputCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** Firmware from here on takes the `colors` block. */
+export const colorsCloudFrameSettingsMinVersion = '2026.10.2'
+
+/**
+ * `colors` (Pi/Linux: the ESP32 runs the automatic fit by default but has no
+ * slot for the setting yet): `{autoFit, global}`, read on every render, so a
+ * push needs no restart. Callers gate on cloudFrameSupportsColors.
+ */
+export const colorsCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(colorsCloudFrameSettingsMinVersion)
+
+export function cloudFrameSupportsColors(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(colorsCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** The layout ids a cloud push may name (docs/events-contract.json `keyboard.layouts`). */
 export const cloudKeyboardLayoutIds: readonly string[] = keyboardLayouts.map((layout) => layout.id)
 
@@ -193,6 +207,7 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...hardwareCloudFrameSettingKeys,
     ...displayDriverCloudFrameSettingKeys,
     ...inputCloudFrameSettingKeys,
+    ...colorsCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )
