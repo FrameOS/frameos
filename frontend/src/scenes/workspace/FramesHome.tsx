@@ -142,8 +142,16 @@ function FrameTree(): JSX.Element {
   const { closeSecondarySidebar, focusFrame, openFrameChangeDrawer, openFrameTool, selectFrame } =
     useActions(workspaceLogic)
   // The frame whose tool links are unfolded under its row. One at a time;
-  // the selected frame starts open, a click on the open row folds it.
+  // the selected frame starts open, a click on the open row folds it, and a
+  // selection made elsewhere (a drawer link focusing its frame) unfolds the
+  // new row. The click handler below changes the selection itself, so this
+  // never fires for a fold.
   const [expandedFrameId, setExpandedFrameId] = useState<FrameId | null>(selectedFrameId ?? null)
+  useEffect(() => {
+    if (selectedFrameId) {
+      setExpandedFrameId(selectedFrameId)
+    }
+  }, [selectedFrameId])
 
   const focusFrameAfterDrawerUpdate = (frameId: FrameId): void => {
     focusFrame(frameId)

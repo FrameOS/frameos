@@ -2039,6 +2039,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
         scrollFramesHomeToTop()
         return
       }
+      // A drawer link (?drawer=deployPlan&frameId=…) names the frame it is
+      // about; that frame is the selected one, scrolled into view. Left to
+      // the fallback, the list highlighted the first frame while the drawer
+      // on the right belonged to another — easy to act on the wrong one.
+      if (drawerFrameId && (payload.initial || drawerFrameId !== values.selectedFrameId)) {
+        actions.focusFrame(drawerFrameId)
+        return
+      }
       if (!payload.initial && !drawerFrameId && previousFrameId) {
         actions.focusFrame(previousFrameId)
       }
