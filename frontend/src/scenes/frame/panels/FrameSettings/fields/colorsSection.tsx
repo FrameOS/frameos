@@ -228,10 +228,20 @@ export function ColorsSection(): JSX.Element {
               colors={colors}
               global={global}
             />
-            <ColorAdjustmentControls
-              profile={global}
-              onChange={(profile) => setColors({ ...colors, global: globalOfProfile(profile) })}
-            />
+            <div className="space-y-3">
+              <ColorAdjustmentControls
+                profile={global}
+                onChange={(profile) => setColors({ ...colors, global: globalOfProfile(profile) })}
+              />
+              <Button
+                size="small"
+                color="secondary"
+                disabled={tunedSliders === 0}
+                onClick={() => setColors({ ...colors, global: {} })}
+              >
+                Reset sliders
+              </Button>
+            </div>
           </div>
         )}
       </div>
