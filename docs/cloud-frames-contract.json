@@ -150,7 +150,7 @@
       "parity": {"only": "linux", "why": "A Pi cron/systemd timer refreshing tzdata; the ESP32 receives its zone as timezone_data instead."}
     },
     "palette": {
-      "$comment": "frame.json's palette: #rrggbb colours plus optional display name and per-colour names. An empty colour list hands the panel back its built-in palette.",
+      "$comment": "frame.json's palette: #rrggbb colours plus optional display name and per-colour names. An empty colour list hands the panel back its built-in palette. The Pi driver reads it at init (restart); the ESP32 keeps the colour list in its config and the packer picks it up on the next render, names never reach the device.",
       "rule": {
         "type": "object",
         "keys": {
@@ -161,8 +161,7 @@
         "required": ["colors"]
       },
       "extraChecks": ["colorNames, when present, has exactly as many entries as colors"],
-      "profiles": {"linux": {"since": "2026.8.31", "restart": true}},
-      "parity": {"only": "linux", "why": "Custom dithering palette for the Pi renderer; ESP32 panels dither to their driver's fixed palette."}
+      "profiles": {"linux": {"since": "2026.8.31", "restart": true}, "esp32": {"since": "2026.10.4"}}
     },
     "colors": {
       "$comment": "frame.json's colors: the automatic fit of drawn images into the panel's range (default = on when the panel dithers to a palette) and a frame-wide colour correction with the sidecar's slider set (docs/asset-color-profiles.md).",

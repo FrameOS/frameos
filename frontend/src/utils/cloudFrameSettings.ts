@@ -213,6 +213,22 @@ export function cloudFrameSupportsEsp32Colors(frameosVersion: string | null | un
   return cloudFrameSupportsSettingsFrom(esp32ColorsCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/**
+ * 2026.10.4: `palette` on the ESP32 — the colour list its packer dithers to
+ * and the automatic fit aims for, applied on the next render. Below the
+ * floor the firmware refuses the whole push, so the form sends it only from
+ * here on (esp32CloudFrameSettingKeysForVersion) and the Palette section
+ * renders disabled with the reason.
+ */
+export const esp32PaletteCloudFrameSettingsMinVersion = '2026.10.4'
+export const esp32PaletteCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32PaletteCloudFrameSettingsMinVersion
+)
+
+export function cloudFrameSupportsEsp32Palette(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32PaletteCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** Every key any profile takes: what the form binds and diffs on. */
 export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.from(
   new Set<CloudFrameSettingKey>([

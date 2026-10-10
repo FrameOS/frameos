@@ -148,8 +148,16 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-esp32-extended',
     surfaces: ['cloudEsp32'],
     nav: [],
-    navNote: 'The esp32 profile keeps a single nav entry (Power); see esp32CloudFrameSettingsSections.',
+    navNote: 'The esp32 profile links Power, Palette and Colors only; see esp32CloudFrameSettingsSections.',
     conditions: 'Disabled below esp32ExtendedCloudFrameSettingsMinVersion.',
+  },
+  {
+    key: 'cloud-esp32-palette',
+    title: 'Palette',
+    anchor: 'frame-settings-palette',
+    surfaces: ['cloudEsp32'],
+    conditions:
+      'Disabled below esp32PaletteCloudFrameSettingsMinVersion (2026.10.4); the colour field renders only for a panel in withCustomPalette (the Spectra 6 panels), the others get a line saying the palette is fixed.',
   },
   {
     key: 'cloud-esp32-gpio',

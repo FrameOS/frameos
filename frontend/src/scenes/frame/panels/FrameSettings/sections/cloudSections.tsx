@@ -23,6 +23,8 @@ import {
   colorsCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Colors,
   esp32ColorsCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32Palette,
+  esp32PaletteCloudFrameSettingsMinVersion,
 } from '../../../../../utils/cloudFrameSettings'
 import type { FrameType } from '../../../../../types'
 import { FrameActionsMenu } from '../FrameActionsMenu'
@@ -343,6 +345,7 @@ export function CloudHardwareSection(): JSX.Element | null {
 export function CloudEsp32Sections(): JSX.Element | null {
   const {
     frame,
+    palette,
     cloudPowerSettings,
     setCloudPowerSettings,
     cloudBatteryEnablePinDisabledReason,
@@ -396,6 +399,33 @@ export function CloudEsp32Sections(): JSX.Element | null {
         </SectionBody>
         <GpioButtonsSection />
       </fieldset>
+      {/* Firmware ≥ 2026.10.4 (esp32PaletteCloudFrameSettingKeys): the
+          colour list the packer dithers to. Only the Spectra panels have one
+          to edit (withCustomPalette); the rest say so. */}
+      <FrameSettingsSection sectionKey="cloud-esp32-palette">
+        <fieldset disabled={!cloudFrameSupportsEsp32Palette(frame.frameos_version)} className="min-w-0 space-y-4">
+          <SectionHeading id="frame-settings-palette" row className="mt-4">
+            Palette
+          </SectionHeading>
+          <SectionBody>
+            {!cloudFrameSupportsEsp32Palette(frame.frameos_version) ? (
+              <p className="frameos-muted text-sm">
+                {frame.frameos_version
+                  ? `The dither palette needs firmware ${esp32PaletteCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the firmware to edit it here.`
+                  : `The dither palette needs firmware ${esp32PaletteCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`}
+              </p>
+            ) : palette ? (
+              <p className="frameos-muted text-sm">
+                The colours the panel dithers to. Applied on the next render; the automatic fit in Colors aims for them
+                too.
+              </p>
+            ) : (
+              <p className="frameos-muted text-sm">This panel dithers to a fixed palette.</p>
+            )}
+            {palette ? <PaletteField /> : null}
+          </SectionBody>
+        </fieldset>
+      </FrameSettingsSection>
       <FrameSettingsSection sectionKey="colors">
         {cloudFrameSupportsEsp32Colors(frame.frameos_version) ? (
           <ColorsSection />

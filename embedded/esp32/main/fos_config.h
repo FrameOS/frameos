@@ -27,6 +27,11 @@
  * the automatic fit switch and the frame-wide correction. Big enough for
  * every slider spelled out; "" = the runtime's defaults. */
 #define FOS_COLORS_LEN 640
+/* frame.json's `palette`, colour list only, as compact JSON
+ * (`["#rrggbb", …]`, at most 16 entries = 162 bytes); "" = the panel's
+ * built-in palette. The names the cloud and backend store with it never
+ * reach the device: nothing here reads them. */
+#define FOS_PALETTE_LEN 192
 
 typedef enum {
     FOS_RENDER_LOCAL = 0,  /* render scenes on-device with the Nim runtime */
@@ -91,6 +96,9 @@ typedef struct {
     char colors[FOS_COLORS_LEN];   /* `{"autoFit":"off","global":{...}}`, "" = defaults;
                                     * pushed into the Nim runtime every pass like
                                     * scaling_mode, so it applies live */
+    char palette[FOS_PALETTE_LEN]; /* `["#rrggbb", …]` the panel dithers to, "" = the
+                                    * driver's own table; pushed every pass like colors,
+                                    * so it applies on the next render */
     uint32_t max_http_response_bytes;
     uint32_t http_spill_force_bytes; /* debug: HTTP bodies over this many buffered
                                       * bytes spill to storage even with PSRAM

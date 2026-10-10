@@ -2102,9 +2102,10 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * `name` (the DHCP hostname — the provider-side display name stays
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
  * once at init, so this one costs a reboot), `scaling_mode` (a per-decode
- * fallback fit, applied live on the next render pass) and `colors` (the
+ * fallback fit, applied live on the next render pass), `colors` (the
  * automatic fit switch and the frame-wide correction, applied live the same
- * way). The power keys —
+ * way) and `palette` (the colour list the packer dithers to, live the same
+ * way; the names ride along in the cloud only). The power keys —
  * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
@@ -2243,6 +2244,17 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         }
         strlcpy(config->colors, next, sizeof(config->colors));
         free(printed);
+    }
+    const cJSON *palette = cJSON_GetObjectItem(settings, "palette");
+    if (palette != NULL) {
+        /* Colour list only, compact; pushed into the Nim runtime by
+         * fos_client on the next pass like `colors` — no reboot. */
+        char next[FOS_PALETTE_LEN];
+        if (!fos_settings_palette_text(palette, next, sizeof(next))) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        strlcpy(config->palette, next, sizeof(config->palette));
     }
     const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
     const cJSON *timezone_data = cJSON_GetObjectItem(settings, "timezone_data");

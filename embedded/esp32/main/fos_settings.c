@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
@@ -82,6 +83,39 @@ static char s_etag[SETTINGS_ETAG_LEN] = "";
 #define SETTINGS_CACHE_AT_KEY "svc_at"
 static bool s_cache_applied = false;   /* this boot started from the cache */
 static void cache_store(const char *printed, const char *etag);
+/* frame.json's `palette` object → the colour list as compact JSON, or ""
+ * for an empty list. false when the list is not an array of #rrggbb strings
+ * (the cloud's contract check already refuses that; the backend's settings
+ * JSON is trusted but still checked) or would not fit the slot. */
+bool fos_settings_palette_text(const cJSON *palette, char *out, size_t out_len)
+{
+    const cJSON *colors = cJSON_GetObjectItem(palette, "colors");
+    if (!cJSON_IsArray(colors) || out_len == 0) return false;
+    size_t used = 0;
+    out[0] = '\0';
+    if (cJSON_GetArraySize(colors) == 0) return true;
+    const cJSON *entry = NULL;
+    out[used++] = '[';
+    cJSON_ArrayForEach(entry, colors) {
+        if (!cJSON_IsString(entry) || entry->valuestring == NULL) return false;
+        const char *hex = entry->valuestring;
+        if (strlen(hex) != 7 || hex[0] != '#') return false;
+        for (int i = 1; i < 7; i++) {
+            if (!isxdigit((unsigned char)hex[i])) return false;
+        }
+        /* `"#rrggbb",` is 10 bytes; keep room for the closing bracket + NUL. */
+        if (used + 10 + 2 > out_len) return false;
+        if (used > 1) out[used++] = ',';
+        out[used++] = '"';
+        memcpy(out + used, hex, 7);
+        used += 7;
+        out[used++] = '"';
+    }
+    out[used++] = ']';
+    out[used] = '\0';
+    return true;
+}
+
 static uint32_t s_cache_stored_at = 0; /* unix seconds; 0 = unknown age */
 /* Which source the stored ETag came from: a backend ETag replayed against the
  * cloud (or the reverse) would earn a bogus 304 and freeze a stale copy. */
@@ -530,6 +564,18 @@ static bool apply_frame_settings(const cJSON *frame)
         free(printed);
     }
 
+    /* `palette` (the SPA's {colors, name?, colorNames?}): only the colour
+     * list is kept, as compact JSON, and pushed into the Nim runtime every
+     * pass like `colors`. An empty list hands the panel back its own table. */
+    const cJSON *palette = cJSON_GetObjectItem(frame, "palette");
+    if (cJSON_IsObject(palette)) {
+        char next[FOS_PALETTE_LEN];
+        if (fos_settings_palette_text(palette, next, sizeof(next)) && strcmp(config->palette, next) != 0) {
+            strlcpy(config->palette, next, sizeof(config->palette));
+            changed = true;
+        }
+    }
+
     const cJSON *max_http = cJSON_GetObjectItem(frame, "maxHttpResponseBytes");
     if (cJSON_IsNumber(max_http) && max_http->valuedouble >= 1024 &&
         max_http->valuedouble <= 512.0 * 1024 * 1024 &&
@@ -663,6 +709,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (strcmp(before->colors, after->colors) != 0) {
         change_append(out, out_len, "colors", after->colors[0] ? "set" : "default");
+    }
+    if (strcmp(before->palette, after->palette) != 0) {
+        change_append(out, out_len, "palette", after->palette[0] ? "set" : "default");
     }
     if (strcmp(before->time_zone, after->time_zone) != 0) {
         change_append(out, out_len, "timezone", after->time_zone);

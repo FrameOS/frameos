@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "fos_config.h"
+#include "cJSON.h"
 
 /* Pull declarative settings and apply them without a rebuild. Runs on the
  * render task, next to the scenes sync, ETag'd against one of two sources:
@@ -35,6 +36,11 @@ void fos_settings_request_sync(void);
 void fos_settings_cloud_scope_granted(bool granted);
 /* Has `settings:services` been announced at any point this boot? Gates the
  * `refresh_service_settings` verb. */
+/* frame.json's `palette` object → its colour list as compact JSON in `out`
+ * ("" for an empty list); false for a malformed list or one that does not
+ * fit. Shared by the settings poll and the cloud's set_settings. */
+bool fos_settings_palette_text(const cJSON *palette, char *out, size_t out_len);
+
 bool fos_settings_cloud_scope(void);
 
 /* Cloud-only frames: apply the NVS copy of the service-settings groups

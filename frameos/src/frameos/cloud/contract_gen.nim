@@ -115,7 +115,8 @@ const CloudContractSettings* = @[
         Rule(kind: rkArray, children: @[
           Rule(kind: rkString, maxLen: 32)]))]),
   profiles: @[
-    ProfileSpec(profile: "linux", since: "2026.8.31", restart: true)]),
+    ProfileSpec(profile: "linux", since: "2026.8.31", restart: true),
+    ProfileSpec(profile: "esp32", since: "2026.10.4")]),
   SettingSpec(key: "colors", rule:
     Rule(kind: rkObject, keys: @[
       KeyRule(name: "autoFit", rule:

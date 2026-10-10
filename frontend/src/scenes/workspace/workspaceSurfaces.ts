@@ -271,6 +271,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // Colors (automatic fit, frame-wide correction): Linux frames on
     // 2026.10.2 or newer, disabled with a note below that.
     'frame-settings-colors',
+    // Palette: the ESP32 profile only (esp32CloudOnlyFrameSettingsSections);
+    // a cloud Pi edits its palette inside the unlinked Panel fieldset.
+    'frame-settings-palette',
     'frame-settings-power',
     // The account's SSH keys, written into SD cards built for this frame
     // (cloud Linux frames only; FrameSettings skips it on an ESP32).
@@ -762,7 +765,19 @@ export function frameSupportsUsbSerialConsole(
  * no nav entry: an "Info" link pointing at the form the panel opens on was
  * pure noise.
  */
-const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-power', 'frame-settings-colors']
+const esp32CloudFrameSettingsSections: readonly string[] = [
+  'frame-settings-power',
+  'frame-settings-palette',
+  'frame-settings-colors',
+]
+
+/**
+ * Sections only the cloud esp32 profile renders under their own heading. A
+ * cloud Pi has the same setting (palette) but edits it inside the Panel
+ * fieldset, whose heading is `frame-settings-hardware`, so a Palette link
+ * there would scroll to nothing.
+ */
+const esp32CloudOnlyFrameSettingsSections: readonly string[] = ['frame-settings-palette']
 
 /**
  * Sections only ESP32 frames render — for everyone else the anchor does not
@@ -812,6 +827,8 @@ export function frameSettingsSectionIsAllowed(
     if (!esp32CloudFrameSettingsSections.includes(sectionId)) {
       return false
     }
+  } else if (mode === 'cloud' && esp32CloudOnlyFrameSettingsSections.includes(sectionId)) {
+    return false
   } else if (esp32OnlyFrameSettingsSections.includes(sectionId) && !isEsp32Platform(frame?.embedded?.platform)) {
     // A backend-managed ESP32 renders Power too — it just stores the values
     // in device_config instead of pushing them as settings.

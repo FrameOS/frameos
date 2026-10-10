@@ -162,6 +162,15 @@ symbol (`driver_abi.nim`; a library from before it keeps its built-in
 palette). On the ESP32 the packer reads it directly. The wasm preview does
 not dither.
 
+Under the per-photo override sits the frame's own palette (frame.json
+`palette`, the Palette section of the settings panel): the Pi driver reads it
+at init, the ESP32 keeps the colour list in its config (`fos_config_t.palette`,
+pushed into the runtime every pass like `colors`) and fits it onto the
+panel's table with the same `fitPaletteOverride` the per-photo path uses —
+so a six-colour list lands on a Spectra panel with the hole put back. The
+automatic fit aims for that palette too (`panelPaletteForFormat`). Cloud and
+backend push it from firmware 2026.10.4 on (`docs/cloud-frames-contract.json`).
+
 ## Where the runtime applies it
 
 * `apps/data/localImage` — after decode. With a profile to apply, `contain`

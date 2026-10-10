@@ -85,13 +85,13 @@ proc clearRenderPaletteOverride*() =
 proc paletteHasHole(palette: seq[(int, int, int)], index: int): bool =
   index < palette.len and palette[index][0] >= 999
 
-proc activePalette*(default: seq[(int, int, int)]): seq[(int, int, int)] =
-  ## The override when it names as many colours as `default` — the Spectra
+proc fitPaletteOverride*(override, default: seq[(int, int, int)]): seq[(int, int, int)] =
+  ## `override` when it names as many colours as `default` — the Spectra
   ## table's `(999, 999, 999)` placeholder at index 4 is not a colour, so a
   ## six-colour override fits the seven-entry table with the hole put back.
   ## Anything else (an override meant for another panel, nothing set) is the
-  ## default.
-  let override = renderPaletteOverride
+  ## default. Shared by the per-photo override below and the frame-level
+  ## palette the ESP32 keeps in its config (frame.json's `palette`).
   if override.len == 0:
     return default
   if override.len == default.len:
@@ -102,6 +102,10 @@ proc activePalette*(default: seq[(int, int, int)]): seq[(int, int, int)] =
     result.add(override[4 ..< override.len])
     return result
   default
+
+proc activePalette*(default: seq[(int, int, int)]): seq[(int, int, int)] =
+  ## The per-photo override fitted onto `default` (see fitPaletteOverride).
+  fitPaletteOverride(renderPaletteOverride, default)
 
 proc clip8(value: int): uint8 {.inline.} =
   if value < 0: return 0

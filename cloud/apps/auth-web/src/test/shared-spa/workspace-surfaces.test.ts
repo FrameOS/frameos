@@ -319,19 +319,23 @@ describe("the esp32 cloud device profile", () => {
     // and offered all cloud sections — most scrolling to an anchor that is
     // never rendered. The compact block itself keeps no nav entry (the old
     // "Info" link pointed at the form the panel opens on anyway).
-    // Power and, since the firmware took the `colors` block (2026.10.2),
-    // Colors — the two sections CloudEsp32Sections renders.
-    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-power", esp32Frame)).toBe(true);
-    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-colors", esp32Frame)).toBe(true);
+    // Power, Colors (the firmware took the `colors` block in 2026.10.2) and
+    // Palette (the colour list, 2026.10.4) — the sections CloudEsp32Sections
+    // renders under their own heading.
+    const esp32Sections = ["frame-settings-power", "frame-settings-palette", "frame-settings-colors"];
+    for (const section of esp32Sections) {
+      expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame), section).toBe(true);
+    }
     for (const section of allowedFrameSettingsSections.cloud) {
-      if (section === "frame-settings-power" || section === "frame-settings-colors") continue;
+      if (esp32Sections.includes(section)) continue;
       expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame)).toBe(false);
     }
     // A cloud Pi still gets the full form, so its nav is untouched — except
-    // Power, which only the esp32 profile renders.
+    // Power, which only the esp32 profile renders, and Palette, which a Pi
+    // edits inside the Panel fieldset (no heading of its own to link).
     for (const section of allowedFrameSettingsSections.cloud) {
-      expect(frameSettingsSectionIsAllowed("cloud", section, piFrame)).toBe(
-        section !== "frame-settings-power",
+      expect(frameSettingsSectionIsAllowed("cloud", section, piFrame), section).toBe(
+        section !== "frame-settings-power" && section !== "frame-settings-palette",
       );
     }
   });

@@ -213,8 +213,15 @@ static bool extra_checks(const char *key, const cJSON *value)
             }
         }
     }
-    /* palette's colorNames/colors count check is a Linux-only key; the
-     * firmware never carries palette. */
+    if (strcmp(key, "palette") == 0) {
+        /* colorNames, when present, names every colour exactly once. */
+        const cJSON *names = cJSON_GetObjectItem(value, "colorNames");
+        const cJSON *colors = cJSON_GetObjectItem(value, "colors");
+        if (names != NULL && cJSON_IsArray(names) && cJSON_IsArray(colors) &&
+            cJSON_GetArraySize(names) != cJSON_GetArraySize(colors)) {
+            return false;
+        }
+    }
     return true;
 }
 

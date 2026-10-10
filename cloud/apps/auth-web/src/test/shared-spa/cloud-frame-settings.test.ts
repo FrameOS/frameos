@@ -19,6 +19,9 @@ import {
   cloudFrameSupportsEsp32Colors,
   esp32ColorsCloudFrameSettingKeys,
   esp32ColorsCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32Palette,
+  esp32PaletteCloudFrameSettingKeys,
+  esp32PaletteCloudFrameSettingsMinVersion,
   inputCloudFrameSettingsMinVersion,
   displayDriverCloudFrameSettingKeys,
   displayDriverCloudFrameSettingsMinVersion,
@@ -68,6 +71,8 @@ import {
   colorsFrameSettingsMinVersion,
   frameSupportsColorsSettings,
   esp32ColorsFrameSettingKeys,
+  esp32PaletteFrameSettingKeys,
+  esp32PaletteFrameSettingsMinVersion,
   esp32ColorsFrameSettingsMinVersion,
 } from "../../lib/frames";
 
@@ -125,7 +130,8 @@ describe("cloud settings push", () => {
         !esp32ExtendedFrameSettingKeys.has(key) &&
         !esp32TimeZoneFrameSettingKeys.has(key) &&
         !esp32BatteryEnablePinFrameSettingKeys.has(key) &&
-        !esp32ColorsFrameSettingKeys.has(key),
+        !esp32ColorsFrameSettingKeys.has(key) &&
+        !esp32PaletteFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -252,8 +258,11 @@ describe("cloud settings push", () => {
     for (const key of hardwareCloudFrameSettingKeys) {
       expect(allowedFrameSettings.has(key)).toBe(true);
       // gpio_buttons is the one wire key both firmwares learned in 2026.8.31,
-      // each behind its own gate; palette / device_config never go to a chip.
-      expect(esp32SettableKeys.has(key)).toBe(esp32ExtendedFrameSettingKeys.has(key));
+      // each behind its own gate; palette reached the chip in 2026.10.4 with
+      // its own floor; device_config never goes to a chip.
+      expect(esp32SettableKeys.has(key)).toBe(
+        esp32ExtendedFrameSettingKeys.has(key) || esp32PaletteFrameSettingKeys.has(key),
+      );
       expect((esp32CloudFrameSettingKeys as readonly string[]).includes(key)).toBe(false);
     }
     for (const version of ["2026.8.30", "2026.8.31", "2026.9.0", "unknown", null, ""]) {
@@ -347,6 +356,28 @@ describe("cloud settings push", () => {
         cloudFrameSettingKeysForVersion("2026.9.22"),
       ),
     ).toEqual({ device: "pimoroni.hyperpixel4sq_touch" });
+  });
+
+  it("gates the ESP32 palette on its own floor", () => {
+    // The Pi took `palette` with the 2026.8.31 hardware batch (restart); the
+    // ESP32 keeps the colour list in its config from 2026.10.4 and applies
+    // it on the next render.
+    expect([...esp32PaletteCloudFrameSettingKeys]).toEqual(["palette"]);
+    expect(new Set(esp32PaletteCloudFrameSettingKeys)).toEqual(esp32PaletteFrameSettingKeys);
+    expect(esp32PaletteCloudFrameSettingsMinVersion).toBe(esp32PaletteFrameSettingsMinVersion);
+    expect(esp32SettableKeys.has("palette")).toBe(true);
+    expect(cloudFrameSupportsEsp32Palette("2026.10.3")).toBe(false);
+    expect(cloudFrameSupportsEsp32Palette("2026.10.4")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.3")).not.toContain("palette");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.4")).toContain("palette");
+    // The payload is the SPA's shape, names included: the device keeps the
+    // colours and drops the rest.
+    expect(
+      cloudFrameSettingsPayload(
+        { palette: { name: "Spectra 6", colors: ["#000000", "#ffffff"], colorNames: ["black", "white"] } },
+        esp32CloudFrameSettingKeysForVersion("2026.10.4"),
+      ),
+    ).toEqual({ palette: { name: "Spectra 6", colors: ["#000000", "#ffffff"], colorNames: ["black", "white"] } });
   });
 
   it("gates the colours batch on its floor, Pi/Linux only", () => {

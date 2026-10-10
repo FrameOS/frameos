@@ -189,6 +189,36 @@ proc fos_nim_set_colors_impl(json: cstring) {.exportc, cdecl.} =
   except CatchableError as e:
     log("colors: ignored, does not parse: " & e.msg)
 
+var lastPaletteJson: string
+
+proc fos_nim_set_palette_impl(json: cstring) {.exportc, cdecl.} =
+  ## frame.json's `palette`, as the firmware keeps it: the colour list alone,
+  ## `["#rrggbb", …]` ("" = the panel's built-in palette). fos_client pushes
+  ## the stored text every render pass like `colors`; it is parsed only when
+  ## it changed. The packer fits it onto the panel's table through
+  ## utils/dither.fitPaletteOverride, so a list of the wrong length is
+  ## ignored there rather than refused here. One unreadable colour empties
+  ## the list, as the Linux config parser does.
+  if json == nil:
+    return
+  let text = $json
+  if text == lastPaletteJson:
+    return
+  var colors: seq[(int, int, int)] = @[]
+  try:
+    if text.len > 0:
+      let node = parseJson(text)
+      if node.kind == JArray:
+        for entry in node.items:
+          let color = parseHtmlColor(entry.getStr())
+          colors.add((int(color.r * 255), int(color.g * 255), int(color.b * 255)))
+  except CatchableError as e:
+    log("palette: ignored, does not parse: " & e.msg)
+    colors = @[]
+  if not frameConfig.isNil:
+    frameConfig.palette.colors = colors
+  lastPaletteJson = text
+
 proc fos_nim_set_time_zone_impl(timeZone: cstring) {.exportc, cdecl.} =
   ## The frame's IANA zone name: what scenes pass on (the weather app's
   ## open-meteo `timezone=`, `frame.timeZone` in JS) and what chrono converts

@@ -99,6 +99,9 @@ export const cloudFramesContractSettings = {
       "since": "2026.8.31",
       "restart": true
     },
+    "palette": {
+      "since": "2026.10.4"
+    },
     "colors": {
       "since": "2026.10.2"
     },

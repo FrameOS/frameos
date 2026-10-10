@@ -117,6 +117,9 @@ void frameos_nim_set_scaling_mode(const char *mode);
 /* frame.json's `colors` block as compact JSON ("" = defaults); live, one
  * string per pass like scaling_mode (docs/asset-color-profiles.md). */
 void frameos_nim_set_colors(const char *json);
+/* frame.json's `palette` colour list as compact JSON ("" = the panel's own
+ * table); live, one string per pass like colors. */
+void frameos_nim_set_palette(const char *json);
 /* Facts for the built-in status screen (drawn when no scene is loaded):
  * a JSON object with name, panel, ip, portal, portal_ssid, portal_ip,
  * cloud_url, cloud_state, cloud_connected, backend_url, version. Push it

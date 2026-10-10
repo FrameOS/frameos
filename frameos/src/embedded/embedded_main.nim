@@ -265,14 +265,24 @@ proc fos_nim_set_status_info_impl(infoJson: cstring) {.exportc, cdecl.} =
   if infoJson != nil and infoJson.len > 0:
     setStatusInfo($infoJson)
 
+proc framePalette(default: seq[(int, int, int)]): seq[(int, int, int)] =
+  ## The panel's table with frame.json's `palette` fitted onto it
+  ## (fos_nim_set_palette_impl keeps the list in frameConfig): the colours
+  ## the packer dithers to, and the target of the automatic fit. A photo's
+  ## own sidecar palette still wins, through activePalette, for that photo.
+  let config = getFrameConfig()
+  if config.isNil:
+    return default
+  fitPaletteOverride(config.palette.colors, default)
+
 proc panelPaletteForFormat(pixelFormat: int): seq[(int, int, int)] =
   ## The palette a display format dithers to: what the automatic fit of
   ## drawn images aims for (utils/asset_colors). Empty for the grey and
   ## two-colour formats, where the fit stays off unless asked for.
   case pixelFormat:
-  of 5: saturated4ColorPalette
-  of 6: saturated7ColorPalette
-  of 7: spectra6ColorPalette
+  of 5: framePalette(saturated4ColorPalette)
+  of 6: framePalette(saturated7ColorPalette)
+  of 7: framePalette(spectra6ColorPalette)
   else: @[]
 
 proc renderFrameImage(): tuple[image: Image, source: string] =
@@ -299,11 +309,11 @@ proc packImageForFormat(
   of 4:
     packImageGray(image, buf, bufLen, 3)
   of 5:
-    packImagePalette(image, buf, bufLen, activePalette(saturated4ColorPalette))
+    packImagePalette(image, buf, bufLen, activePalette(framePalette(saturated4ColorPalette)))
   of 6:
-    packImagePalette(image, buf, bufLen, activePalette(saturated7ColorPalette))
+    packImagePalette(image, buf, bufLen, activePalette(framePalette(saturated7ColorPalette)))
   of 7:
-    packImagePalette(image, buf, bufLen, activePalette(spectra6ColorPalette))
+    packImagePalette(image, buf, bufLen, activePalette(framePalette(spectra6ColorPalette)))
   of 8:
     packImageGray(image, buf, bufLen, 15)
   else:

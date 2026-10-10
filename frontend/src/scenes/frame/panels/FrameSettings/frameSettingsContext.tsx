@@ -328,7 +328,13 @@ export function FrameSettingsProvider({
     setFrameFormValues(nextValues)
   }
 
-  const paletteDevice = cloudProfile ? cloudDevice : frame.device || ''
+  // An ESP32 reports its panel as the bare waveshare key (`EPD_7in3e`), the
+  // palette table is keyed by driver name (`waveshare.EPD_7in3e`).
+  const paletteDevice = cloudProfile
+    ? esp32CloudProfile && cloudDevice && !cloudDevice.includes('.')
+      ? `waveshare.${cloudDevice}`
+      : cloudDevice
+    : frame.device || ''
   const normalizeKeyIds = (keys: string[]): string[] => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
     (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? []

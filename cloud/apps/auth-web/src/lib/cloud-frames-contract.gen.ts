@@ -346,6 +346,9 @@ export const cloudFramesContract = {
         "linux": {
           "since": "2026.8.31",
           "restart": true
+        },
+        "esp32": {
+          "since": "2026.10.4"
         }
       },
       "extraChecks": [

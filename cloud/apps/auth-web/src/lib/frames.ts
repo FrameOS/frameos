@@ -395,6 +395,11 @@ export const esp32TimeZoneFrameSettingKeys = new Set(contractSettingKeysSince("e
 export const esp32ColorsFrameSettingsMinVersion = "2026.10.2";
 export const esp32ColorsFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32ColorsFrameSettingsMinVersion));
 
+// 2026.10.4: `palette`, the colour list the ESP32 packer dithers to (the
+// names stay in the cloud). Live on the next render, no reboot.
+export const esp32PaletteFrameSettingsMinVersion = "2026.10.4";
+export const esp32PaletteFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32PaletteFrameSettingsMinVersion));
+
 export const esp32BatteryEnablePinFrameSettingsMinVersion = "2026.8.39";
 export const esp32BatteryEnablePinFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32BatteryEnablePinFrameSettingsMinVersion),
