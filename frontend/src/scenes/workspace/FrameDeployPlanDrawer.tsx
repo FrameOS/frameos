@@ -2876,46 +2876,50 @@ function CloudOtaDeployView({
                   The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
                 </div>
               ) : null}
-              <button
-                type="button"
-                title={
-                  firmwareDisabledReason ??
-                  (alsoPushScenes && offerResend
-                    ? 'Queue a firmware update and resend this frame’s scenes & settings'
-                    : 'Queue a firmware update notification')
-                }
-                disabled={Boolean(firmwareDisabledReason)}
-                onClick={() => {
-                  if (alsoPushScenes && offerResend) {
-                    // Scenes first: the OTA reboot redelivers a queued push
-                    // when the frame reconnects.
-                    saveAndDeployFrame()
+              {/* The button and the checkbox are both inline boxes; without a
+                  flex row they sat on one line touching each other. */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <button
+                  type="button"
+                  title={
+                    firmwareDisabledReason ??
+                    (alsoPushScenes && offerResend
+                      ? 'Queue a firmware update and resend this frame’s scenes & settings'
+                      : 'Queue a firmware update notification')
                   }
-                  updateFrameFirmware(frame.id)
-                }}
-                // Primary while the device is behind the published release —
-                // an available upgrade is the thing to do on this screen.
-                className={clsx(
-                  upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
-                  'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
-                )}
-              >
-                <CloudArrowDownIcon className="h-4 w-4" />
-                {/* Constant label: the checkbox below says whether scenes ride
+                  disabled={Boolean(firmwareDisabledReason)}
+                  onClick={() => {
+                    if (alsoPushScenes && offerResend) {
+                      // Scenes first: the OTA reboot redelivers a queued push
+                      // when the frame reconnects.
+                      saveAndDeployFrame()
+                    }
+                    updateFrameFirmware(frame.id)
+                  }}
+                  // Primary while the device is behind the published release —
+                  // an available upgrade is the thing to do on this screen.
+                  className={clsx(
+                    upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
+                    'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+                  )}
+                >
+                  <CloudArrowDownIcon className="h-4 w-4" />
+                  {/* Constant label: the checkbox below says whether scenes ride
                     along, so a button that renamed itself to "Update
                     everything" only made the two disagree about what it does. */}
-                Update firmware
-              </button>
-              {/* Nothing to resend when the device already acked everything:
+                  Update firmware
+                </button>
+                {/* Nothing to resend when the device already acked everything:
                   a tick that sends nothing only invites the question of why
                   it is there, so the sentence stands alone. */}
-              {offerResend ? (
-                <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
-              ) : hasScenes ? (
-                <div className="frame-tool-muted text-xs leading-4">
-                  Scenes &amp; settings are already in sync — nothing extra is sent.
-                </div>
-              ) : null}
+                {offerResend ? (
+                  <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+                ) : hasScenes ? (
+                  <div className="frame-tool-muted text-xs leading-4">
+                    Scenes &amp; settings are already in sync — nothing extra is sent.
+                  </div>
+                ) : null}
+              </div>
             </>
           ) : (
             <div className="frame-tool-muted text-sm leading-5">
@@ -3294,43 +3298,47 @@ function CloudPiUpdateCard({
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
-        {offerResend ? (
-          <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
-        ) : hasScenes ? (
-          <div className="frame-tool-muted text-xs leading-4">
-            Scenes &amp; settings are already in sync — nothing extra is sent.
-          </div>
-        ) : null}
-        <button
-          type="button"
-          title={
-            disabledReason ??
-            (alsoPushScenes && offerResend
-              ? 'Queue a FrameOS update and push this frame’s scenes & settings'
-              : 'Queue a FrameOS update notification')
-          }
-          disabled={Boolean(disabledReason)}
-          onClick={() => {
-            if (alsoPushScenes && offerResend) {
-              // Scenes first: the firmware update reboots the frame, and a
-              // queued push simply redelivers after it reconnects.
-              saveAndDeployFrame()
+        {/* Same row as the ESP32 card: the button and the checkbox are inline
+            boxes and touched each other without one. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            title={
+              disabledReason ??
+              (alsoPushScenes && offerResend
+                ? 'Queue a FrameOS update and push this frame’s scenes & settings'
+                : 'Queue a FrameOS update notification')
             }
-            updateFrameFirmware(frame.id)
-          }}
-          // Primary while the device is behind the published release. The
-          // status rows above already flag the version gap; a secondary
-          // button next to the primary "Push scenes & settings" one made the
-          // upgrade look like the optional half of this screen.
-          className={clsx(
-            upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
-            'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
-          )}
-        >
-          <CloudArrowDownIcon className="h-4 w-4" />
-          {/* Constant label — the checkbox above owns "and the scenes too". */}
-          Update FrameOS
-        </button>
+            disabled={Boolean(disabledReason)}
+            onClick={() => {
+              if (alsoPushScenes && offerResend) {
+                // Scenes first: the firmware update reboots the frame, and a
+                // queued push simply redelivers after it reconnects.
+                saveAndDeployFrame()
+              }
+              updateFrameFirmware(frame.id)
+            }}
+            // Primary while the device is behind the published release. The
+            // status rows above already flag the version gap; a secondary
+            // button next to the primary "Push scenes & settings" one made the
+            // upgrade look like the optional half of this screen.
+            className={clsx(
+              upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
+              'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+            )}
+          >
+            <CloudArrowDownIcon className="h-4 w-4" />
+            {/* Constant label — the checkbox above owns "and the scenes too". */}
+            Update FrameOS
+          </button>
+          {offerResend ? (
+            <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+          ) : hasScenes ? (
+            <div className="frame-tool-muted text-xs leading-4">
+              Scenes &amp; settings are already in sync — nothing extra is sent.
+            </div>
+          ) : null}
+        </div>
       </div>
     </section>
   )

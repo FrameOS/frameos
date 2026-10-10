@@ -3030,6 +3030,15 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   margin-top: 0;
 }
 
+/* A heading that opens a <fieldset> (the ESP32 "Device" group, the cloud's
+   "Defaults" and "Panel" batches) is the fieldset's first child, so the
+   form's own row gap never reaches it and the 2rem above landed on top of
+   the fieldset's gap: twice the space every other heading gets. */
+.frame-settings-panel form > fieldset > h6:first-child,
+.frame-settings-panel form > fieldset > .frame-settings-heading-row:first-child {
+  margin-top: 0;
+}
+
 /* The ESP32 "Device" group wraps its heading + box in a <fieldset> (so the
    whole group can be disabled below the firmware floor); it gets the same
    card as the sections that sit directly under the form. */

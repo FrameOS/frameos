@@ -143,6 +143,30 @@ export function FrameAdminServiceSecretsSection(): JSX.Element {
  * travel through this panel.
  */
 /**
+ * The scenes that ask for no key, folded into one line: a frame full of
+ * clocks used to spend a row per scene saying "Needs no service keys", and
+ * the box was mostly that.
+ */
+function NoKeyScenesLine({
+  scenes,
+}: {
+  scenes: { id: string; name: string; declared: string[] }[]
+}): JSX.Element | null {
+  const withoutKeys = scenes.filter((scene) => scene.declared.length === 0)
+  if (withoutKeys.length === 0) {
+    return null
+  }
+  if (withoutKeys.length === scenes.length) {
+    return <div className="frameos-muted text-xs">None of the scenes on this frame asks for a service key.</div>
+  }
+  return (
+    <div className="frameos-muted text-xs">
+      {withoutKeys.length === 1 ? `${withoutKeys[0].name} needs` : 'The other scenes need'} no service keys.
+    </div>
+  )
+}
+
+/**
  * Self-hosted frames: the service keys a scene from the public scene store
  * may read on this frame. A scene the owner authored gets what its apps
  * declare, as it always has; a store scene is anyone's code, so its
@@ -177,34 +201,38 @@ export function StoreSceneServiceSettingsSection(): JSX.Element | null {
         </div>
         {storeScenes.map((scene) => {
           const declared = collectSecretSettingsFromScenes([scene], apps)
+          if (declared.length === 0) {
+            return null
+          }
           return (
-            <div key={scene.id} className="space-y-1">
-              <div className="text-sm">{scene.name || scene.id}</div>
-              {declared.length === 0 ? (
-                <div className="frameos-muted text-xs pl-3">Needs no service keys.</div>
-              ) : (
-                <div className="flex flex-wrap gap-3 pl-3">
-                  {declared.map((group) => (
-                    <label key={group} className="inline-flex items-center gap-1 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={granted.includes(group)}
-                        onChange={(e) =>
-                          setGranted(
-                            e.target.checked
-                              ? [...granted.filter((g) => g !== group), group]
-                              : granted.filter((g) => g !== group)
-                          )
-                        }
-                      />
-                      {settingsDetails[group]?.title ?? group}
-                    </label>
-                  ))}
-                </div>
-              )}
+            <div key={scene.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-sm">{scene.name || scene.id}</span>
+              {declared.map((group) => (
+                <label key={group} className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={granted.includes(group)}
+                    onChange={(e) =>
+                      setGranted(
+                        e.target.checked
+                          ? [...granted.filter((g) => g !== group), group]
+                          : granted.filter((g) => g !== group)
+                      )
+                    }
+                  />
+                  {settingsDetails[group]?.title ?? group}
+                </label>
+              ))}
             </div>
           )
         })}
+        <NoKeyScenesLine
+          scenes={storeScenes.map((scene) => ({
+            id: scene.id,
+            name: scene.name || scene.id,
+            declared: collectSecretSettingsFromScenes([scene], apps),
+          }))}
+        />
       </div>
     </>
   )
@@ -344,36 +372,42 @@ export function CloudServiceSettingsSection(): JSX.Element {
             {rows?.map((row) => {
               const declared = row.declared_settings_groups ?? []
               const granted = draftGrants[row.scene_id] ?? []
+              if (declared.length === 0) {
+                return null
+              }
               return (
-                <div key={row.scene_id} className="space-y-1">
-                  <div className="text-sm">{row.name || row.slug || row.scene_id}</div>
-                  {declared.length === 0 ? (
-                    <div className="frameos-muted text-xs pl-3">Needs no service keys.</div>
-                  ) : (
-                    <div className="flex flex-wrap gap-3 pl-3">
-                      {declared.map((group) => (
-                        <label key={group} className="inline-flex items-center gap-1 text-xs cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={granted.includes(group)}
-                            disabled={savingGrants}
-                            onChange={(e) =>
-                              setDraftGrants((current) => ({
-                                ...current,
-                                [row.scene_id]: e.target.checked
-                                  ? [...granted.filter((g) => g !== group), group]
-                                  : granted.filter((g) => g !== group),
-                              }))
-                            }
-                          />
-                          {settingsDetails[group]?.title ?? group}
-                        </label>
-                      ))}
-                    </div>
-                  )}
+                <div key={row.scene_id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="text-sm">{row.name || row.slug || row.scene_id}</span>
+                  {declared.map((group) => (
+                    <label key={group} className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={granted.includes(group)}
+                        disabled={savingGrants}
+                        onChange={(e) =>
+                          setDraftGrants((current) => ({
+                            ...current,
+                            [row.scene_id]: e.target.checked
+                              ? [...granted.filter((g) => g !== group), group]
+                              : granted.filter((g) => g !== group),
+                          }))
+                        }
+                      />
+                      {settingsDetails[group]?.title ?? group}
+                    </label>
+                  ))}
                 </div>
               )
             })}
+            {rows ? (
+              <NoKeyScenesLine
+                scenes={rows.map((row) => ({
+                  id: row.scene_id,
+                  name: row.name || row.slug || row.scene_id,
+                  declared: row.declared_settings_groups ?? [],
+                }))}
+              />
+            ) : null}
             {rows && rows.length > 0 ? (
               <div className="flex justify-end">
                 <Button
