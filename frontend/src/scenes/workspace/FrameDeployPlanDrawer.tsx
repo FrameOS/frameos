@@ -2249,16 +2249,24 @@ function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX
 }
 
 function OtaUpdateCard({
+  frame,
   onOtaUpdate,
   otaSupported,
   disabled,
   online = false,
 }: {
+  frame: FrameType
   onOtaUpdate: () => void
   otaSupported: boolean
   disabled: boolean
   online?: boolean
 }): JSX.Element {
+  // The request only reboots the board into its updater; what follows
+  // arrives as ota:backend log lines the backend folds into the row. The
+  // card shows that progress and holds its button, so the click that
+  // started the update is not mistaken for one that was lost.
+  const updateState = firmwareUpdateState(frame)
+  const { progress, queued, inFlight } = updateState
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
       <div>
@@ -2267,7 +2275,6 @@ function OtaUpdateCard({
           {otaSupported ? (
             <>
               Install the latest FrameOS release over Wi-Fi. The frame downloads it, checks the signature and restarts.
-              Progress shows up in Logs.
               {online ? '' : ' The frame has to be online.'}
             </>
           ) : (
@@ -2275,14 +2282,28 @@ function OtaUpdateCard({
           )}
         </div>
       </div>
+      {otaSupported ? <FirmwareUpdateState state={updateState} noun="firmware" /> : null}
       <button
         type="button"
         onClick={onOtaUpdate}
-        disabled={disabled || !otaSupported}
+        disabled={disabled || !otaSupported || inFlight}
+        title={
+          progress?.kind === 'running'
+            ? progress.title
+            : queued
+            ? 'An update request is already queued for this frame'
+            : undefined
+        }
         className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
       >
-        <CloudArrowUpIcon className="h-4 w-4" />
-        Update over the air
+        {progress?.kind === 'running' ? (
+          <ArrowPathIcon className="h-4 w-4 animate-spin" />
+        ) : queued ? (
+          <ClockIcon className="h-4 w-4" />
+        ) : (
+          <CloudArrowUpIcon className="h-4 w-4" />
+        )}
+        {progress?.kind === 'running' ? 'Updating firmware' : queued ? 'Update queued' : 'Update over the air'}
       </button>
     </div>
   )
@@ -2403,11 +2424,22 @@ function EmbeddedFirmwareSection({
           </div>
           {/* Over the air first when the frame is online: it needs no cable. */}
           {frame.status === 'ready' || frame.status === 'deploying' ? (
-            <OtaUpdateCard onOtaUpdate={onOtaUpdate} otaSupported={otaSupported} disabled={releaseFlashBusy} online />
+            <OtaUpdateCard
+              frame={frame}
+              onOtaUpdate={onOtaUpdate}
+              otaSupported={otaSupported}
+              disabled={releaseFlashBusy}
+              online
+            />
           ) : null}
           <EmbeddedUsbConnect frame={frame} manualFlashCommand={releaseAvailable ? flashCommand : undefined} />
           {frame.status === 'ready' || frame.status === 'deploying' ? null : (
-            <OtaUpdateCard onOtaUpdate={onOtaUpdate} otaSupported={otaSupported} disabled={releaseFlashBusy} />
+            <OtaUpdateCard
+              frame={frame}
+              onOtaUpdate={onOtaUpdate}
+              otaSupported={otaSupported}
+              disabled={releaseFlashBusy}
+            />
           )}
           <FirmwareFootprintVisualization frame={frame} />
         </>
@@ -2528,14 +2560,15 @@ function capitalizeFirst(text: string): string {
 }
 
 /**
- * An update that is already on its way, for the two cloud update cards: the
- * nudge is queued for a sleeping frame, the device is downloading or
- * rebooting (hub-folded ota / cloud:upgrade progress), or its last attempt
+ * An update that is already on its way, for the update cards of both control
+ * planes: the nudge is queued for a sleeping frame, the device is downloading
+ * or rebooting (the hub, or the backend's models/log.py, folds its ota /
+ * cloud:upgrade lines into frame.firmware_update), or its last attempt
  * failed. The cards disable their button for the first two — pressing it
  * again only queued the same nudge behind the reboot and, with nothing on
  * screen changing, read as if the first click had been lost.
  */
-function cloudFirmwareUpdateState(frame: FrameType): {
+function firmwareUpdateState(frame: FrameType): {
   progress: FrameFirmwareUpdateProgress | null
   queued: boolean
   inFlight: boolean
@@ -2545,11 +2578,11 @@ function cloudFirmwareUpdateState(frame: FrameType): {
   return { progress, queued, inFlight: progress?.kind === 'running' || queued }
 }
 
-function CloudFirmwareUpdateState({
+function FirmwareUpdateState({
   state,
   noun,
 }: {
-  state: ReturnType<typeof cloudFirmwareUpdateState>
+  state: ReturnType<typeof firmwareUpdateState>
   noun: string
 }): JSX.Element | null {
   const { progress, queued } = state
@@ -2954,7 +2987,7 @@ function CloudOtaDeployView({
   const firmwareDisabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
   const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
   const upToDate = Boolean(deviceVersion && releaseInfo.release && deviceVersion === releaseInfo.release)
-  const updateState = cloudFirmwareUpdateState(frame)
+  const updateState = firmwareUpdateState(frame)
 
   return (
     <>
@@ -2981,7 +3014,7 @@ function CloudOtaDeployView({
                   The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
                 </div>
               ) : null}
-              <CloudFirmwareUpdateState state={updateState} noun="firmware" />
+              <FirmwareUpdateState state={updateState} noun="firmware" />
               {/* The button and the checkbox are both inline boxes; without a
                   flex row they sat on one line touching each other. */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -3404,7 +3437,7 @@ function CloudPiUpdateCard({
   const disabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
   const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
   const upToDate = Boolean(deviceVersion && releaseInfo.release && deviceVersion === releaseInfo.release)
-  const updateState = cloudFirmwareUpdateState(frame)
+  const updateState = firmwareUpdateState(frame)
 
   return (
     <section className="space-y-2">
@@ -3420,7 +3453,7 @@ function CloudPiUpdateCard({
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
-        <CloudFirmwareUpdateState state={updateState} noun="release" />
+        <FirmwareUpdateState state={updateState} noun="release" />
         {/* Same row as the ESP32 card: the button and the checkbox are inline
             boxes and touched each other without one. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

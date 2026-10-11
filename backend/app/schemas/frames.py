@@ -121,6 +121,12 @@ class FrameBase(BaseModel):
     next_wake_at: Optional[datetime] = None
     next_render_at: Optional[datetime] = None
     sleep_reason: Optional[str] = None
+    # The device's last word on its firmware update (app/utils/firmware_update.py)
+    # and the contract verbs still queued for it (pending or sent, unexpired):
+    # what the shared workspace reads to say "updating firmware 42%" or
+    # "update queued" instead of offering the update again.
+    firmware_update: Optional[Dict[str, Any]] = None
+    pending_command_types: Optional[List[str]] = None
     log_to_file: Optional[str]
     assets_path: Optional[str]
     save_assets: Any

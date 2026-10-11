@@ -8,6 +8,7 @@ from typing import Any, Optional
 from arq import ArqRedis as Redis
 
 from .frame import Frame, record_successful_deploy, remember_device_reported_frameos_version, update_frame
+from app.utils.firmware_update import firmware_update_from_log, firmware_update_is_over
 from .metrics import new_metrics
 from app.database import Base
 from app.utils.events_contract_gen import SCENE_CHANGED_LOG_EVENTS
@@ -135,6 +136,21 @@ def _sleep_forecast_changes(frame: Frame, event: str, log: dict, timestamp: date
     ):
         return {'next_wake_at': None, 'next_render_at': None, 'sleep_reason': None}
     return {}
+
+
+def _known_frameos_version(frame: Frame) -> str | None:
+    """The FrameOS the row believed the frame ran before this boot: what its
+    last bootup line said (embedded.lastBoot) or, failing that, the deploy
+    baseline's version."""
+    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
+    last_boot = embedded.get("lastBoot")
+    if isinstance(last_boot, dict):
+        version = _frameos_version_from_boot(last_boot.get("frameosVersion"))
+        if version:
+            return version
+    snapshot = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else {}
+    version = snapshot.get("frameos_version")
+    return _frameos_version_from_boot(version) if isinstance(version, str) else None
 
 
 def _should_mark_embedded_boot_deployed(frame: Frame, boot_version: str | None) -> bool:
@@ -352,6 +368,13 @@ async def process_log(
 
     changes: dict[str, Any] = {}
     changes.update(_sleep_forecast_changes(frame, event, log, timestamp))
+    # The device narrating its firmware update (`ota:<plane>` from an ESP32,
+    # `cloud:upgrade` from a Pi) lands on the row as the cloud hub lands it,
+    # so the workspace shows the download instead of a frame that reads
+    # "ready" with an OTA button inviting a second click.
+    firmware_update = firmware_update_from_log(log, frame.firmware_update, timestamp)
+    if firmware_update is not None:
+        changes['firmware_update'] = firmware_update
     if event == 'render':
         changes['status'] = 'preparing'
     if event == 'render:device':
@@ -368,6 +391,14 @@ async def process_log(
         )
 
         marked_buildroot_sd_image_booted = await mark_buildroot_sd_image_booted(db, redis, frame)
+        # The boot that follows a firmware update closes the row's progress:
+        # a verified install, or any version the row did not know (a success
+        # the backend missed). A failure on the same version stays visible.
+        if frame.firmware_update is not None:
+            known_version = _known_frameos_version(frame)
+            boot_version = _frameos_version_from_boot(log.get("version"))
+            if firmware_update_is_over(frame.firmware_update, boot_version, known_version):
+                changes["firmware_update"] = None
         if (frame.mode or "rpios") != "embedded":
             # The bootup line is where the backend learns which FrameOS the
             # frame now runs (the runtime sends `version` since 2026.9.13):

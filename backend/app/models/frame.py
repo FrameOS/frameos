@@ -433,6 +433,15 @@ class Frame(Base):
     next_wake_at = mapped_column(DateTime, nullable=True)
     next_render_at = mapped_column(DateTime, nullable=True)
     sleep_reason = mapped_column(String(32), nullable=True)
+    # What the device last said about its firmware update, folded from its
+    # `ota:<plane>` (ESP32) / `cloud:upgrade` (Pi) log lines by models/log.py
+    # (app/utils/firmware_update.py has the vocabulary). Same row as the
+    # cloud's frames.firmware_update, read by the shared workspace's
+    # frameFirmwareUpdateProgress: the frames list, the change-status tile,
+    # the deploy drawer and the "..." menu say "updating firmware 42%" from
+    # it. Cleared by the bootup line that follows a verified install or
+    # reports a version the row did not know; a failure stays until then.
+    firmware_update = mapped_column(JSON, nullable=True)
     reboot = mapped_column(JSON, nullable=True)
     control_code = mapped_column(JSON, nullable=True)
     scenes = mapped_column(JSON, nullable=True, default=list)
@@ -518,6 +527,7 @@ class Frame(Base):
             'next_wake_at': self.next_wake_at.replace(tzinfo=timezone.utc).isoformat() if self.next_wake_at else None,
             'next_render_at': self.next_render_at.replace(tzinfo=timezone.utc).isoformat() if self.next_render_at else None,
             'sleep_reason': self.sleep_reason,
+            'firmware_update': self.firmware_update,
             'log_to_file': self.log_to_file,
             'assets_path': self.assets_path,
             'save_assets': self.save_assets,
@@ -738,12 +748,19 @@ def refresh_tls_certificate_validity_dates(frame: Frame):
 
 
 async def update_frame(db: Session, redis: Redis, frame: Frame):
+    from app.utils.frame_commands import pending_command_types
+
     db.add(frame)
     db.commit()
     db.refresh(frame)
     # The broadcast reaches every browser tab of the project; secrets stay
     # behind the per-frame GET (see app/utils/frame_secrets for the shape).
-    await publish_message(redis, "update_frame", websocket_frame_payload(frame.to_dict()))
+    payload = websocket_frame_payload(frame.to_dict())
+    # Not a column: what the frame's command queue still holds, as the list
+    # and detail routes report it, so a tab learns that the queued firmware
+    # update was taken (or that one is waiting) without a reload.
+    payload["pending_command_types"] = pending_command_types(db, frame)
+    await publish_message(redis, "update_frame", payload)
 
 
 def frame_has_shell_access(frame: Any) -> bool:

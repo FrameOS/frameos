@@ -1507,7 +1507,10 @@ export const framesModel = kea<framesModelType>([
       // The board pulls this backend's relay of the release manifest and
       // installs the signed release image for its flash layout if it runs an
       // older version; the request itself only reboots it into its updater.
-      // Progress arrives as ota:backend log lines.
+      // Progress arrives as ota:backend log lines, which the backend folds
+      // into the row's firmware_update: the status word, the tile and the
+      // OTA card spin from it once the loadFrame below has refreshed the
+      // queued verb.
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'embeddedOta',

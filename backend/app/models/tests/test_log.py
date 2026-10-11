@@ -407,3 +407,125 @@ async def test_new_log_commits_before_publishing(db, redis):
         await new_log(db, redis, frame.id, "webhook", '{"event":"test"}')
 
     assert tx_open_during_publish is False
+
+
+def _ota_line(status: str, detail: str = "") -> dict:
+    return {"event": "ota:backend", "source": "esp32", "status": status, "detail": detail}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_folds_esp32_ota_lines_into_the_frame_row(mock_pub, mock_frame_pub, db, redis):
+    """The device narrates its OTA as `ota:backend` lines; the row carries the
+    newest one so the workspace shows the download instead of a frame that
+    reads "ready" with an OTA button inviting a second click."""
+    frame = await new_frame(db, redis, "OtaFrame", "frame53.local", "server_host")
+    frame.mode = "embedded"
+    frame.embedded = {"platform": "esp32-s3", "lastBoot": {"frameosVersion": "2026.10.5"}}
+    frame.status = "ready"
+    db.add(frame)
+    db.commit()
+
+    at = datetime(2026, 10, 12, 9, 30, 0)
+    await process_log(db, redis, frame, [at.replace(tzinfo=timezone.utc).timestamp(), _ota_line("downloading", "2026.10.6")])
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update == {
+        "at": "2026-10-12T09:30:00+00:00",
+        "detail": "2026.10.6",
+        "plane": "backend",
+        "status": "downloading",
+        "version": "2026.10.6",
+    }
+    # The row rides the update_frame broadcast (the last publish).
+    broadcast = [call.args for call in mock_frame_pub.await_args_list if call.args[1] == "update_frame"][-1][2]
+    assert broadcast["firmware_update"]["status"] == "downloading"
+    assert broadcast["pending_command_types"] == []
+
+    await process_log(db, redis, frame, _ota_line("progress", "1048576/2500000"))
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update["status"] == "progress"
+    assert updated.firmware_update["detail"] == "1048576/2500000"
+    assert updated.firmware_update["version"] == "2026.10.6"
+
+    # A render line in between does not touch it.
+    await process_log(db, redis, frame, {"event": "render:done"})
+    assert db.get(Frame, frame.id).firmware_update["status"] == "progress"
+
+    await process_log(db, redis, frame, _ota_line("verified", "rebooting"))
+    assert db.get(Frame, frame.id).firmware_update["status"] == "verified"
+
+    # The boot into the new release closes it.
+    await process_log(db, redis, frame, {"event": "bootup", "source": "esp32", "version": "v2026.10.6", "mode": "embedded"})
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update is None
+    assert updated.embedded["lastBoot"]["frameosVersion"] == "2026.10.6"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_folds_pi_upgrade_lines_and_keeps_a_failure_across_the_same_version_boot(mock_pub, db, redis):
+    """frameos/upgrade.nim narrates a Pi's release upgrade as `cloud:upgrade`
+    lines, which reach every control plane that reads the frame log."""
+    frame = await new_frame(db, redis, "PiFrame", "pi.local", "server_host")
+    frame.mode = "buildroot"
+    frame.last_successful_deploy = {"frameos_version": "2026.10.4"}
+    db.add(frame)
+    db.commit()
+
+    await process_log(db, redis, frame, {"event": "cloud:upgrade", "status": "scheduled"})
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update["status"] == "downloading"
+    assert updated.firmware_update["version"] is None
+
+    await process_log(
+        db,
+        redis,
+        frame,
+        {
+            "event": "cloud:upgrade",
+            "status": "running",
+            "message": "FrameOS upgrade is running.",
+            "current_version": "2026.10.4",
+            "latest_version": "2026.10.5",
+        },
+    )
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update["status"] == "downloading"
+    assert updated.firmware_update["detail"] == "FrameOS upgrade is running."
+    assert updated.firmware_update["version"] == "2026.10.5"
+
+    await process_log(db, redis, frame, {"event": "cloud:upgrade", "status": "failed", "message": "signature mismatch"})
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update["status"] == "error"
+    assert updated.firmware_update["detail"] == "signature mismatch"
+
+    # The runtime restarts on the same release: the failure is still the news.
+    await process_log(db, redis, frame, {"event": "bootup", "version": "2026.10.4"})
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update["status"] == "error"
+
+    # A boot on another version means the error belongs to a release that is
+    # no longer running.
+    await process_log(db, redis, frame, {"event": "bootup", "version": "2026.10.5"})
+    updated = db.get(Frame, frame.id)
+    assert updated.firmware_update is None
+    assert updated.last_successful_deploy["frameos_version"] == "2026.10.5"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_without_a_version_only_closes_a_verified_update(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "OldFirmwareFrame", "frame.local", "server_host")
+    frame.firmware_update = {"status": "error", "detail": "download failed", "version": "2026.10.6", "plane": "backend", "at": "x"}
+    db.add(frame)
+    db.commit()
+
+    await process_log(db, redis, frame, {"event": "bootup"})
+    assert db.get(Frame, frame.id).firmware_update["status"] == "error"
+
+    frame.firmware_update = {"status": "verified", "detail": "", "version": "2026.10.6", "plane": "backend", "at": "x"}
+    db.add(frame)
+    db.commit()
+    await process_log(db, redis, frame, {"event": "bootup"})
+    assert db.get(Frame, frame.id).firmware_update is None

@@ -150,16 +150,18 @@ export interface FrameType {
   next_wake_at?: string | null
   next_render_at?: string | null
   sleep_reason?: 'battery' | 'always' | 'battery_critical' | string | null
-  /** Cloud only: the device's last firmware-update log line (the ESP32's
-   * `ota:<plane>`, the Pi's `cloud:upgrade`), folded into the row by the hub
-   * in one vocabulary while an update runs (downloading, progress
-   * "<written>/<total>", verified, error <why>, …). Cleared on the hello
-   * after a verified install; see frameFirmwareUpdateProgress(). */
+  /** The device's last firmware-update log line (the ESP32's `ota:<plane>`,
+   * the Pi's `cloud:upgrade`), folded into the row in one vocabulary while
+   * an update runs (downloading, progress "<written>/<total>", verified,
+   * error <why>, …) — by the hub on the cloud, by models/log.py on the
+   * backend. Cleared by the boot that follows a verified install or reports
+   * a version the row did not know; see frameFirmwareUpdateProgress(). */
   firmware_update?: FrameFirmwareUpdate | null
-  /** Cloud only: the contract verbs still queued for the device (pending or
-   * sent-but-unacked, unexpired), as the list and detail routes report them.
-   * What lets the frames list say "upgrade queued" instead of offering the
-   * same notify_update_available a second time to a sleeping frame. */
+  /** The contract verbs still queued for the device (pending or
+   * sent-but-unacked, unexpired), as the list and detail routes of both
+   * control planes report them. What lets the frames list say "upgrade
+   * queued" instead of offering the same notify_update_available a second
+   * time to a sleeping frame. */
   pending_command_types?: string[]
   frame_host: string
   frame_port: number
@@ -641,7 +643,7 @@ export interface FrameFirmwareUpdate {
   detail: string
   plane?: string
   version?: string | null
-  /** ISO instant the hub recorded the line. */
+  /** ISO instant the control plane recorded the line. */
   at: string
 }
 

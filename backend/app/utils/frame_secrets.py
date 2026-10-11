@@ -180,6 +180,10 @@ def deploy_snapshot(frame_dict: dict) -> dict:
     snapshot = redact_frame_secrets(frame_dict)
     snapshot.pop("last_successful_deploy", None)
     snapshot.pop("last_successful_deploy_at", None)
+    # Device telemetry, not configuration: a baseline that carried it would
+    # read every progress line as a change to deploy.
+    snapshot.pop("firmware_update", None)
+    snapshot.pop("pending_command_types", None)
     fingerprints = frame_secret_fingerprints(frame_dict)
     if fingerprints:
         snapshot[FINGERPRINTS_KEY] = fingerprints

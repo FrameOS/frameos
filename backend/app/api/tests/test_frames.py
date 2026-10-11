@@ -4586,3 +4586,43 @@ async def test_api_frame_assets_folder_falls_back_to_ssh_when_the_admin_api_is_d
 
     assert response.status_code == 200, response.text
     assert [a['path'] for a in response.json()['assets']] == ['/srv/assets/photos/cat.jpg']
+
+
+@pytest.mark.asyncio
+async def test_api_frames_carry_the_firmware_update_and_the_queued_verbs(async_client, db, redis):
+    """The two fields the shared workspace reads to say "updating firmware
+    42%" / "update queued" on a backend frame, as it does on a cloud one.
+    Both ride the response model (which drops what it does not list)."""
+    from app.utils.frame_commands import enqueue_frame_command
+
+    frame = await new_frame(db, redis, 'OtaFrame', 'localhost', 'localhost')
+    frame.mode = 'embedded'
+    frame.embedded = {'platform': 'esp32-s3'}
+    frame.firmware_update = {
+        'at': '2026-10-12T09:30:00+00:00',
+        'detail': '1048576/2500000',
+        'plane': 'backend',
+        'status': 'progress',
+        'version': '2026.10.6',
+    }
+    db.add(frame)
+    db.commit()
+    enqueue_frame_command(db, frame, 'notify_update_available', detail='2026.10.6')
+
+    response = await async_client.get('/api/frames')
+    assert response.status_code == 200
+    listed = response.json()['frames'][0]
+    assert listed['firmware_update'] == frame.firmware_update
+    assert listed['pending_command_types'] == ['notify_update_available']
+
+    response = await async_client.get(f'/api/frames/{frame.id}')
+    assert response.status_code == 200
+    got = response.json()['frame']
+    assert got['firmware_update'] == frame.firmware_update
+    assert got['pending_command_types'] == ['notify_update_available']
+
+    # The deploy baseline the planner stores never carries the telemetry.
+    plain = await new_frame(db, redis, 'PlainFrame', 'localhost', 'localhost')
+    response = await async_client.get(f'/api/frames/{plain.id}')
+    assert response.json()['frame']['pending_command_types'] == []
+    assert response.json()['frame']['firmware_update'] is None

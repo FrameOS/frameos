@@ -1296,9 +1296,15 @@ async def api_frames_list(
         .group_by(Log.frame_id)
         .all()
     )
+    # Local import: the mypy baseline pins a frames.py message by line
+    # number (tools/mypy_gate.py), so nothing new goes above it.
+    from app.utils.frame_commands import pending_command_types_by_frame
+
+    pending_types = pending_command_types_by_frame(db, project_id)
     frame_items = []
     for f in frames:
         data = await _frame_to_api_response_dict(f, redis, latest_logs.get(f.id))
+        data["pending_command_types"] = pending_types.get(int(f.id), [])
         data["active_scene_id"] = await _active_scene_id_from_cache(redis, f.id)
         data["active_connections"] = await number_of_connections_for_frame(redis, f.id)
         frame_items.append(data)
@@ -2249,7 +2255,10 @@ async def api_frame_get(
         .filter(_frame_activity_log_filter())
         .scalar()
     )
+    from app.utils.frame_commands import pending_command_types
+
     data = await _frame_to_api_response_dict(frame, redis, latest_log_at)
+    data["pending_command_types"] = pending_command_types(db, frame)
     active = await redis.get(f"frame:{frame.id}:active_connections")
     data["active_connections"] = int(active or 0)
     data["active_scene_id"] = await _active_scene_id_from_cache(redis, frame.id)

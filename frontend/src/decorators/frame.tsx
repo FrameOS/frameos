@@ -206,10 +206,11 @@ const firmwareUpdateFailureShownMs = 6 * 60 * 60 * 1000
 /**
  * What the device said about its firmware update, read for the frames list
  * (FrameDashboardStatusLine), the change-status tile, the "…" menu and the
- * deploy drawer. The hub folds the ESP32's `ota:<plane>` lines and the Pi's
- * `cloud:upgrade` lines into the row in one vocabulary (frame-hub
- * protocol.ts firmwareUpdateFromLogEntries); before this they were visible
- * only as log lines and a frame mid-download read "waiting to sync". null
+ * deploy drawer. The control plane folds the ESP32's `ota:<plane>` lines and
+ * the Pi's `cloud:upgrade` lines into the row in one vocabulary (the hub's
+ * protocol.ts firmwareUpdateFromLogEntries, the backend's
+ * app/utils/firmware_update.py); before this they were visible only as log
+ * lines and a frame mid-download read "waiting to sync" or "ready". null
  * when nothing is going on, when the last line is too old to be believed,
  * or when the device reported it was already up to date.
  */

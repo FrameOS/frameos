@@ -170,7 +170,11 @@ Cloud-profile verb set (complete):
   broadcasts the row, which is what lets the frames list, the deploy drawer
   and the "…" menu say "updating firmware 42%" instead of offering the nudge
   again. The hello after the reboot clears it (a verified install, or any new
-  version); a failure stays until a hello reports a different version.
+  version); a failure stays until a hello reports a different version. The
+  self-hosted backend keeps the same column and vocabulary
+  (`backend/app/utils/firmware_update.py`, folded by `models/log.py`
+  `process_log`, cleared by the bootup line), so the shared workspace reads
+  one field on both planes.
 - `refresh_service_settings` — advisory only, empty payload; the device
   fetches the account's service API keys over device-authed HTTPS (see
   "Service settings: a pull, not a push" below). No credential ever rides

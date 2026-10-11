@@ -196,3 +196,13 @@ def test_websocket_payload_keeps_the_secret_free_snapshot_and_fingerprints():
     assert payload["secret_fingerprints"] == frame["secret_fingerprints"]
     for secret in ("raspberry", "api-key", "access-key", "KEY", "shared", "hunter2", "p1"):
         assert secret not in str(payload)
+
+
+def test_deploy_snapshot_drops_device_telemetry():
+    """A progress line is not a change to deploy."""
+    source = frame_dict()
+    source["firmware_update"] = {"status": "progress", "detail": "1/2"}
+    source["pending_command_types"] = ["notify_update_available"]
+    snapshot = deploy_snapshot(source)
+    assert "firmware_update" not in snapshot
+    assert "pending_command_types" not in snapshot

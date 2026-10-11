@@ -170,6 +170,43 @@ def pending_command_count(db: Session, frame: Frame, now: datetime | None = None
     )
 
 
+def pending_command_types(db: Session, frame: Frame, now: datetime | None = None) -> list[str]:
+    """The distinct verbs still waiting on this frame (pending or sent,
+    unexpired), sorted. Rides the frame's API responses and the update_frame
+    broadcast as `pending_command_types`, the cloud's name for the same list
+    (cloud/apps/auth-web/src/lib/frames.ts pendingCommandTypesByFrame): the
+    workspace says "update queued" from it instead of offering a sleeping
+    frame the same notify_update_available twice."""
+    now = now or utcnow()
+    rows = (
+        db.query(FrameCommand.type)
+        .filter(FrameCommand.frame_id == int(frame.id), FrameCommand.status.in_(LIVE_STATUSES))
+        .filter(or_(FrameCommand.expires_at.is_(None), FrameCommand.expires_at >= now))
+        .distinct()
+        .all()
+    )
+    return sorted(row[0] for row in rows)
+
+
+def pending_command_types_by_frame(db: Session, project_id: int, now: datetime | None = None) -> dict[int, list[str]]:
+    """`pending_command_types` for every frame of a project in one query,
+    for the frames list. Frames with an empty queue are absent."""
+    now = now or utcnow()
+    rows = (
+        db.query(FrameCommand.frame_id, FrameCommand.type)
+        .filter(FrameCommand.project_id == int(project_id), FrameCommand.status.in_(LIVE_STATUSES))
+        .filter(or_(FrameCommand.expires_at.is_(None), FrameCommand.expires_at >= now))
+        .distinct()
+        .all()
+    )
+    by_frame: dict[int, list[str]] = {}
+    for frame_id, command_type in rows:
+        by_frame.setdefault(int(frame_id), []).append(command_type)
+    for types in by_frame.values():
+        types.sort()
+    return by_frame
+
+
 # ------------------------------------------------------------------- writes
 
 def supersede_pending_commands(db: Session, frame: Frame, command_type: str, now: datetime | None = None) -> int:
