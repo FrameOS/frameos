@@ -316,8 +316,10 @@ bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *p
     }
     char *payload = NULL;
     if (payload_json != NULL && payload_json[0] != '\0') {
-        payload = strdup(payload_json);
+        size_t len = strlen(payload_json);
+        payload = malloc(len + 1);
         if (payload == NULL) return false;
+        memcpy(payload, payload_json, len + 1);
     }
     bool queued = false;
     portENTER_CRITICAL(&s_deferred_lock);

@@ -14,3 +14,10 @@ typedef uint32_t TickType_t;
 #define pdPASS 1
 #define pdFAIL 0
 #define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
+
+/* The deferred-event queue (fos_events.c) guards its slots with a spinlock
+ * on the chip; the host test is single-threaded. */
+typedef int portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED 0
+#define portENTER_CRITICAL(mux) ((void)(mux))
+#define portEXIT_CRITICAL(mux) ((void)(mux))
