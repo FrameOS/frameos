@@ -841,7 +841,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     # render or event handler, so a wedged runner restarts the service.
     notifyWatchdog()
     inc iterations
-    if maxIterations > 0 and iterations > maxIterations:
+    if self.stopMessageLoop or (maxIterations > 0 and iterations > maxIterations):
       break
     # Everything the other threads sent goes into the dispatcher's queue, which
     # is where the contract's coalescing happens: touch drags queue hundreds of

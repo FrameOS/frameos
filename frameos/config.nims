@@ -38,3 +38,14 @@ elif defined(frameosEmbedded):
   # crunchy and zippy each build their own 8 KB slicing-by-8 CRC-32 table, and
   # both are linked into the firmware. Point crunchy's at zippy's.
   patchFile("crunchy", "crc32", "src/embedded/patched_crc32")
+
+when defined(testing):
+  # Test binaries (testament passes -d:testing) are built without C
+  # optimisation. nim.cfg's -d:release means -O3, and for a test that pulls
+  # in the server or the interpreter the C compile is ~30 s of CPU at -O3
+  # against ~12 s at -O0, next to a 6 s Nim frontend — on a four-core CI
+  # runner compiling four tests at once that was most of a cold shard. The
+  # tests themselves run a little slower (the pixel-heavy ones go from
+  # tens of milliseconds to under a second), the checks are the same (this
+  # is still -d:release, not -d:danger), and the warm nimcache is unaffected.
+  switch("opt", "none")

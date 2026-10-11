@@ -559,6 +559,10 @@ type
     isRendering*: bool = false
     triggerRenderNext*: bool = false
     forceSceneReload*: bool = false
+    ## Ends startMessageLoop at its next pass. The runtime never sets it; a
+    ## test that is done with the loop does, instead of letting a generous
+    ## `maxIterations` run out at the loop's idle pace (200 ms a pass).
+    stopMessageLoop*: bool = false
     ## Compiled scenes initialized since their last "open": the generated init
     ## fires "open" itself, so the runner must not fire it a second time.
     openedByInit*: seq[SceneId]
