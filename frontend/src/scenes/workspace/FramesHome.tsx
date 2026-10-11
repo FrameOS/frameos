@@ -21,6 +21,7 @@ import {
   Squares2X2Icon,
   StarIcon,
   XMarkIcon,
+  CodeBracketIcon,
 } from '@heroicons/react/24/outline'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
@@ -53,7 +54,7 @@ import { isCloudMode } from '../../utils/cloudMode'
 import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
-import { frameLogic } from '../frame/frameLogic'
+import { frameLogic, type BlankSceneKind } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { fleetUpdateLogic } from './fleetUpdateLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
@@ -789,11 +790,14 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
 function NewBlankSceneModal({
   onClose,
   onCreate,
+  kind,
 }: {
   onClose: () => void
   onCreate: (name: string) => void
+  /** A node graph, or a pure JS module (docs/pure-js-scenes.md). */
+  kind: BlankSceneKind
 }): JSX.Element {
-  const [name, setName] = useState('New blank scene')
+  const [name, setName] = useState(kind === 'js' ? 'New JavaScript scene' : 'New blank scene')
   const nameInputRef = useRef<HTMLInputElement>(null)
   const canCreate = name.trim().length > 0
 
@@ -806,7 +810,12 @@ function NewBlankSceneModal({
   }
 
   return (
-    <Modal open onClose={onClose} title="New blank scene" initialFocus={nameInputRef}>
+    <Modal
+      open
+      onClose={onClose}
+      title={kind === 'js' ? 'New JavaScript scene' : 'New blank scene'}
+      initialFocus={nameInputRef}
+    >
       <form onSubmit={handleSubmit} className="space-y-4 p-5">
         <label className="block">
           <span className="frameos-muted mb-2 block text-sm font-semibold">Scene name</span>
@@ -909,7 +918,7 @@ function AddSceneDrawerActions({
   const cloudMode = isCloudMode()
   const { createBlankScene } = useActions(frameLogic({ frameId: frame.id }))
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
-  const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
+  const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState<BlankSceneKind | null>(null)
   const [generateElsewhereOpen, setGenerateElsewhereOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
   const { openFrameTool, closeTemplateDrawer, openChatDrawer } = useActions(workspaceLogic)
@@ -973,7 +982,7 @@ function AddSceneDrawerActions({
       <button
         type="button"
         onClick={() => {
-          setNewBlankSceneModalOpen(true)
+          setNewBlankSceneModalOpen('graph')
         }}
         className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
@@ -983,6 +992,21 @@ function AddSceneDrawerActions({
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">New blank scene</span>
           <span className="frameos-muted block text-xs">Start with a render event</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setNewBlankSceneModalOpen('js')
+        }}
+        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+          <CodeBracketIcon className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="frameos-strong block truncate text-sm font-semibold">New JavaScript scene</span>
+          <span className="frameos-muted block text-xs">No diagram: one module draws the frame</span>
         </span>
       </button>
       <button
@@ -1084,10 +1108,12 @@ function AddSceneDrawerActions({
       ) : null}
       {newBlankSceneModalOpen ? (
         <NewBlankSceneModal
-          onClose={() => setNewBlankSceneModalOpen(false)}
+          kind={newBlankSceneModalOpen}
+          onClose={() => setNewBlankSceneModalOpen(null)}
           onCreate={(name) => {
-            setNewBlankSceneModalOpen(false)
-            createBlankScene(name, false, true)
+            const kind = newBlankSceneModalOpen
+            setNewBlankSceneModalOpen(null)
+            createBlankScene(name, kind === 'js', kind !== 'js', kind)
           }}
         />
       ) : null}

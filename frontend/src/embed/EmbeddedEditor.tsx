@@ -25,6 +25,8 @@ import { ZoomOutArea } from '../icons/ZoomOutArea'
 
 import { frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
 import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
+import { JsSceneEditor } from '../scenes/workspace/JsSceneEditor'
+import { sceneIsJs } from '../utils/sceneExecution'
 import { diagramLogic } from '../scenes/frame/panels/Diagram/diagramLogic'
 import { EditAppModal } from '../scenes/frame/panels/EditApp/EditAppModal'
 import { Apps } from '../scenes/frame/panels/Apps/Apps'
@@ -601,7 +603,13 @@ function EmbeddedEditorBody({
         </div>
       ) : null}
       <div className="scene-editor-canvas scene-editor-canvas-full @container relative min-h-0 flex-1 overflow-hidden">
-        {selectedSceneId ? <Diagram sceneId={selectedSceneId} showToolbar={false} /> : null}
+        {selectedSceneId ? (
+          sceneIsJs(selectedScene) ? (
+            <JsSceneEditor frameId={EMBED_FRAME_ID} sceneId={selectedSceneId} />
+          ) : (
+            <Diagram sceneId={selectedSceneId} showToolbar={false} />
+          )
+        ) : null}
         {selectedSceneId ? (
           <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-50">
             {/* One vertical column at the right edge: the drawer opens to its

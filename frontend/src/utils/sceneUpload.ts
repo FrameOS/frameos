@@ -123,7 +123,13 @@ function isSceneLike(value: unknown): value is Partial<FrameScene> {
     return false
   }
   const record = value as Record<string, unknown>
-  return Array.isArray(record.nodes) && Array.isArray(record.edges)
+  if (Array.isArray(record.nodes) && Array.isArray(record.edges)) {
+    return true
+  }
+  // A pure JS scene may arrive without the (empty) graph: its module is the scene.
+  const settings = record.settings as Record<string, unknown> | undefined
+  const sources = record.sources as Record<string, unknown> | undefined
+  return settings?.execution === 'js' && !!sources && typeof sources === 'object' && !Array.isArray(sources)
 }
 
 function scenesFromJson(value: unknown, what: string): Partial<FrameScene>[] {

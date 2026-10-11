@@ -16,7 +16,9 @@ export function sceneExecutionForFrame(
   mode?: FrameType['mode'] | null
 ): NonNullable<FrameSceneSettings['execution']> {
   if (frameRunsScenesInterpreted(mode)) {
-    return 'interpreted'
+    // An embedded frame runs everything from JSON: a graph is interpreted
+    // there whatever its stamp, a pure JS scene stays what it is.
+    return sceneIsJs(scene) ? 'js' : 'interpreted'
   }
   // Through normalizeSceneExecution, not the raw stored value: an unknown
   // stamp ("banana") must read as interpreted here exactly as
@@ -29,7 +31,21 @@ export function sceneIsCompiledForFrame(
   scene: Partial<FrameScene> | null | undefined,
   mode?: FrameType['mode'] | null
 ): boolean {
-  return sceneExecutionForFrame(scene, mode) !== 'interpreted'
+  return sceneExecutionForFrame(scene, mode) === 'compiled'
+}
+
+/** A pure JS scene: one module in `sources`, no diagram (docs/pure-js-scenes.md). */
+export function sceneIsJs(scene: Partial<FrameScene> | null | undefined): boolean {
+  return scene?.settings?.execution === 'js'
+}
+
+/**
+ * The frame runs the scene straight from scenes.json — a node graph the
+ * interpreter walks or a pure JS module. Everything that is not compiled;
+ * mirrors `scene_runs_from_json` on the backend.
+ */
+export function sceneRunsFromJson(scene: Partial<FrameScene> | null | undefined): boolean {
+  return normalizeSceneExecution(scene) !== 'compiled'
 }
 
 /**
@@ -44,7 +60,7 @@ export function normalizeSceneExecution(
   scene: Partial<FrameScene> | null | undefined
 ): NonNullable<FrameSceneSettings['execution']> {
   const explicit = scene?.settings?.execution
-  if (explicit === 'compiled' || explicit === 'interpreted') {
+  if (explicit === 'compiled' || explicit === 'interpreted' || explicit === 'js') {
     return explicit
   }
   return 'interpreted'
