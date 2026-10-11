@@ -910,7 +910,11 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
 
     server.tool(Tool(
         name="frame_commands_list",
-        description="Actions still waiting for the frame to pick them up. The backend pushes most actions immediately, so this is usually empty; a queued embedded OTA request shows here.",
+        description=(
+            "Actions still waiting for the frame to pick them up, oldest first. Linux frames are pushed to "
+            "immediately, so they rarely show anything; an ESP32 takes its queue (scene changes, settings, "
+            "render, OTA) on its next check-in, which for a deep-sleeping battery frame is its next wake."
+        ),
         properties={"frame_id": FRAME_ID},
         required=["frame_id"],
         annotations={"readOnlyHint": True},

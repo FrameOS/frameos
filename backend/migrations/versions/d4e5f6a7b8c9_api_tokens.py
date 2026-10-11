@@ -1,7 +1,7 @@
 """api tokens
 
 Revision ID: d4e5f6a7b8c9
-Revises: c3d8e1f5a7b2
+Revises: f1a2b3c4d5e6
 Create Date: 2026-10-11 12:00:00.000000
 
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'd4e5f6a7b8c9'
-down_revision = 'c3d8e1f5a7b2'
+down_revision = 'f1a2b3c4d5e6'
 branch_labels = None
 depends_on = None
 
