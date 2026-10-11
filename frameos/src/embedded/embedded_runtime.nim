@@ -18,6 +18,7 @@ import frameos/channels
 import frameos/single_scene_host
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
+import frameos/values
 import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
@@ -152,19 +153,28 @@ proc saveSceneStateText(sceneId, text: string) =
     lastSavedStateId = sceneId
     lastSavedStateJson = text
 
-proc persistableSceneState(): JsonNode =
-  ## The resident scene's keys worth a file: the public fields and the
-  ## persist:"disk" ones.
+proc residentSceneState(persistable: bool): JsonNode =
+  ## The resident scene's public fields and its persist:"disk" ones. For the
+  ## file (`persistable`), only those off their declared default: a default
+  ## in the file would outlive a redeploy that changes it (values.nim,
+  ## `stateAtDeclaredDefault`), while a missing key is seeded afresh.
   result = newJObject()
   let scene = host.scene
   if scene.isNil or host.exported.isNil or scene.state.isNil or scene.state.kind != JObject:
     return
+  let declaredFields = if persistable: declaredStateFields(host.exported) else: @[]
   for field in host.exported.publicStateFields:
-    if scene.state.hasKey(field.name):
+    if scene.state.hasKey(field.name) and
+        (not persistable or worthPersistingState(declaredFields, field.name, scene.state[field.name])):
       result[field.name] = scene.state[field.name]
   for key in host.exported.persistedStateKeys:
-    if not result.hasKey(key) and scene.state.hasKey(key):
+    if not result.hasKey(key) and scene.state.hasKey(key) and
+        (not persistable or worthPersistingState(declaredFields, key, scene.state[key])):
       result[key] = scene.state[key]
+
+proc persistableSceneState(): JsonNode =
+  ## The resident scene's keys worth a file.
+  residentSceneState(persistable = true)
 
 proc persistSceneState*() =
   ## Write the resident scene's state when it differs from what was written.
@@ -195,7 +205,7 @@ proc sceneStateJson*(): string =
       return "{}"
     let persisted = loadPersistedSceneState(host.sceneId.get().string)
     return if persisted.isNil: "{}" else: $persisted
-  $persistableSceneState()
+  $residentSceneState(persistable = false)
 
 proc takeRenderRequested*(): bool =
   host.takeRenderRequested()

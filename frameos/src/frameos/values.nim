@@ -309,3 +309,64 @@ proc eventPayloadValueMatches*(payload: JsonNode, key: string, expected: string)
     return expected == "null"
   else:
     return $value == expected
+
+# ------------------------------------------------- state field defaults
+
+proc stateFieldSeed*(field: StateField): JsonNode =
+  ## What a scene's `init` seeds `state[field.name]` with: the declared
+  ## default converted to the field's runtime type, or nil when the field
+  ## seeds nothing (no default, a null, an empty string). The one place this
+  ## conversion lives: the interpreter seeds with it and the two state
+  ## persisters compare against it.
+  if field.isNil or field.value.isNil or field.value.kind == JNull:
+    return nil
+  if field.value.kind == JString and field.value.getStr().len == 0:
+    return nil
+  var seedValue = field.value
+  if field.fieldType == "json" and seedValue.kind == JString:
+    # Compiled scenes parse JSON string defaults; stay consistent
+    try:
+      seedValue = parseJson(seedValue.getStr())
+    except CatchableError:
+      discard
+  valueToJson(valueFromJsonByType(seedValue, field.fieldType))
+
+proc stateAtDeclaredDefault*(field: StateField, value: JsonNode): bool =
+  ## The live value is the field's declared default, so a state file would
+  ## only pin it: after a redeploy with a new default the file would win and
+  ## the editor's change would never reach the frame. Control forms and
+  ## state events deliver numbers as strings and floats as ints, so the live
+  ## value is compared in the field's type, the way `init` would seed it.
+  if value.isNil:
+    return false
+  let seed = stateFieldSeed(field)
+  if seed.isNil:
+    # A field that seeds nothing: an empty value is what a fresh init leaves
+    # (no key at all), so there is nothing to remember either
+    return value.kind == JNull or (value.kind == JString and value.getStr().len == 0)
+  if value == seed:
+    return true
+  try:
+    valueToJson(valueFromJsonByType(value, field.fieldType)) == seed
+  except CatchableError:
+    false
+
+proc declaredStateFields*(exported: ExportedScene): seq[StateField] =
+  ## Every field the scene declares, defaults included: all of them for an
+  ## interpreted scene, only the public ones for a compiled scene (its
+  ## private persisted fields keep persisting unconditionally).
+  if exported.isNil:
+    return @[]
+  if exported of ExportedInterpretedScene:
+    let fields = ExportedInterpretedScene(exported).stateFields
+    if fields.len > 0:
+      return fields
+  exported.publicStateFields
+
+proc worthPersistingState*(fields: seq[StateField], key: string, value: JsonNode): bool =
+  ## A persisted key earns its place in the state file once it leaves the
+  ## declared default; a key no field declares always does.
+  for field in fields:
+    if field.name == key:
+      return not stateAtDeclaredDefault(field, value)
+  true

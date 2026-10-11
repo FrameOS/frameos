@@ -66,19 +66,17 @@ suite "data/immich app":
     check searchRandomUrl("https://x") == "https://x/api/search/random"
     check legacyRandomUrl("https://x") == "https://x/api/assets/random?count=20"
     check albumUrl("https://x", "album-1") == "https://x/api/albums/album-1"
-    check memoriesUrl("https://x", "2026-07-02T00:00:00.000Z") ==
-      "https://x/api/memories?for=2026-07-02T00%3A00%3A00.000Z"
+    check memoriesUrl("https://x", "2026-07-02") == "https://x/api/memories?for=2026-07-02"
 
   test "assetDownloadUrl picks thumbnail or original":
     check assetDownloadUrl("https://x", "a-1", "preview") == "https://x/api/assets/a-1/thumbnail?size=preview"
     check assetDownloadUrl("https://x", "a-1", "fullsize") == "https://x/api/assets/a-1/original"
 
-  test "todayIso formats the frame-local date at UTC midnight":
+  test "todayIso is the bare frame-local date Immich 3 validates":
     let iso = todayIso()
-    check iso.len == 24
-    check iso.endsWith("T00:00:00.000Z")
+    check iso.len == 10
     check iso[4] == '-' and iso[7] == '-'
-    check iso[0..9] == now().format("yyyy-MM-dd")
+    check iso == now().format("yyyy-MM-dd")
 
   test "randomSearchBody includes only requested filters":
     let body = randomSearchBody()
