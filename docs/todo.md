@@ -56,28 +56,6 @@ does:
   the image and refuses a board whose table differs, so a bigger NVS strands
   every board already on the old table.
 
-## ESP32: one HTTP client helper for the backend pulls
-
-Seven places in the firmware set up `esp_http_client` by hand for the same
-job — a bearer-authenticated request to the backend or a provider, an
-ETag or a body, a bounded read into a malloc'd buffer: `fos_settings.c`
-(`read_body`), `fos_scenes.c`, `fos_tz.c`, `fos_ota.c` (twice),
-`fos_client.c` (twice) and, since the command queue (PR #525),
-`fos_commands.c` (`post_json`). Each copy is 1 to 2 KB of flash; the queue's
-copy alone was most of what that PR added to the image.
-
-- [ ] **One helper** (`fos_backend_http.c`, say): URL built from the
-  config's backend URL and frame id, the bearer header, optional
-  If-None-Match, optional JSON body, the status, the response ETag, and a
-  body read capped at a caller-given size. Move `read_body` and
-  `collect_etag_handler` (both duplicated in settings and scenes) into it.
-- [ ] Port the pulls one at a time — settings, scenes, commands, tz, the
-  OTA manifest — and compare the firmware size comment on each; expect the
-  set to come out a few KB lighter than before the queue, not just back to
-  even.
-- Keep the image push (`push_image_to_backend`) and the streaming OTA
-  download out of it: they stream bodies, not buffer them.
-
 ## Pre-release manual test sweep
 
 `docs/manual-testing-todo.md` holds the boxes that need hardware: the

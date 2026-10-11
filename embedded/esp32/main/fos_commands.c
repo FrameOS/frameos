@@ -5,10 +5,9 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "esp_crt_bundle.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 
+#include "fos_backend_http.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -39,48 +38,22 @@ typedef struct {
  * negative value when the request never completed. */
 static int post_json(const char *suffix, const char *body, size_t limit, char **out)
 {
-    const fos_config_t *config = fos_config();
     char url[FOS_URL_LEN + 192];
-    snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/commands%s", config->backend_url,
-             (unsigned long)config->frame_id, suffix);
+    char path[160];
+    snprintf(path, sizeof(path), "/embedded/commands%s", suffix);
+    fos_backend_url(path, url, sizeof(url));
     char auth[FOS_STR_LEN + 16];
-    snprintf(auth, sizeof(auth), "Bearer %s", config->api_key);
+    fos_backend_auth(auth, sizeof(auth));
+    fos_http_request_t request = {.url = url, .auth = auth, .body = body};
+    fos_http_response_t response;
     if (out) *out = NULL;
-    esp_http_client_config_t http_config = {
-        .url = url,
-        .method = HTTP_METHOD_POST,
-        .timeout_ms = FOS_COMMANDS_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 2048,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (client == NULL) return -1;
-    esp_http_client_set_header(client, "Authorization", auth);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    int body_len = (int)strlen(body);
-    int status = -1;
-    if (esp_http_client_open(client, body_len) == ESP_OK &&
-        esp_http_client_write(client, body, body_len) == body_len) {
-        int64_t content_length = esp_http_client_fetch_headers(client);
-        status = esp_http_client_get_status_code(client);
-        if (out && content_length <= (int64_t)limit) {
-            size_t cap = content_length > 0 ? (size_t)content_length : limit;
-            char *buf = malloc(cap + 1);
-            if (buf != NULL) {
-                size_t total = 0;
-                while (total < cap) {
-                    int r = esp_http_client_read(client, buf + total, (int)(cap - total));
-                    if (r <= 0) break;
-                    total += (size_t)r;
-                }
-                buf[total] = '\0';
-                *out = buf;
-            }
-        }
-        esp_http_client_close(client);
+    if (fos_http_fetch(&request, out ? limit : 0, &response) != ESP_OK) return -1;
+    if (out) {
+        *out = response.body; /* ours now */
+    } else {
+        fos_http_response_free(&response);
     }
-    esp_http_client_cleanup(client);
-    return status;
+    return response.status;
 }
 
 /* The ack, with what the frame shows afterwards (the cloud hello's state
