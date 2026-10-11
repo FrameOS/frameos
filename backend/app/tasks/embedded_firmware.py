@@ -275,6 +275,14 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS = [
     {"pin": 4, "label": "LEFT"},
     {"pin": 5, "label": "RIGHT"},
 ]
+# The E1004 wires the same three GPIOs to another front panel (Seeed's Arduino
+# cookbook, E1004 column): GPIO3 the right arrow, GPIO4 the left arrow, GPIO5
+# refresh.
+EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS = [
+    {"pin": 3, "label": "RIGHT"},
+    {"pin": 4, "label": "LEFT"},
+    {"pin": 5, "label": "REFRESH"},
+]
 # Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
 # (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
 # enable"; trmnl-firmware PIN_BATTERY 1 / PIN_VBAT_SWITCH 21 for the
@@ -464,9 +472,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "flashSize": "32MB",
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E1004_PINS,
-        # Same three keys as the E1001/E1002 (Seeed's ESPHome cookbook: GPIO3
-        # green, GPIO4/5 white, active low).
-        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS,
         # 5000 mAh cell through the E-series divider (verified on hardware).
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         # A 5000 mAh frame: deep sleep between renders while on battery, waking

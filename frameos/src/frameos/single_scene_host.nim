@@ -225,6 +225,10 @@ proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: J
   if host.events.isNil:
     host.say("event " & event & " dropped: runtime not ready")
     return false
+  # The current scene is built on first use, and an event is a use: a
+  # battery ESP32 reads the button that woke it before the first render, so
+  # the press found no resident scene and was dropped ("dispatched": false).
+  discard host.ensureScene()
   discard host.events.tick()
   host.events.dispatchNow(origin, event, payload)
 
