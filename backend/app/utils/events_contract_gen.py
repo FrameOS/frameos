@@ -20,6 +20,26 @@ CUSTOM_EVENT_DECLARABLE_ORIGINS: frozenset[str] = frozenset({"schedule", "cloud"
 
 DEVICE_COMMAND_EVENTS: frozenset[str] = frozenset({"metrics", "reload", "restart", "reboot", "uploadScenes"})
 
+# Every event the contract names; anything else a producer says is a custom event.
+CONTRACT_EVENTS: frozenset[str] = frozenset({"init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "turnOn", "turnOff", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"})
+
+# Events the frame event route accepts and the command-queue verb each becomes
+# (the contract's `cloud` column; the cloud's cloudEventRouteVerbs). `profiles`:
+# the device planes whose verb can carry it (absent = all); `since`: the first
+# firmware that knows the verb; `before`: what the event became until then.
+CLOUD_EVENT_ROUTE_VERBS: dict[str, dict] = {
+    "render": {'verb': 'render'},
+    "turnOn": {'profiles': ['linux'], 'verb': 'set_display_power'},
+    "turnOff": {'profiles': ['linux'], 'verb': 'set_display_power'},
+    "button": {'since': '2026.9.21', 'verb': 'scene_event'},
+    "setSceneState": {'before': {'profiles': ['linux'], 'verb': 'set_current_scene'}, 'since': '2026.9.21', 'verb': 'scene_event'},
+    "setCurrentScene": {'verb': 'set_current_scene'},
+    "metrics": {'verb': 'get_metrics'},
+    "restart": {'eventRoute': False, 'verb': 'restart_runtime'},
+    "reboot": {'eventRoute': False, 'verb': 'reboot'},
+    "uploadScenes": {'verb': 'set_scenes'},
+}
+
 # The frame's input settings (frame.json `inputSettings`): the keyboard layout
 # ids of `keyboard.layouts`, `us` being the default, and the button roles a
 # `gpioButtons[].role` may carry (`buttons.roles`).

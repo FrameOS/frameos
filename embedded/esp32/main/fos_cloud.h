@@ -31,6 +31,8 @@
  */
 #pragma once
 
+#include "cJSON.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
@@ -118,3 +120,16 @@ bool fos_cloud_api_access(char *url, size_t url_len,
  * private-network literals, matching docs/cloud-link.md. On false, *reason
  * (when non-NULL) is set to a short, user-facing explanation. */
 bool fos_cloud_url_transport_ok(const char *url, const char **reason);
+
+/* Run one command from the backend's queue (fos_commands.c) through the same
+ * verb handlers a cloud verb takes — set_current_scene, scene_event, render,
+ * reboot, restart_runtime, notify_update_available; anything else
+ * is acked unsupported_verb. Every reply the handler makes (the ack, a `state`
+ * message) goes to `reply` instead of the socket, synchronously, on the
+ * calling task. `root` is the command frame `{id, type, ...}` and stays the
+ * caller's. Serialised with the socket's own dispatch. */
+void fos_cloud_dispatch_backend_command(cJSON *root, void (*reply)(cJSON *msg, void *ctx), void *ctx);
+/* The hello's state fields — frameos_version, active_scene, states (keyed by
+ * scene id), scenes_checksum — on `msg`, from one bounded look at the runtime
+ * (left out when it is busy). What the backend's commands pull reports too. */
+void fos_cloud_add_state_fields(cJSON *msg);

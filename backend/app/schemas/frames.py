@@ -116,6 +116,11 @@ class FrameBase(BaseModel):
     background_color: Optional[str]
     debug: Optional[bool]
     last_log_at: Optional[datetime]
+    # The device's own sleep forecast (an ESP32 between renders): when it is
+    # back, when the panel next refreshes, why it sleeps. None while awake.
+    next_wake_at: Optional[datetime] = None
+    next_render_at: Optional[datetime] = None
+    sleep_reason: Optional[str] = None
     log_to_file: Optional[str]
     assets_path: Optional[str]
     save_assets: Any

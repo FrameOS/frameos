@@ -28,10 +28,11 @@ def _embedded_frame(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
-def _patch_common(monkeypatch: pytest.MonkeyPatch, frame: SimpleNamespace):
+def _patch_common(monkeypatch: pytest.MonkeyPatch, frame: SimpleNamespace, outcome: dict | None = None):
     statuses: list[str] = []
     logs: list[tuple[str, str]] = []
-    http_calls: list[tuple[str, str]] = []
+    queued: list[str] = []
+    outcome = outcome or {"status": "applied", "applied": True, "error": None}
 
     async def fake_update_frame(_db, _redis, _frame):
         statuses.append(_frame.status)
@@ -40,12 +41,18 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, frame: SimpleNamespace):
     async def fake_log(_db, _redis, _frame_id, log_type, message):
         logs.append((log_type, message))
 
-    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None):
-        http_calls.append((method, path))
-        return 200, b'{"ok":true}', {}
+    async def fake_queue(_db, _redis, _frame, command_type, payload=None, **_kwargs):
+        queued.append(command_type)
+        return outcome
 
     async def fail_run_commands(*_args, **_kwargs):
         raise AssertionError("embedded frames must not run SSH commands")
+
+    http_calls: list[tuple[str, str]] = []
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None, **_kwargs):
+        http_calls.append((method, path))
+        return 200, b'{"ok":true}', {}
 
     monkeypatch.setattr(restart_frame_module, "get_fresh_frame", lambda _db, _id: frame)
     monkeypatch.setattr(restart_frame_module, "update_frame", fake_update_frame)
@@ -55,29 +62,32 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, frame: SimpleNamespace):
     monkeypatch.setattr("app.tasks.utils.log", fake_log)
     monkeypatch.setattr(restart_frame_module, "run_commands", fail_run_commands)
     monkeypatch.setattr("app.utils.frame_http._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
-    return statuses, logs, http_calls
+    monkeypatch.setattr("app.utils.embedded_commands.queue_embedded_command", fake_queue)
+    return statuses, logs, http_calls, queued
 
 
 @pytest.mark.asyncio
-async def test_restart_frame_task_embedded_posts_device_action(monkeypatch: pytest.MonkeyPatch):
+async def test_restart_frame_task_embedded_queues_the_verb(monkeypatch: pytest.MonkeyPatch):
     frame = _embedded_frame()
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, queued = _patch_common(monkeypatch, frame)
 
     await restart_frame_task({"db": None, "redis": None}, 53)
 
-    assert http_calls == [("POST", "/api/action/restart")]
+    assert queued == ["restart_runtime"]
+    assert http_calls == []
     assert statuses == ["restarting", "starting"]
     assert any("Requested embedded restart" in message for _t, message in logs)
 
 
 @pytest.mark.asyncio
-async def test_reboot_frame_task_embedded_posts_device_action(monkeypatch: pytest.MonkeyPatch):
+async def test_reboot_frame_task_embedded_queues_the_verb(monkeypatch: pytest.MonkeyPatch):
     frame = _embedded_frame()
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, queued = _patch_common(monkeypatch, frame)
 
     await reboot_frame_task({"db": None, "redis": None}, 53)
 
-    assert http_calls == [("POST", "/api/action/reboot")]
+    assert queued == ["reboot"]
+    assert http_calls == []
     # Like the SSH path, reboot leaves the frame "rebooting" until the
     # device's bootup log flips it back to ready.
     assert statuses == ["rebooting"]
@@ -85,32 +95,45 @@ async def test_reboot_frame_task_embedded_posts_device_action(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_restart_frame_task_embedded_http_failure_marks_uninitialized(monkeypatch: pytest.MonkeyPatch):
+async def test_restart_frame_task_embedded_queued_for_a_sleeping_frame(monkeypatch: pytest.MonkeyPatch):
+    """A board that did not answer the nudge takes the restart on its next
+    check-in: the task reports it queued and leaves the status alone."""
     frame = _embedded_frame()
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, queued = _patch_common(
+        monkeypatch, frame, outcome={"status": "queued", "applied": False, "error": None}
+    )
 
-    async def failing_fetch(_frame, _redis, *, path, method, body=None, headers=None):
-        http_calls.append((method, path))
-        return 502, b"device unreachable", {}
+    await restart_frame_task({"db": None, "redis": None}, 53)
 
-    monkeypatch.setattr("app.utils.frame_http._fetch_frame_http_bytes", failing_fetch)
+    assert queued == ["restart_runtime"]
+    assert statuses == []
+    assert frame.status == "ready"
+    assert any("queued" in message for _t, message in logs)
+
+
+@pytest.mark.asyncio
+async def test_restart_frame_task_embedded_refusal_marks_uninitialized(monkeypatch: pytest.MonkeyPatch):
+    frame = _embedded_frame()
+    statuses, logs, http_calls, queued = _patch_common(
+        monkeypatch, frame, outcome={"status": "failed", "applied": False, "error": "event_not_allowed"}
+    )
 
     # Re-raised so arq records the job as failed, like every other verb.
-    with pytest.raises(Exception, match="HTTP 502"):
+    with pytest.raises(Exception, match="refused the restart"):
         await restart_frame_task({"db": None, "redis": None}, 53)
 
-    assert statuses == ["restarting", "uninitialized"]
-    assert any("HTTP 502" in message for _t, message in logs)
+    assert statuses == ["uninitialized"]
+    assert any("event_not_allowed" in message for _t, message in logs)
 
 
 @pytest.mark.asyncio
 async def test_restart_frame_task_virtual_frame_is_a_noop(monkeypatch: pytest.MonkeyPatch):
     frame = _embedded_frame(embedded={"platform": "virtual"})
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, queued = _patch_common(monkeypatch, frame)
 
     await restart_frame_task({"db": None, "redis": None}, 53)
 
-    assert http_calls == []
+    assert queued == []
     assert statuses == []
     assert any("no device to restart" in message for _t, message in logs)
 
@@ -136,7 +159,7 @@ def _adopted_card(**overrides) -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_restart_frame_task_shell_less_card_posts_the_control_event(monkeypatch: pytest.MonkeyPatch):
     frame = _adopted_card()
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, _queued = _patch_common(monkeypatch, frame)
 
     await restart_frame_task({"db": None, "redis": None}, 14)
 
@@ -148,7 +171,7 @@ async def test_restart_frame_task_shell_less_card_posts_the_control_event(monkey
 @pytest.mark.asyncio
 async def test_reboot_frame_task_shell_less_card_posts_the_control_event(monkeypatch: pytest.MonkeyPatch):
     frame = _adopted_card()
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, _queued = _patch_common(monkeypatch, frame)
 
     await reboot_frame_task({"db": None, "redis": None}, 14)
 
@@ -159,7 +182,7 @@ async def test_reboot_frame_task_shell_less_card_posts_the_control_event(monkeyp
 @pytest.mark.asyncio
 async def test_restart_frame_task_shell_less_card_reports_a_refused_event(monkeypatch: pytest.MonkeyPatch):
     frame = _adopted_card()
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, _queued = _patch_common(monkeypatch, frame)
 
     async def refused(_frame, _redis, *, path, method, body=None, headers=None):
         http_calls.append((method, path))
@@ -178,7 +201,7 @@ async def test_restart_frame_task_shell_less_card_reports_a_refused_event(monkey
 @pytest.mark.asyncio
 async def test_restart_frame_task_buildroot_card_with_ssh_keys_still_uses_the_shell(monkeypatch: pytest.MonkeyPatch):
     frame = _adopted_card(ssh_keys=["key-1"])
-    statuses, logs, http_calls = _patch_common(monkeypatch, frame)
+    statuses, logs, http_calls, _queued = _patch_common(monkeypatch, frame)
     ran: list[list[str]] = []
 
     async def fake_run_commands(_db, _redis, _frame, commands):

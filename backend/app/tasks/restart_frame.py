@@ -8,6 +8,11 @@ from app.models.frame import update_frame
 from app.tasks.utils import get_fresh_frame, record_task_failure
 from app.utils.remote_exec import run_commands
 
+# How long a restart or reboot waits for an awake frame's ack before the
+# task reports it as queued instead of done.
+EMBEDDED_ACTION_WAIT_SECONDS = 5.0
+
+
 async def restart_frame(id: int, redis: Redis):
     await redis.enqueue_job("restart_frame", id=id)
 
@@ -29,20 +34,51 @@ async def _embedded_device_action(
     so both reboot the chip). Status transitions mirror the SSH paths.
     """
     from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
+    from app.utils.embedded_commands import embedded_frame_pulls_commands, queue_embedded_command
 
     if embedded_platform_spec_for_frame(frame)["family"] == "virtual":
         await log(db, redis, int(frame.id),
                   "stderr", f"Virtual frames have no device to {action_label}")
         return
 
-    await _device_http_action(
-        db, redis, frame,
-        path=path,
-        pending_status=pending_status,
-        final_status=final_status,
-        action_label=action_label,
-        success_line=f"Requested embedded {action_label}; the device reboots in about a second",
-    )
+    if not embedded_frame_pulls_commands(frame):
+        # Firmware from before the command queue: the direct push, awake only.
+        await _device_http_action(
+            db, redis, frame,
+            path=path,
+            pending_status=pending_status,
+            final_status=final_status,
+            action_label=action_label,
+            success_line=f"Requested embedded {action_label}; the device reboots in about a second",
+        )
+        return
+
+    # Through the frame's command queue (app/utils/frame_commands.py), the
+    # cloud way: an awake frame takes it within a second, a deep-sleeping one
+    # on its next check-in; either way the queue says what is still waiting.
+    # `path` names the verb the queue carries.
+    command_type = "reboot" if path.endswith("/reboot") else "restart_runtime"
+    try:
+        outcome = await queue_embedded_command(
+            db, redis, frame, command_type, wait_seconds=EMBEDDED_ACTION_WAIT_SECONDS
+        )
+        if outcome["status"] == "failed":
+            frame.status = pending_status  # record_task_failure flips it to uninitialized
+            raise Exception(f"The frame refused the {action_label}: {outcome.get('error')}")
+        if outcome["applied"]:
+            frame.status = pending_status
+            await update_frame(db, redis, frame)
+            await log(db, redis, int(frame.id), "stdout",
+                      f"Requested embedded {action_label}; the device reboots in about a second")
+            if final_status is not None:
+                frame.status = final_status
+                await update_frame(db, redis, frame)
+        else:
+            await log(db, redis, int(frame.id), "stdout",
+                      f"The {action_label} is queued; the frame runs it on its next check-in")
+    except Exception as e:
+        await record_task_failure(db, redis, int(frame.id), e, frame=frame)
+        raise
 
 
 async def _shell_less_control_event(

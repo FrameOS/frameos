@@ -399,11 +399,40 @@ async def api_embedded_device_scenes(
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
     payload = embedded_scenes_payload(frame)
-    etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+    etag = embedded_payload_etag(payload)
     if if_none_match and if_none_match.strip() == etag:
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
     return Response(content=payload, media_type="application/json",
                     headers={"ETag": etag})
+
+
+def embedded_payload_etag(payload: bytes) -> str:
+    """The ETag of a device pull: the payload's sha256, quoted. The device
+    sends it back as If-None-Match on the next pull, and reports it on its
+    commands pull as the checksum of what it holds — which is how a queued
+    deploy learns it has been applied (app/api/embedded_commands.py)."""
+    return f'"{hashlib.sha256(payload).hexdigest()}"'
+
+
+def embedded_scenes_etag(frame: Frame) -> str:
+    return embedded_payload_etag(embedded_scenes_payload(frame))
+
+
+def embedded_settings_document(db: Session, frame: Frame) -> tuple[bytes, str]:
+    """The `/embedded/settings` body and its ETag, the way the route serves it."""
+    payload_dict = {
+        **embedded_settings_payload(db, frame),
+        "frame": embedded_frame_settings(frame),
+        # The scene schedule ({"events": [...]}) — the device evaluates it
+        # on-device (fos_schedule.c), same event model as the Pi scheduler.
+        "schedule": frame.schedule if isinstance(frame.schedule, dict) else None,
+    }
+    payload = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return payload, embedded_payload_etag(payload)
+
+
+def embedded_settings_etag(db: Session, frame: Frame) -> str:
+    return embedded_settings_document(db, frame)[1]
 
 
 def embedded_frame_settings(frame: Frame) -> dict:
@@ -545,17 +574,9 @@ async def api_embedded_device_settings(
     if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    payload_dict = {
-        **embedded_settings_payload(db, frame),
-        "frame": embedded_frame_settings(frame),
-        # The scene schedule ({"events": [...]}) — the device evaluates it
-        # on-device (fos_schedule.c), same event model as the Pi scheduler.
-        "schedule": frame.schedule if isinstance(frame.schedule, dict) else None,
-    }
-    payload = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True).encode("utf-8")
     # Same cheap-poll contract as /embedded/scenes: the ETag is the payload's
     # sha256, so an unchanged configuration costs the device a 304.
-    etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+    payload, etag = embedded_settings_document(db, frame)
     if if_none_match and if_none_match.strip() == etag:
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
     return Response(content=payload, media_type="application/json",

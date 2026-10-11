@@ -126,6 +126,16 @@ from app.utils.remote_exec import (
     run_command,
     _use_remote,
 )
+from app.utils.embedded_commands import (
+    is_queued_embedded_frame,
+    queue_embedded_command,
+)
+from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS
+from app.utils.frame_commands import (
+    cancel_frame_command,
+    frame_is_asleep,
+    list_pending_frame_commands,
+)
 from app.utils.frame_http import (
     _fetch_frame_http_bytes,
     _frame_scheme_port,
@@ -1033,6 +1043,11 @@ async def _refresh_frame_states_cache(
         frame = db.get(Frame, frame_id)
         if frame is None:
             return
+        if is_queued_embedded_frame(frame) and frame_is_asleep(frame):
+            # Asleep by its own forecast: nothing answers, and the cache holds
+            # what the frame reported on its last pull (embedded_commands.py).
+            completed = True
+            return
         state_record = await _load_frame_states(redis, frame)
         invalidated_at = await redis.get(invalidated_key)
         if invalidated_at:
@@ -1478,6 +1493,55 @@ async def api_frame_ping(
         )
 
 
+# How long an event route waits for an awake frame's ack, so the workspace
+# can say "applied" rather than "queued" when it was.
+EMBEDDED_EVENT_WAIT_SECONDS = 4.0
+
+
+def _embedded_event_command(frame: Frame, event: str, body: Any) -> tuple[str, dict[str, Any], str | None] | None:
+    """The queue verb an event becomes for an ESP32, from the contract's
+    `cloud` column (events_contract_gen.CLOUD_EVENT_ROUTE_VERBS — the same
+    table the cloud's event route reads), or None for an event the queue
+    does not carry (pushed straight to the device as before: a preview's
+    uploadScenes, a metrics request, turnOn/turnOff on a panel without
+    power control). A name the contract does not know is a custom scene
+    event."""
+    payload = body if isinstance(body, dict) else {}
+    route = CLOUD_EVENT_ROUTE_VERBS.get(event)
+    if route is None:
+        if event in CONTRACT_EVENTS:
+            return None
+        return "scene_event", {"name": event, "payload": payload}, None
+    if route.get("eventRoute") is False:
+        return None
+    profiles = route.get("profiles")
+    if isinstance(profiles, list) and "esp32" not in profiles:
+        return None
+    verb = route.get("verb")
+    if verb == "set_current_scene":
+        scene_id = payload.get("sceneId")
+        if not isinstance(scene_id, str) or not scene_id:
+            return None
+        command: dict[str, Any] = {"scene_id": scene_id}
+        state = payload.get("state")
+        if isinstance(state, dict) and state:
+            command["state"] = state
+        return verb, command, _scene_name(frame, scene_id)
+    if verb == "scene_event":
+        return verb, {"name": event, "payload": payload}, None
+    if verb == "render":
+        return verb, {}, None
+    return None
+
+
+def _scene_name(frame: Frame, scene_id: str) -> str | None:
+    for scene in frame.scenes or []:
+        if isinstance(scene, dict) and scene.get("id") == scene_id:
+            name = scene.get("name")
+            return name if isinstance(name, str) and name else None
+    return None
+
+
 @api_project.post("/frames/{id:int}/event/{event}")
 async def api_frame_event(
     id: int,
@@ -1522,6 +1586,22 @@ async def api_frame_event(
             db, redis, frame, scenes_override=upload, scene_id=scene_id
         )
         return "OK"
+    # An ESP32 is a fresh boot on every wake and cannot be pushed to while
+    # it sleeps: the event goes on its command queue, the cloud way, and the
+    # answer says whether the frame has already taken it or still will.
+    if is_queued_embedded_frame(frame):
+        queued = _embedded_event_command(frame, event, body)
+        if queued is not None:
+            command_type, payload, detail = queued
+            outcome = await queue_embedded_command(
+                db, redis, frame, command_type, payload, detail=detail, wait_seconds=EMBEDDED_EVENT_WAIT_SECONDS
+            )
+            if outcome["status"] == "failed":
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_GATEWAY,
+                    detail=f"The frame refused {event}: {outcome.get('error')}",
+                )
+            return outcome
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -3839,11 +3919,18 @@ async def api_frame_embedded_firmware_ota(
         _bad_request("OTA updates are only available for embedded frames")
 
     try:
-        device_payload = await request_embedded_firmware_update(db, redis, frame)
+        outcome = await request_embedded_firmware_update(db, redis, frame)
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
 
-    return {"message": "Firmware update requested", "device": device_payload}
+    return {
+        "message": (
+            "Firmware update requested"
+            if outcome["applied"]
+            else "Firmware update queued; the frame checks for it on its next check-in"
+        ),
+        "device": outcome,
+    }
 
 
 async def _record_device_reported_frameos_version(db: Session, redis: Redis, frame: Frame, payload: dict) -> None:
@@ -3931,17 +4018,19 @@ async def api_frame_device_upgrade(
 
 @api_project.get("/frames/{id:int}/commands")
 async def api_frame_pending_commands(id: int, db: Session = Depends(get_db)):
-    """What is still waiting for this frame to act on it.
+    """What is still waiting for this frame to act on it, oldest first.
 
-    Cloud parity endpoint (docs/api-triality.md): the cloud answers this from
-    its durable `frame_commands` queue. The backend pushes every action
-    immediately and queues nothing, so this is always empty — kept so the
-    workspace's pending-actions panel is one component.
+    Cloud parity endpoint (docs/api-triality.md, docs/cloud-frames.md "Queue
+    observability"): the cloud answers this from its durable `frame_commands`
+    queue, the backend from its own (app/utils/frame_commands.py) — what an
+    ESP32 takes on its next pull. Same wire shape either way, so the
+    workspace's "Waiting for the frame" panel is one component. Rows past
+    their TTL are filtered, not swept: reading the queue must not change it.
     """
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
-    return {"commands": []}
+    return {"commands": list_pending_frame_commands(db, frame)}
 
 
 @api_project.delete("/frames/{id:int}/commands/{command_id}")
@@ -3949,12 +4038,20 @@ async def api_frame_cancel_pending_command(
     id: int,
     command_id: str,
     db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
+    """Take a command back off the queue while it is still undelivered: the
+    same terminal state a superseded command gets. 404 when there is nothing
+    to cancel — already taken, already expired, already cancelled — because a
+    pretend success would have the UI claim it stopped something the device
+    had already run."""
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
-    # The backend queues nothing (see above): there is never anything to stop.
-    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
+    if not cancel_frame_command(db, frame, command_id):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
+    await log(db, redis, int(frame.id), "stdinfo", "Cancelled a queued command before the frame took it")
+    return {"ok": True}
 
 
 @api_project.get("/frames/{id:int}/deploy_plan")
@@ -4147,6 +4244,38 @@ async def api_frame_set_next_scene(
 
     if data.state is not None and not isinstance(data.state, dict):
         _bad_request("State must be an object")
+
+    if is_queued_embedded_frame(frame):
+        # The scenes and settings the frame pulls are already the saved
+        # ones; the deploy job records the deploy when the frame pulls them,
+        # and the switch rides the same queue, right behind.
+        try:
+            from app.tasks import fast_deploy_frame
+
+            await fast_deploy_frame(id, redis)
+        except Exception as e:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        command: dict[str, Any] = {"scene_id": data.sceneId}
+        if isinstance(data.state, dict) and data.state:
+            command["state"] = data.state
+        outcome = await queue_embedded_command(
+            db,
+            redis,
+            frame,
+            "set_current_scene",
+            command,
+            detail=_scene_name(frame, data.sceneId),
+            wait_seconds=EMBEDDED_EVENT_WAIT_SECONDS,
+        )
+        if outcome["status"] == "failed":
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"The frame refused the scene switch: {outcome.get('error')}",
+            )
+        return {
+            "message": "Scene applied" if outcome["applied"] else "Scene switch queued for the frame's next check-in",
+            **outcome,
+        }
 
     if not _is_embedded_frame(frame) and not frame_has_shell_access(frame):
         # No shell to write the boot-scene files with: the deploy job pushes

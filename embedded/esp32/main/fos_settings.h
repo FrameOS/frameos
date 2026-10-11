@@ -20,6 +20,11 @@
  * Both feed frameos_nim_apply_service_settings, which replaces the groups the
  * payload carries and deletes the ones it does not. */
 esp_err_t fos_settings_sync(bool force);
+/* The ETag of the backend settings payload the device holds ("" when the
+ * settings come from a cloud provider or nothing was pulled yet): what the
+ * commands pull reports, so the backend can tell a queued settings deploy
+ * has been applied (fos_commands.c). */
+const char *fos_settings_etag(void);
 /* Which declarative settings differ between two config snapshots, as the
  * wire's snake_case keys with their new values ("deep_sleep_on_battery=false,
  * interval=900"), for the log line that confirms what a settings push or

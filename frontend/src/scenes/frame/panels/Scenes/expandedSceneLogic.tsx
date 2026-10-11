@@ -4,7 +4,7 @@ import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene, FrameType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { activationWasRedeploy, controlLogic } from './controlLogic'
+import { ACTIVATION_QUEUED_DETAIL, activationWasQueued, activationWasRedeploy, controlLogic } from './controlLogic'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { socketLogic } from '../../../socketLogic'
@@ -190,19 +190,24 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           if (!response.ok) {
             throw new Error('Failed to send scene activation event')
           }
-          const redeployed = activationWasRedeploy(await response.text())
+          const body = await response.text()
+          const redeployed = activationWasRedeploy(body)
+          const queued = activationWasQueued(body)
           controlLogic({ frameId: props.frameId }).actions.currentSceneChanged(props.sceneId)
           socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: props.sceneId } as FrameType)
+          const name = values.scene?.name || props.sceneId
           longRunningTasksModel.actions.finishTask({
             frameId: props.frameId,
             kind: 'activate',
             sceneId: props.sceneId,
             status: 'success',
             detail: redeployed
-              ? `${values.scene?.name || props.sceneId} — deployed, the frame shows it as soon as it syncs`
-              : values.scene?.name || props.sceneId,
+              ? `${name} — deployed, the frame shows it as soon as it syncs`
+              : queued
+              ? `${name}: ${ACTIVATION_QUEUED_DETAIL}`
+              : name,
           })
-          if (isCloudMode()) {
+          if (isCloudMode() || queued) {
             controlLogic({ frameId: props.frameId }).actions.sceneActivationSettled(props.sceneId)
           }
         } catch (error) {

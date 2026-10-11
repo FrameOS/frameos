@@ -26,6 +26,10 @@ void fos_client_render_recovery_boot(void);
 bool fos_client_render_paused(void);
 void fos_client_clear_render_pause(void);
 void fos_client_render_now(void);
+/* Pull the backend's command queue on the render task as soon as it is idle
+ * (the backend's nudge, fos_http.c `/api/action/commands`); the next pass
+ * pulls it anyway. See fos_commands.h. */
+void fos_client_request_commands_sync(void);
 /* Cut the render task's wait short so queued input (button presses) reaches
  * the scene promptly, WITHOUT asking for a render. */
 void fos_client_wake_for_events(void);

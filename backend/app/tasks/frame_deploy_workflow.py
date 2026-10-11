@@ -483,6 +483,9 @@ class FrameDeployWorkflow:
         # deploy itself. The deploy jobs keep the default and persist it.
         self.persist_detected_mode = persist_detected_mode
         self.pending_mode_change: str | None = None
+        # An embedded deploy the frame did not pull before the wait ran out:
+        # it is on the frame's command queue, and the task line says so.
+        self.queued_for_frame = False
         self.binary_builder = binary_builder or FrameBinaryBuilder(
             db=db,
             redis=redis,
@@ -1145,8 +1148,74 @@ class FrameDeployWorkflow:
             message = body.decode("utf-8", errors="replace")
             raise RuntimeError(f"Reload failed with status {status}: {message}")
 
+    # How long a deploy waits for an awake frame to pull it before reporting
+    # it as queued. A pass on an awake ESP32 takes a few seconds; a sleeping
+    # one does not answer the nudge at all.
+    EMBEDDED_DEPLOY_WAIT_SECONDS = 20.0
+
+    async def _queue_embedded_deploy(self, frame: Frame, plan: FrameDeployPlan) -> str:
+        """Record the deploy on the frame's command queue — the cloud's
+        set_scenes + set_settings, as the intention the "Waiting for the
+        frame" panel shows. Nothing is pushed: the device pulls its scenes and
+        settings on every pass, and the rows are acked when its pull reports
+        the ETags the backend serves now (app/api/embedded_commands.py),
+        which is also when the deploy snapshot becomes the frame's baseline.
+        Returns the deploy id the rows share."""
+        from app.utils.frame_commands import enqueue_frame_command
+
+        deploy_id = uuid4().hex
+        scenes = frame.scenes if isinstance(frame.scenes, list) else []
+        enqueue_frame_command(
+            self.db,
+            frame,
+            "set_scenes",
+            {"_deploy": {"id": deploy_id, "snapshot": plan.frame_dict}},
+            detail=f"{len(scenes)} scene{'' if len(scenes) == 1 else 's'}",
+        )
+        enqueue_frame_command(
+            self.db,
+            frame,
+            "set_settings",
+            {"_deploy": {"id": deploy_id}},
+            detail="live settings",
+        )
+        return deploy_id
+
+    async def _await_embedded_deploy(self, frame: Frame, deploy_id: str, timeout_seconds: float) -> bool:
+        """True once every row of the deploy is acked (the frame pulled it)."""
+        from app.utils.frame_commands import deploy_commands_settled
+
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            if self.db is not None:
+                self.db.expire_all()
+            if deploy_commands_settled(self.db, frame, deploy_id):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.5)
+
+    async def _execute_embedded_fast_direct(self, plan: FrameDeployPlan, frame: Frame) -> None:
+        """Firmware from before the command queue (2026.10.5): push the scenes
+        over the board's HTTP server and ask it to reload. The board has to be
+        awake."""
+        await self._upload_embedded_scenes_and_reload(frame)
+        frame.status = "starting"
+        record_successful_deploy(frame, plan.frame_dict)
+        await update_frame(self.db, self.redis, frame)
+        await log(
+            self.db,
+            self.redis,
+            int(frame.id),
+            "stdinfo",
+            f"{icon} Embedded fast deploy complete; reload queued",
+        )
+
     async def _execute_embedded_fast(self, plan: FrameDeployPlan) -> None:
+        from app.utils.embedded_commands import embedded_frame_pulls_commands, nudge_embedded_frame
+
         frame = self.frame
+        previous_status = frame.status
         frame.status = "deploying"
         await update_frame(self.db, self.redis, frame)
 
@@ -1157,26 +1226,84 @@ class FrameDeployWorkflow:
                 )
             if not plan.fast_deploy:
                 raise RuntimeError("Fast deploy plan missing")
+            if not embedded_frame_pulls_commands(frame):
+                await self._execute_embedded_fast_direct(plan, frame)
+                return
 
-            await self._upload_embedded_scenes_and_reload(frame)
-
-            frame.status = "starting"
-            record_successful_deploy(frame, plan.frame_dict)
-            await update_frame(self.db, self.redis, frame)
+            scenes = frame.scenes if isinstance(frame.scenes, list) else []
             await log(
                 self.db,
                 self.redis,
                 int(frame.id),
                 "stdinfo",
-                f"{icon} Embedded fast deploy complete; reload queued",
+                f"{icon} Queued {len(scenes)} scene(s) and the live settings for the frame to pull",
             )
+            deploy_id = await self._queue_embedded_deploy(frame, plan)
+            nudged = await nudge_embedded_frame(frame, self.redis)
+            applied = nudged and await self._await_embedded_deploy(frame, deploy_id, self.EMBEDDED_DEPLOY_WAIT_SECONDS)
+            frame = self._refresh_frame()
+            if applied:
+                # The device route recorded the baseline on the frame's ack.
+                frame.status = "starting"
+                await update_frame(self.db, self.redis, frame)
+                await log(
+                    self.db,
+                    self.redis,
+                    int(frame.id),
+                    "stdinfo",
+                    f"{icon} Embedded fast deploy complete; the frame pulled the scenes and settings",
+                )
+            else:
+                self.queued_for_frame = True
+                frame.status = previous_status if previous_status not in ("deploying", "uninitialized") else "ready"
+                await update_frame(self.db, self.redis, frame)
+                await log(
+                    self.db,
+                    self.redis,
+                    int(frame.id),
+                    "stdinfo",
+                    f"{icon} Deploy queued; the frame picks it up on its next check-in",
+                )
         except Exception:
             frame.status = "uninitialized"
             await update_frame(self.db, self.redis, frame)
             raise
 
+    async def _execute_embedded_full_direct(self, plan: FrameDeployPlan, frame: Frame) -> None:
+        """Firmware from before the command queue (2026.10.5): the direct OTA
+        poke, the wait for the boot, the scene upload. The board has to be
+        awake; its first boot on the new firmware pulls the queue from then on."""
+        from app.tasks.embedded_firmware import request_embedded_firmware_update
+
+        ota_requested_at = datetime.now(timezone.utc)
+        try:
+            await request_embedded_firmware_update(self.db, self.redis, frame)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Could not start the OTA update: {exc}. "
+                "Check that the frame is powered on and reachable on the network."
+            )
+        frame = self._refresh_frame()
+        await log(self.db, self.redis, int(frame.id), "stdout",
+                  f"{icon} Update requested; waiting for the frame to boot")
+        if not await self._await_embedded_boot(ota_requested_at):
+            raise RuntimeError(
+                "Update requested, but the frame did not report a new boot within "
+                f"{int(self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS // 60)} minutes. "
+                "The device retries the download on its own, so the update may still "
+                "complete; check the frame logs (ota:backend lines) and re-run the deploy to confirm."
+            )
+        frame = self._refresh_frame()
+        await log(self.db, self.redis, int(frame.id), "stdout", f"{icon} Frame booted")
+        await self._upload_embedded_scenes_and_reload(frame)
+        frame.status = "starting"
+        record_successful_deploy(frame, plan.frame_dict)
+        await update_frame(self.db, self.redis, frame)
+        await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} Embedded full deploy complete")
+
     async def _execute_embedded_full(self, plan: FrameDeployPlan) -> None:
         from app.tasks.embedded_firmware import request_embedded_firmware_update
+        from app.utils.embedded_commands import embedded_frame_pulls_commands
 
         if not isinstance(plan.full_deploy, EmbeddedFullDeployPlan):
             raise RuntimeError("Embedded full deploy plan missing")
@@ -1192,20 +1319,41 @@ class FrameDeployWorkflow:
                     "render log. Flash the first firmware over USB from the deploy drawer."
                 )
 
-            # 1. Deliver over the air: the device reboots into its updater,
+            if not embedded_frame_pulls_commands(frame):
+                await self._execute_embedded_full_direct(plan, frame)
+                return
+
+            # 1. The scenes and settings, as a fast deploy records them: the
+            #    rows ack when the frame pulls them (after the update, on the
+            #    pass that follows its boot), and that ack records the deploy.
+            deploy_id = await self._queue_embedded_deploy(frame, plan)
+
+            # 2. Deliver over the air: the device reboots into its updater,
             #    pulls this backend's relay of the release manifest and, when
-            #    its version differs, the signed release image.
+            #    its version differs, the signed release image. Queued, so a
+            #    sleeping frame takes it on its next check-in.
             ota_requested_at = datetime.now(timezone.utc)
             try:
-                await request_embedded_firmware_update(self.db, self.redis, frame)
-            except ValueError as exc:
-                raise RuntimeError(
-                    f"Could not start the OTA update: {exc}. "
-                    "Check that the frame is powered on and reachable on the network."
+                outcome = await request_embedded_firmware_update(
+                    self.db, self.redis, frame, wait_seconds=self.EMBEDDED_DEPLOY_WAIT_SECONDS
                 )
+            except ValueError as exc:
+                raise RuntimeError(f"Could not start the OTA update: {exc}")
             frame = self._refresh_frame()
+            if not outcome["applied"]:
+                self.queued_for_frame = True
+                frame.status = "ready"
+                await update_frame(self.db, self.redis, frame)
+                await log(
+                    self.db,
+                    self.redis,
+                    int(frame.id),
+                    "stdinfo",
+                    f"{icon} Full deploy queued; the frame installs the update and pulls the scenes on its next check-in",
+                )
+                return
 
-            # 2. Confirm via the device's post-update bootup. The updater
+            # 3. Confirm via the device's post-update bootup. The updater
             #    always reboots (an up-to-date frame just comes straight back).
             await log(self.db, self.redis, int(frame.id), "stdout",
                       f"{icon} Update requested; waiting for the frame to boot")
@@ -1219,19 +1367,31 @@ class FrameDeployWorkflow:
             frame = self._refresh_frame()
             await log(self.db, self.redis, int(frame.id), "stdout", f"{icon} Frame booted")
 
-            # 3. Leave scenes fresh, exactly like a fast deploy.
-            await self._upload_embedded_scenes_and_reload(frame)
-
-            frame.status = "starting"
-            record_successful_deploy(frame, plan.frame_dict)
-            await update_frame(self.db, self.redis, frame)
-            await log(
-                self.db,
-                self.redis,
-                int(frame.id),
-                "stdinfo",
-                f"{icon} Embedded full deploy complete",
-            )
+            # 4. The boot's first pass pulls the scenes and settings; its
+            #    commands pull acks the deploy rows.
+            if await self._await_embedded_deploy(frame, deploy_id, self.EMBEDDED_DEPLOY_WAIT_SECONDS):
+                frame = self._refresh_frame()
+                frame.status = "starting"
+                await update_frame(self.db, self.redis, frame)
+                await log(
+                    self.db,
+                    self.redis,
+                    int(frame.id),
+                    "stdinfo",
+                    f"{icon} Embedded full deploy complete",
+                )
+            else:
+                self.queued_for_frame = True
+                frame = self._refresh_frame()
+                frame.status = "ready"
+                await update_frame(self.db, self.redis, frame)
+                await log(
+                    self.db,
+                    self.redis,
+                    int(frame.id),
+                    "stdinfo",
+                    f"{icon} Frame booted on the new firmware; the scenes and settings are recorded when it pulls them",
+                )
         except Exception:
             frame = self._refresh_frame()
             frame.status = "uninitialized"

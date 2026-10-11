@@ -38,6 +38,7 @@
 #include "fos_http.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
+#include "fos_scene_state.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
 #include "fos_status_screen.h"
@@ -251,6 +252,9 @@ void app_main(void)
     BOOTMEM("after-sd");
     ESP_ERROR_CHECK(fos_wifi_init());
     fos_http_set_actions(action_render_now, action_ota_now);
+    /* Scene state across deep sleep: the runtime reads a scene's last public
+     * state when it builds the scene and writes it when it changes. */
+    frameos_nim_set_scene_state_hooks(fos_scene_state_load, fos_scene_state_save);
 
     bool online = false;
     if (fos_config_wifi_ready()) {

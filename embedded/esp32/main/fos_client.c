@@ -39,11 +39,13 @@
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
+#include "fos_commands.h"
 
 static const char *TAG = "fos_client";
 
 #define RENDER_NOW_BIT BIT0
 #define INPUT_EVENTS_BIT BIT1
+#define COMMANDS_BIT BIT2
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
 
@@ -451,6 +453,13 @@ void fos_client_wake_for_events(void)
 {
     if (s_events) {
         xEventGroupSetBits(s_events, INPUT_EVENTS_BIT);
+    }
+}
+
+void fos_client_request_commands_sync(void)
+{
+    if (s_events) {
+        xEventGroupSetBits(s_events, COMMANDS_BIT);
     }
 }
 
@@ -1435,6 +1444,14 @@ static void client_task(void *arg)
         /* Live settings: pick up backend-side interval/name/render-mode
          * changes without a rebuild. ETag'd, so steady state is a 304. */
         fos_settings_sync(false);
+        /* The backend's command queue — what the workspace asked for while
+         * this frame slept (a scene switch, a state, a render, an update) —
+         * before the render, so a switch lands in THIS pass's render instead
+         * of costing a second panel refresh. */
+        if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
+            frameos_nim_available()) {
+            fos_scenes_apply_pending_selection();
+        }
         /* A zone name with no tzdata slice yet (console `set time_zone`,
          * an older provider): one fetch from tz.frameos.net, rate-limited. */
         fos_tz_resolve_pending();
@@ -1733,11 +1750,26 @@ static void client_task(void *arg)
         while (remaining_ms > 0) {
             uint32_t slice = remaining_ms > 1000 ? 1000 : remaining_ms;
             int64_t slice_start_us = esp_timer_get_time();
-            EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT,
+            EventBits_t bits = xEventGroupWaitBits(s_events,
+                                                   RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT,
                                                    pdTRUE, pdFALSE, pdMS_TO_TICKS(slice));
             if (bits & RENDER_NOW_BIT) {
                 force_render = true;
                 break;
+            }
+            if (bits & COMMANDS_BIT) {
+                /* The backend nudged: it just queued something for an awake
+                 * frame. Pull now; whatever the commands asked for (a render,
+                 * a switch) is picked up by the checks below. */
+                if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
+                    frameos_nim_available()) {
+                    fos_scenes_apply_pending_selection();
+                }
+                if (fos_client_render_pending()) {
+                    xEventGroupClearBits(s_events, RENDER_NOW_BIT);
+                    force_render = true;
+                    break;
+                }
             }
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
              * press is delivered just below, and the render-requested check

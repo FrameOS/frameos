@@ -33,6 +33,12 @@ proc requestRuntimeCommand(command: cstring, payloadJson: cstring): bool {.impor
   ## (`metrics` is the only one a scene may say). The firmware owns them all:
   ## main/fos_events.c.
 
+proc sceneStateLoad(sceneId: cstring): cstring {.importc: "frameos_nim_scene_state_load", cdecl.}
+  ## The scene's state as last persisted (main/fos_scene_state.c): malloc'd
+  ## JSON this side frees, or nil.
+proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_nim_scene_state_save", cdecl.}
+proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
+
 proc log*(msg: string) =
   espLog(msg.cstring)
 
@@ -113,17 +119,92 @@ proc sceneInfoJson*(): string =
   }
   $payload
 
+# ------------------------------------------------------- state persistence
+
+# A deep sleep is a reset, and this frame deep-sleeps between renders: without
+# this, "Apply to active scene" lasted one render. The scene's public state
+# (what the workspace shows and sets) and its persist:"disk" fields are kept in
+# a file per scene (main/fos_scene_state.c), written when they change and read
+# back when the scene is built — the Linux runtime's ./state/scene-<id>.json,
+# for a chip. One scene is resident at a time, so one remembered write is
+# enough to skip the flash write an unchanged state would cost.
+var lastSavedStateId = ""
+var lastSavedStateJson = ""
+
+proc loadPersistedSceneState(sceneId: string): JsonNode =
+  ## nil when nothing is persisted or the file is not an object.
+  let raw = sceneStateLoad(sceneId.cstring)
+  if raw == nil:
+    return nil
+  let text = $raw
+  cFree(raw)
+  try:
+    result = parseJson(text)
+    if result.kind != JObject:
+      result = nil
+  except CatchableError:
+    result = nil
+
+proc saveSceneStateText(sceneId, text: string) =
+  if sceneId == lastSavedStateId and text == lastSavedStateJson:
+    return
+  if sceneStateSave(sceneId.cstring, text.cstring):
+    lastSavedStateId = sceneId
+    lastSavedStateJson = text
+
+proc persistableSceneState(): JsonNode =
+  ## The resident scene's keys worth a file: the public fields and the
+  ## persist:"disk" ones.
+  result = newJObject()
+  let scene = host.scene
+  if scene.isNil or host.exported.isNil or scene.state.isNil or scene.state.kind != JObject:
+    return
+  for field in host.exported.publicStateFields:
+    if scene.state.hasKey(field.name):
+      result[field.name] = scene.state[field.name]
+  for key in host.exported.persistedStateKeys:
+    if not result.hasKey(key) and scene.state.hasKey(key):
+      result[key] = scene.state[key]
+
+proc persistSceneState*() =
+  ## Write the resident scene's state when it differs from what was written.
+  if host.scene.isNil or host.sceneId.isNone:
+    return
+  saveSceneStateText(host.sceneId.get().string, $persistableSceneState())
+
+proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
+  ## State for a scene that is not resident — a `setSceneState` on a
+  ## wake-check pass, a `setCurrentScene` carrying state for the scene it
+  ## switches to — goes to the file now, so the pass that builds the scene
+  ## starts from it even if a deep sleep comes first. Keys the scene does not
+  ## own are pruned by the first persistSceneState after it is built.
+  var current = loadPersistedSceneState(sceneId)
+  if current.isNil:
+    current = newJObject()
+  for key, value in state:
+    current[key] = value
+  saveSceneStateText(sceneId, $current)
+
 proc sceneStateJson*(): string =
-  if host.scene.isNil or host.scene.state.isNil or host.scene.state.kind != JObject:
-    return "{}"
-  $host.scene.state
+  ## The current scene's public state: what `/state`, the cloud hello and the
+  ## backend's commands pull report. The resident scene's live values, or —
+  ## between a deep sleep and the first render — what was persisted for it,
+  ## so a frame that woke only to check for commands still says what it shows.
+  if host.scene.isNil:
+    if host.sceneId.isNone:
+      return "{}"
+    let persisted = loadPersistedSceneState(host.sceneId.get().string)
+    return if persisted.isNil: "{}" else: $persisted
+  $persistableSceneState()
 
 proc takeRenderRequested*(): bool =
   host.takeRenderRequested()
 
 proc tickInput*(): bool =
   ## Time passing with nothing sent (single_scene_host.tick).
-  host.tick()
+  result = host.tick()
+  if result:
+    persistSceneState()
 
 proc originFromMask(mask: cuint): Option[EventOrigin] =
   ## The firmware names an origin by its bit in fos_events_gen.h
@@ -149,7 +230,25 @@ proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson
         %*{}
       else:
         parseJson($payloadJson)
-    result = host.send(origin.get(), $eventName, payload)
+    # State aimed at a scene that is not the resident one is persisted first:
+    # the dispatcher can only hand it to a built scene, and on a wake-check
+    # pass (no render) or a switch there is none — the next build takes it
+    # from the file, deep sleep or not. The render it asks for is the pass
+    # that builds the scene with it.
+    var persisted = false
+    let event = $eventName
+    let state = payload{"state"}
+    if not state.isNil and state.kind == JObject:
+      let target =
+        if event == "setCurrentScene": payload{"sceneId"}.getStr()
+        elif event == "setSceneState" and host.sceneId.isSome: host.sceneId.get().string
+        else: ""
+      if target.len > 0 and (host.scene.isNil or host.sceneId.get().string != target):
+        mergePersistedSceneState(target, state)
+        host.renderRequested = true
+        persisted = true
+    result = host.send(origin.get(), event, payload) or persisted
+    persistSceneState()
   except Exception as e:
     log("event " & $eventName & " failed: " & e.msg)
     result = false
@@ -341,6 +440,9 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     let payloadText = $payload
     if not requestRuntimeCommand(name.cstring, payloadText.cstring):
       log("runtime command not handled: " & name)
+  # The state a scene starts with: what it last had (persistSceneState), the
+  # way the Linux runtime seeds a scene from ./state/scene-<id>.json.
+  host.initialState = proc (sceneId: SceneId): JsonNode = loadPersistedSceneState(sceneId.string)
   host.start()
 
 # ------------------------------------------------------------------- scenes
@@ -619,6 +721,7 @@ proc renderCurrentScene*(): Option[Image] =
     nextSleep: -1
   )
   let image = host.renderScene(context)
+  persistSceneState()
   # The scene is done with its JS nodes until the next render, which on this
   # board is minutes away. Hand their interpreters back now so the packing and
   # display work below — and the next render's image decodes — see the memory.

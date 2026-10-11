@@ -424,6 +424,15 @@ class Frame(Base):
     debug = mapped_column(Boolean, nullable=True)
     upload_fonts = mapped_column(String(10), nullable=True)
     last_log_at = mapped_column(DateTime, nullable=True)
+    # The device's own sleep forecast, from its `sleep` log line (an ESP32
+    # deep-sleeping between renders; models/log.py): when it is back to
+    # check for commands, when the panel next refreshes, and why it sleeps.
+    # Cleared when it reports in (a wake or bootup line, a commands pull).
+    # Same three fields as the cloud's frame row, so the workspace can say
+    # "asleep, wakes in 5 min" and size a queued command's TTL to the wake.
+    next_wake_at = mapped_column(DateTime, nullable=True)
+    next_render_at = mapped_column(DateTime, nullable=True)
+    sleep_reason = mapped_column(String(32), nullable=True)
     reboot = mapped_column(JSON, nullable=True)
     control_code = mapped_column(JSON, nullable=True)
     scenes = mapped_column(JSON, nullable=True, default=list)
@@ -506,6 +515,9 @@ class Frame(Base):
             # carry Nim to convert (docs/nim-to-js-conversion.md).
             'compiled_scene_count': compiled_scene_count(self.scenes),
             'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
+            'next_wake_at': self.next_wake_at.replace(tzinfo=timezone.utc).isoformat() if self.next_wake_at else None,
+            'next_render_at': self.next_render_at.replace(tzinfo=timezone.utc).isoformat() if self.next_render_at else None,
+            'sleep_reason': self.sleep_reason,
             'log_to_file': self.log_to_file,
             'assets_path': self.assets_path,
             'save_assets': self.save_assets,

@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from datetime import timezone, datetime
+from datetime import timezone, datetime, timedelta
 from copy import deepcopy
 from ipaddress import ip_address
 from typing import Any, Optional
@@ -105,6 +105,36 @@ def _frameos_version_from_boot(value: Any) -> str | None:
         return None
     match = re.search(r"v?(\d+\.\d+\.\d+)", value)
     return match.group(1) if match else None
+
+
+def _sleep_forecast_changes(frame: Frame, event: str, log: dict, timestamp: datetime) -> dict[str, Any]:
+    """The device's own sleep forecast, kept on the frame row the way the
+    cloud keeps a frame's `sleep` message (docs/cloud-frames.md): an ESP32
+    about to deep-sleep logs `{"event":"sleep","wakeInSeconds":N,
+    "nextRenderAt":T,"reason":"battery"}` as the last line of its pass. The
+    workspace says "asleep, wakes in 5 min" from it, and a command queued
+    meanwhile gets a TTL that reaches past the wake. Spent the moment the
+    device is heard from again: a wake or bootup line clears it (so does a
+    commands pull, app/api/embedded_commands.py)."""
+    if event == 'sleep':
+        wake_in = log.get('wakeInSeconds')
+        if not isinstance(wake_in, (int, float)) or isinstance(wake_in, bool) or wake_in <= 0:
+            return {}
+        wake_in = min(float(wake_in), 7 * 86400 + 3600)
+        changes: dict[str, Any] = {'next_wake_at': timestamp + timedelta(seconds=wake_in)}
+        render_at = log.get('nextRenderAt')
+        if isinstance(render_at, (int, float)) and not isinstance(render_at, bool) and render_at > 1_000_000_000:
+            changes['next_render_at'] = datetime.utcfromtimestamp(float(render_at))
+        else:
+            changes['next_render_at'] = None
+        reason = log.get('reason')
+        changes['sleep_reason'] = reason if isinstance(reason, str) and reason in ('battery', 'always', 'battery_critical') else None
+        return changes
+    if event in ('wake', 'bootup') and (
+        frame.next_wake_at is not None or frame.next_render_at is not None or frame.sleep_reason is not None
+    ):
+        return {'next_wake_at': None, 'next_render_at': None, 'sleep_reason': None}
+    return {}
 
 
 def _should_mark_embedded_boot_deployed(frame: Frame, boot_version: str | None) -> bool:
@@ -321,6 +351,7 @@ async def process_log(
             await redis.set(f"frame:{frame.id}:active_scene", scene_id)
 
     changes: dict[str, Any] = {}
+    changes.update(_sleep_forecast_changes(frame, event, log, timestamp))
     if event == 'render':
         changes['status'] = 'preparing'
     if event == 'render:device':

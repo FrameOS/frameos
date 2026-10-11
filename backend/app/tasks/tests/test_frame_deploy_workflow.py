@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -1917,28 +1916,129 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
     )
 
 
+def _patch_embedded_queue(monkeypatch: pytest.MonkeyPatch, *, nudged: bool, settled: bool):
+    """The deploy's queue side: the rows it records, whether the frame
+    answered the nudge, and whether its pull acked the rows."""
+    queued: list[tuple[str, dict | None, str | None]] = []
+
+    def fake_enqueue(_db, _frame, command_type, payload=None, *, detail=None, **_kwargs):
+        queued.append((command_type, payload, detail))
+        return SimpleNamespace(id=f"cmd-{len(queued)}", type=command_type, status="pending")
+
+    async def fake_nudge(_frame, _redis):
+        return nudged
+
+    def fake_settled(_db, _frame, _deploy_id):
+        return settled
+
+    monkeypatch.setattr("app.utils.frame_commands.enqueue_frame_command", fake_enqueue)
+    monkeypatch.setattr("app.utils.embedded_commands.nudge_embedded_frame", fake_nudge)
+    monkeypatch.setattr("app.utils.frame_commands.deploy_commands_settled", fake_settled)
+    return queued
+
+
+def _embedded_fast_plan(frame: SimpleNamespace) -> FrameDeployPlan:
+    return FrameDeployPlan(
+        mode="fast",
+        frame_id=int(frame.id),
+        frame_name=frame.name,
+        build_id="build12345678",
+        frame_dict={"id": int(frame.id), "name": frame.name, "mode": "embedded"},
+        previous_frameos_version=None,
+        fast_deploy=SimpleNamespace(
+            tls_settings_changed=False,
+            reload_supported=True,
+            action="http_upload_scenes_reload",
+        ),
+    )
+
+
 @pytest.mark.asyncio
-async def test_execute_embedded_fast_uploads_scenes_then_reloads(monkeypatch: pytest.MonkeyPatch):
-    frame = SimpleNamespace(
-        id=53,
-        name="ESPvaarikas",
-        mode="embedded",
-        status="ready",
-        scenes=[{"id": "scene-a", "nodes": []}],
-        last_log_at="2026-06-14T00:14:41+00:00",
-        last_successful_deploy=None,
-        last_successful_deploy_at=None,
-        to_dict=lambda: {"id": 53, "name": "ESPvaarikas", "mode": "embedded"},
+async def test_execute_embedded_fast_queues_the_deploy_and_completes_when_the_frame_pulls_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Nothing is pushed to the board: the deploy is two rows on its command
+    queue (the cloud's set_scenes + set_settings), a nudge, and the ack its
+    pull sends back. The baseline is recorded by that ack, not here."""
+    frame = _embedded_workflow_frame()
+    workflow = _embedded_workflow(frame)
+    workflow.EMBEDDED_DEPLOY_WAIT_SECONDS = 0.01
+    logs: list[tuple[str, str]] = []
+    http_calls: list[str] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, log_type: str, message: str):
+        logs.append((log_type, message))
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, **kwargs):
+        http_calls.append(kwargs.get("path"))
+        return 200, b"{}", {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+    queued = _patch_embedded_queue(monkeypatch, nudged=True, settled=True)
+
+    await workflow._execute_embedded_fast(_embedded_fast_plan(frame))
+
+    assert [item[0] for item in queued] == ["set_scenes", "set_settings"]
+    scenes_payload = queued[0][1]
+    assert scenes_payload["_deploy"]["snapshot"] == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
+    assert queued[0][2] == "1 scene"
+    assert queued[1][1]["_deploy"]["id"] == scenes_payload["_deploy"]["id"]
+    assert http_calls == []
+    assert frame.status == "starting"
+    assert frame.last_successful_deploy is None  # the device route records it on the ack
+    assert any("Embedded fast deploy complete" in message for _, message in logs)
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_fast_pushes_directly_to_firmware_before_the_queue(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A board on firmware older than fos_commands.c gets the upload-and-reload
+    push it always got, and the deploy is recorded here, not by an ack."""
+    frame = _embedded_workflow_frame(
+        embedded={"platform": "esp32-s3", "flashSize": "8MB", "lastBoot": {"frameosVersion": "v2026.10.4"}}
     )
-    workflow = FrameDeployWorkflow(
-        db=None,
-        redis=None,
-        frame=frame,
-        deployer=RecordingDeployer(),
-        temp_dir="",
-        binary_builder=FakeBinaryBuilder(),
-    )
-    calls: list[dict[str, object]] = []
+    workflow = _embedded_workflow(frame)
+    calls: list[str] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, _type, _message):
+        return None
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, **kwargs):
+        calls.append(kwargs.get("path"))
+        return 200, b'{"status":"ok"}', {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+    queued = _patch_embedded_queue(monkeypatch, nudged=True, settled=True)
+
+    await workflow._execute_embedded_fast(_embedded_fast_plan(frame))
+
+    assert queued == []
+    assert calls == ["/uploadScenes", "/reload"]
+    assert frame.status == "starting"
+    assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_fast_reports_queued_when_the_frame_does_not_answer(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A deep-sleeping board does not answer the nudge: the rows wait for
+    its next pull, the frame keeps its status, and the deploy task says so
+    instead of failing."""
+    frame = _embedded_workflow_frame()
+    workflow = _embedded_workflow(frame)
+    workflow.EMBEDDED_DEPLOY_WAIT_SECONDS = 0.01
     logs: list[tuple[str, str]] = []
 
     async def fake_update_frame(_db, _redis, _frame):
@@ -1947,134 +2047,16 @@ async def test_execute_embedded_fast_uploads_scenes_then_reloads(monkeypatch: py
     async def fake_log(_db, _redis, _frame_id, log_type: str, message: str):
         logs.append((log_type, message))
 
-    async def fake_fetch_frame_http_bytes(
-        _frame,
-        _redis,
-        *,
-        path: str,
-        method: str,
-        body=None,
-        headers=None,
-        timeout=None,
-    ):
-        calls.append({"path": path, "method": method, "body": body, "headers": headers})
-        return 200, b'{"status":"ok"}', {}
-
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+    queued = _patch_embedded_queue(monkeypatch, nudged=False, settled=False)
 
-    plan = FrameDeployPlan(
-        mode="fast",
-        frame_id=53,
-        frame_name="ESPvaarikas",
-        build_id="build12345678",
-        frame_dict={"id": 53, "name": "ESPvaarikas", "mode": "embedded"},
-        previous_frameos_version=None,
-        fast_deploy=SimpleNamespace(
-            tls_settings_changed=False,
-            reload_supported=True,
-            action="http_upload_scenes_reload",
-        ),
-    )
+    await workflow._execute_embedded_fast(_embedded_fast_plan(frame))
 
-    await workflow._execute_embedded_fast(plan)
-
-    assert calls == [
-        {
-            "path": "/uploadScenes",
-            "method": "POST",
-            "body": b'[{"id":"scene-a","nodes":[]}]',
-            "headers": {"Content-Type": "application/json"},
-        },
-        {"path": "/reload", "method": "POST", "body": None, "headers": None},
-    ]
-    assert frame.status == "starting"
-    assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
-    assert frame.last_successful_deploy_at is not None
-    assert any("Embedded fast deploy complete" in message for _, message in logs)
-
-
-@pytest.mark.asyncio
-async def test_execute_embedded_fast_failure_includes_status_context(monkeypatch: pytest.MonkeyPatch):
-    frame = SimpleNamespace(
-        id=59,
-        name="SuurESP",
-        mode="embedded",
-        status="ready",
-        scenes=[{"id": "scene-a", "nodes": []}],
-        last_log_at="2026-06-14T00:14:41+00:00",
-        last_successful_deploy=None,
-        last_successful_deploy_at=None,
-        to_dict=lambda: {"id": 59, "name": "SuurESP", "mode": "embedded"},
-    )
-    workflow = FrameDeployWorkflow(
-        db=None,
-        redis=None,
-        frame=frame,
-        deployer=RecordingDeployer(),
-        temp_dir="",
-        binary_builder=FakeBinaryBuilder(),
-    )
-    calls: list[str] = []
-
-    async def fake_update_frame(_db, _redis, _frame):
-        return _frame
-
-    async def fake_log(_db, _redis, _frame_id, log_type: str, message: str):
-        return None
-
-    async def fake_fetch_frame_http_bytes(
-        _frame,
-        _redis,
-        *,
-        path: str,
-        method: str,
-        body=None,
-        headers=None,
-        timeout=None,
-    ):
-        calls.append(path)
-        if path == "/status":
-            return 200, json.dumps({
-                "version": "v2026.6.29-14-gd17bbe05",
-                "storage": {"stateBytes": 25165824, "flashBytes": 33554432},
-                # A PSRAM-less C3 reports exactly this shape when a render
-                # fails: six figures free, no block big enough to use.
-                "memory": {"internalFree": 123456, "internalLargestBlock": 15872, "psramFree": 0},
-                "scenes": {"loaded": 0, "available": 0},
-            }).encode("utf-8"), {}
-        return 500, b"UNKNOWN ERROR", {}
-
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
-    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
-
-    plan = FrameDeployPlan(
-        mode="fast",
-        frame_id=59,
-        frame_name="SuurESP",
-        build_id="build12345678",
-        frame_dict={"id": 59, "name": "SuurESP", "mode": "embedded"},
-        previous_frameos_version=None,
-        fast_deploy=SimpleNamespace(
-            tls_settings_changed=False,
-            reload_supported=True,
-            action="http_upload_scenes_reload",
-        ),
-    )
-
-    with pytest.raises(RuntimeError) as exc:
-        await workflow._execute_embedded_fast(plan)
-
-    assert calls == ["/uploadScenes", "/status"]
-    assert "UNKNOWN ERROR" in str(exc.value)
-    assert "version=v2026.6.29-14-gd17bbe05" in str(exc.value)
-    assert "stateBytes=25165824" in str(exc.value)
-    assert "internalFree=123456" in str(exc.value)
-    assert "internalLargestBlock=15872" in str(exc.value)
-    assert "scenes.loaded=0" in str(exc.value)
-    assert frame.status == "uninitialized"
+    assert [item[0] for item in queued] == ["set_scenes", "set_settings"]
+    assert frame.status == "ready"
+    assert frame.last_successful_deploy is None
+    assert any("Deploy queued" in message for _, message in logs)
 
 
 @pytest.mark.asyncio
@@ -2645,7 +2627,7 @@ async def test_execute_embedded_full_updates_waits_for_boot_and_uploads_scenes(
             **_frame.embedded,
             "lastBoot": {"at": (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()},
         }
-        return {"ok": True}
+        return {"status": "applied", "applied": True}
 
     async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None, timeout=None):
         http_calls.append(path)
@@ -2655,15 +2637,51 @@ async def test_execute_embedded_full_updates_waits_for_boot_and_uploads_scenes(
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
     monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
+    queued = _patch_embedded_queue(monkeypatch, nudged=True, settled=True)
+    workflow.EMBEDDED_DEPLOY_WAIT_SECONDS = 0.01
 
     await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
 
     assert "update-requested" in events
-    assert http_calls == ["/uploadScenes", "/reload"]
+    # The scenes and settings are rows the post-boot pull acks, not an upload.
+    assert [item[0] for item in queued] == ["set_scenes", "set_settings"]
+    assert http_calls == []
     assert frame.status == "starting"
-    assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
-    assert frame.last_successful_deploy_at is not None
     assert any("Embedded full deploy complete" in message for message in events)
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_full_queued_when_the_frame_is_asleep(monkeypatch: pytest.MonkeyPatch):
+    """A board that did not take the update notice yet is asleep: the notice
+    and the deploy rows wait on its queue, and the task reports queued
+    instead of waiting ten minutes for a boot that cannot come."""
+    frame = _embedded_workflow_frame()
+    workflow = _embedded_workflow(frame)
+    events: list[str] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, _type, message):
+        events.append(message)
+
+    async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
+        return {"status": "queued", "applied": False}
+
+    async def no_boot_wait(_since):
+        raise AssertionError("a queued update must not wait for a boot")
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
+    monkeypatch.setattr(workflow, "_await_embedded_boot", no_boot_wait)
+    queued = _patch_embedded_queue(monkeypatch, nudged=False, settled=False)
+
+    await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
+
+    assert [item[0] for item in queued] == ["set_scenes", "set_settings"]
+    assert frame.status == "ready"
+    assert any("Full deploy queued" in message for message in events)
 
 
 @pytest.mark.asyncio
@@ -2686,7 +2704,7 @@ async def test_execute_embedded_full_always_waits_for_a_boot(monkeypatch: pytest
         return None
 
     async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
-        return {"ok": True}
+        return {"status": "applied", "applied": True}
 
     async def fake_fetch_frame_http_bytes(_frame, _redis, **_kwargs):
         http_calls.append(_kwargs.get("path"))
@@ -2696,6 +2714,7 @@ async def test_execute_embedded_full_always_waits_for_a_boot(monkeypatch: pytest
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
     monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
+    _patch_embedded_queue(monkeypatch, nudged=True, settled=False)
 
     with pytest.raises(RuntimeError) as exc:
         await workflow._execute_embedded_full(_embedded_full_plan_for(frame))
@@ -2703,14 +2722,13 @@ async def test_execute_embedded_full_always_waits_for_a_boot(monkeypatch: pytest
     assert "may still" in str(exc.value)
     assert "ota:backend" in str(exc.value)
     assert frame.status == "uninitialized"
-    # Scenes are never uploaded to a frame that did not come back.
     assert http_calls == []
 
 
 @pytest.mark.asyncio
-async def test_execute_embedded_full_surfaces_an_unreachable_device(monkeypatch: pytest.MonkeyPatch):
-    """The OTA poke is a plain HTTP call to the board. Nothing is queued for
-    later, so a device that will not answer fails the deploy now."""
+async def test_execute_embedded_full_surfaces_a_refused_update(monkeypatch: pytest.MonkeyPatch):
+    """A board that answers the update notice with a refusal (no OTA slot,
+    an unsupported layout) fails the deploy now, with its reason."""
     frame = _embedded_workflow_frame()
     workflow = _embedded_workflow(frame)
     workflow.EMBEDDED_POLL_INTERVAL_SECONDS = 0.001
@@ -2722,11 +2740,12 @@ async def test_execute_embedded_full_surfaces_an_unreachable_device(monkeypatch:
         return None
 
     async def fake_request_update(_db, _redis, _frame, *_args, **_kwargs):
-        raise ValueError("HTTP 503: busy rendering")
+        raise ValueError("the frame refused the update check: busy rendering")
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
     monkeypatch.setattr("app.tasks.embedded_firmware.request_embedded_firmware_update", fake_request_update)
+    _patch_embedded_queue(monkeypatch, nudged=True, settled=False)
 
     with pytest.raises(RuntimeError) as exc:
         await workflow._execute_embedded_full(_embedded_full_plan_for(frame))

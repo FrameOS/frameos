@@ -286,15 +286,18 @@ async def _fetch_frame_http_bytes(
     body: bytes | str | None = None,
     headers: Optional[dict[str, str]] = None,
     timeout: Optional[httpx.Timeout] = None,
+    attempts: Optional[int] = None,
 ) -> tuple[int, bytes, dict[str, str]]:
     """Fetch *path* from the frame returning (status, body-bytes, headers).
 
     `timeout` overrides FRAME_HTTP_TIMEOUT for requests that legitimately
-    take long (e.g. asset uploads crawling over a weak WiFi link)."""
+    take long (e.g. asset uploads crawling over a weak WiFi link);
+    `attempts` overrides FRAME_HTTP_RETRIES for a request that must answer
+    fast or not at all (a nudge to a frame that may be asleep)."""
     control = _is_control_path(path)
     hdrs = _auth_headers(frame, headers, prefer_server_key=control)
     result = await _fetch_frame_http_bytes_once(
-        frame, redis, path=path, method=method, body=body, headers=hdrs, timeout=timeout
+        frame, redis, path=path, method=method, body=body, headers=hdrs, timeout=timeout, attempts=attempts
     )
     if control and result[0] == HTTPStatus.UNAUTHORIZED:
         fallback = _legacy_control_fallback_headers(frame, headers)
@@ -307,6 +310,7 @@ async def _fetch_frame_http_bytes(
                 body=body,
                 headers=fallback,
                 timeout=timeout,
+                attempts=attempts,
             )
     return result
 
@@ -342,6 +346,7 @@ async def _fetch_frame_http_bytes_once(
     body: bytes | str | None,
     headers: dict[str, str],
     timeout: Optional[httpx.Timeout],
+    attempts: Optional[int] = None,
 ) -> tuple[int, bytes, dict[str, str]]:
     """One request with the headers exactly as given (auth already decided)."""
     if await _use_remote(frame, redis):
@@ -381,7 +386,7 @@ async def _fetch_frame_http_bytes_once(
     candidates = _frame_http_direct_candidates(frame, path, method)
     hdrs = headers
     timeout_errors = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout)
-    attempts = max(1, FRAME_HTTP_RETRIES)
+    attempts = max(1, FRAME_HTTP_RETRIES if attempts is None else int(attempts))
     last_error: HTTPException | None = None
     async with _frame_http_semaphore:
         for candidate_index, (url, verify) in enumerate(candidates):

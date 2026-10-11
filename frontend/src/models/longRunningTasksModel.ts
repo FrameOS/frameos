@@ -250,6 +250,20 @@ function deployTaskSignal(
   }
 }
 
+/** The toast for a finished deploy. "queued" means the frame did not pull it
+ * yet (an ESP32 asleep between renders): the backend recorded it on the
+ * frame's command queue, and the deploy drawer lists it until the frame does. */
+function deployCompletedDetail(detail: string): string {
+  const words = detail.toLowerCase().split(/\s+/)
+  const fast = words.includes('fast')
+  if (words.includes('queued')) {
+    return fast
+      ? 'Fast deploy queued. The frame picks it up on its next check-in.'
+      : 'Deploy queued. The frame picks it up on its next check-in.'
+  }
+  return fast ? 'Fast deploy completed' : 'Deploy completed'
+}
+
 function frameStatus(frame: Partial<FrameType>): string | null {
   return typeof frame.status === 'string' ? frame.status : null
 }
@@ -584,7 +598,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
             frameId: log.frame_id,
             kind: 'deploy',
             status: 'success',
-            detail: deploySignal.detail === 'fast' ? 'Fast deploy completed' : 'Deploy completed',
+            detail: deployCompletedDetail(deploySignal.detail),
           })
         } else if (deploySignal.action === 'failed') {
           actions.taskFailed({

@@ -39,6 +39,7 @@
 #include "fos_framebuffer.h"
 #include "fos_mem.h"
 #include "fos_scenes.h"
+#include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -2038,6 +2039,32 @@ static void restart_task(void *arg)
 /* POST /api/action/restart and /api/action/reboot: on ESP32 the runtime is
  * the firmware, so both are a chip reset. The backend's restart/reboot
  * tasks call these instead of systemd-over-SSH. */
+/* The backend's nudge: "I queued something for you, pull it now". The pull
+ * itself runs on the render task (fos_commands.c), so this only wakes it;
+ * `?sync=1` (a deploy) also forces the scenes and settings pulls, which the
+ * commands pull reports the ETags of. A short keep-awake, like a cloud verb:
+ * the 3-minute hold of the other mutations would cost a battery frame on
+ * every queued state change. */
+static esp_err_t commands_post_handler(httpd_req_t *req)
+{
+    REQUIRE_PROTECTED_ACCESS();
+    log_http_command_from_path(req, 0);
+    char query[32];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char value[4];
+        if (httpd_query_key_value(query, "sync", value, sizeof(value)) == ESP_OK &&
+            strcmp(value, "1") == 0) {
+            fos_scenes_request_sync();
+            fos_settings_request_sync();
+        }
+    }
+    fos_client_keep_awake_ms(15000);
+    fos_client_request_commands_sync();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "202 Accepted");
+    return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+}
+
 static esp_err_t restart_post_handler(httpd_req_t *req)
 {
     REQUIRE_PROTECTED_ACCESS();
@@ -2928,6 +2955,7 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
     httpd_uri_t action_restart = {.uri = "/api/action/restart", .method = HTTP_POST, .handler = restart_post_handler};
     httpd_uri_t action_reboot = {.uri = "/api/action/reboot", .method = HTTP_POST, .handler = restart_post_handler};
     httpd_uri_t scene = {.uri = "/api/action/scene", .method = HTTP_POST, .handler = scene_select_handler};
+    httpd_uri_t commands = {.uri = "/api/action/commands", .method = HTTP_POST, .handler = commands_post_handler};
     httpd_uri_t remount_sd = {.uri = "/api/action/remount-sd", .method = HTTP_POST, .handler = sd_remount_post_handler};
     httpd_uri_t format_sd = {.uri = "/api/action/format-sd", .method = HTTP_POST, .handler = sd_format_post_handler};
     REGISTER_ROUTE(render);
@@ -2935,6 +2963,7 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
     REGISTER_ROUTE(action_restart);
     REGISTER_ROUTE(action_reboot);
     REGISTER_ROUTE(scene);
+    REGISTER_ROUTE(commands);
     REGISTER_ROUTE(remount_sd);
     REGISTER_ROUTE(format_sd);
 
