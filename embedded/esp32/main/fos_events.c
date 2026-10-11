@@ -1,6 +1,7 @@
 #include "fos_events.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_err.h"
@@ -292,6 +293,80 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
     }
     fos_client_render_now();
     return FOS_EVENT_DONE;
+}
+
+/* --------------------------------------------------------- deferred events */
+
+#define FOS_EVENTS_DEFERRED_MAX 4
+
+typedef struct {
+    fos_event_origin_t origin;
+    char name[FOS_CUSTOM_EVENT_MAX_NAME_LENGTH + 1];
+    char *payload; /* malloc'd copy, NULL = {} */
+} deferred_event_t;
+
+static deferred_event_t s_deferred[FOS_EVENTS_DEFERRED_MAX];
+static size_t s_deferred_count = 0;
+static portMUX_TYPE s_deferred_lock = portMUX_INITIALIZER_UNLOCKED;
+
+bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *payload_json)
+{
+    if (name == NULL || name[0] == '\0' || strlen(name) > FOS_CUSTOM_EVENT_MAX_NAME_LENGTH) {
+        return false;
+    }
+    char *payload = NULL;
+    if (payload_json != NULL && payload_json[0] != '\0') {
+        payload = strdup(payload_json);
+        if (payload == NULL) return false;
+    }
+    bool queued = false;
+    portENTER_CRITICAL(&s_deferred_lock);
+    if (s_deferred_count < FOS_EVENTS_DEFERRED_MAX) {
+        deferred_event_t *slot = &s_deferred[s_deferred_count++];
+        slot->origin = origin;
+        snprintf(slot->name, sizeof(slot->name), "%s", name);
+        slot->payload = payload;
+        queued = true;
+    }
+    portEXIT_CRITICAL(&s_deferred_lock);
+    if (!queued) {
+        free(payload);
+        return false;
+    }
+    log_event_line("event:deferred", origin, name, "runtime busy");
+    fos_client_wake_for_events();
+    return true;
+}
+
+bool fos_events_deferred_pending(void)
+{
+    return s_deferred_count > 0;
+}
+
+bool fos_events_deliver_deferred(void)
+{
+    /* Render task only: it owns the runtime between renders, so the wait is
+     * the dispatcher's own queue, never a render. */
+    bool delivered_any = false;
+    while (true) {
+        deferred_event_t event;
+        bool have = false;
+        portENTER_CRITICAL(&s_deferred_lock);
+        if (s_deferred_count > 0) {
+            event = s_deferred[0];
+            memmove(&s_deferred[0], &s_deferred[1], (s_deferred_count - 1) * sizeof(s_deferred[0]));
+            s_deferred_count--;
+            have = true;
+        }
+        portEXIT_CRITICAL(&s_deferred_lock);
+        if (!have) break;
+        fos_event_result_t result = fos_events_dispatch(event.origin, event.name, event.payload);
+        log_event_line("event:deferred:delivered", event.origin, event.name,
+                       result == FOS_EVENT_DONE ? NULL : "not delivered");
+        free(event.payload);
+        if (result == FOS_EVENT_DONE) delivered_any = true;
+    }
+    return delivered_any;
 }
 
 /* ---------------------------------------------------------------- dispatch */

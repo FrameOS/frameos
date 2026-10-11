@@ -332,6 +332,15 @@ when it woke only to check in (`fos_scenes_take_switched`). Work that lands
 mid-render holds the deep sleep for one more pass (`sleep:held`, reason
 `scenes`) so the switch shows on the same wake.
 
+A `scene_event` (`setSceneState`, a button, a custom event) meets the same
+timing: the cloud delivers it the moment the session is up, the wake's render
+already holds the runtime, and the handler used to answer `busy` after three
+seconds — an answer the hub never retries, so no state ever reached a
+sleeping frame. A busy scene event is now kept (`fos_events_defer`, a
+handful of slots, `event:deferred` in the log), delivered by the render task
+at the start of its next pass (`event:deferred:delivered`), rendered on that
+pass, and counted as work that holds the deep sleep.
+
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's
 `embedded_provisioning_plan` (`backend/app/tasks/embedded_firmware.py`) —

@@ -27,6 +27,7 @@
 #include "fos_buttons.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_events.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_mem.h"
@@ -1445,6 +1446,12 @@ static void client_task(void *arg)
              * renders once and goes back to deep sleep, which loses the
              * queue. */
             fos_scenes_apply_pending_selection();
+            /* Scene events the cloud delivered while the previous pass was
+             * rendering (fos_events_defer): to the scene now, before this
+             * pass renders, and the render shows them. */
+            if (fos_events_deliver_deferred()) {
+                force_render = true;
+            }
         }
 
         /* Live settings: pick up backend-side interval/name/render-mode
@@ -1645,13 +1652,15 @@ static void client_task(void *arg)
         s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
         if (deep_sleep_now && fos_display_present() && config->render_mode == FOS_RENDER_LOCAL &&
-            frameos_nim_available() && fos_scenes_work_pending()) {
+            frameos_nim_available() && (fos_scenes_work_pending() || fos_events_deferred_pending())) {
             /* A scene payload or a scene switch arrived while this pass was
              * rendering (the cloud delivers them the moment the session is
              * up, and a 13.3" render takes a minute). Sleeping now would
              * leave the old scene on the panel until the next wake — and
              * the switch itself in RAM, lost. One more pass applies and
-             * renders it; the apply consumes the work, so this cannot loop. */
+             * renders it; the apply consumes the work, so this cannot loop.
+             * A deferred scene event (a setSceneState the cloud sent during
+             * the render) holds the sleep the same way. */
             frameos_nim_log_hook("{\"event\":\"sleep:held\",\"source\":\"esp32\","
                                  "\"reason\":\"scenes\"}");
             force_render = true;

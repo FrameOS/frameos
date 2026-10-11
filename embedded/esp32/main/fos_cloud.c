@@ -2558,6 +2558,13 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_
     }
     fos_event_result_t result = fos_events_dispatch_wait(origin, name, printed,
                                                          FOS_CLOUD_SCENE_EVENT_WAIT_MS);
+    /* Busy means a render holds the runtime — on a deep-sleeping frame, the
+     * wake's render, the only moment this verb could ever arrive. Keep it
+     * for the render task instead of telling the hub "busy" (which never
+     * sends it again): `ok` here means queued, like Linux. */
+    if (result == FOS_EVENT_BUSY && fos_events_defer(origin, name, printed)) {
+        result = FOS_EVENT_DONE;
+    }
     if (printed != NULL) cJSON_free(printed);
     switch (result) {
         case FOS_EVENT_BUSY:
