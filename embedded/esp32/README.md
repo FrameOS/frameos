@@ -318,6 +318,20 @@ file right away, so a deep sleep in between loses nothing. Both control
 planes get it: the cloud hello and the commands pull report the persisted
 state even before the first render, keyed by scene id.
 
+A scene switch outlives the sleep the same way. The render task applies a
+queued selection (`set_scenes` with a scene to activate, `setCurrentScene`)
+at the start of a pass, and a verb that lands while a pass is already
+rendering used to sit in RAM until the deep sleep right after the render
+dropped it: an "install and activate" reached an E1004 on a button wake, the
+frame rendered the old scene, slept, and every later wake came up on the old
+scene with the new one merely stored (2026-10-12). Now `fos_scenes_select`
+writes the queued id to NVS (`pending_scene`), the boot restore prefers it
+over `last_scene`, the pass that applies it erases it, and a pass that
+switched the scene — or applied a payload pushed since boot — renders even
+when it woke only to check in (`fos_scenes_take_switched`). Work that lands
+mid-render holds the deep sleep for one more pass (`sleep:held`, reason
+`scenes`) so the switch shows on the same wake.
+
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's
 `embedded_provisioning_plan` (`backend/app/tasks/embedded_firmware.py`) —

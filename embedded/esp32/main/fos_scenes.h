@@ -73,6 +73,18 @@ bool fos_scenes_apply_pending_selection(void);
 /* Apply pending scenes (file → Nim). Render task only. True if applied. */
 bool fos_scenes_apply_pending(void);
 
+/* A payload or a selection is waiting for the render task. A deep-sleeping
+ * frame checks this before it sleeps: work that landed during the render
+ * gets a pass now instead of after the sleep (fos_client.c). */
+bool fos_scenes_work_pending(void);
+bool fos_scenes_selection_pending(void);
+
+/* True once per switch: the render task changed the resident scene, or
+ * applied a payload pushed since boot, since the last call. The pass that
+ * sees it renders even when it woke only to check in — the panel shows the
+ * previous scene. Render task only. */
+bool fos_scenes_take_switched(void);
+
 /* Monotonic count of apply attempts made by the render task, and whether the
  * most recent one loaded into the runtime. A producer records the generation
  * before calling fos_scenes_set_json() and polls until it changes, which is
