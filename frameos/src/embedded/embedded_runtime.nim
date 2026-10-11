@@ -126,9 +126,10 @@ proc sceneInfoJson*(): string =
 # (what the workspace shows and sets) and its persist:"disk" fields are kept in
 # a file per scene (main/fos_scene_state.c), written when they change and read
 # back when the scene is built — the Linux runtime's ./state/scene-<id>.json,
-# for a chip. What was last written, by scene id, so an unchanged state costs
-# no flash write.
-var lastSavedSceneState = initTable[string, string]()
+# for a chip. One scene is resident at a time, so one remembered write is
+# enough to skip the flash write an unchanged state would cost.
+var lastSavedStateId = ""
+var lastSavedStateJson = ""
 
 proc loadPersistedSceneState(sceneId: string): JsonNode =
   ## nil when nothing is persisted or the file is not an object.
@@ -138,40 +139,38 @@ proc loadPersistedSceneState(sceneId: string): JsonNode =
   let text = $raw
   cFree(raw)
   try:
-    let parsed = parseJson(text)
-    if parsed.kind != JObject:
-      return nil
-    lastSavedSceneState[sceneId] = $parsed
-    parsed
-  except CatchableError as e:
-    log("persisted scene state unreadable: " & e.msg)
-    nil
+    result = parseJson(text)
+    if result.kind != JObject:
+      result = nil
+  except CatchableError:
+    result = nil
 
-proc persistableSceneState(scene: FrameScene, exported: ExportedInterpretedScene): JsonNode =
-  ## The keys worth a file: the public fields and the persist:"disk" ones.
-  result = newJObject()
-  if scene.isNil or scene.state.isNil or scene.state.kind != JObject:
+proc saveSceneStateText(sceneId, text: string) =
+  if sceneId == lastSavedStateId and text == lastSavedStateJson:
     return
-  for field in exported.publicStateFields:
+  if sceneStateSave(sceneId.cstring, text.cstring):
+    lastSavedStateId = sceneId
+    lastSavedStateJson = text
+
+proc persistableSceneState(): JsonNode =
+  ## The resident scene's keys worth a file: the public fields and the
+  ## persist:"disk" ones.
+  result = newJObject()
+  let scene = host.scene
+  if scene.isNil or host.exported.isNil or scene.state.isNil or scene.state.kind != JObject:
+    return
+  for field in host.exported.publicStateFields:
     if scene.state.hasKey(field.name):
       result[field.name] = scene.state[field.name]
-  for key in exported.persistedStateKeys:
+  for key in host.exported.persistedStateKeys:
     if not result.hasKey(key) and scene.state.hasKey(key):
       result[key] = scene.state[key]
 
 proc persistSceneState*() =
   ## Write the resident scene's state when it differs from what was written.
-  if host.scene.isNil or host.exported.isNil or host.sceneId.isNone:
+  if host.scene.isNil or host.sceneId.isNone:
     return
-  try:
-    let sceneId = host.sceneId.get().string
-    let text = $persistableSceneState(host.scene, host.exported)
-    if lastSavedSceneState.getOrDefault(sceneId, "") == text:
-      return
-    if sceneStateSave(sceneId.cstring, text.cstring):
-      lastSavedSceneState[sceneId] = text
-  except CatchableError as e:
-    log("scene state persist failed: " & e.msg)
+  saveSceneStateText(host.sceneId.get().string, $persistableSceneState())
 
 proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
   ## State for a scene that is not resident — a `setSceneState` on a
@@ -179,16 +178,12 @@ proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
   ## switches to — goes to the file now, so the pass that builds the scene
   ## starts from it even if a deep sleep comes first. Keys the scene does not
   ## own are pruned by the first persistSceneState after it is built.
-  if state.isNil or state.kind != JObject:
-    return
   var current = loadPersistedSceneState(sceneId)
   if current.isNil:
     current = newJObject()
   for key, value in state:
     current[key] = value
-  let text = $current
-  if sceneStateSave(sceneId.cstring, text.cstring):
-    lastSavedSceneState[sceneId] = text
+  saveSceneStateText(sceneId, $current)
 
 proc sceneStateJson*(): string =
   ## The current scene's public state: what `/state`, the cloud hello and the
@@ -200,9 +195,7 @@ proc sceneStateJson*(): string =
       return "{}"
     let persisted = loadPersistedSceneState(host.sceneId.get().string)
     return if persisted.isNil: "{}" else: $persisted
-  if host.exported.isNil or host.scene.state.isNil or host.scene.state.kind != JObject:
-    return "{}"
-  $persistableSceneState(host.scene, host.exported)
+  $persistableSceneState()
 
 proc takeRenderRequested*(): bool =
   host.takeRenderRequested()
@@ -244,15 +237,14 @@ proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson
     # that builds the scene with it.
     var persisted = false
     let event = $eventName
-    if payload.kind == JObject and payload.hasKey("state") and payload["state"].kind == JObject:
-      var target = ""
-      if event == "setCurrentScene":
-        target = payload{"sceneId"}.getStr()
-      elif event == "setSceneState" and host.sceneId.isSome:
-        target = host.sceneId.get().string
-      let resident = not host.scene.isNil and host.sceneId.isSome and host.sceneId.get().string == target
-      if target.len > 0 and not resident:
-        mergePersistedSceneState(target, payload["state"])
+    let state = payload{"state"}
+    if not state.isNil and state.kind == JObject:
+      let target =
+        if event == "setCurrentScene": payload{"sceneId"}.getStr()
+        elif event == "setSceneState" and host.sceneId.isSome: host.sceneId.get().string
+        else: ""
+      if target.len > 0 and (host.scene.isNil or host.sceneId.get().string != target):
+        mergePersistedSceneState(target, state)
         host.renderRequested = true
         persisted = true
     result = host.send(origin.get(), event, payload) or persisted

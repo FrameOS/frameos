@@ -288,8 +288,8 @@ backend keeps pushing to older firmware directly):
 
 - Once per pass, after the scenes and settings pulls and before the render:
   `POST /api/frames/{id}/embedded/commands` with what it holds and shows
-  (`frameos_version`, `active_scene`, `states`, `scenes_etag`,
-  `settings_etag`), answered with the queue, oldest first, as the cloud's
+  (the cloud hello's `frameos_version`, `active_scene`, `states` and
+  `scenes_checksum`, plus `settings_etag`), answered with the queue, oldest first, as the cloud's
   command frames (`{id, type, ...}`). Each runs through the same verb
   handlers a cloud verb takes (`fos_cloud.c`) and is answered with
   `POST .../commands/{id}/ack` `{ok, error?, active_scene?, states?}` the

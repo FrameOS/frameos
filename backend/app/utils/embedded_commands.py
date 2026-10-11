@@ -44,7 +44,6 @@ COMMAND_LABELS: dict[str, str] = {
     "restart_runtime": "Restart FrameOS",
     "set_current_scene": "Switch scene",
     "scene_event": "Scene event",
-    "get_state": "Read scene state",
     "notify_update_available": "Check for a firmware update",
     "set_scenes": "Deploy scenes",
     "set_settings": "Deploy settings",

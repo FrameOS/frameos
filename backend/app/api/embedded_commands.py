@@ -9,7 +9,7 @@ per pass (after its scenes and settings pulls) and whenever the backend
 nudges it. The body says what the device holds and shows:
 
     {"frameos_version": "2026.10.5", "active_scene": "…", "states": {…},
-     "scenes_etag": "\\"…\\"", "settings_etag": "\\"…\\""}
+     "scenes_checksum": "\\"…\\"", "settings_etag": "\\"…\\""}
 
 `states` is the active scene's state (the device keeps one scene resident)
 and goes straight into the backend's states cache, so the workspace shows
@@ -156,7 +156,8 @@ async def api_embedded_device_commands(
 
     await _remember_device_state(redis, frame, body)
 
-    scenes_etag = _str_field(body, "scenes_etag")
+    # The cloud hello's name for it, and the older name this route first had.
+    scenes_etag = _str_field(body, "scenes_checksum") or _str_field(body, "scenes_etag")
     settings_etag = _str_field(body, "settings_etag")
     acked = ack_pull_backed_commands(
         db,

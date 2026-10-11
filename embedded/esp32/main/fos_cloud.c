@@ -1118,10 +1118,10 @@ static void nim_snapshot_release(nim_snapshot_t *snap)
 
 /* Attach the hello-shaped state fields to msg. `snap->states` moves into
  * msg; the scene fields are omitted entirely when the snapshot timed out. */
-static void add_state_fields(cJSON *msg, nim_snapshot_t *snap)
+static void add_state_fields(cJSON *msg, nim_snapshot_t *snap, bool with_hardware)
 {
     cJSON_AddStringToObject(msg, "frameos_version", esp_app_get_description()->version);
-    add_hardware_json(msg);
+    if (with_hardware) add_hardware_json(msg);
     if (snap->ok) {
         cJSON *states = snap->states ? snap->states : cJSON_CreateObject();
         snap->states = NULL;
@@ -1185,7 +1185,7 @@ static void ws_poll_active_scene(void)
         cJSON *msg = cJSON_CreateObject();
         if (msg) {
             cJSON_AddStringToObject(msg, "type", "state");
-            add_state_fields(msg, &snap);
+            add_state_fields(msg, &snap, true);
             ws_send_json(msg);
             cJSON_Delete(msg);
             strlcpy(s_active_scene_reported, snap.scene_id, sizeof(s_active_scene_reported));
@@ -1202,7 +1202,7 @@ static void ws_send_hello(void)
     cJSON *msg = cJSON_CreateObject();
     if (msg) {
         cJSON_AddStringToObject(msg, "type", "hello");
-        add_state_fields(msg, &snap);
+        add_state_fields(msg, &snap, true);
         ws_send_json(msg);
         cJSON_Delete(msg);
     }
@@ -1280,7 +1280,7 @@ static bool ws_send_state(const cJSON *id)
     if (msg) {
         if (id) cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, 1));
         cJSON_AddStringToObject(msg, "type", "state");
-        add_state_fields(msg, &snap);
+        add_state_fields(msg, &snap, true);
         ws_send_json(msg);
         cJSON_Delete(msg);
         sent = true;
@@ -2592,7 +2592,7 @@ static bool backend_verb_allowed(const char *type)
 {
     static const char *const allowed[] = {
         "render", "reboot", "restart_runtime", "set_current_scene", "scene_event",
-        "get_state", "notify_update_available",
+        "notify_update_available",
     };
     for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
         if (strcmp(type, allowed[i]) == 0) return true;
@@ -2727,6 +2727,14 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
         ws_ack(id, false, "unknown_verb");
     }
+}
+
+void fos_cloud_add_state_fields(cJSON *msg)
+{
+    nim_snapshot_t snap;
+    nim_snapshot_take(&snap);
+    add_state_fields(msg, &snap, false);
+    nim_snapshot_release(&snap);
 }
 
 void fos_cloud_dispatch_backend_command(cJSON *root, void (*reply)(cJSON *msg, void *ctx), void *ctx)

@@ -78,7 +78,6 @@ QUEUEABLE_TYPES: frozenset[str] = frozenset(
         "restart_runtime",
         "set_current_scene",
         "scene_event",
-        "get_state",
         "notify_update_available",
         "set_scenes",
         "set_settings",

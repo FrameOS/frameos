@@ -159,7 +159,7 @@ async def test_pull_acks_a_deploy_when_the_device_holds_the_current_pulls(async_
 
     response = await no_auth_client.post(
         f'/api/frames/{frame.id}/embedded/commands',
-        json={'scenes_etag': embedded_scenes_etag(frame), 'settings_etag': embedded_settings_etag(db, frame)},
+        json={'scenes_checksum': embedded_scenes_etag(frame), 'settings_etag': embedded_settings_etag(db, frame)},
         headers=headers,
     )
     assert response.json()['pending'] == 0
