@@ -1,4 +1,4 @@
-import std/[atomics, deques, json, locks, unittest]
+import std/[atomics, deques, json, locks, monotimes, os, times, unittest]
 
 import ../state
 import ../../types
@@ -42,6 +42,13 @@ suite "Server state helpers":
     proc reader(args: tuple[done: ptr Atomic[bool], bad: ptr Atomic[int]]) {.thread.} =
       {.cast(gcsafe).}:
         while not args.done[].load:
+          # Each read copies the whole deque under the lock. Four readers that
+          # re-read the instant they are done keep that (unfair) lock busy and
+          # starve the writer: a second at -O3, a minute at -O0. Pausing for
+          # four times the last read's cost caps the readers' share of the
+          # lock at about 80% on any machine, and they still overlap every
+          # one of the writer's passes, which is what the test is about.
+          let readStarted = getMonoTime()
           let logs = getUiLogs()
           for entry in logs:
             if entry{"event"}.getStr("") != "metrics" or entry{"frame_id"}.getInt(0) != FRAME_API_ID:
@@ -49,6 +56,7 @@ suite "Server state helpers":
           for metric in getUiMetrics():
             if metric{"metrics"}{"load"}.getInt(-1) < 0:
               discard args.bad[].fetchAdd(1)
+          sleep(max(1, 4 * int((getMonoTime() - readStarted).inMilliseconds)))
     var readers: array[4, Thread[tuple[done: ptr Atomic[bool], bad: ptr Atomic[int]]]]
     for t in readers.mitems: createThread(t, reader, (addr done, addr bad))
     for i in 0 ..< MAX_RECENT_LOGS + 2000:
