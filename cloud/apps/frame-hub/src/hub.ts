@@ -92,6 +92,7 @@ import {
   uuidPattern,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateFromLogEntries,
   firmwareUpdateIsOver,
 } from "./protocol";
 import {
@@ -1637,51 +1638,27 @@ export async function startFrameHub(
     await recordFirmwareUpdate(session, entries);
   }
 
-  // The firmware narrates an OTA as structured `ota:<plane>` log lines
-  // (embedded/esp32/main/fos_ota.c: downloading <version>, progress
-  // <written>/<total> every 512 KB, verified, error <why>, up-to-date,
-  // downgrade-refused, skipped). Until these landed on the row, a frame
-  // half-way through a download still read "waiting to sync" in the list.
-  // The newest line of the batch wins; the hello after the reboot clears it
-  // (see the connect handler). Best effort like the rest of telemetry.
+  // The device narrates its firmware update as structured log lines: the
+  // ESP32 as `ota:<plane>` (embedded/esp32/main/fos_ota.c: downloading
+  // <version>, progress <written>/<total> every 512 KB, verified, error <why>,
+  // up-to-date, downgrade-refused, skipped), the Pi as `cloud:upgrade`
+  // (frameos/upgrade.nim: scheduled, starting, running, success,
+  // reboot_required, failed, stalled, up_to_date). Until these landed on the
+  // row, a frame half-way through a download still read "waiting to sync" in
+  // the list. firmwareUpdateFromLogEntries folds the newest line of the batch
+  // into one vocabulary; the hello after the reboot clears it (see the connect
+  // handler). Best effort like the rest of telemetry.
   async function recordFirmwareUpdate(
     session: DeviceSession,
     entries: { timestamp: Date; payload: unknown }[],
   ) {
-    let latest: Record<string, unknown> | null = null;
-    for (const entry of entries) {
-      const payload = entry.payload;
-      if (
-        isRecord(payload) &&
-        typeof payload.event === "string" &&
-        payload.event.startsWith("ota:") &&
-        typeof payload.status === "string"
-      ) {
-        latest = payload;
-      }
-    }
-    if (!latest) {
+    const firmwareUpdate = firmwareUpdateFromLogEntries(
+      entries,
+      session.frame.firmwareUpdate,
+    );
+    if (!firmwareUpdate) {
       return;
     }
-    const status = String(latest.status).slice(0, 32);
-    const detail =
-      typeof latest.detail === "string" ? latest.detail.slice(0, 160) : "";
-    const previous = isRecord(session.frame.firmwareUpdate)
-      ? session.frame.firmwareUpdate
-      : null;
-    const firmwareUpdate = {
-      at: new Date().toISOString(),
-      detail,
-      plane: String(latest.event).slice(4, 36),
-      status,
-      // The version rides the "downloading" line only; later lines keep it.
-      version:
-        status === "downloading"
-          ? detail
-          : typeof previous?.version === "string"
-            ? previous.version
-            : null,
-    };
     session.frame = { ...session.frame, firmwareUpdate };
     await db
       .update(frames)

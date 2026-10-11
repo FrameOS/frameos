@@ -22,7 +22,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu, type DropdownMenuProps } from '../../components/DropdownMenu'
 import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
-import { frameHost, frameUpgradeIsQueued } from '../../decorators/frame'
+import { frameFirmwareUpdateProgress, frameHost, frameUpgradeIsQueued } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { workspaceLogic } from './workspaceLogic'
@@ -75,6 +75,7 @@ export function FrameActionsMenu({
   // hidden because there is no device — see workspaceSurfaces.ts.
   const mode = workspaceMode()
   const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action, frame)
+  const firmwareProgress = frameFirmwareUpdateProgress(frame)
   // "Delete" is a different act per control plane (frameDeleteCopy.ts): the
   // backend drops the frame and its scenes, the cloud unlinks a device that
   // keeps running. The words come from the same allow-list module as the
@@ -224,7 +225,17 @@ export function FrameActionsMenu({
         // lags behind the verb again.
         ...(allows('updateFirmware')
           ? [
-              frameUpgradeIsQueued(frame)
+              firmwareProgress?.kind === 'running'
+                ? {
+                    // The device is already downloading or rebooting into
+                    // the update (hub-folded ota / cloud:upgrade lines): say
+                    // how far it is instead of offering the nudge again.
+                    label: firmwareProgress.label.charAt(0).toUpperCase() + firmwareProgress.label.slice(1),
+                    title: firmwareProgress.title,
+                    disabled: true,
+                    icon: <ArrowPathIcon className="h-5 w-5 animate-spin" />,
+                  }
+                : frameUpgradeIsQueued(frame)
                 ? {
                     // Already in the queue: a second click would only enqueue
                     // the same nudge behind the first.

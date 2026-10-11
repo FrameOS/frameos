@@ -150,8 +150,9 @@ export interface FrameType {
   next_wake_at?: string | null
   next_render_at?: string | null
   sleep_reason?: 'battery' | 'always' | 'battery_critical' | string | null
-  /** Cloud only: the device's last `ota:<plane>` log line, folded into the
-   * row by the hub while a firmware update runs (downloading, progress
+  /** Cloud only: the device's last firmware-update log line (the ESP32's
+   * `ota:<plane>`, the Pi's `cloud:upgrade`), folded into the row by the hub
+   * in one vocabulary while an update runs (downloading, progress
    * "<written>/<total>", verified, error <why>, …). Cleared on the hello
    * after a verified install; see frameFirmwareUpdateProgress(). */
   firmware_update?: FrameFirmwareUpdate | null

@@ -19,6 +19,7 @@ import {
   stateWithActiveScene,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateFromLogEntries,
   firmwareUpdateIsOver,
 } from "./protocol";
 
@@ -482,5 +483,95 @@ describe("firmwareUpdateIsOver", () => {
   it("has nothing to clear without a line", () => {
     expect(firmwareUpdateIsOver(null, "2026.10.3", "2026.10.1")).toBe(false);
     expect(firmwareUpdateIsOver(undefined, "2026.10.3", "2026.10.1")).toBe(false);
+  });
+});
+
+describe("firmwareUpdateFromLogEntries", () => {
+  const now = new Date("2026-10-11T19:25:41Z");
+  const entry = (payload: unknown) => ({ payload });
+
+  it("folds the ESP32's ota lines, keeping the version the downloading line named", () => {
+    const downloading = firmwareUpdateFromLogEntries(
+      [entry({ event: "ota:cloud", status: "downloading", detail: "2026.10.5", source: "esp32" })],
+      null,
+      now,
+    );
+    expect(downloading).toEqual({
+      at: now.toISOString(),
+      detail: "2026.10.5",
+      plane: "cloud",
+      status: "downloading",
+      version: "2026.10.5",
+    });
+    // A later batch: the newest ota line wins, render lines in between are
+    // ignored, and the version carries over from the row.
+    expect(
+      firmwareUpdateFromLogEntries(
+        [
+          entry({ event: "ota:cloud", status: "progress", detail: "524288/3232080" }),
+          entry({ event: "render:skipped", reason: "ota", status: "skipped" }),
+          entry({ event: "ota:cloud", status: "progress", detail: "1048576/3232080" }),
+        ],
+        downloading,
+        now,
+      ),
+    ).toMatchObject({ detail: "1048576/3232080", status: "progress", version: "2026.10.5" });
+    expect(
+      firmwareUpdateFromLogEntries([entry({ event: "ota:cloud", status: "verified", detail: "rebooting" })], downloading, now),
+    ).toMatchObject({ status: "verified", version: "2026.10.5" });
+  });
+
+  it("maps the Pi's cloud:upgrade words onto the same vocabulary", () => {
+    expect(
+      firmwareUpdateFromLogEntries(
+        [entry({ event: "cloud:upgrade", status: "scheduled", current_version: "2026.10.4" })],
+        null,
+        now,
+      ),
+    ).toMatchObject({ detail: "", plane: "cloud", status: "downloading", version: null });
+    const running = firmwareUpdateFromLogEntries(
+      [
+        entry({
+          event: "cloud:upgrade",
+          status: "running",
+          message: "FrameOS upgrade is running.",
+          current_version: "2026.10.4",
+          latest_version: "2026.10.5",
+        }),
+      ],
+      null,
+      now,
+    );
+    expect(running).toMatchObject({ detail: "FrameOS upgrade is running.", status: "downloading", version: "2026.10.5" });
+    expect(
+      firmwareUpdateFromLogEntries(
+        [entry({ event: "cloud:upgrade", status: "reboot_required", message: "FrameOS upgraded to 2026.10.5. Rebooting to finish." })],
+        running,
+        now,
+      ),
+    ).toMatchObject({ status: "verified", version: "2026.10.5" });
+    expect(
+      firmwareUpdateFromLogEntries(
+        [entry({ event: "cloud:upgrade", status: "stalled", detail: "the upgrade process stopped reporting" })],
+        running,
+        now,
+      ),
+    ).toMatchObject({ detail: "the upgrade process stopped reporting", status: "error" });
+    expect(
+      firmwareUpdateFromLogEntries([entry({ event: "cloud:upgrade", status: "up_to_date" })], null, now),
+    ).toMatchObject({ status: "up-to-date" });
+  });
+
+  it("leaves the row alone for batches without an update line, and for the Pi's idle word", () => {
+    expect(firmwareUpdateFromLogEntries([entry({ event: "render:done" })], null, now)).toBeNull();
+    expect(firmwareUpdateFromLogEntries([entry({ event: "cloud:upgrade", status: "idle" })], null, now)).toBeNull();
+    expect(firmwareUpdateFromLogEntries([entry("ota:cloud downloading"), entry(null)], null, now)).toBeNull();
+    // Device-written strings are capped before they reach the row.
+    const long = firmwareUpdateFromLogEntries(
+      [entry({ event: "ota:cloud", status: "error", detail: "x".repeat(500) })],
+      null,
+      now,
+    );
+    expect(long?.detail).toHaveLength(160);
   });
 });

@@ -2548,3 +2548,142 @@ describe("sweep", () => {
     }
   });
 });
+
+describe("firmware update progress", () => {
+  // The device narrates its update as log lines; the hub folds the newest one
+  // into frames.firmware_update and broadcasts the row, so the frames list can
+  // say "updating firmware 42%" instead of "waiting to sync" while it runs.
+  it("folds the ESP32's ota lines into the row and clears them on the hello after the reboot", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { frameos_version: "2026.10.4" });
+    const sessionToken = await createBrowserSession(account.id);
+    const browser = await openBrowser(frame.id, sessionToken);
+
+    device.send({
+      id: randomUUID(),
+      logs: [
+        { payload: { event: "ota:cloud", status: "downloading", detail: "2026.10.5", source: "esp32" } },
+        { payload: { event: "render:skipped", reason: "ota", status: "skipped" } },
+        { payload: { event: "ota:cloud", status: "progress", detail: "524288/3232080", source: "esp32" } },
+      ],
+      type: "log_batch",
+    });
+    const progress = await browser.next((msg) => {
+      if (msg.event !== "update_frame") {
+        return false;
+      }
+      const update = (msg.data as Record<string, unknown>).firmware_update;
+      return typeof update === "object" && update !== null && (update as { status?: string }).status === "progress";
+    }, "update_frame with the download's progress");
+    expect((progress.data as Record<string, unknown>).firmware_update).toMatchObject({
+      detail: "524288/3232080",
+      plane: "cloud",
+      status: "progress",
+      version: "2026.10.5",
+    });
+    const [midway] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(midway?.firmwareUpdate).toMatchObject({ status: "progress", version: "2026.10.5" });
+
+    device.send({
+      id: randomUUID(),
+      logs: [{ payload: { event: "ota:cloud", status: "verified", detail: "rebooting", source: "esp32" } }],
+      type: "log_batch",
+    });
+    await browser.next((msg) => {
+      if (msg.event !== "update_frame") {
+        return false;
+      }
+      const update = (msg.data as Record<string, unknown>).firmware_update as { status?: string } | null;
+      return update?.status === "verified";
+    }, "update_frame after verification");
+    device.ws.close();
+
+    // The hello after the reboot ends the narrative: the row says nothing
+    // about an update any more, and the browser learns that too.
+    const rebooted = await openDevice(token);
+    await handshake(rebooted, privateKey, { frameos_version: "2026.10.5" });
+    await browser.next((msg) => {
+      if (msg.event !== "update_frame") {
+        return false;
+      }
+      const data = msg.data as Record<string, unknown>;
+      return data.frameos_version === "2026.10.5" && data.firmware_update === null;
+    }, "update_frame with the narrative cleared");
+    const [after] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(after?.firmwareUpdate).toBeNull();
+    rebooted.ws.close();
+  });
+
+  it("reads the Pi's cloud:upgrade lines in the same vocabulary", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { frameos_version: "2026.10.4" });
+    const sessionToken = await createBrowserSession(account.id);
+    const browser = await openBrowser(frame.id, sessionToken);
+
+    device.send({
+      id: randomUUID(),
+      logs: [
+        { payload: { event: "cloud:upgrade", status: "scheduled", current_version: "2026.10.4" } },
+        {
+          payload: {
+            event: "cloud:upgrade",
+            status: "running",
+            message: "FrameOS upgrade is running.",
+            current_version: "2026.10.4",
+            latest_version: "2026.10.5",
+          },
+        },
+      ],
+      type: "log_batch",
+    });
+    const running = await browser.next((msg) => {
+      if (msg.event !== "update_frame") {
+        return false;
+      }
+      const update = (msg.data as Record<string, unknown>).firmware_update as { status?: string } | null;
+      return update?.status === "downloading";
+    }, "update_frame while the Pi downloads");
+    expect((running.data as Record<string, unknown>).firmware_update).toMatchObject({
+      detail: "FrameOS upgrade is running.",
+      status: "downloading",
+      version: "2026.10.5",
+    });
+
+    device.send({
+      id: randomUUID(),
+      logs: [
+        {
+          payload: {
+            event: "cloud:upgrade",
+            status: "failed",
+            message: "signature verification failed",
+            latest_version: "2026.10.5",
+          },
+        },
+      ],
+      type: "log_batch",
+    });
+    await browser.next((msg) => {
+      if (msg.event !== "update_frame") {
+        return false;
+      }
+      const update = (msg.data as Record<string, unknown>).firmware_update as { status?: string } | null;
+      return update?.status === "error";
+    }, "update_frame with the failure");
+    device.ws.close();
+
+    // A failure stays on the row across a reconnect on the SAME version, so
+    // the frames list can still say "update failed".
+    const again = await openDevice(token);
+    await handshake(again, privateKey, { frameos_version: "2026.10.4" });
+    await browser.next(
+      (msg) => msg.event === "update_frame" && (msg.data as Record<string, unknown>).connected === true,
+      "update_frame for the reconnect",
+    );
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.firmwareUpdate).toMatchObject({ detail: "signature verification failed", status: "error" });
+    again.ws.close();
+  });
+});
