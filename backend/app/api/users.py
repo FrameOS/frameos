@@ -9,6 +9,7 @@ from app.api.auth import (
     _should_use_secure_cookie,
     current_session_id,
     get_current_user_from_request,
+    require_session_credential,
 )
 from app.database import get_db
 from app.models.user import User
@@ -56,6 +57,7 @@ def api_user_update_email(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_local_user),
 ):
+    require_session_credential(request)
     if data.email == current_user.email:
         return {"email": current_user.email}
     # The email is the login name, so changing it is as sensitive as changing
@@ -112,6 +114,7 @@ def api_user_update_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_local_user),
 ):
+    require_session_credential(request)
     # A cloud-created user has no local password at all (cloud signup leaves it
     # NULL). Requiring the current one would leave them no way to ever set one,
     # so if the cloud link later breaks — revoked, provider gone, or
