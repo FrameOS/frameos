@@ -11,7 +11,9 @@
  * host whenever the scene's public state changes and read back when the
  * scene is next built (single_scene_host.initialState). The runtime decides
  * WHAT is persisted (frameos/src/embedded/embedded_runtime.nim: the public
- * fields and the persist:"disk" ones); this module only keeps bytes.
+ * fields and the persist:"disk" ones, each only once it has left its declared
+ * default, so a redeploy with a new default still reaches the frame); this
+ * module only keeps bytes.
  *
  * File names: /state/st-<fnv1a32 of the scene id>.json. SPIFFS caps a name
  * at 32 bytes (CONFIG_SPIFFS_OBJ_NAME_LEN) and a scene id is a 36-byte uuid,

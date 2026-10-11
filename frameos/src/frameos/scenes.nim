@@ -8,6 +8,7 @@ import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
 import frameos/types
 import frameos/interpreter
+import frameos/values
 import frameos/refresh_interval
 import frameos/js_runtime/runtime
 import frameos/js_runtime/app_runtime
@@ -748,16 +749,19 @@ proc updateLastPersistedState*(self: FrameScene) =
     return
   let exported = sceneExport.get()
   let persistedStateKeys = exported.persistedStateKeys
+  let declaredFields = declaredStateFields(exported)
   var hasChanges = false
-  # An implicit refresh interval still on the scene's default is not worth a
-  # file: persisting it would pin the old number when the scene's settings
-  # change. Once somebody customizes it, it persists like any other field.
+  # A field still on the scene's declared default is not worth a file:
+  # persisting it would pin the old value when the scene is redeployed with a
+  # new default (the refresh interval, an album id...), and the editor's
+  # change would never reach the frame. Once somebody customizes it, it
+  # persists like any other field, and going back to the default drops it.
   proc worthPersisting(key: string): bool =
     if not self.state.hasKey(key):
       return false
     if exported.refreshIntervalImplicit and key == exported.refreshIntervalKey:
       return parseRefreshSeconds(self.state[key]) != exported.refreshIntervalDefault
-    true
+    worthPersistingState(declaredFields, key, self.state[key])
   if not lastPersistedStates.hasKey(self.id.string):
     discard loadPersistedState(self.id)
   if not lastPersistedStates.hasKey(self.id.string):

@@ -104,6 +104,56 @@ suite "scene persistence helpers":
       updateUploadedScenes(uploadedBackupTable)
       removePersistedState(sceneId)
 
+  test "a declared field persists only once it leaves the scene's default":
+    # The Immich/Google Photos sample scenes: `seconds` (persist: disk, 300)
+    # and `albumId` (persist: disk, "") were written to disk on the first
+    # render while still at their defaults, so "set 10 s in the editor, Save +
+    # Deploy" changed nothing on a frame that had rendered the scene once:
+    # init seeds from the file before the field defaults.
+    let sceneId = "uploaded/persist-defaults".SceneId
+    let path = persistedPath(sceneId)
+    let uploadedBackupTable = uploadedScenes
+    try:
+      if fileExists(path):
+        removeFile(path)
+      updateUploadedScenes(buildInterpretedScenes(parseInterpretedSceneInputs($(%*[{
+        "id": sceneId.string, "name": "Persist defaults", "nodes": [], "edges": [],
+        "fields": [
+          {"name": "mode", "type": "select", "value": "random", "options": ["random", "album"],
+           "persist": "disk", "access": "public"},
+          {"name": "albumId", "type": "string", "value": "", "persist": "disk", "access": "public"},
+          {"name": "seconds", "type": "integer", "value": 300, "role": "refreshInterval",
+           "persist": "disk", "access": "public"},
+          {"name": "token", "type": "string", "value": "abc", "persist": "disk", "access": "private"},
+        ],
+        "settings": {"backgroundColor": "#000000", "refreshInterval": 300.0}
+      }]))))
+
+      # Everything as seeded: nothing to remember
+      let scene = FrameScene(id: sceneId, state: %*{"mode": "random", "albumId": "", "seconds": 300, "token": "abc"})
+      scene.updateLastPersistedState()
+      check not fileExists(path)
+
+      # A control form moved the album and the interval (numbers arrive as
+      # strings); the private field is still on its default
+      scene.state["mode"] = %"album"
+      scene.state["albumId"] = %"album-1"
+      scene.state["seconds"] = %"10"
+      scene.updateLastPersistedState()
+      let persisted = loadPersistedState(sceneId)
+      check persisted == %*{"mode": "album", "albumId": "album-1", "seconds": "10"}
+
+      # Back on the defaults: the file goes away, the next init seeds whatever
+      # the editor ships next
+      scene.state["mode"] = %"random"
+      scene.state["albumId"] = %""
+      scene.state["seconds"] = %300
+      scene.updateLastPersistedState()
+      check not fileExists(path)
+    finally:
+      updateUploadedScenes(uploadedBackupTable)
+      removePersistedState(sceneId)
+
   test "updateLastPersistedState removes stale keys when fields stop persisting":
     let sceneId = "uploaded/persist-prune".SceneId
     let path = persistedPath(sceneId)

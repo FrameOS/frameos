@@ -177,8 +177,12 @@ scene can change it without opening the editor:
   the scene is using the name for something else — and then there is no
   interval control; the linter warns.)
 - Anything that is not a positive number falls back to the scene's default.
-  A customized implicit interval is persisted; one still on the default is
-  not, so editing `settings.refreshInterval` keeps working after a redeploy.
+- A `persist: "disk"` field (and, on the ESP32, every public field) reaches
+  the state file only once it has left its declared default; back on the
+  default it is dropped again. A value still on the default would otherwise
+  pin it: the file is read before the defaults, so a redeploy that changes
+  the default (`settings.refreshInterval`, a `seconds` field, an album id)
+  would never reach a frame that had rendered the scene once.
 
 There is no need to wire a state node into `logic/nextSleepDuration` to make
 the cadence configurable. That app (and `frameos.setNextSleep()`) is a
