@@ -5,6 +5,7 @@ import { useState } from 'react'
 import type { CSSProperties, DragEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
+  ArrowPathIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   CheckCircleIcon,
@@ -411,6 +412,18 @@ function QueuedMarker(): JSX.Element {
   )
 }
 
+// The spinner after "updating firmware 42%": the device is downloading or
+// rebooting into an update right now, and the word alone read like one more
+// static state next to "waiting to sync".
+function UpdatingMarker(): JSX.Element {
+  return (
+    <ArrowPathIcon
+      className="pointer-events-none ml-1 inline h-3.5 w-3.5 animate-spin align-[-2px] text-amber-500"
+      aria-label="updating"
+    />
+  )
+}
+
 function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element {
   const { undeployedChangeDetails, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId: frame.id }))
   const { openFrameChangeDrawer } = useActions(workspaceLogic)
@@ -430,6 +443,7 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   // lines): a download in progress is the one thing happening on this
   // frame, so it outranks "upgrade queued" and "waiting to sync".
   const firmwareProgress = frameFirmwareUpdateProgress(frame)
+  const firmwareUpdating = firmwareProgress?.kind === 'running'
   const changeLabel = unsavedChanges
     ? 'unsaved'
     : firmwareProgress
@@ -460,7 +474,7 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
           className={clsx(
             'frameos-change-status-link relative rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null,
-            upgradeQueued ? 'pr-3' : null
+            upgradeQueued && !firmwareUpdating ? 'pr-3' : null
           )}
           title={
             firmwareProgress
@@ -471,12 +485,12 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
           }
         >
           {changeLabel}
-          {upgradeQueued ? <QueuedMarker /> : null}
+          {firmwareUpdating ? <UpdatingMarker /> : upgradeQueued ? <QueuedMarker /> : null}
         </button>
       ) : (
-        <span className={clsx('relative font-medium', upgradeQueued ? 'pr-3' : null)}>
+        <span className={clsx('relative font-medium', upgradeQueued && !firmwareUpdating ? 'pr-3' : null)}>
           {changeLabel}
-          {upgradeQueued ? <QueuedMarker /> : null}
+          {firmwareUpdating ? <UpdatingMarker /> : upgradeQueued ? <QueuedMarker /> : null}
         </span>
       )}
       <span> - </span>

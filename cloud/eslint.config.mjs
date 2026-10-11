@@ -109,6 +109,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/template-install-feedback.test.ts",
       // Mounts eventsLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/custom-event-origins.test.ts",
+      // Mounts frameLogic for Save & Deploy; out of the tsconfig too.
+      "**/src/test/shared-spa/save-and-deploy-waits-for-save.test.ts",
     ],
   },
   js.configs.recommended,

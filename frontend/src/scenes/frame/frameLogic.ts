@@ -2173,6 +2173,7 @@ export interface frameLogicValues {
   frameFormErrors: DeepPartialMap<FrameType, ValidationErrorType>
   frameFormHasErrors: boolean
   frameFormManualErrors: Record<string, any>
+  frameFormSaveError: Error | null
   frameFormTouched: boolean
   frameFormTouches: Record<string, boolean>
   frameFormValidationErrors: DeepPartialMap<FrameType, ValidationErrorType>
@@ -2691,6 +2692,17 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   reducers({
+    // How the last save ended, for the save-then-deploy flows: kea-forms'
+    // submit promise resolves once the request is dispatched, before the
+    // server has answered, so the outcome has to be read back from here.
+    frameFormSaveError: [
+      null as Error | null,
+      {
+        submitFrameFormRequest: () => null,
+        submitFrameFormSuccess: () => null,
+        submitFrameFormFailure: (_, { error }) => error,
+      },
+    ],
     convertingSceneId: [
       null as string | null,
       {
@@ -3527,6 +3539,24 @@ export const frameLogic = kea<frameLogicType>([
     // checksummed result to the device. That push IS the deploy; the ad-hoc
     // uploadScenes shim stays as the fallback when persistence fails, so the
     // frame still updates even if the cloud refuses a scene.
+    // Save & Deploy used to `await asyncActions.submitFrameForm()` and deploy
+    // whatever came of it. That promise resolves as soon as the save request
+    // is dispatched, so the deploy raced the save; and a save the backend
+    // refused (a 400 on the server host, a reboot schedule it will not take,
+    // a field that failed validation) still deployed the last saved copy while
+    // the deploy drawer kept listing the same unsaved changes. Wait for the
+    // save to finish and stop when it did not: the failure toast
+    // (submitFrameFormFailure) says why.
+    const saveBeforeDeploy = async (): Promise<boolean> => {
+      if (values.frameFormHasErrors) {
+        // Surfaces the inline errors and the "fields need fixing" toast
+        actions.submitFrameForm()
+        return false
+      }
+      // The same values kea-forms hands submitFrameFormRequest itself
+      await asyncActions.submitFrameFormRequest(values.frameForm as FrameType)
+      return !values.frameFormSaveError
+    }
     const cloudSaveAndDeploy = async (): Promise<void> => {
       try {
         await pushCloudFrameSettings(props.frameId, normalizeFrameForSubmit(values.frameForm))
@@ -3636,7 +3666,9 @@ export const frameLogic = kea<frameLogicType>([
         // live connection and falls back to SSH by itself, so a disconnected
         // remote is not a reason to silently overwrite the user's saved
         // choice of how this frame is reached.
-        await asyncActions.submitFrameForm()
+        if (!(await saveBeforeDeploy())) {
+          return
+        }
         framesModel.actions.deployFrame(
           props.frameId,
           frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
@@ -3651,7 +3683,9 @@ export const frameLogic = kea<frameLogicType>([
         // live connection and falls back to SSH by itself, so a disconnected
         // remote is not a reason to silently overwrite the user's saved
         // choice of how this frame is reached.
-        await asyncActions.submitFrameForm()
+        if (!(await saveBeforeDeploy())) {
+          return
+        }
         framesModel.actions.deployFrame(props.frameId, true)
       },
       saveAndFullDeployFrame: async () => {
@@ -3663,7 +3697,9 @@ export const frameLogic = kea<frameLogicType>([
         // live connection and falls back to SSH by itself, so a disconnected
         // remote is not a reason to silently overwrite the user's saved
         // choice of how this frame is reached.
-        await asyncActions.submitFrameForm()
+        if (!(await saveBeforeDeploy())) {
+          return
+        }
         framesModel.actions.deployFrame(props.frameId, false)
       },
       renderFrame: () => framesModel.actions.renderFrame(props.frameId),

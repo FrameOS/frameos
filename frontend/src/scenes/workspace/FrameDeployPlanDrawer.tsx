@@ -6,8 +6,10 @@ import copy from 'copy-to-clipboard'
 import {
   ArrowDownTrayIcon,
   ArrowLeftIcon,
+  ArrowPathIcon,
   ArrowsRightLeftIcon,
   ChevronRightIcon,
+  ClockIcon,
   CloudArrowDownIcon,
   CloudArrowUpIcon,
   ClipboardDocumentIcon,
@@ -32,8 +34,11 @@ import {
   formatFrameRelativeFuture,
   formatFrameRelativeTime,
   frameCheckin,
+  frameFirmwareUpdateProgress,
   frameHasActivityLog,
   frameHost,
+  frameUpgradeIsQueued,
+  type FrameFirmwareUpdateProgress,
 } from '../../decorators/frame'
 import {
   EMBEDDED_VIRTUAL,
@@ -2518,6 +2523,75 @@ function CloudStatusRow({
   )
 }
 
+function capitalizeFirst(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/**
+ * An update that is already on its way, for the two cloud update cards: the
+ * nudge is queued for a sleeping frame, the device is downloading or
+ * rebooting (hub-folded ota / cloud:upgrade progress), or its last attempt
+ * failed. The cards disable their button for the first two — pressing it
+ * again only queued the same nudge behind the reboot and, with nothing on
+ * screen changing, read as if the first click had been lost.
+ */
+function cloudFirmwareUpdateState(frame: FrameType): {
+  progress: FrameFirmwareUpdateProgress | null
+  queued: boolean
+  inFlight: boolean
+} {
+  const progress = frameFirmwareUpdateProgress(frame)
+  const queued = frameUpgradeIsQueued(frame)
+  return { progress, queued, inFlight: progress?.kind === 'running' || queued }
+}
+
+function CloudFirmwareUpdateState({
+  state,
+  noun,
+}: {
+  state: ReturnType<typeof cloudFirmwareUpdateState>
+  noun: string
+}): JSX.Element | null {
+  const { progress, queued } = state
+  if (progress?.kind === 'running') {
+    return (
+      <div className="space-y-1.5" role="status">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">
+          <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+          <span>{capitalizeFirst(progress.label)}</span>
+        </div>
+        {progress.percent !== null ? (
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-400/25">
+            <div
+              className="h-full rounded-full bg-[color:var(--frameos-primary)] transition-[width] duration-500"
+              style={{ width: `${progress.percent}%` }}
+            />
+          </div>
+        ) : null}
+        <div className="frame-tool-muted text-xs leading-4">
+          {progress.title}. The frame reconnects on the new {noun} when it is done; the lines also show in Logs.
+        </div>
+      </div>
+    )
+  }
+  if (progress?.kind === 'failed') {
+    return (
+      <div className="text-xs leading-4 text-amber-700 dark:text-amber-300" role="status">
+        {progress.title}
+      </div>
+    )
+  }
+  if (queued) {
+    return (
+      <div className="frame-tool-muted flex items-center gap-2 text-xs leading-4" role="status">
+        <ClockIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>An update request is already queued; it applies when the frame next wakes.</span>
+      </div>
+    )
+  }
+  return null
+}
+
 /**
  * The "what is there to update" summary every cloud deploy view opens with:
  * connection, firmware version vs. the published release, and whether the
@@ -2619,8 +2693,38 @@ function CloudDeployStatus({
   // Pi upgrades its FrameOS release, but "device version vs latest published
   // release" reads the same either way.
   const versionLabel = isEsp32 ? 'Firmware' : 'FrameOS'
+  // What the device itself said about an update in flight (hub-folded ota /
+  // cloud:upgrade lines) outranks the version comparison: "2026.10.4 →
+  // 2026.10.5, a newer release is published" was all this row said while the
+  // download it had just started was half-way through.
+  const firmwareProgress = frameFirmwareUpdateProgress(frame)
   let firmware: JSX.Element | null = null
-  if (deviceVersion && releaseInfo.release) {
+  if (firmwareProgress?.kind === 'running') {
+    firmware = (
+      <CloudStatusRow
+        label={versionLabel}
+        value={
+          <span className="inline-flex items-center gap-2">
+            <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden="true" />
+            {capitalizeFirst(firmwareProgress.label)}
+          </span>
+        }
+        detail={`${firmwareProgress.title}. ${
+          deviceVersion ? `Running ${deviceVersion} until then; it` : 'It'
+        } reconnects on the new version when it is done.`}
+        tone="muted"
+      />
+    )
+  } else if (firmwareProgress?.kind === 'failed') {
+    firmware = (
+      <CloudStatusRow
+        label={versionLabel}
+        value={`${deviceVersion ?? 'Unknown'} · update failed`}
+        detail={`${firmwareProgress.title} You can ask it to try again below.`}
+        tone="warn"
+      />
+    )
+  } else if (deviceVersion && releaseInfo.release) {
     firmware =
       deviceVersion === releaseInfo.release ? (
         <CloudStatusRow
@@ -2850,6 +2954,7 @@ function CloudOtaDeployView({
   const firmwareDisabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
   const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
   const upToDate = Boolean(deviceVersion && releaseInfo.release && deviceVersion === releaseInfo.release)
+  const updateState = cloudFirmwareUpdateState(frame)
 
   return (
     <>
@@ -2871,23 +2976,28 @@ function CloudOtaDeployView({
                 installs it into the spare OTA slot and reboots. Progress shows up in Logs as <code>ota:cloud</code>{' '}
                 lines.
               </div>
-              {upToDate ? (
+              {upToDate && !updateState.inFlight ? (
                 <div className="frame-tool-muted text-xs leading-4">
                   The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
                 </div>
               ) : null}
+              <CloudFirmwareUpdateState state={updateState} noun="firmware" />
               {/* The button and the checkbox are both inline boxes; without a
                   flex row they sat on one line touching each other. */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <button
                   type="button"
                   title={
-                    firmwareDisabledReason ??
-                    (alsoPushScenes && offerResend
-                      ? 'Queue a firmware update and resend this frame’s scenes & settings'
-                      : 'Queue a firmware update notification')
+                    updateState.progress?.kind === 'running'
+                      ? updateState.progress.title
+                      : updateState.queued
+                      ? 'The update request is queued and applies when the frame next wakes'
+                      : firmwareDisabledReason ??
+                        (alsoPushScenes && offerResend
+                          ? 'Queue a firmware update and resend this frame’s scenes & settings'
+                          : 'Queue a firmware update notification')
                   }
-                  disabled={Boolean(firmwareDisabledReason)}
+                  disabled={Boolean(firmwareDisabledReason) || updateState.inFlight}
                   onClick={() => {
                     if (alsoPushScenes && offerResend) {
                       // Scenes first: the OTA reboot redelivers a queued push
@@ -2903,11 +3013,22 @@ function CloudOtaDeployView({
                     'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
                   )}
                 >
-                  <CloudArrowDownIcon className="h-4 w-4" />
-                  {/* Constant label: the checkbox below says whether scenes ride
-                    along, so a button that renamed itself to "Update
-                    everything" only made the two disagree about what it does. */}
-                  Update firmware
+                  {updateState.progress?.kind === 'running' ? (
+                    <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                  ) : updateState.queued ? (
+                    <ClockIcon className="h-4 w-4" />
+                  ) : (
+                    <CloudArrowDownIcon className="h-4 w-4" />
+                  )}
+                  {/* Constant label while idle: the checkbox below says whether
+                    scenes ride along, so a button that renamed itself to
+                    "Update everything" only made the two disagree about what it
+                    does. It does say when the update is already under way. */}
+                  {updateState.progress?.kind === 'running'
+                    ? 'Updating firmware'
+                    : updateState.queued
+                    ? 'Update queued'
+                    : 'Update firmware'}
                 </button>
                 {/* Nothing to resend when the device already acked everything:
                   a tick that sends nothing only invites the question of why
@@ -3283,6 +3404,7 @@ function CloudPiUpdateCard({
   const disabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
   const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
   const upToDate = Boolean(deviceVersion && releaseInfo.release && deviceVersion === releaseInfo.release)
+  const updateState = cloudFirmwareUpdateState(frame)
 
   return (
     <section className="space-y-2">
@@ -3293,23 +3415,28 @@ function CloudPiUpdateCard({
           downloads the latest FrameOS release, verifies the signature on the device itself, installs it next to the
           current version and restarts into it. Progress shows up in Logs as <code>cloud:upgrade</code> lines.
         </div>
-        {upToDate ? (
+        {upToDate && !updateState.inFlight ? (
           <div className="frame-tool-muted text-xs leading-4">
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
+        <CloudFirmwareUpdateState state={updateState} noun="release" />
         {/* Same row as the ESP32 card: the button and the checkbox are inline
             boxes and touched each other without one. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <button
             type="button"
             title={
-              disabledReason ??
-              (alsoPushScenes && offerResend
-                ? 'Queue a FrameOS update and push this frame’s scenes & settings'
-                : 'Queue a FrameOS update notification')
+              updateState.progress?.kind === 'running'
+                ? updateState.progress.title
+                : updateState.queued
+                ? 'The update request is queued and applies when the frame next wakes'
+                : disabledReason ??
+                  (alsoPushScenes && offerResend
+                    ? 'Queue a FrameOS update and push this frame’s scenes & settings'
+                    : 'Queue a FrameOS update notification')
             }
-            disabled={Boolean(disabledReason)}
+            disabled={Boolean(disabledReason) || updateState.inFlight}
             onClick={() => {
               if (alsoPushScenes && offerResend) {
                 // Scenes first: the firmware update reboots the frame, and a
@@ -3327,9 +3454,20 @@ function CloudPiUpdateCard({
               'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
             )}
           >
-            <CloudArrowDownIcon className="h-4 w-4" />
-            {/* Constant label — the checkbox above owns "and the scenes too". */}
-            Update FrameOS
+            {updateState.progress?.kind === 'running' ? (
+              <ArrowPathIcon className="h-4 w-4 animate-spin" />
+            ) : updateState.queued ? (
+              <ClockIcon className="h-4 w-4" />
+            ) : (
+              <CloudArrowDownIcon className="h-4 w-4" />
+            )}
+            {/* Constant label while idle — the checkbox above owns "and the
+                scenes too"; it only changes to say the update is under way. */}
+            {updateState.progress?.kind === 'running'
+              ? 'Updating FrameOS'
+              : updateState.queued
+              ? 'Update queued'
+              : 'Update FrameOS'}
           </button>
           {offerResend ? (
             <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />

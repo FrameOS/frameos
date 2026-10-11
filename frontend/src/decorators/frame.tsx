@@ -187,20 +187,31 @@ export interface FrameFirmwareUpdateProgress {
   title: string
   /** 0..100 while a download reports written/total, else null. */
   percent: number | null
+  /** The release being installed, when the device named it. */
+  version: string | null
 }
 
-/** A download that has not reported for this long is not running any more. */
+/** A download that reported byte counts and then stopped for this long is not running any more. */
 const firmwareUpdateStaleMs = 15 * 60 * 1000
+/**
+ * A download without byte counts (the Pi fetches its 40 MB release archive in
+ * one go and reports phases, not bytes) gets as long as the device's own
+ * watcher before it is disbelieved: frameos/upgrade.nim logs `stalled` — an
+ * error line — after 45 minutes of silence.
+ */
+const firmwareUpdateNoProgressStaleMs = 45 * 60 * 1000
 /** A failure is worth a word for a while, then the row goes back to normal. */
 const firmwareUpdateFailureShownMs = 6 * 60 * 60 * 1000
 
 /**
- * What the device said about its firmware update, read for the frames
- * list (FrameDashboardStatusLine). The hub folds the `ota:<plane>` log
- * lines into the row; before this they were visible only as log lines and
- * a frame mid-download read "waiting to sync". null when nothing is going
- * on, when the last line is too old to be believed, or when the device
- * reported it was already up to date.
+ * What the device said about its firmware update, read for the frames list
+ * (FrameDashboardStatusLine), the change-status tile, the "…" menu and the
+ * deploy drawer. The hub folds the ESP32's `ota:<plane>` lines and the Pi's
+ * `cloud:upgrade` lines into the row in one vocabulary (frame-hub
+ * protocol.ts firmwareUpdateFromLogEntries); before this they were visible
+ * only as log lines and a frame mid-download read "waiting to sync". null
+ * when nothing is going on, when the last line is too old to be believed,
+ * or when the device reported it was already up to date.
  */
 export function frameFirmwareUpdateProgress(
   frame: FrameType,
@@ -212,23 +223,28 @@ export function frameFirmwareUpdateProgress(
   }
   const at = parseFrameTimestamp(update.at)
   const age = Number.isFinite(at) ? now - at : Number.POSITIVE_INFINITY
-  const version = update.version ? ` ${update.version}` : ''
+  const version = update.version || null
+  const versionSuffix = version ? ` ${version}` : ''
   const detail = update.detail || ''
   switch (update.status) {
     case 'downloading':
     case 'progress': {
-      if (age > firmwareUpdateStaleMs) {
-        return null
-      }
       const match = /^(\d+)\/(\d+)$/.exec(detail)
       const written = match ? Number(match[1]) : NaN
       const total = match ? Number(match[2]) : NaN
       const percent = total > 0 && written >= 0 ? Math.min(100, Math.round((written / total) * 100)) : null
+      if (age > (percent === null ? firmwareUpdateNoProgressStaleMs : firmwareUpdateStaleMs)) {
+        return null
+      }
+      // The Pi's lines carry its own sentence ("FrameOS upgrade is running.");
+      // the ESP32's downloading line only repeats the version.
+      const phrase = detail && !match && detail !== version ? `: ${detail}` : ''
       return {
         kind: 'running',
         label: percent === null ? 'updating firmware' : `updating firmware ${percent}%`,
-        title: `Downloading FrameOS${version}${percent === null ? '' : ` (${percent}%)`}`,
+        title: `Downloading FrameOS${versionSuffix}${percent === null ? '' : ` (${percent}%)`}${phrase}`,
         percent,
+        version,
       }
     }
     case 'verified':
@@ -237,9 +253,10 @@ export function frameFirmwareUpdateProgress(
       }
       return {
         kind: 'running',
-        label: `rebooting into${version || ' the update'}`,
-        title: `Firmware verified; the frame restarts into FrameOS${version}`,
+        label: `rebooting into${versionSuffix || ' the update'}`,
+        title: `Firmware verified; the frame restarts into FrameOS${versionSuffix}`,
         percent: 100,
+        version,
       }
     case 'error':
       if (age > firmwareUpdateFailureShownMs) {
@@ -248,13 +265,19 @@ export function frameFirmwareUpdateProgress(
       return {
         kind: 'failed',
         label: 'update failed',
-        title: `The firmware update failed: ${detail || 'unknown error'}. See the ota lines in Logs.`,
+        title: `The firmware update failed: ${detail || 'unknown error'}. See the ota or cloud:upgrade lines in Logs.`,
         percent: null,
+        version,
       }
     default:
       // up-to-date, downgrade-refused, skipped: nothing in flight.
       return null
   }
+}
+
+/** True while the device is downloading, installing or rebooting into a firmware update. */
+export function frameFirmwareUpdateIsRunning(frame: FrameType, now: number = Date.now()): boolean {
+  return frameFirmwareUpdateProgress(frame, now)?.kind === 'running'
 }
 
 export function frameCheckin(frame: FrameType, now: number = Date.now()): FrameCheckin | null {

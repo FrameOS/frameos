@@ -162,6 +162,15 @@ Cloud-profile verb set (complete):
   fetches and verifies its own signed release independently (see OTA
   below). On buildroot/Pi it triggers the signed upgrade flow in
   `frameos/upgrade.nim`; on ESP32 the signed boot-slot OTA.
+  The device narrates the update as log lines (`ota:<plane>` on the ESP32,
+  `cloud:upgrade` on buildroot/Pi); the hub folds the newest one of every
+  `log_batch` into `frames.firmware_update` (`frame-hub/src/protocol.ts`
+  `firmwareUpdateFromLogEntries`: one vocabulary — `downloading`,
+  `progress "<written>/<total>"`, `verified`, `error`, `up-to-date`) and
+  broadcasts the row, which is what lets the frames list, the deploy drawer
+  and the "…" menu say "updating firmware 42%" instead of offering the nudge
+  again. The hello after the reboot clears it (a verified install, or any new
+  version); a failure stays until a hello reports a different version.
 - `refresh_service_settings` — advisory only, empty payload; the device
   fetches the account's service API keys over device-authed HTTPS (see
   "Service settings: a pull, not a push" below). No credential ever rides

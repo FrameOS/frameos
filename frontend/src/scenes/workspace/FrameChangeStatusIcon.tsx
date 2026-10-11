@@ -1,7 +1,9 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import type { MouseEvent, SVGProps } from 'react'
-import { ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
+
+import { frameFirmwareUpdateProgress } from '../../decorators/frame'
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -52,8 +54,16 @@ export function FrameChangeStatusIcon({
   const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
+  // The device is downloading or rebooting into a firmware update (the hub
+  // folds its ota / cloud:upgrade lines into the row): the tile spins and
+  // says how far it is, instead of showing the same "undeployed" arrow it
+  // showed before the click — which read as if nothing had happened.
+  const firmwareProgress = frame ? frameFirmwareUpdateProgress(frame) : null
+  const firmwareUpdating = firmwareProgress?.kind === 'running'
   const statusLabel = unsavedChanges
     ? 'Unsaved'
+    : firmwareUpdating
+    ? 'Updating'
     : hasFrameSyncChanges
     ? 'Sync'
     : undeployedChanges
@@ -64,7 +74,9 @@ export function FrameChangeStatusIcon({
   // gave no hint that the thing waiting was a FrameOS release, which is the
   // one pending change you might want to act on days later.
   const statusTitle =
-    statusLabel === 'Undeployed' && undeployedChangeDetails.length > 0
+    firmwareUpdating && firmwareProgress
+      ? firmwareProgress.title
+      : statusLabel === 'Undeployed' && undeployedChangeDetails.length > 0
       ? undeployedChangeDetails.map((change) => change.label).join(', ')
       : `${statusLabel} changes`
   // The deploy drawer is the 'deploy' menu action's dialog, so this icon may
@@ -77,13 +89,19 @@ export function FrameChangeStatusIcon({
   // cannot serve.
   const canOpenDeployDrawer = drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
-  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : hasFrameSyncChanges ? ArrowsRightLeftIcon : DeployToFrameIcon
+  const StatusIcon = unsavedChanges
+    ? CloudArrowUpIcon
+    : firmwareUpdating
+    ? ArrowPathIcon
+    : hasFrameSyncChanges
+    ? ArrowsRightLeftIcon
+    : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard
     ? 'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition'
     : 'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition'
   const idleClassName = isDashboard ? 'frameos-icon-tile bg-white/70 text-slate-700 shadow-sm' : 'text-current'
-  const iconClassName = isDashboard ? 'h-7 w-7' : 'h-5 w-5'
+  const iconClassName = clsx(isDashboard ? 'h-7 w-7' : 'h-5 w-5', firmwareUpdating ? 'animate-spin' : null)
 
   const focusFrameAfterDrawerUpdate = (): void => {
     if (isDashboard) {
@@ -167,6 +185,8 @@ export function FrameChangeStatusIcon({
           ? 'Open unsaved changes'
           : unsavedChanges
           ? 'Open deploy for unsaved changes'
+          : firmwareUpdating
+          ? 'Open deploy for the running firmware update'
           : hasFrameSyncChanges
           ? 'Open sync'
           : 'Open deploy for undeployed changes'

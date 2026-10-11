@@ -87,13 +87,7 @@
           "keyword": "data/immich",
           "config": {},
           "cache": {
-            "enabled": true,
-            "inputEnabled": true,
-            "durationEnabled": true,
-            "duration": "state{\"seconds\"}.getFloat()",
-            "expressionEnabled": false,
-            "expression": null,
-            "expressionType": null
+            "enabled": false
           }
         },
         "width": 300,

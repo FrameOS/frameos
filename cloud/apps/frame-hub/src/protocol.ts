@@ -262,3 +262,117 @@ export function firmwareUpdateIsOver(
     reportedVersion !== (knownVersion ?? "")
   );
 }
+
+// What the row's firmware_update says, in ONE vocabulary for both device
+// families (frontend/src/decorators/frame.tsx frameFirmwareUpdateProgress
+// reads it):
+//   downloading   the device accepted the update and is fetching it
+//                 (`version` = the release it is fetching, when it said)
+//   progress      "<written>/<total>" bytes so far (the ESP32 reports every
+//                 512 KB; the Pi's archive download has no progress lines)
+//   verified      installed and verified; the device restarts into it
+//   error         the attempt failed; `detail` is the device's reason
+//   up-to-date, skipped, downgrade-refused   nothing to do
+export interface FirmwareUpdateRecord {
+  at: string;
+  detail: string;
+  plane: string;
+  status: string;
+  version: string | null;
+}
+
+// frameos/upgrade.nim upgradeStatusLogLine + hub_client.nim: the Pi narrates
+// its signed release upgrade as `cloud:upgrade` lines whose `status` is the
+// upgrade-status.json word. "running" covers the whole download+install (no
+// byte counts), so it maps onto `downloading`; "idle" is the file's resting
+// state and says nothing about an update.
+const piUpgradeStatusToRow: Record<string, string> = {
+  error: "error",
+  failed: "error",
+  reboot_required: "verified",
+  running: "downloading",
+  scheduled: "downloading",
+  skipped: "skipped",
+  stalled: "error",
+  starting: "downloading",
+  success: "verified",
+  up_to_date: "up-to-date",
+};
+
+function firmwareUpdateLine(
+  payload: unknown,
+): { detail: string; plane: string; status: string; version: string | null } | null {
+  if (!isRecord(payload) || typeof payload.event !== "string" || typeof payload.status !== "string") {
+    return null;
+  }
+  if (payload.event.startsWith("ota:")) {
+    // embedded/esp32/main/fos_ota.c: the version rides the "downloading"
+    // line's detail; later lines carry bytes, a reason, or "rebooting".
+    const status = payload.status.slice(0, 32);
+    const detail = typeof payload.detail === "string" ? payload.detail.slice(0, 160) : "";
+    return {
+      detail,
+      plane: payload.event.slice(4, 36),
+      status,
+      version: status === "downloading" && detail.length > 0 ? detail : null,
+    };
+  }
+  if (payload.event === "cloud:upgrade") {
+    const status = piUpgradeStatusToRow[payload.status];
+    if (!status) {
+      return null;
+    }
+    const message =
+      typeof payload.message === "string"
+        ? payload.message
+        : typeof payload.detail === "string"
+          ? payload.detail
+          : "";
+    return {
+      detail: message.slice(0, 160),
+      plane: "cloud",
+      status,
+      version:
+        typeof payload.latest_version === "string" && payload.latest_version.length > 0
+          ? payload.latest_version.slice(0, 64)
+          : null,
+    };
+  }
+  return null;
+}
+
+// The newest firmware-update line of a log batch, folded over what the row
+// already says: the ESP32's `ota:<plane>` lines and the Pi's `cloud:upgrade`
+// lines. A line that names no version keeps the one an earlier line named
+// (the ESP32 says it once, on "downloading"). null when the batch has no such
+// line — the caller leaves the row alone.
+export function firmwareUpdateFromLogEntries(
+  entries: { payload: unknown }[],
+  previous: unknown,
+  now: Date = new Date(),
+): FirmwareUpdateRecord | null {
+  let latest: ReturnType<typeof firmwareUpdateLine> = null;
+  let version: string | null = null;
+  for (const entry of entries) {
+    const line = firmwareUpdateLine(entry.payload);
+    if (line) {
+      latest = line;
+      if (line.version) {
+        version = line.version;
+      }
+    }
+  }
+  if (!latest) {
+    return null;
+  }
+  if (!version && isRecord(previous) && typeof previous.version === "string") {
+    version = previous.version;
+  }
+  return {
+    at: now.toISOString(),
+    detail: latest.detail,
+    plane: latest.plane,
+    status: latest.status,
+    version,
+  };
+}

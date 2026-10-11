@@ -3,7 +3,7 @@ import { framesModel } from '../../models/framesModel'
 import { longRunningTasksModel } from '../../models/longRunningTasksModel'
 import type { LongRunningTask } from '../../models/longRunningTasksModel'
 import { publishedReleaseModel } from '../../models/publishedReleaseModel'
-import { frameStatusWithSpinner, frameUpgradeIsQueued } from '../../decorators/frame'
+import { frameFirmwareUpdateIsRunning, frameStatusWithSpinner, frameUpgradeIsQueued } from '../../decorators/frame'
 import type { FrameId, FrameType } from '../../types'
 import { isCloudMode } from '../../utils/cloudMode'
 import { deviceUpgradeInFlight, frameLogic, pendingFrameosUpgrade } from '../frame/frameLogic'
@@ -51,7 +51,14 @@ export function fleetUpdateVerbForFrame(frame: FrameType): FleetUpdateVerb | nul
 
 /** An update this UI already asked for and that has not settled: never ask again on top of it. */
 export function fleetUpdateInFlight(frame: FrameType, runningTasks: LongRunningTask[]): boolean {
-  if (frameUpgradeIsQueued(frame) || frameStatusWithSpinner.includes(frame.status)) {
+  // A cloud frame mid-download (the hub folds its ota / cloud:upgrade lines
+  // into the row) is updating already: a second nudge would only queue
+  // behind the reboot.
+  if (
+    frameUpgradeIsQueued(frame) ||
+    frameFirmwareUpdateIsRunning(frame) ||
+    frameStatusWithSpinner.includes(frame.status)
+  ) {
     return true
   }
   if (
