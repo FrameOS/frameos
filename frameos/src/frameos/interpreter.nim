@@ -99,20 +99,26 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
   ## rendered before the producer this pass, and a compositing producer (JS,
   ## SVG) blends over the same — baking either into the cache would replay a
   ## stale background over later renders.
-  proc refuse(reason: string): ImageSpool =
-    scene.logger.log(%*{
-      "event": "interpreter:cache:imageSpill:refused",
-      "sceneId": scene.id.string,
-      "nodeId": nodeId.int,
-      "reason": reason
-    })
+  ## "skipped", not an error: nothing failed, the cache simply holds nothing
+  ## for this value. Logged only when the reason is worth a look; the canvas
+  ## alias below is the by-design case for every scene that draws one image
+  ## straight onto the canvas, so it fires on nearly every render and used to
+  ## read like a failure in the logs ("imageSpill:refused", 2026-10-12).
+  proc refuse(reason: string, debugOnly = false): ImageSpool =
+    if not debugOnly or scene.frameConfig.debug:
+      scene.logger.log(%*{
+        "event": "interpreter:cache:imageSpill:skipped",
+        "sceneId": scene.id.string,
+        "nodeId": nodeId.int,
+        "reason": reason
+      })
     nil
 
   if imageSpillDisabled:
     return refuse("spill disabled after an earlier storage failure")
   if context != nil and context.hasImage and not context.image.isNil and
       image.bufferPointer == context.image.bufferPointer:
-    return refuse("value aliases the live canvas")
+    return refuse("value aliases the live canvas", debugOnly = true)
   # The disk tier exists for canvas-shaped values. A native-resolution decode
   # that some unfused shape materialized (tens of MB) would cost a huge write
   # on every miss and could never be read back under the render budget anyway.
