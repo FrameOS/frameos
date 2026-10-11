@@ -248,7 +248,10 @@ class SceneConverter {
   async run(): Promise<ConversionResult> {
     const settings = (this.scene.settings && typeof this.scene.settings === "object" ? this.scene.settings : {}) as JsonObject;
     this.scene.settings = settings;
-    const explicit = settings.execution === "compiled" || settings.execution === "interpreted" ? settings.execution : undefined;
+    const explicit =
+      settings.execution === "compiled" || settings.execution === "interpreted" || settings.execution === "js"
+        ? settings.execution
+        : undefined;
     const requiredBefore = sceneRequiresCompilation(this.scene);
     const executionBefore = explicit ?? (requiredBefore ? "compiled" : "interpreted");
 
@@ -303,7 +306,7 @@ class SceneConverter {
     const convertedSomething = this.items.some((item) => item.status === "converted");
     const stillCompiled = needsModel.length > 0 || needsManualPort.length > 0 || sceneRequiresCompilation(this.scene);
 
-    let executionAfter: "compiled" | "interpreted";
+    let executionAfter: "compiled" | "interpreted" | "js";
     if (stillCompiled) {
       executionAfter = "compiled";
       if (explicit !== "interpreted") {
@@ -315,9 +318,10 @@ class SceneConverter {
         executionAfter = "interpreted";
       }
     } else {
-      executionAfter = "interpreted";
-      if (explicit !== "interpreted" || convertedSomething) {
-        settings.execution = "interpreted";
+      // A pure JS scene has nothing to convert and keeps its stamp.
+      executionAfter = explicit === "js" ? "js" : "interpreted";
+      if ((explicit !== "interpreted" && explicit !== "js") || convertedSomething) {
+        settings.execution = executionAfter;
       }
       if (convertedSomething || explicit === "compiled") {
         settings.convertedFrom = {

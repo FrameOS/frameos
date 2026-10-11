@@ -109,6 +109,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/template-install-feedback.test.ts",
       // Mounts eventsLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/custom-event-origins.test.ts",
+      // Imports sanitizeScene and jsSceneEditorLogic (→ frameLogic); out of the tsconfig too.
+      "**/src/test/shared-spa/pure-js-scenes.test.ts",
     ],
   },
   js.configs.recommended,

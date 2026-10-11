@@ -27,8 +27,12 @@ from typing import Any
 
 from app.utils.js_apps import find_js_app_source_key
 
-VALID_SCENE_EXECUTIONS: frozenset[str] = frozenset({"compiled", "interpreted"})
+VALID_SCENE_EXECUTIONS: frozenset[str] = frozenset({"compiled", "interpreted", "js"})
 DEFAULT_SCENE_EXECUTION = "interpreted"
+#: Modes the frame runs straight from ``scenes.json``: the node graph the
+#: interpreter walks and the pure JS scene (``docs/pure-js-scenes.md``).
+#: Everything that is not compiled.
+JSON_SCENE_EXECUTIONS: frozenset[str] = frozenset({"interpreted", "js"})
 
 
 def _has_text(value: object) -> bool:
@@ -90,12 +94,27 @@ def explicit_scene_execution(scene: object) -> str | None:
 
 
 def scene_execution(scene: object) -> str:
-    """``"compiled"`` or ``"interpreted"``; absent or unknown reads as interpreted."""
+    """``"compiled"``, ``"interpreted"`` or ``"js"``; absent or unknown reads as interpreted."""
     return explicit_scene_execution(scene) or DEFAULT_SCENE_EXECUTION
 
 
 def scene_is_interpreted(scene: object) -> bool:
+    """The scene is a node graph the interpreter walks (not compiled, not pure JS)."""
     return scene_execution(scene) == "interpreted"
+
+
+def scene_is_js(scene: object) -> bool:
+    """The scene is a pure JS module (``settings.execution == "js"``)."""
+    return scene_execution(scene) == "js"
+
+
+def scene_runs_from_json(scene: object) -> bool:
+    """The frame runs the scene from ``scenes.json`` — interpreted or js.
+
+    This is the question every deploy, build and listing site asks: does
+    the scene ship as JSON, or does it need the legacy source build?
+    """
+    return scene_execution(scene) in JSON_SCENE_EXECUTIONS
 
 
 def infer_scene_execution(scene: object) -> str:
