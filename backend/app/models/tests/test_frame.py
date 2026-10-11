@@ -180,6 +180,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["https_proxy"]["client_ca_cert_not_valid_after"] is not None
     assert data["mountpoints"] == {"enabled": False, "items": []}
     assert data["error_behavior"]["mode"] == "show_error_retry"
+    assert data["firmware_update"] is None
     assert mock_publish.await_count == 1
 
 

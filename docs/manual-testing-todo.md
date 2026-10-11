@@ -98,8 +98,10 @@ to end.
   `platform=esp32-s3-16mb`; an 8 MB board stays on `esp32-s3-generic`.
 - [ ] **Backend OTA onto the release image** (needs an OTA-capable board on
   a self-hosted backend — the 4 MB C3 is not one): "Update over the air" /
-  Full deploy logs `ota:backend downloading … verified`, the board reboots
-  into the release, and a second request answers `up-to-date`. With HTTPS
+  Full deploy logs `ota:backend downloading … verified`, the frames list
+  and the OTA card spin with "updating firmware NN%" meanwhile (the button
+  disabled), the board reboots into the release and the spinner clears, and
+  a second request answers `up-to-date`. With HTTPS
   enabled on the frame, `status` says `https: … cert=yes key=yes` and the
   API answers on 8443. Finally a board still on a per-frame image from
   before release images must OTA onto the release image from the new

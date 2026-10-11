@@ -25,6 +25,8 @@ from app.utils.frame_commands import (
     frame_is_asleep,
     list_pending_frame_commands,
     pending_command_count,
+    pending_command_types,
+    pending_command_types_by_frame,
 )
 
 NOW = datetime(2026, 10, 11, 12, 0, 0)
@@ -210,3 +212,31 @@ async def test_listing_and_cancel(db, redis):
     assert not cancel_frame_command(db, other, deploy.id, NOW)
     assert frame_command_public(deploy)["status"] == "pending"
     assert db.query(FrameCommand).count() == 3
+
+
+@pytest.mark.asyncio
+async def test_pending_command_types_names_the_live_verbs_once(db, redis):
+    """What the frames list and the update_frame broadcast carry as
+    `pending_command_types`: the workspace says "update queued" from it."""
+    frame = await _frame(db, redis)
+    other = await _frame(db, redis)
+    assert pending_command_types(db, frame, NOW) == []
+    assert pending_command_types_by_frame(db, int(frame.project_id), NOW) == {}
+
+    enqueue_frame_command(db, frame, "notify_update_available", detail="2026.10.6", now=NOW)
+    enqueue_frame_command(db, frame, "render", now=NOW)
+    enqueue_frame_command(db, frame, "render", now=NOW + timedelta(seconds=1))
+    enqueue_frame_command(db, other, "reboot", now=NOW)
+    assert pending_command_types(db, frame, NOW) == ["notify_update_available", "render"]
+    assert pending_command_types_by_frame(db, int(frame.project_id), NOW) == {
+        int(frame.id): ["notify_update_available", "render"],
+        int(other.id): ["reboot"],
+    }
+
+    # A row past its TTL is not pending, even before the sweep retires it;
+    # a sent-but-unacked one still is.
+    drained = drain_frame_commands(db, frame, NOW + timedelta(seconds=2))
+    assert [command.status for command in drained] == ["sent", "sent"]
+    assert pending_command_types(db, frame, NOW + timedelta(seconds=2)) == ["notify_update_available", "render"]
+    late = NOW + timedelta(seconds=UPDATE_NOTIFY_TTL_SECONDS + 10)
+    assert "notify_update_available" not in pending_command_types(db, frame, late)
