@@ -42,4 +42,19 @@ doAssert host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0
   "a button sent before the first render is dispatched"
 doAssert not host.scene.isNil
 doAssert selected == @["fixtures/dispatcher/switchTo"], "selected " & $selected
+
+# A switch sent before the first render (the backend's set_current_scene,
+# queued for the wake) must not build the scene it is leaving: the dispatcher
+# serves a switch without one, and building it is seconds of work for a scene
+# nobody sees.
+let fresh = SingleSceneHost(frameConfig: config, logger: logger)
+var freshSelected: seq[string]
+fresh.requestSelect = proc (sceneId: string): bool =
+  freshSelected.add(sceneId)
+  true
+fresh.start()
+fresh.makeCurrent("fixtures/dispatcher/switchFrom".SceneId)
+doAssert fresh.send(eoCloud, "setCurrentScene", %*{"sceneId": "fixtures/dispatcher/switchTo"})
+doAssert fresh.scene.isNil, "the scene being left was not built for the switch"
+doAssert freshSelected == @["fixtures/dispatcher/switchTo"], "selected " & $freshSelected
 echo "ok"
