@@ -104,6 +104,45 @@ suite "scene persistence helpers":
       updateUploadedScenes(uploadedBackupTable)
       removePersistedState(sceneId)
 
+  test "a declared field persists only once it leaves the scene's default":
+    let sceneId = "uploaded/persist-declared-default".SceneId
+    let path = persistedPath(sceneId)
+    let uploadedBackupTable = uploadedScenes
+    try:
+      if fileExists(path):
+        removeFile(path)
+      updateUploadedScenes(buildInterpretedScenes(parseInterpretedSceneInputs($(%*[{
+        "id": sceneId.string, "name": "Persist declared", "nodes": [], "edges": [],
+        "fields": [
+          {"name": "mode", "type": "select", "value": "random", "persist": "disk", "access": "public",
+           "options": ["random", "album"]},
+          {"name": "seconds", "role": "refreshInterval", "type": "float", "value": "300",
+           "persist": "disk", "access": "public"}
+        ],
+        "settings": {"backgroundColor": "#000000", "refreshInterval": 300.0}
+      }]))))
+
+      # The defaults as init() seeds them: nothing worth a file. The Immich
+      # sample's "Seconds per image" used to be pinned at 300 right here, so a
+      # Save & Deploy with a new default changed nothing on the frame.
+      let scene = FrameScene(id: sceneId, state: %*{"mode": "random", "seconds": 300.0})
+      scene.updateLastPersistedState()
+      check not fileExists(path)
+
+      # Moved from the Control panel: only what moved is remembered
+      scene.state["seconds"] = %10
+      scene.updateLastPersistedState()
+      check loadPersistedState(sceneId) == %*{"seconds": 10}
+
+      # The form delivers strings; back on the default means off the disk
+      scene.state["seconds"] = %"300"
+      scene.state["mode"] = %"album"
+      scene.updateLastPersistedState()
+      check loadPersistedState(sceneId) == %*{"mode": "album"}
+    finally:
+      updateUploadedScenes(uploadedBackupTable)
+      removePersistedState(sceneId)
+
   test "updateLastPersistedState removes stale keys when fields stop persisting":
     let sceneId = "uploaded/persist-prune".SceneId
     let path = persistedPath(sceneId)

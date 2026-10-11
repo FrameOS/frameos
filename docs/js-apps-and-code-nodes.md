@@ -177,8 +177,11 @@ scene can change it without opening the editor:
   the scene is using the name for something else — and then there is no
   interval control; the linter warns.)
 - Anything that is not a positive number falls back to the scene's default.
-  A customized implicit interval is persisted; one still on the default is
-  not, so editing `settings.refreshInterval` keeps working after a redeploy.
+  A customized interval is persisted; one still on the scene's default is
+  not, so editing `settings.refreshInterval` (or the declared field's
+  `value`) keeps working after a redeploy. The same holds for every
+  `"persist": "disk"` field: the state file only remembers values someone
+  moved off the default.
 
 There is no need to wire a state node into `logic/nextSleepDuration` to make
 the cadence configurable. That app (and `frameos.setNextSleep()`) is a

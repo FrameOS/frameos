@@ -222,6 +222,41 @@ proc valueFromJsonByType*(j: JsonNode; fieldType: string): Value =
     let s = if j.kind == JString: j.getStr() else: $j
     return VString(s)
 
+proc stateFieldDefaultJson*(field: StateField): JsonNode =
+  ## The value a scene seeds for `field` when nothing else sets it, in the
+  ## shape it takes in `scene.state`: typed through `valueFromJsonByType`, a
+  ## json field's string default parsed. nil when the field has no default (a
+  ## missing or null value, or an empty string).
+  let value = field.value
+  if value.isNil or value.kind == JNull:
+    return nil
+  if value.kind == JString and value.getStr().len == 0:
+    return nil
+  var seed = value
+  if field.fieldType == "json" and seed.kind == JString:
+    # Compiled scenes parse JSON string defaults; stay consistent
+    try:
+      seed = parseJson(seed.getStr())
+    except CatchableError:
+      discard
+  valueToJson(valueFromJsonByType(seed, field.fieldType))
+
+proc stateValueIsFieldDefault*(field: StateField, value: JsonNode): bool =
+  ## Whether `value`, as found in `scene.state`, is what the scene would have
+  ## seeded anyway. Both sides go through the field's type, so a control
+  ## form's "300" and a scene's 300.0 compare equal. A field without a default
+  ## matches nothing.
+  let default = stateFieldDefaultJson(field)
+  if default.isNil or value.isNil:
+    return false
+  var candidate = value
+  if field.fieldType == "json" and candidate.kind == JString:
+    try:
+      candidate = parseJson(candidate.getStr())
+    except CatchableError:
+      discard
+  valueToJson(valueFromJsonByType(candidate, field.fieldType)) == default
+
 type DefaultedArg* = tuple[name: string, error: string]
   ## A code-node argument whose producer raised, plus that producer's error
   ## message, so the failure stays attributable further down the pipeline.

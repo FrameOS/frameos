@@ -146,6 +146,8 @@
     // Mounts templatesLogic (→ frameLogic), same reason.
     "src/test/shared-spa/template-install-feedback.test.ts",
     // Mounts eventsLogic (→ frameLogic), same reason.
-    "src/test/shared-spa/custom-event-origins.test.ts"
+    "src/test/shared-spa/custom-event-origins.test.ts",
+    // Mounts frameLogic for Save & Deploy, same reason.
+    "src/test/shared-spa/save-and-deploy-waits-for-save.test.ts"
   ]
 }

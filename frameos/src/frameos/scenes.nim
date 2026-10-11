@@ -9,6 +9,7 @@ import frameos/hal/files as halFiles
 import frameos/types
 import frameos/interpreter
 import frameos/refresh_interval
+import frameos/values
 import frameos/js_runtime/runtime
 import frameos/js_runtime/app_runtime
 
@@ -749,14 +750,22 @@ proc updateLastPersistedState*(self: FrameScene) =
   let exported = sceneExport.get()
   let persistedStateKeys = exported.persistedStateKeys
   var hasChanges = false
-  # An implicit refresh interval still on the scene's default is not worth a
-  # file: persisting it would pin the old number when the scene's settings
-  # change. Once somebody customizes it, it persists like any other field.
+  # A field still on the scene's own default is not worth a file: persisting
+  # it would pin the old value when the scene is edited and redeployed, since
+  # init() seeds the file before the defaults. The Immich sample's "Seconds
+  # per image" sat at 300 on disk after the first render, and a Save & Deploy
+  # with 10 changed nothing. Once somebody moves a field, it persists like
+  # before; set back to the default, its entry goes away again. The implicit
+  # refresh interval (refresh_interval.nim) is one such field.
+  let fields =
+    if exported of ExportedInterpretedScene: ExportedInterpretedScene(exported).stateFields
+    else: exported.publicStateFields
   proc worthPersisting(key: string): bool =
     if not self.state.hasKey(key):
       return false
-    if exported.refreshIntervalImplicit and key == exported.refreshIntervalKey:
-      return parseRefreshSeconds(self.state[key]) != exported.refreshIntervalDefault
+    for field in fields:
+      if field.name == key:
+        return not stateValueIsFieldDefault(field, self.state[key])
     true
   if not lastPersistedStates.hasKey(self.id.string):
     discard loadPersistedState(self.id)
