@@ -1,0 +1,12 @@
+{
+  "id": "b4c2d3e5-8f90-4ba1-c2d3-e4f5a6b7c8d9",
+  "name": "JS Photo",
+  "settings": { "execution": "js", "refreshInterval": 600, "backgroundColor": "#000000" },
+  "fields": [
+    { "name": "imageUrl", "label": "Image URL", "type": "string", "value": "https://picsum.photos/1200/800", "access": "public", "persist": "disk" },
+    { "name": "caption", "label": "Caption", "type": "string", "value": "", "access": "public", "persist": "disk" },
+    { "name": "fit", "label": "Fit", "type": "select", "options": ["cover", "contain"], "value": "cover", "access": "public", "persist": "disk" }
+  ],
+  "nodes": [],
+  "edges": []
+}

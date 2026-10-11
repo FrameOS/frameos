@@ -9,7 +9,7 @@ from typing import Any, Optional
 from sqlalchemy import JSON
 from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean, Text
 from sqlalchemy.orm import Session, mapped_column, object_session
-from app.utils.scene_execution import scene_is_interpreted
+from app.utils.scene_execution import scene_runs_from_json
 from app.database import Base
 
 from app.drivers.devices import (
@@ -145,7 +145,7 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
 
 def compiled_scene_count(scenes) -> int:
     """How many of a frame's scenes are on the legacy compiled path."""
-    return sum(1 for scene in (scenes or []) if isinstance(scene, dict) and not scene_is_interpreted(scene))
+    return sum(1 for scene in (scenes or []) if isinstance(scene, dict) and not scene_runs_from_json(scene))
 
 
 def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
@@ -1061,4 +1061,4 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     return frame_json
 
 def get_interpreted_scenes_json(frame: Frame) -> list[dict]:
-    return [scene for scene in frame.scenes if scene_is_interpreted(scene)]
+    return [scene for scene in frame.scenes if scene_runs_from_json(scene)]

@@ -93,7 +93,7 @@ import { getDeployPlanErrorMessage, getResponseDetail } from './frameDeployError
 import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
-import { frameRunsScenesInterpreted, normalizeSceneExecution, sceneExecutionForFrame } from '../../utils/sceneExecution'
+import { frameRunsScenesInterpreted, normalizeSceneExecution, sceneExecutionForFrame, sceneIsJs } from '../../utils/sceneExecution'
 import { normalizeCustomEvent } from '../../utils/frameEvents'
 import { normalizeFieldOptions } from '../../utils/selectOptions'
 import { frameFormSceneErrors } from './frameFormSceneErrors'
@@ -818,10 +818,12 @@ function sceneChangeDetails(
     const mode = sceneExecutionForFrame(scene, frameMode)
     const deployedMode = sceneExecutionForFrame(deployed, frameMode)
 
+    // Only a compiled scene needs the source build; interpreted and pure JS
+    // scenes ship in scenes.json.
     if (!deployed) {
       details.push({
-        label: `${mode === 'interpreted' ? 'Scene' : 'Compiled scene'} added: ${scene.name || scene.id}`,
-        requiresFullDeploy: mode !== 'interpreted',
+        label: `${mode === 'compiled' ? 'Compiled scene' : 'Scene'} added: ${scene.name || scene.id}`,
+        requiresFullDeploy: mode === 'compiled',
       })
       continue
     }
@@ -829,7 +831,7 @@ function sceneChangeDetails(
     if (mode !== deployedMode) {
       details.push({
         label: `Scene mode changed: ${scene.name || scene.id} (${deployedMode} → ${mode})`,
-        requiresFullDeploy: mode !== 'interpreted' || deployedMode !== 'interpreted',
+        requiresFullDeploy: mode === 'compiled' || deployedMode === 'compiled',
       })
       continue
     }
@@ -837,7 +839,7 @@ function sceneChangeDetails(
     if (!sceneEqualForComparison(scene, deployed)) {
       details.push({
         label: `Scene updated: ${scene.name || scene.id}`,
-        requiresFullDeploy: mode !== 'interpreted',
+        requiresFullDeploy: mode === 'compiled',
       })
     }
   }
@@ -847,7 +849,7 @@ function sceneChangeDetails(
       const mode = sceneExecutionForFrame(scene, frameMode)
       details.push({
         label: `Scene removed: ${scene.name || scene.id}`,
-        requiresFullDeploy: mode !== 'interpreted',
+        requiresFullDeploy: mode === 'compiled',
       })
     }
   }
@@ -1761,6 +1763,51 @@ function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Par
   return Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame ? sanitizeFrame(frame) : frameForm
 }
 
+/** What "new scene" builds: a node graph, or a pure JS module (docs/pure-js-scenes.md). */
+export type BlankSceneKind = 'graph' | 'js'
+
+/** The module a new pure JS scene starts from: enough to render, and the shape to grow. */
+export const BLANK_JS_SCENE_SOURCE = `import type { Scene, Canvas } from "frameos"
+
+// A pure JavaScript scene: no diagram, one module. render() draws the whole
+// frame on the canvas every refresh; module-level variables survive between
+// renders. See docs/pure-js-scenes.md for the scene and canvas API.
+
+export function init(scene: Scene) {
+  // Runs once, after the state is seeded from the scene's fields.
+}
+
+export function render(scene: Scene, canvas: Canvas) {
+  canvas.clear("#ffffff")
+  canvas.text(scene.name, 0, 0, {
+    width: canvas.width, height: canvas.height, size: 64, fit: true,
+    align: "center", valign: "middle", color: "#111111",
+  })
+  canvas.text(scene.format(scene.now(), "{hour/2}:{minute/2}"), 0, canvas.height - 40, {
+    width: canvas.width, size: 24, align: "center", color: "#666666",
+  })
+}
+
+export function onEvent(scene: Scene, event: string, payload: any) {
+  // Buttons, keys, custom events and state changes arrive here.
+}
+`
+
+function buildBlankJsScene(frame: Partial<FrameType>, name: string = 'New JavaScript scene'): FrameScene {
+  return sanitizeScene(
+    {
+      id: uuidv4(),
+      name,
+      nodes: [],
+      edges: [],
+      fields: [],
+      settings: { execution: 'js' },
+      sources: { 'scene.ts': BLANK_JS_SCENE_SOURCE },
+    },
+    frame
+  )
+}
+
 function buildBlankScene(frame: Partial<FrameType>, name: string = 'New blank scene'): FrameScene {
   return sanitizeScene(
     {
@@ -2134,7 +2181,11 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
       ...settings,
       // Always materialized: templates, imports and chat scenes arrive
       // without it, and "absent" used to be read as compiled downstream.
-      execution: frameRunsInterpreted ? ('interpreted' as const) : normalizeSceneExecution(scene),
+      execution: frameRunsInterpreted
+        ? sceneIsJs(scene)
+          ? ('js' as const)
+          : ('interpreted' as const)
+        : normalizeSceneExecution(scene),
       refreshInterval: settings.refreshInterval || frame.interval || 300,
       backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
     },
@@ -2239,8 +2290,10 @@ export interface frameLogicActions {
   createBlankScene: (
     name?: string,
     openEditor?: boolean,
-    openDrawer?: boolean
+    openDrawer?: boolean,
+    kind?: BlankSceneKind
   ) => {
+    kind: BlankSceneKind
     name: string | undefined
     openDrawer: boolean
     openEditor: boolean
@@ -2582,10 +2635,11 @@ export const frameLogic = kea<frameLogicType>([
       preserveSceneIds: preserveSceneIds ?? false,
       template,
     }),
-    createBlankScene: (name?: string, openEditor?: boolean, openDrawer?: boolean) => ({
+    createBlankScene: (name?: string, openEditor?: boolean, openDrawer?: boolean, kind?: BlankSceneKind) => ({
       name,
       openEditor: openEditor ?? false,
       openDrawer: openDrawer ?? false,
+      kind: kind ?? 'graph',
     }),
     deleteSceneAndSave: (sceneId: string) => ({ sceneId }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
@@ -3716,9 +3770,9 @@ export const frameLogic = kea<frameLogicType>([
       applyTemplate: async ({ template, openDrawer, preserveSceneIds }) => {
         await appendTemplates(templatesFromPayload(template), openDrawer, preserveSceneIds)
       },
-      createBlankScene: async ({ name, openEditor, openDrawer }) => {
+      createBlankScene: async ({ name, openEditor, openDrawer, kind }) => {
         const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-        const scene = buildBlankScene(frameForm, name)
+        const scene = kind === 'js' ? buildBlankJsScene(frameForm, name) : buildBlankScene(frameForm, name)
         actions.setFrameFormValues({ scenes: [...(frameForm.scenes ?? []), scene] })
         if (openEditor) {
           router.actions.push(urls.scenes(props.frameId, scene.id))

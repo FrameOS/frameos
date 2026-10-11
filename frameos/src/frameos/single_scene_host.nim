@@ -18,6 +18,7 @@ import std/[json, options, tables]
 import pixie
 import ./event_loop
 import ./interpreter
+import ./js_scene
 import ./types
 import ./utils/asset_colors
 import ./utils/dither
@@ -70,7 +71,12 @@ proc cleanupScene*(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
   ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
   ## outside these builds).
-  if scene.isNil or not (scene of InterpretedFrameScene):
+  if scene.isNil:
+    return
+  if scene of JsFrameScene:
+    cleanupJsScene(scene)
+    return
+  if not (scene of InterpretedFrameScene):
     return
   when defined(memProbe): memProbe("  cleanupScene: entry")
   let interpreted = InterpretedFrameScene(scene)

@@ -1,5 +1,9 @@
 # JavaScript in scenes: code nodes and scene-local JS apps
 
+(A third place JavaScript runs: a **pure JS scene** is one module that draws
+the whole frame with a canvas API and has no diagram at all —
+`docs/pure-js-scenes.md`.)
+
 Interpreted scenes run two kinds of JavaScript on the frame, in two different
 sandboxes. They look alike in the editor and behave differently at run time;
 most "it renders nothing / prints the format string" reports come from mixing

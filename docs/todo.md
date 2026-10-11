@@ -41,6 +41,39 @@ Two rules that shape most entries:
 
 ---
 
+## Pure JS scenes (`docs/pure-js-scenes.md`)
+
+A scene can be one JS/TS module drawing the frame through a canvas API
+(`settings.execution: "js"`): runtime on every host, editor, both control
+planes and five bundled samples landed 2026-10-11 as an experiment. What a
+first real use will want next:
+
+- **Bench it on an ESP32.** The canvas binding was designed for the 8 MB
+  boards (into-target decodes, view cells, no JSON on draw calls) and the
+  firmware compile-checks, but no sample has rendered on a device yet.
+  Measure the JS Weather and JS Photo samples with `-d:memProbe` on the
+  7.3" and the 13.3" (565 canvas) and record the numbers in
+  `docs/esp32-memory.md`.
+- **The AI.** `cloud/apps/auth-web/src/lib/ai/prompts.ts` and the AI
+  context only know node graphs; `validateScenePayload` accepts js scenes,
+  but nothing teaches the model to write one. Decide whether the scene
+  chat offers "write it as a JS scene" (the canvas API is a smaller, more
+  regular target than the node catalog) and run the evals.
+- **Per-photo color profiles.** `canvas.image()` does not apply a
+  photo's `.frameos.json` sidecar or the frame-level `colors.autoFit`
+  (`docs/asset-color-profiles.md`); `render/image` does. Route the asset
+  path through `applyAssetColors` / `applyAutoFitToDrawn` once there is a
+  photo scene that needs it.
+- **Store and cloud UI.** The scene store shows a scene's node count and
+  app keywords (`sceneTileLabels.ts`, `extractAppKeywords`); a js scene
+  shows "0 nodes". A "JavaScript" badge and the module's size would say
+  more. The cloud `SceneLivePreview` settings grants
+  (`preview-settings.ts`) read only app nodes: a js scene's
+  `config.json` `settings` list is not granted yet.
+- **Events in the editor.** The Events utility panel is hidden for js
+  scenes; a list of the events `onEvent` can receive (from the contract)
+  would replace it.
+
 ## ESP32 NVS on the 16 KB layouts
 
 The 4 MB and 8 MB partition tables give NVS 16 KB (3 usable pages × 126

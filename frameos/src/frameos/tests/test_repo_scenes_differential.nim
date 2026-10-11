@@ -116,6 +116,10 @@ for kind, templateDir in walkDir(SamplesDir):
   resetInterpretedScenes()
 
   for sceneInput in inputs:
+    # A pure JS scene (js_scene.nim) has no node graph to plan; its own
+    # test is test_js_scene.nim.
+    if sceneInput.settings != nil and sceneInput.settings.execution == "js":
+      continue
     var visited = initHashSet[string]()
     let apps = sceneAppKeywords(sceneInput, inputs, visited)
     let sceneLabel = templateName & " / " & sceneInput.name

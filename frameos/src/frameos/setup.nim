@@ -140,8 +140,9 @@ proc setupExportScenes(data: JsonNode): JsonNode =
   for scene in scenes.items:
     if scene == nil or scene.kind != JObject:
       continue
+    # Everything that runs from JSON: the node graph and the pure JS scene.
     let execution = scene{"settings"}{"execution"}.getStr("compiled")
-    if execution == "interpreted":
+    if execution == "interpreted" or execution == "js":
       result.add(scene)
 
 proc installServiceFile(sourcePath, destinationPath: string) =

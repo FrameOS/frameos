@@ -42,6 +42,24 @@ export function validateScenePayload(payload: JsonObject): string[] {
     if (!sceneId || !sceneName) {
       issues.push(`Scene ${index} is missing id or name.`);
     }
+    if (settings.execution === "js") {
+      // A pure JS scene (docs/pure-js-scenes.md): the module is the scene,
+      // the graph stays empty.
+      const sources = entry.sources;
+      const main =
+        sources && typeof sources === "object" && !Array.isArray(sources)
+          ? ["scene.ts", "scene.tsx", "scene.js", "scene.jsx"].find(
+              (name) => typeof (sources as JsonObject)[name] === "string" && String((sources as JsonObject)[name]).trim(),
+            )
+          : undefined;
+      if (!main) {
+        issues.push(`Scene ${index} is a pure JS scene but has no scene.ts in sources.`);
+      }
+      if (Array.isArray(nodes) && nodes.length > 0) {
+        issues.push(`Scene ${index} is a pure JS scene and must not carry nodes.`);
+      }
+      return;
+    }
     if (!Array.isArray(nodes) || nodes.length === 0) {
       issues.push(`Scene ${index} must include nodes.`);
       return;

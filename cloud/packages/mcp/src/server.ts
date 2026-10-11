@@ -40,7 +40,7 @@ export type FrameosMcpServerOptions = {
 
 const instructions = `FrameOS Cloud: cloud-managed e-paper/LCD frames, the scenes they display, the public scene store, and an AI that builds scenes.
 
-Vocabulary: a *frame* is a device enrolled with the cloud (frames_list). A *scene* is a graph of nodes (apps, code, events, state) that renders one screen; scenes live in the account as store scenes (private drafts or published), each with immutable numbered versions. A frame holds up to 20 installed scenes and shows one at a time; a *schedule* switches between them. Scene JSON is the array from scenes.json — objects with id, name, nodes, edges, fields, settings (execution: "interpreted").
+Vocabulary: a *frame* is a device enrolled with the cloud (frames_list). A *scene* is a graph of nodes (apps, code, events, state) that renders one screen; scenes live in the account as store scenes (private drafts or published), each with immutable numbered versions. A frame holds up to 20 installed scenes and shows one at a time; a *schedule* switches between them. Scene JSON is the array from scenes.json — objects with id, name, nodes, edges, fields, settings (execution: "interpreted"). A *pure JS scene* (settings.execution: "js") has empty nodes/edges and a sources map ({"scene.ts": "export function render(scene, canvas) {…}"}) that draws the frame with a canvas API instead of a graph.
 
 Typical flows:
 - See what is on a frame: frame_get → frame_scenes_list → frame_screenshot; frame_logs when something looks wrong.

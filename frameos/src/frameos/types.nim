@@ -414,6 +414,9 @@ type
   FrameSceneSettings* = ref object
     backgroundColor*: Color
     refreshInterval*: float
+    ## "interpreted" (the default; a node graph), "compiled" (legacy Nim) or
+    ## "js" (a pure JavaScript scene: one module, no graph — js_scene.nim).
+    execution*: string
 
   # Imported scene from scenes.json
   FrameSceneInput* = ref object of RootObj
@@ -428,6 +431,9 @@ type
     origin*: JsonNode
     ## The scene's custom event declarations ([{name, origins?, …}]); nil when absent.
     customEvents*: JsonNode
+    ## A pure JS scene's files by name (`scene.ts` and what it imports); nil
+    ## for a node graph. See docs/pure-js-scenes.md.
+    sources*: JsonNode
 
   # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene

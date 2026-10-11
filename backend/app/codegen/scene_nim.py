@@ -11,7 +11,7 @@ from app.codegen.drivers_nim import DEFAULT_COMPILATION_MODE
 from app.codegen.utils import sanitize_nim_string, natural_keys, nim_comment, select_field_options
 from app.utils.js_apps import find_js_app_source_key
 from app.utils.refresh_interval import resolve_refresh_interval
-from app.utils.scene_execution import scene_is_interpreted
+from app.utils.scene_execution import scene_runs_from_json
 
 def get_events_schema() -> list[dict]:
     """The editor's event catalog: frontend/schema/events.json, generated from
@@ -51,7 +51,7 @@ def compiled_frame_scenes(frame: Frame) -> list[dict]:
     scenes = getattr(frame, "scenes", None) or []
     compiled_scenes = []
     for scene in scenes:
-        if isinstance(scene, dict) and not scene_is_interpreted(scene):
+        if isinstance(scene, dict) and not scene_runs_from_json(scene):
             compiled_scenes.append(scene)
     return compiled_scenes
 
@@ -1081,7 +1081,7 @@ class SceneWriter:
                 app_import = f"import scenes/{scene_app_id} as {scene_app_id}"
                 node_integer = self.node_id_to_integer(node_id)
                 app_id = f"node{node_integer}"
-                is_interpreted_child = scene_is_interpreted(scene)
+                is_interpreted_child = scene_runs_from_json(scene)
 
                 if is_interpreted_child:
                     interpreter_import = "import frameos/interpreter as interpreter"

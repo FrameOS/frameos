@@ -121,6 +121,11 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                         from the released FrameOS binaries, live preview in the browser.
                       </p>
                       <p>
+                        <strong>Pure JavaScript</strong> has no diagram: the whole scene is one module that draws the
+                        frame with a canvas API. Create one with "New JavaScript scene"; switching an existing scene
+                        here keeps its nodes but stops running them.
+                      </p>
+                      <p>
                         <strong>Compiled</strong> is the legacy mode for scenes that still carry Nim code nodes or Nim
                         app sources. It needs a full FrameOS source build on every deploy. Convert it to an interpreted
                         scene instead (scenes.frameos.net/nim-converter).
@@ -133,6 +138,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                     className="h-10"
                     options={[
                       { value: 'interpreted', label: 'Interpreted' },
+                      { value: 'js', label: 'Pure JavaScript (no diagram)' },
                       { value: 'compiled', label: 'Compiled (legacy — needs a source build on every deploy)' },
                     ]}
                   />

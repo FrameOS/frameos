@@ -8,6 +8,7 @@ import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
 import frameos/types
 import frameos/interpreter
+import frameos/js_scene
 import frameos/refresh_interval
 import frameos/js_runtime/runtime
 import frameos/js_runtime/app_runtime
@@ -155,6 +156,9 @@ proc findExportedScene*(sceneId: SceneId): Option[ExportedScene] =
 
 proc cleanupSceneRuntime*(scene: FrameScene) =
   if scene.isNil:
+    return
+  if scene of JsFrameScene:
+    cleanupJsScene(scene)
     return
   if scene of InterpretedFrameScene:
     let interpreted = InterpretedFrameScene(scene)

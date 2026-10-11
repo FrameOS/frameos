@@ -25,7 +25,7 @@ export interface ConversionReport {
   sceneId: string
   sceneName: string
   executionBefore: string
-  executionAfter: 'compiled' | 'interpreted'
+  executionAfter: 'compiled' | 'interpreted' | 'js'
   items: ConversionReportItem[]
   needsModel: string[]
   needsManualPort: string[]

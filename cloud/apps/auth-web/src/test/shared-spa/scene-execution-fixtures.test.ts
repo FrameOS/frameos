@@ -16,6 +16,7 @@ import {
   normalizeSceneExecution,
   sceneExecutionForFrame,
   sceneIsCompiledForFrame,
+  sceneRunsFromJson,
 } from "../../../../../../frontend/src/utils/sceneExecution";
 import { normalizeFrameCompilationMode } from "../../../../../../frontend/src/utils/frameBuildOptions";
 import { frameCompilationMode } from "../../../../../../frontend/src/scenes/frame/frameDeployUtils";
@@ -26,7 +27,7 @@ interface SceneCase {
   name: string;
   scene: Record<string, unknown> & { id: string; name: string };
   requiresCompilation: boolean;
-  execution: "compiled" | "interpreted";
+  execution: "compiled" | "interpreted" | "js";
   cloudRefuses: boolean;
 }
 
@@ -56,8 +57,10 @@ describe("scene-execution fixtures", () => {
       expect(sceneExecutionForFrame(scene, "rpios")).toBe(testCase.execution);
       expect(sceneIsCompiledForFrame(scene, "rpios")).toBe(testCase.execution === "compiled");
       expect(normalizeSceneExecution(scene)).toBe(testCase.execution);
-      // An embedded (ESP32) frame runs everything interpreted regardless.
-      expect(sceneExecutionForFrame(scene, "embedded")).toBe("interpreted");
+      // An embedded (ESP32) frame runs everything from JSON regardless: a
+      // graph is interpreted, a pure JS scene stays js.
+      expect(sceneExecutionForFrame(scene, "embedded")).toBe(testCase.execution === "js" ? "js" : "interpreted");
+      expect(sceneRunsFromJson(scene)).toBe(testCase.execution !== "compiled");
       // The converter package (the /nim-converter page, the CLI, MCP).
       expect(converterRequiresCompilation(testCase.scene as never)).toBe(testCase.requiresCompilation);
       // The cloud store's refusal list.

@@ -6,7 +6,15 @@
       "scene": {
         "id": "s-plain",
         "name": "Plain",
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "render/text" } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "render/text"
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -15,28 +23,60 @@
     },
     {
       "name": "explicit interpreted stamp",
-      "scene": { "id": "s-interp", "name": "Interp", "nodes": [], "edges": [], "settings": { "execution": "interpreted" } },
+      "scene": {
+        "id": "s-interp",
+        "name": "Interp",
+        "nodes": [],
+        "edges": [],
+        "settings": {
+          "execution": "interpreted"
+        }
+      },
       "requiresCompilation": false,
       "execution": "interpreted",
       "cloudRefuses": false
     },
     {
       "name": "explicit compiled stamp on a scene that carries no Nim: the user's choice wins",
-      "scene": { "id": "s-compiled", "name": "Compiled", "nodes": [], "edges": [], "settings": { "execution": "compiled" } },
+      "scene": {
+        "id": "s-compiled",
+        "name": "Compiled",
+        "nodes": [],
+        "edges": [],
+        "settings": {
+          "execution": "compiled"
+        }
+      },
       "requiresCompilation": false,
       "execution": "compiled",
       "cloudRefuses": true
     },
     {
       "name": "unknown execution value reads as interpreted everywhere",
-      "scene": { "id": "s-banana", "name": "Banana", "nodes": [], "edges": [], "settings": { "execution": "banana" } },
+      "scene": {
+        "id": "s-banana",
+        "name": "Banana",
+        "nodes": [],
+        "edges": [],
+        "settings": {
+          "execution": "banana"
+        }
+      },
       "requiresCompilation": false,
       "execution": "interpreted",
       "cloudRefuses": false
     },
     {
       "name": "settings present but no execution key",
-      "scene": { "id": "s-nokey", "name": "No key", "nodes": [], "edges": [], "settings": { "refreshInterval": 60 } },
+      "scene": {
+        "id": "s-nokey",
+        "name": "No key",
+        "nodes": [],
+        "edges": [],
+        "settings": {
+          "refreshInterval": 60
+        }
+      },
       "requiresCompilation": false,
       "execution": "interpreted",
       "cloudRefuses": false
@@ -46,7 +86,15 @@
       "scene": {
         "id": "s-nimcode",
         "name": "Nim code",
-        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "result = 1" } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "code",
+            "data": {
+              "code": "result = 1"
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": true,
@@ -58,7 +106,16 @@
       "scene": {
         "id": "s-twin",
         "name": "Twin",
-        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "result = 1", "codeJS": "return 1" } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "code",
+            "data": {
+              "code": "result = 1",
+              "codeJS": "return 1"
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -70,7 +127,15 @@
       "scene": {
         "id": "s-ws",
         "name": "Whitespace",
-        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "   \n  " } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "code",
+            "data": {
+              "code": "   \n  "
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -82,7 +147,15 @@
       "scene": {
         "id": "s-js",
         "name": "JS",
-        "nodes": [{ "id": "n1", "type": "code", "data": { "codeJS": "return 1" } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "code",
+            "data": {
+              "codeJS": "return 1"
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -94,7 +167,19 @@
       "scene": {
         "id": "s-appnim",
         "name": "App Nim",
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "proc run() = discard", "config.json": "{}" } } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "custom",
+              "sources": {
+                "app.nim": "proc run() = discard",
+                "config.json": "{}"
+              }
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": true,
@@ -106,7 +191,18 @@
       "scene": {
         "id": "s-confignim",
         "name": "Config Nim",
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "config.nim": "const x = 1" } } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "custom",
+              "sources": {
+                "config.nim": "const x = 1"
+              }
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": true,
@@ -118,7 +214,19 @@
       "scene": {
         "id": "s-appboth",
         "name": "App both",
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "proc run() = discard", "app.ts": "export function run() {}" } } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "custom",
+              "sources": {
+                "app.nim": "proc run() = discard",
+                "app.ts": "export function run() {}"
+              }
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -130,7 +238,19 @@
       "scene": {
         "id": "s-appjsx",
         "name": "App jsx",
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "x", "app.jsx": "export function run() {}" } } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "custom",
+              "sources": {
+                "app.nim": "x",
+                "app.jsx": "export function run() {}"
+              }
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -142,7 +262,19 @@
       "scene": {
         "id": "s-appempty",
         "name": "App empty",
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "custom", "sources": { "app.nim": "", "config.json": "{}" } } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "custom",
+              "sources": {
+                "app.nim": "",
+                "config.json": "{}"
+              }
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -154,8 +286,22 @@
       "scene": {
         "id": "s-sceneapp",
         "name": "Scene app",
-        "apps": { "myapp": { "sources": { "app.nim": "proc run() = discard" } } },
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "myapp" } }],
+        "apps": {
+          "myapp": {
+            "sources": {
+              "app.nim": "proc run() = discard"
+            }
+          }
+        },
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "myapp"
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": true,
@@ -167,7 +313,13 @@
       "scene": {
         "id": "s-sceneapp-unref",
         "name": "Scene app unreferenced",
-        "apps": { "orphan": { "sources": { "app.nim": "proc run() = discard" } } },
+        "apps": {
+          "orphan": {
+            "sources": {
+              "app.nim": "proc run() = discard"
+            }
+          }
+        },
         "nodes": [],
         "edges": []
       },
@@ -180,8 +332,23 @@
       "scene": {
         "id": "s-sceneapp-js",
         "name": "Scene app JS",
-        "apps": { "myapp": { "sources": { "app.ts": "export function run() {}", "config.json": "{}" } } },
-        "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "myapp" } }],
+        "apps": {
+          "myapp": {
+            "sources": {
+              "app.ts": "export function run() {}",
+              "config.json": "{}"
+            }
+          }
+        },
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "app",
+            "data": {
+              "keyword": "myapp"
+            }
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": false,
@@ -193,7 +360,13 @@
       "scene": {
         "id": "s-source",
         "name": "Source",
-        "nodes": [{ "id": "n1", "type": "source", "data": {} }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "source",
+            "data": {}
+          }
+        ],
         "edges": []
       },
       "requiresCompilation": true,
@@ -206,9 +379,27 @@
         "id": "s-events",
         "name": "Events",
         "nodes": [
-          { "id": "n1", "type": "event", "data": { "keyword": "render" } },
-          { "id": "n2", "type": "state", "data": { "keyword": "count" } },
-          { "id": "n3", "type": "dispatch", "data": { "keyword": "setSceneState" } }
+          {
+            "id": "n1",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "n2",
+            "type": "state",
+            "data": {
+              "keyword": "count"
+            }
+          },
+          {
+            "id": "n3",
+            "type": "dispatch",
+            "data": {
+              "keyword": "setSceneState"
+            }
+          }
         ],
         "edges": []
       },
@@ -221,25 +412,167 @@
       "scene": {
         "id": "s-both",
         "name": "Both",
-        "nodes": [{ "id": "n1", "type": "code", "data": { "code": "result = 1" } }],
+        "nodes": [
+          {
+            "id": "n1",
+            "type": "code",
+            "data": {
+              "code": "result = 1"
+            }
+          }
+        ],
         "edges": [],
-        "settings": { "execution": "compiled" }
+        "settings": {
+          "execution": "compiled"
+        }
       },
       "requiresCompilation": true,
       "execution": "compiled",
       "cloudRefuses": true
+    },
+    {
+      "name": "pure JS scene: runs from JSON on every frame, never compiled",
+      "scene": {
+        "id": "s-js",
+        "name": "JS",
+        "nodes": [],
+        "edges": [],
+        "settings": {
+          "execution": "js"
+        },
+        "sources": {
+          "scene.ts": "export function render(scene, canvas) { canvas.clear('#fff') }"
+        }
+      },
+      "requiresCompilation": false,
+      "execution": "js",
+      "cloudRefuses": false
+    },
+    {
+      "name": "pure JS scene that also carries a Nim app: still js, and the cloud refuses the Nim",
+      "scene": {
+        "id": "s-js-nim",
+        "name": "JS Nim",
+        "nodes": [],
+        "edges": [],
+        "settings": {
+          "execution": "js"
+        },
+        "apps": {
+          "legacy": {
+            "sources": {
+              "app.nim": "echo 1"
+            }
+          }
+        },
+        "sources": {
+          "scene.ts": "export function render() {}"
+        }
+      },
+      "requiresCompilation": true,
+      "execution": "js",
+      "cloudRefuses": true
     }
   ],
   "frames": [
-    { "name": "rpios frame with no compilation mode defaults to precompiled", "frame": { "mode": "rpios" }, "compilationMode": "precompiled" },
-    { "name": "rpios frame with an empty compilation mode", "frame": { "mode": "rpios", "rpios": { "compilationMode": "" } }, "compilationMode": "precompiled" },
-    { "name": "rpios static", "frame": { "mode": "rpios", "rpios": { "compilationMode": "static" } }, "compilationMode": "static" },
-    { "name": "rpios precompiled", "frame": { "mode": "rpios", "rpios": { "compilationMode": "precompiled" } }, "compilationMode": "precompiled" },
-    { "name": "retired shared mode maps to static", "frame": { "mode": "rpios", "rpios": { "compilationMode": "shared" } }, "compilationMode": "static" },
-    { "name": "retired shared-scenes mode maps to static", "frame": { "mode": "rpios", "rpios": { "compilationMode": "shared-scenes" } }, "compilationMode": "static" },
-    { "name": "unknown mode falls back to precompiled", "frame": { "mode": "rpios", "rpios": { "compilationMode": "garbage" } }, "compilationMode": "precompiled" },
-    { "name": "buildroot reads its own block, not rpios", "frame": { "mode": "buildroot", "buildroot": { "compilationMode": "static" }, "rpios": { "compilationMode": "precompiled" } }, "compilationMode": "static" },
-    { "name": "buildroot with no block defaults to precompiled", "frame": { "mode": "buildroot", "rpios": { "compilationMode": "static" } }, "compilationMode": "precompiled" },
-    { "name": "frame with no mode reads the rpios block", "frame": { "rpios": { "compilationMode": "static" } }, "compilationMode": "static" }
+    {
+      "name": "rpios frame with no compilation mode defaults to precompiled",
+      "frame": {
+        "mode": "rpios"
+      },
+      "compilationMode": "precompiled"
+    },
+    {
+      "name": "rpios frame with an empty compilation mode",
+      "frame": {
+        "mode": "rpios",
+        "rpios": {
+          "compilationMode": ""
+        }
+      },
+      "compilationMode": "precompiled"
+    },
+    {
+      "name": "rpios static",
+      "frame": {
+        "mode": "rpios",
+        "rpios": {
+          "compilationMode": "static"
+        }
+      },
+      "compilationMode": "static"
+    },
+    {
+      "name": "rpios precompiled",
+      "frame": {
+        "mode": "rpios",
+        "rpios": {
+          "compilationMode": "precompiled"
+        }
+      },
+      "compilationMode": "precompiled"
+    },
+    {
+      "name": "retired shared mode maps to static",
+      "frame": {
+        "mode": "rpios",
+        "rpios": {
+          "compilationMode": "shared"
+        }
+      },
+      "compilationMode": "static"
+    },
+    {
+      "name": "retired shared-scenes mode maps to static",
+      "frame": {
+        "mode": "rpios",
+        "rpios": {
+          "compilationMode": "shared-scenes"
+        }
+      },
+      "compilationMode": "static"
+    },
+    {
+      "name": "unknown mode falls back to precompiled",
+      "frame": {
+        "mode": "rpios",
+        "rpios": {
+          "compilationMode": "garbage"
+        }
+      },
+      "compilationMode": "precompiled"
+    },
+    {
+      "name": "buildroot reads its own block, not rpios",
+      "frame": {
+        "mode": "buildroot",
+        "buildroot": {
+          "compilationMode": "static"
+        },
+        "rpios": {
+          "compilationMode": "precompiled"
+        }
+      },
+      "compilationMode": "static"
+    },
+    {
+      "name": "buildroot with no block defaults to precompiled",
+      "frame": {
+        "mode": "buildroot",
+        "rpios": {
+          "compilationMode": "static"
+        }
+      },
+      "compilationMode": "precompiled"
+    },
+    {
+      "name": "frame with no mode reads the rpios block",
+      "frame": {
+        "rpios": {
+          "compilationMode": "static"
+        }
+      },
+      "compilationMode": "static"
+    }
   ]
 }

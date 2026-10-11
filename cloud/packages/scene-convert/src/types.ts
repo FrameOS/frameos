@@ -126,8 +126,8 @@ export type ConversionReport = {
   sceneName: string;
   /** What the scene was stamped with before the converter ran. */
   executionBefore: string;
-  /** What it is stamped with now. "compiled" means something is left over. */
-  executionAfter: "compiled" | "interpreted";
+  /** What it is stamped with now. "compiled" means something is left over; "js" is a pure JS scene, untouched. */
+  executionAfter: "compiled" | "interpreted" | "js";
   items: ConversionItem[];
   /** Nodes the model still has to port; empty after a full run with a model. */
   needsModel: string[];

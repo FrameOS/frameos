@@ -55,7 +55,8 @@ import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
-import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { sceneIsCompiledForFrame, sceneIsJs } from '../../utils/sceneExecution'
+import { JsSceneEditor } from './JsSceneEditor'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { sceneUtilityPanelIsAllowed, workspaceMode } from './workspaceSurfaces'
@@ -89,15 +90,21 @@ function sceneIsCompiled(scene: FrameScene | null, frameMode?: FrameType['mode']
   return sceneIsCompiledForFrame(scene, frameMode)
 }
 
+/** Panels about the node graph: a pure JS scene has none to show. */
+const graphOnlyUtilityPanels = new Set<WorkspaceUtilityPanel>(['apps', 'events', 'source'])
+
 function sceneUtilityDefinitions(scene: FrameScene | null, frameMode?: FrameType['mode'] | null): UtilityDefinition[] {
   const mode = workspaceMode()
+  const isJs = sceneIsJs(scene)
   return utilityDefinitions.filter(
     (definition) =>
-      // Allow-list per control plane (workspaceSurfaces.ts), plus one
-      // per-scene rule: SceneSource shows generated Nim, so it needs a
-      // compiled scene even where the mode permits the panel.
+      // Allow-list per control plane (workspaceSurfaces.ts), plus two
+      // per-scene rules: SceneSource shows generated Nim, so it needs a
+      // compiled scene even where the mode permits the panel; and a pure JS
+      // scene has no apps, events or Nim to show.
       sceneUtilityPanelIsAllowed(mode, definition.panel) &&
-      (definition.panel !== 'source' || sceneIsCompiled(scene, frameMode))
+      (definition.panel !== 'source' || sceneIsCompiled(scene, frameMode)) &&
+      !(isJs && graphOnlyUtilityPanels.has(definition.panel))
   )
 }
 
@@ -641,7 +648,9 @@ function SceneDiagramOverlay({
     <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
       <div className="scene-diagram-corner-toolbar pointer-events-none absolute flex min-w-0 items-start gap-2">
         <div className="scene-diagram-node-toolbar scene-diagram-utility-toolbar pointer-events-none flex min-w-0 flex-wrap items-center justify-end gap-2">
-          {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} variant="floating" /> : null}
+          {sceneId && !sceneIsJs(scene) ? (
+            <DiagramToolbar sceneId={sceneId} showSceneAction={false} variant="floating" />
+          ) : null}
         </div>
         <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
           <button
@@ -987,8 +996,15 @@ function SceneCanvas({
       onDragOverCapture={handleSceneDragOver}
       onDropCapture={handleSceneDrop}
     >
-      <SceneSelectedNodeSync frameId={frameId} sceneId={selectedSceneId} />
-      <Diagram sceneId={selectedSceneId} showToolbar={false} />
+      {sceneIsJs(selectedScene) ? (
+        // A pure JS scene has no diagram: the module is the scene.
+        <JsSceneEditor frameId={frameId} sceneId={selectedSceneId} />
+      ) : (
+        <>
+          <SceneSelectedNodeSync frameId={frameId} sceneId={selectedSceneId} />
+          <Diagram sceneId={selectedSceneId} showToolbar={false} />
+        </>
+      )}
       <SceneDiagramOverlay frameId={frameId} frameMode={frameMode} scene={selectedScene} sceneId={selectedSceneId} />
     </div>
   )

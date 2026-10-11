@@ -1,0 +1,12 @@
+{
+  "id": "a3b1c2d4-7e8f-4a90-b1c2-d3e4f5a6b7c8",
+  "name": "JS Clock",
+  "settings": { "execution": "js", "refreshInterval": 60, "backgroundColor": "#ffffff" },
+  "fields": [
+    { "name": "label", "label": "Label under the time", "type": "string", "value": "", "access": "public", "persist": "disk" },
+    { "name": "twentyFourHour", "label": "24-hour clock", "type": "boolean", "value": "true", "access": "public", "persist": "disk" },
+    { "name": "dark", "label": "Dark theme", "type": "boolean", "value": "false", "access": "public", "persist": "disk" }
+  ],
+  "nodes": [],
+  "edges": []
+}

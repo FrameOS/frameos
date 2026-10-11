@@ -138,6 +138,12 @@ async function collectExampleScenes() {
       if (!Array.isArray(scenes) || scenes.length === 0) {
         continue
       }
+      // The AI builds node graphs; a pure JS scene (settings.execution "js",
+      // docs/pure-js-scenes.md) is a different shape it is not taught yet,
+      // so the js samples stay out of its examples (docs/todo.md).
+      if (scenes.some((scene) => scene?.settings?.execution === 'js')) {
+        continue
+      }
       examples.push({
         name: template.name ?? entry.name,
         slug: `${group}/${entry.name}`,

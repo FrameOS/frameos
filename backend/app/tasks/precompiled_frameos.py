@@ -19,7 +19,7 @@ from app.config import config
 from app.codegen.release_drivers_nim import release_driver_specs
 from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
-from app.utils.scene_execution import scene_is_interpreted
+from app.utils.scene_execution import scene_runs_from_json
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.versions import get_versions
 from app.utils.release_signing import release_asset_name, verify_release_archive_signature
@@ -48,7 +48,7 @@ class PrecompiledFrameOSResult:
 def frame_compiled_scene_count(frame: Frame) -> int:
     count = 0
     for scene in getattr(frame, "scenes", None) or []:
-        if isinstance(scene, dict) and not scene_is_interpreted(scene):
+        if isinstance(scene, dict) and not scene_runs_from_json(scene):
             count += 1
     return count
 

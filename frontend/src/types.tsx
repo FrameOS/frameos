@@ -1054,7 +1054,12 @@ export interface ConnectionAppOutputAppInput extends EdgeConnectionType {
 export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
-  execution?: 'compiled' | 'interpreted'
+  /**
+   * How the frame runs the scene: `interpreted` (the default, a node graph),
+   * `compiled` (legacy Nim), or `js` (a pure JavaScript module in `sources`,
+   * no diagram — docs/pure-js-scenes.md).
+   */
+  execution?: 'compiled' | 'interpreted' | 'js'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>
 }
@@ -1094,6 +1099,8 @@ export interface FrameScene {
   default?: boolean
   settings?: FrameSceneSettings
   origin?: SceneOrigin
+  /** A pure JS scene's files by name (`scene.ts` and what it imports); only when `settings.execution` is `js`. */
+  sources?: Record<string, string>
 }
 
 export interface FrameSceneIndexed {

@@ -16,6 +16,7 @@ import frameos/event_log
 import frameos/events
 import frameos/planner
 import frameos/refresh_interval
+import frameos/js_scene
 import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
@@ -1245,6 +1246,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     exportedScene = uploadedScenes[sceneId]
   else:
     raise newException(Exception, "Scene not found: " & sceneId.string)
+  if exportedScene of ExportedJsScene:
+    # A pure JS scene (js_scene.nim) shares the registry and these entry
+    # points; everything below is the node graph's.
+    return initJsScene(ExportedJsScene(exportedScene), sceneId, frameConfig, logger, persistedState)
 
   let scene = InterpretedFrameScene(
     id: sceneId,
@@ -1601,7 +1606,11 @@ proc sceneListensTo*(scene: FrameScene, event: string): bool =
   ## Whether the scene has an event node for `event`. The dispatcher builds an
   ## input event's payload only when this is true; a scene that is not
   ## interpreted keeps every event, because nothing here can tell.
-  if scene.isNil or not (scene of InterpretedFrameScene):
+  if scene.isNil:
+    return true
+  if scene of JsFrameScene:
+    return jsSceneListensTo(scene, event)
+  if not (scene of InterpretedFrameScene):
     return true
   InterpretedFrameScene(scene).eventListeners.hasKey(event)
 
@@ -1699,6 +1708,9 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   ## this is where the run's budgets are armed: the wall-clock deadline that
   ## counts native calls too, and the dispatch budget. Re-entrant: a nested run
   ## rides on the outer one's budgets (run_budget.nim).
+  if self of JsFrameScene:
+    runJsEvent(self, context)
+    return
   let armedHere = armRenderDeadline(resolvedRenderDeadlineMs(self.frameConfig))
   if armedHere:
     setDispatchBudget(resolvedDispatchBudget(self.frameConfig))
@@ -1713,6 +1725,8 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       setDispatchBudget(0)
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
+  if self of JsFrameScene:
+    return renderJsScene(self, context)
   if TRACING:
     self.logger.log(%*{
       "event": "renderInterpreted",
@@ -1838,6 +1852,8 @@ proc annotateInterpretedSceneSourceNodeIds(data: string): string =
 # -------------------------
 
 proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedScene =
+  if scene.settings != nil and isJsSceneExecution(scene.settings.execution):
+    return buildJsSceneExport(scene)
   let settingsInterval = if scene.settings != nil: scene.settings.refreshInterval else: 0.0
   let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
   # The refresh interval is a state field: the scene's own (by role or by

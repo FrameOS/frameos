@@ -36,6 +36,13 @@ type
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
+    ## A pure JS scene's runtime (js_scene.nim): never torn down between
+    ## renders by the embedded idle sweep, because its module state IS the
+    ## scene's working state. Still evicted under memory pressure, like any.
+    pinned*: bool
+    ## Called once the interpreter exists and the app prelude is in, before
+    ## the module is evaluated: where a host registers its own bindings.
+    onReady*: proc (runtime: JsAppRuntime) {.closure.}
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -107,7 +114,7 @@ proc releaseIdleJsAppRuntimes*() =
   ## QuickJS parses the TypeScript itself.
   when defined(frameosEmbedded):
     for runtime in liveJsRuntimes:
-      if runtime.ready and not jsRuntimeStack.contains(runtime):
+      if runtime.ready and not runtime.pinned and not jsRuntimeStack.contains(runtime):
         teardownJsRuntime(runtime)
 
 proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
@@ -1259,6 +1266,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
       : undefined;
   }
   """ & sceneJsPrelude)
+  if not runtime.onReady.isNil:
+    runtime.onReady(runtime)
   # Named after the real file so `./helper` resolves beside it and error
   # locations read `app.ts:12:3`.
   let filename = runtime.sourceName
@@ -1546,11 +1555,19 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
 
   runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
 
-proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JSValue =
+proc invokeWith*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext,
+    invoker: string, fnName: string, extra: openArray[JSValue]): JSValue =
+  ## Call the module's exported `fnName` through the prelude function
+  ## `invoker` (`__frameosInvoke` for apps; a scene host supplies its own),
+  ## with `extra` appended to the arguments. The result is the caller's to
+  ## free; an exception is logged and comes back as null.
   ensureReady(runtime, owner.frameConfig, if owner.scene.isNil: "" else: owner.scene.id.string)
   let ctx = runtime.js.context
   let fnNameValue = nimStringToJS(ctx, fnName)
   defer: JS_FreeValue(ctx, fnNameValue)
+  var args = @[JSValueConst(fnNameValue)]
+  for value in extra:
+    args.add(JSValueConst(value))
 
   jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
   # A JS app can run another node, which can be another JS app, so track the
@@ -1559,7 +1576,7 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
   when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
   result =
     try:
-      callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+      callGlobalFunction(ctx, invoker, args)
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
@@ -1580,6 +1597,26 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
       })
     JS_FreeValue(ctx, result)
     return jsNull(ctx)
+
+proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JSValue =
+  runtime.invokeWith(owner, configJson, context, "__frameosInvoke", fnName, [])
+
+proc ensureRuntimeReady*(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
+  ## Build the interpreter and evaluate the module now, rather than on the
+  ## first call — a scene host wants a compile error at init, not at render.
+  ensureReady(runtime, frameConfig, sceneId)
+
+proc releaseJsRuntime*(runtime: JsAppRuntime) =
+  ## Close a runtime that is not behind an app node (a JS scene's).
+  if runtime.isNil:
+    return
+  when defined(frameosEmbedded):
+    if jsRuntimeStack.contains(runtime):
+      return
+    let live = liveJsRuntimes.find(runtime)
+    if live >= 0:
+      liveJsRuntimes.delete(live)
+  teardownJsRuntime(runtime)
 
 proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
   if runtime.initialized:

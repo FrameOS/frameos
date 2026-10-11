@@ -1,0 +1,6 @@
+{
+  "name": "JS Crypto",
+  "description": "A coin's price and its last seven days as a sparkline, from Kraken's public API (no key). A pure JavaScript scene: the chart is one polyline over a typed array.",
+  "config": null,
+  "scenes": "./scenes.json"
+}

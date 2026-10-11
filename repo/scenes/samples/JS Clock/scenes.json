@@ -1,0 +1,42 @@
+[
+  {
+    "id": "a3b1c2d4-7e8f-4a90-b1c2-d3e4f5a6b7c8",
+    "name": "JS Clock",
+    "settings": {
+      "execution": "js",
+      "refreshInterval": 60,
+      "backgroundColor": "#ffffff"
+    },
+    "fields": [
+      {
+        "name": "label",
+        "label": "Label under the time",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "twentyFourHour",
+        "label": "24-hour clock",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "dark",
+        "label": "Dark theme",
+        "type": "boolean",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [],
+    "edges": [],
+    "sources": {
+      "scene.ts": "import type { Scene, Canvas } from \"frameos\";\n\n// A clock: the time as large as the frame allows, the date under it, and a\n// thin bar showing how far the day has come. Nothing is allocated per\n// render beyond a few strings; the canvas is drawn in place.\n\nexport function render(scene: Scene, canvas: Canvas) {\n  const dark = scene.state.dark === true;\n  const ink = dark ? \"#f5f5f5\" : \"#111111\";\n  const paper = dark ? \"#111111\" : \"#ffffff\";\n  const accent = dark ? \"#ffb347\" : \"#d14b00\";\n  canvas.clear(paper);\n\n  const now = scene.now();\n  const time = scene.state.twentyFourHour === false\n    ? scene.format(now, \"{hour/ap}:{minute/2}\")\n    : scene.format(now, \"{hour/2}:{minute/2}\");\n  const date = scene.format(now, \"{weekday}, {day} {month/n} {year/4}\");\n\n  const w = canvas.width;\n  const h = canvas.height;\n  const pad = Math.round(Math.min(w, h) * 0.06);\n\n  // The time fills the top two thirds; `fit` shrinks it until it does.\n  canvas.text(time, pad, pad, {\n    width: w - 2 * pad, height: Math.round(h * 0.6), size: h, fit: true,\n    align: \"center\", valign: \"middle\", color: ink,\n  });\n  canvas.text(date, pad, Math.round(h * 0.66), {\n    width: w - 2 * pad, height: Math.round(h * 0.14), size: Math.round(h * 0.09), fit: true,\n    align: \"center\", valign: \"middle\", color: ink,\n  });\n  const label = String(scene.state.label || \"\");\n  if (label) {\n    canvas.text(label, pad, Math.round(h * 0.8), {\n      width: w - 2 * pad, height: Math.round(h * 0.1), size: Math.round(h * 0.06), fit: true,\n      align: \"center\", valign: \"middle\", color: accent,\n    });\n  }\n\n  // Day progress: a hairline with the elapsed part in the accent color.\n  const secondsToday = Number(scene.format(now, \"{hour}\")) * 3600 + Number(scene.format(now, \"{minute}\")) * 60;\n  const progress = secondsToday / 86400;\n  const barY = h - pad;\n  canvas.fillRect(pad, barY, w - 2 * pad, 2, dark ? \"#444444\" : \"#dddddd\");\n  canvas.fillRect(pad, barY - 2, Math.round((w - 2 * pad) * progress), 6, accent);\n\n  // Wake up on the next full minute, so the display never shows a stale minute.\n  scene.setNextSleep(60 - (Math.floor(now) % 60));\n}\n"
+    }
+  }
+]

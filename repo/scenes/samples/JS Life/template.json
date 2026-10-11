@@ -1,0 +1,6 @@
+{
+  "name": "JS Life",
+  "description": "Conway's Game of Life as a pure JavaScript scene: fixed buffers, no allocation per generation. For LCDs and the live preview; e-ink owners, raise the refresh interval.",
+  "config": null,
+  "scenes": "./scenes.json"
+}
