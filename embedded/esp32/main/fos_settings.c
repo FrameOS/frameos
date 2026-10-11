@@ -9,14 +9,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "esp_crt_bundle.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_system.h"
 
 #include "cJSON.h"
 #include "esp_timer.h"
 #include "nvs.h"
+#include "fos_backend_http.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_mem.h"
@@ -33,7 +32,6 @@ static const char *TAG = "fos_settings";
 #define SETTINGS_MAX_BYTES (32 * 1024)
 #define SETTINGS_ETAG_LEN 96
 /* Provider error bodies are a bare {"error": "…"}. */
-#define SETTINGS_ERROR_MAX_BYTES 512
 #define SETTINGS_AUTH_LEN (FOS_CLOUD_TOKEN_LEN + 16)
 /* Steady-state and post-failure spacing for the cloud pull, matching the Pi
  * hub client (HubServiceSettingsIntervalSeconds / …RetrySeconds). Every other
@@ -338,16 +336,6 @@ bool fos_settings_cloud_scope(void)
     return s_cloud_scope_granted;
 }
 
-static esp_err_t collect_etag_handler(esp_http_client_event_t *evt)
-{
-    if (evt->event_id == HTTP_EVENT_ON_HEADER &&
-        strcasecmp(evt->header_key, "ETag") == 0) {
-        char *etag_out = (char *)evt->user_data;
-        snprintf(etag_out, SETTINGS_ETAG_LEN, "%s", evt->header_value);
-    }
-    return ESP_OK;
-}
-
 static void log_settings_event(const char *status, const char *detail)
 {
     char line[256];
@@ -372,27 +360,6 @@ static void log_settings_applied(const char *detail, const char *changed)
 
 /* Read at most `limit` bytes of the response body. Returns a NUL-terminated
  * malloc'd buffer (caller frees) or NULL. */
-static char *read_body(esp_http_client_handle_t client, int64_t content_length,
-                       size_t limit)
-{
-    if (content_length > (int64_t)limit) return NULL;
-    size_t cap = content_length > 0 ? (size_t)content_length : limit;
-    char *buf = malloc(cap + 1);
-    if (buf == NULL) return NULL;
-    size_t total = 0;
-    while (total < cap) {
-        int r = esp_http_client_read(client, buf + total, cap - total);
-        if (r < 0) {
-            free(buf);
-            return NULL;
-        }
-        if (r == 0) break;
-        total += (size_t)r;
-    }
-    buf[total] = '\0';
-    return buf;
-}
-
 /* A pin the chip cannot spare (SPI flash / PSRAM pad, driver-claimed) is
  * refused and the previous value kept; -1 ("none") always passes. */
 static bool settings_pin_usable(const char *key, int pin)
@@ -840,57 +807,37 @@ esp_err_t fos_settings_sync(bool force)
         s_etag_source = source;
     }
 
-    char response_etag[SETTINGS_ETAG_LEN] = "";
-    esp_http_client_config_t http_config = {
+    fos_http_request_t request = {
         .url = url,
-        .timeout_ms = 15000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 2048,
-        .event_handler = collect_etag_handler,
-        .user_data = response_etag,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (client == NULL) {
-        log_settings_event("error", "client-init-failed");
-        return ESP_FAIL;
-    }
-    esp_http_client_set_header(client, "Authorization", auth);
-    if (source == SETTINGS_SOURCE_CLOUD) {
+        .auth = auth,
         /* This body is the account's credentials: no intermediate cache may
          * keep a copy, matching the provider's own Cache-Control: no-store. */
-        esp_http_client_set_header(client, "Cache-Control", "no-store");
+        .no_store = source == SETTINGS_SOURCE_CLOUD,
+        .if_none_match = force ? NULL : s_etag,
+    };
+    fos_http_response_t response;
+    if (fos_http_fetch(&request, SETTINGS_MAX_BYTES, &response) != ESP_OK) {
+        log_settings_event("error", "connect-failed");
+        return ESP_FAIL;
     }
-    if (!force && s_etag[0]) {
-        esp_http_client_set_header(client, "If-None-Match", s_etag);
-    }
-
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "settings sync: connect failed: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        return err;
-    }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
+    int status = response.status;
     if (status != 304) {
         char status_line[192];
         snprintf(status_line, sizeof(status_line),
                  "{\"event\":\"settings:sync\",\"source\":\"esp32\","
                  "\"status\":\"fetched\",\"httpStatus\":%d,\"bytes\":%lld}",
-                 status, (long long)content_length);
+                 status, (long long)response.content_length);
         frameos_nim_log_hook(status_line);
     }
 
     if (status == 304) {
         /* The copy we hold is the copy the source would send. Keep it. */
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         if (source == SETTINGS_SOURCE_CLOUD) {
             s_cloud_next_pull_us = esp_timer_get_time() + SETTINGS_CLOUD_INTERVAL_US;
         }
         return ESP_OK;
     }
-    if (status != 200 || content_length > SETTINGS_MAX_BYTES) {
+    if (status != 200 || response.too_large || response.body == NULL) {
         /* `403 insufficient_scope` is the revocation boundary: the link no
          * longer holds settings:services, so every cloud-owned group comes off
          * the device and the source goes quiet until a `ready` re-announces
@@ -898,19 +845,14 @@ esp_err_t fos_settings_sync(bool force)
          * frame_not_active, 401, 429, 5xx, a truncated read — keeps the
          * current copy. */
         bool revoked = false;
-        if (source == SETTINGS_SOURCE_CLOUD && status == 403) {
-            char *error_body = read_body(client, content_length, SETTINGS_ERROR_MAX_BYTES);
-            if (error_body != NULL) {
-                cJSON *error_json = cJSON_Parse(error_body);
-                const cJSON *code = cJSON_GetObjectItem(error_json, "error");
-                revoked = cJSON_IsString(code) && code->valuestring &&
-                          strcmp(code->valuestring, "insufficient_scope") == 0;
-                cJSON_Delete(error_json);
-                free(error_body);
-            }
+        if (source == SETTINGS_SOURCE_CLOUD && status == 403 && response.body != NULL) {
+            cJSON *error_json = cJSON_Parse(response.body);
+            const cJSON *code = cJSON_GetObjectItem(error_json, "error");
+            revoked = cJSON_IsString(code) && code->valuestring &&
+                      strcmp(code->valuestring, "insufficient_scope") == 0;
+            cJSON_Delete(error_json);
         }
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
+        fos_http_response_free(&response);
         if (revoked) {
             frameos_nim_apply_service_settings("{}");
             fos_settings_forget_cache();
@@ -924,19 +866,14 @@ esp_err_t fos_settings_sync(bool force)
         if (status != 404) { /* older backends have no settings route */
             ESP_LOGW(TAG, "settings sync: HTTP %d from %s", status, url);
         }
-        return ESP_FAIL;
+        return status == 200 ? ESP_ERR_NO_MEM : ESP_FAIL;
     }
 
-    char *buf = read_body(client, content_length, SETTINGS_MAX_BYTES);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    if (buf == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-
-    cJSON *root = cJSON_ParseWithLength(buf, strlen(buf));
-    memset(buf, 0, strlen(buf)); /* the body carries the account's API keys */
-    free(buf);
+    char response_etag[SETTINGS_ETAG_LEN];
+    strlcpy(response_etag, response.etag, sizeof(response_etag));
+    cJSON *root = cJSON_ParseWithLength(response.body, response.body_len);
+    memset(response.body, 0, response.body_len); /* the body carries the account's API keys */
+    fos_http_response_free(&response);
     if (root == NULL || !cJSON_IsObject(root)) {
         cJSON_Delete(root);
         log_settings_event("error", "unparseable");

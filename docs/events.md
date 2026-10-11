@@ -393,6 +393,7 @@ an event means:
 | Device commands | all five | `metrics` has no host; the rest are the firmware's (`fos_events.c`) | none: logged and ignored |
 | When a queued event is delivered | the runner thread's message loop | on the task that sent it, before `frameos_nim_send_event` returns; what a render dispatched, right after the render | before `frameos_wasm_event` returns; right after a render |
 | An event aimed at a scene that is not the current one (`target`) | delivered if that scene is in memory | dropped: one resident scene | dropped |
+| An event before the current scene is built | not a state the runner has: scenes are built when selected | the event builds it (`single_scene_host.send`), so a boot's replayed button press reaches the scene it woke; a scene switch is served without building the scene being left | same as the ESP32 |
 | `close` on `reload` / `uploadScenes` | not sent | not sent | — |
 
 A frame on firmware older than `cloud.since` does not know `scene_event`: the

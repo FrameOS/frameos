@@ -9,15 +9,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
 #include "cJSON.h"
+#include "fos_backend_http.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_mem.h"
@@ -1244,16 +1243,6 @@ esp_err_t fos_scenes_set_json(const char *json, size_t len)
 
 /* ------------------------------------------------------------- backend */
 
-static esp_err_t collect_etag_handler(esp_http_client_event_t *evt)
-{
-    if (evt->event_id == HTTP_EVENT_ON_HEADER &&
-        strcasecmp(evt->header_key, "ETag") == 0) {
-        char *etag_out = (char *)evt->user_data;
-        snprintf(etag_out, ETAG_LEN, "%s", evt->header_value);
-    }
-    return ESP_OK;
-}
-
 esp_err_t fos_scenes_sync(bool force)
 {
     fos_config_t *config = fos_config();
@@ -1274,115 +1263,55 @@ esp_err_t fos_scenes_sync(bool force)
     if (err != ESP_OK) return err;
 
     char url[FOS_URL_LEN + 64];
-    snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/scenes",
-             config->backend_url, (unsigned long)config->frame_id);
+    fos_backend_url("/embedded/scenes", url, sizeof(url));
     char auth[FOS_STR_LEN + 16];
-    snprintf(auth, sizeof(auth), "Bearer %s", config->api_key);
-
-    char response_etag[ETAG_LEN] = "";
-    esp_http_client_config_t http_config = {
+    fos_backend_auth(auth, sizeof(auth));
+    fos_http_request_t request = {
         .url = url,
+        .auth = auth,
+        .if_none_match = (!force && strcmp(s_etag, "local") != 0) ? s_etag : NULL,
         .timeout_ms = 30000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 4096,
-        .event_handler = collect_etag_handler,
-        .user_data = response_etag,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (client == NULL) return ESP_FAIL;
-    esp_http_client_set_header(client, "Authorization", auth);
-    if (!force && s_etag[0] && strcmp(s_etag, "local") != 0) {
-        esp_http_client_set_header(client, "If-None-Match", s_etag);
-    }
-
-    err = esp_http_client_open(client, 0);
+    fos_http_response_t response;
+    err = fos_http_fetch(&request, SCENES_MAX_BYTES, &response);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "scenes sync: connect failed: %s", esp_err_to_name(err));
         log_scene_event("scenes:sync", "error", "backend", "", "connect-failed",
                         0, 0, 0, err);
-        esp_http_client_cleanup(client);
         return err;
     }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-
+    int status = response.status;
     if (status == 304) {
         if (log_unchanged) {
             log_scene_event("scenes:sync", "ok", "backend", "", "unchanged",
                             0, s_loaded, status, ESP_OK);
         }
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         return ESP_OK;
     }
     if (status != 200) {
         ESP_LOGW(TAG, "scenes sync: HTTP %d from %s", status, url);
         log_scene_event("scenes:sync", "error", "backend", "", "http-error",
                         0, 0, status, ESP_FAIL);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
+        fos_http_response_free(&response);
         return ESP_FAIL;
     }
-    if (content_length > SCENES_MAX_BYTES) {
-        ESP_LOGE(TAG, "scenes sync: payload too large (%lld)", content_length);
+    if (response.too_large) {
+        ESP_LOGE(TAG, "scenes sync: payload too large (%lld)", response.content_length);
         log_scene_event("scenes:sync", "error", "backend", "", "payload-too-large",
-                        (size_t)content_length, 0, status, ESP_ERR_NO_MEM);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_ERR_NO_MEM;
-    }
-
-    size_t cap = content_length > 0 ? (size_t)content_length : 16384;
-    char *buf = fos_big_malloc(cap + 1);
-    if (buf == NULL) buf = malloc(cap + 1);
-    if (buf == NULL) {
-        log_scene_event("scenes:sync", "error", "backend", "", "out-of-memory",
-                        (size_t)(content_length > 0 ? content_length : 0),
+                        (size_t)(response.content_length > 0 ? response.content_length : SCENES_MAX_BYTES),
                         0, status, ESP_ERR_NO_MEM);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         return ESP_ERR_NO_MEM;
     }
-    size_t total = 0;
-    while (true) {
-        if (total == cap) {
-            if (cap >= SCENES_MAX_BYTES) {
-                log_scene_event("scenes:sync", "error", "backend", "", "payload-too-large",
-                                cap, 0, status, ESP_ERR_NO_MEM);
-                free(buf);
-                esp_http_client_close(client);
-                esp_http_client_cleanup(client);
-                return ESP_ERR_NO_MEM;
-            }
-            size_t new_cap = cap * 2 > SCENES_MAX_BYTES ? SCENES_MAX_BYTES : cap * 2;
-            char *new_buf = fos_big_realloc(buf, new_cap + 1);
-            if (new_buf == NULL) new_buf = realloc(buf, new_cap + 1);
-            if (new_buf == NULL) {
-                log_scene_event("scenes:sync", "error", "backend", "", "out-of-memory",
-                                new_cap, 0, status, ESP_ERR_NO_MEM);
-                free(buf);
-                esp_http_client_close(client);
-                esp_http_client_cleanup(client);
-                return ESP_ERR_NO_MEM;
-            }
-            buf = new_buf;
-            cap = new_cap;
-        }
-        int r = esp_http_client_read(client, buf + total, cap - total);
-        if (r < 0) {
-            log_scene_event("scenes:sync", "error", "backend", "", "read-failed",
-                            total, 0, status, ESP_FAIL);
-            free(buf);
-            esp_http_client_close(client);
-            esp_http_client_cleanup(client);
-            return ESP_FAIL;
-        }
-        if (r == 0) break;
-        total += r;
+    if (response.body == NULL) {
+        log_scene_event("scenes:sync", "error", "backend", "", "read-failed",
+                        0, 0, status, ESP_FAIL);
+        return ESP_FAIL;
     }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    buf[total] = 0;
+    char *buf = response.body;
+    size_t total = response.body_len;
+    char response_etag[ETAG_LEN];
+    strlcpy(response_etag, response.etag, sizeof(response_etag));
 
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, buf, total);
     if (err == ESP_OK) {

@@ -26,6 +26,7 @@
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
 
+#include "fos_backend_http.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_http.h"
@@ -277,33 +278,25 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
 {
     *up_to_date = false;
     ESP_LOGI(TAG, "ota (%s): checking manifest %s", src->plane, src->manifest_url);
-    esp_http_client_config_t config = {
+    fos_http_request_t request = {
         .url = src->manifest_url,
+        .auth = src->auth,
         .timeout_ms = 20000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 4096,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ota_log(src, "error", "no-memory");
-        return ESP_ERR_NO_MEM;
-    }
-    esp_http_client_set_header(client, "Authorization", src->auth);
-    esp_err_t err = esp_http_client_open(client, 0);
+    fos_http_response_t response;
+    esp_err_t err = fos_http_fetch(&request, FOS_OTA_MANIFEST_MAX, &response);
     if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        ota_log(src, "error", "manifest-connect-failed");
+        ota_log(src, "error", err == ESP_ERR_NO_MEM ? "no-memory" : "manifest-connect-failed");
         return err;
     }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
+    int status = response.status;
     /* Dev servers (and some proxies) send chunked responses with no
      * Content-Length — read to EOF under the manifest cap either way. */
-    if (status != 200 || content_length > FOS_OTA_MANIFEST_MAX) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
+    if (status != 200 || response.too_large) {
+        fos_http_response_free(&response);
         ESP_LOGW(TAG, "ota (%s): manifest HTTP %d (%lld bytes)", src->plane, status,
-                 (long long)content_length);
+                 (long long)response.content_length);
         /* 404 = the release carries no OTA app image for this platform; 409 =
          * it has one but no signature. Both are "nothing to install", and
          * telling them apart in the log is the difference between waiting for
@@ -313,25 +306,13 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
                                             : "manifest-unavailable");
         return status == 404 ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }
-    char *body = malloc(FOS_OTA_MANIFEST_MAX + 1);
-    if (body == NULL) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
+    if (response.body == NULL) {
         ota_log(src, "error", "no-memory");
         return ESP_ERR_NO_MEM;
     }
-    size_t total = 0;
-    while (total < FOS_OTA_MANIFEST_MAX) {
-        int r = esp_http_client_read(client, body + total, FOS_OTA_MANIFEST_MAX - total);
-        if (r <= 0) break;
-        total += (size_t)r;
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    body[total] = '\0';
 
-    cJSON *root = cJSON_ParseWithLength(body, total);
-    free(body);
+    cJSON *root = cJSON_ParseWithLength(response.body, response.body_len);
+    fos_http_response_free(&response);
     if (root == NULL) {
         ota_log(src, "error", "manifest-unparseable");
         return ESP_FAIL;

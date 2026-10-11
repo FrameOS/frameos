@@ -1,4 +1,5 @@
 #include "fos_tz.h"
+#include "fos_backend_http.h"
 #include "fos_config.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -8,8 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_crt_bundle.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -142,36 +141,18 @@ static esp_err_t fetch_slice(const char *name, char *out, size_t out_len)
 {
     char url[sizeof(TZ_LOOKUP_URL_PREFIX) + FOS_STR_LEN + 8];
     snprintf(url, sizeof(url), TZ_LOOKUP_URL_PREFIX "%s.json", name);
-    esp_http_client_config_t http_config = {
-        .url = url,
-        .timeout_ms = 10000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 1024,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (client == NULL) return ESP_FAIL;
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        return err;
+    fos_http_request_t request = {.url = url, .timeout_ms = 10000, .buffer_size = 1024};
+    fos_http_response_t response;
+    esp_err_t err = fos_http_fetch(&request, out_len - 1, &response);
+    if (err != ESP_OK) return err;
+    if (response.status != 200 || response.body == NULL) {
+        ESP_LOGW(TAG, "tz lookup for '%s': HTTP %d (%lld bytes)", name, response.status,
+                 (long long)response.content_length);
+        fos_http_response_free(&response);
+        return response.status == 404 ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    if (status != 200 || content_length > (int64_t)out_len - 1) {
-        ESP_LOGW(TAG, "tz lookup for '%s': HTTP %d (%lld bytes)", name, status, (long long)content_length);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return status == 404 ? ESP_ERR_NOT_FOUND : ESP_FAIL;
-    }
-    int total = 0;
-    while (total < (int)out_len - 1) {
-        int n = esp_http_client_read(client, out + total, (int)out_len - 1 - total);
-        if (n <= 0) break;
-        total += n;
-    }
-    out[total] = '\0';
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
+    strlcpy(out, response.body, out_len);
+    fos_http_response_free(&response);
     return out[0] ? ESP_OK : ESP_FAIL;
 }
 

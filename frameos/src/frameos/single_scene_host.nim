@@ -228,7 +228,12 @@ proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: J
   # The current scene is built on first use, and an event is a use: a
   # battery ESP32 reads the button that woke it before the first render, so
   # the press found no resident scene and was dropped ("dispatched": false).
-  discard host.ensureScene()
+  # Not for a scene switch: the dispatcher serves that without a scene, and
+  # a switch queued for the wake (the backend's set_current_scene) would
+  # otherwise build the scene it is leaving first — seconds of JavaScript
+  # transpiling for a scene nobody sees.
+  if event != "setCurrentScene":
+    discard host.ensureScene()
   discard host.events.tick()
   host.events.dispatchNow(origin, event, payload)
 

@@ -34,6 +34,7 @@ main/                     boot orchestration + platform modules
   fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
   fos_scene_state.c       scene state across deep sleep: one JSON file per scene under /state (host-tested)
   fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id
+  fos_backend_http.c      the one HTTP client for the small pulls and posts (settings, scenes, commands, tz, OTA manifest)
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
   fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
                           producer — /event/<name>, the schedule, the cloud verbs, the console's
