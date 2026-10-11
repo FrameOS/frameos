@@ -152,7 +152,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
                 await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "started"))
             await workflow.execute(plan)
             if task_id:
-                await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "completed"))
+                detail = "queued" if workflow.queued_for_frame else ""
+                await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "completed", detail))
     except (Exception, asyncio.CancelledError) as exc:
         # CancelledError is a BaseException: an aborted or timed-out job used
         # to skip this block, leave status="deploying" and log nothing, and

@@ -1425,41 +1425,56 @@ async def test_deploy_plan_full_for_embedded_pico_is_unavailable(async_client, d
 
 
 @pytest.mark.asyncio
-async def test_request_embedded_firmware_update_pokes_the_device(async_client, db, redis):
-    """The backend holds no image and no signing key. All it does is tell the
-    board to check this backend's relay of the release manifest now."""
+async def test_request_embedded_firmware_update_queues_the_notice(async_client, db, redis):
+    """The backend holds no image and no signing key. All it does is queue a
+    `notify_update_available` for the board, which checks this backend's
+    relay of the release manifest when it takes it — now if awake, on its
+    next check-in if asleep."""
+    from app.models.frame_command import FrameCommand
+
     frame_json = await create_embedded_frame(async_client)
     frame = db.get(Frame, frame_json['id'])
 
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
-        fetch.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
-        payload = await request_embedded_firmware_update(db, redis, frame)
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock) as nudge:
+        nudge.return_value = False
+        outcome = await request_embedded_firmware_update(db, redis, frame)
 
-    assert payload == {'ok': True}
-    fetch.assert_awaited_once()
-    assert fetch.await_args.kwargs['path'] == '/api/action/ota'
-    assert fetch.await_args.kwargs['method'] == 'POST'
-
-    # A non-JSON body comes back as text, not an exception.
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
-        fetch.return_value = (200, b'started', {'content-type': 'text/plain'})
-        assert await request_embedded_firmware_update(db, redis, frame) == 'started'
+    assert outcome['status'] == 'queued' and outcome['applied'] is False
+    assert outcome['command']['type'] == 'notify_update_available'
+    nudge.assert_awaited_once()
+    rows = db.query(FrameCommand).filter_by(frame_id=frame.id).all()
+    assert [row.type for row in rows] == ['notify_update_available']
+    assert rows[0].status == 'pending'
+    # The route says the same.
+    response = await async_client.post(f'/api/frames/{frame.id}/embedded/firmware/ota')
+    assert response.status_code == 200, response.text
+    assert 'queued' in response.json()['message']
+    # Queued twice is one notice: the newer supersedes the older.
+    db.expire_all()
+    rows = db.query(FrameCommand).filter_by(frame_id=frame.id).order_by(FrameCommand.created_at).all()
+    assert [row.status for row in rows] == ['expired', 'pending']
 
 
 @pytest.mark.asyncio
-async def test_request_embedded_firmware_update_reports_device_failures(async_client, db, redis):
+async def test_request_embedded_firmware_update_reports_a_refusal(async_client, db, redis):
+    """An awake board that refuses the notice fails the request with its
+    reason, as the HTTP poke used to."""
+    from app.models.frame_command import FrameCommand
+
     frame_json = await create_embedded_frame(async_client)
     frame = db.get(Frame, frame_json['id'])
 
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
-        fetch.return_value = (503, b'busy rendering', {'content-type': 'text/plain'})
-        with pytest.raises(ValueError, match='HTTP 503'):
-            await request_embedded_firmware_update(db, redis, frame)
+    async def refuse(_db, _frame, command_id, _timeout):
+        command = db.get(FrameCommand, command_id)
+        command.status = 'failed'
+        command.error = 'unsupported_verb'
+        db.commit()
+        return command
 
-    # A transport failure is the same kind of "no" — never a silent success.
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
-        fetch.side_effect = OSError('connection refused')
-        with pytest.raises(ValueError, match='connection refused'):
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock) as nudge, \
+            patch('app.utils.embedded_commands.wait_for_frame_command', side_effect=refuse):
+        nudge.return_value = True
+        with pytest.raises(ValueError, match='unsupported_verb'):
             await request_embedded_firmware_update(db, redis, frame)
 
 
@@ -1473,23 +1488,26 @@ async def test_request_embedded_firmware_update_refuses_a_4mb_board(async_client
     db.add(frame)
     db.commit()
 
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock) as nudge:
         with pytest.raises(ValueError, match='OTA updates are not available'):
             await request_embedded_firmware_update(db, redis, frame)
-    fetch.assert_not_awaited()
+    nudge.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_firmware_ota_route_requests_the_device_update(async_client, db):
     frame = await create_embedded_frame(async_client)
 
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
-        fetch.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock) as nudge:
+        nudge.return_value = False
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
 
     assert response.status_code == 200, response.text
-    assert response.json() == {'message': 'Firmware update requested', 'device': {'ok': True}}
-    fetch.assert_awaited_once()
+    body = response.json()
+    assert 'queued' in body['message']
+    assert body['device']['status'] == 'queued'
+    assert body['device']['command']['type'] == 'notify_update_available'
+    nudge.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1506,24 +1524,29 @@ async def test_firmware_ota_route_rejects_a_flash_layout_without_ota(async_clien
 
 
 @pytest.mark.asyncio
-async def test_pending_commands_are_always_empty(async_client):
-    """Cloud parity endpoint (docs/api-triality.md). The cloud answers it from
-    a durable queue; the backend pushes every action immediately and queues
-    nothing — including the OTA poke, which is now a plain device call — so
-    there is never anything here to observe or to take back."""
+async def test_pending_commands_show_the_queued_update(async_client):
+    """Cloud parity endpoint (docs/api-triality.md): the queue the owner can
+    see and take back, same wire shape as the cloud's."""
     frame = await create_embedded_frame(async_client)
 
     response = await async_client.get(f"/api/frames/{frame['id']}/commands")
     assert response.status_code == 200
     assert response.json() == {'commands': []}
 
-    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch:
-        fetch.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock) as nudge:
+        nudge.return_value = False
         assert (await async_client.post(
             f"/api/frames/{frame['id']}/embedded/firmware/ota")).status_code == 200
 
     response = await async_client.get(f"/api/frames/{frame['id']}/commands")
-    assert response.json() == {'commands': []}
+    (command,) = response.json()['commands']
+    assert command['type'] == 'notify_update_available'
+    assert command['status'] == 'pending'
+    assert command['expires_at'] is not None
+
+    response = await async_client.delete(f"/api/frames/{frame['id']}/commands/{command['id']}")
+    assert response.status_code == 200
+    assert (await async_client.get(f"/api/frames/{frame['id']}/commands")).json() == {'commands': []}
 
     # Nothing to cancel is a 404, never a pretend success.
     response = await async_client.delete(f"/api/frames/{frame['id']}/commands/anything")

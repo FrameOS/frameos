@@ -205,6 +205,30 @@ bool frameos_nim_request_scene_select(const char *scene_id)
     return s_scene_select(scene_id);
 }
 
+static char *(*s_scene_state_load)(const char *scene_id) = NULL;
+static bool (*s_scene_state_save)(const char *scene_id, const char *json) = NULL;
+
+void frameos_nim_set_scene_state_hooks(char *(*load)(const char *scene_id),
+                                       bool (*save)(const char *scene_id, const char *json))
+{
+    s_scene_state_load = load;
+    s_scene_state_save = save;
+}
+
+/* Called from Nim (embedded_runtime.nim) when a scene is built (its persisted
+ * state seeds the fields) and whenever its public state changed. */
+char *frameos_nim_scene_state_load(const char *scene_id)
+{
+    if (s_scene_state_load == NULL || scene_id == NULL || scene_id[0] == '\0') return NULL;
+    return s_scene_state_load(scene_id);
+}
+
+bool frameos_nim_scene_state_save(const char *scene_id, const char *json)
+{
+    if (s_scene_state_save == NULL || scene_id == NULL || scene_id[0] == '\0') return false;
+    return s_scene_state_save(scene_id, json);
+}
+
 static bool (*s_runtime_command)(const char *command, const char *payload_json) = NULL;
 
 void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, const char *payload_json))

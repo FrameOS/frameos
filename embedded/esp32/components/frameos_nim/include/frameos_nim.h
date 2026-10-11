@@ -63,6 +63,15 @@ void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id));
  * The hook runs on whatever task called into Nim, under the runtime lock: it
  * must not call back into the Nim runtime. */
 void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, const char *payload_json));
+/* Scene state across deep sleep (main/fos_scene_state.c). The runtime keeps a
+ * scene's public state in a file through these: `load` returns a malloc'd
+ * JSON object the runtime frees (NULL = none), `save` replaces it (an empty
+ * object forgets). Both run on whatever task entered the runtime, under the
+ * runtime lock, and must not call back into it. */
+void frameos_nim_set_scene_state_hooks(char *(*load)(const char *scene_id),
+                                       bool (*save)(const char *scene_id, const char *json));
+char *frameos_nim_scene_state_load(const char *scene_id);
+bool frameos_nim_scene_state_save(const char *scene_id, const char *json);
 const char *frameos_nim_scene_info_json(void);
 /* Same, but gives up after timeout_ms (-1 = wait forever, 0 = try once).
  * NULL means exactly one thing: the wait timed out because the runtime is

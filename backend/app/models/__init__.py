@@ -3,6 +3,7 @@ from .assets import *  # noqa: F403
 from .chat import *  # noqa: F403
 from .cloud import *  # noqa: F403
 from .frame import *  # noqa: F403
+from .frame_command import *  # noqa: F403
 from .log import *  # noqa: F403
 from .metrics import *  # noqa: F403
 from .organization import *  # noqa: F403

@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
@@ -810,8 +811,33 @@ static void ws_backoff_reset(void);
 static void ws_ack(const cJSON *id, bool ok, const char *error);
 static cJSON *log_line_entry(const char *line, double timestamp);
 
+/* Where a verb's replies go. The management socket, unless a backend command
+ * is being dispatched (fos_cloud_dispatch_backend_command): the same handlers
+ * then answer through the caller's sink, which posts the ack to the backend's
+ * HTTP queue instead. One dispatch at a time, whichever side it came from —
+ * the sink is a global, and the lock is what makes that safe between the
+ * cloud task and the render task. */
+typedef void (*reply_sink_fn)(cJSON *msg, void *ctx);
+static reply_sink_fn s_reply_sink = NULL;
+static void *s_reply_sink_ctx = NULL;
+static SemaphoreHandle_t s_dispatch_lock = NULL;
+
+static void dispatch_lock_take(void)
+{
+    if (s_dispatch_lock != NULL) xSemaphoreTake(s_dispatch_lock, portMAX_DELAY);
+}
+
+static void dispatch_lock_give(void)
+{
+    if (s_dispatch_lock != NULL) xSemaphoreGive(s_dispatch_lock);
+}
+
 static void ws_send_json(cJSON *msg)
 {
+    if (s_reply_sink != NULL) {
+        s_reply_sink(msg, s_reply_sink_ctx);
+        return;
+    }
     char *text = cJSON_PrintUnformatted(msg);
     if (!text) return;
     esp_websocket_client_send_text(s_ws_client, text, strlen(text),
@@ -1099,6 +1125,17 @@ static void add_state_fields(cJSON *msg, nim_snapshot_t *snap)
     if (snap->ok) {
         cJSON *states = snap->states ? snap->states : cJSON_CreateObject();
         snap->states = NULL;
+        /* Keyed by scene id, as the Linux client's helloStatePayload is and
+         * the provider reads it (frameStatesRecord keeps the object-valued
+         * entries of last_state as scenes): the one resident scene's state
+         * under its id. Sent flat, it came out as no state at all. */
+        if (states && snap->scene_id[0]) {
+            cJSON *by_scene = cJSON_CreateObject();
+            if (by_scene) {
+                cJSON_AddItemToObject(by_scene, snap->scene_id, states);
+                states = by_scene;
+            }
+        }
         if (states) cJSON_AddItemToObject(msg, "states", states);
         /* Same top-level spot the Linux client puts it (helloStatePayload);
          * the hub folds it into last_state, which is where the workspace
@@ -2431,21 +2468,21 @@ static void ws_ack_unparseable(const char *data, size_t len)
  * BEFORE the dispatch — a restart does not come back to send one, and the
  * delay in fos_events.c exists so this ack gets onto the wire — which is why
  * the allow-list is asked here first instead of reading the result. */
-static void ws_handle_event_verb(const char *event, const cJSON *id)
+static void ws_handle_event_verb(const char *event, const cJSON *id, fos_event_origin_t origin)
 {
-    if (!fos_event_origin_may_emit(FOS_ORIGIN_CLOUD, event)) {
+    if (!fos_event_origin_may_emit(origin, event)) {
         ws_ack(id, false, "event_not_allowed");
         return;
     }
     ws_ack(id, true, NULL);
-    fos_events_dispatch(FOS_ORIGIN_CLOUD, event, NULL);
+    fos_events_dispatch(origin, event, NULL);
 }
 
 /* `set_current_scene {scene_id, state?}` → setCurrentScene {sceneId, state?},
  * the shape the local event carries (docs/cloud-frames.md). The switch is
  * queued without waiting for anything; `state` is handed to the runtime with a
  * bounded wait (fos_events.c), so this task never parks behind a render. */
-static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id)
+static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id, fos_event_origin_t origin)
 {
     char scene_id[128] = "";
     if (!json_field_str(root, "scene_id", scene_id, sizeof(scene_id))) {
@@ -2467,7 +2504,7 @@ static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id)
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch(FOS_ORIGIN_CLOUD, FOS_EVENT_SET_CURRENT_SCENE, printed);
+    fos_event_result_t result = fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed);
     cJSON_free(printed);
     if (result == FOS_EVENT_DONE) {
         ws_ack(id, true, NULL);
@@ -2495,7 +2532,7 @@ static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id)
  * keep answering — and `busy` says the event was NOT delivered. `ok` means
  * "handed to the dispatcher"; what came of it (no listener, an undeclared
  * custom event) is in the frame log, as on Linux. */
-static void ws_handle_scene_event(const cJSON *root, const cJSON *id)
+static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_origin_t origin)
 {
     const cJSON *name_item = cJSON_GetObjectItem(root, "name");
     const char *name = cJSON_IsString(name_item) && name_item->valuestring ? name_item->valuestring : "";
@@ -2505,7 +2542,7 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id)
     }
     if (fos_event_is_device_command(name) ||
         (fos_event_spec(name)->event_class != FOS_EVENT_CLASS_CUSTOM &&
-         !fos_event_origin_may_emit(FOS_ORIGIN_CLOUD, name))) {
+         !fos_event_origin_may_emit(origin, name))) {
         ws_ack(id, false, "event_not_allowed");
         return;
     }
@@ -2519,7 +2556,7 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id)
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch_wait(FOS_ORIGIN_CLOUD, name, printed,
+    fos_event_result_t result = fos_events_dispatch_wait(origin, name, printed,
                                                          FOS_CLOUD_SCENE_EVENT_WAIT_MS);
     if (printed != NULL) cJSON_free(printed);
     switch (result) {
@@ -2545,6 +2582,165 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id)
             ws_ack(id, true, NULL);
             break;
     }
+}
+
+/* The verbs a backend command may carry (app/utils/frame_commands.py
+ * QUEUEABLE_TYPES): the ones that answer on the spot. Asset streams and log
+ * pulls reply over the socket in their own time, from their own task, which
+ * the HTTP ack has no way to carry. */
+static bool backend_verb_allowed(const char *type)
+{
+    static const char *const allowed[] = {
+        "render", "reboot", "restart_runtime", "set_current_scene", "scene_event",
+        "get_state", "notify_update_available",
+    };
+    for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
+        if (strcmp(type, allowed[i]) == 0) return true;
+    }
+    return false;
+}
+
+/* One verb, whoever sent it: the management socket (origin cloud) or the
+ * backend's command queue (origin http:admin — the backend signs in with the
+ * frame's server API key, the same credential as its /event route, so the
+ * same allow-list applies and a custom scene event needs no `cloud` origin
+ * declaration). Replies go through ws_send_json, so to the socket or to the
+ * backend sink. Called with the dispatch lock held; `root` stays the
+ * caller's. */
+static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
+                          fos_event_origin_t origin, bool from_backend)
+{
+    if (from_backend && !backend_verb_allowed(type)) {
+        ws_ack(id, false, "unsupported_verb");
+        return;
+    }
+    if (strcmp(type, "get_state") == 0) {
+        if (!ws_send_state(id)) ws_ack(id, false, "runtime_busy");
+        else ws_ack(id, true, NULL);
+    } else if (strcmp(type, "render") == 0) {
+        ws_handle_event_verb(FOS_EVENT_RENDER, id, origin);
+    } else if (strcmp(type, "set_current_scene") == 0) {
+        ws_handle_set_current_scene(root, id, origin);
+    } else if (strcmp(type, "scene_event") == 0) {
+        ws_handle_scene_event(root, id, origin);
+    } else if (strcmp(type, "set_scenes") == 0) {
+        ws_handle_set_scenes(root, id);
+    } else if (strcmp(type, "set_settings") == 0) {
+        ws_handle_set_settings(root, id);
+    } else if (strcmp(type, "assets_list") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
+    } else if (strcmp(type, "asset_get") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_GET, root, id);
+    } else if (strcmp(type, "asset_put") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_PUT, root, id);
+    } else if (strcmp(type, "asset_put_chunk") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_PUT_CHUNK, root, id);
+    } else if (strcmp(type, "asset_mkdir") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_MKDIR, root, id);
+    } else if (strcmp(type, "asset_delete") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_DELETE, root, id);
+    } else if (strcmp(type, "asset_rename") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_RENAME, root, id);
+    } else if (strcmp(type, "image_get") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
+    } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
+        /* On ESP32 the runtime IS the firmware: restart_runtime == reboot,
+         * and fos_events.c carries both out the same way. */
+        ws_handle_event_verb(strcmp(type, "reboot") == 0 ? FOS_EVENT_REBOOT : FOS_EVENT_RESTART, id, origin);
+    } else if (strcmp(type, "set_schedule") == 0) {
+        /* The chip carries no tz database, so the provider sends the frame's
+         * current UTC offset alongside the schedule (the backend poll does the
+         * same via the `frame` object). Apply it first: without it a
+         * cloud-only frame evaluates every event in UTC. */
+        const cJSON *offset = cJSON_GetObjectItem(root, "utcOffsetMinutes");
+        if (cJSON_IsNumber(offset)) {
+            fos_schedule_set_utc_offset_minutes((int)offset->valuedouble);
+        }
+        const cJSON *schedule = cJSON_GetObjectItem(root, "schedule");
+        if (schedule == NULL || cJSON_IsNull(schedule)) {
+            fos_schedule_set_json(NULL, 0);
+            ws_ack(id, true, NULL);
+        } else if (!cJSON_IsObject(schedule)) {
+            ws_ack(id, false, "invalid_schedule");
+        } else {
+            char *printed = cJSON_PrintUnformatted(schedule);
+            if (printed == NULL) {
+                ws_ack(id, false, "no_memory");
+            } else if (fos_schedule_set_json(printed, strlen(printed)) == ESP_OK) {
+                ws_ack(id, true, NULL);
+            } else {
+                ws_ack(id, false, "invalid_schedule");
+            }
+            cJSON_free(printed);
+        }
+    } else if (strcmp(type, "refresh_service_settings") == 0) {
+        /* Advisory nudge: "your service settings changed, re-fetch them". The
+         * payload is always empty — API keys never ride the command queue
+         * (docs/cloud-frames.md, "Service settings") and nothing here reads
+         * one. Disjoint from set_settings: the six service groups are not in
+         * that verb's allowlist and never become settable over the socket.
+         * Ack on ACCEPTING the nudge, not on completing the fetch: the fetch
+         * is HTTP on the render task's schedule, and a failed fetch must not
+         * look like a refused verb. */
+        if (!fos_settings_cloud_scope()) {
+            ws_ack(id, false, "insufficient_scope");
+        } else {
+            ws_ack(id, true, NULL);
+            fos_settings_request_sync();
+        }
+    } else if (strcmp(type, "get_logs") == 0) {
+        ws_handle_get_logs(root, id);
+    } else if (strcmp(type, "get_metrics") == 0) {
+        ws_handle_get_metrics(id);
+    } else if (strcmp(type, "notify_update_available") == 0) {
+        /* Signed cloud OTA (docs/cloud-frames.md): fetch the manifest,
+         * verify the minisign signature, apply. Runs in its own task —
+         * the ack only means "the check was accepted". */
+        ws_ack(id, true, NULL);
+        if (from_backend) {
+            /* The backend's relay of the release manifest (fos_ota.c
+             * `/embedded/ota/manifest`), the path its HTTP action takes. */
+            fos_ota_request_check();
+        } else {
+            fos_ota_request_cloud_update();
+        }
+    } else if (strcmp(type, "set_display_power") == 0) {
+        /* Documented, and deliberately not implemented here (contract:
+         * profiles ["linux"]). Powering a panel down is a driver capability;
+         * this profile drives e-paper, which holds its image with the power
+         * off and has no backlight to switch. `unsupported_verb` — the
+         * documented answer for a verb this plane does not serve — rather
+         * than `unknown_verb`, which would say the provider invented it. */
+        ws_ack(id, false, "unsupported_verb");
+    } else if (strcmp(type, "scenes_get") == 0) {
+        /* Documented, Linux only (contract: profiles ["linux"]): it hands a
+         * provider the scenes an owner built on the frame's own admin page.
+         * This firmware has no on-device editor — whatever is in its store
+         * came from a control plane or the USB tool, which still holds it —
+         * and sends no `scene_count` in its hello, so a provider following
+         * the protocol never asks. */
+        ws_ack(id, false, "unsupported_verb");
+    } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
+        /* provider-side notices; nothing to do */
+    } else {
+        /* Audit-log and refuse everything not in the allowlist. */
+        ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
+        ws_ack(id, false, "unknown_verb");
+    }
+}
+
+void fos_cloud_dispatch_backend_command(cJSON *root, void (*reply)(cJSON *msg, void *ctx), void *ctx)
+{
+    const cJSON *type_item = cJSON_GetObjectItem(root, "type");
+    const cJSON *id = cJSON_GetObjectItem(root, "id");
+    const char *type = cJSON_IsString(type_item) && type_item->valuestring ? type_item->valuestring : "";
+    dispatch_lock_take();
+    s_reply_sink = reply;
+    s_reply_sink_ctx = ctx;
+    dispatch_verb(type, root, id, FOS_ORIGIN_HTTP_ADMIN, true);
+    s_reply_sink = NULL;
+    s_reply_sink_ctx = NULL;
+    dispatch_lock_give();
 }
 
 static void ws_handle_message(const char *data, size_t len)
@@ -2657,112 +2853,10 @@ static void ws_handle_message(const char *data, size_t len)
         frameos_nim_log_hook(event);
         s_prev_close_how = NULL;
         s_prev_close_code = 0;
-    } else if (strcmp(type, "get_state") == 0) {
-        if (!ws_send_state(id)) ws_ack(id, false, "runtime_busy");
-        else ws_ack(id, true, NULL);
-    } else if (strcmp(type, "render") == 0) {
-        ws_handle_event_verb(FOS_EVENT_RENDER, id);
-    } else if (strcmp(type, "set_current_scene") == 0) {
-        ws_handle_set_current_scene(root, id);
-    } else if (strcmp(type, "scene_event") == 0) {
-        ws_handle_scene_event(root, id);
-    } else if (strcmp(type, "set_scenes") == 0) {
-        ws_handle_set_scenes(root, id);
-    } else if (strcmp(type, "set_settings") == 0) {
-        ws_handle_set_settings(root, id);
-    } else if (strcmp(type, "assets_list") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
-    } else if (strcmp(type, "asset_get") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_GET, root, id);
-    } else if (strcmp(type, "asset_put") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_PUT, root, id);
-    } else if (strcmp(type, "asset_put_chunk") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_PUT_CHUNK, root, id);
-    } else if (strcmp(type, "asset_mkdir") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_MKDIR, root, id);
-    } else if (strcmp(type, "asset_delete") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_DELETE, root, id);
-    } else if (strcmp(type, "asset_rename") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_RENAME, root, id);
-    } else if (strcmp(type, "image_get") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
-    } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
-        /* On ESP32 the runtime IS the firmware: restart_runtime == reboot,
-         * and fos_events.c carries both out the same way. */
-        ws_handle_event_verb(strcmp(type, "reboot") == 0 ? FOS_EVENT_REBOOT : FOS_EVENT_RESTART, id);
-    } else if (strcmp(type, "set_schedule") == 0) {
-        /* The chip carries no tz database, so the provider sends the frame's
-         * current UTC offset alongside the schedule (the backend poll does the
-         * same via the `frame` object). Apply it first: without it a
-         * cloud-only frame evaluates every event in UTC. */
-        const cJSON *offset = cJSON_GetObjectItem(root, "utcOffsetMinutes");
-        if (cJSON_IsNumber(offset)) {
-            fos_schedule_set_utc_offset_minutes((int)offset->valuedouble);
-        }
-        const cJSON *schedule = cJSON_GetObjectItem(root, "schedule");
-        if (schedule == NULL || cJSON_IsNull(schedule)) {
-            fos_schedule_set_json(NULL, 0);
-            ws_ack(id, true, NULL);
-        } else if (!cJSON_IsObject(schedule)) {
-            ws_ack(id, false, "invalid_schedule");
-        } else {
-            char *printed = cJSON_PrintUnformatted(schedule);
-            if (printed == NULL) {
-                ws_ack(id, false, "no_memory");
-            } else if (fos_schedule_set_json(printed, strlen(printed)) == ESP_OK) {
-                ws_ack(id, true, NULL);
-            } else {
-                ws_ack(id, false, "invalid_schedule");
-            }
-            cJSON_free(printed);
-        }
-    } else if (strcmp(type, "refresh_service_settings") == 0) {
-        /* Advisory nudge: "your service settings changed, re-fetch them". The
-         * payload is always empty — API keys never ride the command queue
-         * (docs/cloud-frames.md, "Service settings") and nothing here reads
-         * one. Disjoint from set_settings: the six service groups are not in
-         * that verb's allowlist and never become settable over the socket.
-         * Ack on ACCEPTING the nudge, not on completing the fetch: the fetch
-         * is HTTP on the render task's schedule, and a failed fetch must not
-         * look like a refused verb. */
-        if (!fos_settings_cloud_scope()) {
-            ws_ack(id, false, "insufficient_scope");
-        } else {
-            ws_ack(id, true, NULL);
-            fos_settings_request_sync();
-        }
-    } else if (strcmp(type, "get_logs") == 0) {
-        ws_handle_get_logs(root, id);
-    } else if (strcmp(type, "get_metrics") == 0) {
-        ws_handle_get_metrics(id);
-    } else if (strcmp(type, "notify_update_available") == 0) {
-        /* Signed cloud OTA (docs/cloud-frames.md): fetch the manifest,
-         * verify the minisign signature, apply. Runs in its own task —
-         * the ack only means "the check was accepted". */
-        ws_ack(id, true, NULL);
-        fos_ota_request_cloud_update();
-    } else if (strcmp(type, "set_display_power") == 0) {
-        /* Documented, and deliberately not implemented here (contract:
-         * profiles ["linux"]). Powering a panel down is a driver capability;
-         * this profile drives e-paper, which holds its image with the power
-         * off and has no backlight to switch. `unsupported_verb` — the
-         * documented answer for a verb this plane does not serve — rather
-         * than `unknown_verb`, which would say the provider invented it. */
-        ws_ack(id, false, "unsupported_verb");
-    } else if (strcmp(type, "scenes_get") == 0) {
-        /* Documented, Linux only (contract: profiles ["linux"]): it hands a
-         * provider the scenes an owner built on the frame's own admin page.
-         * This firmware has no on-device editor — whatever is in its store
-         * came from a control plane or the USB tool, which still holds it —
-         * and sends no `scene_count` in its hello, so a provider following
-         * the protocol never asks. */
-        ws_ack(id, false, "unsupported_verb");
-    } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
-        /* provider-side notices; nothing to do */
     } else {
-        /* Audit-log and refuse everything not in the allowlist. */
-        ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
-        ws_ack(id, false, "unknown_verb");
+        dispatch_lock_take();
+        dispatch_verb(type, root, id, FOS_ORIGIN_CLOUD, false);
+        dispatch_lock_give();
     }
     cJSON_Delete(root);
 }
@@ -3329,6 +3423,7 @@ static void cloud_task(void *arg)
 
 esp_err_t fos_cloud_start(void)
 {
+    if (s_dispatch_lock == NULL) s_dispatch_lock = xSemaphoreCreateMutex();
     if (s_task != NULL) return ESP_OK;
     /* Read the stored link state and arm the private-network policy here, not
      * in the task: main() brings the render loop up immediately after this

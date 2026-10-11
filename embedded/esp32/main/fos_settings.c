@@ -796,6 +796,11 @@ static settings_source_t select_source(char *url, size_t url_len,
     return SETTINGS_SOURCE_CLOUD;
 }
 
+const char *fos_settings_etag(void)
+{
+    return s_etag_source == SETTINGS_SOURCE_BACKEND ? s_etag : "";
+}
+
 esp_err_t fos_settings_sync(bool force)
 {
     fos_config_t *config = fos_config();

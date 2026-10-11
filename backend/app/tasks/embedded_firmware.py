@@ -1574,19 +1574,10 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     frame.device_config = device_config
 
 
-async def request_embedded_firmware_update(db: Session, redis: Redis, frame: Frame) -> Any:
-    """Ask a backend-managed board to check this backend's OTA manifest now.
-
-    The device answers, reboots into its early updater, fetches
-    ``/embedded/ota/manifest`` (app/api/embedded_device.py — the release
-    manifest, relayed), and installs the release app image for its flash
-    layout if the version differs, verifying the release signature first.
-    Progress arrives as ``ota:backend`` log lines. The backend holds no image
-    and no key: the release is the only thing it can offer.
-    """
-    frame = get_fresh_frame(db, int(frame.id)) or frame
-    if not embedded_ota_supported_for_frame(frame):
-        raise ValueError("OTA updates are not available for the selected ESP32 flash size")
+async def _request_embedded_firmware_update_direct(db: Session, redis: Redis, frame: Frame) -> dict[str, Any]:
+    """The push for firmware from before the command queue (fos_commands.c,
+    2026.10.5): `POST /api/action/ota` on the board, which has to be awake.
+    Answers in the queue outcome's shape, applied or failed, never queued."""
     await log(db, redis, int(frame.id), "stdout", "Asking the frame to check for a firmware update")
     try:
         status, body, headers = await _fetch_frame_http_bytes(
@@ -1607,9 +1598,59 @@ async def request_embedded_firmware_update(db: Session, redis: Redis, frame: Fra
         await log(db, redis, int(frame.id), "stderr", f"Failed to request the firmware update: {error}")
         raise ValueError(error)
     await log(db, redis, int(frame.id), "stdout", "Firmware update check requested; the frame reboots into its updater")
+    device: Any = body.decode("utf-8", errors="replace")
     if headers.get("content-type", "").startswith("application/json"):
         try:
-            return json.loads(body.decode("utf-8", errors="replace"))
+            device = json.loads(body.decode("utf-8", errors="replace"))
         except ValueError:
             pass
-    return body.decode("utf-8", errors="replace")
+    return {"status": "applied", "applied": True, "error": None, "command": None, "device": device}
+
+
+async def request_embedded_firmware_update(
+    db: Session, redis: Redis, frame: Frame, *, wait_seconds: float = 5.0
+) -> dict[str, Any]:
+    """Ask a backend-managed board to check this backend's OTA manifest.
+
+    Queued as `notify_update_available` on the frame's command queue
+    (app/utils/frame_commands.py): an awake frame takes it within a second,
+    a deep-sleeping one on its next check-in, and the queue says which until
+    then. The device reboots into its early updater, fetches
+    ``/embedded/ota/manifest`` (app/api/embedded_device.py — the release
+    manifest, relayed), and installs the release app image for its flash
+    layout if the version differs, verifying the release signature first.
+    Progress arrives as ``ota:backend`` log lines. The backend holds no image
+    and no key: the release is the only thing it can offer.
+
+    Returns the queue outcome (app/utils/embedded_commands.command_outcome):
+    `applied` once the frame acked the check, `queued` while it waits.
+    """
+    from app.utils.embedded_commands import embedded_frame_pulls_commands, queue_embedded_command
+
+    frame = get_fresh_frame(db, int(frame.id)) or frame
+    if not embedded_ota_supported_for_frame(frame):
+        raise ValueError("OTA updates are not available for the selected ESP32 flash size")
+    if not embedded_frame_pulls_commands(frame):
+        return await _request_embedded_firmware_update_direct(db, redis, frame)
+    release = embedded_release_firmware_for_frame(frame)
+    detail = str(release.get("version")) if isinstance(release, dict) and release.get("version") else None
+    outcome = await queue_embedded_command(
+        db,
+        redis,
+        frame,
+        "notify_update_available",
+        detail=detail,
+        wait_seconds=wait_seconds,
+        log_line="Asking the frame to check for a firmware update",
+    )
+    if outcome["status"] == "failed":
+        error = f"the frame refused the update check: {outcome.get('error')}"
+        await log(db, redis, int(frame.id), "stderr", f"Failed to request the firmware update: {error}")
+        raise ValueError(error)
+    if outcome["applied"]:
+        await log(db, redis, int(frame.id), "stdout",
+                  "Firmware update check requested; the frame reboots into its updater")
+    else:
+        await log(db, redis, int(frame.id), "stdout",
+                  "Firmware update queued; the frame checks for it on its next check-in")
+    return outcome

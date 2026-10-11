@@ -512,7 +512,7 @@ lines), nothing retained across disconnects, and error acks are ignored.
 
 | Type | Payload | Notes |
 |---|---|---|
-| `state` | `hello`-shaped | sent on scene change / significant events |
+| `state` | `hello`-shaped | sent on scene change / significant events. `states` is keyed by scene id (`{sceneId: {field: value}}`) on every profile: ESP32 firmware before **2026.10.5** sent its one resident scene's state flat, which a provider read as no state at all |
 | `log_batch` | `{"logs": [{"timestamp", "scene"?, "payload"}…]}` | only with `telemetry:logs`; batched (device: ≤2 s / ≤100 lines); provider stores with a hard per-frame retention cap and counts retained bytes toward the account's storage usage |
 | `metrics` | `{"metrics": {…}}` | only with `telemetry:metrics` |
 | `sleep` | `{"wake_in_seconds", "next_render_at"?, "reason", "wake_check"}` | ESP32 (firmware **2026.8.41**+), sent synchronously right before `esp_deep_sleep` halts the CPU: back (and redialing) in `wake_in_seconds`; `next_render_at` is the unix time of the next panel refresh (omitted without a synced clock; later than the wake when the wake is only a `wake_check_seconds` command check-in, `wake_check: true`); `reason` is `battery` / `always` / `battery_critical`. The forecast is an upper bound: a press on a registered GPIO button wakes the frame early (firmware **2026.8.42**+), and the reconnect clears it like any other. The provider stores the forecast (`next_wake_at` / `next_render_at` / `sleep_reason` on the frame row, cleared again on the next connect), **terminates the socket itself** — a halted chip sends no close frame, and waiting for the heartbeat to notice would keep the frame "connected" for up to a minute after it went dark — and records the disconnect as `asleep`. The SPA shows "asleep · wakes in 5 min" (and "overdue" when the wake never comes) instead of "last seen just now"; for firmware without the message it estimates the wake from the pushed power settings. The ESP32 metrics sample carries `onBattery` (the firmware's own cell-present test) for that estimate |
@@ -710,11 +710,17 @@ expired, already cancelled — because a pretend success would have the UI claim
 it stopped something the device had already run. Nothing can recall a command
 the device already has; that is exactly why action verbs carry short TTLs.
 
-The self-hosted backend implements the same two routes over the one action it
-records instead of pushing immediately (a queued ESP32 OTA request); its
-deploys, restarts and renders are immediate SSH/HTTP pushes with nothing
-durable to observe. Same wire shape either way, so the workspace's "Waiting
-for the frame" panel is one component (docs/api-triality.md).
+The self-hosted backend keeps the same queue for its ESP32 frames
+(`backend/app/utils/frame_commands.py`: the same statuses, TTLs, supersede and
+at-most-once rules, the same two routes). An ESP32 is a fresh boot on every
+wake and cannot be pushed to, so it pulls the queue over HTTP on every pass
+and acks each command by id (`embedded/esp32/README.md`, "Commands and state
+across deep sleep"); an awake frame is nudged to pull at once. A deploy there
+is two rows (`set_scenes`, `set_settings`) the backend acks itself when the
+frame's pull reports the ETags it serves. Its Linux frames are still deployed,
+restarted and rendered by immediate SSH/HTTP pushes with nothing durable to
+observe. Same wire shape either way, so the workspace's "Waiting for the
+frame" panel is one component (docs/api-triality.md).
 
 ## Service settings
 

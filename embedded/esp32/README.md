@@ -32,6 +32,8 @@ main/                     boot orchestration + platform modules
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
+  fos_scene_state.c       scene state across deep sleep: one JSON file per scene under /state (host-tested)
+  fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
   fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
                           producer — /event/<name>, the schedule, the cloud verbs, the console's
@@ -273,6 +275,47 @@ are at least 10 s apart). The backend cannot pull it reliably: the frame
 deep-sleeps between renders and answers no mDNS, so its `frame<id>.local`
 default never resolves. That name gives way to the address the frame boots
 with. The cloud gets the same image with `image_get`.
+
+### Commands and state across deep sleep
+
+A battery frame is a fresh boot on every wake and gone again seconds later,
+so the backend never pushes to it. What the workspace asks for — a scene
+switch, a scene state, a render, a reboot, a firmware update, a deploy — is a
+row on the frame's command queue (the backend's `frame_command` table, the
+cloud's `frame_commands`; `docs/cloud-frames.md`, "Queue observability"),
+and the frame drains it (`fos_commands.c`, firmware 2026.10.5 and later; the
+backend keeps pushing to older firmware directly):
+
+- Once per pass, after the scenes and settings pulls and before the render:
+  `POST /api/frames/{id}/embedded/commands` with what it holds and shows
+  (`frameos_version`, `active_scene`, `states`, `scenes_etag`,
+  `settings_etag`), answered with the queue, oldest first, as the cloud's
+  command frames (`{id, type, ...}`). Each runs through the same verb
+  handlers a cloud verb takes (`fos_cloud.c`) and is answered with
+  `POST .../commands/{id}/ack` `{ok, error?, active_scene?, states?}` the
+  moment the handler acks, so a reboot's ack is on the wire before the chip
+  goes down. A switch queued this way lands in the same pass's render.
+- Whenever the backend nudges an awake frame: `POST /api/action/commands` on
+  the local HTTP server (`?sync=1`, which a deploy sends, also forces the
+  scenes and settings pulls) wakes the render task to pull at once, so a
+  mains-powered frame takes a queued command within a second. A sleeping
+  frame does not answer the nudge; its next wake pulls.
+- A deploy is never a push. The backend records `set_scenes` and
+  `set_settings` rows and acks them itself when the ETags the frame reports
+  match what it serves — on the wake that applied it, never when it was
+  queued. The frame's sleep line (`{"event":"sleep","wakeInSeconds":…}`)
+  gives the backend the wake forecast the workspace shows and a queued
+  command's TTL reaches past.
+
+Scene state used to last one render on such a frame. The runtime keeps each
+scene's public state (and its `persist: "disk"` fields) in a file per scene
+under /state (`fos_scene_state.c`, `/state/st-<hash>.json`), writes it when
+it changes and seeds the scene from it when the scene is next built — the
+Linux runtime's `./state/scene-<id>.json`, for the chip. State for a scene
+that is not resident (a wake-check pass, a switch carrying state) goes to the
+file right away, so a deep sleep in between loses nothing. Both control
+planes get it: the cloud hello and the commands pull report the persisted
+state even before the first render, keyed by scene id.
 
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's
