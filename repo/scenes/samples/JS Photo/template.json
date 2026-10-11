@@ -1,0 +1,6 @@
+{
+  "name": "JS Photo",
+  "description": "A photo from any URL with a caption bar, as a pure JavaScript scene. The picture is decoded straight into the frame's canvas.",
+  "config": null,
+  "scenes": "./scenes.json"
+}

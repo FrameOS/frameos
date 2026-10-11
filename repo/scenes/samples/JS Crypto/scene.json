@@ -1,0 +1,10 @@
+{
+  "id": "d6e4f5a7-ab12-4dc3-e4f5-a6b7c8d9e0f1",
+  "name": "JS Crypto",
+  "settings": { "execution": "js", "refreshInterval": 900, "backgroundColor": "#ffffff" },
+  "fields": [
+    { "name": "pair", "label": "Kraken pair (XBTEUR, ETHUSD, …)", "type": "string", "value": "XBTEUR", "access": "public", "persist": "disk" }
+  ],
+  "nodes": [],
+  "edges": []
+}

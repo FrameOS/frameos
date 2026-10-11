@@ -1,0 +1,6 @@
+{
+  "name": "JS Weather",
+  "description": "Current conditions and a five-day forecast from Open-Meteo (no API key), as a pure JavaScript scene laid out with canvas cells and drawn icons.",
+  "config": null,
+  "scenes": "./scenes.json"
+}

@@ -1,0 +1,46 @@
+[
+  {
+    "id": "b4c2d3e5-8f90-4ba1-c2d3-e4f5a6b7c8d9",
+    "name": "JS Photo",
+    "settings": {
+      "execution": "js",
+      "refreshInterval": 600,
+      "backgroundColor": "#000000"
+    },
+    "fields": [
+      {
+        "name": "imageUrl",
+        "label": "Image URL",
+        "type": "string",
+        "value": "https://picsum.photos/1200/800",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "caption",
+        "label": "Caption",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fit",
+        "label": "Fit",
+        "type": "select",
+        "options": [
+          "cover",
+          "contain"
+        ],
+        "value": "cover",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [],
+    "edges": [],
+    "sources": {
+      "scene.ts": "import type { Scene, Canvas } from \"frameos\";\n\n// A photo with a caption. `canvas.image(url, …)` streams the download\n// straight into the canvas rectangle at the panel's resolution — on an\n// ESP32 that is the difference between a 20 MB native-size bitmap and a\n// few rows of decoder scratch. Nothing here keeps the picture around.\n\nlet failures = 0;\n\nexport function render(scene: Scene, canvas: Canvas) {\n  const url = String(scene.state.imageUrl || \"\");\n  const fit = scene.state.fit === \"contain\" ? \"contain\" : \"cover\";\n  canvas.clear(\"#000000\");\n\n  const ok = url && canvas.image(url, { fit });\n  if (!ok) {\n    failures += 1;\n    canvas.text(url ? \"Could not load the picture\" : \"Set an image URL in the scene's options\", 0, 0, {\n      width: canvas.width, height: canvas.height, size: 32, fit: true,\n      align: \"center\", valign: \"middle\", color: \"#ffffff\",\n    });\n    canvas.text(url, 24, canvas.height - 48, { width: canvas.width - 48, size: 18, color: \"#888888\", wrap: false });\n    // Try again soon rather than waiting out the whole interval.\n    scene.setNextSleep(Math.min(300, 30 * failures));\n    return;\n  }\n  failures = 0;\n\n  const caption = String(scene.state.caption || \"\");\n  if (!caption) return;\n  const size = Math.max(18, Math.round(canvas.height * 0.045));\n  const measured = canvas.measureText(caption, { size, width: canvas.width - 2 * size });\n  const barHeight = Math.round(measured.height + size);\n  // A translucent bar: the fill blends over the photo, no layer allocated.\n  canvas.fillRect(0, canvas.height - barHeight, canvas.width, barHeight, \"#00000099\");\n  canvas.text(caption, size, canvas.height - barHeight + size / 2, {\n    width: canvas.width - 2 * size, size, color: \"#ffffff\", align: \"left\",\n  });\n}\n"
+    }
+  }
+]

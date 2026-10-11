@@ -69,6 +69,10 @@ for scenesPath in walkDirRec(SamplesDir):
   resetInterpretedScenes()
 
   for sceneInput in inputs:
+    # A pure JS scene (js_scene.nim) has no node graph to plan; its own
+    # test is test_js_scene.nim.
+    if sceneInput.settings != nil and sceneInput.settings.execution == "js":
+      continue
     let config = testConfig()
     var scene: InterpretedFrameScene
     try:

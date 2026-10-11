@@ -1,0 +1,6 @@
+{
+  "name": "JS Clock",
+  "description": "A big clock with the date and the day's progress, written as a pure JavaScript scene: one file, no diagram.",
+  "config": null,
+  "scenes": "./scenes.json"
+}

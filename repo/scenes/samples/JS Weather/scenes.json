@@ -1,0 +1,55 @@
+[
+  {
+    "id": "e7f5a6b8-bc23-4ed4-f5a6-b7c8d9e0f1a2",
+    "name": "JS Weather",
+    "settings": {
+      "execution": "js",
+      "refreshInterval": 1800,
+      "backgroundColor": "#ffffff"
+    },
+    "fields": [
+      {
+        "name": "city",
+        "label": "City name (shown)",
+        "type": "string",
+        "value": "Brussels",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "latitude",
+        "label": "Latitude",
+        "type": "float",
+        "value": "50.85",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "longitude",
+        "label": "Longitude",
+        "type": "float",
+        "value": "4.35",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "units",
+        "label": "Units",
+        "type": "select",
+        "options": [
+          "celsius",
+          "fahrenheit"
+        ],
+        "value": "celsius",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [],
+    "edges": [],
+    "sources": {
+      "icons.ts": "// Weather glyphs as SVG path data in a 64x64 box. Paths are strings, not\n// objects: a string costs its own bytes in the JS heap, a parsed object\n// ten to twenty times that. `canvas.fillPath` takes them as they are.\n\nexport const SUN = \"M32 14a18 18 0 1 0 0 36 18 18 0 1 0 0-36zm-2-14h4v9h-4zm0 55h4v9h-4zM0 30h9v4H0zm55 0h9v4h-9zM8.9 6.1l2.8-2.8 6.4 6.4-2.8 2.8zm37 37l2.8-2.8 6.4 6.4-2.8 2.8zM6.1 55.1l6.4-6.4 2.8 2.8-6.4 6.4zm37-37l6.4-6.4 2.8 2.8-6.4 6.4z\";\nexport const CLOUD = \"M18 52a12 12 0 0 1-1.5-23.9A16 16 0 0 1 47 24a10 10 0 0 1 1 20H18z\";\nexport const RAIN = CLOUD + \" M20 56l-4 8h4l4-8zm12 0l-4 8h4l4-8zm12 0l-4 8h4l4-8z\";\nexport const SNOW = CLOUD + \" M22 56h4v8h-4zm10 0h4v8h-4zm10 0h4v8h-4z\";\nexport const FOG = \"M8 30h48v4H8zm0 10h48v4H8zm0 10h48v4H8zm6-30h36v4H14z\";\nexport const STORM = CLOUD + \" M30 46l-6 10h6l-2 8 8-12h-6l2-6z\";\n\n// Open-Meteo WMO weather codes → glyph and a short label.\nexport function describe(code: number): { path: string; label: string } {\n  if (code === 0) return { path: SUN, label: \"Clear\" };\n  if (code <= 2) return { path: CLOUD, label: \"Partly cloudy\" };\n  if (code === 3) return { path: CLOUD, label: \"Overcast\" };\n  if (code <= 48) return { path: FOG, label: \"Fog\" };\n  if (code <= 67) return { path: RAIN, label: \"Rain\" };\n  if (code <= 77) return { path: SNOW, label: \"Snow\" };\n  if (code <= 82) return { path: RAIN, label: \"Showers\" };\n  if (code <= 86) return { path: SNOW, label: \"Snow showers\" };\n  return { path: STORM, label: \"Thunderstorm\" };\n}\n",
+      "scene.ts": "import type { Scene, Canvas } from \"frameos\";\nimport { describe } from \"./icons\";\n\n// Today in a large left cell, the next five days as a row of cells below.\n// Each cell is a window onto the one canvas: no intermediate images, and\n// a draw that overflows its cell is clipped instead of painting a neighbour.\n\ntype Forecast = {\n  temperature: number; code: number; wind: number;\n  days: { date: number; code: number; high: number; low: number }[];\n};\n\nlet forecast: Forecast | null = null;\nlet fetchedAt = 0;\nlet error = \"\";\n\nfunction load(scene: Scene) {\n  const lat = Number(scene.state.latitude) || 0;\n  const lon = Number(scene.state.longitude) || 0;\n  const unit = scene.state.units === \"fahrenheit\" ? \"fahrenheit\" : \"celsius\";\n  const url = \"https://api.open-meteo.com/v1/forecast?latitude=\" + lat + \"&longitude=\" + lon +\n    \"&current=temperature_2m,weather_code,wind_speed_10m\" +\n    \"&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=6\" +\n    \"&temperature_unit=\" + unit;\n  try {\n    const data = scene.fetchJson(url);\n    const days: Forecast[\"days\"] = [];\n    const daily = data.daily;\n    for (let i = 1; i < Math.min(6, daily.time.length); i++) {\n      days.push({\n        date: scene.parseTs(\"{year/4}-{month/2}-{day/2}\", daily.time[i]),\n        code: daily.weather_code[i], high: daily.temperature_2m_max[i], low: daily.temperature_2m_min[i],\n      });\n    }\n    // Keep only what is drawn; the response object goes out of scope here.\n    forecast = {\n      temperature: data.current.temperature_2m, code: data.current.weather_code,\n      wind: data.current.wind_speed_10m, days,\n    };\n    fetchedAt = scene.now();\n    error = \"\";\n  } catch (e) {\n    error = String((e && (e as Error).message) || e);\n    scene.error(\"weather fetch failed\", error);\n  }\n}\n\nfunction icon(cell: Canvas, path: string, x: number, y: number, size: number, color: string) {\n  cell.fillPath(path, color, { x, y, scale: size / 64 });\n}\n\nexport function render(scene: Scene, canvas: Canvas) {\n  if (!forecast || scene.now() - fetchedAt > 1500) load(scene);\n  const w = canvas.width;\n  const h = canvas.height;\n  const pad = Math.round(Math.min(w, h) * 0.04);\n  const unit = scene.state.units === \"fahrenheit\" ? \"°F\" : \"°C\";\n  canvas.gradient(0, 0, w, h, { from: \"#dbeafe\", to: \"#ffffff\", angle: 180 });\n\n  if (!forecast) {\n    canvas.text(error ? \"Weather unavailable\\n\" + error : \"Loading…\", pad, pad, {\n      width: w - 2 * pad, height: h - 2 * pad, size: 28, fit: true, align: \"center\", valign: \"middle\", color: \"#333333\",\n    });\n    scene.setNextSleep(120);\n    return;\n  }\n\n  // Today: the top 60% of the frame.\n  const today = canvas.cell(0, 0, w, Math.round(h * 0.6));\n  const now = describe(forecast.code);\n  const big = Math.round(today.height * 0.5);\n  icon(today, now.path, pad, pad, big, \"#f59e0b\");\n  today.text(String(scene.state.city || \"\"), pad * 2 + big, pad, { size: Math.round(today.height * 0.14), color: \"#1f2937\" });\n  today.text(Math.round(forecast.temperature) + unit, pad * 2 + big, pad + Math.round(today.height * 0.16), {\n    width: today.width - pad * 3 - big, height: Math.round(today.height * 0.5), size: Math.round(today.height * 0.5),\n    fit: true, color: \"#111827\",\n  });\n  today.text(now.label + \"  ·  wind \" + Math.round(forecast.wind) + \" km/h\", pad * 2 + big, pad + Math.round(today.height * 0.7), {\n    size: Math.round(today.height * 0.1), color: \"#374151\",\n  });\n\n  // Five days in a row of equal cells.\n  const rowY = Math.round(h * 0.6);\n  const rowH = h - rowY;\n  const n = forecast.days.length;\n  const cellW = Math.floor(w / n);\n  for (let i = 0; i < n; i++) {\n    const day = forecast.days[i];\n    const cell = canvas.cell(i * cellW, rowY, cellW, rowH);\n    if (i > 0) cell.fillRect(0, pad, 1, rowH - 2 * pad, \"#cbd5e1\");\n    const glyph = describe(day.code);\n    const size = Math.round(Math.min(cellW, rowH) * 0.4);\n    cell.text(scene.format(day.date, \"{weekday/3}\"), 0, pad, { width: cellW, align: \"center\", size: Math.round(rowH * 0.14), color: \"#1f2937\" });\n    icon(cell, glyph.path, (cellW - size) / 2, pad + Math.round(rowH * 0.2), size, \"#64748b\");\n    cell.text(Math.round(day.high) + \"°  \" + Math.round(day.low) + \"°\", 0, rowH - pad - Math.round(rowH * 0.18), {\n      width: cellW, align: \"center\", size: Math.round(rowH * 0.14), color: \"#111827\",\n    });\n  }\n  canvas.text(\"updated \" + scene.format(fetchedAt, \"{hour/2}:{minute/2}\"), w - pad, pad, {\n    size: 12, color: \"#94a3b8\", align: \"right\",\n  });\n}\n"
+    }
+  }
+]

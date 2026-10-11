@@ -1,0 +1,13 @@
+{
+  "id": "e7f5a6b8-bc23-4ed4-f5a6-b7c8d9e0f1a2",
+  "name": "JS Weather",
+  "settings": { "execution": "js", "refreshInterval": 1800, "backgroundColor": "#ffffff" },
+  "fields": [
+    { "name": "city", "label": "City name (shown)", "type": "string", "value": "Brussels", "access": "public", "persist": "disk" },
+    { "name": "latitude", "label": "Latitude", "type": "float", "value": "50.85", "access": "public", "persist": "disk" },
+    { "name": "longitude", "label": "Longitude", "type": "float", "value": "4.35", "access": "public", "persist": "disk" },
+    { "name": "units", "label": "Units", "type": "select", "options": ["celsius", "fahrenheit"], "value": "celsius", "access": "public", "persist": "disk" }
+  ],
+  "nodes": [],
+  "edges": []
+}

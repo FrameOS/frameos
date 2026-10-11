@@ -1,0 +1,26 @@
+[
+  {
+    "id": "d6e4f5a7-ab12-4dc3-e4f5-a6b7c8d9e0f1",
+    "name": "JS Crypto",
+    "settings": {
+      "execution": "js",
+      "refreshInterval": 900,
+      "backgroundColor": "#ffffff"
+    },
+    "fields": [
+      {
+        "name": "pair",
+        "label": "Kraken pair (XBTEUR, ETHUSD, …)",
+        "type": "string",
+        "value": "XBTEUR",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [],
+    "edges": [],
+    "sources": {
+      "scene.ts": "import type { Scene, Canvas } from \"frameos\";\n\n// Price and a seven-day sparkline. The API response is reduced to one\n// Float32Array of prices the moment it arrives; the parsed JSON is dropped\n// before anything is drawn, so the heap holds a few KB, not the payload.\n\nconst MAX_POINTS = 400;\nlet prices = new Float32Array(0);\nlet points = new Float32Array(MAX_POINTS * 2);\nlet latest = 0;\nlet first = 0;\nlet fetchedAt = 0;\nlet error = \"\";\n\nfunction load(scene: Scene) {\n  // Kraken's public OHLC: hourly candles, the last seven days of them.\n  const pair = encodeURIComponent(String(scene.state.pair || \"XBTEUR\").trim().toUpperCase());\n  const since = Math.floor(scene.now()) - 7 * 24 * 3600;\n  try {\n    const data = scene.fetchJson(`https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=60&since=${since}`);\n    if (data && data.error && data.error.length) throw new Error(String(data.error[0]));\n    const result = (data && data.result) || {};\n    let raw: (number | string)[][] = [];\n    for (const key in result) if (key !== \"last\") raw = result[key];\n    if (!raw || raw.length === 0) throw new Error(\"no candles in the response\");\n    // Thin to what the chart can show: every n-th close, at most MAX_POINTS.\n    const stride = Math.max(1, Math.ceil(raw.length / MAX_POINTS));\n    const count = Math.ceil(raw.length / stride);\n    prices = new Float32Array(count);\n    for (let i = 0, j = 0; i < raw.length; i += stride, j++) prices[j] = Number(raw[i][4]);\n    first = Number(raw[0][4]);\n    latest = Number(raw[raw.length - 1][4]);\n    fetchedAt = scene.now();\n    error = \"\";\n  } catch (e) {\n    error = String((e && (e as Error).message) || e);\n    scene.error(\"crypto fetch failed\", error);\n  }\n}\n\nfunction money(value: number, currency: string): string {\n  const digits = value >= 100 ? 0 : value >= 1 ? 2 : 4;\n  const text = value.toFixed(digits).replace(/\\B(?=(\\d{3})+(?!\\d))/g, \" \");\n  return `${text} ${currency.toUpperCase()}`;\n}\n\nexport function render(scene: Scene, canvas: Canvas) {\n  if (prices.length === 0 || scene.now() - fetchedAt > 600) load(scene);\n  const w = canvas.width;\n  const h = canvas.height;\n  const pad = Math.round(Math.min(w, h) * 0.06);\n  canvas.clear(\"#ffffff\");\n\n  const pair = String(scene.state.pair || \"XBTEUR\").toUpperCase();\n  const currency = pair.length > 3 ? pair.slice(-3) : \"\";\n  canvas.text(pair, pad, pad, { size: Math.round(h * 0.08), color: \"#444444\" });\n\n  if (prices.length === 0) {\n    canvas.text(error || \"Loading…\", pad, pad * 3, { width: w - 2 * pad, size: 24, color: \"#aa0000\" });\n    scene.setNextSleep(120);\n    return;\n  }\n\n  const change = first > 0 ? ((latest - first) / first) * 100 : 0;\n  const up = change >= 0;\n  const ink = up ? \"#1a7f37\" : \"#b42318\";\n  canvas.text(money(latest, currency), pad, pad + Math.round(h * 0.1), {\n    width: w - 2 * pad, height: Math.round(h * 0.22), size: Math.round(h * 0.2), fit: true, color: \"#111111\",\n  });\n  canvas.text(`${up ? \"+\" : \"-\"}${Math.abs(change).toFixed(2)}% over 7 days`, pad, pad + Math.round(h * 0.32), {\n    size: Math.round(h * 0.06), color: ink,\n  });\n\n  // The sparkline: min/max to the chart box, then one polyline call.\n  const top = Math.round(h * 0.52);\n  const bottom = h - pad * 2;\n  let min = prices[0];\n  let max = prices[0];\n  for (let i = 1; i < prices.length; i++) {\n    if (prices[i] < min) min = prices[i];\n    if (prices[i] > max) max = prices[i];\n  }\n  const span = max - min || 1;\n  const n = prices.length;\n  for (let i = 0; i < n; i++) {\n    points[i * 2] = pad + ((w - 2 * pad) * i) / (n - 1);\n    points[i * 2 + 1] = bottom - ((prices[i] - min) / span) * (bottom - top);\n  }\n  // Baseline and the line itself; subarray() views the same buffer.\n  canvas.line(pad, bottom + 0.5, w - pad, bottom + 0.5, \"#dddddd\", 1);\n  canvas.polyline(points.subarray(0, n * 2), ink, Math.max(2, Math.round(h / 200)), { join: \"round\", cap: \"round\" });\n  canvas.fillCircle(points[(n - 1) * 2], points[(n - 1) * 2 + 1], Math.max(4, h / 80), ink);\n  canvas.text(money(max, currency), pad, top - Math.round(h * 0.05), { size: Math.round(h * 0.035), color: \"#888888\" });\n  canvas.text(money(min, currency), pad, bottom + 4, { size: Math.round(h * 0.035), color: \"#888888\" });\n  canvas.text(\"updated \" + scene.format(fetchedAt, \"{hour/2}:{minute/2}\"), w - pad, h - pad - Math.round(h * 0.035), {\n    size: Math.round(h * 0.03), color: \"#888888\", align: \"right\", width: 0,\n  });\n}\n"
+    }
+  }
+]

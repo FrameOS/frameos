@@ -1,0 +1,11 @@
+{
+  "id": "c5d3e4f6-9a01-4cb2-d3e4-f5a6b7c8d9e0",
+  "name": "JS Life",
+  "settings": { "execution": "js", "refreshInterval": 1, "backgroundColor": "#000000" },
+  "fields": [
+    { "name": "cellSize", "label": "Cell size (pixels)", "type": "integer", "value": "12", "access": "public", "persist": "disk" },
+    { "name": "density", "label": "Starting density (0-1)", "type": "float", "value": "0.3", "access": "public", "persist": "disk" }
+  ],
+  "nodes": [],
+  "edges": []
+}
