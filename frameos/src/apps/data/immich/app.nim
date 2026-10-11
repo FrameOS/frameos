@@ -65,9 +65,12 @@ proc assetDownloadUrl*(serverUrl: string, assetId: string, previewSize: string):
     &"{serverUrl}/api/assets/{encodeUrl(assetId)}/thumbnail?size=preview"
 
 proc todayIso*(): string =
-  # Frame-local date: local date D at 00:00:00Z falls inside Immich's UTC
-  # day-D window, matching the web client's local-date semantics
-  now().format("yyyy-MM-dd") & "T00:00:00.000Z"
+  ## The frame-local calendar date, as `GET /api/memories?for=` wants it.
+  ## Immich 3 validates `for` as a plain `YYYY-MM-DD` and answers 400 to the
+  ## `T00:00:00.000Z` form this used to send (the app then fell back to a
+  ## random image, so "memories" silently meant "random"); the 1.x and 2.x
+  ## servers parse the bare date as UTC midnight, the same instant as before.
+  now().format("yyyy-MM-dd")
 
 proc randomSearchBody*(albumId = "", personId = "", isFavorite = false): JsonNode =
   result = %*{"size": 1, "type": "IMAGE", "withExif": true, "withPeople": true}
