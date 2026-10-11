@@ -110,6 +110,27 @@
   :3000, the local DB filled by `scripts/import-store-scenes.mjs`, and
   `OPENAI_API_KEY`). See `cloud/apps/auth-web/evals/README.md`.
 
+## Pure JS scenes: `settings.execution == "js"` (docs/pure-js-scenes.md)
+
+- A scene is one of `interpreted` (default, the node graph), `compiled`
+  (legacy Nim) or `js`: one JS/TS module in `sources` (`scene.ts` plus what
+  it imports) that draws the frame with the canvas API, no diagram. The
+  runtime side is `frameos/src/frameos/js_scene.nim` (lifecycle, the `scene`
+  object) and `js_runtime/canvas_api.nim` (the `Canvas` class: draw calls
+  read QuickJS arguments directly, cells are pixie views, pictures and SVGs
+  decode into their rectangle); the interpreter's `init`/`render`/`runEvent`
+  dispatch there, so every host gets the mode through one path. "Runs from
+  JSON" (interpreted OR js) is `scene_runs_from_json` /
+  `sceneRunsFromJson`; never test `== "interpreted"` to mean "not compiled".
+- The bundled examples are `repo/scenes/samples/JS *`: edit the `.ts` files
+  and run `python3 frameos/tools/pack_js_scenes.py` (the backend test
+  `test_js_sample_scenes.py` runs `--check`). The editor types come from
+  `frontend/src/utils/sceneTypeDeclarations.ts`; keep them in step with the
+  two Nim files when the API changes.
+- `canvas.cell()` depends on pixie views being honoured by every fill: the
+  fork's `fillShapes` fast path and `clearUnsafe` were fixed for views on
+  2026-10-11 (FrameOS/pixie#9); `tests/test_image_views.nim` there pins it.
+
 ## Per-photo colour profiles: `docs/asset-color-profiles.md` is the contract
 
 - A photo may carry a `<image>.frameos.json` sidecar (exposure, white point,
