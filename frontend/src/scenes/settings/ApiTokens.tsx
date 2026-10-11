@@ -198,7 +198,8 @@ export function IngressApiTokensSection(): JSX.Element {
 }
 
 export function ApiTokensSection(): JSX.Element {
-  const { listing, listingLoading, liveTokens, pastTokens, mcpCommand } = useValues(apiTokensLogic)
+  const { listing, listingLoading, liveTokens, pastTokens, mcpInstructionsOpen } = useValues(apiTokensLogic)
+  const { toggleMcpInstructions } = useActions(apiTokensLogic)
   return (
     <div className="space-y-4">
       <H6 id="settings-developer" className="pt-4">
@@ -229,28 +230,46 @@ export function ApiTokensSection(): JSX.Element {
         <CreatedTokenNotice />
         <CreateTokenForm />
       </Box>
-      <Box className="settings-mcp-card space-y-3 p-4">
-        <div className="frameos-strong font-medium">MCP server</div>
-        <p className="text-sm leading-relaxed">
-          Connect an AI agent (Claude Code, Claude Desktop, Cursor, or any Model Context Protocol client) to this
-          backend. The server runs here, speaks Streamable HTTP, and takes an API token as the bearer. Tools that change
-          what a frame shows ask the agent to confirm the user asked for it.
-        </p>
-        <div className="space-y-1 text-sm">
-          <div className="frameos-muted text-xs">Endpoint</div>
-          <Code className="block break-all" data-testid="mcp-url">
-            {listing.mcp_url || '…'}
-          </Code>
-        </div>
-        <div className="space-y-1 text-sm">
-          <div className="frameos-muted text-xs">Claude Code</div>
-          <Code className="block break-all">{mcpCommand}</Code>
-        </div>
-        <p className="frameos-muted text-xs">
-          Any other client: a Streamable HTTP server at the endpoint above with an Authorization: Bearer header. Details
-          in docs/mcp.md.
-        </p>
-      </Box>
+      <div>
+        <Button
+          size="small"
+          color="secondary"
+          onClick={toggleMcpInstructions}
+          aria-expanded={mcpInstructionsOpen}
+          aria-controls="settings-mcp-instructions"
+        >
+          {mcpInstructionsOpen ? 'Hide MCP server instructions' : 'Show MCP server instructions'}
+        </Button>
+      </div>
+      {mcpInstructionsOpen ? <McpInstructions /> : null}
     </div>
+  )
+}
+
+function McpInstructions(): JSX.Element {
+  const { listing, mcpCommand } = useValues(apiTokensLogic)
+  return (
+    <Box id="settings-mcp-instructions" className="settings-mcp-card space-y-3 p-4">
+      <div className="frameos-strong font-medium">MCP server</div>
+      <p className="text-sm leading-relaxed">
+        Connect an AI agent (Claude Code, Claude Desktop, Cursor, or any Model Context Protocol client) to this backend.
+        The server runs here, speaks Streamable HTTP, and takes an API token as the bearer. Tools that change what a
+        frame shows ask the agent to confirm the user asked for it.
+      </p>
+      <div className="space-y-1 text-sm">
+        <div className="frameos-muted text-xs">Endpoint</div>
+        <Code className="block break-all" data-testid="mcp-url">
+          {listing.mcp_url || '…'}
+        </Code>
+      </div>
+      <div className="space-y-1 text-sm">
+        <div className="frameos-muted text-xs">Claude Code</div>
+        <Code className="block break-all">{mcpCommand}</Code>
+      </div>
+      <p className="frameos-muted text-xs">
+        Any other client: a Streamable HTTP server at the endpoint above with an Authorization: Bearer header. Details
+        in docs/mcp.md.
+      </p>
+    </Box>
   )
 }

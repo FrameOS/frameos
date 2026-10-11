@@ -110,6 +110,7 @@ export interface apiTokensLogicValues {
   listingLoading: boolean
   liveTokens: ApiToken[]
   mcpCommand: string
+  mcpInstructionsOpen: boolean
   newToken: ApiTokenForm
   newTokenAllErrors: Record<string, any>
   newTokenChanged: boolean
@@ -191,6 +192,9 @@ export interface apiTokensLogicActions {
   submitNewTokenSuccess: (newToken: ApiTokenForm) => {
     newToken: ApiTokenForm
   }
+  toggleMcpInstructions: () => {
+    value: true
+  }
   touchNewTokenField: (key: string) => {
     key: string
   }
@@ -212,6 +216,7 @@ export const apiTokensLogic = kea<apiTokensLogicType>([
   path(['src', 'scenes', 'settings', 'apiTokensLogic']),
   actions({
     setCreateOpen: (open: boolean) => ({ open }),
+    toggleMcpInstructions: true,
     setCreatedToken: (created: CreatedApiToken | null) => ({ created }),
     dismissCreatedToken: true,
     copyCreatedToken: true,
@@ -224,6 +229,13 @@ export const apiTokensLogic = kea<apiTokensLogicType>([
       {
         setCreateOpen: (_, { open }) => open,
         submitNewTokenSuccess: () => false,
+      },
+    ],
+    // The connect recipe is for the moment a token is minted; closed until asked.
+    mcpInstructionsOpen: [
+      false,
+      {
+        toggleMcpInstructions: (state) => !state,
       },
     ],
     createdToken: [
