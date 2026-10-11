@@ -45,6 +45,7 @@ const frameSettingsSections = [
 ] as const
 
 const globalSettingsSections = [
+  ['API tokens and MCP', 'settings-developer'],
   ['SSH Keys', 'settings-ssh'],
   ['FrameOS Gallery', 'settings-gallery'],
   ['OpenAI', 'settings-openai'],

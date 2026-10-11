@@ -31,6 +31,7 @@ import { FrameosShell } from '../workspace/FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
 import { globalSettingsSectionIsAllowed, workspaceMode } from '../workspace/workspaceSurfaces'
 import { accountLogic } from './accountLogic'
+import { ApiTokensSection, IngressApiTokensSection } from './ApiTokens'
 import { CloudSettingsSection } from './CloudSettings'
 import versions from '../../../../versions.json'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -49,6 +50,7 @@ const allSettingsNavSections: readonly SettingsNavSection[] = [
     label: '',
     items: [
       ['Account', '#settings-account'],
+      ['API tokens and MCP', '#settings-developer'],
       ['FrameOS Cloud', '#settings-cloud'],
     ],
   },
@@ -576,6 +578,13 @@ export function Settings() {
               <IngressAccountSettingsSection />
             ) : (
               <AccountSettingsSection onLogout={logout} />
+            )
+          ) : null}
+          {showSection('settings-developer') ? (
+            isHassioIngress ? (
+              <IngressApiTokensSection />
+            ) : (
+              <ApiTokensSection />
             )
           ) : null}
           {showSection('settings-cloud') ? <CloudSettingsSection /> : null}

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 from app import config as app_config
 from app.models.user import User
+from app.models.api_token import ApiTokenIdentity, authenticate_api_token, is_api_token
 from app.database import get_db
 from app.redis import get_redis
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -156,6 +157,61 @@ def issue_credentials(
     return access_token, session_value, max_age
 
 
+SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _api_token_user(request: Request, db: Session, token: str) -> User:
+    """A personal API token (app/models/api_token.py) in the bearer slot.
+
+    Resolved to its owner exactly where a login JWT would be, so no route
+    changes. The identity lands on `request.state.api_token` for the routes
+    that must refuse tokens (`require_session_credential`) and for the MCP
+    server's `account_info`. A read-only token is refused for anything but a
+    safe method here — the one place that sees method and credential
+    together — with the same `read_only_token` code the cloud uses."""
+    authenticated = authenticate_api_token(db, token)
+    if authenticated is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API token refused: revoked, expired, or not minted by this server",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user_id, identity = authenticated
+    # The MCP endpoint is a POST by transport, not by effect: its tool calls
+    # reach the routes as separate in-process requests carrying this same
+    # token, and those are where a read-only token meets a real mutation.
+    is_mcp_transport = request.url.path.rstrip("/").endswith("/api/mcp")
+    if identity.read_only and request.method.upper() not in SAFE_HTTP_METHODS and not is_mcp_transport:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "read_only_token", "message": "This API token is read-only"},
+        )
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+    request.state.api_token = identity
+    return user
+
+
+def request_api_token(request: Request) -> ApiTokenIdentity | None:
+    """The API token this request authenticated with, if any."""
+    return getattr(request.state, "api_token", None)
+
+
+def require_session_credential(request: Request) -> None:
+    """Refuse API tokens on the routes that turn a session into something
+    more durable (minting a token) or change the login itself (email,
+    password): a leaked token must not be able to make itself permanent."""
+    if request_api_token(request) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "api_token_not_allowed",
+                "message": "This action needs a browser sign-in and is not available to API tokens",
+            },
+        )
+
+
 async def get_current_user_from_jwt(token: str, db: Session) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -193,9 +249,20 @@ async def get_current_user_from_request(
     authorization: str | None = None,
 ) -> User | None:
     token: str | None = None
+    if authorization is None:
+        authorization = request.headers.get("authorization")
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
     if token:
+        if is_api_token(token):
+            try:
+                return _api_token_user(request, db, token)
+            except HTTPException as exc:
+                # A read-only token on a mutation is a refusal the caller
+                # must see, not an anonymous 401.
+                if exc.status_code == status.HTTP_403_FORBIDDEN:
+                    raise
+                return None
         try:
             return await get_current_user_from_jwt(token, db)
         except HTTPException:
@@ -302,6 +369,9 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if token and is_api_token(token):
+        return _api_token_user(request, db, token)
+
     try:
         if token:
             email, session_id = _decode_jwt_claims(token)

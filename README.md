@@ -55,6 +55,12 @@ The FrameOS backend is where you set up your frames. You can run it continuously
 
 Read more in [the documentation](https://frameos.net/guide/backend).
 
+**Scripts and AI agents.** The backend serves a Model Context Protocol server
+at `POST /api/mcp` and accepts personal API tokens (`fb_api_…`) wherever a
+login is, so Claude Code or any MCP client can list frames, install and edit
+scenes, read logs and screenshots, and push settings. Mint a token under
+Settings → API tokens and MCP; `docs/mcp.md` has the details.
+
 **Compiled scenes are deprecated.** FrameOS ships as released binaries and a
 deploy never compiles anything. A scene still on the legacy _compiled_ path
 (Nim code nodes or Nim app sources) does not run on that binary: convert it to
