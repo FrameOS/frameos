@@ -27,6 +27,7 @@ import {
   storeBlob,
 } from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
+import { commandTtlForFrame } from "./frame-sleep";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { compiledSceneNames } from "./store";
@@ -842,15 +843,32 @@ export async function enqueueFrameCommand(
     payload?: unknown;
     createdByAccountId?: string;
     // Commands that only make sense "now" (render, reboot) expire quickly;
-    // state-carrying commands (set_scenes) wait for the next connect.
+    // state-carrying commands (set_scenes) wait for the next connect. The
+    // lifetime is measured from the frame's announced wake, not from now
+    // (commandTtlForFrame): a frame asleep for fifteen minutes cannot see a
+    // five-minute command, so every "activate this scene" sent to a battery
+    // E1004 expired unseen (2026-10-12). Same rule as the self-hosted
+    // backend's command_ttl_for_frame.
     ttlMs?: number;
   },
 ) {
+  let expiresAt: Date | null = null;
+  if (input.ttlMs) {
+    const now = Date.now();
+    const [sleeping] = await db
+      .select({ nextWakeAt: frames.nextWakeAt })
+      .from(frames)
+      .where(eq(frames.id, input.frameId))
+      .limit(1);
+    expiresAt = new Date(
+      now + commandTtlForFrame({ nextWakeAt: sleeping?.nextWakeAt ?? null }, input.ttlMs, now),
+    );
+  }
   const [command] = await db
     .insert(frameCommands)
     .values({
       createdByAccountId: input.createdByAccountId ?? null,
-      expiresAt: input.ttlMs ? new Date(Date.now() + input.ttlMs) : null,
+      expiresAt,
       frameId: input.frameId,
       payload: input.payload ?? null,
       type: input.type,

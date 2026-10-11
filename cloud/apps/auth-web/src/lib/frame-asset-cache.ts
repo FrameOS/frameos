@@ -14,10 +14,10 @@ import {
   type FramesDatabase,
 } from "./frames";
 
-// For an AWAKE frame. A sleeping frame's fetch has to outlive its sleep:
-// callers pass commandTtlForFrame(frame, assetFetchCommandTtlMs) instead
-// (frame-sleep.ts) — a 2-minute TTL on a 15-minute sleeper expired every
-// single time, which is how a frame's image stayed stale for days.
+// Measured from the frame's announced wake, like every command's TTL
+// (enqueueFrameCommand → commandTtlForFrame): a 2-minute TTL counted from
+// "now" on a 15-minute sleeper expired every single time, which is how a
+// frame's image stayed stale for days.
 export const assetFetchCommandTtlMs = 2 * 60 * 1000;
 
 /**

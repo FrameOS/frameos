@@ -9,7 +9,6 @@ import {
   recentFailedAssetGet,
   sceneSnapshotAssetPath,
 } from "../../../../../../src/lib/frame-asset-cache";
-import { commandTtlForFrame } from "../../../../../../src/lib/frame-sleep";
 import {
   frameForAccount,
   frameHardwareIsEsp32,
@@ -171,7 +170,7 @@ export async function GET(
       frame.id,
       snapshotPath,
       thumb,
-      commandTtlForFrame(frame, assetFetchCommandTtlMs, now),
+      assetFetchCommandTtlMs,
     );
   }
   const cachedContent = await readBlob(cached);
