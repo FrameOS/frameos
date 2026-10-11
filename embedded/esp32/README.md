@@ -341,6 +341,12 @@ handful of slots, `event:deferred` in the log), delivered by the render task
 at the start of its next pass (`event:deferred:delivered`), rendered on that
 pass, and counted as work that holds the deep sleep.
 
+The cloud log tap only runs once the session is up, so the first ~15 s of a
+wake (the wake cause, the scene load, the replayed button press) used to
+stay on the device. The first session_ready of a boot that carries logs now
+replays the boot's lines from the device ring as one `log_batch` with their
+own timestamps (`ws_replay_boot_log`).
+
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's
 `embedded_provisioning_plan` (`backend/app/tasks/embedded_firmware.py`) —
