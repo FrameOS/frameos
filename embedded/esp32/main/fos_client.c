@@ -1439,6 +1439,12 @@ static void client_task(void *arg)
             fos_scenes_apply_pending();
             fos_scenes_apply_pending_selection();
             fos_buttons_process_events();
+            /* A press that dispatched `setCurrentScene` (a scene's next/prev
+             * button) only queued the switch. Apply it now, so this pass
+             * renders the scene it asked for: after a button wake the frame
+             * renders once and goes back to deep sleep, which loses the
+             * queue. */
+            fos_scenes_apply_pending_selection();
         }
 
         /* Live settings: pick up backend-side interval/name/render-mode

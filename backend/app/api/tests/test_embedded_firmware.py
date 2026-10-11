@@ -701,11 +701,13 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
         "rst": 38, "dc": 11, "cs": 10, "cs2": 2,
         "busy": 13, "sck": 7, "mosi": 9, "pwr": 12,
     }
-    # The E-series trio (Seeed's ESPHome cookbook), same as the E1001/E1002.
+    # The E-series GPIOs, but the E1004's front panel: GPIO3 is the right
+    # arrow and GPIO5 refresh (Seeed's Arduino cookbook), the reverse of the
+    # E1001/E1002.
     assert frame.gpio_buttons == [
-        {"pin": 3, "label": "REFRESH"},
+        {"pin": 3, "label": "RIGHT"},
         {"pin": 4, "label": "LEFT"},
-        {"pin": 5, "label": "RIGHT"},
+        {"pin": 5, "label": "REFRESH"},
     ]
     # Battery behind a switched 2:1 divider, and a battery power policy: the
     # board ships sleeping between renders on battery, checking in every 15 min.
