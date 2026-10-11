@@ -167,6 +167,9 @@ type
   ## Resolves and classifies one sub-resource host:port (spawn_guard.nim's
   ## spawnSubresourcePin by default).
   ChromiumSubresourcePinHook* = proc(host: string, port: int): tuple[refusal: string, address: string]
+  ## The pause after a (re)started background Chromium before the first
+  ## capture script talks to it (CHROMIUM_STARTUP_SETTLE_MS by default).
+  ChromiumSettleHook* = proc(ms: int)
 
 var
   chromiumRamProbeHook*: ChromiumRamProbeHook = nil
@@ -175,6 +178,7 @@ var
   chromiumEnsureBackgroundBrowserHook*: ChromiumEnsureBackgroundBrowserHook = nil
   chromiumCaptureHook*: ChromiumCaptureHook = nil
   chromiumSubresourcePinHook*: ChromiumSubresourcePinHook = nil
+  chromiumSettleHook*: ChromiumSettleHook = nil
   # The rules the last capture asked the browser for (tests read this; the
   # ensure-browser hook does not see them).
   chromiumLastResolverRules*: string = ""
@@ -199,6 +203,15 @@ when defined(testing):
   chromiumEnsureSystemDependenciesHook = proc(self: App) = discard
   chromiumEnsureVenvExistsHook = proc(self: App): string = ""
   chromiumEnsureBackgroundBrowserHook = proc(self: App, width, height: int): bool = false
+  # Likewise the warm-up pause: with a fake browser there is nothing to wait
+  # for, and the 2.5 s pause ran up to eight times per test file.
+  chromiumSettleHook = proc(ms: int) = discard
+
+proc settleAfterBrowserStart(self: App) =
+  if chromiumSettleHook == nil:
+    sleep(CHROMIUM_STARTUP_SETTLE_MS)
+  else:
+    chromiumSettleHook(CHROMIUM_STARTUP_SETTLE_MS)
 
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600,
@@ -620,7 +633,7 @@ proc get*(self: App, context: ExecutionContext): Image =
         return renderError(width, height, "Chromium browser is not available")
 
     self.log &"Waiting {CHROMIUM_STARTUP_SETTLE_MS}ms for Chromium to finish warming up"
-    sleep(CHROMIUM_STARTUP_SETTLE_MS)
+    self.settleAfterBrowserStart()
 
     # Write the playwright script to a temporary file
     let scriptContext = if self.appConfig.persistSession:
@@ -657,7 +670,7 @@ page.wait_for_timeout(1500)
             chromiumEnsureBackgroundBrowserHook(self, width, height)
         if not browserReady:
           return renderError(width, height, "Chromium browser is not available")
-        sleep(CHROMIUM_STARTUP_SETTLE_MS)
+        self.settleAfterBrowserStart()
         completed = false
         blockedNavigation = false
         try: removeFile(blockedFile)
@@ -686,7 +699,7 @@ page.wait_for_timeout(1500)
               chromiumEnsureBackgroundBrowserHook(self, width, height)
           if not browserReady:
             return renderError(width, height, "Chromium browser is not available")
-          sleep(CHROMIUM_STARTUP_SETTLE_MS)
+          self.settleAfterBrowserStart()
 
         try:
           let (output, response) = self.runCapture(venvPython, scriptFile, screenshotFile, blockedFile)

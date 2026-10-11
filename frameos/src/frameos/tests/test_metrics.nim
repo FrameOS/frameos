@@ -25,6 +25,10 @@ suite "metrics loop":
     resetRuntimeDiagnosticsForTest()
 
   test "disabled interval logs disabled state and skips samples":
+    # The disabled sampler dozes MetricsDisabledPollMs (a minute) between
+    # looks at its interval; with the real sleep this one test was 60 s of
+    # the whole Nim suite's run time.
+    setMetricsHooksForTest(sleepHook = proc(ms: int) {.gcsafe, nimcall.} = discard)
     runMetricsLoopForTest(FrameConfig(metricsInterval: 0), iterations = 1)
 
     let (ok, payload) = logChannel.tryRecv()

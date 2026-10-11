@@ -595,6 +595,10 @@ suite "runner loop safety":
       sendEvent("setCurrentScene", %*{"sceneId": sceneA.string}, eoHttpAdmin)
       check waitUntil(proc(): bool = opens(sceneA) == 2)
       waitFor renderLoop
+      # The loop only has to outlive the three waits above; the budget of 400
+      # passes is for a slow runner, and idle passes are 200 ms each (a minute
+      # of the Nim suite's run time when all of them ran).
+      runnerThread.stopMessageLoop = true
       waitFor messageLoop
 
       check heard == @[
