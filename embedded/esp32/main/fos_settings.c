@@ -864,7 +864,16 @@ esp_err_t fos_settings_sync(bool force)
     char auth[SETTINGS_AUTH_LEN];
     settings_source_t source = select_source(url, sizeof(url), auth, sizeof(auth));
     if (source == SETTINGS_SOURCE_NONE) {
-        log_settings_exit(s_cloud_scope_blocked ? "scope-revoked" : "unconfigured");
+        /* An enrolled cloud frame has no source until this session's `ready`
+         * announces the scope: a boot's first pass, with no cache to apply,
+         * renders before that and used to call it "unconfigured". */
+        const char *why = "unconfigured";
+        if (s_cloud_scope_blocked) {
+            why = "scope-revoked";
+        } else if (!s_cloud_scope_granted && fos_cloud_frame_id()[0] != '\0') {
+            why = "awaiting-session";
+        }
+        log_settings_exit(why);
         return ESP_ERR_INVALID_STATE;
     }
     if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
@@ -900,8 +909,13 @@ esp_err_t fos_settings_sync(bool force)
         .if_none_match = force ? NULL : s_etag,
     };
     fos_http_response_t response;
-    if (fos_http_fetch(&request, SETTINGS_MAX_BYTES, &response) != ESP_OK) {
-        log_settings_event("error", "connect-failed");
+    esp_err_t fetch_err = fos_http_fetch(&request, SETTINGS_MAX_BYTES, &response);
+    if (fetch_err != ESP_OK) {
+        /* With the code: a refused connect on the wake's first request and a
+         * read timeout look the same as a bare "connect-failed". */
+        char detail[80];
+        snprintf(detail, sizeof(detail), "connect-failed:%s", fos_http_err_name(fetch_err));
+        log_settings_event("error", detail);
         return ESP_FAIL;
     }
     int status = response.status;

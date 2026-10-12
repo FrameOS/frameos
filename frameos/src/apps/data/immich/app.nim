@@ -81,6 +81,17 @@ proc randomSearchBody*(albumId = "", personId = "", isFavorite = false): JsonNod
   if isFavorite:
     result["isFavorite"] = %true
 
+proc randomSearchLabel*(albumId = "", personId = "", isFavorite = false): string =
+  ## What the random search filtered by, for the log line that records what
+  ## the app actually asked for. "An album that never applies" then reads as
+  ## either "album <id>" with the server answering from it, or "whole library"
+  ## because the mode or the id never reached the app (a pinned state file,
+  ## a field left on its default).
+  if albumId != "": "album " & albumId
+  elif personId != "": "person " & personId
+  elif isFavorite: "favorites"
+  else: "whole library"
+
 proc imageAssets*(assets: JsonNode): seq[JsonNode] =
   if assets != nil and assets.kind == JArray:
     for asset in assets:
@@ -195,6 +206,11 @@ proc fetchRandomAsset(self: App, serverUrl: string, apiKey: string, albumId = ""
       if asset{"isFavorite"}.getBool:
         favorites.add(asset)
     assets = favorites
+  # Always on, one line per fetch: the filter the request carried and what
+  # came back. The debug-only request line above needs `debug` on the frame,
+  # which a frame in a user's log rarely has.
+  self.log(&"Immich random search ({randomSearchLabel(albumId, personId, isFavorite)}): " &
+    &"HTTP {response.code}, {assets.len} image candidate(s)")
   if assets.len == 0:
     if usedLegacyFallback:
       return (nil, "This Immich server returned no matching images from /api/assets/random.")
@@ -230,6 +246,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       let response = self.requestJson(apiKey, memoriesUrl(serverUrl, todayIso()))
       if response.code == 200:
         let assets = memoriesImageAssets(parseJson(response.body))
+        self.log(&"Immich memories for {todayIso()}: HTTP 200, {assets.len} image candidate(s)")
         if assets.len > 0:
           asset = pickRandomAsset(assets)
       else:
@@ -254,6 +271,8 @@ proc get*(self: App, context: ExecutionContext): Image =
     let assetId = asset{"id"}.getStr
     if assetId == "":
       return self.error(context, "Immich returned an asset without an ID.")
+    let fileName = asset{"originalFileName"}.getStr
+    self.log(&"Showing Immich asset {assetId} ({fileName}, {self.appConfig.previewSize})")
 
     let downloadUrl = assetDownloadUrl(serverUrl, assetId, self.appConfig.previewSize)
     if self.frameConfig.debug:

@@ -44,6 +44,11 @@ typedef struct {
  * so a scene bundle does not land in internal RAM. */
 esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_http_response_t *res);
 
+/* esp_err_to_name() has no row for esp_http_client's own codes, so a refused
+ * connect reached the frame's log as `"espErr":28674,"espErrName":"UNKNOWN
+ * ERROR"`. The HTTP range by name; everything else as esp_err_to_name(). */
+const char *fos_http_err_name(esp_err_t err);
+
 void fos_http_response_free(fos_http_response_t *res);
 
 /* `{backend_url}/api/frames/{frame_id}{suffix}`; false when no backend is

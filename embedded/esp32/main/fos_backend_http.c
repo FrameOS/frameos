@@ -95,6 +95,27 @@ static void read_body(esp_http_client_handle_t client, size_t max_body, fos_http
     res->body_len = total;
 }
 
+const char *fos_http_err_name(esp_err_t err)
+{
+    switch (err) {
+    case ESP_ERR_HTTP_MAX_REDIRECT: return "ESP_ERR_HTTP_MAX_REDIRECT";
+    case ESP_ERR_HTTP_CONNECT: return "ESP_ERR_HTTP_CONNECT";
+    case ESP_ERR_HTTP_WRITE_DATA: return "ESP_ERR_HTTP_WRITE_DATA";
+    case ESP_ERR_HTTP_FETCH_HEADER: return "ESP_ERR_HTTP_FETCH_HEADER";
+    case ESP_ERR_HTTP_INVALID_TRANSPORT: return "ESP_ERR_HTTP_INVALID_TRANSPORT";
+    case ESP_ERR_HTTP_CONNECTING: return "ESP_ERR_HTTP_CONNECTING";
+    case ESP_ERR_HTTP_EAGAIN: return "ESP_ERR_HTTP_EAGAIN";
+    case ESP_ERR_HTTP_CONNECTION_CLOSED: return "ESP_ERR_HTTP_CONNECTION_CLOSED";
+#ifdef ESP_ERR_HTTP_READ_TIMEOUT
+    case ESP_ERR_HTTP_READ_TIMEOUT: return "ESP_ERR_HTTP_READ_TIMEOUT";
+#endif
+#ifdef ESP_ERR_HTTP_INCOMPLETE_DATA
+    case ESP_ERR_HTTP_INCOMPLETE_DATA: return "ESP_ERR_HTTP_INCOMPLETE_DATA";
+#endif
+    default: return esp_err_to_name(err);
+    }
+}
+
 esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_http_response_t *res)
 {
     memset(res, 0, sizeof(*res));
@@ -119,7 +140,7 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
     int body_len = req->body ? (int)strlen(req->body) : 0;
     esp_err_t err = esp_http_client_open(client, body_len);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "%s: connect failed: %s", req->url, esp_err_to_name(err));
+        ESP_LOGW(TAG, "%s: connect failed: %s", req->url, fos_http_err_name(err));
         esp_http_client_cleanup(client);
         return err;
     }

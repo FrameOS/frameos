@@ -56,6 +56,13 @@ suite "data/immich app":
     check app.appConfig.mode == "album"
     check app.appConfig.previewSize == "fullsize"
 
+  test "randomSearchLabel names the filter the request carried":
+    check randomSearchLabel() == "whole library"
+    check randomSearchLabel(albumId = "7f2d") == "album 7f2d"
+    check randomSearchLabel(personId = "9c8b") == "person 9c8b"
+    check randomSearchLabel(isFavorite = true) == "favorites"
+    check randomSearchLabel(albumId = "7f2d", personId = "9c8b") == "album 7f2d"
+
   test "normalizeServerUrl strips whitespace and trailing slashes":
     check normalizeServerUrl("https://immich.example.com") == "https://immich.example.com"
     check normalizeServerUrl("https://immich.example.com/") == "https://immich.example.com"

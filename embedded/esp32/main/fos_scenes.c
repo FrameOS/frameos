@@ -148,7 +148,7 @@ static void log_scene_event(const char *event, const char *status, const char *o
     json_escape_value(scene_id, scene_id_esc, sizeof(scene_id_esc));
     json_escape_value(detail, detail_esc, sizeof(detail_esc));
     json_escape_value(s_etag, etag_esc, sizeof(etag_esc));
-    json_escape_value(esp_err == ESP_OK ? "OK" : esp_err_to_name(esp_err),
+    json_escape_value(esp_err == ESP_OK ? "OK" : fos_http_err_name(esp_err),
                       err_name_esc, sizeof(err_name_esc));
 
     char log_line[1024];
