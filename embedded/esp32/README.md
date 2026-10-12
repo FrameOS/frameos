@@ -312,7 +312,11 @@ Scene state used to last one render on such a frame. The runtime keeps each
 scene's public state (and its `persist: "disk"` fields) in a file per scene
 under /state (`fos_scene_state.c`, `/state/st-<hash>.json`), writes it when
 it changes and seeds the scene from it when the scene is next built — the
-Linux runtime's `./state/scene-<id>.json`, for the chip. State for a scene
+Linux runtime's `./state/scene-<id>.json`, for the chip. Only values off
+their declared default are written (a default in the file would outlive the
+redeploy that changes it), and the file carries a `"__persist": 2` marker: a
+file without one was written by firmware that still pinned defaults and is
+dropped the first time it is read, so the deployed defaults win. State for a scene
 that is not resident (a wake-check pass, a switch carrying state) goes to the
 file right away, so a deep sleep in between loses nothing. Both control
 planes get it: the cloud hello and the commands pull report the persisted
