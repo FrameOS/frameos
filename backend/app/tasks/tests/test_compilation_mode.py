@@ -142,6 +142,35 @@ def test_driver_library_exports_setup_symbol_when_driver_has_setup():
     assert "syncHostDriverContext(hostContext, driverContextInstance)" in source
 
 
+def test_driver_library_exports_never_let_an_exception_out():
+    """A driver library runs its own Nim runtime: an exception that leaves an
+    export never reaches the host and leaves the library's error flag set, so
+    every later render returned at once and earlier_render_seconds answered
+    0.0. A 13.3" E busy timeout turned into a 0.25 s retry loop that only a
+    restart ended (frame 24, 2026-10-12)."""
+    source = write_driver_library_nim(
+        Driver(name="waveshare", import_path="waveshare/waveshare", can_render=True, can_png=True, can_turn_on_off=True)
+    )
+
+    def export_body(name: str) -> str:
+        start = source.index(f"proc {name}*(")
+        end = source.find("\nproc ", start + 1)
+        return source[start:end if end != -1 else len(source)]
+
+    for name, call in (
+        ("frameos_driver_init", "waveshareDriver.init("),
+        ("frameos_driver_render", "waveshareDriver.render("),
+        ("frameos_driver_to_png", "waveshareDriver.toPng("),
+        ("frameos_driver_turn_on", "waveshareDriver.turnOn("),
+        ("frameos_driver_turn_off", "waveshareDriver.turnOff("),
+    ):
+        body = export_body(name)
+        assert "  try:\n" in body, name
+        assert body.index("  try:\n") < body.index(call), name
+        assert "except Exception as e:" in body, name
+    assert '"event": "render:driver:error", "driver": "waveshare"' in export_body("frameos_driver_render")
+
+
 def test_static_drivers_setup_uses_generated_driver_list():
     source = write_static_drivers_nim(
         {

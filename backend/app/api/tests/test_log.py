@@ -236,6 +236,26 @@ async def test_api_log_rate_limited_per_frame(async_client, db, redis, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_api_log_rate_limit_counter_without_a_window_heals(async_client, db, redis):
+    """A request that died between INCR and EXPIRE left a counter with no
+    TTL; frame 24 then got 429 for every log batch, forever (2026-10-12)."""
+    from app.utils.rate_limit import rate_limit_key
+
+    frame = await new_frame(db, redis, 'StuckRateFrame', 'localhost', 'localhost')
+    frame.server_api_key = 'testkey'
+    await update_frame(db, redis, frame)
+
+    key = rate_limit_key("frame_log", str(frame.id))
+    await redis.set(key, 1111)
+    assert await redis.ttl(key) == -1
+
+    headers = {'Authorization': 'Bearer testkey'}
+    assert (await async_client.post('/api/log', json={}, headers=headers)).status_code == 429
+    # The rejected hit put the window back, so the block ends with it.
+    assert 0 < await redis.ttl(key) <= 60
+
+
+@pytest.mark.asyncio
 async def test_gzip_body_over_the_cap_is_rejected_before_decompression(async_client, db, redis, monkeypatch):
     from app import middleware
 

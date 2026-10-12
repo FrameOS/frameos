@@ -17,10 +17,20 @@ def rate_limit_key(name: str, subject: str) -> str:
 
 async def hit_rate_limit(redis: Redis, name: str, subject: str, *, limit: int, window_seconds: int) -> bool:
     """Count one hit for `subject` and report whether it is now over `limit`
-    within a fixed window of `window_seconds`."""
+    within a fixed window of `window_seconds`.
+
+    The window is set on any counter without one, not only on the first hit.
+    INCR and EXPIRE are two commands: a request that dies between them (the
+    dev server's --reload, a cancelled task, a dropped Redis connection)
+    leaves a counter that never resets, and a frame whose log counter did
+    that answered 429 to every log batch until Redis was flushed — the frame
+    looked dead while it rendered fine."""
     key = rate_limit_key(name, subject)
-    count = await redis.incr(key)
-    if count == 1:
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.incr(key)
+        pipe.ttl(key)
+        count, ttl = await pipe.execute()
+    if int(ttl) < 0:
         await redis.expire(key, window_seconds)
     return int(count) > limit
 
