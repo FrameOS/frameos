@@ -31,7 +31,8 @@ void fos_buzzer_press_end(void);
  * the boot got here. */
 void fos_buzzer_chirp(void);
 /* A press the frame could not take (its queue is full): a lower buzz, a
- * quarter of the press tone, for 250 ms. */
+ * quarter of the press tone, for 50 ms: a short "no" next to the press's
+ * "yes". */
 void fos_buzzer_reject(void);
 /* Any tone (the console's `beep`). Safe from any task; a tone while one
  * sounds replaces it. */

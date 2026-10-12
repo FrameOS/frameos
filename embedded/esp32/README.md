@@ -707,8 +707,8 @@ the render task drains the queue in one go before its next pass (one render
 for the whole burst). The queue holds 64 edges, 32 press/release pairs, and a
 press is accepted only when its release also fits, so the dispatcher never
 sees a key that stays down. A press with no room is dropped, logged as
-`button:dropped`, and buzzes lower instead (a quarter of the press tone, 250
-ms): it was not received.
+`button:dropped`, and gets a short low buzz instead (a quarter of the press
+tone, 50 ms): it was not received.
 
 The pitch is `buzzer_tone_hz` (100-10000, default 2000). The pin is
 `buzzer_pin` (`-1` = none): the reTerminal E-series presets set

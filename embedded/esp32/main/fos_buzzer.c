@@ -29,7 +29,7 @@ static const char *TAG = "fos_buzzer";
 #define CHIRP_MS 60
 /* A refused press: a quarter of the press tone, so it reads as "no" next to
  * the press's "yes" whatever pitch the frame is set to. */
-#define REJECT_MS 250
+#define REJECT_MS 50
 #define REJECT_MIN_HZ 150
 
 static SemaphoreHandle_t s_lock = NULL;
