@@ -26,6 +26,7 @@ import {
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
+import { DeployProgressBar } from '../../components/DeployProgressBar'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameSidebarBattery, frameLastBatteryPercent } from './FrameBatteryIndicator'
 import { FrameImage } from '../../components/FrameImage'
@@ -35,6 +36,7 @@ import { TextInput } from '../../components/TextInput'
 import {
   frameActivityDescription,
   frameCheckin,
+  frameDeployProgress,
   frameHost,
   frameIsHealthy,
   frameIsStale,
@@ -98,6 +100,17 @@ const frameSectionToolLinks = [
 
 function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
   return currentSceneId === scene.id || currentSceneId === `${uploadedScenePrefix}${scene.id}`
+}
+
+// The line under the frame's name: the deploy's progress bar while one is
+// under way (and believed — a stale record is back to "last seen"), the
+// check-in / last-seen text otherwise.
+function FrameActivityLine({ frame }: { frame: FrameType }): JSX.Element {
+  const deploy = frameDeployProgress(frame)
+  if (deploy) {
+    return <DeployProgressBar progress={deploy} className="mt-0.5" />
+  }
+  return <span className="block truncate text-xs text-slate-400">{frameActivityDescription(frame)}</span>
 }
 
 function SidebarStatusDots({ frame, inactive }: { frame: FrameType; inactive?: boolean }): JSX.Element {
@@ -329,7 +342,7 @@ function FrameTreeRow({
                 ) : null}
               </span>
             </span>
-            <span className="block truncate text-xs text-slate-400">{frameActivityDescription(frame)}</span>
+            <FrameActivityLine frame={frame} />
           </button>
           <FrameMetricAlertIndicator frame={frame} />
           {frameLastBatteryPercent(frame) !== null ? (

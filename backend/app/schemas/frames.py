@@ -126,6 +126,9 @@ class FrameBase(BaseModel):
     # what the shared workspace reads to say "updating firmware 42%" or
     # "update queued" instead of offering the update again.
     firmware_update: Optional[Dict[str, Any]] = None
+    # The deploy / update / restart in flight (or the last one), in the
+    # vocabulary of docs/deploy-progress-contract.json: the workspace's bar.
+    deploy_progress: Optional[Dict[str, Any]] = None
     pending_command_types: Optional[List[str]] = None
     log_to_file: Optional[str]
     assets_path: Optional[str]

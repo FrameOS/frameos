@@ -51,6 +51,13 @@ import {
   verifyFrameSignature,
 } from "../../auth-web/src/lib/frames";
 import {
+  foldDeployProgress,
+  foldDeployProgressCommand,
+  foldDeployProgressLogEntries,
+  isDeployProgressRecord,
+  type DeployProgressRecord,
+} from "../../auth-web/src/lib/deploy-progress";
+import {
   cachedAssetFile,
   cachedAssetContentType,
   assetFetchCommandTtlMs,
@@ -466,6 +473,48 @@ export async function startFrameHub(
     await recordFrameAudit(frame, eventType, metadata);
   }
 
+  // The deploy's bar (docs/deploy-progress-contract.json): re-read the row's
+  // record — auth-web starts it at enqueue time while this session is live,
+  // so `session.frame` never has the current one — apply one fold, write it
+  // back only if nobody else moved it meanwhile, and broadcast the row.
+  // A concurrent fold (the drain's "sent" next to the device's ack, a log
+  // batch next to a hello) may win the write: re-read and re-apply, so the
+  // stage gating — not the race — decides what the record says.
+  async function moveDeployProgress(
+    frameId: string,
+    mutate: (record: unknown) => DeployProgressRecord | undefined,
+  ) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const [row] = await db
+        .select({ deployProgress: frames.deployProgress })
+        .from(frames)
+        .where(eq(frames.id, frameId))
+        .limit(1);
+      if (!row || !isDeployProgressRecord(row.deployProgress)) {
+        return;
+      }
+      const next = mutate(row.deployProgress);
+      if (!next) {
+        return;
+      }
+      const written = await db
+        .update(frames)
+        .set({ deployProgress: next, updatedAt: new Date() })
+        .where(
+          and(
+            eq(frames.id, frameId),
+            sql`${frames.deployProgress} ->> 'at' = ${row.deployProgress.at}`,
+            sql`${frames.deployProgress} ->> 'id' = ${row.deployProgress.id}`,
+          ),
+        )
+        .returning({ id: frames.id });
+      if (written.length > 0) {
+        await broadcastFrameUpdate(frameId);
+        return;
+      }
+    }
+  }
+
   async function broadcastFrameUpdate(frameId: string) {
     // The link comes along so the broadcast can carry
     // `service_settings_enabled` (the owner's per-frame switch lives in the
@@ -713,6 +762,9 @@ export async function startFrameHub(
                 eq(frameCommands.status, "pending"),
               ),
             );
+          await moveDeployProgress(session.frame.id, (record) =>
+            foldDeployProgressCommand(record, command.type, "sent", { now: new Date() }),
+          );
         }
       } while (session.drainQueued);
     } finally {
@@ -946,6 +998,13 @@ export async function startFrameHub(
           : {}),
       })
       .where(eq(frames.id, frameId));
+    // The device is back: a deploy, update or restart waiting for its
+    // bootup moves on to the first render (the hello is the `bootup` signal
+    // of docs/deploy-progress-contract.json). Before the confirmed gate on
+    // purpose: the bar is the owner's, and this is the frame they enrolled.
+    await moveDeployProgress(frameId, (record) =>
+      foldDeployProgress(record, "bootup", { now: new Date() }),
+    );
 
     // "Sign in with FrameOS Cloud" redirects to the linked client's
     // local_origin and refuses when there is none. Claim-token enrollments
@@ -1238,6 +1297,14 @@ export async function startFrameHub(
         ),
       )
       .returning({ type: frameCommands.type });
+    if (command) {
+      await moveDeployProgress(session.frame.id, (record) =>
+        foldDeployProgressCommand(record, command.type, ok ? "acked" : "failed", {
+          now: new Date(),
+          error: ok ? null : typeof msg.error === "string" ? msg.error : "error",
+        }),
+      );
+    }
     // The Linux runtime answers get_logs with the ring INSIDE the ack
     // (`logs: [...]`, hub_client.nim handleGetLogs); the ESP32 sends a
     // separate log_batch that lands in handleLogBatch. Both end up in
@@ -1324,6 +1391,9 @@ export async function startFrameHub(
       .where(eq(frames.id, session.frame.id))
       .returning({ assignedChecksum: frames.assignedChecksum });
     await broadcastFrameUpdate(session.frame.id);
+    if (checksum !== undefined) {
+      await foldSceneAckIntoDeployProgress(session.frame.id, checksum);
+    }
     // The device confirming the ASSIGNED set (not a preview push, not a
     // stale set) is the cloud's deploy-succeeded moment — the counterpart of
     // frame.scenes_assigned, which records the push.
@@ -1335,6 +1405,32 @@ export async function startFrameHub(
         checksum,
       });
     }
+  }
+
+  // The device says a scene set is live. It ends the `loading` stage of the
+  // deploy's bar only when it is the set THAT deploy pushed: the record's id
+  // is the set_scenes command that started it, and a preview push or a late
+  // ack of an older set must not move a newer push's bar.
+  async function foldSceneAckIntoDeployProgress(frameId: string, checksum: string) {
+    const [row] = await db
+      .select({ payload: frameCommands.payload })
+      .from(frameCommands)
+      .innerJoin(frames, eq(frames.id, frameCommands.frameId))
+      .where(
+        and(
+          eq(frames.id, frameId),
+          eq(frameCommands.type, "set_scenes"),
+          sql`${frameCommands.id}::text = ${frames.deployProgress} ->> 'id'`,
+        ),
+      )
+      .limit(1);
+    const pushed = isRecord(row?.payload) ? row.payload.checksum : undefined;
+    if (pushed !== checksum) {
+      return;
+    }
+    await moveDeployProgress(frameId, (record) =>
+      foldDeployProgress(record, "scene_ack", { now: new Date() }),
+    );
   }
 
   async function handleState(
@@ -1489,6 +1585,11 @@ export async function startFrameHub(
     if (!(await isConfirmedFrame(session, msg))) {
       return;
     }
+    // A render just happened: the first one after a deploy, an update or a
+    // restart ends that deploy's bar, telemetry logs or not.
+    await moveDeployProgress(session.frame.id, (record) =>
+      foldDeployProgress(record, "render:done", { now: new Date() }),
+    );
     const imageViaGet = msg.image === "image_get";
     // Re-read: `session.frame` is the row as it was at connect, and viewers
     // come and go over the life of a socket.
@@ -1644,6 +1745,9 @@ export async function startFrameHub(
       );
     }
     await recordFirmwareUpdate(session, entries);
+    await moveDeployProgress(session.frame.id, (record) =>
+      foldDeployProgressLogEntries(record, entries, { now: new Date() }),
+    );
   }
 
   // The device narrates its firmware update as structured log lines: the

@@ -1,0 +1,214 @@
+{
+  "$comment": "Deploy progress: how far a deploy, update, restart or reboot has come, from the click to the first render on the new code. docs/deploy-progress.md is the prose, docs/deploy-progress-fixtures.json the conformance corpus. Generated tables: frameos/tools/generate_deploy_progress_contract.py (run after every edit). A kind is one ordered list of stages; the control plane advances to the stages it performs itself (source: control-plane) and folds the device's own signals into the rest (source: device/queue). The record lives on the frame row as `deploy_progress` on both control planes.",
+  "version": 1,
+  "record": {
+    "$comment": "The shape of frame.deploy_progress. `at` moves on every change; `progress` is bytes while the device downloads; `error` is set only with status=error.",
+    "fields": {
+      "id": "string: the deploy's id (the task id the browser minted, or the command id / uuid the control plane minted)",
+      "kind": "string: one of `kinds`",
+      "stage": "string: one of the kind's stages, or `done`",
+      "status": "running | done | error",
+      "detail": "string | null: one short sentence about the current step, for the bar's caption",
+      "progress": "{current, total} | null: bytes so far, while a download or upload reports them",
+      "version": "string | null: the FrameOS release this deploy installs, when known",
+      "error": "string | null: why it failed (status=error)",
+      "started_at": "ISO timestamp",
+      "at": "ISO timestamp of the last change"
+    },
+    "doneShownSeconds": 12,
+    "errorShownSeconds": 180,
+    "wakeGraceSeconds": 600
+  },
+  "signals": {
+    "$comment": "The closed vocabulary of things that move a record. `control-plane:<stage>` is the plane's own step (the backend task, the cloud route or hub). Everything else is observed: a device log line, a command-queue state change, a hub session event.",
+    "control-plane": "control-plane:<stage>  the control plane reached that stage of its own work",
+    "device": {
+      "bootup": "the runtime's `bootup` log line (Linux and ESP32); on the cloud the hub's hello (session start) is the same signal",
+      "reload": "the Linux runtime's `reload` log line: it re-read frame.json and the scenes and will render",
+      "render:done": "the runtime finished a render (`render:done`); on the cloud the device's `render` announce is the same signal",
+      "ota:waiting": "ESP32 `ota:<plane>` status `waiting`: a render pass finishes before the download",
+      "ota:downloading": "ESP32 `ota:<plane>` status `downloading`",
+      "ota:progress": "ESP32 `ota:<plane>` status `progress` (`detail` = `<written>/<total>` bytes)",
+      "ota:verified": "ESP32 `ota:<plane>` status `verified`: installed, restarting into it",
+      "ota:up-to-date": "ESP32 `ota:<plane>` status `up-to-date` / `skipped` / `downgrade-refused`: nothing to install, the frame restarts on what it has",
+      "ota:error": "ESP32 `ota:<plane>` status `error` / `gave-up`",
+      "upgrade:downloading": "Pi `cloud:upgrade` status starting / scheduled / running",
+      "upgrade:verified": "Pi `cloud:upgrade` status success / reboot_required",
+      "upgrade:up-to-date": "Pi `cloud:upgrade` status up_to_date / skipped",
+      "upgrade:error": "Pi `cloud:upgrade` status error / failed / stalled"
+    },
+    "queue": {
+      "command:sent:<type>": "the hub wrote the verb to the device socket",
+      "command:acked:<type>": "the device acked the verb (set_scenes and set_settings on the backend: the pull reported the ETags the backend serves)",
+      "command:failed:<type>": "the device refused the verb",
+      "commands:settled": "every row of this deploy is acked (the backend's deploy_commands_settled)",
+      "scene_ack": "cloud: the device reports the assigned scene set is live (`scene_ack` with the assigned checksum)"
+    }
+  },
+  "stages": {
+    "$comment": "Every stage a kind may use. `staleAfterSeconds` is how long the record may sit in the stage with no change before the workspace stops believing it (the bar hides, the row goes back to `last seen`). The runners never expire a record themselves: `at` is what the reader compares.",
+    "queued": { "label": "queued", "description": "The job is on the worker queue (backend) or the verb is on the frame's command queue (cloud); nothing has happened yet.", "staleAfterSeconds": 900 },
+    "connecting": { "label": "connecting", "description": "SSH / Remote session to the frame, distro probe, deploy plan.", "staleAfterSeconds": 300 },
+    "building": { "label": "building", "description": "Getting the FrameOS binary: the precompiled release (download, signature check), a cross-compile, or an on-device build.", "staleAfterSeconds": 3600 },
+    "uploading": { "label": "uploading", "description": "Release directory, binary, scenes and settings, vendor files on their way to the frame.", "staleAfterSeconds": 1800 },
+    "installing": { "label": "installing", "description": "FrameOS stopped, `frameos setup` running (drivers, services, release activation), fonts synced, cleanup.", "staleAfterSeconds": 1200 },
+    "restarting": { "label": "restarting", "description": "The service restart or device reboot was issued; waiting for the runtime to come back.", "staleAfterSeconds": 600 },
+    "reloading": { "label": "reloading", "description": "The runtime was asked to re-read its files in place (no restart).", "staleAfterSeconds": 180 },
+    "saving": { "label": "saving on the frame", "description": "Service keys, settings and scenes posted to the frame's admin API (the device's own Save).", "staleAfterSeconds": 300 },
+    "waiting": { "label": "waiting for the frame", "description": "Queued for a frame that is asleep or off; it takes the work on its next check-in. Not stale while the frame's next wake (plus record.wakeGraceSeconds) is still ahead.", "staleAfterSeconds": 3600, "freshWhileSleeping": true },
+    "sending": { "label": "sending", "description": "The hub is streaming the verb to the connected frame.", "staleAfterSeconds": 300 },
+    "downloading": { "label": "downloading", "description": "The device is fetching the release image / archive.", "staleAfterSeconds": 1800 },
+    "verified": { "label": "installed", "description": "The device verified and installed the release; it restarts into it.", "staleAfterSeconds": 600 },
+    "flashing": { "label": "flashing", "description": "The browser is writing the image over USB.", "staleAfterSeconds": 1800 },
+    "booting": { "label": "booting", "description": "Waiting for the runtime's bootup line on the new code.", "staleAfterSeconds": 600 },
+    "receiving": { "label": "receiving scenes", "description": "The frame is pulling its scenes and settings (after the boot, on an ESP32).", "staleAfterSeconds": 600 },
+    "loading": { "label": "loading scenes", "description": "The frame accepted the scenes and is making them live.", "staleAfterSeconds": 600 },
+    "rendering": { "label": "first render", "description": "Waiting for the first render on the new code / scenes.", "staleAfterSeconds": 300 }
+  },
+  "kinds": {
+    "$comment": "`stages` is the ordered list a bar is drawn from. Each entry: `stage`, optional `on` (signal -> next stage, or `done` / `error`), optional `holdOn` (signals that refresh `at` and `progress` without leaving the stage). A control plane advances with `control-plane:<stage>` only forward along the list; an observed signal the current stage does not list is ignored, so a late line from the previous runtime cannot move the record.",
+    "linux_full": {
+      "label": "Deploy FrameOS, scenes & settings",
+      "planes": ["backend"],
+      "frames": "Linux frames the backend reaches over SSH or the FrameOS Remote (rpios, buildroot with a shell).",
+      "stages": [
+        { "stage": "queued" },
+        { "stage": "connecting" },
+        { "stage": "building" },
+        { "stage": "uploading" },
+        { "stage": "installing" },
+        { "stage": "restarting", "on": { "bootup": "rendering" } },
+        { "stage": "booting", "on": { "bootup": "rendering" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "linux_fast": {
+      "label": "Deploy scenes & settings",
+      "planes": ["backend"],
+      "frames": "Linux frames the backend reaches over SSH or the FrameOS Remote; the binary stays, frame.json and the scenes are replaced and the runtime reloads (or restarts, when setup or TLS asks for it).",
+      "stages": [
+        { "stage": "queued" },
+        { "stage": "connecting" },
+        { "stage": "uploading" },
+        { "stage": "installing" },
+        { "stage": "reloading", "on": { "reload": "rendering", "bootup": "rendering" } },
+        { "stage": "booting", "on": { "reload": "rendering", "bootup": "rendering" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "admin_push": {
+      "label": "Deploy over the admin API",
+      "planes": ["backend"],
+      "frames": "Linux frames the backend only reaches over their admin HTTP API (an adopted generic Buildroot card: no Remote, no SSH). Fast and full deploys are the same push.",
+      "stages": [
+        { "stage": "queued" },
+        { "stage": "saving" },
+        { "stage": "booting", "on": { "reload": "rendering", "bootup": "rendering", "render:done": "done" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "esp32_full": {
+      "label": "Deploy firmware, scenes & settings",
+      "planes": ["backend"],
+      "frames": "ESP32 frames on the backend: the scenes and settings rows go on the command queue, the board installs the signed release over the air, boots, pulls the rows, renders.",
+      "stages": [
+        { "stage": "queued" },
+        { "stage": "waiting", "on": { "command:acked:notify_update_available": "downloading", "ota:waiting": "downloading", "ota:downloading": "downloading", "ota:progress": "downloading", "ota:verified": "verified", "ota:up-to-date": "booting", "ota:error": "error", "command:failed:notify_update_available": "error", "bootup": "receiving", "commands:settled": "rendering" } },
+        { "stage": "downloading", "holdOn": ["ota:waiting", "ota:downloading", "ota:progress"], "on": { "ota:verified": "verified", "ota:up-to-date": "booting", "ota:error": "error", "bootup": "receiving", "commands:settled": "rendering" } },
+        { "stage": "verified", "on": { "bootup": "receiving", "commands:settled": "rendering" } },
+        { "stage": "booting", "on": { "bootup": "receiving", "commands:settled": "rendering" } },
+        { "stage": "receiving", "on": { "commands:settled": "rendering", "command:failed:set_scenes": "error" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "esp32_fast": {
+      "label": "Deploy scenes & settings",
+      "planes": ["backend"],
+      "frames": "ESP32 frames on the backend: the scenes and settings rows go on the command queue; the board pulls them on its next pass (nudged if awake) and renders.",
+      "stages": [
+        { "stage": "queued" },
+        { "stage": "waiting", "on": { "command:acked:set_scenes": "receiving", "command:acked:set_settings": "receiving", "commands:settled": "rendering", "command:failed:set_scenes": "error" } },
+        { "stage": "receiving", "on": { "commands:settled": "rendering", "command:failed:set_scenes": "error" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "esp32_usb": {
+      "label": "Deploy over USB",
+      "planes": ["backend"],
+      "frames": "ESP32 frames flashed or provisioned from the browser over USB. The control plane learns of it when the flasher reports completion; the board then boots and renders.",
+      "stages": [
+        { "stage": "flashing" },
+        { "stage": "booting", "on": { "bootup": "rendering", "render:done": "done" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "virtual": {
+      "label": "Render",
+      "planes": ["backend"],
+      "frames": "Virtual frames: deploying is rendering, on the backend itself.",
+      "stages": [
+        { "stage": "queued" },
+        { "stage": "rendering" }
+      ]
+    },
+    "upgrade": {
+      "label": "Update FrameOS",
+      "planes": ["backend", "cloud"],
+      "frames": "Linux frames upgrading themselves (the runtime's signed release upgrade): asked over the admin API (backend) or by the notify_update_available verb (cloud). Progress is the runtime's cloud:upgrade lines, then the boot and the first render.",
+      "stages": [
+        { "stage": "queued", "on": { "command:acked:notify_update_available": "waiting", "upgrade:downloading": "downloading", "upgrade:verified": "verified", "upgrade:up-to-date": "done", "upgrade:error": "error" } },
+        { "stage": "waiting", "on": { "upgrade:downloading": "downloading", "upgrade:verified": "verified", "upgrade:up-to-date": "done", "upgrade:error": "error", "command:failed:notify_update_available": "error" } },
+        { "stage": "downloading", "holdOn": ["upgrade:downloading"], "on": { "upgrade:verified": "verified", "upgrade:up-to-date": "done", "upgrade:error": "error", "bootup": "rendering" } },
+        { "stage": "verified", "on": { "bootup": "rendering" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "firmware": {
+      "label": "Update firmware",
+      "planes": ["backend", "cloud"],
+      "frames": "ESP32 frames installing the signed release over the air without a scene deploy: the notify_update_available verb (queued on either plane), the device's ota lines, its bootup / hello on the new release, its first render.",
+      "stages": [
+        { "stage": "queued", "on": { "command:sent:notify_update_available": "waiting", "command:acked:notify_update_available": "downloading", "command:failed:notify_update_available": "error", "ota:waiting": "downloading", "ota:downloading": "downloading", "ota:progress": "downloading" } },
+        { "stage": "waiting", "on": { "command:acked:notify_update_available": "downloading", "ota:waiting": "downloading", "ota:downloading": "downloading", "ota:progress": "downloading", "ota:verified": "verified", "ota:up-to-date": "done", "ota:error": "error", "command:failed:notify_update_available": "error" } },
+        { "stage": "downloading", "holdOn": ["ota:waiting", "ota:downloading", "ota:progress"], "on": { "ota:verified": "verified", "ota:up-to-date": "done", "ota:error": "error", "bootup": "rendering" } },
+        { "stage": "verified", "on": { "bootup": "rendering" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "cloud_scenes": {
+      "label": "Deploy scenes",
+      "planes": ["cloud"],
+      "frames": "Every cloud frame: the set_scenes verb from queued through the device's scene_ack to its first render announce.",
+      "stages": [
+        { "stage": "queued", "on": { "command:sent:set_scenes": "sending", "command:acked:set_scenes": "loading", "scene_ack": "rendering" } },
+        { "stage": "sending", "on": { "command:acked:set_scenes": "loading", "command:failed:set_scenes": "error", "scene_ack": "rendering" } },
+        { "stage": "loading", "on": { "scene_ack": "rendering", "command:failed:set_scenes": "error" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "restart": {
+      "label": "Restart FrameOS",
+      "planes": ["backend", "cloud"],
+      "frames": "Every frame: the runtime exits and comes back (an ESP32 reboots the chip).",
+      "stages": [
+        { "stage": "queued", "on": { "command:sent:restart_runtime": "waiting", "command:acked:restart_runtime": "restarting", "command:failed:restart_runtime": "error", "bootup": "rendering" } },
+        { "stage": "waiting", "on": { "command:acked:restart_runtime": "restarting", "command:failed:restart_runtime": "error", "bootup": "rendering" } },
+        { "stage": "restarting", "on": { "bootup": "rendering" } },
+        { "stage": "booting", "on": { "bootup": "rendering" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    },
+    "reboot": {
+      "label": "Reboot device",
+      "planes": ["backend", "cloud"],
+      "frames": "Every frame: the whole device restarts.",
+      "stages": [
+        { "stage": "queued", "on": { "command:sent:reboot": "waiting", "command:acked:reboot": "restarting", "command:failed:reboot": "error", "bootup": "rendering" } },
+        { "stage": "waiting", "on": { "command:acked:reboot": "restarting", "command:failed:reboot": "error", "bootup": "rendering" } },
+        { "stage": "restarting", "on": { "bootup": "rendering" } },
+        { "stage": "booting", "on": { "bootup": "rendering" } },
+        { "stage": "rendering", "on": { "render:done": "done" } }
+      ]
+    }
+  }
+}

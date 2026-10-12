@@ -1,0 +1,305 @@
+{
+  "$comment": "Conformance corpus for docs/deploy-progress-contract.json. Every runner (backend/app/utils/tests/test_deploy_progress.py, cloud/apps/auth-web/src/test/deploy-progress-fixtures.test.ts) replays each case against its own fold. A case starts a record of `kind` (at `start.stage` when given) and applies `steps` in order; each step is exactly one of `advance` (a control-plane stage), `signal` (an observed signal), `log` (a raw device log line), `command` ({type, state[, error]}), `finish` or `fail`, then `expect` compares stage/status (and `progress`, `detail`, `changed` when given). `stale` cases check is_stale at `ageSeconds` after the record's last change (`nextWakeInSeconds` sets the frame's wake forecast relative to now). `percent` cases pin the bar's arithmetic.",
+  "cases": [
+    {
+      "name": "linux_full: the backend's steps, then the device's bootup and first render",
+      "kind": "linux_full",
+      "steps": [
+        { "expect": { "stage": "queued", "status": "running" } },
+        { "advance": "connecting", "expect": { "stage": "connecting" } },
+        { "log": { "event": "render:done", "sceneId": "old" }, "expect": { "stage": "connecting", "changed": false } },
+        { "advance": "building", "detail": "fetching the precompiled release", "expect": { "stage": "building", "detail": "fetching the precompiled release" } },
+        { "advance": "connecting", "expect": { "stage": "building", "changed": false } },
+        { "advance": "uploading", "expect": { "stage": "uploading" } },
+        { "advance": "installing", "expect": { "stage": "installing" } },
+        { "log": { "event": "bootup", "version": "2026.10.10" }, "expect": { "stage": "installing", "changed": false } },
+        { "advance": "restarting", "detail": "restarting FrameOS", "expect": { "stage": "restarting" } },
+        { "log": { "event": "bootup", "version": "2026.10.11" }, "expect": { "stage": "rendering" } },
+        { "advance": "booting", "expect": { "stage": "rendering", "changed": false } },
+        { "log": { "event": "render:done", "sceneId": "new" }, "expect": { "stage": "done", "status": "done" } },
+        { "advance": "rendering", "expect": { "stage": "done", "status": "done", "changed": false } }
+      ]
+    },
+    {
+      "name": "linux_full: the job finishes before the device boots",
+      "kind": "linux_full",
+      "start": { "stage": "restarting" },
+      "steps": [
+        { "advance": "booting", "expect": { "stage": "booting" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "booting", "changed": false } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "linux_fast: a reload (no restart) renders",
+      "kind": "linux_fast",
+      "steps": [
+        { "advance": "connecting", "expect": { "stage": "connecting" } },
+        { "advance": "uploading", "expect": { "stage": "uploading" } },
+        { "advance": "installing", "expect": { "stage": "installing" } },
+        { "advance": "reloading", "detail": "the runtime re-reads its files", "expect": { "stage": "reloading" } },
+        { "log": { "event": "reload", "message": "Reloading config and interpreted scenes" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "linux_fast: setup asked for a reboot",
+      "kind": "linux_fast",
+      "start": { "stage": "installing" },
+      "steps": [
+        { "advance": "reloading", "detail": "rebooting the device after setup changes", "expect": { "stage": "reloading" } },
+        { "advance": "booting", "expect": { "stage": "booting" } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "admin_push: the save restarted the runtime",
+      "kind": "admin_push",
+      "steps": [
+        { "advance": "saving", "expect": { "stage": "saving" } },
+        { "advance": "booting", "expect": { "stage": "booting" } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "admin_push: the save only reloaded",
+      "kind": "admin_push",
+      "start": { "stage": "saving" },
+      "steps": [
+        { "advance": "rendering", "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "admin_push: nothing to reload is over at once",
+      "kind": "admin_push",
+      "start": { "stage": "saving" },
+      "steps": [
+        { "finish": true, "detail": "nothing to reload", "expect": { "stage": "done", "status": "done", "detail": "nothing to reload" } }
+      ]
+    },
+    {
+      "name": "esp32_full: awake frame, the whole narrative",
+      "kind": "esp32_full",
+      "steps": [
+        { "advance": "waiting", "expect": { "stage": "waiting" } },
+        { "command": { "type": "notify_update_available", "state": "acked" }, "expect": { "stage": "downloading" } },
+        { "log": { "event": "ota:backend", "status": "downloading", "detail": "2026.10.11" }, "expect": { "stage": "downloading", "detail": "downloading 2026.10.11" } },
+        { "log": { "event": "ota:backend", "status": "progress", "detail": "1048576/3233648" }, "expect": { "stage": "downloading", "progress": { "current": 1048576, "total": 3233648 } } },
+        { "log": { "event": "ota:backend", "status": "verified", "detail": "restarting" }, "expect": { "stage": "verified" } },
+        { "log": { "event": "bootup", "version": "2026.10.11" }, "expect": { "stage": "receiving" } },
+        { "command": { "type": "set_settings", "state": "acked" }, "expect": { "stage": "receiving", "changed": false } },
+        { "signal": "commands:settled", "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "esp32_full: the early-boot updater leaves no ota lines",
+      "kind": "esp32_full",
+      "start": { "stage": "waiting" },
+      "steps": [
+        { "log": { "event": "bootup", "version": "2026.10.11" }, "expect": { "stage": "receiving" } },
+        { "signal": "commands:settled", "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "esp32_full: already up to date skips the download",
+      "kind": "esp32_full",
+      "start": { "stage": "waiting" },
+      "steps": [
+        { "log": { "event": "ota:backend", "status": "up-to-date", "detail": "2026.10.11" }, "expect": { "stage": "booting" } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "receiving" } }
+      ]
+    },
+    {
+      "name": "esp32_full: the download failed",
+      "kind": "esp32_full",
+      "start": { "stage": "downloading" },
+      "steps": [
+        { "log": { "event": "ota:backend", "status": "error", "detail": "ESP_ERR_HTTP_CONNECT" }, "expect": { "stage": "downloading", "status": "error", "error": "ESP_ERR_HTTP_CONNECT" } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "downloading", "status": "error", "changed": false } }
+      ]
+    },
+    {
+      "name": "esp32_fast: the frame was asleep and pulled the rows on its wake",
+      "kind": "esp32_fast",
+      "steps": [
+        { "advance": "waiting", "expect": { "stage": "waiting" } },
+        { "command": { "type": "set_scenes", "state": "acked" }, "expect": { "stage": "receiving" } },
+        { "signal": "commands:settled", "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "esp32_fast: the frame refused the scenes",
+      "kind": "esp32_fast",
+      "start": { "stage": "waiting" },
+      "steps": [
+        { "command": { "type": "set_scenes", "state": "failed", "error": "scene store full" }, "expect": { "status": "error", "error": "scene store full" } }
+      ]
+    },
+    {
+      "name": "esp32_usb: the flasher reported, the board boots and renders",
+      "kind": "esp32_usb",
+      "start": { "stage": "booting" },
+      "steps": [
+        { "log": { "event": "bootup" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "virtual: render and done",
+      "kind": "virtual",
+      "steps": [
+        { "advance": "rendering", "expect": { "stage": "rendering" } },
+        { "finish": true, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "upgrade: the runtime's cloud:upgrade lines, then its boot",
+      "kind": "upgrade",
+      "steps": [
+        { "log": { "event": "cloud:upgrade", "status": "starting", "latest_version": "2026.10.11" }, "expect": { "stage": "downloading" } },
+        { "log": { "event": "cloud:upgrade", "status": "running", "message": "downloading the release" }, "expect": { "stage": "downloading", "detail": "downloading the release" } },
+        { "log": { "event": "cloud:upgrade", "status": "success" }, "expect": { "stage": "verified" } },
+        { "log": { "event": "bootup", "version": "2026.10.11" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "upgrade: nothing to do",
+      "kind": "upgrade",
+      "steps": [
+        { "log": { "event": "cloud:upgrade", "status": "up_to_date" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "upgrade: stalled",
+      "kind": "upgrade",
+      "start": { "stage": "downloading" },
+      "steps": [
+        { "log": { "event": "cloud:upgrade", "status": "stalled", "message": "no progress for 45 minutes" }, "expect": { "status": "error", "error": "no progress for 45 minutes" } }
+      ]
+    },
+    {
+      "name": "firmware: the cloud's nudge, the ota lines, the hello, the render announce",
+      "kind": "firmware",
+      "steps": [
+        { "command": { "type": "notify_update_available", "state": "sent" }, "expect": { "stage": "waiting" } },
+        { "command": { "type": "notify_update_available", "state": "acked" }, "expect": { "stage": "downloading" } },
+        { "log": { "event": "ota:cloud", "status": "progress", "detail": "512000/3233648" }, "expect": { "stage": "downloading", "progress": { "current": 512000, "total": 3233648 } } },
+        { "log": { "event": "ota:cloud", "status": "verified" }, "expect": { "stage": "verified" } },
+        { "signal": "bootup", "expect": { "stage": "rendering" } },
+        { "signal": "render:done", "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "firmware: the device acks before the hub records the send",
+      "kind": "firmware",
+      "steps": [
+        { "command": { "type": "notify_update_available", "state": "acked" }, "expect": { "stage": "downloading" } },
+        { "command": { "type": "notify_update_available", "state": "sent" }, "expect": { "stage": "downloading", "changed": false } }
+      ]
+    },
+    {
+      "name": "firmware: a sleeping frame takes the nudge on its wake without an ack line",
+      "kind": "firmware",
+      "start": { "stage": "waiting" },
+      "steps": [
+        { "log": { "event": "ota:cloud", "status": "downloading", "detail": "2026.10.11" }, "expect": { "stage": "downloading" } },
+        { "log": { "event": "ota:cloud", "status": "up-to-date" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "cloud_scenes: queued, sent, acked, live, rendered",
+      "kind": "cloud_scenes",
+      "steps": [
+        { "command": { "type": "set_scenes", "state": "sent" }, "expect": { "stage": "sending" } },
+        { "command": { "type": "set_scenes", "state": "acked" }, "expect": { "stage": "loading" } },
+        { "signal": "scene_ack", "expect": { "stage": "rendering" } },
+        { "signal": "render:done", "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "cloud_scenes: the device refused the set",
+      "kind": "cloud_scenes",
+      "start": { "stage": "sending" },
+      "steps": [
+        { "command": { "type": "set_scenes", "state": "failed", "error": "payload_too_large" }, "expect": { "status": "error", "error": "payload_too_large" } }
+      ]
+    },
+    {
+      "name": "restart: a Linux frame over SSH",
+      "kind": "restart",
+      "steps": [
+        { "advance": "restarting", "expect": { "stage": "restarting" } },
+        { "advance": "booting", "expect": { "stage": "booting" } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "restart: an ESP32 through its queue",
+      "kind": "restart",
+      "steps": [
+        { "advance": "waiting", "expect": { "stage": "waiting" } },
+        { "command": { "type": "restart_runtime", "state": "acked" }, "expect": { "stage": "restarting" } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "reboot: the bootup is what ends the wait",
+      "kind": "reboot",
+      "steps": [
+        { "advance": "restarting", "expect": { "stage": "restarting" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "restarting", "changed": false } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "failure: a failed record takes no further signal",
+      "kind": "linux_full",
+      "start": { "stage": "building" },
+      "steps": [
+        { "fail": "cross compile failed", "expect": { "stage": "building", "status": "error", "error": "cross compile failed" } },
+        { "advance": "uploading", "expect": { "stage": "building", "status": "error", "changed": false } },
+        { "log": { "event": "bootup" }, "expect": { "stage": "building", "status": "error", "changed": false } }
+      ]
+    },
+    {
+      "name": "unknown stage for the kind moves nothing",
+      "kind": "virtual",
+      "steps": [
+        { "advance": "building", "expect": { "stage": "queued", "changed": false } },
+        { "signal": "bootup", "expect": { "stage": "queued", "changed": false } }
+      ]
+    }
+  ],
+  "stale": [
+    { "kind": "linux_full", "stage": "building", "ageSeconds": 1800, "expect": false },
+    { "kind": "linux_full", "stage": "building", "ageSeconds": 3700, "expect": true },
+    { "kind": "linux_full", "stage": "booting", "ageSeconds": 599, "expect": false },
+    { "kind": "linux_full", "stage": "booting", "ageSeconds": 601, "expect": true },
+    { "kind": "linux_fast", "stage": "rendering", "ageSeconds": 301, "expect": true },
+    { "kind": "esp32_fast", "stage": "waiting", "ageSeconds": 7200, "expect": true },
+    { "kind": "esp32_fast", "stage": "waiting", "ageSeconds": 7200, "nextWakeInSeconds": 1800, "expect": false },
+    { "kind": "esp32_fast", "stage": "waiting", "ageSeconds": 7200, "nextWakeInSeconds": -1200, "expect": true },
+    { "kind": "esp32_fast", "stage": "waiting", "ageSeconds": 7200, "nextWakeInSeconds": -300, "expect": false },
+    { "kind": "virtual", "stage": "rendering", "ageSeconds": 10, "status": "done", "expect": false },
+    { "kind": "virtual", "stage": "rendering", "ageSeconds": 99999, "status": "error", "expect": false }
+  ],
+  "percent": [
+    { "kind": "linux_full", "stage": "queued", "expect": 4 },
+    { "kind": "linux_full", "stage": "installing", "expect": 54 },
+    { "kind": "linux_full", "stage": "rendering", "expect": 91 },
+    { "kind": "linux_full", "stage": "done", "status": "done", "expect": 100 },
+    { "kind": "esp32_full", "stage": "downloading", "progress": { "current": 50, "total": 100 }, "expect": 36 },
+    { "kind": "virtual", "stage": "rendering", "expect": 65 }
+  ]
+}

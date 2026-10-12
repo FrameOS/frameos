@@ -759,8 +759,17 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
               theme === 'dark' ? 'text-slate-400' : 'text-slate-500'
             )}
           >
-            {formatTaskBytes(task.progressCurrent ?? 0)} / {formatTaskBytes(task.progressTotal ?? 0)}
-            {progressPercent !== null ? ` (${progressPercent}%)` : ''}
+            {task.progressLabel ? (
+              <>
+                {task.progressLabel}
+                {progressPercent !== null ? ` (${progressPercent}%)` : ''}
+              </>
+            ) : (
+              <>
+                {formatTaskBytes(task.progressCurrent ?? 0)} / {formatTaskBytes(task.progressTotal ?? 0)}
+                {progressPercent !== null ? ` (${progressPercent}%)` : ''}
+              </>
+            )}
           </div>
         </div>
       ) : null}

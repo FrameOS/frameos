@@ -1628,6 +1628,26 @@ async def push_backend_state_to_device(
     apply: dict[str, Any] = apply_block if isinstance(apply_block, dict) else {}
     _mark_frame_sync_baseline(frame)
     frame.status = "ready"
+    # The deploy's bar: the save restarts the runtime (wait for its bootup),
+    # reloads it (wait for the render), or changed nothing visible (over).
+    from datetime import datetime, timezone
+
+    from app.utils import deploy_progress
+
+    runtime_action = apply.get("runtime")
+    now = datetime.now(timezone.utc)
+    record = frame.deploy_progress
+    if runtime_action == "restart":
+        moved = deploy_progress.advance(record, "booting", now=now, kind="admin_push",
+                                        detail="the frame restarts its runtime")
+    elif runtime_action == "reload":
+        moved = deploy_progress.advance(record, "rendering", now=now, kind="admin_push")
+    elif isinstance(record, dict) and record.get("kind") == "admin_push":
+        moved = deploy_progress.finish(record, now=now, detail="nothing to reload")
+    else:
+        moved = None
+    if moved is not None:
+        frame.deploy_progress = moved
     await update_frame(db, redis, frame)
     db.refresh(frame)
     if settings_payload:

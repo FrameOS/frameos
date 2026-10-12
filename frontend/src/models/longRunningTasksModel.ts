@@ -1,6 +1,7 @@
 import { MakeLogicType, actions, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import type { LogType, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
+import { frameDeployProgress } from '../decorators/frame'
 
 export type LongRunningTaskKind =
   | 'deploy'
@@ -42,6 +43,8 @@ export interface LongRunningTask {
   activeStatusSeen?: boolean
   progressCurrent?: number | null
   progressTotal?: number | null
+  /** Shown under the bar instead of "X / Y bytes" (a deploy's stage caption). */
+  progressLabel?: string | null
   logs: LongRunningTaskLog[]
 }
 
@@ -72,6 +75,8 @@ export interface UpdateTaskProgressPayload {
   sceneId?: string | null
   progressCurrent: number | null
   progressTotal: number | null
+  /** Shown under the bar instead of "X / Y bytes" (a deploy's stage caption). */
+  progressLabel?: string | null
   detail?: string | null
   /** Retitle the running task — e.g. an upload that grows while running. */
   title?: string
@@ -163,6 +168,7 @@ function updateLatestTaskProgress(tasks: LongRunningTask[], payload: UpdateTaskP
     detail: payload.detail ?? task.detail,
     progressCurrent: payload.progressCurrent,
     progressTotal: payload.progressTotal,
+    progressLabel: payload.progressLabel ?? null,
   }
   return nextTasks
 }
@@ -724,6 +730,26 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
       }
     },
     [SOCKET_UPDATE_FRAME]: ({ frame }) => {
+      // The control plane's deploy_progress record carries the deploy's id
+      // (the task id this toast was started with): the toast's bar follows
+      // the same stages the sidebar row draws.
+      const record = frame.deploy_progress
+      if (record && typeof record.id === 'string' && record.status === 'running') {
+        const deployTask = values.tasks.find(
+          (task) => task.id === record.id && task.status === 'running' && task.kind === 'deploy'
+        )
+        const view = deployTask ? frameDeployProgress(frame) : null
+        if (deployTask && view) {
+          actions.updateTaskProgress({
+            taskId: deployTask.id,
+            frameId: deployTask.frameId,
+            kind: 'deploy',
+            progressCurrent: view.percent,
+            progressTotal: 100,
+            progressLabel: view.caption,
+          })
+        }
+      }
       const status = frameStatus(frame)
       const sdImage = frame.buildroot?.sdImage
       if (sdImage?.status === 'ready') {

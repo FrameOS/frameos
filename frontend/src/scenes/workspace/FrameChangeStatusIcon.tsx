@@ -3,7 +3,7 @@ import clsx from 'clsx'
 import type { MouseEvent, SVGProps } from 'react'
 import { ArrowPathIcon, ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
 
-import { frameFirmwareUpdateProgress } from '../../decorators/frame'
+import { frameDeployProgress, frameFirmwareUpdateProgress } from '../../decorators/frame'
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -59,7 +59,13 @@ export function FrameChangeStatusIcon({
   // says how far it is, instead of showing the same "undeployed" arrow it
   // showed before the click — which read as if nothing had happened.
   const firmwareProgress = frame ? frameFirmwareUpdateProgress(frame) : null
-  const firmwareUpdating = firmwareProgress?.kind === 'running'
+  // A deploy, update, restart or reboot the control plane is running for
+  // this frame (its deploy_progress record, every frame type): the tile
+  // spins for all of them, not only a firmware download. Before this a Pi
+  // mid-deploy showed the same "undeployed" arrow it showed before the click.
+  const deployProgress = frame ? frameDeployProgress(frame) : null
+  const deploying = deployProgress?.status === 'running'
+  const firmwareUpdating = firmwareProgress?.kind === 'running' || deploying
   const statusLabel = unsavedChanges
     ? 'Unsaved'
     : firmwareUpdating
@@ -74,7 +80,9 @@ export function FrameChangeStatusIcon({
   // gave no hint that the thing waiting was a FrameOS release, which is the
   // one pending change you might want to act on days later.
   const statusTitle =
-    firmwareUpdating && firmwareProgress
+    deploying && deployProgress
+      ? deployProgress.title
+      : firmwareUpdating && firmwareProgress
       ? firmwareProgress.title
       : statusLabel === 'Undeployed' && undeployedChangeDetails.length > 0
       ? undeployedChangeDetails.map((change) => change.label).join(', ')

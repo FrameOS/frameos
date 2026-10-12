@@ -28,6 +28,7 @@ import {
 } from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { commandTtlForFrame } from "./frame-sleep";
+import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { compiledSceneNames } from "./store";
@@ -750,6 +751,9 @@ export function frameSummary(
     // The device's last ota:<plane> line (hub recordFirmwareUpdate): what
     // the frames list shows as "updating firmware 42%" while it runs.
     firmware_update: frame.firmwareUpdate,
+    // The deploy / update / restart in flight (or the last one), in the
+    // vocabulary of docs/deploy-progress-contract.json: the workspace's bar.
+    deploy_progress: frame.deployProgress,
     linked_client_id: frame.linkedClientId,
     name: frame.name,
     scenes_checksum: frame.scenesChecksum,
@@ -853,15 +857,16 @@ export async function enqueueFrameCommand(
   },
 ) {
   let expiresAt: Date | null = null;
+  const now = new Date();
+  const [row] = await db
+    .select({ hardware: frames.hardware, nextWakeAt: frames.nextWakeAt })
+    .from(frames)
+    .where(eq(frames.id, input.frameId))
+    .limit(1);
   if (input.ttlMs) {
-    const now = Date.now();
-    const [sleeping] = await db
-      .select({ nextWakeAt: frames.nextWakeAt })
-      .from(frames)
-      .where(eq(frames.id, input.frameId))
-      .limit(1);
     expiresAt = new Date(
-      now + commandTtlForFrame({ nextWakeAt: sleeping?.nextWakeAt ?? null }, input.ttlMs, now),
+      now.getTime() +
+        commandTtlForFrame({ nextWakeAt: row?.nextWakeAt ?? null }, input.ttlMs, now.getTime()),
     );
   }
   const [command] = await db
@@ -874,10 +879,41 @@ export async function enqueueFrameCommand(
       type: input.type,
     })
     .returning();
+  // The verbs that are a deploy, an update, a restart or a reboot start the
+  // frame's deploy_progress record here, as `queued` — every route, the MCP
+  // tool and the fleet update go through this one function, so the
+  // workspace's bar appears with the click wherever it came from. The hub
+  // moves it from there (docs/deploy-progress-contract.json).
+  const kind =
+    row && command
+      ? deployProgressKindForCommand(input.type, frameContractProfile({ hardware: row.hardware }))
+      : undefined;
+  if (kind && command) {
+    await db
+      .update(frames)
+      .set({
+        deployProgress: startDeployProgress(kind, {
+          id: command.id,
+          now,
+          version: deployProgressVersionForCommand(input.payload),
+        }),
+        updatedAt: now,
+      })
+      .where(eq(frames.id, input.frameId));
+  }
   await db.execute(
     sql`select pg_notify(${frameCommandsNotifyChannel}, ${input.frameId})`,
   );
   return command;
+}
+
+/** The release a notify_update_available payload names, when it names one. */
+function deployProgressVersionForCommand(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const version = (payload as Record<string, unknown>).version;
+  return typeof version === "string" && version ? version : null;
 }
 
 // Supersede undelivered commands of the same type: a newer set_scenes or

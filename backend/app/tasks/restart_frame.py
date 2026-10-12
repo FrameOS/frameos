@@ -5,7 +5,7 @@ from arq import ArqRedis as Redis
 from app.models.frame import Frame, frame_has_shell_access
 from app.models.log import new_log as log
 from app.models.frame import update_frame
-from app.tasks.utils import get_fresh_frame, record_task_failure
+from app.tasks.utils import advance_deploy_progress, get_fresh_frame, record_task_failure
 from app.utils.remote_exec import run_commands
 
 # How long a restart or reboot waits for an awake frame's ack before the
@@ -68,12 +68,14 @@ async def _embedded_device_action(
         if outcome["applied"]:
             frame.status = pending_status
             await update_frame(db, redis, frame)
+            await advance_deploy_progress(db, redis, frame, "restarting", kind=action_label)
             await log(db, redis, int(frame.id), "stdout",
                       f"Requested embedded {action_label}; the device reboots in about a second")
             if final_status is not None:
                 frame.status = final_status
                 await update_frame(db, redis, frame)
         else:
+            await advance_deploy_progress(db, redis, frame, "waiting", kind=action_label)
             await log(db, redis, int(frame.id), "stdout",
                       f"The {action_label} is queued; the frame runs it on its next check-in")
     except Exception as e:
@@ -140,6 +142,7 @@ async def _device_http_action(
                 f"The {action_label} request failed with HTTP {status}"
                 + (f": {detail}" if detail else "")
             )
+        await advance_deploy_progress(db, redis, frame, "restarting", kind=action_label)
         await log(db, redis, int(frame.id), "stdout", success_line)
 
         if final_status is not None:
@@ -184,6 +187,7 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
     try:
         frame.status = "restarting"
         await update_frame(db, redis, frame)
+        await advance_deploy_progress(db, redis, frame, "restarting", kind="restart")
 
         await run_commands(
             db,
@@ -199,6 +203,7 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
 
         frame.status = "starting"
         await update_frame(db, redis, frame)
+        await advance_deploy_progress(db, redis, frame, "booting", kind="restart")
 
     except Exception as e:
         await record_task_failure(db, redis, id, e, frame=frame)
@@ -243,6 +248,7 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
     try:
         frame.status = "rebooting"
         await update_frame(db, redis, frame)
+        await advance_deploy_progress(db, redis, frame, "restarting", kind="reboot")
         await run_commands(
             db,
             redis,
@@ -251,6 +257,7 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
                 "sudo -n reboot",
             ],
         )
+        await advance_deploy_progress(db, redis, frame, "booting", kind="reboot")
 
     except Exception as e:
         await record_task_failure(db, redis, id, e, frame=frame)

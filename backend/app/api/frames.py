@@ -273,6 +273,36 @@ def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
 
 
+async def _begin_deploy_progress_for(db: Session, redis: Redis, frame: Frame, mode: str, task_id: str | None) -> None:
+    """The bar appears with the click: the record starts as `queued` here,
+    before the worker picks the job up, in the kind the worker will run."""
+    from app.tasks.utils import begin_deploy_progress, deploy_progress_kind_for_frame
+
+    await begin_deploy_progress(
+        db, redis, frame, deploy_progress_kind_for_frame(frame, mode), deploy_id=task_id,
+    )
+
+
+async def _fail_deploy_progress_for(db: Session, redis: Redis, frame: Frame, error: str) -> None:
+    """The verb was refused before a worker ever saw it: the bar says why
+    instead of sitting on `queued` until the stage goes stale."""
+    from datetime import datetime, timezone
+
+    from app.models.frame import set_deploy_progress
+    from app.utils.deploy_progress import fail
+
+    await set_deploy_progress(db, redis, frame, fail(frame.deploy_progress, error, now=datetime.now(timezone.utc)))
+
+
+async def _begin_control_progress_for(db: Session, redis: Redis, frame: Frame, kind: str) -> None:
+    """A restart / reboot verb was accepted: its record starts as `queued`."""
+    from app.tasks.utils import begin_deploy_progress
+
+    if is_virtual_frame(frame):
+        return
+    await begin_deploy_progress(db, redis, frame, kind)
+
+
 def _task_id_param(task_id: str | None) -> str | None:
     if task_id is None:
         return None
@@ -3664,9 +3694,11 @@ async def api_frame_restart_event(
     try:
         from app.tasks import restart_frame
 
+        await _begin_control_progress_for(db, redis, frame, "restart")
         await restart_frame(frame.id, redis)
         return "Success"
     except Exception as e:
+        await _fail_deploy_progress_for(db, redis, frame, str(e))
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -3680,9 +3712,11 @@ async def api_frame_reboot_event(
     try:
         from app.tasks import reboot_frame
 
+        await _begin_control_progress_for(db, redis, frame, "reboot")
         await reboot_frame(frame.id, redis)
         return "Success"
     except Exception as e:
+        await _fail_deploy_progress_for(db, redis, frame, str(e))
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -3766,11 +3800,16 @@ async def api_frame_deploy_event(
 
         if force:
             await cancel_active_deploy(db, redis, frame)
+        # Before the enqueue: the worker may pick the job up at once, and its
+        # first step must find the record it advances.
+        await _begin_deploy_progress_for(db, redis, frame, "full", deploy_task_id)
         await deploy_frame(frame.id, redis, task_id=deploy_task_id)
         return {"message": "Success", "taskId": deploy_task_id}
     except JobAlreadyQueuedError as e:
+        await _fail_deploy_progress_for(db, redis, frame, str(e))
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except Exception as e:
+        await _fail_deploy_progress_for(db, redis, frame, str(e))
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -3945,10 +3984,24 @@ async def api_frame_embedded_firmware_ota(
     if (frame.mode or "rpios") != "embedded":
         _bad_request("OTA updates are only available for embedded frames")
 
+    from app.tasks.embedded_firmware import embedded_release_firmware_for_frame
+    from app.tasks.utils import advance_deploy_progress, begin_deploy_progress, record_task_failure
+
+    release = embedded_release_firmware_for_frame(frame)
+    await begin_deploy_progress(
+        db, redis, frame, "firmware",
+        version=str(release.get("version")) if isinstance(release, dict) and release.get("version") else None,
+    )
     try:
         outcome = await request_embedded_firmware_update(db, redis, frame)
     except ValueError as exc:
+        await record_task_failure(db, redis, int(frame.id), exc, frame=frame)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    # Taken now (the ack, or a pre-queue board's direct poke): the device is
+    # off to its updater. Queued: it takes the check on its next wake.
+    await advance_deploy_progress(
+        db, redis, frame, "downloading" if outcome["applied"] else "waiting", kind="firmware"
+    )
 
     return {
         "message": (
@@ -4040,6 +4093,17 @@ async def api_frame_device_upgrade(
     payload = await _relay_device_admin(frame, redis, "/api/upgrade", method="POST", body={"dry_run": dry_run})
     payload["shell_access"] = frame_has_shell_access(frame)
     await _record_device_reported_frameos_version(db, redis, frame, payload)
+    if not dry_run and payload.get("status") not in ("up_to_date", "error", "failed"):
+        # The frame upgrades itself: its cloud:upgrade lines, bootup and
+        # first render move the record from here (models/log.py).
+        from app.tasks.utils import begin_deploy_progress
+
+        latest = payload.get("latest_version")
+        await begin_deploy_progress(
+            db, redis, frame, "upgrade",
+            version=latest if isinstance(latest, str) and latest else None,
+            detail="the frame downloads the release itself",
+        )
     return payload
 
 
@@ -4209,11 +4273,14 @@ async def api_frame_fast_deploy_event(
 
         if force:
             await cancel_active_deploy(db, redis, frame)
+        await _begin_deploy_progress_for(db, redis, frame, "fast", deploy_task_id)
         await fast_deploy_frame(id, redis, task_id=deploy_task_id)
         return {"message": "Success", "taskId": deploy_task_id}
     except JobAlreadyQueuedError as e:
+        await _fail_deploy_progress_for(db, redis, frame, str(e))
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except Exception as e:
+        await _fail_deploy_progress_for(db, redis, frame, str(e))
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -4237,6 +4304,14 @@ async def api_frame_embedded_usb_deploy_complete(
     frame.status = "starting"
     record_successful_deploy(frame, snapshot)
     await update_frame(db, redis, frame)
+    # The browser did the flashing; the board's bootup and first render are
+    # what is left of this deploy (docs/deploy-progress-contract.json).
+    from app.tasks.utils import begin_deploy_progress
+
+    await begin_deploy_progress(
+        db, redis, frame, "esp32_usb", deploy_id=_task_id_param(task_id), stage="booting",
+        detail="the board restarts on what the browser wrote",
+    )
     await log(
         db,
         redis,
@@ -4306,8 +4381,10 @@ async def api_frame_set_next_scene(
         try:
             from app.tasks import fast_deploy_frame
 
+            await _begin_deploy_progress_for(db, redis, frame, "fast", None)
             await fast_deploy_frame(id, redis)
         except Exception as e:
+            await _fail_deploy_progress_for(db, redis, frame, str(e))
             raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
         command: dict[str, Any] = {"scene_id": data.sceneId}
         if isinstance(data.state, dict) and data.state:
@@ -4338,10 +4415,12 @@ async def api_frame_set_next_scene(
         try:
             from app.tasks import fast_deploy_frame
 
+            await _begin_deploy_progress_for(db, redis, frame, "fast", None)
             await fast_deploy_frame(
                 id, redis, activate_scene={"sceneId": data.sceneId, "state": data.state or {}}
             )
         except Exception as e:
+            await _fail_deploy_progress_for(db, redis, frame, str(e))
             raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
         return {"message": "Scene deploy queued over the frame's admin API"}
 
@@ -4370,6 +4449,7 @@ async def api_frame_set_next_scene(
     )
 
     try:
+        await _begin_deploy_progress_for(db, redis, frame, "fast" if data.fastDeploy else "full", None)
         if data.fastDeploy:
             from app.tasks import fast_deploy_frame
 
@@ -4379,6 +4459,7 @@ async def api_frame_set_next_scene(
 
             await deploy_frame(id, redis)
     except Exception as e:
+        await _fail_deploy_progress_for(db, redis, frame, str(e))
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
     return {"message": "Next scene queued for boot"}
@@ -4500,10 +4581,12 @@ async def api_frame_update_endpoint(
     if data.next_action == "restart":
         from app.tasks import restart_frame
 
+        await _begin_control_progress_for(db, redis, frame, "restart")
         await restart_frame(id, redis)
     elif data.next_action == "reboot":
         from app.tasks import reboot_frame
 
+        await _begin_control_progress_for(db, redis, frame, "reboot")
         await reboot_frame(id, redis)
     elif data.next_action == "stop":
         from app.tasks import stop_frame
@@ -4512,6 +4595,7 @@ async def api_frame_update_endpoint(
     elif data.next_action == "deploy":
         from app.tasks import deploy_frame
 
+        await _begin_deploy_progress_for(db, redis, frame, "full", None)
         await deploy_frame(id, redis)
 
     return {"message": "Frame updated successfully"}

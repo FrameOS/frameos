@@ -76,6 +76,9 @@
     "src/test/shared-spa/frame-checkin.test.ts",
     // Same story: the firmware-update progress reader lives there as well.
     "src/test/shared-spa/frame-firmware-update.test.ts",
+    // Same story: the deploy-progress bar reads decorators/frame.tsx (bare
+    // JSX namespace). Vitest still runs it; only tsc leaves it out.
+    "src/test/shared-spa/deploy-progress.test.tsx",
     // Same story: devices.ts imports the Option type from components/Select.tsx
     // (bare JSX namespace). Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/device-catalog-mirror.test.ts",

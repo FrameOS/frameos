@@ -8,6 +8,7 @@ from typing import Any, Optional
 from arq import ArqRedis as Redis
 
 from .frame import Frame, record_successful_deploy, remember_device_reported_frameos_version, update_frame
+from app.utils.deploy_progress import fold_log as fold_deploy_progress_log
 from app.utils.firmware_update import (
     LEAVE as FIRMWARE_UPDATE_LEAVE,
     firmware_update_after_boot,
@@ -387,6 +388,13 @@ async def process_log(
             if firmware_update_already_applied(firmware_update, _known_frameos_version(frame))
             else firmware_update
         )
+    # The deploy's bar: a bootup, a reload, a render:done, an ota:* or
+    # cloud:upgrade line moves the frame's deploy_progress along its kind's
+    # stages (app/utils/deploy_progress.py; the current stage decides which
+    # lines count, so a late line from the previous runtime moves nothing).
+    moved_deploy_progress = fold_deploy_progress_log(frame.deploy_progress, log, now=timestamp)
+    if moved_deploy_progress is not None:
+        changes['deploy_progress'] = moved_deploy_progress
     if event == 'render':
         changes['status'] = 'preparing'
     if event == 'render:device':

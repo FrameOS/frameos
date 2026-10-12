@@ -2689,3 +2689,127 @@ describe("firmware update progress", () => {
     again.ws.close();
   });
 });
+
+describe("deploy progress", () => {
+  // The frame row's deploy_progress (docs/deploy-progress-contract.json):
+  // enqueueFrameCommand starts it, the hub moves it on what it sees — the
+  // verb going out, the device's ack, its scene_ack, its hello after a
+  // restart, its render announce and its log lines — and the browser gets
+  // every move as an update_frame, so the frames list draws a bar.
+  async function deployProgressOf(frameId: string) {
+    const [row] = await db
+      .select({ deployProgress: frames.deployProgress })
+      .from(frames)
+      .where(eq(frames.id, frameId));
+    return row?.deployProgress as { kind?: string; stage?: string; status?: string; progress?: unknown } | null;
+  }
+
+  async function waitForStage(frameId: string, stage: string, status = "running") {
+    return waitFor(async () => {
+      const record = await deployProgressOf(frameId);
+      return record?.stage === stage && record.status === status ? record : undefined;
+    }, `deploy_progress at ${stage} (${status})`);
+  }
+
+  it("follows a scene push from the queue to the frame's first render, and ignores another set's ack", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    const sessionToken = await createBrowserSession(account.id);
+    const browser = await openBrowser(frame.id, sessionToken);
+
+    const command = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "sum-push", scenes: [] },
+      type: "set_scenes",
+    });
+    const queued = await deployProgressOf(frame.id);
+    expect(queued).toMatchObject({ id: command?.id, kind: "cloud_scenes" });
+
+    const pushed = await device.next((msg) => msg.type === "set_scenes", "set_scenes");
+    await waitForStage(frame.id, "sending");
+    device.send({ id: pushed.id, ok: true, type: "ack" });
+    await waitForStage(frame.id, "loading");
+
+    // A scene_ack for a set this push did not carry (a preview, an older
+    // push) says nothing about this one.
+    device.send({ checksum: "sum-other", id: randomUUID(), type: "scene_ack" });
+    device.send({ checksum: "sum-push", id: randomUUID(), type: "scene_ack" });
+    await waitForStage(frame.id, "rendering");
+
+    device.send({ active_scene: "clock", id: randomUUID(), type: "render" });
+    await waitForStage(frame.id, "done", "done");
+    await browser.next((msg) => {
+      if (msg.event !== "update_frame") {
+        return false;
+      }
+      const record = (msg.data as Record<string, unknown>).deploy_progress as { status?: string } | null;
+      return record?.status === "done";
+    }, "update_frame with the finished bar");
+    device.ws.close();
+  });
+
+  it("waits for the hello after a restart before it waits for the render", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    await enqueueFrameCommand(db, { frameId: frame.id, ttlMs: 60_000, type: "restart_runtime" });
+    const restart = await device.next((msg) => msg.type === "restart_runtime", "restart_runtime");
+    device.send({ id: restart.id, ok: true, type: "ack" });
+    await waitForStage(frame.id, "restarting");
+    // A render from the runtime on its way out moves nothing.
+    device.send({ active_scene: "clock", id: randomUUID(), type: "render" });
+    device.ws.close();
+    expect((await deployProgressOf(frame.id))?.stage).toBe("restarting");
+
+    const back = await openDevice(token);
+    await handshake(back, privateKey);
+    await waitForStage(frame.id, "rendering");
+    back.send({
+      id: randomUUID(),
+      logs: [{ payload: { event: "render:done", sceneId: "clock" } }],
+      type: "log_batch",
+    });
+    await waitForStage(frame.id, "done", "done");
+    back.ws.close();
+  });
+
+  it("reads an ESP32's ota lines into the bar's download", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { frameos_version: "2026.10.4", hardware: { platform: "esp32-s3" } });
+
+    await enqueueFrameCommand(db, { frameId: frame.id, ttlMs: 60_000, type: "notify_update_available" });
+    expect((await deployProgressOf(frame.id))?.kind).toBe("firmware");
+    const notify = await device.next((msg) => msg.type === "notify_update_available", "notify");
+    device.send({ id: notify.id, ok: true, type: "ack" });
+    await waitForStage(frame.id, "downloading");
+
+    device.send({
+      id: randomUUID(),
+      logs: [{ payload: { event: "ota:cloud", status: "progress", detail: "1048576/3233648", source: "esp32" } }],
+      type: "log_batch",
+    });
+    const midway = await waitFor(async () => {
+      const record = await deployProgressOf(frame.id);
+      return record?.progress ? record : undefined;
+    }, "download bytes on the bar");
+    expect(midway.progress).toEqual({ current: 1048576, total: 3233648 });
+
+    device.send({
+      id: randomUUID(),
+      logs: [{ payload: { event: "ota:cloud", status: "verified", detail: "rebooting", source: "esp32" } }],
+      type: "log_batch",
+    });
+    await waitForStage(frame.id, "verified");
+    device.ws.close();
+
+    const rebooted = await openDevice(token);
+    await handshake(rebooted, privateKey, { frameos_version: "2026.10.5", hardware: { platform: "esp32-s3" } });
+    await waitForStage(frame.id, "rendering");
+    rebooted.send({ active_scene: "clock", id: randomUUID(), type: "render" });
+    await waitForStage(frame.id, "done", "done");
+    rebooted.ws.close();
+  });
+});

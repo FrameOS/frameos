@@ -24,6 +24,7 @@ import { HourglassIcon } from '../../components/HourglassIcon'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
 import {
+  frameDeployProgress,
   frameFirmwareUpdateProgress,
   frameHost,
   frameIsHealthy,
@@ -34,6 +35,7 @@ import { framesModel } from '../../models/framesModel'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { scheduledEventTitle } from '../../utils/scheduleEvents'
+import { DeployProgressBar } from '../../components/DeployProgressBar'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
@@ -444,6 +446,9 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   // frame, so it outranks "upgrade queued" and "waiting to sync".
   const firmwareProgress = frameFirmwareUpdateProgress(frame)
   const firmwareUpdating = firmwareProgress?.kind === 'running'
+  // The deploy / update / restart in flight replaces the status word and
+  // its "last seen" with the bar (same view as the sidebar row).
+  const deployProgress = frameDeployProgress(frame)
   const changeLabel = unsavedChanges
     ? 'unsaved'
     : firmwareProgress
@@ -494,7 +499,13 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
         </span>
       )}
       <span> - </span>
-      {frameStatus(frame)}
+      {deployProgress ? (
+        <span className="inline-flex max-w-[16rem] items-center gap-2 align-middle">
+          <DeployProgressBar progress={deployProgress} className="min-w-[8rem] flex-1" />
+        </span>
+      ) : (
+        frameStatus(frame)
+      )}
     </div>
   )
 }

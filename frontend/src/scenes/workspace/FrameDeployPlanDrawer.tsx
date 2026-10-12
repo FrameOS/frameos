@@ -1,5 +1,6 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import { AdvancedSection } from '../../components/AdvancedSection'
+import { DeployProgressSteps } from '../../components/DeployProgressBar'
 import { A as Link } from 'kea-router'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
@@ -35,6 +36,8 @@ import {
   formatFrameRelativeFuture,
   formatFrameRelativeTime,
   frameCheckin,
+  frameDeployProgress,
+  frameDeployProgressSteps,
   frameFirmwareUpdateOutcome,
   frameFirmwareUpdateProgress,
   frameHasActivityLog,
@@ -3835,6 +3838,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   // takes its own branch in both the body and the footer and reads none of
   // it. See CloudDeploySection.
   const isCloud = workspaceMode() === 'cloud'
+  const deployProgress = frameDeployProgress(frame)
+  const deployProgressSteps = frameDeployProgressSteps(frame)
   // Reached over its admin login only (an adopted Buildroot card): the
   // SSH/Remote machinery below cannot connect to it, so its main view is
   // the cloud-shaped ShellLessDeploySection and its footer only closes.
@@ -3968,6 +3973,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {deployProgress ? (
+            // The deploy in flight (or just finished): its stages, from the
+            // record the control plane keeps (docs/deploy-progress.md).
+            <div className="frameos-divider mb-4 border-b border-slate-200/80 pb-4">
+              <DeployProgressSteps progress={deployProgress} steps={deployProgressSteps} />
+            </div>
+          ) : null}
           {/* Not on the SD-card / script / USB views: those install a card
               or a board, and the form's edits are not what they carry. */}
           {isCloud ? (
