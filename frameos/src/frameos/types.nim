@@ -559,6 +559,11 @@ type
     isRendering*: bool = false
     triggerRenderNext*: bool = false
     forceSceneReload*: bool = false
+    ## The next render:done is logged even while fast-render logging is
+    ## paused: the first render after a boot or a reload is the line the
+    ## control planes end a deploy's progress bar on
+    ## (docs/deploy-progress-contract.json). Set at start and by `reload`.
+    announceNextRender*: bool = false
     ## Ends startMessageLoop at its next pass. The runtime never sets it; a
     ## test that is done with the loop does, instead of letting a generous
     ## `maxIterations` run out at the loop's idle pace (200 ms a pass).

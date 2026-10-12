@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -2941,3 +2942,76 @@ async def test_full_plan_reports_a_mode_correction_without_persisting_it(monkeyp
     assert plan.frame_dict["ssh_user"] == "pi"
     assert deployer.logs == []
     assert persisted == []
+
+
+@pytest.mark.asyncio
+async def test_execute_fast_walks_the_deploy_progress_stages(monkeypatch: pytest.MonkeyPatch):
+    """docs/deploy-progress-contract.json `linux_fast`: the workflow advances
+    the frame's record through its own steps; the device's `reload` and
+    `render:done` lines (models/log.py) take it from there."""
+    from datetime import datetime, timezone
+
+    from app.utils import deploy_progress
+
+    # Test doubles typed as Any: the workflow's signatures name the real
+    # Frame / FrameDeployer / Session, which this test replaces.
+    frame: Any = SimpleNamespace(
+        id=22,
+        name="FastFrame",
+        status="ready",
+        https_proxy={"enable": False},
+        last_successful_deploy={
+            "frameos_version": "9.9.9",
+            "frameos_commands": list(FRAMEOS_AVAILABLE_COMMANDS),
+            "https_proxy": {"enable": False},
+        },
+        last_successful_deploy_at=None,
+        deploy_progress=deploy_progress.start("linux_fast", deploy_id="d", now=datetime.now(timezone.utc)),
+        to_dict=lambda: {"id": 22, "name": "FastFrame"},
+    )
+    no_db: Any = None
+    no_redis: Any = None
+    deployer: Any = RecordingDeployer()
+    builder: Any = FakeBinaryBuilder()
+    workflow = FrameDeployWorkflow(
+        db=no_db,
+        redis=no_redis,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=builder,
+    )
+    published: list[tuple[str, str | None]] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def record_update_frame(_db, _redis, _frame):
+        published.append((_frame.deploy_progress["stage"], _frame.deploy_progress["detail"]))
+        return _frame
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path: str, method: str):
+        return 200, b'{"status":"ok"}', {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.models.frame.update_frame", record_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+
+    fast_plan: Any = SimpleNamespace(tls_settings_changed=False, reload_supported=True, action="reload")
+    plan = FrameDeployPlan(
+        mode="fast",
+        frame_id=22,
+        frame_name="FastFrame",
+        build_id="build12345678",
+        frame_dict={"id": 22, "name": "FastFrame"},
+        previous_frameos_version="9.9.9",
+        fast_deploy=fast_plan,
+    )
+
+    await workflow._execute_fast(plan)
+
+    assert published == [
+        ("uploading", "frame.json and the scenes"),
+        ("installing", "frameos setup"),
+        ("reloading", "the runtime re-reads its files"),
+    ]

@@ -13,7 +13,13 @@ from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, active_deploy_job_key, deploy_lock_key
 
-from .utils import enqueue_unique_job, get_fresh_frame, record_task_failure
+from .utils import (
+    advance_deploy_progress,
+    enqueue_unique_job,
+    finish_deploy_progress,
+    get_fresh_frame,
+    record_task_failure,
+)
 
 
 def deploy_task_log_line(task_id: str, action: str, detail: str = "") -> str:
@@ -68,8 +74,18 @@ async def cancel_active_deploy(db: Session, redis: Redis, frame: Frame) -> dict[
     reset_status = False
     if frame.status == "deploying":
         frame.status = "uninitialized"
-        await update_frame(db, redis, frame)
         reset_status = True
+    # The bar says "cancelled" rather than sitting at its last stage until
+    # the stage goes stale.
+    from datetime import datetime, timezone
+
+    from app.utils.deploy_progress import fail as fail_deploy_progress
+
+    failed = fail_deploy_progress(getattr(frame, "deploy_progress", None), "cancelled", now=datetime.now(timezone.utc))
+    if failed is not None:
+        frame.deploy_progress = failed
+    if reset_status or failed is not None:
+        await update_frame(db, redis, frame)
 
     summary = []
     if aborted_job:
@@ -112,8 +128,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
 
         if task_id:
             await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "started"))
+        await advance_deploy_progress(db, redis, frame, "rendering", kind="virtual")
         await refresh_virtual_frame_image(db, redis, frame)
         await mark_virtual_frame_deployed(db, redis, frame)
+        await finish_deploy_progress(db, redis, frame, kind="virtual")
         if task_id:
             await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "completed"))
         return
@@ -154,6 +172,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
             if task_id:
                 detail = "queued" if workflow.queued_for_frame else ""
                 await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "completed", detail))
+            # The backend's part is over; what follows is the device's (the
+            # bootup and the first render, folded from its log lines).
+            if not workflow.queued_for_frame:
+                await advance_deploy_progress(db, redis, workflow.frame, "booting", kind="linux_full")
     except (Exception, asyncio.CancelledError) as exc:
         # CancelledError is a BaseException: an aborted or timed-out job used
         # to skip this block, leave status="deploying" and log nothing, and

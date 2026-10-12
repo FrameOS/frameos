@@ -4,6 +4,7 @@ from packaging import version
 import subprocess
 import platform
 import hashlib
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from arq import ArqRedis as Redis
@@ -62,17 +63,117 @@ async def record_task_failure(
 ) -> str:
     """The one failure path for frame verbs (deploy, fast deploy, restart,
     reboot, stop, Remote deploy/restart): log the error, put `frame` back to
-    "uninitialized" if it is still in a verb's transient status, and return
-    the message. Callers re-raise afterwards so arq records the job as
-    failed rather than successful."""
+    "uninitialized" if it is still in a verb's transient status, close its
+    deploy_progress as failed, and return the message. Callers re-raise
+    afterwards so arq records the job as failed rather than successful."""
+    from app.utils.deploy_progress import fail as fail_deploy_progress
+
     message = task_failure_message(exc)
     if task_line is not None:
         await log(db, redis, frame_id, "stderr", task_line(message))
     await log(db, redis, frame_id, "stderr", message)
+    changed = False
     if frame is not None and getattr(frame, "status", None) in TRANSIENT_FRAME_STATUSES:
         frame.status = "uninitialized"
+        changed = True
+    if frame is not None:
+        failed = fail_deploy_progress(getattr(frame, "deploy_progress", None), message, now=datetime.now(timezone.utc))
+        if failed is not None:
+            frame.deploy_progress = failed
+            changed = True
+    if changed:
         await update_frame(db, redis, frame)
     return message
+
+
+def deploy_progress_kind_for_frame(frame: Any, mode: str) -> str:
+    """Which deploy-progress kind (docs/deploy-progress-contract.json) a
+    `full` or `fast` deploy of this frame is: what the backend will actually
+    do for it (deploy_frame_task / fast_deploy_frame_task take the same
+    branches)."""
+    from app.models.frame import frame_has_shell_access
+    from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
+
+    if (getattr(frame, "mode", None) or "rpios") == "embedded":
+        if embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+            return "virtual"
+        return "esp32_full" if mode == "full" else "esp32_fast"
+    if not frame_has_shell_access(frame):
+        return "admin_push"
+    return "linux_full" if mode == "full" else "linux_fast"
+
+
+async def begin_deploy_progress(
+    db: Session,
+    redis: Redis,
+    frame: Any,
+    kind: str,
+    *,
+    deploy_id: str | None = None,
+    stage: str | None = None,
+    detail: str | None = None,
+    version: str | None = None,
+) -> dict:
+    """Start (replace) the frame's deploy_progress record and broadcast it.
+    Called where the verb is accepted — the API route, before the job is
+    even queued — so the workspace's bar appears with the click."""
+    from uuid import uuid4
+
+    from app.models.frame import set_deploy_progress
+    from app.utils.deploy_progress import start as start_deploy_progress
+
+    record = start_deploy_progress(
+        kind,
+        deploy_id=deploy_id or uuid4().hex,
+        now=datetime.now(timezone.utc),
+        stage=stage,
+        detail=detail,
+        version=version,
+    )
+    await set_deploy_progress(db, redis, frame, record)
+    return record
+
+
+async def advance_deploy_progress(
+    db: Session,
+    redis: Redis,
+    frame: Any,
+    stage: str,
+    *,
+    detail: str | None = None,
+    kind: str | None = None,
+    version: str | None = None,
+) -> bool:
+    """The control plane reached `stage`; persist + broadcast when it moved.
+    Re-reads the row's record first: the device's own signals (folded by the
+    web process from its log lines and acks) may already have carried it
+    further than this worker's copy knows."""
+    from app.models.frame import set_deploy_progress
+    from app.utils.deploy_progress import advance
+
+    try:
+        db.refresh(frame, attribute_names=["deploy_progress"])
+    except Exception:  # noqa: BLE001 - a detached or test double frame keeps its copy
+        pass
+    moved = advance(
+        getattr(frame, "deploy_progress", None), stage,
+        now=datetime.now(timezone.utc), detail=detail, kind=kind, version=version,
+    )
+    return await set_deploy_progress(db, redis, frame, moved)
+
+
+async def finish_deploy_progress(db: Session, redis: Redis, frame: Any, *, detail: str | None = None, kind: str | None = None) -> bool:
+    from app.models.frame import set_deploy_progress
+    from app.utils.deploy_progress import finish
+
+    try:
+        db.refresh(frame, attribute_names=["deploy_progress"])
+    except Exception:  # noqa: BLE001
+        pass
+    record = getattr(frame, "deploy_progress", None)
+    if kind is not None and not (isinstance(record, dict) and record.get("kind") == kind):
+        return False
+    return await set_deploy_progress(db, redis, frame, finish(record, now=datetime.now(timezone.utc), detail=detail))
 
 
 def get_nim_version(executable_path: str):

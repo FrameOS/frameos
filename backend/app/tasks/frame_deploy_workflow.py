@@ -555,8 +555,11 @@ class FrameDeployWorkflow:
         elif mode == "combined":
             plan = await self._plan_combined(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         elif mode == "fast":
+            # The kind guard makes this a no-op for an ESP32's record.
+            await self._progress("connecting", kind="linux_fast")
             plan = await self._plan_fast(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         elif mode == "full":
+            await self._progress("connecting", kind="linux_full")
             plan = await self._plan_full(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         else:
             raise ValueError(f"Unsupported deploy mode: {mode}")
@@ -1067,6 +1070,14 @@ class FrameDeployWorkflow:
     EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 10 * 60
     EMBEDDED_POLL_INTERVAL_SECONDS = 5.0
 
+    async def _progress(self, stage: str, detail: str | None = None, *, kind: str | None = None) -> None:
+        """The deploy's bar (docs/deploy-progress-contract.json): this
+        workflow reached `stage`. Forward only; the device's own lines may
+        already have carried the record further."""
+        from app.tasks.utils import advance_deploy_progress
+
+        await advance_deploy_progress(self.db, self.redis, self.frame, stage, detail=detail, kind=kind)
+
     def _refresh_frame(self) -> Frame:
         if self.db is None:
             return self.frame
@@ -1199,10 +1210,12 @@ class FrameDeployWorkflow:
         """Firmware from before the command queue (2026.10.5): push the scenes
         over the board's HTTP server and ask it to reload. The board has to be
         awake."""
+        await self._progress("receiving", "sending the scenes over the board's HTTP server", kind="esp32_fast")
         await self._upload_embedded_scenes_and_reload(frame)
         frame.status = "starting"
         record_successful_deploy(frame, plan.frame_dict)
         await update_frame(self.db, self.redis, frame)
+        await self._progress("rendering", kind="esp32_fast")
         await log(
             self.db,
             self.redis,
@@ -1239,6 +1252,7 @@ class FrameDeployWorkflow:
                 f"{icon} Queued {len(scenes)} scene(s) and the live settings for the frame to pull",
             )
             deploy_id = await self._queue_embedded_deploy(frame, plan)
+            await self._progress("waiting", "the frame pulls the scenes on its next pass", kind="esp32_fast")
             nudged = await nudge_embedded_frame(frame, self.redis)
             applied = nudged and await self._await_embedded_deploy(frame, deploy_id, self.EMBEDDED_DEPLOY_WAIT_SECONDS)
             frame = self._refresh_frame()
@@ -1284,6 +1298,7 @@ class FrameDeployWorkflow:
                 "Check that the frame is powered on and reachable on the network."
             )
         frame = self._refresh_frame()
+        await self._progress("downloading", "the board fetches the release image", kind="esp32_full")
         await log(self.db, self.redis, int(frame.id), "stdout",
                   f"{icon} Update requested; waiting for the frame to boot")
         if not await self._await_embedded_boot(ota_requested_at):
@@ -1295,10 +1310,12 @@ class FrameDeployWorkflow:
             )
         frame = self._refresh_frame()
         await log(self.db, self.redis, int(frame.id), "stdout", f"{icon} Frame booted")
+        await self._progress("receiving", "sending the scenes over the board's HTTP server", kind="esp32_full")
         await self._upload_embedded_scenes_and_reload(frame)
         frame.status = "starting"
         record_successful_deploy(frame, plan.frame_dict)
         await update_frame(self.db, self.redis, frame)
+        await self._progress("rendering", kind="esp32_full")
         await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} Embedded full deploy complete")
 
     async def _execute_embedded_full(self, plan: FrameDeployPlan) -> None:
@@ -1327,6 +1344,10 @@ class FrameDeployWorkflow:
             #    rows ack when the frame pulls them (after the update, on the
             #    pass that follows its boot), and that ack records the deploy.
             deploy_id = await self._queue_embedded_deploy(frame, plan)
+            await self._progress(
+                "waiting", "the frame installs the release and pulls the scenes on its next pass",
+                kind="esp32_full",
+            )
 
             # 2. Deliver over the air: the device reboots into its updater,
             #    pulls this backend's relay of the release manifest and, when
@@ -1404,6 +1425,7 @@ class FrameDeployWorkflow:
         await update_frame(self.db, self.redis, frame)
 
         try:
+            await self._progress("uploading", "frame.json and the scenes", kind="linux_fast")
             await self.deployer._upload_frame_json_atomically("/srv/frameos/current/frame.json")
             await self.deployer._upload_scenes_json_atomically("/srv/frameos/current/scenes.json.gz", gzip=True)
             # all_scenes.json is no longer uploaded, but a runtime from before
@@ -1430,11 +1452,13 @@ class FrameDeployWorkflow:
             if not plan.fast_deploy:
                 raise RuntimeError("Fast deploy plan missing")
 
+            await self._progress("installing", "frameos setup", kind="linux_fast")
             setup_requires_reboot = await self._run_current_setup()
             if setup_requires_reboot:
                 frame.status = "starting"
                 record_successful_deploy(frame, plan.frame_dict)
                 await update_frame(self.db, self.redis, frame)
+                await self._progress("reloading", "rebooting the device after setup changes", kind="linux_fast")
                 await self.deployer.exec_command("sudo -n systemctl enable frameos.service")
                 await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} Deployed! Rebooting device after setup changes")
                 await self.deployer.exec_command("sudo -n reboot")
@@ -1442,8 +1466,10 @@ class FrameDeployWorkflow:
 
             if plan.fast_deploy.tls_settings_changed:
                 await log(self.db, self.redis, int(frame.id), "stdout", "- TLS settings changed, restarting FrameOS service")
+                await self._progress("reloading", "restarting FrameOS for the TLS change", kind="linux_fast")
                 await self.deployer.restart_service("frameos")
             else:
+                await self._progress("reloading", "the runtime re-reads its files", kind="linux_fast")
                 try:
                     status, body, _headers = await _fetch_frame_http_bytes(frame, self.redis, path="/reload", method="POST")
                     if status >= 300:
@@ -1487,7 +1513,9 @@ class FrameDeployWorkflow:
             await self._deploy_remote_for_full_deploy_if_needed(full_plan)
             await ensure_sudo_available(self.deployer)
             await self._install_authorized_keys_for_full_deploy(full_plan)
+            await self._progress("building", self._build_stage_detail(full_plan), kind="linux_full")
             build_result = await self._build_full_release_binary(full_plan)
+            await self._progress("uploading", "dependencies and the release", kind="linux_full")
             quickjs_dirname = await self._prepare_remote_for_full_release(
                 full_plan=full_plan,
                 build_result=build_result,
@@ -1505,6 +1533,7 @@ class FrameDeployWorkflow:
                 build_result=build_result,
                 build_id=build_id,
             )
+            await self._progress("installing", "frameos setup on the new release", kind="linux_full")
             stopped_frameos_for_setup = await self._stop_frameos_for_release_setup()
             await self._run_release_setup(build_id=build_id, post_deploy=full_plan.post_deploy)
             await sync_assets(self.db, self.redis, frame)
@@ -1529,6 +1558,17 @@ class FrameDeployWorkflow:
                         f"Failed to restart previous FrameOS service after failed deploy: {restart_error}",
                     )
             raise
+
+    @staticmethod
+    def _build_stage_detail(full_plan: FullDeployPlan | EmbeddedFullDeployPlan) -> str:
+        if not isinstance(full_plan, FullDeployPlan):
+            return "fetching the release"
+        binary = full_plan.binary_plan.to_dict() if hasattr(full_plan.binary_plan, "to_dict") else {}
+        if binary.get("will_attempt_precompiled"):
+            return "fetching the precompiled release"
+        if binary.get("will_attempt_cross_compile"):
+            return "cross-compiling FrameOS"
+        return "building FrameOS on the frame"
 
     async def _deploy_remote_for_full_deploy_if_needed(self, full_plan: FullDeployPlan) -> None:
         if not full_plan.remote_upgrade:
@@ -2013,9 +2053,11 @@ class FrameDeployWorkflow:
                 await self._remount_root_ro("final cleanup")
 
         if post_deploy.get("final_action") == "reboot":
+            await self._progress("restarting", "rebooting the device", kind="linux_full")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
             await self.deployer.exec_command("sudo -n reboot")
         else:
+            await self._progress("restarting", "restarting FrameOS", kind="linux_full")
             await self.deployer.exec_command("sudo -n systemctl daemon-reload")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
             await self.deployer.exec_command("sudo -n systemctl restart frameos.service")

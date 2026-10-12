@@ -298,7 +298,14 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   markRuntimeCheckpoint("scene:done", currentSceneId = scene.id.string, clearNode = true)
   # Uses logger.log (not logSignal) so render:done respects the fast-render
   # log pause; it's the highest-frequency event and would otherwise flood logs.
-  self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
+  # The first one after a boot or a reload is the exception: it ends the
+  # deploy that caused it (docs/deploy-progress-contract.json `render:done`).
+  let doneLine = %*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)}
+  if self.announceNextRender:
+    self.announceNextRender = false
+    self.logSignal(doneLine)
+  else:
+    self.logger.log(doneLine)
 
 proc noteSceneInit(self: RunnerThread, exportedScene: ExportedScene, sceneId: SceneId) =
   ## A compiled scene's generated init fires "init" and then "open" itself; an
@@ -769,6 +776,7 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     self.configureLinkCodeOverlay()
     self.forceSceneReload = true
     self.triggerRenderNext = true
+    self.announceNextRender = true
   of rcRestart:
     self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
     quit(QuitSuccess)
@@ -897,6 +905,7 @@ proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
       sleepFuture: none(Future[void]),
       isRendering: false,
       triggerRenderNext: false,
+      announceNextRender: true,
       logger: args[1]
     )
     runnerThread.configureControlCode()

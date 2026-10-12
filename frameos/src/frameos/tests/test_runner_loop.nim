@@ -692,6 +692,58 @@ suite "runner loop safety":
     finally:
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
+  test "the first render after a boot or a reload is logged while render logging is paused":
+    # docs/deploy-progress-contract.json: the control planes end a deploy's
+    # progress bar on the first render:done after the boot or the reload.
+    let sceneId = "tests/runner/paused-first-render".SceneId
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      uploaded[sceneId] = ExportedInterpretedScene(
+        name: "Paused first render",
+        publicStateFields: @[],
+        persistedStateKeys: @[],
+        init: fastInit,
+        render: fastRender,
+        runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+      )
+      updateUploadedScenes(uploaded)
+
+      var config = loadConfig()
+      config.controlCode = ControlCode(
+        enabled: false,
+        position: "center",
+        size: 0,
+        padding: 0,
+        offsetX: 0,
+        offsetY: 0,
+        qrCodeColor: parseHtmlColor("#000000"),
+        backgroundColor: parseHtmlColor("#ffffff")
+      )
+
+      let store = LogStore(entries: @[])
+      let logger = testLogger(config, store)
+      logger.disable()
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: sceneId,
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        announceNextRender: true,
+        logger: logger
+      )
+
+      waitFor runnerThread.startRenderLoop(maxCycles = 2)
+
+      # The first render is announced, the second is paused like any other.
+      check countEvent(store, "render:done") == 1
+      check not runnerThread.announceNextRender
+      check not logger.enabled
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
   test "scene render errors do not update boot guard failure details":
     let savedBootGuardState = saveBootGuardState()
     try:

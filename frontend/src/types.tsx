@@ -171,6 +171,13 @@ export interface FrameType {
    * the row did not know, folds it into `done` with the version now running
    * (frameFirmwareUpdateOutcome); see frameFirmwareUpdateProgress(). */
   firmware_update?: FrameFirmwareUpdate | null
+  /**
+   * How far the deploy / update / restart in flight has come (or the last
+   * one), from the click to the first render on the new code — one record in
+   * the vocabulary of docs/deploy-progress-contract.json, kept by both
+   * control planes. frameDeployProgress (decorators/frame.tsx) draws the bar.
+   */
+  deploy_progress?: FrameDeployProgress | null
   /** The contract verbs still queued for the device (pending or
    * sent-but-unacked, unexpired), as the list and detail routes of both
    * control planes report them. What lets the frames list say "upgrade
@@ -650,6 +657,19 @@ export interface AiSceneLogType {
   status?: string
   stage?: string
   timestamp: string
+}
+
+export interface FrameDeployProgress {
+  id: string
+  kind: string
+  stage: string
+  status: 'running' | 'done' | 'error'
+  detail?: string | null
+  progress?: { current: number; total: number } | null
+  version?: string | null
+  error?: string | null
+  started_at: string
+  at: string
 }
 
 export interface FrameFirmwareUpdate {

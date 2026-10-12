@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, tls_settings_changed  # noqa: F401  (tests import it from here)
-from app.tasks.utils import enqueue_unique_job, get_fresh_frame, record_task_failure
+from app.tasks.utils import (
+    advance_deploy_progress,
+    enqueue_unique_job,
+    finish_deploy_progress,
+    get_fresh_frame,
+    record_task_failure,
+)
 from app.tasks.deploy_frame import clear_active_deploy_job, deploy_task_log_line, register_active_deploy_job
 
 
@@ -67,6 +73,7 @@ async def deploy_over_admin_api(
             await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "started", task_label))
         await log(db, redis, id, "stdout",
                   f"No shell on this frame: pushing scenes and settings over its admin API at {frame.frame_host}")
+        await advance_deploy_progress(db, redis, frame, "saving", kind="admin_push")
         await push_backend_state_to_device(
             frame, db, redis, _fetch_frame_http_bytes, activate_scene=activate_scene
         )
@@ -105,8 +112,10 @@ async def fast_deploy_frame_task(
 
         if task_id:
             await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "started", "fast"))
+        await advance_deploy_progress(db, redis, frame, "rendering", kind="virtual")
         await refresh_virtual_frame_image(db, redis, frame)
         await mark_virtual_frame_deployed(db, redis, frame)
+        await finish_deploy_progress(db, redis, frame, kind="virtual")
         if task_id:
             await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", "fast"))
         return
@@ -140,6 +149,8 @@ async def fast_deploy_frame_task(
         if task_id:
             detail = "fast queued" if workflow.queued_for_frame else "fast"
             await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "completed", detail))
+        if not workflow.queued_for_frame:
+            await advance_deploy_progress(db, redis, workflow.frame, "booting", kind="linux_fast")
     except (Exception, asyncio.CancelledError) as exc:
         # The workflow resets "deploying" itself for an Exception; a
         # cancelled job skips that, so the shared path resets it here.

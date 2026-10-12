@@ -3,7 +3,12 @@ import { framesModel } from '../../models/framesModel'
 import { longRunningTasksModel } from '../../models/longRunningTasksModel'
 import type { LongRunningTask } from '../../models/longRunningTasksModel'
 import { publishedReleaseModel } from '../../models/publishedReleaseModel'
-import { frameFirmwareUpdateIsRunning, frameStatusWithSpinner, frameUpgradeIsQueued } from '../../decorators/frame'
+import {
+  frameDeployProgressIsRunning,
+  frameFirmwareUpdateIsRunning,
+  frameStatusWithSpinner,
+  frameUpgradeIsQueued,
+} from '../../decorators/frame'
 import type { FrameId, FrameType } from '../../types'
 import { isCloudMode } from '../../utils/cloudMode'
 import { deviceUpgradeInFlight, frameLogic, pendingFrameosUpgrade } from '../frame/frameLogic'
@@ -57,6 +62,7 @@ export function fleetUpdateInFlight(frame: FrameType, runningTasks: LongRunningT
   if (
     frameUpgradeIsQueued(frame) ||
     frameFirmwareUpdateIsRunning(frame) ||
+    frameDeployProgressIsRunning(frame) ||
     frameStatusWithSpinner.includes(frame.status)
   ) {
     return true

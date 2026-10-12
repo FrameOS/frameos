@@ -964,6 +964,15 @@ export const frames = pgTable(
     // version?}. Cleared on the hello that follows a verified install (or
     // any hello reporting a new version); a terminal error stays until then.
     firmwareUpdate: jsonb("firmware_update"),
+    // How far the current deploy / update / restart / reboot has come, from
+    // the click to the first render on the new code — one record in the
+    // vocabulary of docs/deploy-progress-contract.json (lib/deploy-progress.ts
+    // folds it: enqueueFrameCommand starts it, the hub moves it on sent /
+    // acked / scene_ack / hello / render / log lines). The self-hosted
+    // backend keeps the same column; the shared workspace draws one bar from
+    // it. A stale record is the reader's problem (the stage's
+    // staleAfterSeconds), never cleared by a writer.
+    deployProgress: jsonb("deploy_progress"),
     // "Someone had this frame's images on screen, roughly now." Stamped by
     // every surface that renders a preview, throttled to one write per frame
     // per 30s, and read by the hub to decide whether a device's "render"

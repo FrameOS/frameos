@@ -442,6 +442,13 @@ class Frame(Base):
     # it. Cleared by the bootup line that follows a verified install or
     # reports a version the row did not know; a failure stays until then.
     firmware_update = mapped_column(JSON, nullable=True)
+    # How far the current (or last) deploy, update, restart or reboot has
+    # come, from the click to the first render on the new code — one record
+    # in the vocabulary of docs/deploy-progress-contract.json
+    # (app/utils/deploy_progress.py folds it; the cloud keeps the same row).
+    # The workspace draws its progress bar from this; stale records are the
+    # reader's problem, not the writer's (the stage's staleAfterSeconds).
+    deploy_progress = mapped_column(JSON, nullable=True)
     reboot = mapped_column(JSON, nullable=True)
     control_code = mapped_column(JSON, nullable=True)
     scenes = mapped_column(JSON, nullable=True, default=list)
@@ -528,6 +535,7 @@ class Frame(Base):
             'next_render_at': self.next_render_at.replace(tzinfo=timezone.utc).isoformat() if self.next_render_at else None,
             'sleep_reason': self.sleep_reason,
             'firmware_update': self.firmware_update,
+            'deploy_progress': self.deploy_progress,
             'log_to_file': self.log_to_file,
             'assets_path': self.assets_path,
             'save_assets': self.save_assets,
@@ -761,6 +769,17 @@ async def update_frame(db: Session, redis: Redis, frame: Frame):
     # update was taken (or that one is waiting) without a reload.
     payload["pending_command_types"] = pending_command_types(db, frame)
     await publish_message(redis, "update_frame", payload)
+
+
+async def set_deploy_progress(db: Session, redis: Redis, frame: Frame, record: Any) -> bool:
+    """Persist a changed deploy_progress record and broadcast the frame.
+    None (no change) is a no-op, so callers chain the fold helpers directly:
+    `await set_deploy_progress(db, redis, frame, advance(frame.deploy_progress, "building", now=...))`."""
+    if record is None or record == frame.deploy_progress:
+        return False
+    frame.deploy_progress = record
+    await update_frame(db, redis, frame)
+    return True
 
 
 def frame_has_shell_access(frame: Any) -> bool:

@@ -36,10 +36,15 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.frame import Frame, record_successful_deploy, update_frame
+# Underscored: app/api/__init__.py star-imports this module.
+from datetime import datetime as _datetime, timezone as _timezone
+
+from app.models.frame import Frame, record_successful_deploy, set_deploy_progress, update_frame
 from app.models.frame_command import FrameCommand
 from app.models.log import new_log
 from app.redis import get_redis
+from app.utils.deploy_progress import fold as fold_deploy_progress
+from app.utils.deploy_progress import fold_command as fold_deploy_progress_command
 from app.utils.embedded_commands import command_label
 from app.utils.frame_commands import (
     ack_frame_command,
@@ -130,8 +135,23 @@ async def _record_deploy_if_settled(db: Session, redis: Redis, frame: Frame, com
     record_successful_deploy(frame, snapshot)
     if frame.status in ("deploying", "uninitialized"):
         frame.status = "ready"
+    # The deploy's bar: every row pulled, the first render is what is left.
+    settled = fold_deploy_progress(frame.deploy_progress, "commands:settled", now=_datetime.now(_timezone.utc))
+    if settled is not None:
+        frame.deploy_progress = settled
     await update_frame(db, redis, frame)
     await new_log(db, redis, int(frame.id), "stdinfo", "✅ The frame pulled the deploy; recorded as deployed")
+
+
+async def _fold_deploy_progress_command(db: Session, redis: Redis, frame: Frame, command: FrameCommand) -> None:
+    """A verb the device took or refused moves the frame's deploy_progress
+    (the `command:acked:<type>` / `command:failed:<type>` signals of
+    docs/deploy-progress-contract.json)."""
+    moved = fold_deploy_progress_command(
+        frame.deploy_progress, command.type, command.status,
+        now=_datetime.now(_timezone.utc), error=command.error,
+    )
+    await set_deploy_progress(db, redis, frame, moved)
 
 
 async def _note_outcome(db: Session, redis: Redis, frame: Frame, command: FrameCommand) -> None:
@@ -170,6 +190,7 @@ async def api_embedded_device_commands(
     db.commit()
     for command in acked:
         await _note_outcome(db, redis, frame, command)
+        await _fold_deploy_progress_command(db, redis, frame, command)
         await _record_deploy_if_settled(db, redis, frame, command)
     await _clear_sleep_forecast(db, redis, frame)
     return {
@@ -208,6 +229,7 @@ async def api_embedded_device_command_ack(
     await _remember_device_state(redis, frame, body)
     if was_live:
         await _note_outcome(db, redis, frame, command)
+        await _fold_deploy_progress_command(db, redis, frame, command)
         if command.type == "set_current_scene" and command.status == "acked":
             scene_id = frame_command_wire(command).get("scene_id")
             if isinstance(scene_id, str) and scene_id:

@@ -98,6 +98,32 @@
   report. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
 
+## Deploy progress: the contract is `docs/deploy-progress-contract.json`
+
+- Every deploy, update, restart and reboot of a frame, on every frame type and
+  on both control planes, keeps ONE record on the frame row
+  (`deploy_progress`): its kind, its stage, `at`. The workspace draws the bar
+  from it (`frameDeployProgress` in `frontend/src/decorators/frame.tsx`) in
+  place of "last seen", and the deploy tile spins on it. `docs/deploy-progress.md`
+  is the per-frame-type spec (which kind, which stage, which signal moves it);
+  `docs/deploy-progress-fixtures.json` is the corpus the backend
+  (`app/utils/deploy_progress.py`) and the cloud (`lib/deploy-progress.ts`)
+  both replay.
+- **Never decide "how far is this deploy" from `frame.status` or a log
+  regex.** A new step is `advance(record, stage)` from the plane that does it;
+  a new device signal is a contract `signals` entry plus the stages whose
+  `on` table lists it. Edit the contract, run
+  `python3 frameos/tools/generate_deploy_progress_contract.py` (the backend
+  suite runs `--check`), add a fixture.
+- Records move forward only and only on what their current stage lists — that
+  is what keeps the old runtime's last `render:done`, or a late ack of an
+  older push, from finishing a deploy. Nothing expires a record; readers
+  compare `at` with the stage's `staleAfterSeconds`.
+- A route starts the record BEFORE it enqueues the job (the worker's first
+  step must find it) and fails it when the enqueue throws. On the cloud,
+  `enqueueFrameCommand` starts it for `set_scenes`, `notify_update_available`,
+  `reboot` and `restart_runtime`; the hub moves it.
+
 ## AI scene chat: change the prompt/linter, then run the evals
 
 - The cloud AI (`cloud/apps/auth-web/src/lib/ai/`) builds and edits scenes on

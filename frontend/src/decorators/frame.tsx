@@ -1,8 +1,10 @@
 import { FrameConnectionDot } from '../components/FrameConnectionDot'
 import { isCloudMode } from '../utils/cloudMode'
 import { Spinner } from '../components/Spinner'
-import { FrameType, LogType } from '../types'
+import { FrameDeployProgress, FrameType, LogType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
+import { deployProgressContract } from '../utils/deployProgress.gen'
+import type { DeployProgressKind, DeployProgressStage } from '../utils/deployProgress.gen'
 
 export function logUpdatesFrameActivity(log: Pick<LogType, 'type' | 'line'>): boolean {
   return log.type === 'webhook'
@@ -364,6 +366,175 @@ export function frameFirmwareUpdateIsRunning(frame: FrameType, now: number = Dat
   return frameFirmwareUpdateProgress(frame, now)?.kind === 'running'
 }
 
+export interface FrameDeployProgressView {
+  /** The contract kind (`linux_full`, `esp32_fast`, `restart`, …). */
+  kind: string
+  /** The kind's human label: "Deploy FrameOS, scenes & settings". */
+  kindLabel: string
+  stage: string
+  status: 'running' | 'done' | 'error'
+  /** The stage's word: "installing", "first render", "restarted". */
+  label: string
+  detail: string | null
+  error: string | null
+  /** One line for the row under the frame's name: "installing · frameos setup". */
+  caption: string
+  /** The tooltip: kind, stage and detail. */
+  title: string
+  /** 0..100 for the bar. */
+  percent: number
+  startedAt: number
+  at: number
+}
+
+const deployProgressDoneWords: Partial<Record<DeployProgressKind, string>> = {
+  restart: 'restarted',
+  reboot: 'rebooted',
+  upgrade: 'updated',
+  firmware: 'firmware updated',
+  virtual: 'rendered',
+}
+
+/**
+ * The deploy / update / restart in flight, as the control plane recorded it
+ * in `deploy_progress` (docs/deploy-progress-contract.json: the stage order,
+ * the labels and the stale rules all come from the contract's tables). null
+ * when nothing is going on, when the record sat in its stage longer than
+ * the stage allows (the frame or the worker went quiet: back to "last seen"),
+ * or when a finished one is old enough to forget. The sidebar row, the
+ * dashboard status line and the deploy tile all read this one view.
+ */
+export function frameDeployProgress(frame: FrameType, now: number = Date.now()): FrameDeployProgressView | null {
+  const record: FrameDeployProgress | null | undefined = frame.deploy_progress
+  if (!record || typeof record.kind !== 'string' || typeof record.stage !== 'string') {
+    return null
+  }
+  const kindSpec = deployProgressContract.kinds[record.kind as DeployProgressKind]
+  if (!kindSpec) {
+    return null
+  }
+  const at = parseFrameTimestamp(record.at)
+  const startedAt = parseFrameTimestamp(record.started_at)
+  if (!Number.isFinite(at)) {
+    return null
+  }
+  const ageMs = now - at
+  const status = record.status === 'done' || record.status === 'error' ? record.status : 'running'
+  const stageNames = kindSpec.stages.map((entry) => entry.stage)
+  const stageIndex = stageNames.indexOf(record.stage as DeployProgressStage)
+  const stageSpec = deployProgressContract.stages[record.stage as DeployProgressStage]
+  if (status === 'running') {
+    if (!stageSpec || stageIndex < 0) {
+      return null
+    }
+    // A frame asleep between renders takes a queued deploy on its next wake:
+    // its own forecast says when, and the record stays believable until then.
+    const wakeAt = parseFrameTimestamp(frame.next_wake_at)
+    const freshWhileSleeping =
+      stageSpec.freshWhileSleeping === true &&
+      Number.isFinite(wakeAt) &&
+      now < wakeAt + deployProgressContract.record.wakeGraceSeconds * 1000
+    if (!freshWhileSleeping && ageMs > stageSpec.staleAfterSeconds * 1000) {
+      return null
+    }
+  } else if (status === 'done') {
+    if (ageMs > deployProgressContract.record.doneShownSeconds * 1000) {
+      return null
+    }
+  } else if (ageMs > deployProgressContract.record.errorShownSeconds * 1000) {
+    return null
+  }
+  const detail = typeof record.detail === 'string' && record.detail ? record.detail : null
+  const error = typeof record.error === 'string' && record.error ? record.error : null
+  let percent = 0
+  if (status === 'done') {
+    percent = 100
+  } else if (stageIndex >= 0 && stageNames.length > 0) {
+    let fraction = 0.3
+    const progress = record.progress
+    if (progress && typeof progress.current === 'number' && typeof progress.total === 'number' && progress.total > 0) {
+      fraction = Math.max(0, Math.min(1, progress.current / progress.total))
+    }
+    percent = Math.round((100 * (stageIndex + fraction)) / stageNames.length)
+  }
+  const label =
+    status === 'done'
+      ? deployProgressDoneWords[record.kind as DeployProgressKind] ?? 'deployed'
+      : status === 'error'
+      ? 'failed'
+      : stageSpec?.label ?? record.stage
+  const bytes =
+    status === 'running' && record.progress && typeof record.progress.total === 'number' && record.progress.total > 0
+      ? `${Math.round((100 * record.progress.current) / record.progress.total)}%`
+      : null
+  const caption =
+    status === 'error'
+      ? `${label}: ${error ?? 'deploy did not complete'}`
+      : status === 'done'
+      ? detail
+        ? `${label} · ${detail}`
+        : label
+      : [label, bytes ?? detail].filter(Boolean).join(' · ')
+  const title = [kindSpec.label, status === 'running' ? label : caption, status === 'running' ? detail : null]
+    .filter(Boolean)
+    .join(' · ')
+  return {
+    kind: record.kind,
+    kindLabel: kindSpec.label,
+    stage: record.stage,
+    status,
+    label,
+    detail,
+    error,
+    caption,
+    title,
+    percent,
+    startedAt: Number.isFinite(startedAt) ? startedAt : at,
+    at,
+  }
+}
+
+export interface FrameDeployProgressStep {
+  stage: string
+  /** "Installing", "First render". */
+  label: string
+  state: 'done' | 'current' | 'pending' | 'error'
+  detail: string | null
+}
+
+/**
+ * The deploy drawer's step list: every stage of the record's kind, in the
+ * contract's order, marked done / current / pending (or error where it
+ * failed). Empty when there is no record worth showing.
+ */
+export function frameDeployProgressSteps(frame: FrameType, now: number = Date.now()): FrameDeployProgressStep[] {
+  const view = frameDeployProgress(frame, now)
+  if (!view) {
+    return []
+  }
+  const kindSpec = deployProgressContract.kinds[view.kind as DeployProgressKind]
+  const stages = kindSpec.stages.map((entry) => entry.stage)
+  const current = view.status === 'done' ? stages.length : stages.indexOf(view.stage as DeployProgressStage)
+  return stages.map((stage, index) => {
+    const spec = deployProgressContract.stages[stage]
+    const label = spec.label.charAt(0).toUpperCase() + spec.label.slice(1)
+    if (index < current) {
+      return { stage, label, state: 'done', detail: null }
+    }
+    if (index === current) {
+      return view.status === 'error'
+        ? { stage, label, state: 'error', detail: view.error }
+        : { stage, label, state: 'current', detail: view.caption === view.label ? null : view.caption }
+    }
+    return { stage, label, state: 'pending', detail: null }
+  })
+}
+
+/** True while a deploy, update, restart or reboot of this frame is under way and believed. */
+export function frameDeployProgressIsRunning(frame: FrameType, now: number = Date.now()): boolean {
+  return frameDeployProgress(frame, now)?.status === 'running'
+}
+
 export function frameCheckin(frame: FrameType, now: number = Date.now()): FrameCheckin | null {
   if (frame.connected === true || (frame.active_connections ?? 0) > 0) {
     return null
@@ -514,6 +685,12 @@ export function frameNeedsInitialDeploy(frame: FrameType): boolean {
  * everything else says when it was last heard from.
  */
 export function frameActivityDescription(frame: FrameType): string {
+  // A deploy in flight is what the frame is doing; the row draws the bar
+  // from the same view (DeployProgressBar), this is its text form.
+  const deploy = frameDeployProgress(frame)
+  if (deploy && deploy.status === 'running') {
+    return deploy.caption
+  }
   if (frameNeedsInitialDeploy(frame)) {
     return 'waiting for first deploy'
   }
@@ -542,11 +719,12 @@ export function frameStatusDescription(frame: FrameType): string {
 
 export function frameStatus(frame: FrameType): JSX.Element {
   const status = frameStatusLabel(frame)
+  const deploying = frameDeployProgressIsRunning(frame)
 
   return (
     <span className="inline-flex items-center gap-2">
       {frameStatusDescription(frame)}
-      {frameStatusWithSpinner.includes(status) ? <Spinner /> : null}
+      {deploying || frameStatusWithSpinner.includes(status) ? <Spinner /> : null}
     </span>
   )
 }

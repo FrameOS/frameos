@@ -1849,6 +1849,23 @@ describe("frame management API", () => {
     for (const command of commands) {
       expect(command.expiresAt).not.toBeNull();
     }
+    // The queue started the workspace's bar (docs/deploy-progress-contract.json):
+    // the later verb replaced the earlier one's record, keyed by its command id.
+    const reboot = commands.find((command) => command.type === "reboot");
+    expect((await frameRow(frame_id)).deployProgress).toMatchObject({
+      id: reboot?.id,
+      kind: "reboot",
+      stage: "queued",
+      status: "running",
+    });
+    const detail = await getFrameDetail(
+      getRequest(`/api/frames/${frame_id}`),
+      routeParams(frame_id),
+    );
+    expect(
+      ((await detail.json()) as { frame: { deploy_progress?: { kind?: string } } }).frame
+        .deploy_progress?.kind,
+    ).toBe("reboot");
 
     // Another account's frame is invisible, not forbidden.
     await enrolledFrame();
