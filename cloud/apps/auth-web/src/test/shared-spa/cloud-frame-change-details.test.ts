@@ -185,6 +185,35 @@ describe("frameFormKeysEqual", () => {
     ).toBe(false);
   });
 
+  // 2026-10-13, frame 70: a sleeping ESP32's deploy drawer listed "Embedded
+  // settings" after every wake. The bootup line rewrites embedded.lastBoot
+  // and the backend derives embedded.layout on read; only the user's choices
+  // in `embedded` are a change.
+  it("ignores what an ESP32 reports in embedded: lastBoot and layout", () => {
+    const row = frame({
+      name: "esptest",
+      mode: "embedded",
+      embedded: {
+        platform: "esp32-s3",
+        flashSize: "32MB",
+        lastBoot: { at: "2026-10-12T22:17:48+00:00", ip: "10.8.0.9", version: "2026.10.11" },
+        layout: { ram: { panel: "EPD_13in3e" } },
+      },
+    });
+    const woke = {
+      ...row,
+      embedded: {
+        platform: "esp32-s3",
+        flashSize: "32MB",
+        lastBoot: { at: "2026-10-12T22:22:31+00:00", ip: "10.8.0.10", version: "2026.10.11" },
+      },
+    } as FrameType;
+    expect(frameFormKeysEqual(row, woke)).toBe(true);
+    expect(frameFormKeysEqual(row, { ...woke, embedded: { ...woke.embedded, flashSize: "16MB" } } as FrameType)).toBe(
+      false,
+    );
+  });
+
   it("is false when a form key moved, scenes included", () => {
     const previous = frame({ name: "Kitchen", interval: 60, scenes });
     expect(frameFormKeysEqual(previous, { ...previous, name: "Hall" })).toBe(false);

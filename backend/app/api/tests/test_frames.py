@@ -1482,6 +1482,35 @@ async def test_api_frame_update_keeps_server_side_sd_image_record(async_client, 
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_keeps_the_boards_last_boot_and_drops_layout(async_client, db, redis):
+    # embedded.lastBoot is what the board's last bootup line said; a form
+    # loaded before the board woke echoes back the older boot. embedded.layout
+    # is derived on every read and should never be stored.
+    frame = await new_frame(db, redis, 'EspFrame', '10.8.0.9', 'backend.local')
+    frame.mode = 'embedded'
+    frame.embedded = {
+        'platform': 'esp32-s3',
+        'flashSize': '32MB',
+        'lastBoot': {'at': '2026-10-12T22:22:31+00:00', 'ip': '10.8.0.9', 'frameosVersion': '2026.10.11'},
+    }
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={'embedded': {
+        'platform': 'esp32-s3',
+        'flashSize': '16MB',
+        'lastBoot': {'at': '2026-10-12T22:17:48+00:00', 'ip': '10.8.0.3', 'frameosVersion': '2026.10.10'},
+        'layout': {'ram': {'panel': 'EPD_13in3e'}},
+    }})
+    assert resp.status_code == 200
+    db.expire_all()
+    stored = db.get(Frame, frame.id).embedded
+    assert stored['flashSize'] == '16MB'
+    assert stored['lastBoot'] == {'at': '2026-10-12T22:22:31+00:00', 'ip': '10.8.0.9', 'frameosVersion': '2026.10.11'}
+    assert 'layout' not in stored
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_clears_sd_image_when_config_changes(async_client, db, redis):
     # Config changes that alter the SD image fingerprint must still clear the
     # record (the preserved server-side copy no longer matches the config).

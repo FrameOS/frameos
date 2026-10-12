@@ -1129,6 +1129,20 @@ function normalizeBuildrootForComparison(value: unknown): Record<string, unknown
   }
 }
 
+/**
+ * `embedded` mixes what the user configures (platform, flash size, hardware
+ * preset) with what the board reports and the backend derives: `lastBoot` is
+ * rewritten from every bootup line, and `layout` is computed on every read.
+ * Compared whole, a sleeping ESP32 put "Embedded settings" in the pending
+ * changes after every wake, the deploy's own boot included (frame 70,
+ * 2026-10-13: only `lastBoot.at` differed).
+ */
+function normalizeEmbeddedForComparison(value: unknown): Record<string, unknown> {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, ...rest } = source
+  return rest
+}
+
 function normalizeMountpointsForComparison(value: unknown): Record<string, any> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
   const rawItems = Array.isArray(source.items) ? source.items : []
@@ -1184,6 +1198,10 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
 
   if (key === 'buildroot') {
     return normalizeBuildrootForComparison(value)
+  }
+
+  if (key === 'embedded') {
+    return normalizeEmbeddedForComparison(value)
   }
 
   if (key === 'mountpoints') {
