@@ -47,6 +47,19 @@ const DRIVER_IDLE_TURN_OFF_HEARTBEAT_SECONDS = 60
 # Floor for a driver's "call me back sooner" request. A driver asking for 0
 # would otherwise turn the render loop into a spin.
 const DRIVER_RETRY_MIN_SECONDS = 0.25
+# The floor doubles with every retry in a row, up to this. A driver that keeps
+# asking for 0 is broken, not about to draw: a wedged waveshare library did
+# that every 0.3 s for at least 14 hours, and its log lines pushed everything
+# else out of the frame's log (2026-10-12). The framebuffer's own 2 s, 4 s, 8 s… probe
+# backoff stays above this floor and is unchanged by it.
+const DRIVER_RETRY_MAX_SECONDS = 60.0
+
+proc nextDriverRetrySeconds*(requested: float, floor: var float): float =
+  ## The wait before the next driver callback, for a driver that asked for
+  ## another one `requested` seconds out. `floor` starts at
+  ## DRIVER_RETRY_MIN_SECONDS for each sleep and doubles here per retry.
+  floor = min(floor * 2, DRIVER_RETRY_MAX_SECONDS)
+  max(requested, floor)
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
@@ -559,6 +572,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       var nextDriverRetryAt =
         if driverRetryImage.isNil: none(MonoTime)
         else: some(getMonoTime() + initDuration(milliseconds = int(driverRetrySeconds * 1000)))
+      var driverRetryFloor = DRIVER_RETRY_MIN_SECONDS
       # The system screens (system/index and friends) print the cloud link
       # status; a frame that just enrolled used to say "standalone" for the
       # rest of the 5-minute interval. Only those scenes wake on a link
@@ -593,7 +607,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
             clearNextRenderSeconds()
           let againRequest = takeEarlierRenderRequest()
           if againRequest.isSome:
-            let againSeconds = max(againRequest.get(), DRIVER_RETRY_MIN_SECONDS)
+            let againSeconds = nextDriverRetrySeconds(againRequest.get(), driverRetryFloor)
             nextDriverRetryAt = some(getMonoTime() + initDuration(milliseconds = int(againSeconds * 1000)))
             self.logger.log(%*{"event": "render:driver:retry",
               "device": self.frameConfig.device,

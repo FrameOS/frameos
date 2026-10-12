@@ -215,6 +215,24 @@ suite "runner loop safety":
     # Consumed, not left standing for the next pass.
     check takeEarlierRenderRequest().isNone
 
+  test "a driver that keeps asking for an immediate retry is backed off":
+    # A wedged waveshare library answered 0.0 after every callback and the
+    # runner called it back every 0.3 s, logging each one, until a restart.
+    var floor = 0.25
+    var waits: seq[float] = @[]
+    for _ in 0 ..< 12:
+      waits.add(nextDriverRetrySeconds(0.0, floor))
+    check waits[0] == 0.5
+    check waits[1] == 1.0
+    check waits[^1] == 60.0
+    # The framebuffer's own probe backoff (2 s doubling to 60 s) stays above
+    # the floor, so what it asks for is what it gets.
+    floor = 0.25
+    var probe = 2.0
+    for _ in 0 ..< 8:
+      check nextDriverRetrySeconds(probe, floor) == probe
+      probe = min(probe * 2, 60.0)
+
   test "a driver request leaves a fast scene's schedule alone":
     clearEventChannel()
     clearEarlierRenderRequest()

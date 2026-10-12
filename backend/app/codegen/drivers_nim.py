@@ -705,9 +705,21 @@ proc frameos_driver_setup*(driverContextPtr: pointer): bool {{.cdecl, exportc, d
     if driver.can_render:
         render_proc = f"""
 proc frameos_driver_render*(driver: pointer, image: pointer) {{.cdecl, exportc, dynlib.}} =
+  ## Nothing may raise out of an export. This library runs its own Nim
+  ## runtime (frameos/driver_abi): an exception that leaves it never reaches
+  ## the host, and it leaves THIS runtime's error flag set on the render
+  ## thread, so every later call returns at its first checked step. No render
+  ## reached the panel again, and earlier_render_seconds answered 0.0, which
+  ## spun the runner's retry loop at its floor until the process restarted (a
+  ## 13.3" E busy timeout, 2026-10-12). Log what the runner logs for a
+  ## statically linked driver instead; the next pass is a fresh attempt.
   if driver.isNil:
     return
-  {driver.name}Driver.render(cast[{driver.name}Driver.Driver](driver), cast[Image](image))
+  try:
+    {driver.name}Driver.render(cast[{driver.name}Driver.Driver](driver), cast[Image](image))
+  except Exception as e:
+    log(%*{{"event": "render:driver:error", "driver": "{driver.name}", "error": e.msg,
+        "stacktrace": e.getStackTrace()}})
 
 proc frameos_driver_earlier_render_seconds*(driver: pointer): cdouble {{.cdecl, exportc, dynlib.}} =
   ## Driver -> host: seconds until this driver would like another pass, or a
@@ -760,14 +772,21 @@ proc frameos_driver_to_png*(driver: pointer, rotate: cint, flip: cstring, length
     if driver.can_turn_on_off:
         turn_procs = f"""
 proc frameos_driver_turn_on*(driver: pointer) {{.cdecl, exportc, dynlib.}} =
+  ## Caught for the reason frameos_driver_render gives.
   if driver.isNil:
     return
-  {driver.name}Driver.turnOn(cast[{driver.name}Driver.Driver](driver))
+  try:
+    {driver.name}Driver.turnOn(cast[{driver.name}Driver.Driver](driver))
+  except Exception as e:
+    log(%*{{"event": "driver:{driver.name}:turnOn:error", "error": e.msg}})
 
 proc frameos_driver_turn_off*(driver: pointer) {{.cdecl, exportc, dynlib.}} =
   if driver.isNil:
     return
-  {driver.name}Driver.turnOff(cast[{driver.name}Driver.Driver](driver))
+  try:
+    {driver.name}Driver.turnOff(cast[{driver.name}Driver.Driver](driver))
+  except Exception as e:
+    log(%*{{"event": "driver:{driver.name}:turnOff:error", "error": e.msg}})
 """
 
     code = f"""
@@ -792,7 +811,13 @@ proc frameos_driver_init*(driverContextPtr: pointer, logHook: HostLogProc, sendE
   setSharedHostCallbacks(logHook, sendEventHook)
   let hostContext {{.cursor.}} = cast[DriverContext](driverContextPtr)
   driverContextInstance = cloneDriverContext(hostContext)
-  driverInstance = {driver.name}Driver.init(driverContextInstance)
+  # Caught for the reason frameos_driver_render gives. A nil instance is a
+  # driver the host's render and turn calls skip.
+  try:
+    driverInstance = {driver.name}Driver.init(driverContextInstance)
+  except Exception as e:
+    log(%*{{"event": "driver:{driver.name}:init:error", "error": e.msg}})
+    return nil
   syncHostDriverContext(hostContext, driverContextInstance)
   result = cast[pointer](driverInstance)
 
