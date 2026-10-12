@@ -33,6 +33,10 @@ bool fos_buttons_woke_by_button(int *pin, char *label, size_t label_len);
  * chip). Logged with the wake so a label dispute can be settled from the
  * log: the mask says which pad went low, the preset says what it is called. */
 uint64_t fos_buttons_wake_mask(void);
+/* True while a press (or release) sits in the queue unprocessed: the render
+ * task drains it at the start of a pass and in its idle wait, so a battery
+ * frame about to deep-sleep right after a render asks this first. */
+bool fos_buttons_pending(void);
 /* Arm the registered buttons as deep-sleep wake sources. `*armed_mask`
  * (may be NULL) receives the GPIO bit mask actually armed — 0 when no
  * button can wake this chip, or every key is currently held. Call right

@@ -1705,8 +1705,11 @@ static void client_task(void *arg)
          * render again. */
         s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
+        bool button_pending = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+                              fos_buttons_pending();
         if (deep_sleep_now && fos_display_present() && config->render_mode == FOS_RENDER_LOCAL &&
-            frameos_nim_available() && (fos_scenes_work_pending() || fos_events_deferred_pending())) {
+            frameos_nim_available() &&
+            (fos_scenes_work_pending() || fos_events_deferred_pending() || button_pending)) {
             /* A scene payload or a scene switch arrived while this pass was
              * rendering (the cloud delivers them the moment the session is
              * up, and a 13.3" render takes a minute). Sleeping now would
@@ -1714,9 +1717,17 @@ static void client_task(void *arg)
              * the switch itself in RAM, lost. One more pass applies and
              * renders it; the apply consumes the work, so this cannot loop.
              * A deferred scene event (a setSceneState the cloud sent during
-             * the render) holds the sleep the same way. */
-            frameos_nim_log_hook("{\"event\":\"sleep:held\",\"source\":\"esp32\","
-                                 "\"reason\":\"scenes\"}");
+             * the render) holds the sleep the same way, and so does a button
+             * pressed during the render: the queue is drained only at the
+             * start of a pass and in the idle wait, neither of which a
+             * battery frame reaches between its render and its sleep, so the
+             * press vanished without a log line (E1004, 2026-10-12: two
+             * right-arrow presses during a refresh, nothing in the log). */
+            char held[96];
+            snprintf(held, sizeof(held),
+                     "{\"event\":\"sleep:held\",\"source\":\"esp32\",\"reason\":\"%s\"}",
+                     button_pending ? "button" : "scenes");
+            frameos_nim_log_hook(held);
             force_render = true;
             continue;
         }

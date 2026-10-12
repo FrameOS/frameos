@@ -346,6 +346,11 @@ uint64_t fos_buttons_wake_mask(void)
     return s_wake_mask;
 }
 
+bool fos_buttons_pending(void)
+{
+    return s_queue != NULL && uxQueueMessagesWaiting(s_queue) > 0;
+}
+
 bool fos_buttons_woke_by_button(int *pin, char *label, size_t label_len)
 {
     if (s_wake_pin < 0) return false;
