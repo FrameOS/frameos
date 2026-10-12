@@ -326,7 +326,10 @@ dropped it: an "install and activate" reached an E1004 on a button wake, the
 frame rendered the old scene, slept, and every later wake came up on the old
 scene with the new one merely stored (2026-10-12). Now `fos_scenes_select`
 writes the queued id to NVS (`pending_scene`), the boot restore prefers it
-over `last_scene`, the pass that applies it erases it, and a pass that
+over `last_scene`, the pass that applies it erases it and writes
+`last_scene` too — resident because of the pending key is not persisted,
+and skipping that write sent the frame back to the old scene on the next
+timer wake (2026-10-12) — and a pass that
 switched the scene — or applied a payload pushed since boot — renders even
 when it woke only to check in (`fos_scenes_take_switched`). Work that lands
 mid-render holds the deep sleep for one more pass (`sleep:held`, reason

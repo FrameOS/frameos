@@ -1186,6 +1186,15 @@ bool fos_scenes_apply_pending_selection(void)
         log_scene_event("scenes:select", "ok", "queued", scene_id,
                         "already-resident", 0, 1, 0, ESP_OK);
         frameos_nim_set_scene(scene_id);
+        /* Resident is not the same as persisted. The boot restore loads the
+         * PENDING scene when one survived the sleep (activate_from_index),
+         * and a fresh payload's apply does the same, so the scene the user
+         * picked is resident here on the strength of pending_scene alone
+         * while last_scene still names the one from before. Skipping the
+         * write left an E1004 flipping back to its old scene on every timer
+         * wake after a cloud switch (2026-10-12). */
+        persist_last_scene(scene_id);
+        s_last_scene_settled = true;
         return true;
     }
     if (s_slot_count > 0) {
