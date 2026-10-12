@@ -2759,7 +2759,7 @@ function FirmwareUpdateState({
       </div>
     )
   }
-  if (outcome) {
+  if (outcome?.kind === 'done') {
     // The boot that ended the update: the owner who watched the download
     // gets told it worked, instead of a card that only says "up to date".
     return (
@@ -2769,6 +2769,19 @@ function FirmwareUpdateState({
           Updated to {outcome.version ?? `the new ${noun}`}
           {outcome.when ? ` ${outcome.when}` : ''}
           {outcome.detail ? `. ${outcome.detail}` : '.'}
+        </span>
+      </div>
+    )
+  }
+  if (outcome?.kind === 'up-to-date') {
+    // The check ran and found nothing to install: say so, or the click
+    // that asked for it looks ignored.
+    return (
+      <div className="frame-tool-muted flex items-center gap-2 text-xs leading-4" role="status">
+        <CheckCircleIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          Checked{outcome.when ? ` ${outcome.when}` : ''}: already on {outcome.version ?? `the latest ${noun}`}, nothing
+          to install.
         </span>
       </div>
     )

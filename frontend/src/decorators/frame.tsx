@@ -310,9 +310,13 @@ export function frameFirmwareUpdateProgress(
 
 /** How long "updated to X" stays worth a word in the deploy drawer. */
 const firmwareUpdateOutcomeShownMs = 24 * 60 * 60 * 1000
+/** How long "already on the latest release" answers the click that asked. */
+const firmwareUpdateUpToDateShownMs = 60 * 60 * 1000
 
 export interface FrameFirmwareUpdateOutcome {
-  /** The release the frame came back on. */
+  /** 'done': the frame came back on a new release; 'up-to-date': the check found nothing to install. */
+  kind: 'done' | 'up-to-date'
+  /** The release the frame came back on, or already runs. */
   version: string | null
   /** "3 minutes ago", when the row's timestamp parses. */
   when: string | null
@@ -325,24 +329,33 @@ export interface FrameFirmwareUpdateOutcome {
  * an update into a `done` row (the hub's firmwareUpdateAfterBoot, the
  * backend's firmware_update_after_boot) with the version the frame reports.
  * Read by the deploy drawer and its status rows only — the frames list goes
- * back to "up to date" — and forgotten after a day.
+ * back to "up to date" — and forgotten after a day. A check that found the
+ * frame already on the offered release (`up-to-date`, the ESP32's answer when
+ * its running version equals the manifest's) is an outcome too, for an hour:
+ * before this the drawer said nothing at all after such a click, which read
+ * as "the frame just doesn't want to update".
  */
 export function frameFirmwareUpdateOutcome(
   frame: FrameType,
   now: number = Date.now()
 ): FrameFirmwareUpdateOutcome | null {
   const update = frame.firmware_update
-  if (!update || update.status !== 'done') {
+  if (!update || (update.status !== 'done' && update.status !== 'up-to-date')) {
     return null
   }
   const at = parseFrameTimestamp(update.at)
-  if (!Number.isFinite(at) || now - at > firmwareUpdateOutcomeShownMs) {
+  const shownMs = update.status === 'done' ? firmwareUpdateOutcomeShownMs : firmwareUpdateUpToDateShownMs
+  if (!Number.isFinite(at) || now - at > shownMs) {
     return null
   }
+  // The ESP32's up-to-date line carries the version as its detail.
+  const version =
+    update.version || (update.status === 'up-to-date' && /^\d+\.\d+\.\d+$/.test(update.detail) ? update.detail : null)
   return {
-    version: update.version || null,
+    kind: update.status === 'done' ? 'done' : 'up-to-date',
+    version,
     when: formatFrameRelativeTime(update.at, now),
-    detail: update.detail || '',
+    detail: update.status === 'done' ? update.detail || '' : '',
   }
 }
 

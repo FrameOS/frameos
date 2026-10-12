@@ -133,7 +133,13 @@ describe("frameFirmwareUpdateProgress (Pi lines, folded by the hub into the same
 describe("frameFirmwareUpdateOutcome", () => {
   it("reads the done row the boot after an update leaves, for a day, and keeps it out of the progress word", () => {
     const done = frame({ status: "done", detail: "", version: "2026.10.8", plane: "cloud", at: at(3 * 60) });
-    expect(frameFirmwareUpdateOutcome(done, now)).toEqual({ version: "2026.10.8", when: "3 minutes ago", detail: "" });
+    expect(frameFirmwareUpdateOutcome(done, now)).toEqual({ kind: "done", version: "2026.10.8", when: "3 minutes ago", detail: "" });
+    // A check that found nothing to install is an outcome for an hour: the
+    // ESP32 answers `up-to-date` with the version as its detail.
+    expect(
+      frameFirmwareUpdateOutcome(frame({ status: "up-to-date", detail: "2026.10.8", version: null, at: at(2 * 60) }), now),
+    ).toEqual({ kind: "up-to-date", version: "2026.10.8", when: "2 minutes ago", detail: "" });
+    expect(frameFirmwareUpdateOutcome(frame({ status: "up-to-date", detail: "2026.10.8", at: at(2 * 60 * 60) }), now)).toBeNull();
     expect(frameFirmwareUpdateProgress(done, now)).toBeNull();
     expect(frameFirmwareUpdateIsRunning(done, now)).toBe(false);
     // The Pi's success line lands after its hello: the done row carries its sentence.
