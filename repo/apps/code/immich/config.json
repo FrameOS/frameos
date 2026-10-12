@@ -21,8 +21,7 @@
       "required": false,
       "label": "Album ID",
       "hint": "UUID of the album, visible in the album URL.",
-      "placeholder": "e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6",
-      "showIf": [{ "field": "mode", "operator": "eq", "value": "album" }]
+      "placeholder": "e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6"
     },
     {
       "name": "personId",
@@ -31,8 +30,7 @@
       "required": false,
       "label": "Person ID",
       "hint": "Optional. UUID of a person to limit random images to, visible in the person's URL.",
-      "placeholder": "e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
-      "showIf": [{ "field": "mode", "operator": "eq", "value": "random" }]
+      "placeholder": "e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
     },
     {
       "name": "metadataStateKey",
