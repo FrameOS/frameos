@@ -29,6 +29,7 @@ from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.deploy_remote import legacy_remote_cleanup_script
 from app.utils.release_signing import release_signing_public_key_spki_base64
+from app.utils.versions import current_frameos_version
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
 from app.utils.release_targets import release_distro_summary, release_versions
 from app.utils.token import secure_token
@@ -194,7 +195,8 @@ def _frame_bootstrap_config_json(db: Session, frame: Frame) -> str:
 
 
 def _frame_bootstrap_scenes_json(frame: Frame) -> str:
-    scenes = get_interpreted_scenes_json(frame) if frame.scenes else []
+    # The bootstrap installs the release this backend runs.
+    scenes = get_interpreted_scenes_json(frame, current_frameos_version()) if frame.scenes else []
     return json.dumps(scenes, indent=2) + "\n"
 
 

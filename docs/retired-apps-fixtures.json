@@ -1,0 +1,257 @@
+{
+  "$comment": "Conformance corpus for the retired-app transform (docs/retired-apps.md). Each case runs `op` on `input` and must produce `output`. `retire` and `restore` take the scenes array; `forRuntime` also takes `runtimeVersion` (null = unknown). An app entry written as the string \"@repo/apps/code/immich\" stands for the full scene-local app the runner builds from that folder: the app's config.json keys plus `origin` and `sources` (every file of the folder). Runners: backend/app/utils/tests/test_retired_apps.py, cloud/apps/auth-web/src/lib/retired-apps.test.ts.",
+  "cases": [
+    {
+      "name": "retire: a data/immich node becomes the scene-local JS app",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "n1", "type": "app", "data": { "keyword": "render/image", "config": {} } },
+            {
+              "id": "n2",
+              "type": "app",
+              "data": { "keyword": "data/immich", "config": { "mode": "album", "albumId": "a-1" }, "cache": { "enabled": true } }
+            }
+          ],
+          "edges": [{ "id": "e1", "source": "n2", "sourceHandle": "fieldOutput", "target": "n1", "targetHandle": "fieldInput/image" }]
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "n1", "type": "app", "data": { "keyword": "render/image", "config": {} } },
+            {
+              "id": "n2",
+              "type": "app",
+              "data": { "keyword": "immich", "config": { "mode": "album", "albumId": "a-1" }, "cache": { "enabled": true } }
+            }
+          ],
+          "edges": [{ "id": "e1", "source": "n2", "sourceHandle": "fieldOutput", "target": "n1", "targetHandle": "fieldInput/image" }],
+          "apps": { "immich": "@repo/apps/code/immich" }
+        }
+      ]
+    },
+    {
+      "name": "retire: two nodes share one app entry",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": { "mode": "favorites" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "data/immich", "config": { "mode": "memories" } } }
+          ]
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "immich", "config": { "mode": "favorites" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "immich", "config": { "mode": "memories" } } }
+          ],
+          "apps": { "immich": "@repo/apps/code/immich" }
+        }
+      ]
+    },
+    {
+      "name": "retire: an already converted scene is left alone",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
+          "apps": { "immich": { "origin": "repo/apps/code/immich", "name": "Immich (edited)", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
+          "apps": { "immich": { "origin": "repo/apps/code/immich", "name": "Immich (edited)", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ]
+    },
+    {
+      "name": "retire: an existing entry with the same origin is reused under its own key",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "photos", "config": {} } },
+            { "id": "b", "type": "app", "data": { "keyword": "data/immich", "config": {} } }
+          ],
+          "apps": { "photos": { "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "photos", "config": {} } },
+            { "id": "b", "type": "app", "data": { "keyword": "photos", "config": {} } }
+          ],
+          "apps": { "photos": { "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ]
+    },
+    {
+      "name": "retire: a different app already named immich pushes the key to immich2",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } },
+            { "id": "b", "type": "app", "data": { "keyword": "data/immich", "config": {} } }
+          ],
+          "apps": { "immich": { "origin": "repo/apps/code/jsImage", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } },
+            { "id": "b", "type": "app", "data": { "keyword": "immich2", "config": {} } }
+          ],
+          "apps": {
+            "immich": { "origin": "repo/apps/code/jsImage", "sources": { "app.ts": "export function get() {}" } },
+            "immich2": "@repo/apps/code/immich"
+          }
+        }
+      ]
+    },
+    {
+      "name": "retire: a node that carries its own sources is self-contained and left alone",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {}, "sources": { "app.nim": "discard" } } }]
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {}, "sources": { "app.nim": "discard" } } }]
+        }
+      ]
+    },
+    {
+      "name": "restore: the JS app goes back to the Nim keyword and its entry is dropped",
+      "op": "restore",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": { "mode": "album" } } }],
+          "apps": { "immich": "@repo/apps/code/immich" }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": { "mode": "album" } } }]
+        }
+      ]
+    },
+    {
+      "name": "restore: other scene apps stay",
+      "op": "restore",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "photos", "config": {} } },
+            { "id": "b", "type": "app", "data": { "keyword": "panel", "config": {} } }
+          ],
+          "apps": {
+            "photos": { "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } },
+            "panel": { "origin": "repo/apps/code/weatherPanel", "sources": { "app.ts": "export function get() {}" } }
+          }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } },
+            { "id": "b", "type": "app", "data": { "keyword": "panel", "config": {} } }
+          ],
+          "apps": {
+            "panel": { "origin": "repo/apps/code/weatherPanel", "sources": { "app.ts": "export function get() {}" } }
+          }
+        }
+      ]
+    },
+    {
+      "name": "forRuntime: a runtime older than the replacement gets the Nim keyword",
+      "op": "forRuntime",
+      "runtimeVersion": "2026.10.10",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
+          "apps": { "immich": "@repo/apps/code/immich" }
+        }
+      ],
+      "output": [{ "id": "s1", "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } }] }]
+    },
+    {
+      "name": "forRuntime: an old runtime keeps a scene that was never converted as it is",
+      "op": "forRuntime",
+      "runtimeVersion": "2026.9.30",
+      "input": [{ "id": "s1", "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } }] }],
+      "output": [{ "id": "s1", "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } }] }]
+    },
+    {
+      "name": "forRuntime: the first runtime with the replacement gets the JS app",
+      "op": "forRuntime",
+      "runtimeVersion": "2026.10.11",
+      "input": [{ "id": "s1", "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } }] }],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
+          "apps": { "immich": "@repo/apps/code/immich" }
+        }
+      ]
+    },
+    {
+      "name": "forRuntime: a release tag with a build suffix compares by its numbers",
+      "op": "forRuntime",
+      "runtimeVersion": "v2026.11.2+3c9e1f0",
+      "input": [{ "id": "s1", "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } }] }],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
+          "apps": { "immich": "@repo/apps/code/immich" }
+        }
+      ]
+    },
+    {
+      "name": "forRuntime: an unknown runtime is a current one",
+      "op": "forRuntime",
+      "runtimeVersion": null,
+      "input": [{ "id": "s1", "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } }] }],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
+          "apps": { "immich": "@repo/apps/code/immich" }
+        }
+      ]
+    },
+    {
+      "name": "retire: scenes without nodes and non-object entries pass through",
+      "op": "retire",
+      "input": [{ "id": "s1" }, "not a scene", { "id": "s2", "nodes": [] }],
+      "output": [{ "id": "s1" }, "not a scene", { "id": "s2", "nodes": [] }]
+    }
+  ]
+}

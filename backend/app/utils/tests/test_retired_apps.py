@@ -1,0 +1,98 @@
+import copy
+import json
+
+import pytest
+
+from app.utils.retired_apps import (
+    REPO_ROOT,
+    RETIRED_APPS,
+    device_runs_replacements,
+    keywords_runtime_lacks,
+    replacement_app_entry,
+    restore_apps_in_scenes,
+    retire_apps_in_scenes,
+    scenes_for_embedded_device,
+    scenes_for_runtime,
+)
+
+CONTRACT = json.loads((REPO_ROOT / "docs" / "retired-apps.json").read_text())
+FIXTURES = json.loads((REPO_ROOT / "docs" / "retired-apps-fixtures.json").read_text())
+
+
+def expand(value):
+    """Swap the fixtures' "@repo/apps/code/<app>" placeholders for the real entry."""
+    if isinstance(value, str) and value.startswith("@repo/"):
+        return replacement_app_entry(value[1:])
+    if isinstance(value, list):
+        return [expand(item) for item in value]
+    if isinstance(value, dict):
+        return {key: expand(item) for key, item in value.items()}
+    return value
+
+
+def test_table_is_the_contract():
+    assert RETIRED_APPS == CONTRACT["apps"]
+
+
+def test_generated_copies_are_current():
+    """The cloud and the Linux runtime carry generated copies of the table and
+    of each replacement app; a change to either needs the generator run."""
+    import subprocess
+
+    generator = REPO_ROOT / "frameos" / "tools" / "generate_retired_apps.py"
+    result = subprocess.run(["python3", str(generator), "--check"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("case", FIXTURES["cases"], ids=[case["name"] for case in FIXTURES["cases"]])
+def test_fixture(case):
+    scenes = expand(case["input"])
+    original = copy.deepcopy(scenes)
+    if case["op"] == "retire":
+        retire_apps_in_scenes(scenes)
+        result = scenes
+    elif case["op"] == "restore":
+        restore_apps_in_scenes(scenes)
+        result = scenes
+    else:
+        result = scenes_for_runtime(scenes, case["runtimeVersion"])
+        # A copy for the device: what is stored is never touched.
+        assert scenes == original
+    assert result == expand(case["output"])
+
+
+def test_retire_then_restore_is_the_original_scene():
+    scenes = [{"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "data/immich", "config": {"mode": "album"}}}]}]
+    original = copy.deepcopy(scenes)
+    assert retire_apps_in_scenes(scenes)
+    assert restore_apps_in_scenes(scenes)
+    assert scenes == original
+
+
+def test_replacement_entry_is_the_repo_app():
+    entry = replacement_app_entry("repo/apps/code/immich")
+    assert entry["origin"] == "repo/apps/code/immich"
+    assert entry["settings"] == ["immich"]
+    assert entry["sources"]["app.ts"] == (REPO_ROOT / "repo/apps/code/immich/app.ts").read_text()
+    assert json.loads(entry["sources"]["config.json"])["name"] == entry["name"]
+
+
+def test_keywords_runtime_lacks():
+    assert keywords_runtime_lacks("2026.10.10") == ["data/immich"]
+    assert keywords_runtime_lacks("2026.10.11") == []
+    assert keywords_runtime_lacks(None) == []
+    assert keywords_runtime_lacks("not a version") == []
+
+
+def test_embedded_device_decides_by_its_capabilities_header():
+    stored = [{"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "immich", "config": {}}}],
+               "apps": {"immich": replacement_app_entry("repo/apps/code/immich")}}]
+    assert device_runs_replacements("fetchImage")
+    assert device_runs_replacements("other, fetchImage")
+    assert not device_runs_replacements(None)
+    assert not device_runs_replacements("")
+    current = scenes_for_embedded_device(stored, "fetchImage")
+    assert current[0]["nodes"][0]["data"]["keyword"] == "immich"
+    older = scenes_for_embedded_device(stored, None)
+    assert older[0]["nodes"][0]["data"]["keyword"] == "data/immich"
+    assert "apps" not in older[0]

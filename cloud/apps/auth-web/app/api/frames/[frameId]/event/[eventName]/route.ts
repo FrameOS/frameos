@@ -32,6 +32,7 @@ import {
 } from "../../../../../../src/lib/frame-scenes";
 import { deviceSceneIdForFrame } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { scenesForRuntime } from "../../../../../../src/lib/retired-apps";
 import { readSession } from "../../../../../../src/lib/session";
 import {
   compiledSceneHint,
@@ -295,16 +296,19 @@ export async function POST(
           scenes: compiled,
         });
       }
+      // In the form this frame's firmware reads: an older one gets a retired
+      // Nim app's keyword back (data/immich), as the assignment push does.
+      const delivered = scenesForRuntime(scenes, frame.frameosVersion);
       // The same digest the assignment push uses (buildScenesPayloadForFrame):
       // the device stores it opaquely and echoes it in scene_ack, which is
       // how the workspace can tell this ad-hoc set apart from the assigned one.
-      const checksum = createHash("sha256").update(serialized).digest("hex");
+      const checksum = createHash("sha256").update(JSON.stringify(delivered)).digest("hex");
       if (sceneId && sceneId.length > maxSceneIdChars) {
         return jsonError("invalid_scene_id", 400);
       }
       payload = {
         checksum,
-        scenes,
+        scenes: delivered,
         ...(sceneId ? { scene_id: sceneId } : {}),
         ...(state ? { state } : {}),
       };

@@ -2290,7 +2290,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     monkeypatch.setattr("app.tasks.buildroot_image.get_frame_json", lambda _db, _frame: {"id": 1})
     monkeypatch.setattr(
         "app.tasks.buildroot_image.get_interpreted_scenes_json",
-        lambda _frame: [
+        lambda _frame, _runtime_version=None: [
             scene
             for scene in getattr(_frame, "scenes", [])
             if scene.get("settings", {}).get("execution") == "interpreted"

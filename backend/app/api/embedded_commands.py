@@ -46,6 +46,7 @@ from app.redis import get_redis
 from app.utils.deploy_progress import fold as fold_deploy_progress
 from app.utils.deploy_progress import fold_command as fold_deploy_progress_command
 from app.utils.embedded_commands import command_label
+from app.utils.retired_apps import remember_device_capabilities
 from app.utils.frame_commands import (
     ack_frame_command,
     ack_pull_backed_commands,
@@ -169,12 +170,15 @@ async def api_embedded_device_commands(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
     authorization: str = Header(None),
+    x_frameos_capabilities: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
     body = await _json_body(request)
     now = utcnow()
 
     await _remember_device_state(redis, frame, body)
+    # Committed with the drain below.
+    remember_device_capabilities(frame, x_frameos_capabilities)
 
     # The cloud hello's name for it, and the older name this route first had.
     scenes_etag = _str_field(body, "scenes_checksum") or _str_field(body, "scenes_etag")
@@ -182,7 +186,11 @@ async def api_embedded_device_commands(
     acked = ack_pull_backed_commands(
         db,
         frame,
-        scenes_current=None if scenes_etag is None else scenes_etag == embedded_scenes_etag(frame),
+        # Compared with what THIS device pulls: its capabilities pick the
+        # form of a retired app it gets (utils/retired_apps.py).
+        scenes_current=None if scenes_etag is None else (
+            scenes_etag == embedded_scenes_etag(frame, x_frameos_capabilities)
+        ),
         settings_current=None if settings_etag is None else settings_etag == embedded_settings_etag(db, frame),
         now=now,
     )

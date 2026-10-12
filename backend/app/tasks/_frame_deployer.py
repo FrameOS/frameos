@@ -275,9 +275,10 @@ class FrameDeployer:
             self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport, mode=0o600
         )
 
-    async def _upload_scenes_json(self, path: str, gzip: bool = False) -> None:
-        """Upload the release-specific `scenes.json`."""
-        json_data = json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode() + b"\n"
+    async def _upload_scenes_json(self, path: str, gzip: bool = False, runtime_version: str | None = None) -> None:
+        """Upload the release-specific `scenes.json`, as the FrameOS that will
+        read it (`runtime_version`) has to receive it."""
+        json_data = json.dumps(get_interpreted_scenes_json(self.frame, runtime_version), indent=4).encode() + b"\n"
         if gzip:
             json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
@@ -287,9 +288,11 @@ class FrameDeployer:
         await self._upload_frame_json(temp_path)
         await rename_path(self.db, self.redis, self.frame, temp_path, path, transport=self.remote_transport)
 
-    async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
+    async def _upload_scenes_json_atomically(
+        self, path: str, gzip: bool = False, runtime_version: str | None = None
+    ) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
-        await self._upload_scenes_json(temp_path, gzip=gzip)
+        await self._upload_scenes_json(temp_path, gzip=gzip, runtime_version=runtime_version)
         await rename_path(self.db, self.redis, self.frame, temp_path, path, transport=self.remote_transport)
 
     async def get_hostname(self) -> str:

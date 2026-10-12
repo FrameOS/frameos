@@ -111,8 +111,11 @@ class RecordingDeployer(FakeDeployer):
     async def _upload_frame_json_atomically(self, path: str) -> None:
         self.atomic_uploads.append((path, False))
 
-    async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
+    async def _upload_scenes_json_atomically(
+        self, path: str, gzip: bool = False, runtime_version: str | None = None
+    ) -> None:
         self.atomic_uploads.append((path, gzip))
+        self.scenes_runtime_version = runtime_version
 
 
 class FakeBinaryBuilder:

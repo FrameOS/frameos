@@ -8,6 +8,7 @@ from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
 when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
+import frameos/retired_apps
 import frameos/channels
 import frameos/cloud/scene_guard
 import frameos/js_runtime/run_budget
@@ -167,6 +168,11 @@ proc initInterpretedApp(keyword: string, node: DiagramNode, scene: FrameScene): 
   var sources = node.data{"sources"}
   if not hasJsAppSource(sources):
     sources = appSourcesFromSceneApps(scene, keyword)
+  if not hasJsAppSource(sources):
+    # A scene still on disk from before this runtime dropped a built-in app
+    # (data/immich): run the JavaScript app that replaced it. Linux only —
+    # see frameos/retired_apps.nim.
+    sources = retiredAppSources(keyword)
   if hasJsAppSource(sources):
     return initDynamicJsApp(keyword, node, scene, sources)
   initApp(keyword, node, scene)

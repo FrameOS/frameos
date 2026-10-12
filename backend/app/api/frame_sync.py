@@ -44,6 +44,7 @@ from app.tasks.buildroot_image import (
 from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import device_server_host_error, is_safe_host
+from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_runtime
 from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
 from app.utils.timezone import stored_timezone
 from app.utils.versions import current_frameos_version
@@ -878,6 +879,11 @@ async def _load_live_frame_api_payload(
             remote_frame = _extract_remote_frame_payload(json.loads(body.decode("utf-8")))
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Frame returned invalid JSON: {exc}")
+        # A runtime that predates a retired Nim app's replacement holds the
+        # Nim keyword (it is sent it: utils/retired_apps.py). Compare and merge
+        # in the form the backend stores, so that is not a change to sync.
+        if isinstance(remote_frame, dict) and isinstance(remote_frame.get("scenes"), list):
+            retire_apps_in_scenes(remote_frame["scenes"])
         return _restore_write_only_secrets(remote_frame, frame)
     # Whatever answered on that address does not get its body relayed to the
     # browser; a structured `detail`/`error` from a FrameOS runtime does.
@@ -1878,8 +1884,10 @@ async def adopt_standalone_frame(
         remote_scenes = remote_frame.get("scenes")
         if isinstance(remote_scenes, list) and remote_scenes:
             # Scenes pulled from a device may predate the removal of the
-            # legacy/* apps.
+            # legacy/* apps, and an older device holds data/immich (it is
+            # sent the retired keyword: utils/retired_apps.py).
             migrate_legacy_apps_in_scenes(remote_scenes)
+            retire_apps_in_scenes(remote_scenes)
             normalize_scenes_execution(remote_scenes)
             frame.scenes = remote_scenes
         frame.frame_admin_auth = admin_auth
@@ -2055,15 +2063,18 @@ async def apply_frame_sync(
         )
         if not _sync_values_equal(backend_scenes, backend_frame.get("scenes")):
             if isinstance(backend_scenes, list):
-                # Scenes pulled from a device may predate the removal of the legacy/* apps
+                # Scenes pulled from a device may predate the removal of the
+                # legacy/* apps, or hold data/immich (utils/retired_apps.py)
                 migrate_legacy_apps_in_scenes(backend_scenes)
+                retire_apps_in_scenes(backend_scenes)
                 normalize_scenes_execution(backend_scenes)
             frame.scenes = backend_scenes
             database_changed = True
         if not _sync_values_equal(frame_scenes, remote_scenes):
             # Same stamp the stored copy gets, so device and backend agree.
             normalize_scenes_execution(frame_scenes)
-            backend_push_payload["scenes"] = frame_scenes
+            # ...and in the form its runtime reads (utils/retired_apps.py).
+            backend_push_payload["scenes"] = scenes_for_runtime(frame_scenes, frame_runtime_version(frame))
 
     if database_changed:
         await update_frame(db, redis, frame)

@@ -32,6 +32,7 @@ import {
 // header comment in cloud/apps/auth-web/src/lib/frames.ts).
 import { authenticateLinkedClient, linkedClientScopes } from "../../auth-web/src/lib/backend-auth";
 import {
+  buildScenesPayloadForFrame,
   enqueueFrameCommand,
   frameCommandsNotifyChannel,
   frameForLinkedClient,
@@ -70,6 +71,7 @@ import {
   storeFrameDeviceScenes,
 } from "../../auth-web/src/lib/device-scenes";
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
+import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
 import {
   allowsPrivateNetworkOrigins,
@@ -1042,6 +1044,15 @@ export async function startFrameHub(
     }
 
     await resyncEmptyStore(session, hello);
+    // Ahead of the pending count below, like the empty-store resync: an
+    // ESP32's first render waits for what `ready` says is coming (#534).
+    if (hello.scenes_checksum !== "") {
+      await resyncScenesForFirmwareChange(
+        session,
+        session.frame.frameosVersion,
+        typeof hello.frameos_version === "string" ? hello.frameos_version.slice(0, 64) : undefined,
+      );
+    }
     await requestDeviceScenes(session, hello);
     await expireStaleCommands(frameId);
     // A fresh session cannot have written anything yet, so every command
@@ -1106,6 +1117,85 @@ export async function startFrameHub(
     // disconnect bookkeeping this close handler may have raced past.
     if (session.closed) {
       await markDeviceDisconnected(session);
+    }
+  }
+
+  // A firmware update can change what this frame must be SENT: the payload
+  // builder hands a firmware older than a retired Nim app's replacement the
+  // Nim keyword (data/immich) and every newer one the JavaScript app
+  // (auth-web retired-apps.ts). The device still holds what its old firmware
+  // was sent — a keyword the new one may no longer have — so rebuild the
+  // assigned set for the version it reports now and, if that moved the
+  // checksum, push the same assignments again, on the scene it is showing.
+  // Only an update across a retired app's runtime does this: any other
+  // difference between the assigned checksum and a fresh build stays the
+  // owner's call, as it always was.
+  async function resyncScenesForFirmwareChange(
+    session: DeviceSession,
+    fromVersion: string | null | undefined,
+    toVersion: string | undefined,
+  ) {
+    if (!toVersion || toVersion === fromVersion) {
+      return;
+    }
+    const before = keywordsRuntimeLacks(fromVersion);
+    const after = keywordsRuntimeLacks(toVersion);
+    if (before.length === after.length && before.every((keyword) => after.includes(keyword))) {
+      return;
+    }
+    const frameId = session.frame.id;
+    try {
+      const [row] = await db
+        .select()
+        .from(frames)
+        .where(eq(frames.id, frameId))
+        .limit(1);
+      if (!row?.assignedChecksum) {
+        return;
+      }
+      const built = await buildScenesPayloadForFrame(db, frameId, { runtimeVersion: toVersion });
+      if ("error" in built || built.checksum === row.assignedChecksum) {
+        return;
+      }
+      // Only when it is the firmware that changes the payload: the same
+      // assignments built for the firmware the frame had before must differ.
+      // Any other gap between the assigned checksum and a fresh build stays
+      // the owner's call.
+      const prior = await buildScenesPayloadForFrame(db, frameId, { runtimeVersion: fromVersion ?? null });
+      if ("error" in prior || prior.checksum === built.checksum) {
+        return;
+      }
+      const lastState =
+        row.lastState && typeof row.lastState === "object" && !Array.isArray(row.lastState)
+          ? (row.lastState as Record<string, unknown>)
+          : {};
+      const activeScene =
+        typeof lastState.active_scene === "string" && lastState.active_scene
+          ? lastState.active_scene
+          : undefined;
+      const outcome = await redeployAssignedScenesToFrame(db, {
+        accountId: row.accountId,
+        activeSceneId: activeScene,
+        frame: row,
+      });
+      if (outcome.ok) {
+        logInfo("device.scenes_resynced_for_firmware", {
+          checksum: outcome.checksum,
+          commandId: outcome.commandId,
+          frameId,
+        });
+        await recordFrameAudit(row, "frame.scenes_resynced", {
+          checksum: outcome.checksum,
+          reason: "firmware_changed",
+        });
+      } else {
+        logWarn("device.scenes_resync_failed", { error: outcome.error, frameId });
+      }
+    } catch (error) {
+      logError("device.scenes_resync_failed", {
+        error: error instanceof Error ? error.message : String(error),
+        frameId,
+      });
     }
   }
 

@@ -1108,5 +1108,14 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     frame_json['settings'] = final_settings
     return frame_json
 
-def get_interpreted_scenes_json(frame: Frame) -> list[dict]:
-    return [scene for scene in frame.scenes if scene_is_interpreted(scene)]
+def get_interpreted_scenes_json(frame: Frame, runtime_version: str | None = None) -> list[dict]:
+    """The interpreted scenes as a runtime of `runtime_version` (None: the
+    release this backend carries) must receive them: one that predates a
+    retired Nim app's replacement gets the Nim keyword back
+    (utils/retired_apps.py)."""
+    from app.utils.retired_apps import scenes_for_runtime
+
+    return scenes_for_runtime(
+        [scene for scene in (frame.scenes or []) if scene_is_interpreted(scene)],
+        runtime_version,
+    )

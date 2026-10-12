@@ -10,7 +10,6 @@ import apps/data/frameOSGallery/app_loader as data_frameOSGallery_loader
 import apps/data/googlePhotos/app_loader as data_googlePhotos_loader
 import apps/data/haSensor/app_loader as data_haSensor_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
-import apps/data/immich/app_loader as data_immich_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
 import apps/data/newImage/app_loader as data_newImage_loader
@@ -65,7 +64,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
     AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
-    AppEntry(keyword: "data/immich", initProc: data_immich_loader.init, setFieldProc: data_immich_loader.setField, getProc: data_immich_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
@@ -107,7 +105,6 @@ else:
     AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
     AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
-    AppEntry(keyword: "data/immich", initProc: data_immich_loader.init, setFieldProc: data_immich_loader.setField, getProc: data_immich_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
@@ -205,14 +202,6 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       requestsBounds: @[],
       fieldDefaults: @[])
   of "data/googlePhotos":
-    AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[])
-  of "data/immich":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],

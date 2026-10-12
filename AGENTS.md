@@ -136,6 +136,18 @@
   :3000, the local DB filled by `scripts/import-store-scenes.mjs`, and
   `OPENAI_API_KEY`). See `cloud/apps/auth-web/evals/README.md`.
 
+## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
+
+- A Nim app that gets a repo JavaScript replacement (`data/immich` →
+  `repo/apps/code/immich`) is deleted in the same change and listed in
+  `docs/retired-apps.json`. Stored scenes become the JS app (backend alembic
+  migration + import doors; the cloud converts at read time, its zips are
+  immutable), every path to a device sends what that runtime reads (older
+  firmware gets the Nim keyword back), and the Linux runtime runs the
+  replacement for a scene still on disk. `docs/retired-apps.md` has the
+  steps; run `python3 frameos/tools/generate_retired_apps.py` after touching
+  the contract or a replacement's files (`test_retired_apps.py` checks it).
+
 ## Per-photo colour profiles: `docs/asset-color-profiles.md` is the contract
 
 - A photo may carry a `<image>.frameos.json` sidecar (exposure, white point,

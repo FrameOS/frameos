@@ -12,6 +12,7 @@ import {
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { withRetiredAppsReplaced } from "../../../../../../src/lib/retired-apps";
 import { withStoreSceneOrigin } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 import { unzipBounded } from "../../../../../../src/lib/zip-bounded";
@@ -124,13 +125,17 @@ async function handleGet(request: NextRequest, context: RouteContext) {
 
   // Each scene leaves with its `origin` (store page, uuid, THIS version) —
   // the workspace hydrates cloud frames from here and keeps the stamp as the
-  // record of what the frame is running. See scene-origin.ts.
+  // record of what the frame is running. See scene-origin.ts. A version saved
+  // before a built-in Nim app was retired names it (data/immich); it reads
+  // as the JavaScript app that replaced it (retired-apps.ts).
   const body = JSON.stringify(
-    withStoreSceneOrigin(scenes, {
-      id: scene.id,
-      slug: scene.slug,
-      version: version.version,
-    }),
+    withRetiredAppsReplaced(
+      withStoreSceneOrigin(scenes, {
+        id: scene.id,
+        slug: scene.slug,
+        version: version.version,
+      }),
+    ),
   );
 
   return new NextResponse(body, {

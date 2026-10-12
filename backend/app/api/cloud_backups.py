@@ -38,6 +38,7 @@ from app.models.template import Template
 from app.models.user import User
 from app.redis import get_redis
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
+from app.utils.retired_apps import retire_apps_in_scenes
 from app.utils.scene_execution import normalize_scenes_execution
 from app.schemas.cloud import (
     CloudBackupKeyImportRequest,
@@ -287,8 +288,10 @@ async def restore_cloud_backup(
             ) from exc
         image = fields.get("image")
         scenes = fields.get("scenes") or []
-        # Backups may predate the removal of the legacy/* apps
+        # Backups may predate the removal of the legacy/* apps, or of a
+        # retired Nim app (data/immich)
         migrate_legacy_apps_in_scenes(scenes)
+        retire_apps_in_scenes(scenes)
         normalize_scenes_execution(scenes)
         template = Template(
             project_id=project.id,
@@ -328,8 +331,10 @@ async def restore_cloud_backup(
             if field in frame_dict:
                 setattr(frame, field, frame_dict[field])
         if isinstance(frame.scenes, list):
-            # Backups may predate the removal of the legacy/* apps
+            # Backups may predate the removal of the legacy/* apps, or of a
+            # retired Nim app (data/immich)
             migrate_legacy_apps_in_scenes(frame.scenes)
+            retire_apps_in_scenes(frame.scenes)
             normalize_scenes_execution(frame.scenes)
         agent = dict(frame.agent or {}) if isinstance(frame.agent, dict) else {}
         agent["agentSharedSecret"] = secure_token(32)
