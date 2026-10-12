@@ -153,7 +153,7 @@ export function ExpandedScene({
         frameId,
         kind: 'deploy',
         sceneId,
-        title: requiresRecompilation ? 'Deploying scene changes' : 'Fast deploying scene changes',
+        title: 'Deploying scene changes',
         detail: scene?.name || sceneId,
       })
       try {

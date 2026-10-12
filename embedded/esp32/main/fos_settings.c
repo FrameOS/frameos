@@ -471,6 +471,54 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    /* GPIO buttons: [{pin, label}], the whole list replaced — the cloud's
+     * set_settings shape (fos_cloud.c), through the console's spec parser so
+     * the limits live in one place. Present only when the backend holds a
+     * map; a reserved pin or a bad entry keeps the previous list. The
+     * buttons task binds pins once at boot, hence the restart. Before this
+     * the Settings panel's GPIO buttons changed nothing on a provisioned
+     * board (E1004, 2026-10-12). */
+    const cJSON *buttons = cJSON_GetObjectItem(frame, "gpioButtons");
+    if (cJSON_IsArray(buttons)) {
+        char spec[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
+        size_t used = 0;
+        bool valid = true;
+        const cJSON *button = NULL;
+        cJSON_ArrayForEach(button, buttons) {
+            const cJSON *pin = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "pin") : NULL;
+            const cJSON *label = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "label") : NULL;
+            if (!cJSON_IsNumber(pin) || !cJSON_IsString(label) ||
+                strlen(label->valuestring) >= FOS_GPIO_BUTTON_LABEL_LEN ||
+                !settings_pin_usable("gpioButtons", (int)pin->valuedouble)) {
+                valid = false;
+                break;
+            }
+            int written = snprintf(spec + used, sizeof(spec) - used, "%s%d:%s",
+                                   used ? "\n" : "", (int)pin->valuedouble, label->valuestring);
+            if (written < 0 || (size_t)written >= sizeof(spec) - used) {
+                valid = false;
+                break;
+            }
+            used += (size_t)written;
+        }
+        if (valid) {
+            char before_spec[FOS_GPIO_BUTTONS_SPEC_LEN];
+            fos_config_format_gpio_buttons(config, before_spec, sizeof(before_spec));
+            if (strcmp(before_spec, spec) != 0) {
+                /* Into the live config, as the cloud verb does: the parser
+                 * validates the whole spec before it writes. */
+                if (fos_config_parse_gpio_buttons(spec, config) == ESP_OK) {
+                    s_restart_after_apply = true;
+                    changed = true;
+                } else {
+                    ESP_LOGW(TAG, "settings: gpioButtons refused: %s", spec);
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "settings: gpioButtons ignored (bad entry or reserved pin)");
+        }
+    }
+
     const cJSON *rotate = cJSON_GetObjectItem(frame, "rotate");
     uint16_t normalized_rotate = 0;
     if (cJSON_IsNumber(rotate) &&

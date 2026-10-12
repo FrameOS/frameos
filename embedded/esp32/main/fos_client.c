@@ -527,6 +527,17 @@ RTC_NOINIT_ATTR static uint32_t s_render_recovery_magic;
 #define FOS_RENDER_RECOVERY_MAGIC 0x5245434fu /* "RECO" */
 
 static bool s_render_paused_for_memory = false;
+/* True from the moment a pass decides to render until render_once returns
+ * (image fetches, the scene, dither, the panel refresh). Read by fos_ota.c:
+ * an OTA that starts next to a render shares one Wi-Fi link and ~80 KB of
+ * internal heap with a TLS image stream — E1004 2026-10-12 died at 1 MB of
+ * 3.2 MB that way — so the download waits for the pass to finish first. */
+static volatile bool s_render_in_flight = false;
+
+bool fos_client_render_in_flight(void)
+{
+    return s_render_in_flight;
+}
 
 static void json_escape_value(const char *src, char *out, size_t out_len)
 {
@@ -1411,9 +1422,13 @@ static void client_task(void *arg)
         json_escape_value(wake_label, label_esc, sizeof(label_esc));
         char line[192];
         if (button_wake) {
+            /* `mask`: every pad the wake reported low. One bit, and the pin
+             * is beyond dispute; a label dispute (E1004, 2026-10-12: "I
+             * pressed right, it says refresh") is then about the preset. */
             snprintf(line, sizeof(line),
                      "{\"event\":\"wake\",\"source\":\"esp32\",\"cause\":\"button\","
-                     "\"pin\":%d,\"label\":\"%s\"}", wake_pin, label_esc);
+                     "\"pin\":%d,\"label\":\"%s\",\"mask\":\"0x%llx\"}", wake_pin, label_esc,
+                     (unsigned long long)fos_buttons_wake_mask());
         } else {
             snprintf(line, sizeof(line),
                      "{\"event\":\"wake\",\"source\":\"esp32\",\"cause\":\"%s\"}",
@@ -1617,10 +1632,15 @@ static void client_task(void *arg)
             log_render_skipped("wake_check", -1);
         } else {
             if (fos_ota_busy()) {
+                /* The OTA task waits for a render that is already under way
+                 * (fos_client_render_in_flight); a pass that starts while it
+                 * is busy yields instead, so the two never share the link. */
                 ESP_LOGW(TAG, "OTA in progress; skipping render cycle");
                 log_render_skipped("ota", -1);
             } else {
+                s_render_in_flight = true;
                 render_once();
+                s_render_in_flight = false;
                 rendered = true;
             }
         }
@@ -1685,8 +1705,11 @@ static void client_task(void *arg)
          * render again. */
         s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
+        bool button_pending = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+                              fos_buttons_pending();
         if (deep_sleep_now && fos_display_present() && config->render_mode == FOS_RENDER_LOCAL &&
-            frameos_nim_available() && (fos_scenes_work_pending() || fos_events_deferred_pending())) {
+            frameos_nim_available() &&
+            (fos_scenes_work_pending() || fos_events_deferred_pending() || button_pending)) {
             /* A scene payload or a scene switch arrived while this pass was
              * rendering (the cloud delivers them the moment the session is
              * up, and a 13.3" render takes a minute). Sleeping now would
@@ -1694,9 +1717,17 @@ static void client_task(void *arg)
              * the switch itself in RAM, lost. One more pass applies and
              * renders it; the apply consumes the work, so this cannot loop.
              * A deferred scene event (a setSceneState the cloud sent during
-             * the render) holds the sleep the same way. */
-            frameos_nim_log_hook("{\"event\":\"sleep:held\",\"source\":\"esp32\","
-                                 "\"reason\":\"scenes\"}");
+             * the render) holds the sleep the same way, and so does a button
+             * pressed during the render: the queue is drained only at the
+             * start of a pass and in the idle wait, neither of which a
+             * battery frame reaches between its render and its sleep, so the
+             * press vanished without a log line (E1004, 2026-10-12: two
+             * right-arrow presses during a refresh, nothing in the log). */
+            char held[96];
+            snprintf(held, sizeof(held),
+                     "{\"event\":\"sleep:held\",\"source\":\"esp32\",\"reason\":\"%s\"}",
+                     button_pending ? "button" : "scenes");
+            frameos_nim_log_hook(held);
             force_render = true;
             continue;
         }

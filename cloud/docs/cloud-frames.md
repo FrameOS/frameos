@@ -165,15 +165,19 @@ Cloud-profile verb set (complete):
   The device narrates the update as log lines (`ota:<plane>` on the ESP32,
   `cloud:upgrade` on buildroot/Pi); the hub folds the newest one of every
   `log_batch` into `frames.firmware_update` (`frame-hub/src/protocol.ts`
-  `firmwareUpdateFromLogEntries`: one vocabulary — `downloading`,
+  `firmwareUpdateFromLogEntries`: one vocabulary — `waiting`, `downloading`,
   `progress "<written>/<total>"`, `verified`, `error`, `up-to-date`) and
   broadcasts the row, which is what lets the frames list, the deploy drawer
   and the "…" menu say "updating firmware 42%" instead of offering the nudge
-  again. The hello after the reboot clears it (a verified install, or any new
-  version); a failure stays until a hello reports a different version. The
-  self-hosted backend keeps the same column and vocabulary
+  again. The hello after the reboot ends it (a verified install, or any new
+  version) as `done` with the version the frame now runs, which the deploy
+  drawer shows as "updated to 2026.10.8 · 3 minutes ago" for a day; a failure
+  stays until a hello reports a different version, and a `bootup` on the old
+  version while the row still says downloading folds into `error:
+  interrupted …` (the ESP32 cannot forward its own error while its socket is
+  down). The self-hosted backend keeps the same column and vocabulary
   (`backend/app/utils/firmware_update.py`, folded by `models/log.py`
-  `process_log`, cleared by the bootup line), so the shared workspace reads
+  `process_log`, ended by the bootup line), so the shared workspace reads
   one field on both planes.
 - `refresh_service_settings` — advisory only, empty payload; the device
   fetches the account's service API keys over device-authed HTTPS (see

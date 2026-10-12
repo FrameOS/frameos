@@ -2599,8 +2599,9 @@ describe("firmware update progress", () => {
     }, "update_frame after verification");
     device.ws.close();
 
-    // The hello after the reboot ends the narrative: the row says nothing
-    // about an update any more, and the browser learns that too.
+    // The hello after the reboot ends the narrative: the row says the
+    // update is done, with the version the frame now runs, and the browser
+    // learns that too (the deploy drawer says "updated to 2026.10.5").
     const rebooted = await openDevice(token);
     await handshake(rebooted, privateKey, { frameos_version: "2026.10.5" });
     await browser.next((msg) => {
@@ -2608,10 +2609,11 @@ describe("firmware update progress", () => {
         return false;
       }
       const data = msg.data as Record<string, unknown>;
-      return data.frameos_version === "2026.10.5" && data.firmware_update === null;
-    }, "update_frame with the narrative cleared");
+      const update = data.firmware_update as { status?: string; version?: string } | null;
+      return data.frameos_version === "2026.10.5" && update?.status === "done" && update.version === "2026.10.5";
+    }, "update_frame with the narrative done");
     const [after] = await db.select().from(frames).where(eq(frames.id, frame.id));
-    expect(after?.firmwareUpdate).toBeNull();
+    expect(after?.firmwareUpdate).toMatchObject({ status: "done", version: "2026.10.5" });
     rebooted.ws.close();
   });
 

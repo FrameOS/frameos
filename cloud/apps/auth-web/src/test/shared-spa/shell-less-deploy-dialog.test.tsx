@@ -173,8 +173,10 @@ describe("the deploy dialog for a frame with admin-API access only", () => {
     }
     expect(screen.queryByText(/^Suggested:/)).toBeNull();
     expect(screen.queryByText(/Last upgrade/)).toBeNull();
-    // Like the cloud: the actions sit in the body, the footer only closes.
-    expect(screen.getByText("Close")).toBeTruthy();
+    // Like the cloud: the actions sit in the body, and a footer that would
+    // only hold "Close" is left out — the drawer's top-right control closes.
+    expect(screen.queryByText("Close")).toBeNull();
+    expect(screen.getByLabelText("Close")).toBeTruthy();
   });
 
   it("refreshes by asking the frame again, and starts the frame's own update", async () => {

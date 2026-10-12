@@ -27,6 +27,7 @@
 #include "monocypher-ed25519.h"
 
 #include "fos_backend_http.h"
+#include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_http.h"
@@ -50,6 +51,15 @@ static const char *TAG = "fos_ota";
 #define FOS_OTA_DOWNLOAD_ATTEMPTS 3
 #define FOS_OTA_RETRY_DELAY_MS 3000
 #define FOS_OTA_WIFI_RECONNECT_TIMEOUT_MS 30000
+/* A render pass that is already under way finishes before the OTA touches
+ * the network: the two would share one Wi-Fi link and the internal heap
+ * (three TLS contexts on ~80 KB: the hub socket, the scene's image stream
+ * and the download), which is how E1004's download died at 1 MB of 3.2 MB
+ * on 2026-10-12. A 13.3" panel's pass can run five minutes (render plus
+ * refresh); past this the download goes ahead regardless, logged. The
+ * reverse holds too: a pass that starts while the OTA is busy skips its
+ * render (fos_client.c, `render:skipped reason=ota`). */
+#define FOS_OTA_RENDER_WAIT_MAX_MS (10 * 60 * 1000)
 #define FOS_OTA_AUTH_LEN (FOS_CLOUD_TOKEN_LEN + 16)
 
 static StaticSemaphore_t s_ota_lock_storage;
@@ -263,6 +273,24 @@ static void ota_log_progress(const ota_source_t *src, size_t written, size_t exp
         snprintf(detail, sizeof(detail), "%u", (unsigned)written);
     }
     ota_log(src, "progress", detail);
+}
+
+/* Returns once no render pass is in flight, or after timeout_ms. Logs the
+ * wait once so the control plane's row says why the download has not
+ * started (`waiting` folds like `downloading`). */
+static void wait_for_render_idle(const ota_source_t *src, uint32_t timeout_ms)
+{
+    if (!fos_client_render_in_flight()) return;
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    ESP_LOGW(TAG, "ota (%s): render in flight; waiting for the pass to finish", src->plane);
+    ota_log(src, "waiting", "render");
+    while (fos_client_render_in_flight() && esp_timer_get_time() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    if (fos_client_render_in_flight()) {
+        ESP_LOGW(TAG, "ota (%s): render still in flight after %u s; going ahead", src->plane,
+                 (unsigned)(timeout_ms / 1000));
+    }
 }
 
 typedef struct {
@@ -550,6 +578,10 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
                  src->plane, wifi_state_name(fos_wifi_state()));
         return ESP_ERR_INVALID_STATE;
     }
+
+    /* s_ota_busy is already set by every caller, so the next render pass
+     * yields to this run; a pass already rendering is waited out here. */
+    wait_for_render_idle(src, FOS_OTA_RENDER_WAIT_MAX_MS);
 
     ota_manifest_t manifest;
     bool up_to_date = false;

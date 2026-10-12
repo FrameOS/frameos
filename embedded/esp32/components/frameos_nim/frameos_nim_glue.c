@@ -1009,7 +1009,7 @@ static void queue_log_line(const char *msg)
     xSemaphoreGive(s_log_lock);
 }
 
-static void (*s_log_tap)(const char *line) = NULL;
+static void (*s_log_tap)(const char *line, uint32_t seq) = NULL;
 
 void frameos_nim_apply_service_settings(const char *json)
 {
@@ -1021,7 +1021,7 @@ void frameos_nim_apply_service_settings(const char *json)
     nim_lock_give();
 }
 
-void frameos_nim_set_log_tap(void (*tap)(const char *line))
+void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq))
 {
     s_log_tap = tap;
 }
@@ -1033,16 +1033,19 @@ void frameos_nim_set_log_tap(void (*tap)(const char *line))
 static frameos_log_entry_t s_log_ring[FOS_NIM_LOG_RING_CAP];
 static size_t s_log_ring_next = 0;
 static size_t s_log_ring_count = 0;
+static uint32_t s_log_ring_seq = 0;
 
-static void ring_log_line(const char *msg)
+/* Returns the line's ring sequence (1 for the boot's first line), 0 when the
+ * line could not be kept. */
+static uint32_t ring_log_line(const char *msg)
 {
     ensure_log_lock();
-    if (s_log_lock == NULL || msg == NULL) return;
+    if (s_log_lock == NULL || msg == NULL) return 0;
     size_t len = strnlen(msg, FOS_NIM_LOG_MAX_LINE + 1);
     if (len > FOS_NIM_LOG_MAX_LINE) len = FOS_NIM_LOG_MAX_LINE;
     char *line = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (line == NULL) line = malloc(len + 1);
-    if (line == NULL) return;
+    if (line == NULL) return 0;
     memcpy(line, msg, len);
     line[len] = '\0';
     /* time() before SNTP reports seconds-since-boot epoch; consumers treat
@@ -1050,14 +1053,17 @@ static void ring_log_line(const char *msg)
     double now = (double)time(NULL);
     if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(5)) != pdTRUE) {
         free(line);
-        return;
+        return 0;
     }
+    uint32_t seq = ++s_log_ring_seq;
     free(s_log_ring[s_log_ring_next].line);
     s_log_ring[s_log_ring_next].line = line;
     s_log_ring[s_log_ring_next].timestamp = now;
+    s_log_ring[s_log_ring_next].seq = seq;
     s_log_ring_next = (s_log_ring_next + 1) % FOS_NIM_LOG_RING_CAP;
     if (s_log_ring_count < FOS_NIM_LOG_RING_CAP) s_log_ring_count++;
     xSemaphoreGive(s_log_lock);
+    return seq;
 }
 
 size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
@@ -1075,6 +1081,7 @@ size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
         if (copy == NULL) break;
         out[copied].line = copy;
         out[copied].timestamp = src->timestamp;
+        out[copied].seq = src->seq;
         copied++;
     }
     xSemaphoreGive(s_log_lock);
@@ -1094,12 +1101,13 @@ void frameos_nim_log_hook(const char *msg)
      * verifies the declared length and retries the transfer. */
     printf("%s\n", msg ? msg : "");
     queue_log_line(msg);
-    ring_log_line(msg);
+    uint32_t seq = ring_log_line(msg);
     /* The tap runs on whatever task logged; the cloud client's tap only
-     * copies the line into its own queue (or drops it). */
-    void (*tap)(const char *) = s_log_tap;
+     * copies the line into its own queue (or leaves it to the ring replay
+     * of the next session, by this sequence). */
+    void (*tap)(const char *, uint32_t) = s_log_tap;
     if (tap != NULL && msg != NULL) {
-        tap(msg);
+        tap(msg, seq);
     }
 }
 

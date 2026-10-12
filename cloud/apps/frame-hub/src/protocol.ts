@@ -271,6 +271,53 @@ export function firmwareUpdateIsOver(
 // already running it, and nothing cleared it until the next reconnect
 // (2026-10-12, the FastClock 10.3"). The device's running version is what
 // its last hello reported.
+/** The row's statuses that narrate an update (as opposed to "nothing to do"). */
+const firmwareUpdateNarratedStatuses = ["waiting", "downloading", "progress", "verified", "error", "done"];
+
+/**
+ * The row after a boot report (the hello on the cloud, `bootup` on the
+ * backend): `undefined` leaves it alone, otherwise the new value. An update
+ * that is over (firmwareUpdateIsOver) used to clear the row, which left the
+ * deploy drawer with nothing to say the moment the frame came back — the
+ * owner who watched "updating firmware 97%" saw "up to date" and wondered.
+ * It now folds into `done` with the version the frame reports, so the
+ * workspace can say "updated to 2026.10.8 · 3 minutes ago"
+ * (frameFirmwareUpdateOutcome); the frames list ignores `done`. A row that
+ * never narrated an update (up-to-date, skipped, downgrade-refused) clears.
+ */
+export function firmwareUpdateAfterBoot(
+  firmwareUpdate: unknown,
+  reportedVersion: unknown,
+  knownVersion: string | null | undefined,
+  now: Date = new Date(),
+): FirmwareUpdateRecord | null | undefined {
+  if (!firmwareUpdateIsOver(firmwareUpdate, reportedVersion, knownVersion)) {
+    return undefined;
+  }
+  const row = firmwareUpdate as Record<string, unknown>;
+  if (!firmwareUpdateNarratedStatuses.includes(String(row.status))) {
+    return null;
+  }
+  const version =
+    typeof reportedVersion === "string" && reportedVersion.length > 0
+      ? reportedVersion.slice(0, 64)
+      : typeof row.version === "string"
+        ? row.version
+        : null;
+  return {
+    at: now.toISOString(),
+    detail: row.status === "verified" && typeof row.detail === "string" ? row.detail : "",
+    plane: typeof row.plane === "string" ? row.plane : "cloud",
+    status: "done",
+    version,
+  };
+}
+
+/** The `done` row for a verified line that lands after the frame already came back on that version (firmwareUpdateAlreadyApplied). */
+export function firmwareUpdateDone(folded: FirmwareUpdateRecord): FirmwareUpdateRecord {
+  return { ...folded, status: "done" };
+}
+
 export function firmwareUpdateAlreadyApplied(
   firmwareUpdate: { status: string; version: string | null },
   runningVersion: string | null | undefined,
@@ -319,9 +366,9 @@ const piUpgradeStatusToRow: Record<string, string> = {
   up_to_date: "up-to-date",
 };
 
-function firmwareUpdateLine(
-  payload: unknown,
-): { detail: string; plane: string; status: string; version: string | null } | null {
+type FirmwareUpdateLine = { detail: string; plane: string; status: string; version: string | null };
+
+function firmwareUpdateLine(payload: unknown): FirmwareUpdateLine | null {
   if (!isRecord(payload) || typeof payload.event !== "string" || typeof payload.status !== "string") {
     return null;
   }
@@ -366,22 +413,64 @@ function firmwareUpdateLine(
 // lines. A line that names no version keeps the one an earlier line named
 // (the ESP32 says it once, on "downloading"). null when the batch has no such
 // line — the caller leaves the row alone.
+/**
+ * A `bootup` line while the row still says the device is downloading: the
+ * device restarted before the update finished, on the release it already
+ * had. The ESP32 forwards nothing while its hub socket is down (fos_cloud.c:
+ * the log tap is a tick coalescer, not a store), so the `ota:<plane> error`
+ * of a download that died in a socket gap never arrives — E1004, 2026-10-12:
+ * the row sat on "progress 1048576/3233648" and the frames list on "updating
+ * firmware 32%" through the frame's next wake, then quietly went back to
+ * "upgrade". A boot on a NEW version is the update's success and the hello
+ * handler's business (firmwareUpdateIsOver); a Pi runtime that restarts
+ * while its detached upgrade still runs replays the status file right after
+ * its bootup line, which overrides this in the same batch.
+ */
+function firmwareUpdateInterruptedByBoot(
+  payload: unknown,
+  current: unknown,
+): FirmwareUpdateLine | null {
+  if (!isRecord(payload) || payload.event !== "bootup" || typeof payload.version !== "string") {
+    return null;
+  }
+  if (!isRecord(current) || !["waiting", "downloading", "progress"].includes(String(current.status))) {
+    return null;
+  }
+  const booted = payload.version.replace(/^v/, "").slice(0, 64);
+  const target = typeof current.version === "string" && current.version.length > 0 ? current.version : null;
+  if (booted.length === 0 || booted === target) {
+    return null;
+  }
+  return {
+    detail: `interrupted: the frame restarted on ${booted} before the update finished`,
+    plane: typeof current.plane === "string" ? current.plane : "cloud",
+    status: "error",
+    version: target,
+  };
+}
+
 export function firmwareUpdateFromLogEntries(
   entries: { payload: unknown }[],
   previous: unknown,
   now: Date = new Date(),
 ): FirmwareUpdateRecord | null {
-  let latest: ReturnType<typeof firmwareUpdateLine> = null;
-  let version: string | null = null;
+  // What the row says so far: the batch's newest update line (with the
+  // version carried over), else the row as stored.
+  const state: { latest: FirmwareUpdateLine | null; version: string | null } = { latest: null, version: null };
   for (const entry of entries) {
-    const line = firmwareUpdateLine(entry.payload);
+    const current: unknown = state.latest
+      ? { ...state.latest, version: state.version ?? state.latest.version }
+      : previous;
+    const line = firmwareUpdateLine(entry.payload) ?? firmwareUpdateInterruptedByBoot(entry.payload, current);
     if (line) {
-      latest = line;
+      state.latest = line;
       if (line.version) {
-        version = line.version;
+        state.version = line.version;
       }
     }
   }
+  const latest = state.latest;
+  let version = state.version;
   if (!latest) {
     return null;
   }

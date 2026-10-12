@@ -11,7 +11,6 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CircleStackIcon,
-  ClockIcon,
   CommandLineIcon,
   DocumentTextIcon,
   PlayIcon,
@@ -20,6 +19,7 @@ import {
   SparklesIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
+import { HourglassIcon } from '../../components/HourglassIcon'
 
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
@@ -405,7 +405,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
 // The small "waiting" clock in the bottom-right corner of the status word.
 function QueuedMarker(): JSX.Element {
   return (
-    <ClockIcon
+    <HourglassIcon
       className="pointer-events-none absolute -bottom-0.5 right-0 h-3 w-3 text-amber-500"
       aria-label="queued"
     />

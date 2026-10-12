@@ -11,12 +11,17 @@ backend kept the lines only in the Logs panel, so a frame mid-download read
 "ready" and the OTA button invited a second click.
 
 The vocabulary (`status`):
+  waiting       the ESP32 is letting a render pass that was already under way
+                finish before it downloads (`detail` = "render")
   downloading   the device accepted the update and is fetching it
                 (`version` = the release it is fetching, when it said)
   progress      "<written>/<total>" bytes so far (the ESP32 reports every
                 512 KB; the Pi's archive download has no progress lines)
   verified      installed and verified; the device restarts into it
   error         the attempt failed; `detail` is the device's reason
+  done          the boot that ended the update: `version` is what the frame
+                now runs (firmware_update_after_boot); the frames list
+                ignores it, the deploy drawer says "updated to X"
   up-to-date, skipped, downgrade-refused   nothing to do
 
 Two producers:
@@ -95,6 +100,40 @@ def _firmware_update_line(payload: Any) -> dict[str, Any] | None:
     return None
 
 
+def _firmware_update_interrupted_by_boot(payload: Any, current: Any) -> dict[str, Any] | None:
+    """A `bootup` line while the row still says the device is downloading:
+    the device restarted before the update finished, on the release it
+    already had. The ESP32 forwards nothing while its control-plane socket is
+    down (fos_cloud.c: the log tap is a tick coalescer, not a store), so the
+    `ota:<plane> error` of a download that died in a socket gap never
+    arrives — E1004 on the cloud, 2026-10-12: the row sat on "progress
+    1048576/3233648" and the frames list on "updating firmware 32%" through
+    the frame's next wake, then quietly went back to "upgrade". A boot on a
+    NEW version is the update's success (firmware_update_is_over, in the
+    caller's bootup branch). The cloud hub's firmwareUpdateInterruptedByBoot
+    is the sibling."""
+    if not isinstance(payload, dict) or payload.get("event") != "bootup":
+        return None
+    booted = payload.get("version")
+    if not isinstance(booted, str):
+        return None
+    if not isinstance(current, dict) or current.get("status") not in ("waiting", "downloading", "progress"):
+        return None
+    booted = booted[1:] if booted.startswith("v") else booted
+    booted = booted[:VERSION_MAX_LENGTH]
+    target = current.get("version")
+    target = target if isinstance(target, str) and target else None
+    if not booted or booted == target:
+        return None
+    plane = current.get("plane")
+    return {
+        "detail": f"interrupted: the frame restarted on {booted} before the update finished"[:DETAIL_MAX_LENGTH],
+        "plane": plane if isinstance(plane, str) else "cloud",
+        "status": "error",
+        "version": target,
+    }
+
+
 def is_firmware_update_log(payload: Any) -> bool:
     """Whether this device log line narrates a firmware update."""
     return _firmware_update_line(payload) is not None
@@ -104,8 +143,12 @@ def firmware_update_from_log(payload: Any, previous: Any, now: datetime) -> dict
     """The row's new `firmware_update` for one device log line, folded over
     what the row already says, or None when the line is not about a firmware
     update — the caller leaves the row alone. A line that names no version
-    keeps the one the row knew (the ESP32 says it once, on "downloading")."""
+    keeps the one the row knew (the ESP32 says it once, on "downloading").
+    A `bootup` on the old version while the row says downloading folds as
+    the failure the device could not report (_firmware_update_interrupted_by_boot)."""
     line = _firmware_update_line(payload)
+    if line is None:
+        line = _firmware_update_interrupted_by_boot(payload, previous)
     if line is None:
         return None
     version = line["version"]
@@ -136,6 +179,53 @@ def firmware_update_is_over(firmware_update: Any, reported_version: Any, known_v
         and len(reported_version) > 0
         and reported_version != (known_version or "")
     )
+
+
+# The row's statuses that narrate an update (as opposed to "nothing to do").
+FIRMWARE_UPDATE_NARRATED_STATUSES = ("waiting", "downloading", "progress", "verified", "error", "done")
+
+# Sentinel for "leave the row alone" (None means clear it).
+LEAVE = object()
+
+
+def firmware_update_after_boot(
+    firmware_update: Any, reported_version: Any, known_version: str | None, now: datetime
+) -> Any:
+    """The row after a `bootup` line: LEAVE keeps it, None clears it, a dict
+    replaces it. An update that is over (firmware_update_is_over) used to
+    clear the row, which left the deploy drawer with nothing to say the
+    moment the frame came back. It now folds into `done` with the version
+    the frame reports, so the workspace can say "updated to 2026.10.8 · 3
+    minutes ago"; a row that never narrated an update (up-to-date, skipped,
+    downgrade-refused) clears. The cloud hub's firmwareUpdateAfterBoot is
+    the sibling."""
+    if not firmware_update_is_over(firmware_update, reported_version, known_version):
+        return LEAVE
+    row = firmware_update if isinstance(firmware_update, dict) else {}
+    if row.get("status") not in FIRMWARE_UPDATE_NARRATED_STATUSES:
+        return None
+    row_version = row.get("version")
+    version: Any = (
+        reported_version[:VERSION_MAX_LENGTH]
+        if isinstance(reported_version, str) and reported_version
+        else row_version if isinstance(row_version, str) else None
+    )
+    at = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    plane = row.get("plane")
+    detail = row.get("detail")
+    return {
+        "at": at.isoformat(),
+        "detail": detail if row.get("status") == "verified" and isinstance(detail, str) else "",
+        "plane": plane if isinstance(plane, str) else "cloud",
+        "status": "done",
+        "version": version,
+    }
+
+
+def firmware_update_done(folded: dict[str, Any]) -> dict[str, Any]:
+    """The `done` row for a verified line that lands after the frame already
+    came back on that version (firmware_update_already_applied)."""
+    return {**folded, "status": "done"}
 
 
 def firmware_update_already_applied(firmware_update: Any, running_version: Any) -> bool:

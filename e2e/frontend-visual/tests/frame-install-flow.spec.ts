@@ -234,7 +234,7 @@ async function runFullDeploy(page: Page): Promise<void> {
     const url = new URL(response.url())
     return projectFrameApiPattern('/deploy$').test(url.pathname) && response.request().method() === 'POST'
   })
-  await page.getByRole('button', { name: 'Full deploy' }).click()
+  await page.getByRole('button', { name: 'Deploy FrameOS, scenes & settings' }).click()
   const response = await responsePromise
   expect(response.ok()).toBeTruthy()
 }

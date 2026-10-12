@@ -131,12 +131,15 @@ static const char *NVS_NS = "frameos";
 /* Log forwarding: every structured log line (frameos_nim_log_hook) is teed
  * into a small queue while the WS session is live AND the provider granted
  * telemetry:logs, then the cloud task coalesces the queue into one
- * `log_batch` per 1 s tick. This is a tick coalescer, not a store: nothing
- * is kept across disconnects, a full queue drops the line, and a failed or
- * refused send is simply forgotten (the hub's error acks — rate_limited,
- * insufficient_scope — are documented as non-fatal notices). One batch per
- * second also stays far under the hub's 120 batches/min cap, which a
- * per-line send would trip during a render burst. */
+ * `log_batch` per 1 s tick. The queue is a tick coalescer, not a store: a
+ * full queue drops the line, and a refused send is simply forgotten (the
+ * hub's error acks — rate_limited, insufficient_scope — are documented as
+ * non-fatal notices). The store is the device ring (frameos_nim_log_recent):
+ * the lines the tap could not queue — logged before the session, or while
+ * the socket was down — are replayed from it, by ring sequence, on the next
+ * session_ready (ws_replay_missed_log). One batch per second also stays far
+ * under the hub's 120 batches/min cap, which a per-line send would trip
+ * during a render burst. */
 #define FOS_CLOUD_LOG_QUEUE_DEPTH 64
 #define FOS_CLOUD_LOG_BATCH_MAX 60
 #define FOS_CLOUD_LOG_LINE_MAX 2048
@@ -813,6 +816,14 @@ static char s_applied_scenes_checksum[96] = "";
 static volatile bool s_logs_granted = false;
 static volatile bool s_metrics_granted = false;
 static QueueHandle_t s_log_queue = NULL;
+typedef struct {
+    char *line;
+    uint32_t seq; /* the line's ring sequence (frameos_log_entry_t.seq) */
+} cloud_log_item_t;
+/* The ring sequence of the newest line handed to the hub — queued by the
+ * tap, or replayed. ws_replay_missed_log starts after it; a drain of lines
+ * that never left rolls it back to the first of them. */
+static volatile uint32_t s_log_forwarded_seq = 0;
 
 /* How the previous session of this boot ended, reported on the next
  * `cloud:session_ready` line. The close code is otherwise a printf on the
@@ -875,36 +886,42 @@ static void ws_send_json(cJSON *msg)
 
 /* Runs on whatever task produced the log line (render, HTTP, Nim): copy the
  * line into the queue and get out. Anything that cannot be taken right now
- * — session down, scope missing, queue full, allocation failure — drops the
- * line; the serial console still carries everything. */
-static void cloud_log_tap(const char *line)
+ * — session down, scope missing, queue full, allocation failure — is left
+ * to the ring replay of the next session_ready; the serial console still
+ * carries everything. */
+static void cloud_log_tap(const char *line, uint32_t seq)
 {
     if (!s_ws_ready || !s_logs_granted || s_log_queue == NULL) return;
     size_t len = strnlen(line, FOS_CLOUD_LOG_LINE_MAX);
-    char *copy = malloc(len + 1);
-    if (!copy) return;
-    memcpy(copy, line, len);
-    copy[len] = '\0';
-    if (xQueueSend(s_log_queue, &copy, 0) != pdTRUE) {
-        free(copy);
+    cloud_log_item_t item = { .line = malloc(len + 1), .seq = seq };
+    if (!item.line) return;
+    memcpy(item.line, line, len);
+    item.line[len] = '\0';
+    if (xQueueSend(s_log_queue, &item, 0) != pdTRUE) {
+        free(item.line);
+        return;
     }
+    if (seq > s_log_forwarded_seq) s_log_forwarded_seq = seq;
 }
 
-/* Once per boot, right after the first session_ready that may carry logs:
- * everything logged before the tap was live goes up as one log_batch with
- * its own timestamps. On a deep-sleeping frame that is the whole first
- * ~15 s of a wake — the wake cause, the scene load, the replayed button
- * press that woke it — which never reached cloud retention before
- * (2026-10-12: "I don't see which button was pressed"). The ring holds the
- * boot's lines (FOS_NIM_LOG_RING_CAP, RAM, so nothing from before the
- * sleep); the session_ready line itself and anything after it came through
- * the tap, so the replay stops at it. */
-static bool s_boot_log_replayed = false;
-
-static void ws_replay_boot_log(void)
+/* Right after every session_ready that may carry logs: everything in the
+ * device ring that never reached the hub goes up as one log_batch with its
+ * own timestamps. On a boot's first session that is the whole ~15 s before
+ * it — on a deep-sleeping frame the wake cause, the scene load, the replayed
+ * button press that woke it, which never reached cloud retention before
+ * (2026-10-12: "I don't see which button was pressed"). On a reconnect it is
+ * whatever was logged while the socket was down: E1004, 2026-10-12, an OTA
+ * download died while the socket flapped, its `ota:cloud error` lines fell
+ * into the gap, and the cloud kept saying "updating firmware 32%". The tap
+ * advances s_log_forwarded_seq for every line it queued and a drain rolls it
+ * back to the first line it threw away, so `after_seq` (the value before
+ * this session's session_ready line was logged) is where the replay starts.
+ * The ring holds the boot's last FOS_NIM_LOG_RING_CAP lines (RAM, so
+ * nothing from before a deep sleep); the session_ready line itself and
+ * anything after it came through the tap, so the replay stops at it. */
+static void ws_replay_missed_log(uint32_t after_seq)
 {
-    if (s_boot_log_replayed || !s_logs_granted) return;
-    s_boot_log_replayed = true;
+    if (!s_logs_granted) return;
     frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
     if (entries == NULL) return;
     size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
@@ -916,19 +933,26 @@ static void ws_replay_boot_log(void)
             break;
         }
     }
-    if (end > 0) {
-        cJSON *msg = cJSON_CreateObject();
-        cJSON *logs = msg ? cJSON_AddArrayToObject(msg, "logs") : NULL;
-        if (logs != NULL) {
+    cJSON *msg = NULL;
+    cJSON *logs = NULL;
+    uint32_t newest = after_seq;
+    for (size_t i = 0; i < end; i++) {
+        if (entries[i].seq <= after_seq) continue;
+        if (msg == NULL) {
+            msg = cJSON_CreateObject();
+            logs = msg ? cJSON_AddArrayToObject(msg, "logs") : NULL;
+            if (logs == NULL) break;
             cJSON_AddStringToObject(msg, "type", "log_batch");
-            for (size_t i = 0; i < end; i++) {
-                cJSON *entry = log_line_entry(entries[i].line, entries[i].timestamp);
-                if (entry != NULL) cJSON_AddItemToArray(logs, entry);
-            }
-            ws_send_json(msg);
         }
-        cJSON_Delete(msg);
+        cJSON *entry = log_line_entry(entries[i].line, entries[i].timestamp);
+        if (entry != NULL) cJSON_AddItemToArray(logs, entry);
+        if (entries[i].seq > newest) newest = entries[i].seq;
     }
+    if (logs != NULL && cJSON_GetArraySize(logs) > 0) {
+        ws_send_json(msg);
+        if (newest > s_log_forwarded_seq) s_log_forwarded_seq = newest;
+    }
+    cJSON_Delete(msg);
     for (size_t i = 0; i < count; i++) free(entries[i].line);
     free(entries);
 }
@@ -936,7 +960,7 @@ static void ws_replay_boot_log(void)
 static void ws_logs_init(void)
 {
     if (s_log_queue == NULL) {
-        s_log_queue = xQueueCreate(FOS_CLOUD_LOG_QUEUE_DEPTH, sizeof(char *));
+        s_log_queue = xQueueCreate(FOS_CLOUD_LOG_QUEUE_DEPTH, sizeof(cloud_log_item_t));
     }
     if (s_log_queue != NULL) {
         frameos_nim_set_log_tap(cloud_log_tap);
@@ -945,9 +969,16 @@ static void ws_logs_init(void)
 
 static void ws_drain_log_queue(void)
 {
-    char *line = NULL;
-    while (s_log_queue != NULL && xQueueReceive(s_log_queue, &line, 0) == pdTRUE) {
-        free(line);
+    cloud_log_item_t item;
+    bool first = true;
+    while (s_log_queue != NULL && xQueueReceive(s_log_queue, &item, 0) == pdTRUE) {
+        /* Never delivered: the next session's replay starts at the first of
+         * them (the tap queues in ring order). */
+        if (first && item.seq > 0 && item.seq - 1 < s_log_forwarded_seq) {
+            s_log_forwarded_seq = item.seq - 1;
+        }
+        first = false;
+        free(item.line);
     }
 }
 
@@ -967,18 +998,18 @@ static void ws_poll_logs(void)
     int count = 0;
     bool have_time = fos_wifi_time_synced();
     double now = have_time ? (double)time(NULL) : 0;
-    char *line = NULL;
+    cloud_log_item_t item;
     while (count < FOS_CLOUD_LOG_BATCH_MAX &&
-           xQueueReceive(s_log_queue, &line, 0) == pdTRUE) {
+           xQueueReceive(s_log_queue, &item, 0) == pdTRUE) {
         if (logs == NULL) logs = cJSON_CreateArray();
         if (logs == NULL) {
-            free(line);
+            free(item.line);
             return;
         }
         /* Without SNTP the entry carries no timestamp and the hub stamps
          * its own arrival time — better than a 1970 date. */
-        cJSON *entry = log_line_entry(line, have_time ? now : 0);
-        free(line);
+        cJSON *entry = log_line_entry(item.line, have_time ? now : 0);
+        free(item.line);
         if (entry == NULL) continue;
         cJSON_AddItemToArray(logs, entry);
         count++;
@@ -2921,10 +2952,9 @@ static void ws_handle_message(const char *data, size_t len)
          * hook prints to the console, so the answer is on the USB serial
          * stream even in the not-granted case that keeps it off the wire.
          *
-         * Version and boot slot ride along because this is the first line
-         * of a boot that can reach cloud retention at all: the bootup event
-         * fires before the session exists and the tap drops it, so without
-         * this an OTA reboot never echoes what it now runs. */
+         * Version and boot slot ride along: the bootup event fires before
+         * the session exists and the tap drops it (the ring replay below
+         * carries it up after this line). */
         const esp_partition_t *running_part = esp_ota_get_running_partition();
         s_session_count++;
         char previous[96];
@@ -2942,8 +2972,9 @@ static void ws_handle_message(const char *data, size_t len)
                  running_part ? running_part->label : "?",
                  (unsigned long)s_session_count,
                  (long long)(esp_timer_get_time() / 1000000), previous);
+        uint32_t forwarded_before_ready = s_log_forwarded_seq; /* see ws_replay_missed_log */
         frameos_nim_log_hook(event);
-        ws_replay_boot_log();
+        ws_replay_missed_log(forwarded_before_ready);
         s_prev_close_how = NULL;
         s_prev_close_code = 0;
     } else {

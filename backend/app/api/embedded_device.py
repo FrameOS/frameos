@@ -439,14 +439,17 @@ def embedded_frame_settings(frame: Frame) -> dict:
     """Live frame settings the device polls once per render pass.
 
     Everything a frame is, minus what only the USB console provisions (Wi-Fi,
-    backend URL, API key, frame id, panel, pins, buttons, SD wiring): the
-    interval, name, render mode, the power-management flags from
-    ``device_config``, rotation, time zone, the HTTP response cap, the
+    backend URL, API key, frame id, panel, pins, SD wiring): the interval,
+    name, render mode, the power-management flags from ``device_config``,
+    rotation, time zone, the HTTP response cap, the GPIO button map, the
     device's own admin login and its HTTPS material — so a settings change
     takes effect on the next poll, and a board flashed with the stock release
     image finishes provisioning itself on its first sync. ``renderMode`` is
     serialized as the "local"/"remote" string the device parser
-    (fos_settings.c) expects.
+    (fos_settings.c) expects. ``gpioButtons`` rides along only when the
+    backend holds a map (the cloud pushes the same list through
+    ``set_settings``); until 2026-10-12 the Settings panel's GPIO buttons
+    changed nothing on a provisioned board.
     """
     from app.tasks.embedded_firmware import (
         EMBEDDED_RENDER_REMOTE,
@@ -496,6 +499,11 @@ def embedded_frame_settings(frame: Frame) -> dict:
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),
         "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
         **_optional_power_settings(),
+        **(
+            {"gpioButtons": [dict(button) for button in frame.gpio_buttons if isinstance(button, dict)]}
+            if isinstance(frame.gpio_buttons, list)
+            else {}
+        ),
         # 0/90/180/270 — the firmware restarts itself to re-init the renderer
         # when this changes (scene canvases are sized at init).
         "rotate": int(frame.rotate or 0) % 360,

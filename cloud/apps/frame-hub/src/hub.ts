@@ -92,9 +92,10 @@ import {
   uuidPattern,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateAfterBoot,
   firmwareUpdateAlreadyApplied,
+  firmwareUpdateDone,
   firmwareUpdateFromLogEntries,
-  firmwareUpdateIsOver,
 } from "./protocol";
 import {
   checkMemoryRateLimit,
@@ -915,12 +916,18 @@ export async function startFrameHub(
           : {}),
         // The OTA narrative is over once the device is back: after a
         // verified install, or with any new version, the row stops saying
-        // "updating". A failed attempt stays visible until a later hello
-        // reports a different version, so the error is not lost on the
-        // reconnect that follows it.
-        ...(firmwareUpdateIsOver(session.frame.firmwareUpdate, hello.frameos_version, session.frame.frameosVersion)
-          ? { firmwareUpdate: null }
-          : {}),
+        // "updating" and says "done" with the version it now runs. A failed
+        // attempt stays visible until a later hello reports a different
+        // version, so the error is not lost on the reconnect that follows it.
+        ...(() => {
+          const after = firmwareUpdateAfterBoot(
+            session.frame.firmwareUpdate,
+            hello.frameos_version,
+            session.frame.frameosVersion,
+            now,
+          );
+          return after === undefined ? {} : { firmwareUpdate: after };
+        })(),
         ...(confirmed && helloState && acceptState(frameId, helloState)
           ? { lastState: helloState }
           : {}),
@@ -1640,9 +1647,9 @@ export async function startFrameHub(
   }
 
   // The device narrates its firmware update as structured log lines: the
-  // ESP32 as `ota:<plane>` (embedded/esp32/main/fos_ota.c: downloading
-  // <version>, progress <written>/<total> every 512 KB, verified, error <why>,
-  // up-to-date, downgrade-refused, skipped), the Pi as `cloud:upgrade`
+  // ESP32 as `ota:<plane>` (embedded/esp32/main/fos_ota.c: waiting render,
+  // downloading <version>, progress <written>/<total> every 512 KB, verified,
+  // error <why>, up-to-date, downgrade-refused, skipped), the Pi as `cloud:upgrade`
   // (frameos/upgrade.nim: scheduled, starting, running, success,
   // reboot_required, failed, stalled, up_to_date). Until these landed on the
   // row, a frame half-way through a download still read "waiting to sync" in
@@ -1661,10 +1668,10 @@ export async function startFrameHub(
       return;
     }
     // A verified install the device already runs (its hello said so) is
-    // over on arrival: the row goes back to nothing rather than to
-    // "rebooting into" a version it is on.
+    // over on arrival: the row says "done" (with the device's own sentence)
+    // rather than "rebooting into" a version it is on.
     const firmwareUpdate = firmwareUpdateAlreadyApplied(folded, session.frame.frameosVersion)
-      ? null
+      ? firmwareUpdateDone(folded)
       : folded;
     session.frame = { ...session.frame, firmwareUpdate };
     await db

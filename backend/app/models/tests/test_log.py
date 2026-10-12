@@ -455,11 +455,17 @@ async def test_process_log_folds_esp32_ota_lines_into_the_frame_row(mock_pub, mo
     await process_log(db, redis, frame, _ota_line("verified", "rebooting"))
     assert db.get(Frame, frame.id).firmware_update["status"] == "verified"
 
-    # The boot into the new release closes it.
+    # The boot into the new release closes it: "done", with the version the
+    # frame now runs, so the deploy drawer can say "updated to 2026.10.6".
     await process_log(db, redis, frame, {"event": "bootup", "source": "esp32", "version": "v2026.10.6", "mode": "embedded"})
     updated = db.get(Frame, frame.id)
-    assert updated.firmware_update is None
+    assert updated.firmware_update["status"] == "done"
+    assert updated.firmware_update["version"] == "2026.10.6"
+    assert updated.firmware_update["detail"] == "rebooting"
     assert updated.embedded["lastBoot"]["frameosVersion"] == "2026.10.6"
+    # The next boot on that version leaves the row alone.
+    await process_log(db, redis, frame, {"event": "bootup", "source": "esp32", "version": "v2026.10.6", "mode": "embedded"})
+    assert db.get(Frame, frame.id).firmware_update["status"] == "done"
 
 
 @pytest.mark.asyncio
@@ -506,10 +512,12 @@ async def test_process_log_folds_pi_upgrade_lines_and_keeps_a_failure_across_the
     assert updated.firmware_update["status"] == "error"
 
     # A boot on another version means the error belongs to a release that is
-    # no longer running.
+    # no longer running: the update happened after all.
     await process_log(db, redis, frame, {"event": "bootup", "version": "2026.10.5"})
     updated = db.get(Frame, frame.id)
-    assert updated.firmware_update is None
+    assert updated.firmware_update["status"] == "done"
+    assert updated.firmware_update["version"] == "2026.10.5"
+    assert updated.firmware_update["detail"] == ""
     assert updated.last_successful_deploy["frameos_version"] == "2026.10.5"
 
 
@@ -528,4 +536,6 @@ async def test_process_log_bootup_without_a_version_only_closes_a_verified_updat
     db.add(frame)
     db.commit()
     await process_log(db, redis, frame, {"event": "bootup"})
-    assert db.get(Frame, frame.id).firmware_update is None
+    # No version in the line: the done row keeps the one the update named.
+    assert db.get(Frame, frame.id).firmware_update["status"] == "done"
+    assert db.get(Frame, frame.id).firmware_update["version"] == "2026.10.6"

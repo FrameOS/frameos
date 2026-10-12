@@ -228,6 +228,7 @@ export function frameFirmwareUpdateProgress(
   const versionSuffix = version ? ` ${version}` : ''
   const detail = update.detail || ''
   switch (update.status) {
+    case 'waiting':
     case 'downloading':
     case 'progress': {
       const match = /^(\d+)\/(\d+)$/.exec(detail)
@@ -235,15 +236,38 @@ export function frameFirmwareUpdateProgress(
       const total = match ? Number(match[2]) : NaN
       const percent = total > 0 && written >= 0 ? Math.min(100, Math.round((written / total) * 100)) : null
       if (age > (percent === null ? firmwareUpdateNoProgressStaleMs : firmwareUpdateStaleMs)) {
-        return null
+        // Silence past the window: the download died without a word (the
+        // ESP32 forwards nothing while its hub socket is down, and E1004's
+        // 2026-10-12 download died in exactly such a gap). Say so, for as
+        // long as a reported failure is shown, instead of going back to
+        // "upgrade" as if nothing had been asked.
+        if (age > firmwareUpdateFailureShownMs) {
+          return null
+        }
+        return {
+          kind: 'failed',
+          label: 'update stalled',
+          title: `The firmware update${versionSuffix} stopped reporting${
+            percent === null ? '' : ` at ${percent}%`
+          }; the frame may have lost its connection or restarted. See the ota or cloud:upgrade lines in Logs.`,
+          percent,
+          version,
+        }
       }
       // The Pi's lines carry its own sentence ("FrameOS upgrade is running.");
       // the ESP32's downloading line only repeats the version.
       const phrase = detail && !match && detail !== version ? `: ${detail}` : ''
+      // The ESP32 lets a render pass that is already under way finish before
+      // it downloads (fos_ota.c): the one thing happening on the frame is
+      // still the update, so the word stays the same.
+      const title =
+        update.status === 'waiting'
+          ? `Waiting for the frame's render to finish before downloading FrameOS${versionSuffix}`
+          : `Downloading FrameOS${versionSuffix}${percent === null ? '' : ` (${percent}%)`}${phrase}`
       return {
         kind: 'running',
         label: percent === null ? 'updating firmware' : `updating firmware ${percent}%`,
-        title: `Downloading FrameOS${versionSuffix}${percent === null ? '' : ` (${percent}%)`}${phrase}`,
+        title,
         percent,
         version,
       }
@@ -278,8 +302,47 @@ export function frameFirmwareUpdateProgress(
         version,
       }
     default:
-      // up-to-date, downgrade-refused, skipped: nothing in flight.
+      // up-to-date, downgrade-refused, skipped, done: nothing in flight
+      // (frameFirmwareUpdateOutcome reads `done`).
       return null
+  }
+}
+
+/** How long "updated to X" stays worth a word in the deploy drawer. */
+const firmwareUpdateOutcomeShownMs = 24 * 60 * 60 * 1000
+
+export interface FrameFirmwareUpdateOutcome {
+  /** The release the frame came back on. */
+  version: string | null
+  /** "3 minutes ago", when the row's timestamp parses. */
+  when: string | null
+  /** The device's own closing sentence (the Pi's "FrameOS upgraded to …"), else "". */
+  detail: string
+}
+
+/**
+ * The update that just finished: the control plane folds the boot that ends
+ * an update into a `done` row (the hub's firmwareUpdateAfterBoot, the
+ * backend's firmware_update_after_boot) with the version the frame reports.
+ * Read by the deploy drawer and its status rows only — the frames list goes
+ * back to "up to date" — and forgotten after a day.
+ */
+export function frameFirmwareUpdateOutcome(
+  frame: FrameType,
+  now: number = Date.now()
+): FrameFirmwareUpdateOutcome | null {
+  const update = frame.firmware_update
+  if (!update || update.status !== 'done') {
+    return null
+  }
+  const at = parseFrameTimestamp(update.at)
+  if (!Number.isFinite(at) || now - at > firmwareUpdateOutcomeShownMs) {
+    return null
+  }
+  return {
+    version: update.version || null,
+    when: formatFrameRelativeTime(update.at, now),
+    detail: update.detail || '',
   }
 }
 
