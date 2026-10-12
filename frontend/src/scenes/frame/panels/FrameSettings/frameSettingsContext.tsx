@@ -120,14 +120,21 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
    */
   reportedGpioButtons: GPIOButton[] | null
   /**
-   * ESP32 only, null elsewhere: the buzzer a GPIO button press chirps
-   * (fos_buzzer.c). The cloud pushes `buzzer_pin`; the backend keeps
-   * `buzzerPin` in device_config for the device's settings poll.
-   * `reportedPin` is what a cloud frame said it runs with
-   * (`hardware.buzzerPin`); `disabledReason` the cloud firmware floor.
+   * ESP32 only, null elsewhere: the buzzer a GPIO button press sounds and
+   * its pitch (fos_buzzer.c). The cloud pushes `buzzer_pin` /
+   * `buzzer_tone_hz`; the backend keeps `buzzerPin` / `buzzerToneHz` in
+   * device_config for the device's settings poll. `reported*` is what a
+   * cloud frame said it runs with (`hardware.buzzerPin` / `buzzerToneHz`);
+   * `disabledReason` the cloud firmware floor.
    */
-  buttonBeep: { pin: number | undefined; reportedPin: number | undefined; disabledReason: string | undefined } | null
-  setButtonBeepPin: (pin: number | undefined) => void
+  buttonBeep: {
+    pin: number | undefined
+    toneHz: number | undefined
+    reportedPin: number | undefined
+    reportedToneHz: number | undefined
+    disabledReason: string | undefined
+  } | null
+  setButtonBeep: (patch: { pin?: number; toneHz?: number }) => void
 
   appsWithSaveAssets: Record<string, string>
   logs: unknown[]
@@ -461,7 +468,9 @@ export function FrameSettingsProvider({
   const buttonBeep: FrameSettingsContextValue['buttonBeep'] = esp32CloudProfile
     ? {
         pin: frameForm.buzzer_pin,
+        toneHz: frameForm.buzzer_tone_hz,
         reportedPin: typeof frame.hardware?.buzzerPin === 'number' ? frame.hardware.buzzerPin : undefined,
+        reportedToneHz: typeof frame.hardware?.buzzerToneHz === 'number' ? frame.hardware.buzzerToneHz : undefined,
         disabledReason: cloudFrameSupportsEsp32Buzzer(frame.frameos_version)
           ? undefined
           : frame.frameos_version
@@ -471,23 +480,40 @@ export function FrameSettingsProvider({
     : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
     ? {
         pin: powerDeviceConfig.buzzerPin ?? powerDeviceConfig.buzzer_pin,
+        toneHz: powerDeviceConfig.buzzerToneHz ?? powerDeviceConfig.buzzer_tone_hz,
         reportedPin: undefined,
+        reportedToneHz: undefined,
         disabledReason: undefined,
       }
     : null
-  const setButtonBeepPin = (pin: number | undefined): void => {
+  const setButtonBeep = (patch: { pin?: number; toneHz?: number }): void => {
     if (esp32CloudProfile) {
-      setFrameFormValues({ buzzer_pin: pin })
+      setFrameFormValues({
+        ...('pin' in patch ? { buzzer_pin: patch.pin } : {}),
+        ...('toneHz' in patch ? { buzzer_tone_hz: patch.toneHz } : {}),
+      })
       return
     }
     // Same rule as the power keys: the camelCase key wins, so drop the
     // snake_case copy a USB-console provisioning may have left behind.
     const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
-    delete next.buzzer_pin
-    if (pin === undefined) {
-      delete next.buzzerPin
-    } else {
-      next.buzzerPin = pin
+    const write = (
+      key: 'buzzerPin' | 'buzzerToneHz',
+      snakeKey: 'buzzer_pin' | 'buzzer_tone_hz',
+      value: number | undefined
+    ): void => {
+      delete next[snakeKey]
+      if (value === undefined) {
+        delete next[key]
+      } else {
+        next[key] = value
+      }
+    }
+    if ('pin' in patch) {
+      write('buzzerPin', 'buzzer_pin', patch.pin)
+    }
+    if ('toneHz' in patch) {
+      write('buzzerToneHz', 'buzzer_tone_hz', patch.toneHz)
     }
     setFrameFormValues({ device_config: next })
   }
@@ -578,7 +604,7 @@ export function FrameSettingsProvider({
       : null,
     reportedGpioButtons: cloudProfile ? reportedGpioButtonsOf(frame.hardware?.gpioButtons) : null,
     buttonBeep,
-    setButtonBeepPin,
+    setButtonBeep,
 
     appsWithSaveAssets,
     logs,

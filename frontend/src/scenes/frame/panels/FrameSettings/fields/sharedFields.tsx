@@ -249,44 +249,74 @@ export function GpioButtonsSection(): JSX.Element {
 }
 
 /**
- * The buzzer a press chirps, under the buttons it answers for (ESP32 only).
- * A GPIO like the battery pins next door: empty leaves the board's own
- * (its preset's), -1 turns the beep off.
+ * The buzzer a press sounds, under the buttons it answers for (ESP32 only).
+ * A GPIO like the battery pins next door: empty leaves the board's own (its
+ * preset's), -1 turns the beep off. The pitch below it is in Hz; empty
+ * leaves the frame's (2000 by default).
  */
 function ButtonBeepField(): JSX.Element | null {
-  const { buttonBeep, setButtonBeepPin } = useFrameSettings()
+  const { buttonBeep, setButtonBeep } = useFrameSettings()
   if (!buttonBeep) {
     return null
   }
-  const { pin, reportedPin, disabledReason } = buttonBeep
-  const placeholder =
+  const { pin, toneHz, reportedPin, reportedToneHz, disabledReason } = buttonBeep
+  const pinPlaceholder =
     reportedPin === undefined
       ? 'Board default, -1 = off'
       : reportedPin < 0
       ? 'Off on the frame'
       : `${reportedPin} on the frame`
+  const tonePlaceholder = reportedToneHz === undefined ? '2000' : `${reportedToneHz} on the frame`
   return (
-    <div className="space-y-1 @md:flex @md:gap-2">
-      <Label className="@md:w-1/3">
-        Button beep GPIO
-        <Tooltip
-          title={
-            disabledReason ?? (
-              <>
-                The frame beeps for as long as you hold a button it registered (up to a second), and briefly when a
-                press wakes it from deep sleep, so you know the press arrived before the screen changes. A press it
-                could not take, like the 33rd during one render, stays silent. This is the GPIO of the board's buzzer:
-                GPIO 45 on the Seeed reTerminal E1001, E1002 and E1004. Set -1 to turn the beep off. Applies without a
-                restart.
-              </>
-            )
-          }
-        />
-      </Label>
-      <fieldset disabled={disabledReason !== undefined} className="w-full min-w-0">
-        <NumberTextInput value={pin} onChange={setButtonBeepPin} placeholder={placeholder} />
-      </fieldset>
-    </div>
+    <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Button beep GPIO
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  The frame beeps for as long as you hold a button it registered (up to a second), and briefly when a
+                  press wakes it from deep sleep, so you know the press arrived before the screen changes. A press it
+                  could not take, like the 33rd during one render, gets a lower buzz instead. This is the GPIO of the
+                  board's buzzer: GPIO 45 on the Seeed reTerminal E1001, E1002 and E1004. Set -1 to turn the beep off.
+                  Applies without a restart.
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <NumberTextInput
+            value={pin}
+            onChange={(value) => setButtonBeep({ pin: value })}
+            placeholder={pinPlaceholder}
+          />
+        </div>
+      </div>
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Button beep tone (Hz)
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  The pitch of the beep, 100 to 10000 Hz. 2000 is the default; small piezo buzzers are loudest around
+                  2000 to 4000. The lower buzz for a press the frame could not take is a quarter of this.
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <NumberTextInput
+            value={toneHz}
+            onChange={(value) => setButtonBeep({ toneHz: value })}
+            placeholder={tonePlaceholder}
+          />
+        </div>
+      </div>
+    </fieldset>
   )
 }
 

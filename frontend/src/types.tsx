@@ -120,6 +120,8 @@ export interface FrameType {
     gpioButtons?: { pin: number; label: string }[] | null
     /** ESP32 only: the buzzer a button press chirps, -1 = none (2026.10.12+). */
     buzzerPin?: number | null
+    /** ESP32 only: the pitch of that tone in Hz (2026.10.12+). */
+    buzzerToneHz?: number | null
     mac?: string | null
     /** major*100 + minor, as esp_chip_info reports it */
     chipRevision?: number | null
@@ -262,6 +264,9 @@ export interface FrameType {
     /** GPIO of the buzzer a button press chirps; -1 = none / silent. */
     buzzerPin?: number
     buzzer_pin?: number
+    /** Pitch of that tone in Hz (default 2000 on the device). */
+    buzzerToneHz?: number
+    buzzer_tone_hz?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
@@ -315,6 +320,8 @@ export interface FrameType {
   battery_enable_pin?: number
   /** ESP32: the buzzer a button press chirps; -1 = silent. */
   buzzer_pin?: number
+  /** ESP32: pitch of the button beep in Hz. */
+  buzzer_tone_hz?: number
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]

@@ -132,6 +132,9 @@ export const cloudFramesContractSettings = {
     },
     "buzzer_pin": {
       "since": "2026.10.12"
+    },
+    "buzzer_tone_hz": {
+      "since": "2026.10.12"
     }
   }
 } as const

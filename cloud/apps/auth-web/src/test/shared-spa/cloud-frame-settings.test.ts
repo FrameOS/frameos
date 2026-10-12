@@ -216,18 +216,29 @@ describe("cloud settings push", () => {
   });
 
   it("gates the ESP32 button beep on its own floor", () => {
-    // 2026.10.12: the buzzer a button press chirps. A power-section-style
-    // chip key (the form binds and diffs it with esp32PowerSettingKeys) that
-    // never rides a push to older firmware.
-    expect([...esp32BuzzerCloudFrameSettingKeys]).toEqual(["buzzer_pin"]);
+    // 2026.10.12: the buzzer a button press sounds, and its pitch. Chip keys
+    // the form binds and diffs with esp32PowerSettingKeys, that never ride a
+    // push to older firmware.
+    expect([...esp32BuzzerCloudFrameSettingKeys].sort()).toEqual(["buzzer_pin", "buzzer_tone_hz"]);
     expect(new Set(esp32BuzzerCloudFrameSettingKeys)).toEqual(esp32BuzzerFrameSettingKeys);
     expect(esp32BuzzerCloudFrameSettingsMinVersion).toBe(esp32BuzzerFrameSettingsMinVersion);
-    expect(esp32OnlySettableKeys.has("buzzer_pin")).toBe(true);
-    expect((esp32PowerSettingKeys as readonly string[]).includes("buzzer_pin")).toBe(true);
+    for (const key of ["buzzer_pin", "buzzer_tone_hz"]) {
+      expect(esp32OnlySettableKeys.has(key)).toBe(true);
+      expect((esp32PowerSettingKeys as readonly string[]).includes(key)).toBe(true);
+    }
     expect(cloudFrameSupportsEsp32Buzzer("2026.10.11")).toBe(false);
     expect(cloudFrameSupportsEsp32Buzzer("2026.10.12")).toBe(true);
     expect(esp32CloudFrameSettingKeysForVersion("2026.10.11")).not.toContain("buzzer_pin");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.11")).not.toContain("buzzer_tone_hz");
     expect(esp32CloudFrameSettingKeysForVersion("2026.10.12")).toContain("buzzer_pin");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.12")).toContain("buzzer_tone_hz");
+    const tone = allowedFrameSettings.get("buzzer_tone_hz");
+    for (const value of [100, 2000, 10000]) {
+      expect(tone?.(value), String(value)).toBe(true);
+    }
+    for (const value of [99, 10001, 2000.5, "2000", null]) {
+      expect(tone?.(value), JSON.stringify(value)).toBe(false);
+    }
     const check = allowedFrameSettings.get("buzzer_pin");
     for (const value of [-1, 0, 45, 48]) {
       expect(check?.(value), String(value)).toBe(true);
@@ -236,9 +247,9 @@ describe("cloud settings push", () => {
       expect(check?.(value), JSON.stringify(value)).toBe(false);
     }
     // The form holds what the text input typed; the payload sends a number.
-    expect(cloudFrameSettingsPayload({ buzzer_pin: "45" }, ["buzzer_pin"])).toEqual({
-      buzzer_pin: 45,
-    });
+    expect(
+      cloudFrameSettingsPayload({ buzzer_pin: "45", buzzer_tone_hz: "2700" }, ["buzzer_pin", "buzzer_tone_hz"]),
+    ).toEqual({ buzzer_pin: 45, buzzer_tone_hz: 2700 });
   });
 
   it("validates the battery enable pin like the battery pin: a GPIO or -1", () => {

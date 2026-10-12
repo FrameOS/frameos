@@ -1486,6 +1486,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     buzzer_pin = _embedded_device_config_value(frame, "buzzerPin", "buzzer_pin")
     if isinstance(buzzer_pin, int) and not isinstance(buzzer_pin, bool):
         settings.append(_provisioning_setting("buzzer_pin", buzzer_pin))
+    buzzer_tone_hz = _embedded_device_config_value(frame, "buzzerToneHz", "buzzer_tone_hz")
+    if isinstance(buzzer_tone_hz, int) and not isinstance(buzzer_tone_hz, bool):
+        settings.append(_provisioning_setting("buzzer_tone_hz", buzzer_tone_hz))
 
     # The frame's own certificate is not a console value: it rides the first
     # settings pull once the board is on Wi-Fi and talking to this backend.

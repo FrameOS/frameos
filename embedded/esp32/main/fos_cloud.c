@@ -488,9 +488,11 @@ static void add_hardware_json(cJSON *parent)
             cJSON_AddItemToArray(buttons, button);
         }
     }
-    /* The buzzer the button chirp drives (-1 = none): the preset's when no
-     * push set one, which the Settings panel shows as "on the frame". */
+    /* The buzzer a button press sounds (-1 = none) and its pitch: the
+     * preset's and the default when no push set them, which the Settings
+     * panel shows as "on the frame". */
     cJSON_AddNumberToObject(hw, "buzzerPin", config->buzzer_pin);
+    cJSON_AddNumberToObject(hw, "buzzerToneHz", config->buzzer_tone_hz);
 
     /* Board facts for the cloud deploy drawer, mirroring the USB console's
      * status JSON (fos_http_status_json). Sent on hello, so the control
@@ -2251,8 +2253,8 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
- * and `buzzer_pin` (live, the next button chirp drives it) round out the
- * profile.
+ * and `buzzer_pin` / `buzzer_tone_hz` (live, the next button tone uses them)
+ * round out the profile.
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */
 /* The contract's pin ranges (-1..48) are chip-agnostic; whether a pin is an
@@ -2458,11 +2460,15 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         battery_changed = battery_changed || config->battery_enable_pin != pin;
         config->battery_enable_pin = pin;
     }
-    /* The buzzer a button press chirps; -1 = silent. Live: fos_buzzer.c
-     * reads the pin on every chirp. */
+    /* The buzzer a button press sounds (-1 = silent) and its pitch. Live:
+     * fos_buzzer.c reads both on every tone. */
     const cJSON *buzzer_pin = cJSON_GetObjectItem(settings, "buzzer_pin");
     if (buzzer_pin != NULL) {
         config->buzzer_pin = (int8_t)buzzer_pin->valuedouble;
+    }
+    const cJSON *buzzer_tone_hz = cJSON_GetObjectItem(settings, "buzzer_tone_hz");
+    if (buzzer_tone_hz != NULL) {
+        config->buzzer_tone_hz = (uint16_t)buzzer_tone_hz->valuedouble;
     }
     /* Debug logging: the render loop pushes config->debug_logging into the
      * Nim runtime every pass (fos_client.c), so this applies live. */

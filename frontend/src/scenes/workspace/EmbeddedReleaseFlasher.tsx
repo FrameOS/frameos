@@ -109,10 +109,11 @@ const OPTIONAL_ON_OLDER_FIRMWARE: ReadonlySet<EmbeddedUsbConfigKey> = new Set<Em
   'admin_auth',
   'tls_enable',
   'tls_port',
-  // 2026.10.12: the button-press chirp's buzzer. Rides the settings pull as
-  // `buzzerPin` too, and a current release takes the E-series default from
-  // the stored preset anyway.
+  // 2026.10.12: the button beep's buzzer and pitch. Both ride the settings
+  // pull (`buzzerPin`, `buzzerToneHz`), and a current release takes the
+  // E-series pin from the stored preset anyway.
   'buzzer_pin',
+  'buzzer_tone_hz',
 ])
 
 export interface ProvisionOverUsbResult {

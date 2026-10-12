@@ -737,6 +737,10 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert settings["deep_sleep_on_battery"] == "1"
     assert settings["wake_check"] == "900"
     assert settings["buzzer_pin"] == "45"
+    # The pitch is the firmware's default until someone picks one.
+    assert "buzzer_tone_hz" not in settings
+    frame.device_config = {**frame.device_config, "buzzerToneHz": 2700}
+    assert _provisioned(embedded_provisioning_plan(frame))["buzzer_tone_hz"] == "2700"
     assert embedded_flash_size_for_frame(frame) == "32MB"
 
 

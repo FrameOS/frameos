@@ -707,17 +707,20 @@ the render task drains the queue in one go before its next pass (one render
 for the whole burst). The queue holds 64 edges, 32 press/release pairs, and a
 press is accepted only when its release also fits, so the dispatcher never
 sees a key that stays down. A press with no room is dropped, logged as
-`button:dropped`, and stays silent: it was not received.
+`button:dropped`, and buzzes lower instead (a quarter of the press tone, 250
+ms): it was not received.
 
-The pin is `buzzer_pin` (`-1` = none): the reTerminal E-series presets set
+The pitch is `buzzer_tone_hz` (100-10000, default 2000). The pin is
+`buzzer_pin` (`-1` = none): the reTerminal E-series presets set
 GPIO 45, and a board whose NVS predates the key takes its preset's
 (`fos_board_buzzer_pin`), so an E-series frame beeps after the update without
 being reprovisioned. The firmware leaves a pin alone that is a display,
-button, battery or SD pin. Console: `set buzzer_pin <gpio|-1>` and
-`beep [hz] [ms]` to test it. Applied live on every plane: the backend's
-settings pull carries `buzzerPin`, the cloud's `set_settings` carries
-`buzzer_pin` (firmware 2026.10.12+), and both show it as "Button beep GPIO"
-under the frame's GPIO buttons.
+button, battery or SD pin. Console: `set buzzer_pin <gpio|-1>`,
+`set buzzer_tone_hz <hz>` and `beep [hz] [ms]` to test it. Applied live on
+every plane: the backend's settings pull carries `buzzerPin` /
+`buzzerToneHz`, the cloud's `set_settings` carries `buzzer_pin` /
+`buzzer_tone_hz` (firmware 2026.10.12+), and both show them as "Button beep
+GPIO" and "Button beep tone" under the frame's GPIO buttons.
 
 ## Scene storage and memory (2026.8.13)
 

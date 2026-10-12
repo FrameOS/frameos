@@ -261,7 +261,10 @@ static int cmd_status(int argc, char **argv)
     } else {
         printf("battery:     not configured\n");
     }
-    if (config->buzzer_pin >= 0) printf("buzzer:      GPIO %d (sounds while a button is held)\n", (int)config->buzzer_pin);
+    if (config->buzzer_pin >= 0) {
+        printf("buzzer:      GPIO %d, %u Hz (sounds while a button is held)\n", (int)config->buzzer_pin,
+               (unsigned)config->buzzer_tone_hz);
+    }
     else printf("buzzer:      none\n");
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
@@ -449,7 +452,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|pins|gpio_buttons|ap_psk> "
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|pins|gpio_buttons|ap_psk> "
                "<value...>\n");
         return 1;
     }
@@ -822,6 +825,14 @@ static int cmd_set(int argc, char **argv)
             return 1;
         }
         config->buzzer_pin = (int8_t)pin;
+    }
+    else if (strcmp(key, "buzzer_tone_hz") == 0) {
+        long hz = strtol(value, NULL, 10);
+        if (hz < FOS_BUZZER_TONE_HZ_MIN || hz > FOS_BUZZER_TONE_HZ_MAX) {
+            printf("buzzer_tone_hz must be %d-%d\n", FOS_BUZZER_TONE_HZ_MIN, FOS_BUZZER_TONE_HZ_MAX);
+            return 1;
+        }
+        config->buzzer_tone_hz = (uint16_t)hz;
     }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
@@ -1775,7 +1786,7 @@ static int cmd_beep(int argc, char **argv)
         printf("no buzzer configured (set buzzer_pin <gpio>)\n");
         return 1;
     }
-    long freq_hz = argc > 1 ? strtol(argv[1], NULL, 10) : 2000;
+    long freq_hz = argc > 1 ? strtol(argv[1], NULL, 10) : (long)config->buzzer_tone_hz;
     long duration_ms = argc > 2 ? strtol(argv[2], NULL, 10) : 200;
     if (freq_hz < 100 || freq_hz > 10000 || duration_ms < 1 || duration_ms > 5000) {
         printf("usage: beep [100-10000 Hz] [1-5000 ms]\n");
@@ -1792,7 +1803,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "status", .help = "Show device status", .func = cmd_status},
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
-        {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer (buzzer_pin)", .func = cmd_beep},
+        {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer (buzzer_pin, buzzer_tone_hz)", .func = cmd_beep},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},

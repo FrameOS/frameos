@@ -153,8 +153,8 @@ export function cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion: string |
 }
 
 /**
- * 2026.10.12: the buzzer a GPIO button press chirps (reTerminal E-series:
- * GPIO 45; -1 silences it). Applied live. Older firmware refuses the whole
+ * 2026.10.12: the buzzer a GPIO button press sounds (reTerminal E-series:
+ * GPIO 45; -1 silences it) and its pitch. Applied live. Older firmware refuses the whole
  * push on it, so it has its own floor; the GPIO section renders the field
  * disabled below it.
  */
@@ -355,6 +355,7 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'battery_divider',
   'battery_enable_pin',
   'buzzer_pin',
+  'buzzer_tone_hz',
   'metrics_interval',
   'max_http_response_bytes',
 ]

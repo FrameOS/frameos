@@ -11,9 +11,9 @@
  * release (a tap clicks, a hold beeps, a second at most), and a press that
  * wakes the chip chirps as soon as it boots.
  *
- * The pin is the live config's `buzzer_pin` (-1 = none), read again on
- * every chirp: a settings push moves or silences the buzzer without a
- * reboot.
+ * The pin is the live config's `buzzer_pin` (-1 = none) and the pitch its
+ * `buzzer_tone_hz`, both read again on every tone: a settings push moves,
+ * retunes or silences the buzzer without a reboot.
  */
 #pragma once
 
@@ -30,6 +30,9 @@ void fos_buzzer_press_end(void);
 /* A short fixed chirp: the press that woke the chip, released long before
  * the boot got here. */
 void fos_buzzer_chirp(void);
+/* A press the frame could not take (its queue is full): a lower buzz, a
+ * quarter of the press tone, for 250 ms. */
+void fos_buzzer_reject(void);
 /* Any tone (the console's `beep`). Safe from any task; a tone while one
  * sounds replaces it. */
 void fos_buzzer_tone(uint32_t freq_hz, uint32_t duration_ms);

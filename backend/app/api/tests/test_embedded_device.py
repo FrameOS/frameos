@@ -613,6 +613,8 @@ async def test_settings_carry_the_buzzer_pin_only_when_set(async_client, no_auth
     assert response.status_code == 200, response.text
     assert 'buzzerPin' not in response.json()['frame']
 
+    assert 'buzzerToneHz' not in response.json()['frame']
+
     # Either spelling: a USB-console provisioning writes snake_case.
     for stored, sent in ({'buzzerPin': 45}, 45), ({'buzzer_pin': -1}, -1):
         frame.device_config = {**base_config, **stored}
@@ -621,6 +623,14 @@ async def test_settings_carry_the_buzzer_pin_only_when_set(async_client, no_auth
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
         assert response.json()['frame']['buzzerPin'] == sent
+
+    # The pitch travels the same way, only once the backend holds one.
+    frame.device_config = {**base_config, 'buzzerPin': 45, 'buzzerToneHz': 2700}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['buzzerToneHz'] == 2700
 
 
 @pytest.mark.asyncio

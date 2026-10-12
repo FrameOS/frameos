@@ -13,7 +13,7 @@
  * registered press sounds it until its release, at most a second, and a
  * press that woke the chip chirps it at boot. A press the queue has no room
  * for (it holds 32 press/release pairs while a render keeps the render task
- * busy) is dropped, and stays silent.
+ * busy) is dropped, and gets a lower buzz instead.
  */
 #pragma once
 

@@ -95,9 +95,10 @@ describe("settings parity between the device planes", () => {
     // 10 since `input_settings` (2026.9.23): keyboard layout + grab, and the
     // chip has no keyboard or pointer at all (events contract hosts.esp32).
     expect(counts.linux ?? 0).toBeLessThanOrEqual(10);
-    // esp32 8 since `buzzer_pin` (2026.10.12): the button-press chirp lives in
-    // the ESP32 button task, and no Pi preset has a buzzer.
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(8);
+    // esp32 9 since `buzzer_pin` + `buzzer_tone_hz` (2026.10.12): the
+    // button-press tone lives in the ESP32 button task, and no Pi preset has a
+    // buzzer.
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(9);
   });
 });
 

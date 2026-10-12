@@ -573,6 +573,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   battery_divider: 'Battery voltage divider',
   battery_enable_pin: 'Battery enable GPIO',
   buzzer_pin: 'Button beep GPIO',
+  buzzer_tone_hz: 'Button beep tone',
   network: 'Network settings',
   agent: 'Remote settings',
   mountpoints: 'Mountpoints',

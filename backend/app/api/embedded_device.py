@@ -487,6 +487,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("batteryDivider", ("batteryDivider", "battery_divider"), "float"),
             ("batteryEnablePin", ("batteryEnablePin", "battery_enable_pin"), "int"),
             ("buzzerPin", ("buzzerPin", "buzzer_pin"), "int"),
+            ("buzzerToneHz", ("buzzerToneHz", "buzzer_tone_hz"), "int"),
         ):
             for key in keys:
                 value = device_config.get(key)

@@ -124,8 +124,9 @@ static void press_edge(size_t index, size_t count)
      * owed: an accepted press is always followed by its release. Only this
      * task sends (the render task only takes), so the reservation holds. */
     if (uxQueueSpacesAvailable(s_queue) < releases_owed(count) + 2) {
-        /* Not received, so not acknowledged: no beep. */
+        /* Not received: say so with the low buzz instead of the beep. */
         log_dropped(fos_config()->gpio_buttons[index].pin);
+        fos_buzzer_reject();
         return;
     }
     if (!enqueue_event(index, 0, false)) return;

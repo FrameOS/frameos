@@ -520,14 +520,21 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
-    /* The board buzzer the button chirp drives; -1 = silent. Live: the next
-     * chirp reads the new pin (fos_buzzer.c), no restart. */
+    /* The board buzzer a button press sounds, and its pitch; -1 = silent.
+     * Live: the next tone reads both (fos_buzzer.c), no restart. */
     const cJSON *buzzer_pin = cJSON_GetObjectItem(frame, "buzzerPin");
     if (cJSON_IsNumber(buzzer_pin) && buzzer_pin->valuedouble >= -1 &&
         buzzer_pin->valuedouble <= 48 &&
         config->buzzer_pin != (int8_t)buzzer_pin->valuedouble &&
         settings_pin_usable("buzzerPin", (int)buzzer_pin->valuedouble)) {
         config->buzzer_pin = (int8_t)buzzer_pin->valuedouble;
+        changed = true;
+    }
+    const cJSON *buzzer_tone_hz = cJSON_GetObjectItem(frame, "buzzerToneHz");
+    if (cJSON_IsNumber(buzzer_tone_hz) && buzzer_tone_hz->valuedouble >= FOS_BUZZER_TONE_HZ_MIN &&
+        buzzer_tone_hz->valuedouble <= FOS_BUZZER_TONE_HZ_MAX &&
+        config->buzzer_tone_hz != (uint16_t)buzzer_tone_hz->valuedouble) {
+        config->buzzer_tone_hz = (uint16_t)buzzer_tone_hz->valuedouble;
         changed = true;
     }
 
@@ -817,6 +824,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->buzzer_pin != after->buzzer_pin) {
         change_append_int(out, out_len, "buzzer_pin", (long)after->buzzer_pin);
+    }
+    if (before->buzzer_tone_hz != after->buzzer_tone_hz) {
+        change_append_int(out, out_len, "buzzer_tone_hz", (long)after->buzzer_tone_hz);
     }
     if (before->debug_logging != after->debug_logging) {
         change_append(out, out_len, "debug", after->debug_logging ? "true" : "false");
