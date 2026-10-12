@@ -92,6 +92,7 @@ import {
   uuidPattern,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateAlreadyApplied,
   firmwareUpdateFromLogEntries,
   firmwareUpdateIsOver,
 } from "./protocol";
@@ -1652,13 +1653,19 @@ export async function startFrameHub(
     session: DeviceSession,
     entries: { timestamp: Date; payload: unknown }[],
   ) {
-    const firmwareUpdate = firmwareUpdateFromLogEntries(
+    const folded = firmwareUpdateFromLogEntries(
       entries,
       session.frame.firmwareUpdate,
     );
-    if (!firmwareUpdate) {
+    if (!folded) {
       return;
     }
+    // A verified install the device already runs (its hello said so) is
+    // over on arrival: the row goes back to nothing rather than to
+    // "rebooting into" a version it is on.
+    const firmwareUpdate = firmwareUpdateAlreadyApplied(folded, session.frame.frameosVersion)
+      ? null
+      : folded;
     session.frame = { ...session.frame, firmwareUpdate };
     await db
       .update(frames)

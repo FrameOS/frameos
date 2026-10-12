@@ -43,6 +43,21 @@ export interface CloudFrameSceneRow {
 }
 
 /**
+ * The service-key groups a scene declares but was not granted on this frame:
+ * what the device renders it WITHOUT. The device is served the grant alone,
+ * so an Unsplash scene with an empty grant asks for a key on every render
+ * while the account holds one — the gap this names. Empty when the row has
+ * no declaration (a legacy row reads as fully granted on the server).
+ */
+export function missingSettingsGroups(row: {
+  declared_settings_groups?: string[] | undefined
+  granted_settings_groups?: string[] | undefined
+}): string[] {
+  const granted = new Set(row.granted_settings_groups ?? [])
+  return (row.declared_settings_groups ?? []).filter((group) => !granted.has(group))
+}
+
+/**
  * The version of the scene the frame holds, as far as the control plane can
  * know: what the last push carried, else the pin. An assignment that follows
  * the latest is NOT at the store's latest — it only moves on a push — so the

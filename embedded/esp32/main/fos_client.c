@@ -68,6 +68,15 @@ static const char *TAG = "fos_client";
  * keep-awake hold and cancels this pass's sleep). */
 #define FOS_CLOUD_SLEEP_GRACE_SEC 20
 
+/* How long the first pass of a boot waits for the provider's session to
+ * come up and deliver what waited out the sleep (the hub's ready frame says
+ * how many verbs that is) before it renders. Observed on an E1004: the
+ * session was ready 6 s after boot and the queued switch landed 3 s later,
+ * by which time the previous scene was 10 s into a 34 s render that the
+ * switch then threw away. Bounded for a cloud that does not answer; the
+ * pass-end grace is skipped when this already waited the socket out. */
+#define FOS_CLOUD_BOOT_COMMANDS_WAIT_MS 20000
+
 /* A deep sleep must not cut an OTA short. The cloud OTA runs in its own task
  * for minutes (a 3 MB image over TLS plus flash writes), while the verb that
  * started it holds the frame awake for 15 s — so a battery frame used to
@@ -1432,6 +1441,31 @@ static void client_task(void *arg)
         }
         int64_t cycle_start = esp_timer_get_time();
 
+        /* First pass of a boot on a cloud-managed frame: the commands that
+         * waited out the sleep (a scene switch, a scenes push, a state) are
+         * delivered right after the session's ready frame, and the backend
+         * equivalent below (fos_commands_sync) already runs before the
+         * render for the same reason. Without this the pass rendered the
+         * old scene while the socket came up, then rendered again. */
+        bool cloud_socket_waited_out = false;
+        if (s_render_attempts == 0 && !s_render_paused_for_memory &&
+            config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+            fos_cloud_state() == FOS_CLOUD_ENROLLED &&
+            fos_wifi_state() == FOS_WIFI_CONNECTED) {
+            int64_t wait_start = esp_timer_get_time();
+            int announced = -1;
+            bool drained = fos_cloud_wait_initial_commands(FOS_CLOUD_BOOT_COMMANDS_WAIT_MS,
+                                                           &announced);
+            cloud_socket_waited_out = !drained && !fos_cloud_ws_connected();
+            char line[160];
+            snprintf(line, sizeof(line),
+                     "{\"event\":\"cloud:boot_commands\",\"source\":\"esp32\","
+                     "\"status\":\"%s\",\"pending\":%d,\"waitedMs\":%lld}",
+                     drained ? "drained" : fos_cloud_ws_connected() ? "timeout" : "no_session",
+                     announced, (long long)((esp_timer_get_time() - wait_start) / 1000));
+            frameos_nim_log_hook(line);
+        }
+
         /* Interpreted scenes: pick up backend changes and any payload
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
@@ -1699,7 +1733,7 @@ static void client_task(void *arg)
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0 &&
             fos_cloud_state() == FOS_CLOUD_ENROLLED && fos_wifi_ip()[0] != '\0' &&
-            !fos_cloud_ws_connected()) {
+            !fos_cloud_ws_connected() && !cloud_socket_waited_out) {
             /* Hold the boot open briefly for the provider's management socket
              * so queued commands can land before the deep sleep kills it. An
              * arriving verb arms the keep-awake hold, which cancels this

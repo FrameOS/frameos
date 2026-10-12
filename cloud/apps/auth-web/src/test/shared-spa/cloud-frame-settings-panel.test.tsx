@@ -11,7 +11,7 @@
 // the WHOLE push on a key the device does not know, so those fields could
 // never be made to work by typing harder; they silently dropped what you
 // typed, or took the rest of the push down with them.
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initKea } from "../../../../../../frontend/src/initKea";
 import { BindLogic } from "../../../../../../frontend/node_modules/kea";
@@ -34,6 +34,7 @@ function cloudFrame(
   platform: string,
   frameosVersion: string | null = extendedCloudFrameSettingsMinVersion,
   device?: string,
+  hardware: Partial<NonNullable<FrameType["hardware"]>> = {},
 ): FrameType {
   return {
     id: 1 as unknown as FrameType["id"],
@@ -41,7 +42,7 @@ function cloudFrame(
     name: `Frame on ${platform}`,
     managed_by: "cloud",
     frameos_version: frameosVersion,
-    hardware: { platform, width: 800, height: 480, ...(device ? { device } : {}) },
+    hardware: { platform, width: 800, height: 480, ...(device ? { device } : {}), ...hardware },
     frame_host: "",
     frame_port: 8787,
     frame_access_key: "",
@@ -362,6 +363,64 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("QR Control Code")).toBeNull();
     expect(screen.queryByText("Global errors")).toBeNull();
     expect(screen.queryByText("Panel")).toBeNull();
+  });
+
+  it("knows a Spectra PhotoPainter fits by default, from the panel in its hardware report", () => {
+    // The cloud fills no `device` for an ESP32: the panel name lives in the
+    // enrollment report alone, as the bare waveshare key. Read from
+    // `frame.device` the section found no palette and told the owner of a
+    // six-ink panel that "this display shows full color".
+    renderPanel(cloudFrame("esp32-s3", "2026.10.2", "EPD_7in3e"));
+    expect(screen.getAllByText("Default (on for this panel)").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Default (off for this display)")).toBeNull();
+    cleanup();
+
+    // A grayscale panel dithers too, but the device leaves the fit off there.
+    renderPanel(cloudFrame("esp32-s3", "2026.10.2", "EPD_4in26"));
+    expect(screen.getAllByText("Default (off for this display)").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Default (on for this panel)")).toBeNull();
+  });
+
+  it("shows the button map the frame reported, and edits start from it", () => {
+    // A reTerminal E1004 provisioned over USB runs the three keys its
+    // `set hardware` bundle gave it; the cloud never pushed a list, so the
+    // form has none. The section used to show nothing but "Add button".
+    const reported = [
+      { pin: 3, label: "REFRESH" },
+      { pin: 4, label: "LEFT" },
+      { pin: 5, label: "RIGHT" },
+    ];
+    renderPanel(cloudFrame("esp32-s3", "2026.10.7", "EPD_13in3e", { hardwarePreset: "seeed_reterminal_e1004", gpioButtons: reported }));
+    expect(screen.getByText("On the frame")).toBeTruthy();
+    expect(screen.queryByText("Add button")).toBeNull();
+    const pins = [...document.querySelectorAll<HTMLInputElement>("input[readonly]")]
+      .map((input) => input.value)
+      .filter((value) => /^\d+$/.test(value));
+    expect(pins).toEqual(["3", "4", "5"]);
+    // Read-only: no editable per-button fields yet.
+    expect(document.querySelector('input[name="pin"]')).toBeNull();
+
+    // Edit seeds the editable list with the reported map, so a save pushes
+    // a change to it rather than an unrelated list.
+    fireEvent.click(screen.getByText("Edit buttons"));
+    const editable = [...document.querySelectorAll<HTMLInputElement>('input[name="pin"]')].map((input) => input.value);
+    expect(editable).toEqual(["3", "4", "5"]);
+    const labels = [...document.querySelectorAll<HTMLInputElement>('input[name="label"]')].map((input) => input.value);
+    expect(labels).toEqual(["REFRESH", "LEFT", "RIGHT"]);
+    expect(screen.queryByText("On the frame")).toBeNull();
+    expect(screen.getByText("Add button")).toBeTruthy();
+    cleanup();
+
+    // A frame that reports no buttons says so and offers the list.
+    renderPanel(cloudFrame("esp32-s3", "2026.10.7", "EPD_7in5_V2", { gpioButtons: [] }));
+    expect(screen.getByText("No buttons set on the frame.")).toBeTruthy();
+    expect(screen.getByText("Add button")).toBeTruthy();
+    cleanup();
+
+    // Firmware without the report (no `gpioButtons` key) keeps the plain list.
+    renderPanel(cloudFrame("esp32-s3", "2026.8.31", "EPD_7in5_V2"));
+    expect(screen.queryByText("On the frame")).toBeNull();
+    expect(screen.getByText("Add button")).toBeTruthy();
   });
 
   it("enables the time zone field from firmware 2026.8.34", () => {

@@ -8,7 +8,12 @@ import { assetPathKey } from './assetPaths'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 import { devices } from '../../../../devices'
 import { type AutoEndPoints, applyAssetColors, autoEndPoints } from '../../../../utils/assetColors/adjust'
-import { panelPaletteForFrame, visiblePalette } from '../../../../utils/assetColors/devicePalette'
+import {
+  paletteDeviceOf,
+  panelAutoFitByDefault,
+  panelPaletteForFrame,
+  visiblePalette,
+} from '../../../../utils/assetColors/devicePalette'
 import { ditherToPalette } from '../../../../utils/assetColors/dither'
 import {
   type AssetColorProfile,
@@ -22,6 +27,20 @@ import {
   sidecarPathFor,
 } from '../../../../utils/assetColors/profile'
 import type { AssetType, FrameId, FrameType } from '../../../../types'
+
+/** The frame fields the panel palette is read from: the form first, the saved row second. */
+function panelOf(
+  frameForm: Partial<FrameType>,
+  frame: FrameType
+): Pick<FrameType, 'device' | 'palette' | 'device_config' | 'embedded' | 'hardware'> {
+  return {
+    device: frameForm.device ?? frame.device,
+    palette: frameForm.palette ?? frame.palette,
+    device_config: frameForm.device_config ?? frame.device_config,
+    embedded: frame.embedded,
+    hardware: frame.hardware,
+  }
+}
 
 export interface AssetColorsLogicProps {
   frameId: FrameId
@@ -374,7 +393,7 @@ export interface assetColorsLogicMeta {
       height: number
       width: number
     }
-    frameAutoFitActive: (frameForm: Partial<FrameType>, frame: FrameType, panelPalette: RgbTriplet[] | null) => boolean
+    frameAutoFitActive: (frameForm: Partial<FrameType>, frame: FrameType) => boolean
     hasSavedProfile: (imagePath: string | null, colorProfileKeys: Set<string>, frame: FrameType) => boolean
     isDefault: (profile: AssetColorProfile) => boolean
     adjustmentMode: (profile: AssetColorProfile, autoEndPoints: AutoEndPoints | null) => AdjustmentMode
@@ -544,16 +563,10 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
   selectors({
     panelPalette: [
       (s) => [s.frameForm, s.frame],
-      (frameForm: assetColorsLogicValues['frameForm'], frame: assetColorsLogicValues['frame']): RgbTriplet[] | null =>
-        panelPaletteForFrame(
-          {
-            device: frameForm.device ?? frame.device,
-            palette: frameForm.palette ?? frame.palette,
-            device_config: frameForm.device_config ?? frame.device_config,
-            embedded: frame.embedded,
-          },
-          deviceLabelFor(frameForm.device ?? frame.device)
-        ),
+      (frameForm: assetColorsLogicValues['frameForm'], frame: assetColorsLogicValues['frame']): RgbTriplet[] | null => {
+        const panel = panelOf(frameForm, frame)
+        return panelPaletteForFrame(panel, deviceLabelFor(paletteDeviceOf(panel)))
+      },
     ],
     imageSize: [
       (s) => [s.frameForm, s.frame],
@@ -565,14 +578,11 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
         }),
     ],
     frameAutoFitActive: [
-      (s) => [s.frameForm, s.frame, s.panelPalette],
-      (
-        frameForm: assetColorsLogicValues['frameForm'],
-        frame: assetColorsLogicValues['frame'],
-        panelPalette: assetColorsLogicValues['panelPalette']
-      ): boolean => {
+      (s) => [s.frameForm, s.frame],
+      (frameForm: assetColorsLogicValues['frameForm'], frame: assetColorsLogicValues['frame']): boolean => {
         const mode = (frameForm.colors ?? frame.colors)?.autoFit ?? 'default'
-        return mode === 'on' || (mode !== 'off' && visiblePalette(panelPalette).length > 0)
+        const panel = panelOf(frameForm, frame)
+        return mode === 'on' || (mode !== 'off' && panelAutoFitByDefault(panel, deviceLabelFor(paletteDeviceOf(panel))))
       },
     ],
     hasSavedProfile: [
@@ -593,8 +603,8 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
         sameAdjustments(profile, defaultAssetColorProfile())
           ? 'none'
           : autoEndPoints && sameAdjustments(profile, autoProfileFor(profile, autoEndPoints))
-          ? 'auto'
-          : 'custom',
+            ? 'auto'
+            : 'custom',
     ],
     isDirty: [
       (s) => [s.profile, s.savedProfile],
@@ -641,13 +651,13 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
     previousImagePath: [
       (s) => [s.imagePosition, s.folderImagePaths],
       (position: { index: number; count: number }, folderImagePaths: string[]): string | null =>
-        position.index > 0 ? folderImagePaths[position.index - 1] ?? null : null,
+        position.index > 0 ? (folderImagePaths[position.index - 1] ?? null) : null,
     ],
     nextImagePath: [
       (s) => [s.imagePosition, s.folderImagePaths],
       (position: { index: number; count: number }, folderImagePaths: string[]): string | null =>
         position.index >= 0 && position.index < position.count - 1
-          ? folderImagePaths[position.index + 1] ?? null
+          ? (folderImagePaths[position.index + 1] ?? null)
           : null,
     ],
   }),

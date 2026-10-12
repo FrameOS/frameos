@@ -8,7 +8,12 @@ import { Switch } from '../../../../../components/Switch'
 import { frameAssetsApiPath } from '../../../../../utils/frameAssetsApi'
 import { getBasePath } from '../../../../../utils/getBasePath'
 import { applyAssetColors, autoEndPoints } from '../../../../../utils/assetColors/adjust'
-import { panelPaletteForFrame, visiblePalette } from '../../../../../utils/assetColors/devicePalette'
+import {
+  paletteDeviceOf,
+  panelAutoFitByDefault,
+  panelPaletteForFrame,
+  visiblePalette,
+} from '../../../../../utils/assetColors/devicePalette'
 import { ditherToPalette } from '../../../../../utils/assetColors/dither'
 import {
   type AssetColorProfile,
@@ -57,12 +62,16 @@ function FrameColorsPreview({
   const [failed, setFailed] = useState(false)
   const [dithered, setDithered] = useState(true)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const panelPalette = panelPaletteForFrame(
-    { device: frame.device, palette: frame.palette, device_config: frame.device_config, embedded: frame.embedded },
-    deviceLabelFor(frame.device)
-  )
-  const palette = visiblePalette(panelPalette)
-  const autoFit = colors.autoFit === 'on' || (colors.autoFit !== 'off' && palette.length > 0)
+  const panel = {
+    device: frame.device,
+    palette: frame.palette,
+    device_config: frame.device_config,
+    embedded: frame.embedded,
+    hardware: frame.hardware,
+  }
+  const deviceLabel = deviceLabelFor(paletteDeviceOf(panel))
+  const palette = visiblePalette(panelPaletteForFrame(panel, deviceLabel))
+  const autoFit = colors.autoFit === 'on' || (colors.autoFit !== 'off' && panelAutoFitByDefault(panel, deviceLabel))
 
   useEffect(() => {
     let cancelled = false
@@ -149,16 +158,15 @@ export function ColorsSection(): JSX.Element {
   // correction switch is always in view.
   const [showFineTuning, setShowFineTuning] = useState(false)
   const tunedSliders = Object.keys(globalOfProfile(global)).length
-  const panelPalette = panelPaletteForFrame(
-    {
-      device: frameForm.device ?? frame.device,
-      palette: frameForm.palette ?? frame.palette,
-      device_config: frameForm.device_config ?? frame.device_config,
-      embedded: frame.embedded,
-    },
-    deviceLabelFor(frameForm.device ?? frame.device)
-  )
-  const hasPalette = visiblePalette(panelPalette).length > 0
+  // Whether the frame fits by default: the device decides by panel family
+  // (color inks only), and a cloud frame's panel is in its hardware report.
+  const panel = {
+    device: frameForm.device ?? frame.device,
+    device_config: frameForm.device_config ?? frame.device_config,
+    embedded: frame.embedded,
+    hardware: frame.hardware,
+  }
+  const fitsByDefault = panelAutoFitByDefault(panel, deviceLabelFor(paletteDeviceOf(panel)))
   const setColors = (next: FrameColors): void => setFrameFormValues({ colors: next })
 
   return (
@@ -187,7 +195,7 @@ export function ColorsSection(): JSX.Element {
             options={[
               {
                 value: 'default',
-                label: hasPalette ? 'Default (on for this panel)' : 'Default (off for this display)',
+                label: fitsByDefault ? 'Default (on for this panel)' : 'Default (off for this display)',
               },
               { value: 'on', label: 'Always on' },
               { value: 'off', label: 'Off' },
@@ -196,9 +204,9 @@ export function ColorsSection(): JSX.Element {
           />
         </label>
         <p className="frameos-muted text-xs">
-          {hasPalette
-            ? 'Default is on here: this panel dithers to a fixed set of inks. Off shows the image as it is.'
-            : 'Default is off here: this display shows full color, so there is nothing to fit. Always on still applies it.'}
+          {fitsByDefault
+            ? 'Default is on here: this panel dithers to a fixed set of color inks. Off shows the image as it is.'
+            : 'Default is off here: this display is full color, grayscale or two-color, so there is nothing to fit. Always on still applies it.'}
         </p>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="flex items-center gap-1">

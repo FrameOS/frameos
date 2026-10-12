@@ -168,6 +168,15 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
   let board = detectBoard()
   if board.len > 0:
     result["board"] = %board
+  # The GPIO button map the runtime binds (frame.json gpio_buttons), so a
+  # provider can show what the frame runs with before it ever pushed one.
+  # Pin and label only: the role is what a provider sets, not reads back.
+  var buttons = newJArray()
+  if frameConfig != nil:
+    for button in frameConfig.gpioButtons:
+      if button != nil:
+        buttons.add(%*{"pin": button.pin, "label": button.label})
+  result["gpioButtons"] = buttons
   # "color" only lives in raw frame.json (device color variant); include it
   # when present, drop it otherwise — providers must drop unknown/missing
   # optional fields anyway.

@@ -154,30 +154,76 @@ export function customPaletteOf(frame: Pick<FrameType, 'palette'>): RgbTriplet[]
 }
 
 /**
+ * The driver name the palette tables are keyed by. A cloud frame's panel is
+ * the one in its enrollment hardware report, never a form value: the cloud
+ * fills no `device` for an ESP32, and a Pi reports the driver it runs. An
+ * ESP32 reports its panel as the bare waveshare key (`EPD_7in3e`) where the
+ * tables say `waveshare.EPD_7in3e`. Backend-managed frames carry no
+ * hardware report and keep their own `device`.
+ */
+export function paletteDeviceOf(frame: Pick<FrameType, 'device' | 'hardware'>): string {
+  const reported = frame.hardware?.device ?? ''
+  if (reported) {
+    const platform = frame.hardware?.platform
+    const esp32 = typeof platform === 'string' && platform.toLowerCase().startsWith('esp32')
+    return esp32 && !reported.includes('.') ? `waveshare.${reported}` : reported
+  }
+  return frame.device || ''
+}
+
+/** The virtual frame's chosen color mode, as a panel family. */
+function panelPaletteKindForColorMode(mode: unknown): PanelPaletteKind {
+  return mode === 'spectra6'
+    ? 'spectra6'
+    : mode === 'sevencolor'
+    ? 'sevenColor'
+    : mode === 'bwyr'
+    ? 'fourColor'
+    : mode === 'gray4'
+    ? 'gray4'
+    : mode === 'bw'
+    ? 'blackWhite'
+    : 'none'
+}
+
+/**
  * `deviceLabel` is the catalog label ("… 4 Grayscale", "… 7 Color"), which
  * tells the greyscale and seven-color families apart where the name alone
- * does not; the caller looks it up (devices.ts) so this module stays free
- * of UI imports.
+ * does not; the caller looks it up (devices.ts, by `paletteDeviceOf`) so
+ * this module stays free of UI imports.
  */
+export function panelPaletteKindForFrame(
+  frame: Pick<FrameType, 'device' | 'device_config' | 'embedded' | 'hardware'>,
+  deviceLabel = ''
+): PanelPaletteKind {
+  if (frame.embedded?.platform === 'virtual') {
+    return panelPaletteKindForColorMode(frame.device_config?.colorMode)
+  }
+  return panelPaletteKindForDevice(paletteDeviceOf(frame), deviceLabel)
+}
+
 export function panelPaletteForFrame(
-  frame: Pick<FrameType, 'device' | 'palette' | 'device_config' | 'embedded'>,
+  frame: Pick<FrameType, 'device' | 'palette' | 'device_config' | 'embedded' | 'hardware'>,
   deviceLabel = ''
 ): RgbTriplet[] | null {
-  if (frame.embedded?.platform === 'virtual') {
-    const mode = frame.device_config?.colorMode
-    const kind: PanelPaletteKind =
-      mode === 'spectra6'
-        ? 'spectra6'
-        : mode === 'sevencolor'
-        ? 'sevenColor'
-        : mode === 'bwyr'
-        ? 'fourColor'
-        : mode === 'gray4'
-        ? 'gray4'
-        : mode === 'bw'
-        ? 'blackWhite'
-        : 'none'
-    return paletteForKind(kind, customPaletteOf(frame))
-  }
-  return paletteForKind(panelPaletteKindForDevice(frame.device, deviceLabel), customPaletteOf(frame))
+  return paletteForKind(panelPaletteKindForFrame(frame, deviceLabel), customPaletteOf(frame))
+}
+
+/**
+ * Whether the frame runs the automatic fit when `colors.autoFit` is
+ * `default`: on the color-ink families alone. A grayscale or two-color
+ * panel dithers to a palette too, but its black and white are a photo's,
+ * so the device leaves the fit off there (`panelPaletteForDevice` in
+ * utils/asset_colors.nim returns nothing for them, `panelPaletteForFormat`
+ * in embedded_main.nim the same for the ESP32); keep the three in step.
+ */
+export function autoFitByDefaultForKind(kind: PanelPaletteKind): boolean {
+  return kind === 'spectra6' || kind === 'sevenColor' || kind === 'fourColor'
+}
+
+export function panelAutoFitByDefault(
+  frame: Pick<FrameType, 'device' | 'device_config' | 'embedded' | 'hardware'>,
+  deviceLabel = ''
+): boolean {
+  return autoFitByDefaultForKind(panelPaletteKindForFrame(frame, deviceLabel))
 }

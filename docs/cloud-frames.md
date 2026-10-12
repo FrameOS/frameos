@@ -59,7 +59,8 @@ POST {provider}/api/frames/enroll
     "platform": "pi-zero2w | pi | esp32 | …",
     "board": "raspberry-pi-5 | raspberry-pi-64 | raspberry-pi-32",
     "device": "…driver name…",
-    "width": 800, "height": 480, "color": "…"
+    "width": 800, "height": 480, "color": "…",
+    "gpioButtons": [{"pin": 3, "label": "REFRESH"}, {"pin": 4, "label": "LEFT"}]
   },
   "frameos_version": "2026.8.1",
   "name": "…optional, e.g. from the personalization file…",
@@ -349,7 +350,14 @@ profile they target rather than relying on the cap.
    the link's currently granted scope list; a device should treat it as
    additive truth and enable the matching push loops (telemetry above all) —
    it is how a frame whose enrollment response under-reported the grant
-   learns it may send logs and metrics without re-enrolling.
+   learns it may send logs and metrics without re-enrolling. `pending_commands`
+   is a promise about what follows: the ESP32 firmware (2026.10.7+) holds the
+   first render of a boot until that many verbs have been dispatched, up to
+   20 s, so a scene switch that waited out a deep sleep lands in that render
+   instead of after a wasted one (`cloud:boot_commands` in the device log says
+   `drained`, `timeout` or `no_session`). A provider that announces fewer than
+   it then sends merely loses that optimisation; one that announces more
+   costs the frame the timeout on every wake.
 
 The hello's `hardware` object is the same shape enrollment sends; a provider
 should persist it on each successful session start so its copy tracks the
@@ -1111,7 +1119,14 @@ without a cable: `mac`, `chipRevision` (major×100+minor), `chipCores`,
 metrics), `storage` (partition-map byte counts: `flashBytes`, `nvsBytes`,
 `otadataBytes`, `phyBytes`, `factorySlotBytes`, `otaSlots`, `otaSlotBytes`,
 `otaBytes`, `stateBytes`), `ota` (`supported`, `slotBytes`) and `sd`
-(`enabled`, `mounted`, `capacityBytes`). A permanent
+(`enabled`, `mounted`, `capacityBytes`). 2026.10.7+ firmware (and the Linux
+runtime from the same release) adds `gpioButtons` (`[{pin, label}]`, the
+button map the device runs with — the preset's from `set hardware`, or what
+the last `set_settings` push left) and, on the ESP32, `hardwarePreset` (the
+`set hardware` bundle name, absent on a custom build). The reference SPA
+shows the reported map read-only, with an edit path that seeds a
+`gpio_buttons` push, where it has never pushed one; the cloud seeds no
+button map of its own, unlike the backend's preset table. A permanent
 enrollment rejection (HTTP 400) erases the claim token on-device and shows
 `error` until a fresh token is provisioned. `set cloud_url` refuses a
 provider URL that would carry the claim token in the clear (see "The

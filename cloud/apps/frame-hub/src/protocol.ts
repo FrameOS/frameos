@@ -263,6 +263,26 @@ export function firmwareUpdateIsOver(
   );
 }
 
+// A "verified" line that reaches the hub AFTER the device came back on the
+// release it names has nothing left to narrate: the Pi's upgrade watcher
+// forwards its `success` line from the NEW runtime's session (the old one
+// died with the restart), seconds after the hello that cleared the previous
+// record. Folded as-is, the row said "rebooting into 2026.10.6" for a frame
+// already running it, and nothing cleared it until the next reconnect
+// (2026-10-12, the FastClock 10.3"). The device's running version is what
+// its last hello reported.
+export function firmwareUpdateAlreadyApplied(
+  firmwareUpdate: { status: string; version: string | null },
+  runningVersion: string | null | undefined,
+): boolean {
+  return (
+    firmwareUpdate.status === "verified" &&
+    typeof firmwareUpdate.version === "string" &&
+    firmwareUpdate.version.length > 0 &&
+    firmwareUpdate.version === runningVersion
+  );
+}
+
 // What the row's firmware_update says, in ONE vocabulary for both device
 // families (frontend/src/decorators/frame.tsx frameFirmwareUpdateProgress
 // reads it):

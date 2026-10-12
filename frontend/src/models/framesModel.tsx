@@ -235,6 +235,8 @@ async function fetchCloudFrameScenes(frameId: FrameId): Promise<{
         scene_version: row.scene_version ?? null,
         held_version: cloudSceneHeldVersion(row),
         update_version: cloudSceneUpdateVersion(row),
+        declared_settings_groups: row.declared_settings_groups ?? [],
+        granted_settings_groups: row.granted_settings_groups ?? [],
       }
     }
     scenes.push(...rowScenes)

@@ -7,6 +7,7 @@ import {
   cloudSceneHeldVersion,
   cloudSceneStub,
   cloudSceneUpdateVersion,
+  missingSettingsGroups,
   scenesFromStoreSceneJson,
 } from "../../../../../../frontend/src/utils/cloudFrameScenes";
 
@@ -16,6 +17,23 @@ import {
 // each store scene's scenes.json; these are the pure pieces of that path.
 
 describe("cloud frame scene hydration helpers", () => {
+  it("names the service keys a scene declares but was not allowed on this frame", () => {
+    // "Please provide an Unsplash API key in the settings" on a frame whose
+    // account holds one: the assignment's grant was empty, and the device is
+    // served the grant alone. The drawer shows this gap with an Allow button.
+    expect(missingSettingsGroups({ declared_settings_groups: ["unsplash"], granted_settings_groups: [] })).toEqual([
+      "unsplash",
+    ]);
+    expect(
+      missingSettingsGroups({ declared_settings_groups: ["openAI", "unsplash"], granted_settings_groups: ["openAI"] }),
+    ).toEqual(["unsplash"]);
+    expect(
+      missingSettingsGroups({ declared_settings_groups: ["immich"], granted_settings_groups: ["immich"] }),
+    ).toEqual([]);
+    // No declaration: nothing is missing (a legacy row reads as fully granted on the server).
+    expect(missingSettingsGroups({})).toEqual([]);
+  });
+
   it("uses the scenes.json array verbatim — it carries the runtime scene ids", () => {
     const scenes = [
       { id: "runtime-1", name: "Clock", nodes: [{ id: "n1" }], edges: [] },

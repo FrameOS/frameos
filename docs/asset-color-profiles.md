@@ -96,10 +96,14 @@ it draws. `frame.json`'s `colors` block:
 { "autoFit": "default", "global": { "whites": -10, "hues": { "blue": { "saturation": 20 } } } }
 ```
 
-* `autoFit`: `default` (on when the panel dithers to a palette, off on a
-  full-color display), `on` or `off`. On a Pi the palette comes from the
+* `autoFit`: `default` (on when the panel dithers to color inks: Spectra 6,
+  seven-color and four-color panels; off on full-color, grayscale and
+  two-color displays), `on` or `off`. On a Pi the palette comes from the
   device name plus a six-color custom palette (`panelPaletteForDevice`), on
-  the ESP32 from the display format at render time.
+  the ESP32 from the display format at render time. The editor's copy of the
+  rule is `panelAutoFitByDefault` in `frontend/src/utils/assetColors/devicePalette.ts`,
+  which reads a cloud frame's panel from its hardware report (an ESP32 has
+  no `device` setting at all).
 * `global`: the sidecar's slider set without a palette, applied once to the
   whole finished canvas on every display, after the fit. Neutral by default.
 

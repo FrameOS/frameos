@@ -6,6 +6,8 @@ import {
 } from "../../../../../../frontend/src/utils/assetColors/adjust";
 import {
   SPECTRA6_PALETTE,
+  paletteDeviceOf,
+  panelAutoFitByDefault,
   panelPaletteForFrame,
   panelPaletteKindForDevice,
   visiblePalette,
@@ -195,6 +197,43 @@ describe("panel palette for a frame", () => {
     expect(panelPaletteKindForDevice("waveshare.EPD_7in5_V2")).toBe("blackWhite");
     expect(panelPaletteKindForDevice("framebuffer")).toBe("none");
     expect(panelPaletteKindForDevice("web_only")).toBe("none");
+  });
+
+  it("reads a cloud frame's panel from its hardware report, an ESP32's as the waveshare driver", () => {
+    // The cloud fills no `device` for an ESP32; the enrollment report says
+    // `EPD_7in3e` and the palette tables say `waveshare.EPD_7in3e`. This is
+    // how a Spectra PhotoPainter's settings claimed "this display shows full
+    // color" and left the automatic fit looking off.
+    const photoPainter = { device: "", hardware: { platform: "esp32-s3", device: "EPD_7in3e" } };
+    expect(paletteDeviceOf(photoPainter)).toBe("waveshare.EPD_7in3e");
+    expect(visiblePalette(panelPaletteForFrame(photoPainter))).toHaveLength(6);
+    expect(panelAutoFitByDefault(photoPainter)).toBe(true);
+    // A Pi reports the driver name it runs, dotted or not.
+    expect(paletteDeviceOf({ device: "", hardware: { platform: "buildroot", device: "waveshare.EPD_7in5_V2" } })).toBe(
+      "waveshare.EPD_7in5_V2",
+    );
+    expect(paletteDeviceOf({ device: "", hardware: { platform: "buildroot", device: "framebuffer" } })).toBe("framebuffer");
+    // The report wins over a stale form value; without one the frame's own device stands.
+    expect(paletteDeviceOf({ device: "waveshare.EPD_7in3f", hardware: { platform: "esp32", device: "EPD_13in3e" } })).toBe(
+      "waveshare.EPD_13in3e",
+    );
+    expect(paletteDeviceOf({ device: "waveshare.EPD_7in3f", hardware: { platform: "esp32" } })).toBe("waveshare.EPD_7in3f");
+    expect(paletteDeviceOf({ device: "waveshare.EPD_7in3f" })).toBe("waveshare.EPD_7in3f");
+  });
+
+  it("fits by default on the color-ink families alone, as the device does", () => {
+    // panelPaletteForDevice (asset_colors.nim) returns a palette for these
+    // three families and nothing for the rest; the editor's default must say
+    // the same, even where it still previews a dither.
+    expect(panelAutoFitByDefault({ device: "waveshare.EPD_7in3e" })).toBe(true);
+    expect(panelAutoFitByDefault({ device: "waveshare.EPD_7in3f" })).toBe(true);
+    expect(panelAutoFitByDefault({ device: "waveshare.EPD_2in13g" })).toBe(true);
+    expect(panelAutoFitByDefault({ device: "waveshare.EPD_7in5_V2" })).toBe(false);
+    expect(visiblePalette(panelPaletteForFrame({ device: "waveshare.EPD_7in5_V2" }))).toHaveLength(2);
+    expect(panelAutoFitByDefault({ device: "waveshare.EPD_7in5b_V2" })).toBe(false);
+    expect(panelAutoFitByDefault({ device: "framebuffer" })).toBe(false);
+    expect(panelAutoFitByDefault({ device: "", embedded: { platform: "virtual" }, device_config: { colorMode: "spectra6" } })).toBe(true);
+    expect(panelAutoFitByDefault({ device: "", embedded: { platform: "virtual" }, device_config: { colorMode: "bw" } })).toBe(false);
   });
 
   it("prefers a frame's six-color custom palette on a Spectra panel", () => {

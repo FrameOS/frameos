@@ -384,6 +384,35 @@ function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<str
 }
 
 /**
+ * Allow one assigned scene the given service-key groups on a cloud frame
+ * (the scene drawer's "Allow" for a scene that asks for a key it was never
+ * granted). Read-modify-write like the install: every other row keeps its
+ * pin, the version the frame holds and its grant; this scene's grant becomes
+ * `groups`, which the server narrows to what the scene declares.
+ * `activeSceneId` (a RUNTIME scene id) keeps the current scene on screen.
+ */
+export async function grantCloudFrameSceneSettingsGroups(
+  frameId: FrameId,
+  storeSceneId: string,
+  groups: readonly string[],
+  activeSceneId?: string
+): Promise<void> {
+  const existing = await listCloudFrameScenes(frameId)
+  if (!existing.some((scene) => scene.scene_id === storeSceneId)) {
+    throw new Error('This scene is no longer on the frame')
+  }
+  await setCloudFrameScenes(
+    frameId,
+    existing.map((scene) => ({
+      scene_id: scene.scene_id,
+      scene_version: scene.scene_version ?? null,
+      settings_groups: scene.scene_id === storeSceneId ? [...groups] : scene.granted_settings_groups,
+    })),
+    activeSceneId
+  )
+}
+
+/**
  * Install (or re-pin) one store scene on a cloud frame, granting it the given
  * service-settings groups — what the chat's Install card does when the user
  * approves an AI proposal. Read-modify-write like assignCloudFrameStoreScene:

@@ -152,6 +152,13 @@ static char s_ws_path[FOS_CLOUD_WS_PATH_LEN] = "";
  * cloud_url + ws_path. */
 static char s_ws_url[FOS_URL_LEN] = "";
 static bool s_ws_ready = false;
+/* The ready frame's `pending_commands` and how many verbs this session has
+ * dispatched since. fos_cloud_wait_initial_commands holds a boot's first
+ * render on them, so a scene switch that waited out a deep sleep lands in
+ * THAT render instead of after a wasted one (30 s on a 13.3" Spectra).
+ * -1 = no ready frame yet this session. */
+static volatile int s_initial_pending = -1;
+static volatile int s_initial_dispatched = 0;
 static TaskHandle_t s_task = NULL;
 
 fos_cloud_state_t fos_cloud_state(void) { return s_state; }
@@ -457,6 +464,27 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddStringToObject(hw, "panel", config->panel);
     cJSON_AddNumberToObject(hw, "width", fos_display_present() ? fos_display_width() : 0);
     cJSON_AddNumberToObject(hw, "height", fos_display_present() ? fos_display_height() : 0);
+
+    /* The board bundle `set hardware` applied (empty on a custom build) and
+     * the GPIO button map the firmware runs with, in the status JSON's
+     * shape. The cloud never seeds buttons the way the backend's preset
+     * table does (apply_embedded_hardware_preset), so without this its
+     * Settings panel showed a reTerminal's three keys as none at all. Sent
+     * on every hello, so a `set_settings` push shows up after the restart
+     * it causes, and a console `set gpio_buttons` after the next reboot. */
+    if (config->hardware_preset[0]) {
+        cJSON_AddStringToObject(hw, "hardwarePreset", config->hardware_preset);
+    }
+    cJSON *buttons = cJSON_AddArrayToObject(hw, "gpioButtons");
+    if (buttons) {
+        for (size_t i = 0; i < config->gpio_button_count; i++) {
+            cJSON *button = cJSON_CreateObject();
+            if (!button) break;
+            cJSON_AddNumberToObject(button, "pin", config->gpio_buttons[i].pin);
+            cJSON_AddStringToObject(button, "label", config->gpio_buttons[i].label);
+            cJSON_AddItemToArray(buttons, button);
+        }
+    }
 
     /* Board facts for the cloud deploy drawer, mirroring the USB console's
      * status JSON (fos_http_status_json). Sent on hello, so the control
@@ -2851,6 +2879,12 @@ static void ws_handle_message(const char *data, size_t len)
     if (strcmp(type, "challenge") == 0) {
         ws_send_auth(root);
     } else if (strcmp(type, "ready") == 0) {
+        /* How many queued verbs follow this frame (the hub drains them in
+         * order right after it): what the first render of a boot waits for. */
+        const cJSON *pending = cJSON_GetObjectItem(root, "pending_commands");
+        s_initial_dispatched = 0;
+        s_initial_pending = cJSON_IsNumber(pending) && pending->valuedouble >= 0
+                                ? (int)pending->valuedouble : 0;
         /* The ready message is authoritative for what this session may do:
          * its scopes array reflects the provider's current grant, including
          * revocations since enrollment. */
@@ -2916,8 +2950,28 @@ static void ws_handle_message(const char *data, size_t len)
         dispatch_lock_take();
         dispatch_verb(type, root, id, FOS_ORIGIN_CLOUD, false);
         dispatch_lock_give();
+        /* Counted AFTER the dispatch: a set_scenes has written its payload
+         * and a set_current_scene has queued its switch by now, so the
+         * render task that stops waiting on this count finds them. */
+        if (s_initial_pending >= 0) s_initial_dispatched++;
     }
     cJSON_Delete(root);
+}
+
+bool fos_cloud_wait_initial_commands(uint32_t timeout_ms, int *pending_out)
+{
+    if (pending_out) *pending_out = -1;
+    if (fos_cloud_state() != FOS_CLOUD_ENROLLED) return true;
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000LL;
+    for (;;) {
+        if (fos_wifi_state() != FOS_WIFI_CONNECTED) return false;
+        if (s_ws_ready && s_initial_pending >= 0) {
+            if (pending_out) *pending_out = s_initial_pending;
+            if (s_initial_dispatched >= s_initial_pending) return true;
+        }
+        if (esp_timer_get_time() >= deadline) return false;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
 
 /* Jittered exponential backoff for the redial, as promised by
@@ -2991,6 +3045,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
             s_ws_ready = false;
+            s_initial_pending = -1;
             s_logs_granted = false; /* re-derived from this session's ready */
             s_metrics_granted = false;
             s_ws_backoff_advanced = false; /* a new attempt got this far */
@@ -3280,6 +3335,7 @@ static void ws_stop(void)
     esp_websocket_client_stop(client);
     esp_websocket_client_destroy(client);
     s_ws_ready = false;
+    s_initial_pending = -1;
     s_logs_granted = false;
     s_metrics_granted = false;
     ws_drain_log_queue();

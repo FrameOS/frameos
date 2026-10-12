@@ -442,6 +442,20 @@ suite "board detection":
     # raising, because it runs inside the enrollment payload.
     check detectBoard() == "" or detectBoard().startsWith("raspberry-pi-")
 
+suite "hardware payload":
+  test "reports the button map the runtime binds, pin and label only":
+    # A provider shows what the frame runs with before it ever pushed a
+    # list; the role is the provider's to set, so it never travels back.
+    let config = FrameConfig(mode: "buildroot", device: "pimoroni.inky_impression_13",
+      gpioButtons: @[GPIOButton(pin: 5, label: "A", role: "primary"), GPIOButton(pin: 6, label: "B")])
+    let payload = hardwarePayload(config)
+    check payload["device"].getStr == "pimoroni.inky_impression_13"
+    check payload["gpioButtons"] == %*[{"pin": 5, "label": "A"}, {"pin": 6, "label": "B"}]
+    # No buttons is an empty list, so the provider can tell "none" from
+    # "firmware too old to say".
+    check hardwarePayload(FrameConfig(mode: "buildroot", device: "web_only"))["gpioButtons"] == %*[]
+    check hardwarePayload(nil)["gpioButtons"] == %*[]
+
 # No server.close(): it segfaults in mummy's shutdown path *after* the suite
 # has passed, turning a green run into exit code 1. It reproduces on demand —
 # adding close() to test_hub_session.nim (which never had one and never failed)

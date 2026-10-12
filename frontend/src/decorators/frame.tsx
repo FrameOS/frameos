@@ -252,6 +252,13 @@ export function frameFirmwareUpdateProgress(
       if (age > firmwareUpdateStaleMs) {
         return null
       }
+      // The frame is back on the release the line names: a row the control
+      // plane folded after the reboot (the Pi's watcher reports `success`
+      // from the new runtime) would otherwise read "rebooting into" a
+      // version the frame already runs.
+      if (version && frame.frameos_version === version) {
+        return null
+      }
       return {
         kind: 'running',
         label: `rebooting into${versionSuffix || ' the update'}`,

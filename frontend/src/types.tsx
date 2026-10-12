@@ -59,6 +59,12 @@ export interface CloudSceneSource {
   held_version?: number | null
   /** Set when the store has a newer version the account can install. */
   update_version?: number | null
+  /** Service-key groups the assigned version's apps declare (a request):
+   * `unsplash`, `openAI`, … Names only. */
+  declared_settings_groups?: string[]
+  /** The groups the owner allowed this scene on this frame: what the device
+   * is served. Always a subset of declared. */
+  granted_settings_groups?: string[]
 }
 
 export interface FrameType {
@@ -105,6 +111,13 @@ export interface FrameType {
     width?: number | null
     height?: number | null
     color?: string | null
+    /** ESP32 only: the `set hardware` bundle the board was provisioned with
+     * (`seeed_reterminal_e1004`, …); absent on a custom build. */
+    hardwarePreset?: string | null
+    /** The GPIO button map the device runs with (pin and label, never a
+     * role), from 2026.10.7 firmware and the Linux runtime of the same
+     * release. Absent on older firmware; `[]` is a frame with no buttons. */
+    gpioButtons?: { pin: number; label: string }[] | null
     mac?: string | null
     /** major*100 + minor, as esp_chip_info reports it */
     chipRevision?: number | null
