@@ -2952,10 +2952,9 @@ static void ws_handle_message(const char *data, size_t len)
          * hook prints to the console, so the answer is on the USB serial
          * stream even in the not-granted case that keeps it off the wire.
          *
-         * Version and boot slot ride along because this is the first line
-         * of a boot that reaches cloud retention live: the bootup event
-         * fires before the session exists and the tap drops it (the ring
-         * replay below carries it up afterwards). */
+         * Version and boot slot ride along: the bootup event fires before
+         * the session exists and the tap drops it (the ring replay below
+         * carries it up after this line). */
         const esp_partition_t *running_part = esp_ota_get_running_partition();
         s_session_count++;
         char previous[96];
@@ -2973,10 +2972,7 @@ static void ws_handle_message(const char *data, size_t len)
                  running_part ? running_part->label : "?",
                  (unsigned long)s_session_count,
                  (long long)(esp_timer_get_time() / 1000000), previous);
-        /* Captured before the session_ready line goes through the tap: the
-         * replay covers everything the ring holds between the last line the
-         * previous session took and this one. */
-        uint32_t forwarded_before_ready = s_log_forwarded_seq;
+        uint32_t forwarded_before_ready = s_log_forwarded_seq; /* see ws_replay_missed_log */
         frameos_nim_log_hook(event);
         ws_replay_missed_log(forwarded_before_ready);
         s_prev_close_how = NULL;
