@@ -3838,6 +3838,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const showDeployDrawerView = (view: DeployDrawerView): void => {
     openFrameChangeDrawer(frame.id, 'deploy', view)
   }
+  // Mirrors the footer's branches below: the cloud, a close-only view, and
+  // a shell-less or ESP32 main view with no stuck deploy would hold nothing
+  // but "Close", which the drawer's top-right control already is.
+  const isVirtualFrame = (frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual'
+  const footerHidden =
+    isCloud ||
+    (!isVirtualFrame && activeDeployDrawerView !== 'main' && closeOnlyDrawerView) ||
+    (!isVirtualFrame &&
+      activeDeployDrawerView === 'main' &&
+      !hasFrameSyncChanges &&
+      (shellLess || isEmbeddedFrame) &&
+      !cancelStuckDeployButton)
   const showMainDeployView = (): void => showDeployDrawerView('main')
   const deploySummaryWithoutBuildOptions = fullDeployPlanSummary.filter(
     (item) => item.label !== 'Build strategy' && item.label !== 'Compilation'
@@ -4102,136 +4114,122 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             </>
           )}
         </div>
-        <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
-          {isCloud ? (
-            // The deploy actions live in the body next to their explanations
-            // (a bare footer "Push scenes" button was unexplainable); the
-            // footer only closes.
-            <button
-              type="button"
-              onClick={closeDrawer}
-              className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              Close
-            </button>
-          ) : (frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
-            <>
-              <button
-                type="button"
-                onClick={closeDrawer}
-                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                title="Save changes and render this frame's scenes now"
-                onClick={() => closeAndRun(saveAndFullDeployFrame)}
-                className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Deploy
-              </button>
-            </>
-          ) : activeDeployDrawerView !== 'main' ? (
-            <button
-              type="button"
-              onClick={closeOnlyDrawerView ? closeDrawer : showMainDeployView}
-              className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              {closeOnlyDrawerView ? 'Close' : 'Cancel'}
-            </button>
-          ) : hasFrameSyncChanges ? (
-            <>
-              <button
-                type="button"
-                onClick={closeDrawer}
-                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => loadFrameSyncStatus()}
-                disabled={frameSyncStatusLoading || frameSyncApplying}
-                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={() => ignoreFrameSyncChanges()}
-                disabled={!canIgnoreFrameSyncChanges}
-                title="Hide these frame changes and continue to deploy"
-                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-              >
-                Ignore frame changes
-              </button>
-              <button
-                type="button"
-                onClick={() => applyFrameSync()}
-                disabled={frameSyncApplying || !frameSyncStatusReady || !canApplyFrameSync}
-                className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-              >
-                {frameSyncApplyMode === 'commit' ? <Spinner color="white" /> : null}
-                {frameSyncApplyMode === 'commit'
-                  ? 'Committing sync changes'
-                  : !frameSyncStatusReady
-                  ? 'Checking'
-                  : canApplyFrameSync
-                  ? 'Commit selected choices'
-                  : 'Choose changes'}
-              </button>
-            </>
-          ) : shellLess || isEmbeddedFrame ? (
-            // Like the cloud: the deploy actions sit in the body next to
-            // what they change (an ESP32's in its over-the-air card); the
-            // footer only closes.
-            <>
-              {cancelStuckDeployButton}
-              <button
-                type="button"
-                onClick={closeDrawer}
-                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Close
-              </button>
-            </>
-          ) : (
-            <>
-              {cancelStuckDeployButton}
-              <button
-                type="button"
-                onClick={closeDrawer}
-                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => closeAndRun(saveAndFastDeployFrame)}
-                className={clsx(
-                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                )}
-              >
-                Fast deploy
-              </button>
-              {!isEmbeddedFrame || embeddedFullDeploySupported ? (
+        {/* No footer when all it would hold is "Close": the drawer's own
+            close control sits top right. The cloud and shell-less drawers
+            (and an ESP32's) keep their deploy actions in the body next to
+            what they change. */}
+        {footerHidden ? null : (
+          <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
+            {isCloud ? null : (frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
+              <>
                 <button
                   type="button"
-                  title={isEmbeddedFrame ? 'Update FrameOS over the air (OTA), then deploy the scenes' : undefined}
+                  onClick={closeDrawer}
+                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  title="Save changes and render this frame's scenes now"
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                  className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Deploy
+                </button>
+              </>
+            ) : activeDeployDrawerView !== 'main' ? (
+              <button
+                type="button"
+                onClick={showMainDeployView}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Cancel
+              </button>
+            ) : hasFrameSyncChanges ? (
+              <>
+                <button
+                  type="button"
+                  onClick={closeDrawer}
+                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => loadFrameSyncStatus()}
+                  disabled={frameSyncStatusLoading || frameSyncApplying}
+                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => ignoreFrameSyncChanges()}
+                  disabled={!canIgnoreFrameSyncChanges}
+                  title="Hide these frame changes and continue to deploy"
+                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+                >
+                  Ignore frame changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyFrameSync()}
+                  disabled={frameSyncApplying || !frameSyncStatusReady || !canApplyFrameSync}
+                  className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+                >
+                  {frameSyncApplyMode === 'commit' ? <Spinner color="white" /> : null}
+                  {frameSyncApplyMode === 'commit'
+                    ? 'Committing sync changes'
+                    : !frameSyncStatusReady
+                    ? 'Checking'
+                    : canApplyFrameSync
+                    ? 'Commit selected choices'
+                    : 'Choose changes'}
+                </button>
+              </>
+            ) : shellLess || isEmbeddedFrame ? (
+              // The deploy actions sit in the body next to what they change
+              // (an ESP32's in its over-the-air card); only a stuck deploy
+              // leaves the footer anything to say.
+              cancelStuckDeployButton
+            ) : (
+              <>
+                {cancelStuckDeployButton}
+                <button
+                  type="button"
+                  onClick={closeDrawer}
+                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => closeAndRun(saveAndFastDeployFrame)}
                   className={clsx(
                     'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                    deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
                   )}
                 >
-                  Full deploy
+                  Fast deploy
                 </button>
-              ) : null}
-            </>
-          )}
-        </div>
+                {!isEmbeddedFrame || embeddedFullDeploySupported ? (
+                  <button
+                    type="button"
+                    title={isEmbeddedFrame ? 'Update FrameOS over the air (OTA), then deploy the scenes' : undefined}
+                    onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                    className={clsx(
+                      'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                      deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                    )}
+                  >
+                    Full deploy
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
