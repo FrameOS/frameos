@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -2952,7 +2953,9 @@ async def test_execute_fast_walks_the_deploy_progress_stages(monkeypatch: pytest
 
     from app.utils import deploy_progress
 
-    frame = SimpleNamespace(
+    # Test doubles typed as Any: the workflow's signatures name the real
+    # Frame / FrameDeployer / Session, which this test replaces.
+    frame: Any = SimpleNamespace(
         id=22,
         name="FastFrame",
         status="ready",
@@ -2966,13 +2969,17 @@ async def test_execute_fast_walks_the_deploy_progress_stages(monkeypatch: pytest
         deploy_progress=deploy_progress.start("linux_fast", deploy_id="d", now=datetime.now(timezone.utc)),
         to_dict=lambda: {"id": 22, "name": "FastFrame"},
     )
+    no_db: Any = None
+    no_redis: Any = None
+    deployer: Any = RecordingDeployer()
+    builder: Any = FakeBinaryBuilder()
     workflow = FrameDeployWorkflow(
-        db=None,
-        redis=None,
+        db=no_db,
+        redis=no_redis,
         frame=frame,
-        deployer=RecordingDeployer(),
+        deployer=deployer,
         temp_dir="",
-        binary_builder=FakeBinaryBuilder(),
+        binary_builder=builder,
     )
     published: list[tuple[str, str | None]] = []
 
@@ -2990,6 +2997,7 @@ async def test_execute_fast_walks_the_deploy_progress_stages(monkeypatch: pytest
     monkeypatch.setattr("app.models.frame.update_frame", record_update_frame)
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
 
+    fast_plan: Any = SimpleNamespace(tls_settings_changed=False, reload_supported=True, action="reload")
     plan = FrameDeployPlan(
         mode="fast",
         frame_id=22,
@@ -2997,7 +3005,7 @@ async def test_execute_fast_walks_the_deploy_progress_stages(monkeypatch: pytest
         build_id="build12345678",
         frame_dict={"id": 22, "name": "FastFrame"},
         previous_frameos_version="9.9.9",
-        fast_deploy=SimpleNamespace(tls_settings_changed=False, reload_supported=True, action="reload"),
+        fast_deploy=fast_plan,
     )
 
     await workflow._execute_fast(plan)
