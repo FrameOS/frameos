@@ -12,6 +12,8 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { logEventIsSceneStateChange } from '../../../../utils/eventsContract'
 import { activeSceneFromLastState } from '../../../../utils/cloudFrameScenes'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { framesModel, rehydrateCloudFrameScenes } from '../../../../models/framesModel'
+import { grantCloudFrameSceneSettingsGroups } from '../../../../utils/cloudFrameApi'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
 import { sceneIdsRefer } from '../../../../utils/systemScenes'
 import { SCENE_ACTIVATION_TIMEOUT_MS } from '../../../../utils/sceneActivation'
@@ -43,6 +45,8 @@ export interface controlLogicValues {
   frameForm: Partial<FrameType> // frameLogic
   activatingSceneId: string | null
   fields: StateField[]
+  grantSettingsError: string | null
+  grantingSettingsSceneId: string | null
   loading: boolean | string
   scene: FrameScene | null
   sceneChanging: string | null
@@ -79,6 +83,22 @@ export interface controlLogicActions {
   } // frameLogic
   currentSceneChanged: (sceneId: string) => {
     sceneId: string
+  }
+  grantSceneSettingsGroups: (
+    storeSceneId: string,
+    groups: string[],
+    reactivateSceneId: string | null
+  ) => {
+    groups: string[]
+    reactivateSceneId: string | null
+    storeSceneId: string
+  }
+  grantSceneSettingsGroupsSettled: (
+    storeSceneId: string,
+    error: string | null
+  ) => {
+    error: string | null
+    storeSceneId: string
   }
   loadUploadedScenes: () => any
   loadUploadedScenesFailure: (
@@ -196,6 +216,15 @@ export const controlLogic = kea<controlLogicType>([
     // button that was clicked, which used to give no sign at all.
     sceneActivationStarted: (sceneId: string) => ({ sceneId }),
     sceneActivationSettled: (sceneId: string) => ({ sceneId }),
+    // Cloud frames: allow an assigned scene the service-key groups it
+    // declares, then show it again when it is the one on screen, so the key
+    // reaches the device's next render instead of its next scheduled one.
+    grantSceneSettingsGroups: (storeSceneId: string, groups: string[], reactivateSceneId: string | null) => ({
+      storeSceneId,
+      groups,
+      reactivateSceneId,
+    }),
+    grantSceneSettingsGroupsSettled: (storeSceneId: string, error: string | null) => ({ storeSceneId, error }),
   }),
   loaders(({ props, values }) => ({
     stateRecord: [
@@ -285,6 +314,21 @@ export const controlLogic = kea<controlLogicType>([
           state !== null && sceneIdsRefer(state, sceneId) ? null : state,
       },
     ],
+    /** The store scene whose grant is being saved, for the drawer's button. */
+    grantingSettingsSceneId: [
+      null as null | string,
+      {
+        grantSceneSettingsGroups: (_, { storeSceneId }) => storeSceneId,
+        grantSceneSettingsGroupsSettled: () => null,
+      },
+    ],
+    grantSettingsError: [
+      null as null | string,
+      {
+        grantSceneSettingsGroups: () => null,
+        grantSceneSettingsGroupsSettled: (_, { error }) => error,
+      },
+    ],
   }),
   selectors({
     scenes: [
@@ -321,6 +365,19 @@ export const controlLogic = kea<controlLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
+    grantSceneSettingsGroups: async ({ storeSceneId, groups, reactivateSceneId }) => {
+      try {
+        await grantCloudFrameSceneSettingsGroups(props.frameId, storeSceneId, groups, values.frame.active_scene_id)
+        framesModel.actions.loadFrame(props.frameId)
+        await rehydrateCloudFrameScenes(props.frameId)
+        actions.grantSceneSettingsGroupsSettled(storeSceneId, null)
+        if (reactivateSceneId) {
+          actions.setCurrentScene(reactivateSceneId)
+        }
+      } catch (error) {
+        actions.grantSceneSettingsGroupsSettled(storeSceneId, error instanceof Error ? error.message : String(error))
+      }
+    },
     [socketLogic.actionTypes.socketReconnected]: () => {
       // The active scene / state record is event-sourced from newLog, so a
       // scene change during the outage would go unnoticed. Resync once -- this

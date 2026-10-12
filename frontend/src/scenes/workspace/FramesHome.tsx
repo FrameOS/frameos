@@ -13,6 +13,7 @@ import {
   BuildingStorefrontIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  KeyIcon,
   PhotoIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -58,6 +59,8 @@ import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { fleetUpdateLogic } from './fleetUpdateLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
+import { settingsDetails } from '../frame/panels/secretSettings'
+import { missingSettingsGroups } from '../../utils/cloudFrameScenes'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
@@ -1310,6 +1313,64 @@ function SceneOriginLine({ origin }: { origin: SceneOrigin }): JSX.Element | nul
   )
 }
 
+/**
+ * A cloud scene that asks for a service key the owner never allowed it on
+ * this frame. The device is served the grant alone, so the scene renders
+ * without the key and says so in the log ("Please provide an Unsplash API
+ * key") while the account may well hold one — the drawer is where the owner
+ * is looking when that happens, so the fix is a button here, not a hunt
+ * through Settings. Allowing re-posts the scene list with the grant and
+ * shows the scene again when it is the one on screen.
+ */
+function SceneKeysNotice({
+  frame,
+  scene,
+  sceneIsActive,
+}: {
+  frame: FrameType
+  scene: FrameScene
+  sceneIsActive: boolean
+}): JSX.Element | null {
+  const { grantingSettingsSceneId, grantSettingsError } = useValues(controlLogic({ frameId: frame.id }))
+  const { grantSceneSettingsGroups } = useActions(controlLogic({ frameId: frame.id }))
+  const source = frame.cloud_scene_sources?.[scene.id]
+  const missing = source ? missingSettingsGroups(source) : []
+  if (!source || missing.length === 0) {
+    return null
+  }
+  const names = missing.map((group) => settingsDetails[group]?.title ?? group)
+  const granting = grantingSettingsSceneId === source.scene_id
+  return (
+    <div className="mb-4 rounded-lg border border-amber-300/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
+      <div className="font-semibold">
+        Uses your {names.join(' and ')} {missing.length === 1 ? 'key' : 'keys'}, not allowed on this frame
+      </div>
+      <div className="mt-1 leading-5">
+        The frame renders this scene without {missing.length === 1 ? 'it' : 'them'}. Allow the{' '}
+        {missing.length === 1 ? 'key' : 'keys'} to send {missing.length === 1 ? 'it' : 'them'} to the frame
+        {sceneIsActive ? ' and show the scene again' : ''}.
+      </div>
+      {grantSettingsError ? <div className="mt-1 text-red-700">{grantSettingsError}</div> : null}
+      <button
+        type="button"
+        disabled={granting}
+        aria-busy={granting || undefined}
+        onClick={() =>
+          grantSceneSettingsGroups(
+            source.scene_id,
+            [...(source.granted_settings_groups ?? []), ...missing],
+            sceneIsActive ? scene.id : null
+          )
+        }
+        className="frameos-secondary-button mt-2 inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-wait disabled:opacity-70"
+      >
+        {granting ? <Spinner className="h-3 w-3 shrink-0" /> : <KeyIcon className="h-3.5 w-3.5 shrink-0" />}
+        {granting ? 'Allowing…' : `Allow ${names.join(' and ')}`}
+      </button>
+    </div>
+  )
+}
+
 function SceneControlPanelContent({
   sceneControlSelection,
 }: {
@@ -1492,6 +1553,9 @@ function SceneControlPanelContent({
                 </div>
               ) : null}
               {scene.origin ? <SceneOriginLine origin={scene.origin} /> : null}
+              {isCloudMode() ? (
+                <SceneKeysNotice frame={frame} scene={scene} sceneIsActive={selectedSceneIsActive} />
+              ) : null}
               <SceneControlPanelModeTitle />
               <SceneControlChangeNotice
                 busy={isFrameFormSubmitting}

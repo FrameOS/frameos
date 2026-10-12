@@ -59,6 +59,12 @@ export interface CloudSceneSource {
   held_version?: number | null
   /** Set when the store has a newer version the account can install. */
   update_version?: number | null
+  /** Service-key groups the assigned version's apps declare (a request):
+   * `unsplash`, `openAI`, … Names only. */
+  declared_settings_groups?: string[]
+  /** The groups the owner allowed this scene on this frame: what the device
+   * is served. Always a subset of declared. */
+  granted_settings_groups?: string[]
 }
 
 export interface FrameType {
