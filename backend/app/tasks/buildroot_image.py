@@ -2076,7 +2076,9 @@ class BuildrootImageBuilder:
         )
         (release_dir / "scenes.json.gz").write_bytes(
             gzip.compress(
-                json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode("utf-8") + b"\n",
+                json.dumps(
+                    get_interpreted_scenes_json(self.frame, current_frameos_version()), indent=4
+                ).encode("utf-8") + b"\n",
                 mtime=0,
             )
         )

@@ -30,6 +30,7 @@ from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import assert_url_target_allowed
+from app.utils.retired_apps import retire_apps_in_scenes
 from app.utils.upload_limits import (
     MAX_TEMPLATE_MEMBER_BYTES,
     MAX_TEMPLATE_ZIP_BYTES,
@@ -344,9 +345,11 @@ async def create_template(
     # Now validate data with the updated Pydantic model
     create_req = CreateTemplateRequest(**data)
 
-    # Imported templates may predate the removal of the legacy/* apps
+    # Imported templates may predate the removal of the legacy/* apps, or of
+    # a retired Nim app (data/immich)
     if isinstance(create_req.scenes, list):
         migrate_legacy_apps_in_scenes(create_req.scenes)
+        retire_apps_in_scenes(create_req.scenes)
         normalize_scenes_execution(create_req.scenes)
 
     new_template = Template(

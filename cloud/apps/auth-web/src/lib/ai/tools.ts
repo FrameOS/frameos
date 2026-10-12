@@ -35,6 +35,7 @@ import {
   type JsonObject,
 } from "./scene-utils";
 import type { ResponsesToolDefinition } from "./openai";
+import { retireAppsInScenes, withRetiredAppsReplaced } from "../retired-apps";
 import { formatLintIssues, lintScenes, type LintIssue } from "./scene-lint";
 import { currentSceneAssignments, maxScenesPerFrame } from "../frame-scenes";
 import {
@@ -867,6 +868,9 @@ function deliverScenes(
       }
     }
   }
+  // A model that remembers a retired Nim app (data/immich) gets the
+  // JavaScript app that replaced it, as every other reader does.
+  retireAppsInScenes(scenes);
   const issues = [
     ...validateScenePayload(payload),
     ...validateAppKeywords(payload, knownAppKeywords()),
@@ -1918,7 +1922,9 @@ export async function executeTool(
           description: scene.description,
           name: scene.name,
           owned_by_user: scene.accountId === ctx.accountId,
-          scenes: scenesJson,
+          // A retired Nim app (data/immich) reads as its JavaScript
+          // replacement, which is what the catalog and the linter know.
+          scenes: withRetiredAppsReplaced(scenesJson),
           version: version?.version,
         }),
       );

@@ -22,6 +22,7 @@ import { jsonError, readBoundedJsonValue } from "../../../../src/lib/device-flow
 import { hasDatabaseUrl } from "../../../../src/lib/env";
 import { logWarn } from "../../../../src/lib/log";
 import { checkRateLimit, clientKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { retireAppsInScenes } from "../../../../src/lib/retired-apps";
 import {
   renderScenes,
   rendererAvailable,
@@ -203,6 +204,9 @@ export async function POST(request: NextRequest) {
   }
   const converted = results.map((result) => result.scene);
   const reports = results.map((result) => result.report);
+  // A compiled scene from before a Nim app was retired can name it
+  // (data/immich): hand back the JavaScript app that replaced it.
+  retireAppsInScenes(converted);
 
   // --- verify -----------------------------------------------------------------
   const shapeErrors = validateScenePayload({ scenes: converted });

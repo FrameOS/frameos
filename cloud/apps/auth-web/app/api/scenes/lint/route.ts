@@ -9,6 +9,7 @@ import {
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { jsonError, readJsonObject } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { withRetiredAppsReplaced } from "../../../../src/lib/retired-apps";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -52,14 +53,17 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const payload: JsonObject = { scenes: body.scenes };
+  // A retired Nim app (data/immich) is linted as the JavaScript app every
+  // reader turns it into (retired-apps.ts), not as an unknown keyword.
+  const scenes = withRetiredAppsReplaced(body.scenes);
+  const payload: JsonObject = { scenes };
   const shape = validateScenePayload(payload);
   const keywords = shape.length
     ? []
     : validateAppKeywords(payload, knownAppKeywords());
   const lint = shape.length
     ? { errors: [], warnings: [] }
-    : lintScenes(body.scenes, { catalog: appCatalog() });
+    : lintScenes(scenes, { catalog: appCatalog() });
 
   const errors = [
     ...shape.map((message) => ({ message, scene: "payload" })),

@@ -58,6 +58,7 @@ from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
+from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
 from app.utils.versions import current_frameos_version, current_remote_version, version_tuple
 
 REMOTE_RUNTIME_APT_PACKAGES = ("hostapd",)
@@ -1122,7 +1123,11 @@ class FrameDeployWorkflow:
             await asyncio.sleep(self.EMBEDDED_POLL_INTERVAL_SECONDS)
 
     async def _upload_embedded_scenes_and_reload(self, frame: Frame) -> None:
-        scenes = frame.scenes if isinstance(frame.scenes, list) else []
+        # As this firmware reads them: one that predates a retired Nim app's
+        # replacement gets the Nim keyword (utils/retired_apps.py).
+        scenes = scenes_for_runtime(
+            frame.scenes if isinstance(frame.scenes, list) else [], frame_runtime_version(frame)
+        )
         payload = json.dumps(scenes, separators=(",", ":")).encode("utf-8")
         await log(
             self.db,
@@ -1427,7 +1432,13 @@ class FrameDeployWorkflow:
         try:
             await self._progress("uploading", "frame.json and the scenes", kind="linux_fast")
             await self.deployer._upload_frame_json_atomically("/srv/frameos/current/frame.json")
-            await self.deployer._upload_scenes_json_atomically("/srv/frameos/current/scenes.json.gz", gzip=True)
+            # A fast deploy keeps the runtime the frame already runs, so the
+            # scenes go out as that version reads them (utils/retired_apps.py).
+            await self.deployer._upload_scenes_json_atomically(
+                "/srv/frameos/current/scenes.json.gz",
+                gzip=True,
+                runtime_version=plan.frame_dict.get("frameos_version"),
+            )
             # all_scenes.json is no longer uploaded, but a runtime from before
             # it was dropped still prefers one over scenes.json when `frameos
             # setup` (below) picks the apps' apt packages — and a fast deploy
@@ -1789,7 +1800,13 @@ class FrameDeployWorkflow:
                 )
 
     async def _upload_release_metadata(self, build_id: str) -> None:
-        await self.deployer._upload_scenes_json(f"{self._release_dir(build_id)}/scenes.json.gz", gzip=True)
+        # The release directory gets this backend's own FrameOS: the scenes go
+        # out as that version reads them (utils/retired_apps.py).
+        await self.deployer._upload_scenes_json(
+            f"{self._release_dir(build_id)}/scenes.json.gz",
+            gzip=True,
+            runtime_version=current_frameos_version(),
+        )
         await self.deployer._upload_frame_json(f"{self._release_dir(build_id)}/frame.json")
 
     async def _sync_vendor_dependencies(

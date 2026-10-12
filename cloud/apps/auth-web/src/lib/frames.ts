@@ -30,6 +30,7 @@ import { deviceDeliverableFields } from "./frame-service-settings";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
 import { requiredSettingsForScenes } from "./preview-settings";
+import { scenesForRuntime } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
@@ -1418,12 +1419,17 @@ export async function buildScenesPayloadForFrame(
   frameId: string,
   {
     latestSceneIds,
+    runtimeVersion,
   }: {
     // Store scene ids whose UNPINNED assignment moves to the newest version
     // on this build (an explicit update, a re-install, the workspace saving
     // its own edit). Every other unpinned assignment holds the version the
     // frame was last sent.
     latestSceneIds?: ReadonlySet<string> | undefined;
+    // Build for this firmware instead of the one the frame last reported —
+    // the hub compares two builds to tell whether a firmware update changes
+    // what the frame must be sent (retired-apps.ts).
+    runtimeVersion?: string | null | undefined;
   } = {},
 ): Promise<
   | {
@@ -1439,6 +1445,7 @@ export async function buildScenesPayloadForFrame(
     .select({
       accountId: frames.accountId,
       assignedSceneState: frames.assignedSceneState,
+      frameosVersion: frames.frameosVersion,
     })
     .from(frames)
     .where(eq(frames.id, frameId))
@@ -1554,11 +1561,19 @@ export async function buildScenesPayloadForFrame(
     // Every pushed scene says where it came from (`origin`: store page,
     // scene uuid, the version these bytes are) — the frame's copy is the
     // record of its install, and the workspace reads it back from there.
-    const stamped = withStoreSceneOrigin(extracted.scenes, {
-      id: assignment.sceneId,
-      slug: assignment.sceneSlug,
-      version: versionRow.version,
-    });
+    // ...and arrives in the form its runtime reads: a firmware older than a
+    // retired Nim app's replacement gets the Nim keyword (data/immich), every
+    // other one the JavaScript app (retired-apps.ts). The checksums below are
+    // of this form, so a firmware update that changes it shows — and the hub
+    // redeploys on it (frame-hub, firmware version change).
+    const stamped = scenesForRuntime(
+      withStoreSceneOrigin(extracted.scenes, {
+        id: assignment.sceneId,
+        slug: assignment.sceneSlug,
+        version: versionRow.version,
+      }),
+      runtimeVersion !== undefined ? runtimeVersion : frameRow.frameosVersion,
+    );
     scenes.push(...stamped);
     sceneNames.push(assignment.sceneName);
     assignmentGroups.push({

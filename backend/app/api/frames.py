@@ -1656,6 +1656,12 @@ async def api_frame_event(
                     detail=f"The frame refused {event}: {outcome.get('error')}",
                 )
             return outcome
+    if event == "uploadScenes" and isinstance(body, dict):
+        # Preview-on-frame: the editor's scenes as this frame's runtime reads
+        # them (utils/retired_apps.py).
+        from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+
+        body = {**body, "scenes": scenes_for_runtime(scenes, frame_runtime_version(frame))}
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -1753,6 +1759,11 @@ async def api_frame_upload_scenes(
     scenes, body = _normalize_upload_scenes_payload(body)
     scene_id = body.get("sceneId")
     _validate_upload_scenes_payload(scenes, scene_id)
+    # The editor's scenes, as this frame's runtime has to receive them (an
+    # older one gets data/immich back: utils/retired_apps.py).
+    from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+
+    body = {**body, "scenes": scenes_for_runtime(scenes, frame_runtime_version(frame))}
     try:
         await _forward_frame_request(
             frame, redis, path="/uploadScenes", method="POST", json_body=body
@@ -4510,6 +4521,11 @@ async def api_frame_update_endpoint(
     # Templates, imports and chat-built scenes arrive without an execution
     # mode; stamp it here so nothing downstream has to guess.
     normalize_scenes_execution(update_data.get("scenes"))
+    # An editor tab or a saved draft from before the upgrade still holds the
+    # retired Nim keyword (data/immich); store it as the JS app it became.
+    from app.utils.retired_apps import retire_apps_in_scenes
+
+    retire_apps_in_scenes(update_data.get("scenes"))
 
     if "server_host" in update_data:
         # Handed to the device as frame.json serverHost on the next deploy or

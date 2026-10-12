@@ -201,7 +201,11 @@ async function createFrameForAccount(
 // A store scene with one version whose zip is exactly what the payload
 // builder expects (scene/scenes.json + scene/template.json), so a resync test
 // can assign it and receive a real set_scenes push.
-async function createAssignedStoreScene(accountId: string, frameId: string) {
+async function createAssignedStoreScene(
+  accountId: string,
+  frameId: string,
+  scenes: unknown[] = [{ edges: [], id: "resync-runtime", name: "Resync scene", nodes: [] }],
+) {
   const [scene] = await db
     .insert(storeScenes)
     .values({
@@ -217,7 +221,6 @@ async function createAssignedStoreScene(accountId: string, frameId: string) {
   if (!scene) {
     throw new Error("scene insert failed");
   }
-  const scenes = [{ edges: [], id: "resync-runtime", name: "Resync scene", nodes: [] }];
   await db.insert(storeSceneVersions).values({
     content: Buffer.from(
       zipSync({
@@ -817,6 +820,73 @@ describe("command redelivery", () => {
       return rows.find((row) => row.eventType === "frame.scenes_resynced");
     }, "audit row frame.scenes_resynced");
     expect(audit.metadata).toMatchObject({ checksum: push.checksum, reason: "empty_store" });
+    device.ws.close();
+  });
+
+  // docs/retired-apps.md: a store version saved before the Nim Immich app
+  // was retired names `data/immich`. Firmware older than 2026.10.11 is sent
+  // that keyword; once the device reports a firmware that runs the
+  // JavaScript replacement, the hub pushes the same assignments again in the
+  // new form, before `ready`, on the scene the device is showing.
+  const immichScenes = [
+    {
+      edges: [],
+      id: "photos",
+      name: "Photos",
+      nodes: [{ data: { config: { mode: "favorites" }, keyword: "data/immich" }, id: "n1", type: "app" }],
+    },
+  ];
+
+  it("re-pushes a retired Nim app in its JavaScript form when the firmware moves past it", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id, immichScenes);
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.10.10" })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, {
+      frameos_version: "2026.10.11",
+      states: { active_scene: "photos" },
+    });
+    expect(ready.pending_commands).toBe(1);
+    const push = await device.next((msg) => msg.type === "set_scenes", "set_scenes push");
+    const [pushed] = push.scenes as Array<{
+      apps?: Record<string, { origin?: string }>;
+      nodes: Array<{ data: { config: unknown; keyword: string } }>;
+    }>;
+    expect(pushed?.nodes[0]?.data).toEqual({ config: { mode: "favorites" }, keyword: "immich" });
+    expect(pushed?.apps?.immich?.origin).toBe("repo/apps/code/immich");
+    expect(push.scene_id).toBe("photos");
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.assignedChecksum).toBe(push.checksum);
+    const audit = await waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(auditEvents)
+        .where(sql`${auditEvents.target}->>'frameId' = ${frame.id}`);
+      return rows.find((r) => r.eventType === "frame.scenes_resynced");
+    }, "audit row frame.scenes_resynced");
+    expect(audit.metadata).toMatchObject({ checksum: push.checksum, reason: "firmware_changed" });
+    device.ws.close();
+  });
+
+  it("leaves a firmware update that crosses no retired app to the owner", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id, immichScenes);
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.10.11" })
+      .where(eq(frames.id, frame.id));
+
+    // The assigned checksum ("sum-assigned") does not match a fresh build
+    // either, but nothing about the retired app changed: no push.
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, { frameos_version: "2026.10.12" });
+    expect(ready.pending_commands).toBe(0);
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.assignedChecksum).toBe("sum-assigned");
     device.ws.close();
   });
 

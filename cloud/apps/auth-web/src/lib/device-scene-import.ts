@@ -50,6 +50,7 @@ import {
 } from "./frame-scenes";
 import { declaredServiceSettingGroups, pinnedSceneVersion } from "./frames";
 import { reportError } from "./log";
+import { restoreAppsInScenes, retireAppsInScenes } from "./retired-apps";
 import { extractScenesFromZip } from "./scene-title";
 import { maxNewScenesPerDay, maxScenesPerAccount } from "./store";
 import type { PublishActor } from "./store-publish";
@@ -133,9 +134,17 @@ async function storeVersionDigests(
     )
     .limit(1);
   const content = await readBlob(row);
-  const scenes = content ? extractScenesFromZip(content) : undefined;
+  const scenes = (content ? extractScenesFromZip(content) : undefined) ?? [];
+  // A frame holds a store scene in the form its firmware was sent
+  // (retired-apps.ts): as stored, with a retired Nim app turned into its
+  // JavaScript replacement, or with the replacement turned back into the Nim
+  // keyword. All three are this version.
+  const retired = structuredClone(scenes);
+  retireAppsInScenes(retired);
+  const restored = structuredClone(scenes);
+  restoreAppsInScenes(restored);
   return new Set(
-    (scenes ?? [])
+    [...scenes, ...retired, ...restored]
       .filter(
         (scene): scene is Record<string, unknown> =>
           typeof scene === "object" && scene !== null && !Array.isArray(scene),

@@ -21,6 +21,7 @@ import {
   renderScenes,
   SceneRenderError,
 } from "../../../../src/lib/scene-render";
+import { withRetiredAppsReplaced } from "../../../../src/lib/retired-apps";
 import { extractScenesFromZip } from "../../../../src/lib/scene-title";
 import { readSession } from "../../../../src/lib/session";
 import {
@@ -123,7 +124,9 @@ export async function POST(request: NextRequest) {
         max_bytes: maxScenesPayloadBytes,
       });
     }
-    scenes = body.scenes;
+    // An editor tab or draft from before a Nim app was retired can still
+    // name it (data/immich).
+    scenes = withRetiredAppsReplaced(body.scenes);
   } else {
     return jsonError("invalid_scenes", 400);
   }
@@ -303,5 +306,7 @@ async function loadStoredScenes(
   if (!scenes || scenes.length === 0) {
     return { response: jsonError("invalid_scene_zip", 500) };
   }
-  return { scenes, version: version.version };
+  // The render runs the current runtime, which no longer has the retired
+  // Nim apps (data/immich): render what replaced them (retired-apps.ts).
+  return { scenes: withRetiredAppsReplaced(scenes), version: version.version };
 }

@@ -46,6 +46,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.utils.tz_slice import tz_slice
+from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
 from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
@@ -368,8 +369,14 @@ def embedded_scenes_payload(frame: Frame) -> bytes:
     Embedded frames run every scene interpreted (there is no on-device
     compiler), so unlike Linux fast-deploy this does not filter on
     ``settings.execution``.
+
+    Firmware older than a retired Nim app's replacement gets its keyword back
+    (utils/retired_apps.py). The payload — and so the ETag — follows the
+    version the board reported at boot, which is what moves it onto the
+    JavaScript app on its first pull after the OTA that removed the Nim one.
     """
     scenes = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
+    scenes = scenes_for_runtime(scenes, frame_runtime_version(frame))
     return json.dumps(scenes, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
