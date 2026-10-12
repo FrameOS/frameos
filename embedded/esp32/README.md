@@ -636,17 +636,25 @@ RTC memory: a newer release or a power cycle resets it).
   utils/tests/test_dither.nim covers RGBX, 565 and views); the on-device gain
   is read from the next `dither+pack` log line — a laptop runs the old loop
   at 40 ns/pixel, so the 11 µs/pixel on the S3 is the build, not the maths.
-- **Service settings survive a reboot.** Cloud-only frames keep the six
-  groups in NVS (`svc_cache` / `svc_etag` / `svc_at`, same namespace as the
+- **Service settings survive a reboot.** Frames keep the six groups in NVS
+  (`svc_cache` / `svc_etag` / `svc_at` / `svc_src`, same namespace as the
   bearer token) and apply them before the first render
   (`fos_settings_boot_apply_cache`, `settings:services origin=cache`). A
-  deep-sleep frame used to render its only pass with no service settings —
-  `ready` asks for the pull after the pass has started, and the pass that
-  would pull never comes — and every boot that did pull paid a full TLS
-  handshake for a body that rarely changes. `ready` now skips the pull while
-  the copy is under 6 h old; the queued `refresh_service_settings` nudge, a
-  `403 insufficient_scope`, a demotion and `factory-reset` all clear or
-  refresh it.
+  deep-sleep cloud frame used to render its only pass with no service
+  settings — `ready` asks for the pull after the pass has started, and the
+  pass that would pull never comes — and every boot that did pull paid a
+  full TLS handshake for a body that rarely changes. `ready` now skips the
+  pull while the copy is under 6 h old; the queued `refresh_service_settings`
+  nudge, a `403 insufficient_scope`, a demotion and `factory-reset` all clear
+  or refresh it. The cache was cloud-only until 2026.10.10: a
+  backend-managed frame whose backend was unreachable at wake (`settings:sync
+  connect-failed`) rendered with no groups at all, and an Immich scene wrote
+  "Please provide an Immich server URL in the settings" onto the panel. It
+  now applies the cache too; its first pass still fetches (the backend poll
+  also carries `frame` and the schedule) and a successful fetch replaces the
+  groups and rewrites the cache, so the cache only decides what a pass
+  renders with when the backend is down. `svc_src` names the source that
+  wrote the blob; only a cloud ETag is seeded for a cloud frame.
 - **`cloud:session_ready` says how the previous session ended**
   (`previousClose: {how, code}`, plus `session` count and `uptimeSeconds`):
   the E1004 redialed 17 s into some wakes with nothing logged between, and

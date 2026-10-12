@@ -57,30 +57,43 @@ static char s_etag[SETTINGS_ETAG_LEN] = "";
 
 /* NVS cache of the six cloud-owned service-settings groups, so a boot
  * starts with the settings it had (docs/cloud-frames.md "Service
- * settings"). Two things this fixes for a deep-sleep frame, whose every
- * wake is a boot:
+ * settings"). Written on every applied pull, from either source. Three
+ * things this fixes for a deep-sleep frame, whose every wake is a boot:
  *
- *  - It used to render its first (and only) pass with NO service settings:
- *    the pull is requested by the session's `ready`, which on a battery
- *    frame lands a couple of seconds after the render pass has already
- *    started, and the pass that would have pulled never comes — the frame
- *    sleeps. Any scene needing an API key failed on every wake.
+ *  - A cloud-only frame used to render its first (and only) pass with NO
+ *    service settings: the pull is requested by the session's `ready`,
+ *    which on a battery frame lands a couple of seconds after the render
+ *    pass has already started, and the pass that would have pulled never
+ *    comes — the frame sleeps. Any scene needing an API key failed on every
+ *    wake.
  *  - Every boot that did pull paid a full TLS handshake to the provider
  *    (the ETag was RAM-only), ~1-2 s of radio per wake for a body that
  *    changes a few times a year.
+ *  - A backend-managed frame rendered its pass with no service settings
+ *    whenever the backend was unreachable at wake (the pull's
+ *    `connect-failed`): the Immich scene on an E1004 painted "Please
+ *    provide an Immich server URL in the settings" onto the panel every
+ *    time the dev backend wedged (2026-10-12), with the groups intact on
+ *    the backend. The cache was cloud-only until then.
  *
  * With the cache, `ready` skips the pull while the copy is younger than the
  * hub client's 6 h interval; the `refresh_service_settings` nudge (queued by
  * the provider on every save, delivered on the next connect) still forces a
- * fetch, as does a revocation's 403. The blob is the same JSON the Nim
- * runtime is handed — the account's API keys — stored next to the cloud
- * bearer token and the Wi-Fi password in the same NVS namespace, cleared by
- * a revocation, a demotion, and `factory-reset`. */
+ * fetch, as does a revocation's 403. A backend-managed frame still fetches
+ * once per boot — its payload also carries the `frame` object and the
+ * schedule — so the cache only decides what the pass renders with when that
+ * fetch fails; a fetch that succeeds replaces the groups wholesale and
+ * rewrites the cache. The blob is the same JSON the Nim runtime is handed —
+ * the account's API keys — stored next to the cloud bearer token and the
+ * Wi-Fi password in the same NVS namespace, cleared by a revocation, a
+ * demotion, and `factory-reset`. `svc_src` records which source wrote it:
+ * only a cloud ETag is replayed against the cloud (see s_etag_source). */
 #define SETTINGS_CACHE_KEY "svc_cache"
 #define SETTINGS_CACHE_ETAG_KEY "svc_etag"
 #define SETTINGS_CACHE_AT_KEY "svc_at"
+#define SETTINGS_CACHE_SOURCE_KEY "svc_src"
 static bool s_cache_applied = false;   /* this boot started from the cache */
-static void cache_store(const char *printed, const char *etag);
+static void cache_store(const char *printed, const char *etag, const char *origin);
 /* frame.json's `palette` object → the colour list as compact JSON, or ""
  * for an empty list. false when the list is not an array of #rrggbb strings
  * (the cloud's contract check already refuses that; the backend's settings
@@ -228,19 +241,20 @@ static void apply_service_settings(const cJSON *root, const char *origin, const 
     cJSON_Delete(out);
     if (printed == NULL) return; /* same: an OOM must not read as a revocation */
     frameos_nim_apply_service_settings(printed);
-    if (strcmp(origin, "cloud") == 0) cache_store(printed, etag);
+    cache_store(printed, etag, origin);
     /* These are the account's credentials; do not leave them in freed heap. */
     memset(printed, 0, strlen(printed));
     cJSON_free(printed);
     log_service_settings_event(origin, "applied", names);
 }
 
-static void cache_store(const char *printed, const char *etag)
+static void cache_store(const char *printed, const char *etag, const char *origin)
 {
     nvs_handle_t nvs;
     if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
     esp_err_t err = nvs_set_blob(nvs, SETTINGS_CACHE_KEY, printed, strlen(printed) + 1);
     if (err == ESP_OK) err = nvs_set_str(nvs, SETTINGS_CACHE_ETAG_KEY, etag ? etag : "");
+    if (err == ESP_OK) err = nvs_set_str(nvs, SETTINGS_CACHE_SOURCE_KEY, origin ? origin : "");
     time_t now = time(NULL);
     uint32_t at = now > 1000000000 ? (uint32_t)now : 0;
     if (err == ESP_OK) err = nvs_set_u32(nvs, SETTINGS_CACHE_AT_KEY, at);
@@ -261,6 +275,7 @@ void fos_settings_forget_cache(void)
     nvs_erase_key(nvs, SETTINGS_CACHE_KEY);
     nvs_erase_key(nvs, SETTINGS_CACHE_ETAG_KEY);
     nvs_erase_key(nvs, SETTINGS_CACHE_AT_KEY);
+    nvs_erase_key(nvs, SETTINGS_CACHE_SOURCE_KEY);
     nvs_commit(nvs);
     nvs_close(nvs);
     s_cache_applied = false;
@@ -269,10 +284,14 @@ void fos_settings_forget_cache(void)
 
 bool fos_settings_boot_apply_cache(void)
 {
-    /* Cloud-only frames only: a backend-managed frame's settings poll owns
-     * the groups (and its payload carries more than them), so its first
-     * pass fetches as before. */
-    if (fos_config()->backend_url[0] != '\0' || fos_cloud_state() != FOS_CLOUD_ENROLLED) {
+    /* A backend-managed frame applies the cache and still fetches on its
+     * first pass (the poll also carries `frame` and the schedule, and the
+     * fetch replaces the groups wholesale); the cache is what that pass
+     * renders with when the fetch fails. A cloud-only frame needs the
+     * enrolled link the groups belong to; an unprovisioned board has
+     * neither source and nothing to apply. */
+    bool backend = fos_config()->backend_url[0] != '\0';
+    if (!backend && fos_cloud_state() != FOS_CLOUD_ENROLLED) {
         return false;
     }
     nvs_handle_t nvs;
@@ -296,6 +315,12 @@ bool fos_settings_boot_apply_cache(void)
     }
     uint32_t at = 0;
     if (err == ESP_OK && nvs_get_u32(nvs, SETTINGS_CACHE_AT_KEY, &at) != ESP_OK) at = 0;
+    /* Firmware before `svc_src` only ever cached a cloud pull. */
+    char source[16] = "cloud";
+    size_t source_len = sizeof(source);
+    if (err == ESP_OK && nvs_get_str(nvs, SETTINGS_CACHE_SOURCE_KEY, source, &source_len) != ESP_OK) {
+        strlcpy(source, "cloud", sizeof(source));
+    }
     nvs_close(nvs);
     if (err != ESP_OK) {
         free(blob);
@@ -323,10 +348,21 @@ bool fos_settings_boot_apply_cache(void)
     frameos_nim_apply_service_settings(blob);
     memset(blob, 0, len);
     free(blob);
-    strlcpy(s_etag, etag, sizeof(s_etag));
-    s_etag_source = SETTINGS_SOURCE_CLOUD;
-    s_cache_applied = true;
-    s_cache_stored_at = at;
+    /* The ETag stands in for a body only against the source that sent it,
+     * and only where the body is just the groups: a cloud frame's `ready`
+     * then skips the pull. A backend frame's first pass fetches regardless
+     * (its ETag covers `frame` and the schedule too), so it starts without
+     * one; a stale ETag replayed against the other source would earn a
+     * bogus 304 and freeze this copy. */
+    if (!backend && strcmp(source, "cloud") == 0) {
+        strlcpy(s_etag, etag, sizeof(s_etag));
+        s_etag_source = SETTINGS_SOURCE_CLOUD;
+        /* "Fresh" (cache_is_fresh) only means something for a cloud copy on
+         * a cloud frame: a backend copy a frame carried over to the cloud
+         * must not let `ready` skip the first pull. */
+        s_cache_applied = true;
+        s_cache_stored_at = at;
+    }
     log_service_settings_event("cache", "applied", names);
     return true;
 }
