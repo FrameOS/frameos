@@ -8,6 +8,7 @@ import {
   ArrowLeftIcon,
   ArrowPathIcon,
   ArrowsRightLeftIcon,
+  CheckCircleIcon,
   ChevronRightIcon,
   CloudArrowDownIcon,
   CloudArrowUpIcon,
@@ -34,10 +35,12 @@ import {
   formatFrameRelativeFuture,
   formatFrameRelativeTime,
   frameCheckin,
+  frameFirmwareUpdateOutcome,
   frameFirmwareUpdateProgress,
   frameHasActivityLog,
   frameHost,
   frameUpgradeIsQueued,
+  type FrameFirmwareUpdateOutcome,
   type FrameFirmwareUpdateProgress,
 } from '../../decorators/frame'
 import {
@@ -2570,12 +2573,14 @@ function capitalizeFirst(text: string): string {
  */
 function firmwareUpdateState(frame: FrameType): {
   progress: FrameFirmwareUpdateProgress | null
+  outcome: FrameFirmwareUpdateOutcome | null
   queued: boolean
   inFlight: boolean
 } {
   const progress = frameFirmwareUpdateProgress(frame)
+  const outcome = frameFirmwareUpdateOutcome(frame)
   const queued = frameUpgradeIsQueued(frame)
-  return { progress, queued, inFlight: progress?.kind === 'running' || queued }
+  return { progress, outcome, queued, inFlight: progress?.kind === 'running' || queued }
 }
 
 function FirmwareUpdateState({
@@ -2585,7 +2590,7 @@ function FirmwareUpdateState({
   state: ReturnType<typeof firmwareUpdateState>
   noun: string
 }): JSX.Element | null {
-  const { progress, queued } = state
+  const { progress, outcome, queued } = state
   if (progress?.kind === 'running') {
     return (
       <div className="space-y-1.5" role="status">
@@ -2619,6 +2624,20 @@ function FirmwareUpdateState({
       <div className="frame-tool-muted flex items-center gap-2 text-xs leading-4" role="status">
         <HourglassIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span>An update request is already queued; it applies when the frame next wakes.</span>
+      </div>
+    )
+  }
+  if (outcome) {
+    // The boot that ended the update: the owner who watched the download
+    // gets told it worked, instead of a card that only says "up to date".
+    return (
+      <div className="flex items-center gap-2 text-xs leading-4 text-emerald-700 dark:text-emerald-300" role="status">
+        <CheckCircleIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          Updated to {outcome.version ?? `the new ${noun}`}
+          {outcome.when ? ` ${outcome.when}` : ''}
+          {outcome.detail ? `. ${outcome.detail}` : '.'}
+        </span>
       </div>
     )
   }
@@ -2731,6 +2750,7 @@ function CloudDeployStatus({
   // 2026.10.5, a newer release is published" was all this row said while the
   // download it had just started was half-way through.
   const firmwareProgress = frameFirmwareUpdateProgress(frame)
+  const firmwareOutcome = frameFirmwareUpdateOutcome(frame)
   let firmware: JSX.Element | null = null
   if (firmwareProgress?.kind === 'running') {
     firmware = (
@@ -2762,7 +2782,7 @@ function CloudDeployStatus({
       deviceVersion === releaseInfo.release ? (
         <CloudStatusRow
           label={versionLabel}
-          value={deviceVersion}
+          value={firmwareOutcome ? `${deviceVersion} · updated ${firmwareOutcome.when ?? 'just now'}` : deviceVersion}
           detail="Up to date with the latest release."
           tone="ok"
         />
@@ -3009,7 +3029,7 @@ function CloudOtaDeployView({
                 installs it into the spare OTA slot and reboots. Progress shows up in Logs as <code>ota:cloud</code>{' '}
                 lines.
               </div>
-              {upToDate && !updateState.inFlight ? (
+              {upToDate && !updateState.inFlight && !updateState.outcome ? (
                 <div className="frame-tool-muted text-xs leading-4">
                   The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
                 </div>
@@ -3448,7 +3468,7 @@ function CloudPiUpdateCard({
           downloads the latest FrameOS release, verifies the signature on the device itself, installs it next to the
           current version and restarts into it. Progress shows up in Logs as <code>cloud:upgrade</code> lines.
         </div>
-        {upToDate && !updateState.inFlight ? (
+        {upToDate && !updateState.inFlight && !updateState.outcome ? (
           <div className="frame-tool-muted text-xs leading-4">
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>

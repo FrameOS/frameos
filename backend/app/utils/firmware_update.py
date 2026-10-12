@@ -19,6 +19,9 @@ The vocabulary (`status`):
                 512 KB; the Pi's archive download has no progress lines)
   verified      installed and verified; the device restarts into it
   error         the attempt failed; `detail` is the device's reason
+  done          the boot that ended the update: `version` is what the frame
+                now runs (firmware_update_after_boot); the frames list
+                ignores it, the deploy drawer says "updated to X"
   up-to-date, skipped, downgrade-refused   nothing to do
 
 Two producers:
@@ -176,6 +179,53 @@ def firmware_update_is_over(firmware_update: Any, reported_version: Any, known_v
         and len(reported_version) > 0
         and reported_version != (known_version or "")
     )
+
+
+# The row's statuses that narrate an update (as opposed to "nothing to do").
+FIRMWARE_UPDATE_NARRATED_STATUSES = ("waiting", "downloading", "progress", "verified", "error", "done")
+
+# Sentinel for "leave the row alone" (None means clear it).
+LEAVE = object()
+
+
+def firmware_update_after_boot(
+    firmware_update: Any, reported_version: Any, known_version: str | None, now: datetime
+) -> Any:
+    """The row after a `bootup` line: LEAVE keeps it, None clears it, a dict
+    replaces it. An update that is over (firmware_update_is_over) used to
+    clear the row, which left the deploy drawer with nothing to say the
+    moment the frame came back. It now folds into `done` with the version
+    the frame reports, so the workspace can say "updated to 2026.10.8 · 3
+    minutes ago"; a row that never narrated an update (up-to-date, skipped,
+    downgrade-refused) clears. The cloud hub's firmwareUpdateAfterBoot is
+    the sibling."""
+    if not firmware_update_is_over(firmware_update, reported_version, known_version):
+        return LEAVE
+    row = firmware_update if isinstance(firmware_update, dict) else {}
+    if row.get("status") not in FIRMWARE_UPDATE_NARRATED_STATUSES:
+        return None
+    row_version = row.get("version")
+    version: Any = (
+        reported_version[:VERSION_MAX_LENGTH]
+        if isinstance(reported_version, str) and reported_version
+        else row_version if isinstance(row_version, str) else None
+    )
+    at = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    plane = row.get("plane")
+    detail = row.get("detail")
+    return {
+        "at": at.isoformat(),
+        "detail": detail if row.get("status") == "verified" and isinstance(detail, str) else "",
+        "plane": plane if isinstance(plane, str) else "cloud",
+        "status": "done",
+        "version": version,
+    }
+
+
+def firmware_update_done(folded: dict[str, Any]) -> dict[str, Any]:
+    """The `done` row for a verified line that lands after the frame already
+    came back on that version (firmware_update_already_applied)."""
+    return {**folded, "status": "done"}
 
 
 def firmware_update_already_applied(firmware_update: Any, running_version: Any) -> bool:

@@ -9,9 +9,11 @@ from arq import ArqRedis as Redis
 
 from .frame import Frame, record_successful_deploy, remember_device_reported_frameos_version, update_frame
 from app.utils.firmware_update import (
+    LEAVE as FIRMWARE_UPDATE_LEAVE,
+    firmware_update_after_boot,
     firmware_update_already_applied,
+    firmware_update_done,
     firmware_update_from_log,
-    firmware_update_is_over,
 )
 from .metrics import new_metrics
 from app.database import Base
@@ -379,9 +381,11 @@ async def process_log(
     firmware_update = firmware_update_from_log(log, frame.firmware_update, timestamp)
     if firmware_update is not None:
         # A verified install the frame already runs (its bootup said so) is
-        # over on arrival; the row goes back to nothing.
+        # over on arrival; the row says "done" with the device's own sentence.
         changes['firmware_update'] = (
-            None if firmware_update_already_applied(firmware_update, _known_frameos_version(frame)) else firmware_update
+            firmware_update_done(firmware_update)
+            if firmware_update_already_applied(firmware_update, _known_frameos_version(frame))
+            else firmware_update
         )
     if event == 'render':
         changes['status'] = 'preparing'
@@ -401,12 +405,14 @@ async def process_log(
         marked_buildroot_sd_image_booted = await mark_buildroot_sd_image_booted(db, redis, frame)
         # The boot that follows a firmware update closes the row's progress:
         # a verified install, or any version the row did not know (a success
-        # the backend missed). A failure on the same version stays visible.
+        # the backend missed) becomes "done" with the version now running. A
+        # failure on the same version stays visible.
         if frame.firmware_update is not None:
             known_version = _known_frameos_version(frame)
             boot_version = _frameos_version_from_boot(log.get("version"))
-            if firmware_update_is_over(frame.firmware_update, boot_version, known_version):
-                changes["firmware_update"] = None
+            after = firmware_update_after_boot(frame.firmware_update, boot_version, known_version, timestamp)
+            if after is not FIRMWARE_UPDATE_LEAVE:
+                changes["firmware_update"] = after
         if (frame.mode or "rpios") != "embedded":
             # The bootup line is where the backend learns which FrameOS the
             # frame now runs (the runtime sends `version` since 2026.9.13):

@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   frameFirmwareUpdateIsRunning,
+  frameFirmwareUpdateOutcome,
   frameFirmwareUpdateProgress,
 } from "../../../../../../frontend/src/decorators/frame";
 import type { FrameType } from "../../../../../../frontend/src/types";
@@ -126,5 +127,24 @@ describe("frameFirmwareUpdateProgress (Pi lines, folded by the hub into the same
     // drawer's button may ask again.
     expect(frameFirmwareUpdateIsRunning(frame({ status: "progress", detail: "1/2", at: at(20 * 60) }), now)).toBe(false);
     expect(frameFirmwareUpdateIsRunning(frame(null), now)).toBe(false);
+  });
+});
+
+describe("frameFirmwareUpdateOutcome", () => {
+  it("reads the done row the boot after an update leaves, for a day, and keeps it out of the progress word", () => {
+    const done = frame({ status: "done", detail: "", version: "2026.10.8", plane: "cloud", at: at(3 * 60) });
+    expect(frameFirmwareUpdateOutcome(done, now)).toEqual({ version: "2026.10.8", when: "3 minutes ago", detail: "" });
+    expect(frameFirmwareUpdateProgress(done, now)).toBeNull();
+    expect(frameFirmwareUpdateIsRunning(done, now)).toBe(false);
+    // The Pi's success line lands after its hello: the done row carries its sentence.
+    expect(
+      frameFirmwareUpdateOutcome(
+        frame({ status: "done", detail: "FrameOS upgraded to 2026.10.8. Restarting services.", version: "2026.10.8", at: at(60) }),
+        now,
+      )?.detail,
+    ).toBe("FrameOS upgraded to 2026.10.8. Restarting services.");
+    expect(frameFirmwareUpdateOutcome(frame({ status: "done", detail: "", version: "2026.10.8", at: at(25 * 60 * 60) }), now)).toBeNull();
+    expect(frameFirmwareUpdateOutcome(frame({ status: "progress", detail: "1/2", at: at(1) }), now)).toBeNull();
+    expect(frameFirmwareUpdateOutcome(frame(null), now)).toBeNull();
   });
 });

@@ -4,7 +4,10 @@
 from datetime import datetime, timezone
 
 from app.utils.firmware_update import (
+    LEAVE,
+    firmware_update_after_boot,
     firmware_update_already_applied,
+    firmware_update_done,
     firmware_update_from_log,
     firmware_update_is_over,
     is_firmware_update_log,
@@ -157,3 +160,42 @@ def test_a_boot_on_the_old_version_mid_download_is_the_failure_the_device_could_
     assert pi_boot["version"] is None
     assert firmware_update_from_log({"event": "bootup"}, progress, NOW) is None
     assert is_firmware_update_log(boot) is False
+
+
+def test_the_boot_that_ends_an_update_leaves_a_done_row():
+    progress = {"status": "progress", "detail": "3148784/3233648", "plane": "cloud", "version": "2026.10.8", "at": "x"}
+    # Still downloading on the same version: leave it (the bootup rule in
+    # firmware_update_from_log is what calls this an interruption).
+    assert firmware_update_after_boot(progress, "2026.10.6", "2026.10.6", NOW) is LEAVE
+    done = firmware_update_after_boot(progress, "2026.10.8", "2026.10.6", NOW)
+    assert done == {
+        "at": "2026-10-12T09:30:00+00:00",
+        "detail": "",
+        "plane": "cloud",
+        "status": "done",
+        "version": "2026.10.8",
+    }
+    # A verified row keeps the device's closing sentence; no version in the
+    # boot line keeps the one the update named.
+    verified = {"status": "verified", "detail": "FrameOS upgraded to 2026.10.8. Rebooting.", "version": "2026.10.8", "plane": "cloud"}
+    assert firmware_update_after_boot(verified, None, "2026.10.6", NOW) == {
+        "at": "2026-10-12T09:30:00+00:00",
+        "detail": "FrameOS upgraded to 2026.10.8. Rebooting.",
+        "plane": "cloud",
+        "status": "done",
+        "version": "2026.10.8",
+    }
+    # A failure the frame outgrew is a success the plane missed.
+    error = {"status": "error", "detail": "download-failed", "version": "2026.10.8", "plane": "backend"}
+    assert firmware_update_after_boot(error, "2026.10.8", "2026.10.6", NOW)["status"] == "done"
+    assert firmware_update_after_boot(error, "2026.10.6", "2026.10.6", NOW) is LEAVE
+    # Rows that never narrated an update clear on a new version; a done row
+    # on the same version stays.
+    assert firmware_update_after_boot({"status": "up-to-date"}, "2026.10.8", "2026.10.6", NOW) is None
+    assert firmware_update_after_boot({"status": "done", "version": "2026.10.8"}, "2026.10.8", "2026.10.8", NOW) is LEAVE
+    assert firmware_update_after_boot(None, "2026.10.8", "2026.10.6", NOW) is LEAVE
+    assert firmware_update_done({"status": "verified", "detail": "x", "version": "2026.10.8"}) == {
+        "status": "done",
+        "detail": "x",
+        "version": "2026.10.8",
+    }

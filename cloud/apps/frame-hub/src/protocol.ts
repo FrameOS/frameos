@@ -271,6 +271,53 @@ export function firmwareUpdateIsOver(
 // already running it, and nothing cleared it until the next reconnect
 // (2026-10-12, the FastClock 10.3"). The device's running version is what
 // its last hello reported.
+/** The row's statuses that narrate an update (as opposed to "nothing to do"). */
+const firmwareUpdateNarratedStatuses = ["waiting", "downloading", "progress", "verified", "error", "done"];
+
+/**
+ * The row after a boot report (the hello on the cloud, `bootup` on the
+ * backend): `undefined` leaves it alone, otherwise the new value. An update
+ * that is over (firmwareUpdateIsOver) used to clear the row, which left the
+ * deploy drawer with nothing to say the moment the frame came back — the
+ * owner who watched "updating firmware 97%" saw "up to date" and wondered.
+ * It now folds into `done` with the version the frame reports, so the
+ * workspace can say "updated to 2026.10.8 · 3 minutes ago"
+ * (frameFirmwareUpdateOutcome); the frames list ignores `done`. A row that
+ * never narrated an update (up-to-date, skipped, downgrade-refused) clears.
+ */
+export function firmwareUpdateAfterBoot(
+  firmwareUpdate: unknown,
+  reportedVersion: unknown,
+  knownVersion: string | null | undefined,
+  now: Date = new Date(),
+): FirmwareUpdateRecord | null | undefined {
+  if (!firmwareUpdateIsOver(firmwareUpdate, reportedVersion, knownVersion)) {
+    return undefined;
+  }
+  const row = firmwareUpdate as Record<string, unknown>;
+  if (!firmwareUpdateNarratedStatuses.includes(String(row.status))) {
+    return null;
+  }
+  const version =
+    typeof reportedVersion === "string" && reportedVersion.length > 0
+      ? reportedVersion.slice(0, 64)
+      : typeof row.version === "string"
+        ? row.version
+        : null;
+  return {
+    at: now.toISOString(),
+    detail: row.status === "verified" && typeof row.detail === "string" ? row.detail : "",
+    plane: typeof row.plane === "string" ? row.plane : "cloud",
+    status: "done",
+    version,
+  };
+}
+
+/** The `done` row for a verified line that lands after the frame already came back on that version (firmwareUpdateAlreadyApplied). */
+export function firmwareUpdateDone(folded: FirmwareUpdateRecord): FirmwareUpdateRecord {
+  return { ...folded, status: "done" };
+}
+
 export function firmwareUpdateAlreadyApplied(
   firmwareUpdate: { status: string; version: string | null },
   runningVersion: string | null | undefined,

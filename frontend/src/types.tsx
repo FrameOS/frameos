@@ -167,8 +167,9 @@ export interface FrameType {
    * the Pi's `cloud:upgrade`), folded into the row in one vocabulary while
    * an update runs (downloading, progress "<written>/<total>", verified,
    * error <why>, …) — by the hub on the cloud, by models/log.py on the
-   * backend. Cleared by the boot that follows a verified install or reports
-   * a version the row did not know; see frameFirmwareUpdateProgress(). */
+   * backend. The boot that follows a verified install, or reports a version
+   * the row did not know, folds it into `done` with the version now running
+   * (frameFirmwareUpdateOutcome); see frameFirmwareUpdateProgress(). */
   firmware_update?: FrameFirmwareUpdate | null
   /** The contract verbs still queued for the device (pending or
    * sent-but-unacked, unexpired), as the list and detail routes of both

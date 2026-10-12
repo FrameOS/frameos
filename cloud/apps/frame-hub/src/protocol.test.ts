@@ -19,7 +19,9 @@ import {
   stateWithActiveScene,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateAfterBoot,
   firmwareUpdateAlreadyApplied,
+  firmwareUpdateDone,
   firmwareUpdateFromLogEntries,
   firmwareUpdateIsOver,
 } from "./protocol";
@@ -484,6 +486,49 @@ describe("firmwareUpdateIsOver", () => {
   it("has nothing to clear without a line", () => {
     expect(firmwareUpdateIsOver(null, "2026.10.3", "2026.10.1")).toBe(false);
     expect(firmwareUpdateIsOver(undefined, "2026.10.3", "2026.10.1")).toBe(false);
+  });
+});
+
+describe("firmwareUpdateAfterBoot", () => {
+  const now = new Date("2026-10-12T07:12:54Z");
+  it("folds the boot that ends an update into a done row with the version the frame runs", () => {
+    const progress = { status: "progress", detail: "3148784/3233648", plane: "cloud", version: "2026.10.8", at: "x" };
+    // Still downloading on the same version: leave the row (the bootup rule
+    // in firmwareUpdateFromLogEntries is what calls that an interruption).
+    expect(firmwareUpdateAfterBoot(progress, "2026.10.6", "2026.10.6", now)).toBeUndefined();
+    expect(firmwareUpdateAfterBoot(progress, "2026.10.8", "2026.10.6", now)).toEqual({
+      at: now.toISOString(),
+      detail: "",
+      plane: "cloud",
+      status: "done",
+      version: "2026.10.8",
+    });
+    // A verified row keeps the device's closing sentence; a hello without a
+    // version keeps the version the update named.
+    expect(
+      firmwareUpdateAfterBoot(
+        { status: "verified", detail: "FrameOS upgraded to 2026.10.8. Rebooting.", version: "2026.10.8", plane: "cloud" },
+        undefined,
+        "2026.10.6",
+        now,
+      ),
+    ).toMatchObject({ status: "done", detail: "FrameOS upgraded to 2026.10.8. Rebooting.", version: "2026.10.8" });
+    // A failure the frame outgrew is a success the hub missed.
+    const error = { status: "error", detail: "download-failed", version: "2026.10.8", plane: "cloud" };
+    expect(firmwareUpdateAfterBoot(error, "2026.10.8", "2026.10.6", now)).toMatchObject({ status: "done" });
+    expect(firmwareUpdateAfterBoot(error, "2026.10.6", "2026.10.6", now)).toBeUndefined();
+    // Rows that never narrated an update clear on a new version; a done row
+    // on the same version stays.
+    expect(firmwareUpdateAfterBoot({ status: "up-to-date" }, "2026.10.8", "2026.10.6", now)).toBeNull();
+    expect(firmwareUpdateAfterBoot({ status: "done", version: "2026.10.8" }, "2026.10.8", "2026.10.8", now)).toBeUndefined();
+    expect(firmwareUpdateAfterBoot(null, "2026.10.8", "2026.10.6", now)).toBeUndefined();
+    expect(firmwareUpdateDone({ at: "x", detail: "d", plane: "cloud", status: "verified", version: "2026.10.8" })).toEqual({
+      at: "x",
+      detail: "d",
+      plane: "cloud",
+      status: "done",
+      version: "2026.10.8",
+    });
   });
 });
 

@@ -302,8 +302,47 @@ export function frameFirmwareUpdateProgress(
         version,
       }
     default:
-      // up-to-date, downgrade-refused, skipped: nothing in flight.
+      // up-to-date, downgrade-refused, skipped, done: nothing in flight
+      // (frameFirmwareUpdateOutcome reads `done`).
       return null
+  }
+}
+
+/** How long "updated to X" stays worth a word in the deploy drawer. */
+const firmwareUpdateOutcomeShownMs = 24 * 60 * 60 * 1000
+
+export interface FrameFirmwareUpdateOutcome {
+  /** The release the frame came back on. */
+  version: string | null
+  /** "3 minutes ago", when the row's timestamp parses. */
+  when: string | null
+  /** The device's own closing sentence (the Pi's "FrameOS upgraded to …"), else "". */
+  detail: string
+}
+
+/**
+ * The update that just finished: the control plane folds the boot that ends
+ * an update into a `done` row (the hub's firmwareUpdateAfterBoot, the
+ * backend's firmware_update_after_boot) with the version the frame reports.
+ * Read by the deploy drawer and its status rows only — the frames list goes
+ * back to "up to date" — and forgotten after a day.
+ */
+export function frameFirmwareUpdateOutcome(
+  frame: FrameType,
+  now: number = Date.now()
+): FrameFirmwareUpdateOutcome | null {
+  const update = frame.firmware_update
+  if (!update || update.status !== 'done') {
+    return null
+  }
+  const at = parseFrameTimestamp(update.at)
+  if (!Number.isFinite(at) || now - at > firmwareUpdateOutcomeShownMs) {
+    return null
+  }
+  return {
+    version: update.version || null,
+    when: formatFrameRelativeTime(update.at, now),
+    detail: update.detail || '',
   }
 }
 
