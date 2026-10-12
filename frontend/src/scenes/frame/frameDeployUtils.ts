@@ -487,7 +487,7 @@ export function buildFastDeployPlanSummary(plan?: DeployPlanResponse | null): Su
     return []
   }
 
-  return [{ label: 'Fast deploy behavior', value: 'Restart FrameOS because TLS settings changed' }]
+  return [{ label: 'Scenes & settings deploy', value: 'Restarts FrameOS because the TLS settings changed' }]
 }
 
 export function buildFullDeployPlanSummary(
@@ -569,7 +569,7 @@ export function buildFullDeployPlanSummary(
       label: 'FrameOS Remote',
       value: `Update ${fullPlan.remote_upgrade.previous_version ?? 'unreported'} → ${
         fullPlan.remote_upgrade.current_version
-      } before full deploy`,
+      } before FrameOS is deployed`,
     })
   }
   if (fullPlan.post_deploy?.bootconfig_changes?.length) {
@@ -679,9 +679,9 @@ export function buildDeployRecommendation(
   if (!hasPreviousDeploy) {
     return {
       mode: 'full',
-      title: 'Suggested: full deploy',
+      title: 'Suggested: deploy FrameOS & scenes',
       description:
-        'This frame has not been deployed yet, so FrameOS, dependencies, and system changes need a full deploy.',
+        'This frame has not been deployed yet: FrameOS, its dependencies and the system settings go first, then the scenes.',
     }
   }
 
@@ -700,13 +700,13 @@ export function buildDeployRecommendation(
           compiledSceneCount === 1 ? 'forces' : 'force'
         } a full FrameOS source build on every deploy. Convert ${
           compiledSceneCount === 1 ? 'it' : 'them'
-        } to interpreted scenes at scenes.frameos.net/nim-converter and the precompiled release installs instead. Otherwise, a full deploy will be rebuilding FrameOS (legacy path).`,
-        descriptionEmphasis: 'rebuilding',
+        } to interpreted scenes at scenes.frameos.net/nim-converter and the precompiled release installs instead. Otherwise, deploying FrameOS rebuilds it from source (legacy path).`,
+        descriptionEmphasis: 'rebuilds',
       }
     }
     return {
       mode: 'full',
-      title: 'Suggested: full deploy',
+      title: 'Suggested: deploy FrameOS & scenes',
       description: usesPrecompiledFrameos
         ? 'You have changes that require reinstalling FrameOS.'
         : 'You have changes that require rebuilding FrameOS (legacy path).',
@@ -717,10 +717,10 @@ export function buildDeployRecommendation(
   if (versionChanged) {
     return {
       mode: 'full',
-      title: 'Suggested: full deploy',
+      title: 'Suggested: deploy FrameOS & scenes',
       description: `Updating FrameOS from ${
         previousVersion ?? 'unknown'
-      } to ${CURRENT_FRAMEOS_VERSION} requires a full deploy.`,
+      } to ${CURRENT_FRAMEOS_VERSION} reinstalls FrameOS; the scenes and settings follow.`,
     }
   }
 
@@ -734,9 +734,8 @@ export function buildDeployRecommendation(
 
   return {
     mode: 'fast',
-    title: 'Suggested: fast deploy',
-    description:
-      'No pending changes require rebuilding FrameOS, so a fast deploy (reload) is enough to bring the frame up to date.',
+    title: 'Suggested: deploy scenes & settings',
+    description: 'Nothing pending needs FrameOS reinstalled: the scenes and settings alone bring the frame up to date.',
   }
 }
 

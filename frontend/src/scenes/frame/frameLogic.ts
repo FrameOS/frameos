@@ -1040,7 +1040,7 @@ function firstDeployChangeDetails(
 ): ChangeDetail[] {
   const details: ChangeDetail[] = [
     {
-      label: 'Initial full deploy',
+      label: 'Initial deploy: FrameOS and scenes',
       requiresFullDeploy: true,
     },
     {
@@ -1406,7 +1406,7 @@ function buildUndeployedSummaryItems(
   const firstDeploy = !previous || Object.keys(previous).length === 0
   const items: SummaryItem[] = [
     {
-      label: 'Full deploy',
+      label: 'FrameOS reinstall',
       value: requiresRecompilation || firstDeploy ? 'Required' : 'Not required',
     },
   ]

@@ -452,7 +452,7 @@ function deployPlanProgressSteps({
     },
     {
       label: planReady ? 'Deploy options ready' : 'Preparing deploy options',
-      detail: planReady ? 'Choose fast or full deploy below.' : error || null,
+      detail: planReady ? 'Choose below what to deploy.' : error || null,
       state: error ? 'error' : planReady ? 'done' : loading && strategyChecked ? 'current' : 'pending',
     },
   ]
@@ -4152,15 +4152,15 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                         primary={deployRecommendation?.mode === 'fast'}
                         onClick={() => closeAndRun(saveAndFastDeployFrame)}
                         icon={<CloudArrowUpIcon className="h-5 w-5" />}
-                        label="Fast deploy"
-                        detail="Scenes & settings; FrameOS stays as it is"
+                        label="Deploy scenes & settings"
+                        detail="FrameOS stays as it is"
                       />
                       <DeployChoiceButton
                         primary={deployRecommendation?.mode === 'full'}
                         onClick={() => closeAndRun(saveAndFullDeployFrame)}
                         icon={<ArrowPathIcon className="h-5 w-5" />}
-                        label="Full deploy"
-                        detail="Reinstall FrameOS, then scenes & settings"
+                        label="Deploy FrameOS & scenes"
+                        detail="Reinstall FrameOS first, then scenes & settings"
                       />
                     </div>
                   ) : null}

@@ -1274,7 +1274,7 @@ export const framesModel = kea<framesModelType>([
         id: taskId,
         frameId: id,
         kind: 'deploy',
-        title: fastDeploy ? 'Fast deploying frame' : 'Deploying frame',
+        title: fastDeploy ? 'Deploying scenes & settings' : 'Deploying frame',
         detail: 'Deploy request sent',
       })
       try {
@@ -1282,7 +1282,7 @@ export const framesModel = kea<framesModelType>([
           ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
           : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
         if (!response.ok) {
-          throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
+          throw new Error(fastDeploy ? 'Failed to start the scenes & settings deploy' : 'Failed to start deploy')
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({

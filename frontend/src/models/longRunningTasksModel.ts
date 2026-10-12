@@ -258,10 +258,10 @@ function deployCompletedDetail(detail: string): string {
   const fast = words.includes('fast')
   if (words.includes('queued')) {
     return fast
-      ? 'Fast deploy queued. The frame picks it up on its next check-in.'
+      ? 'Scenes & settings deploy queued. The frame picks it up on its next check-in.'
       : 'Deploy queued. The frame picks it up on its next check-in.'
   }
-  return fast ? 'Fast deploy completed' : 'Deploy completed'
+  return fast ? 'Scenes & settings deployed' : 'Deploy completed'
 }
 
 function frameStatus(frame: Partial<FrameType>): string | null {
