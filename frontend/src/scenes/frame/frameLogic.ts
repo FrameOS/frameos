@@ -516,21 +516,12 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'agent',
   'buildroot',
 ]
-const FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED: (keyof FrameType)[] = [
-  'device',
-  'device_config',
-  'embedded',
-  'frame_host',
-  'gpio_buttons',
-  'interval',
-  'max_http_response_bytes',
-  'network',
-  'scenes',
-  'server_api_key',
-  'server_host',
-  'server_port',
-  'server_scheme',
-]
+// An ESP32 runs the signed release image and takes every setting over its
+// settings sync (a few, like gpio_buttons, with a deferred reboot): a full
+// deploy only ever means the latest release over the air, so no setting
+// change asks for one. This list once held the keys the backend baked into a
+// per-frame firmware build; that build is gone (docs/legacy-source-builds.md).
+const FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED: (keyof FrameType)[] = []
 
 const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   name: 'Frame name',
