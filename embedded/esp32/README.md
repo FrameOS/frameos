@@ -318,6 +318,35 @@ file right away, so a deep sleep in between loses nothing. Both control
 planes get it: the cloud hello and the commands pull report the persisted
 state even before the first render, keyed by scene id.
 
+A scene switch outlives the sleep the same way. The render task applies a
+queued selection (`set_scenes` with a scene to activate, `setCurrentScene`)
+at the start of a pass, and a verb that lands while a pass is already
+rendering used to sit in RAM until the deep sleep right after the render
+dropped it: an "install and activate" reached an E1004 on a button wake, the
+frame rendered the old scene, slept, and every later wake came up on the old
+scene with the new one merely stored (2026-10-12). Now `fos_scenes_select`
+writes the queued id to NVS (`pending_scene`), the boot restore prefers it
+over `last_scene`, the pass that applies it erases it, and a pass that
+switched the scene — or applied a payload pushed since boot — renders even
+when it woke only to check in (`fos_scenes_take_switched`). Work that lands
+mid-render holds the deep sleep for one more pass (`sleep:held`, reason
+`scenes`) so the switch shows on the same wake.
+
+A `scene_event` (`setSceneState`, a button, a custom event) meets the same
+timing: the cloud delivers it the moment the session is up, the wake's render
+already holds the runtime, and the handler used to answer `busy` after three
+seconds — an answer the hub never retries, so no state ever reached a
+sleeping frame. A busy scene event is now kept (`fos_events_defer`, a
+handful of slots, `event:deferred` in the log), delivered by the render task
+at the start of its next pass (`event:deferred:delivered`), rendered on that
+pass, and counted as work that holds the deep sleep.
+
+The cloud log tap only runs once the session is up, so the first ~15 s of a
+wake (the wake cause, the scene load, the replayed button press) used to
+stay on the device. The first session_ready of a boot that carries logs now
+replays the boot's lines from the device ring as one `log_batch` with their
+own timestamps (`ws_replay_boot_log`).
+
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's
 `embedded_provisioning_plan` (`backend/app/tasks/embedded_firmware.py`) —

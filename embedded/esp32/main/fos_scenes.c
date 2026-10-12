@@ -86,6 +86,15 @@ static char s_etag[ETAG_LEN] = "";
 static char s_pending_scene_id[SCENE_ID_LEN] = "";
 static char s_last_error[SCENE_ERROR_LEN] = "";
 static portMUX_TYPE s_scene_select_lock = portMUX_INITIALIZER_UNLOCKED;
+/* The render task switched the resident scene (or applied a payload that
+ * arrived after boot): the panel shows something else now, so the pass must
+ * render even if it woke only to check in. Taken by fos_client.c. */
+static bool s_scene_switched = false;
+/* The queued selection was read back from NVS on this boot: a deep sleep had
+ * cut in between the queue and the apply (fos_scenes_select). */
+static bool s_boot_pending_selection = false;
+/* A payload was stored since boot (not the cached one init re-applies). */
+static bool s_payload_stored_since_boot = false;
 /* Serializes writers of /state/scenes.json: the USB upload (console task)
  * and the backend sync (fos_client task) share one tmp path, and two
  * concurrent write+rename dances delete each other's tmp file (rename then
@@ -410,6 +419,43 @@ static void persist_last_scene(const char *scene_id)
         nvs_commit(nvs);
     }
     nvs_close(nvs);
+}
+
+/* A queued selection that has not been applied yet. The queue itself is RAM,
+ * and a deep-sleeping frame loses it: the cloud's "install and activate"
+ * reached an E1004 while a button wake was already rendering, the frame
+ * slept right after that render, and the next wake came up on the old scene
+ * with the new one merely stored (2026-10-12). Written when the selection is
+ * queued, erased once the render task applied it, re-queued at init. */
+#define PENDING_SCENE_NVS_KEY "pending_scene"
+
+static void persist_pending_scene(const char *scene_id)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    char current[SCENE_ID_LEN] = "";
+    size_t len = sizeof(current);
+    bool present = nvs_get_str(nvs, PENDING_SCENE_NVS_KEY, current, &len) == ESP_OK && current[0];
+    if (scene_id == NULL || scene_id[0] == '\0') {
+        if (present) {
+            nvs_erase_key(nvs, PENDING_SCENE_NVS_KEY);
+            nvs_commit(nvs);
+        }
+    } else if (!present || strcmp(current, scene_id) != 0) {
+        nvs_set_str(nvs, PENDING_SCENE_NVS_KEY, scene_id);
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
+static bool read_pending_scene(char *scene_id, size_t len)
+{
+    scene_id[0] = '\0';
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return false;
+    bool present = nvs_get_str(nvs, PENDING_SCENE_NVS_KEY, scene_id, &len) == ESP_OK && scene_id[0];
+    nvs_close(nvs);
+    return present;
 }
 
 /* ----------------------------------------------------------- scene source */
@@ -843,12 +889,17 @@ static bool activate_from_index(const char *origin)
 
     char scene_id[SCENE_ID_LEN] = "";
     size_t id_len = sizeof(scene_id);
-    nvs_handle_t nvs;
-    if (nvs_open("frameos", NVS_READONLY, &nvs) == ESP_OK) {
-        if (nvs_get_str(nvs, LAST_SCENE_NVS_KEY, scene_id, &id_len) != ESP_OK) {
-            scene_id[0] = '\0';
+    /* A selection queued before a deep sleep names the scene to come up on;
+     * loading the previous one first would only be replaced by the pass. */
+    if (!(read_pending_scene(scene_id, sizeof(scene_id)) && slot_for_scene(scene_id) >= 0)) {
+        nvs_handle_t nvs;
+        scene_id[0] = '\0';
+        if (nvs_open("frameos", NVS_READONLY, &nvs) == ESP_OK) {
+            if (nvs_get_str(nvs, LAST_SCENE_NVS_KEY, scene_id, &id_len) != ESP_OK) {
+                scene_id[0] = '\0';
+            }
+            nvs_close(nvs);
         }
-        nvs_close(nvs);
     }
     int slot = slot_for_scene(scene_id);
     if (slot >= 0 && consume_oom_scene_mark(scene_id)) {
@@ -958,6 +1009,12 @@ bool fos_scenes_apply_pending(void)
     /* A new payload invalidates whatever is parsed, even if the id matches. */
     s_resident_scene_id[0] = '\0';
     s_pending = false;
+    if (s_payload_stored_since_boot) {
+        /* Not the cached store init re-applies on every boot: a deploy that
+         * landed while the frame was up. What it shows is stale now. */
+        s_payload_stored_since_boot = false;
+        s_scene_switched = true;
+    }
     bool ok = false;
     size_t len = 0;
     char *json = read_file(SCENES_PATH, &len);
@@ -1061,8 +1118,30 @@ esp_err_t fos_scenes_select(const char *scene_id)
     snprintf(s_pending_scene_id, sizeof(s_pending_scene_id), "%s", scene_id);
     s_scene_select_pending = true;
     portEXIT_CRITICAL(&s_scene_select_lock);
+    /* Outlive a deep sleep that cuts in before the render task gets to it
+     * (PENDING_SCENE_NVS_KEY). Same value, no write: the cloud re-announces
+     * the current scene on every reconnect. */
+    persist_pending_scene(scene_id);
     ESP_LOGI(TAG, "scene selection queued: %s", scene_id);
     return ESP_OK;
+}
+
+bool fos_scenes_selection_pending(void)
+{
+    return s_scene_select_pending;
+}
+
+bool fos_scenes_work_pending(void)
+{
+    /* A payload the render task cannot apply (no /state) is not work. */
+    return (s_pending && s_mounted) || s_scene_select_pending;
+}
+
+bool fos_scenes_take_switched(void)
+{
+    bool switched = s_scene_switched;
+    s_scene_switched = false;
+    return switched;
 }
 
 bool fos_scenes_apply_pending_selection(void)
@@ -1080,6 +1159,16 @@ bool fos_scenes_apply_pending_selection(void)
     portEXIT_CRITICAL(&s_scene_select_lock);
 
     if (!pending) return false;
+    /* Consumed, whatever happens next: a selection that fails (an id this
+     * payload does not carry) must not be retried on every boot. */
+    persist_pending_scene(NULL);
+    if (s_boot_pending_selection) {
+        /* Queued before the sleep, applied now: the panel still shows the
+         * scene from before, even when the boot restore already made this
+         * one resident (activate_from_index). */
+        s_boot_pending_selection = false;
+        s_scene_switched = true;
+    }
     /* Already the resident scene: nothing to load. Re-parsing it would throw
      * away everything the runtime has built for it — the interpreted graph and
      * every JS app's QuickJS context and transpiled source — and rebuild the
@@ -1113,6 +1202,7 @@ bool fos_scenes_apply_pending_selection(void)
         return false;
     }
     persist_last_scene(scene_id);
+    s_scene_switched = true;
     s_last_scene_settled = true; /* explicit selection makes the boot restore moot */
     /* Picking a scene is the user saying "try this one instead", so a frame
      * paused after repeated out-of-memory renders gets another chance. */
@@ -1183,6 +1273,22 @@ esp_err_t fos_scenes_init(void)
             nvs_close(nvs);
         }
     }
+    {
+        /* A selection the previous boot queued but never applied (a deep
+         * sleep came first): back on the queue, applied by the first pass
+         * right after the cached payload, and rendered (fos_scenes_take_switched). */
+        char pending_id[SCENE_ID_LEN];
+        if (read_pending_scene(pending_id, sizeof(pending_id))) {
+            portENTER_CRITICAL(&s_scene_select_lock);
+            snprintf(s_pending_scene_id, sizeof(s_pending_scene_id), "%s", pending_id);
+            s_scene_select_pending = true;
+            portEXIT_CRITICAL(&s_scene_select_lock);
+            s_boot_pending_selection = true;
+            ESP_LOGI(TAG, "scene selection restored from before the sleep: %s", pending_id);
+            log_scene_event("scenes:select", "ok", "nvs", pending_id, "restored-pending",
+                            0, 0, 0, ESP_OK);
+        }
+    }
     struct stat st;
     if (stat(SCENES_PATH, &st) == 0 && st.st_size > 2) {
         ESP_LOGI(TAG, "cached scenes.json (%ld bytes, etag %s)", (long)st.st_size,
@@ -1229,6 +1335,7 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
     s_pending_source = (int)source;
     persist_scene_source((int)source);
     s_pending = true;
+    s_payload_stored_since_boot = true;
     ESP_LOGI(TAG, "scenes payload stored (%u bytes, source %s), pending apply",
              (unsigned)len, origin);
     log_scene_event("event:uploadScenes", "stored", origin, "", "pending-apply",

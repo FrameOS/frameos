@@ -862,6 +862,49 @@ static void cloud_log_tap(const char *line)
     }
 }
 
+/* Once per boot, right after the first session_ready that may carry logs:
+ * everything logged before the tap was live goes up as one log_batch with
+ * its own timestamps. On a deep-sleeping frame that is the whole first
+ * ~15 s of a wake — the wake cause, the scene load, the replayed button
+ * press that woke it — which never reached cloud retention before
+ * (2026-10-12: "I don't see which button was pressed"). The ring holds the
+ * boot's lines (FOS_NIM_LOG_RING_CAP, RAM, so nothing from before the
+ * sleep); the session_ready line itself and anything after it came through
+ * the tap, so the replay stops at it. */
+static bool s_boot_log_replayed = false;
+
+static void ws_replay_boot_log(void)
+{
+    if (s_boot_log_replayed || !s_logs_granted) return;
+    s_boot_log_replayed = true;
+    frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
+    if (entries == NULL) return;
+    size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
+    size_t end = count;
+    for (size_t i = count; i > 0; i--) {
+        if (entries[i - 1].line != NULL &&
+            strstr(entries[i - 1].line, "\"event\":\"cloud:session_ready\"") != NULL) {
+            end = i - 1;
+            break;
+        }
+    }
+    if (end > 0) {
+        cJSON *msg = cJSON_CreateObject();
+        cJSON *logs = msg ? cJSON_AddArrayToObject(msg, "logs") : NULL;
+        if (logs != NULL) {
+            cJSON_AddStringToObject(msg, "type", "log_batch");
+            for (size_t i = 0; i < end; i++) {
+                cJSON *entry = log_line_entry(entries[i].line, entries[i].timestamp);
+                if (entry != NULL) cJSON_AddItemToArray(logs, entry);
+            }
+            ws_send_json(msg);
+        }
+        cJSON_Delete(msg);
+    }
+    for (size_t i = 0; i < count; i++) free(entries[i].line);
+    free(entries);
+}
+
 static void ws_logs_init(void)
 {
     if (s_log_queue == NULL) {
@@ -2558,6 +2601,13 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_
     }
     fos_event_result_t result = fos_events_dispatch_wait(origin, name, printed,
                                                          FOS_CLOUD_SCENE_EVENT_WAIT_MS);
+    /* Busy means a render holds the runtime — on a deep-sleeping frame, the
+     * wake's render, the only moment this verb could ever arrive. Keep it
+     * for the render task instead of telling the hub "busy" (which never
+     * sends it again): `ok` here means queued, like Linux. */
+    if (result == FOS_EVENT_BUSY && fos_events_defer(origin, name, printed)) {
+        result = FOS_EVENT_DONE;
+    }
     if (printed != NULL) cJSON_free(printed);
     switch (result) {
         case FOS_EVENT_BUSY:
@@ -2859,6 +2909,7 @@ static void ws_handle_message(const char *data, size_t len)
                  (unsigned long)s_session_count,
                  (long long)(esp_timer_get_time() / 1000000), previous);
         frameos_nim_log_hook(event);
+        ws_replay_boot_log();
         s_prev_close_how = NULL;
         s_prev_close_code = 0;
     } else {

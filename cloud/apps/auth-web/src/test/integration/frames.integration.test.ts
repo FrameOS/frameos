@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
@@ -1756,6 +1756,59 @@ describe("frame management API", () => {
     expect(((await shell.json()) as { error: string }).error).toBe(
       "invalid_command",
     );
+  });
+
+  // A frame asleep for fifteen minutes cannot see a five-minute command: a
+  // scene switch queued for a battery E1004 expired unseen on every wake
+  // (2026-10-12). The lifetime counts from the announced wake, like the
+  // self-hosted backend's command_ttl_for_frame.
+  it("measures a queued command's lifetime from the frame's announced wake", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const queue = (type: string) =>
+      sendCommand(
+        postJson(`/api/frames/${frame_id}/command`, { type }, { origin: baseUrl }),
+        routeParams(frame_id),
+      );
+    const newestExpiry = async () => {
+      const [row] = await db
+        .select({ expiresAt: frameCommands.expiresAt })
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id))
+        .orderBy(desc(frameCommands.createdAt))
+        .limit(1);
+      expect(row?.expiresAt).toBeInstanceOf(Date);
+      return (row!.expiresAt as Date).getTime() - Date.now();
+    };
+    const fiveMinutes = 5 * 60 * 1000;
+
+    // Awake, or no forecast: the base lifetime.
+    expect((await queue("render")).status).toBe(200);
+    const awake = await newestExpiry();
+    expect(awake).toBeGreaterThan(fiveMinutes - 10_000);
+    expect(awake).toBeLessThanOrEqual(fiveMinutes);
+
+    // Asleep for an hour: the base lifetime past the wake.
+    const wakeInMs = 60 * 60 * 1000;
+    await db
+      .update(frames)
+      .set({ nextWakeAt: new Date(Date.now() + wakeInMs) })
+      .where(eq(frames.id, frame_id));
+    expect((await queue("render")).status).toBe(200);
+    const asleep = await newestExpiry();
+    expect(asleep).toBeGreaterThan(wakeInMs + fiveMinutes - 10_000);
+    expect(asleep).toBeLessThanOrEqual(wakeInMs + fiveMinutes);
+
+    // A forecast in the past is no forecast.
+    await db
+      .update(frames)
+      .set({ nextWakeAt: new Date(Date.now() - 1000) })
+      .where(eq(frames.id, frame_id));
+    expect((await queue("render")).status).toBe(200);
+    expect(await newestExpiry()).toBeLessThanOrEqual(fiveMinutes);
   });
 
   // The canonical verb routes the shared SPA calls with no cloud branch

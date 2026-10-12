@@ -7,7 +7,7 @@ import {
   isServableImageContentType,
   queueImageGetIfIdle,
 } from "../../../../../src/lib/frame-asset-cache";
-import { commandTtlForFrame, frameIsAsleep } from "../../../../../src/lib/frame-sleep";
+import { frameIsAsleep } from "../../../../../src/lib/frame-sleep";
 import {
   frameForAccount,
   frameImageAssetPath,
@@ -22,8 +22,8 @@ import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
 
-// For an awake frame; a sleeping frame's fetch stretches to its next wake
-// (commandTtlForFrame) so the device finds it on the pass that can answer it.
+// Counted from the frame's next wake when it sleeps (enqueueFrameCommand),
+// so the device finds the fetch on the pass that can answer it.
 const fetchCommandTtlMs = 2 * 60 * 1000;
 // The preview panel wants "the current image" — anything older than a
 // render interval is history. A passive load (?t=-1, a tile filling in)
@@ -127,7 +127,7 @@ export async function GET(
       db,
       session.accountId,
       frame.id,
-      commandTtlForFrame(frame, fetchCommandTtlMs, now),
+      fetchCommandTtlMs,
     );
   }
   // A frame that announced a sleep answers on its next wake, minutes away:

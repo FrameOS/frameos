@@ -48,3 +48,15 @@ fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *na
  * does itself ever waits, with either flavour. */
 fos_event_result_t fos_events_dispatch_wait(fos_event_origin_t origin, const char *name,
                                             const char *payload_json, int timeout_ms);
+
+/* A scene event that found the runtime busy (FOS_EVENT_BUSY), kept for the
+ * render task instead of dropped. On a deep-sleeping frame the cloud delivers
+ * its queued verbs the moment the session is up — while the wake's render
+ * already holds the runtime — and "busy" was the end of every setSceneState
+ * sent to a sleeping E1004 (2026-10-12). Bounded (a handful); false when
+ * full. The render task delivers them at the start of its next pass
+ * (fos_events_deliver_deferred, true when any were delivered, so the pass
+ * renders) and holds the deep sleep while any are waiting. */
+bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *payload_json);
+bool fos_events_deferred_pending(void);
+bool fos_events_deliver_deferred(void);

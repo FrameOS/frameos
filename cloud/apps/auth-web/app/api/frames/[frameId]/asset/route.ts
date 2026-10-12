@@ -13,7 +13,7 @@ import {
   queueAssetGetIfIdle,
   recentFailedAssetGet,
 } from "../../../../../src/lib/frame-asset-cache";
-import { commandTtlForFrame, frameIsAsleep } from "../../../../../src/lib/frame-sleep";
+import { frameIsAsleep } from "../../../../../src/lib/frame-sleep";
 import { frameForAccount } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
@@ -144,7 +144,7 @@ export async function GET(
       frame.id,
       path,
       thumb,
-      commandTtlForFrame(frame, assetFetchCommandTtlMs, now),
+      assetFetchCommandTtlMs,
     );
   }
   if (cached) {

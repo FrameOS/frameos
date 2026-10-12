@@ -630,9 +630,11 @@ reference hub allows four a minute).
 
 Two things make this work for a frame that deep sleeps between renders. A
 fetch queued while the frame is asleep must outlive the sleep: the reference
-provider stretches the `image_get` / `asset_get` TTL past the frame's
-announced `next_wake_at` (a two-minute TTL on a fifteen-minute sleeper
-expired every time). The converse also holds: a sleeping or offline frame
+provider measures every command's TTL from the frame's announced
+`next_wake_at` rather than from now (a two-minute `image_get` on a
+fifteen-minute sleeper expired every time; so did a five-minute
+`set_current_scene`, which is why "activate" on a sleeping frame never took
+until 2026-10-12). The converse also holds: a sleeping or offline frame
 renders nothing, so a snapshot the provider already holds is not stale while
 it sleeps. The reference provider re-fetches a cached snapshot only toward a
 connected device, and never queues per-scene snapshot fetches toward ESP32
