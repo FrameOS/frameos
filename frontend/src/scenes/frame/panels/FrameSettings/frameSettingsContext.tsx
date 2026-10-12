@@ -111,6 +111,12 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   palette: Palette | undefined
   /** A fixed button map for boards whose buttons are wired on the board itself. */
   configuredGpioButtons: GPIOButton[] | null
+  /**
+   * The button map the device reported running with (`hardware.gpioButtons`,
+   * cloud frames on 2026.10.7+ firmware). Null where the report has none,
+   * so the section falls back to the editable list.
+   */
+  reportedGpioButtons: GPIOButton[] | null
 
   appsWithSaveAssets: Record<string, string>
   logs: unknown[]
@@ -329,6 +335,25 @@ export function FrameSettingsProvider({
     setFrameFormValues(nextValues)
   }
 
+  // What the device says its buttons are: the shape is the device's, so a
+  // malformed entry drops rather than renders as "pin undefined".
+  const reportedGpioButtonsOf = (value: unknown): GPIOButton[] | null => {
+    if (!Array.isArray(value)) {
+      return null
+    }
+    const buttons: GPIOButton[] = []
+    for (const entry of value) {
+      if (
+        entry &&
+        typeof entry === 'object' &&
+        typeof (entry as { pin?: unknown }).pin === 'number' &&
+        typeof (entry as { label?: unknown }).label === 'string'
+      ) {
+        buttons.push({ pin: (entry as { pin: number }).pin, label: (entry as { label: string }).label })
+      }
+    }
+    return buttons
+  }
   // The hardware report first (an ESP32 reports its panel as the bare
   // waveshare key, `EPD_7in3e`, the palette table is keyed by driver name),
   // the frame's own `device` on backend-managed frames.
@@ -502,6 +527,7 @@ export function FrameSettingsProvider({
     configuredGpioButtons: !isEmbeddedMode
       ? configuredGpioButtonsForDevice(cloudProfile ? cloudDevice : frameForm.device)
       : null,
+    reportedGpioButtons: cloudProfile ? reportedGpioButtonsOf(frame.hardware?.gpioButtons) : null,
 
     appsWithSaveAssets,
     logs,

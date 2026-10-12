@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { Group } from 'kea-forms'
-import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { Button } from '../../../../../components/Button'
 import { ColorInput } from '../../../../../components/ColorInput'
 import { Field } from '../../../../../components/Field'
@@ -18,7 +18,7 @@ import {
   DEFAULT_TIMEZONE_UPDATE_HOUR,
   DEFAULT_TIMEZONE_UPDATE_URL,
 } from '../../../frameLogic'
-import type { Palette } from '../../../../../types'
+import type { GPIOButton, Palette } from '../../../../../types'
 import { buttonRoleByLabel, buttonRoles, keyboardLayouts } from '../../../../../utils/eventsContract.gen'
 import { useFrameSettings } from '../frameSettingsContext'
 
@@ -92,55 +92,101 @@ export function PaletteField(): JSX.Element {
   )
 }
 
+function ReadOnlyGpioButtons({ buttons }: { buttons: GPIOButton[] }): JSX.Element {
+  return (
+    <div className="space-y-2">
+      {buttons.map((button) => (
+        <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-3">
+          <div className="space-y-1 @md:flex @md:gap-2">
+            <Label className="@md:w-1/3">Pin</Label>
+            <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
+          </div>
+          <div className="space-y-1 @md:flex @md:gap-2">
+            <Label className="@md:w-1/3">Label</Label>
+            <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
+          </div>
+          <div className="space-y-1 @md:flex @md:gap-2">
+            <Label className="@md:w-1/3">Role</Label>
+            <TextInput
+              value={buttonRoleByLabel[button.label.trim().toUpperCase()] ?? ''}
+              placeholder="none"
+              readOnly
+              className="cursor-default opacity-70"
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /**
- * GPIO buttons: a heading plus its body, because boards with a fixed button
- * map show a read-only table where the others show an editable list.
+ * GPIO buttons: a heading plus its body. Boards with a fixed button map show
+ * a read-only table; a cloud frame that reported its map and was never
+ * pushed one shows that map, with "Edit buttons" seeding the editable list
+ * (the save then pushes it); everything else is the editable list.
  */
 export function GpioButtonsSection(): JSX.Element {
-  const { configuredGpioButtons, frameForm, setFrameFormValues } = useFrameSettings()
+  const { configuredGpioButtons, reportedGpioButtons, frameForm, setFrameFormValues } = useFrameSettings()
+  // The cloud form carries `gpio_buttons` only once a push set it; until
+  // then the frame runs the map its board preset (or a console `set`) gave
+  // it, which is the one the report shows.
+  const showReported = !configuredGpioButtons && reportedGpioButtons !== null && frameForm.gpio_buttons === undefined
+  const addButton = (
+    <Button
+      size="small"
+      color="secondary"
+      onClick={() => setFrameFormValues({ gpio_buttons: [...(frameForm.gpio_buttons || []), {}] })}
+      className="flex items-center gap-1"
+    >
+      <PlusIcon className="w-4 h-4" />
+      Add button
+    </Button>
+  )
   return (
     <>
       <H6 id="frame-settings-gpio" className="flex items-center gap-2">
         GPIO buttons
         {configuredGpioButtons ? (
           <Tag color="gray">Configured</Tag>
+        ) : showReported ? (
+          <>
+            <Tag color="gray">On the frame</Tag>
+            {reportedGpioButtons.length > 0 ? (
+              <Button
+                size="small"
+                color="secondary"
+                onClick={() =>
+                  setFrameFormValues({ gpio_buttons: reportedGpioButtons.map((button) => ({ ...button })) })
+                }
+                className="flex items-center gap-1"
+              >
+                <PencilSquareIcon className="w-4 h-4" />
+                Edit buttons
+              </Button>
+            ) : (
+              addButton
+            )}
+          </>
         ) : (
-          <Button
-            size="small"
-            color="secondary"
-            onClick={() => setFrameFormValues({ gpio_buttons: [...(frameForm.gpio_buttons || []), {}] })}
-            className="flex items-center gap-1"
-          >
-            <PlusIcon className="w-4 h-4" />
-            Add button
-          </Button>
+          addButton
         )}
       </H6>
       <div className="pl-2 @md:pl-8 space-y-2">
         {configuredGpioButtons ? (
-          <div className="space-y-2">
-            {configuredGpioButtons.map((button) => (
-              <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-3">
-                <div className="space-y-1 @md:flex @md:gap-2">
-                  <Label className="@md:w-1/3">Pin</Label>
-                  <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
-                </div>
-                <div className="space-y-1 @md:flex @md:gap-2">
-                  <Label className="@md:w-1/3">Label</Label>
-                  <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
-                </div>
-                <div className="space-y-1 @md:flex @md:gap-2">
-                  <Label className="@md:w-1/3">Role</Label>
-                  <TextInput
-                    value={buttonRoleByLabel[button.label.trim().toUpperCase()] ?? ''}
-                    placeholder="none"
-                    readOnly
-                    className="cursor-default opacity-70"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+          <ReadOnlyGpioButtons buttons={configuredGpioButtons} />
+        ) : showReported ? (
+          reportedGpioButtons.length > 0 ? (
+            <>
+              <ReadOnlyGpioButtons buttons={reportedGpioButtons} />
+              <p className="frameos-muted text-xs">
+                The buttons the frame runs with, from its board preset. Edit buttons starts from this list; saving
+                pushes the new list and restarts the frame.
+              </p>
+            </>
+          ) : (
+            <p className="frameos-muted text-xs">No buttons set on the frame.</p>
+          )
         ) : (
           frameForm.gpio_buttons?.map((_, index) => (
             <Group key={index} name={`gpio_buttons.${index}`}>

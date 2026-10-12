@@ -539,7 +539,14 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_E1004_PINS,
-    gpioButtons: [],
+    // The E1004's front panel is wired like the E1001/E1002's (the backend's
+    // EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS); an empty list here used
+    // to reach the backend as `[]`, which its seed-only preset rule keeps.
+    gpioButtons: [
+      { pin: 3, label: 'REFRESH' },
+      { pin: 4, label: 'LEFT' },
+      { pin: 5, label: 'RIGHT' },
+    ],
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',

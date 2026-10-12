@@ -458,6 +458,27 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "width", fos_display_present() ? fos_display_width() : 0);
     cJSON_AddNumberToObject(hw, "height", fos_display_present() ? fos_display_height() : 0);
 
+    /* The board bundle `set hardware` applied (empty on a custom build) and
+     * the GPIO button map the firmware runs with, in the status JSON's
+     * shape. The cloud never seeds buttons the way the backend's preset
+     * table does (apply_embedded_hardware_preset), so without this its
+     * Settings panel showed a reTerminal's three keys as none at all. Sent
+     * on every hello, so a `set_settings` push shows up after the restart
+     * it causes, and a console `set gpio_buttons` after the next reboot. */
+    if (config->hardware_preset[0]) {
+        cJSON_AddStringToObject(hw, "hardwarePreset", config->hardware_preset);
+    }
+    cJSON *buttons = cJSON_AddArrayToObject(hw, "gpioButtons");
+    if (buttons) {
+        for (size_t i = 0; i < config->gpio_button_count; i++) {
+            cJSON *button = cJSON_CreateObject();
+            if (!button) break;
+            cJSON_AddNumberToObject(button, "pin", config->gpio_buttons[i].pin);
+            cJSON_AddStringToObject(button, "label", config->gpio_buttons[i].label);
+            cJSON_AddItemToArray(buttons, button);
+        }
+    }
+
     /* Board facts for the cloud deploy drawer, mirroring the USB console's
      * status JSON (fos_http_status_json). Sent on hello, so the control
      * plane's copy refreshes on every connect — a firmware update or a
