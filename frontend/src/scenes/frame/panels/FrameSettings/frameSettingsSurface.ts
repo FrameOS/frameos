@@ -166,6 +166,8 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     surfaces: ['cloudEsp32'],
     nav: [],
     navNote: 'Inside the Device fieldset, which is itself unlinked.',
+    conditions:
+      'The button beep GPIO under the buttons is disabled below esp32BuzzerCloudFrameSettingsMinVersion (2026.10.12).',
   },
   {
     key: 'cloud-service-settings',
@@ -354,6 +356,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'GPIO buttons',
     anchor: 'frame-settings-gpio',
     surfaces: ['backend', 'frameAdmin'],
+    conditions: 'The button beep GPIO under the buttons shows for real ESP32 boards only (not virtual, not Pico).',
   },
   {
     key: 'input',

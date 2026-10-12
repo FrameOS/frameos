@@ -2233,6 +2233,7 @@ describe("frame management API", () => {
         "battery_pin",
         "battery_divider",
         "battery_enable_pin",
+        "buzzer_pin",
       ].sort(),
     );
     // The ESP32 profile: exactly what ws_handle_set_settings applies.
@@ -2248,6 +2249,7 @@ describe("frame management API", () => {
         "battery_pin",
         "battery_divider",
         "battery_enable_pin",
+        "buzzer_pin",
         "debug",
         "max_http_response_bytes",
         "gpio_buttons",
@@ -2743,6 +2745,21 @@ describe("frame management API", () => {
     // -1 = always on; anything past the chip's GPIO range is not a pin.
     expect((await push({ battery_enable_pin: -1 })).status).toBe(200);
     expect((await push({ battery_enable_pin: 49 })).status).toBe(400);
+
+    // The 2026.10.12 button beep: its own floor too.
+    const buzzerTooEarly = await push({ buzzer_pin: 45 });
+    expect(buzzerTooEarly.status).toBe(400);
+    expect((await buzzerTooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.10.12",
+    });
+    await db.update(frames).set({ frameosVersion: "2026.10.12" }).where(eq(frames.id, frame_id));
+    expect((await push({ buzzer_pin: 45 })).status).toBe(200);
+    const [withBuzzer] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(withBuzzer?.settings).toMatchObject({ buzzer_pin: 45 });
+    // -1 silences it; past the chip's GPIO range is not a pin.
+    expect((await push({ buzzer_pin: -1 })).status).toBe(200);
+    expect((await push({ buzzer_pin: 49 })).status).toBe(400);
   });
 
   it("renames a non-esp32 frame in the DB AND pushes set_settings to the device", async () => {

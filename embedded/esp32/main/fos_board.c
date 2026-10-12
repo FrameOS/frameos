@@ -56,3 +56,23 @@ const char *fos_board_module(const char *hardware_preset)
     if (hardware_preset && hardware_preset[0]) return hardware_preset;
     return fos_board_target();
 }
+
+/* Seeed's reTerminal E-series puts a passive buzzer on GPIO45 on every model
+ * (Seeed's Arduino and ESPHome cookbooks drive it with PWM at 1-2 kHz). */
+static const struct {
+    const char *preset;
+    int pin;
+} k_buzzers[] = {
+    {"seeed_reterminal_e1001", 45},
+    {"seeed_reterminal_e1002", 45},
+    {"seeed_reterminal_e1004", 45},
+};
+
+int fos_board_buzzer_pin(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return -1;
+    for (size_t i = 0; i < sizeof(k_buzzers) / sizeof(k_buzzers[0]); i++) {
+        if (strcmp(hardware_preset, k_buzzers[i].preset) == 0) return k_buzzers[i].pin;
+    }
+    return -1;
+}

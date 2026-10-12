@@ -17,6 +17,7 @@
 #include "driver/rtc_io.h"
 #endif
 
+#include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events.h"
@@ -64,9 +65,9 @@ static void json_escape(const char *src, char *dst, size_t dst_len)
     dst[out] = '\0';
 }
 
-static void enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
+static bool enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
 {
-    if (!s_queue) return;
+    if (!s_queue) return false;
     fos_button_event_t event = {
         .pin = button->pin,
         .level = level,
@@ -80,7 +81,7 @@ static void enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
                  "{\"event\":\"button:dropped\",\"source\":\"esp32\",\"pin\":%d,"
                  "\"reason\":\"queue-full\"}", button->pin);
         frameos_nim_log_hook(dropped);
-        return;
+        return false;
     }
     /* A live press wakes the render task so the scene hears it now, not at the
      * end of a wait slice — and that is all. Whether a frame is drawn is the
@@ -90,11 +91,15 @@ static void enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
      * heard or not. The replayed wake press needs no nudge: the boot's first
      * pass processes the queue anyway (fos_buttons_woke_by_button). */
     if (!wake) fos_client_wake_for_events();
+    return true;
 }
 
 static void enqueue_edge(const fos_gpio_button_t *button, int level)
 {
-    enqueue_event(button, level, false);
+    /* The press is in the queue: chirp now, from this task, so the feedback
+     * does not wait for the render task (which may be 30 s into a panel
+     * refresh). A dropped press stays silent — it was not received. */
+    if (enqueue_event(button, level, false) && level == 0) fos_buzzer_chirp();
 }
 
 static void buttons_task(void *arg)
@@ -336,6 +341,9 @@ void fos_buttons_wake_boot(void)
     }
     s_wake_pin = config->gpio_buttons[index].pin;
     strlcpy(s_wake_label, config->gpio_buttons[index].label, sizeof(s_wake_label));
+    /* The press that woke a sleeping frame gets its chirp at boot: the
+     * scene hears it only once Wi-Fi and the scene are up, seconds later. */
+    fos_buzzer_chirp();
     /* printf: INFO is compiled out, and this is the one line that explains an
      * off-schedule boot on the USB console. */
     printf("woke from deep sleep: button GPIO %d (%s)\n", s_wake_pin, s_wake_label);

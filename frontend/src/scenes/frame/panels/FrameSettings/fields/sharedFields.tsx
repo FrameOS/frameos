@@ -242,8 +242,49 @@ export function GpioButtonsSection(): JSX.Element {
             </Group>
           ))
         )}
+        <ButtonBeepField />
       </div>
     </>
+  )
+}
+
+/**
+ * The buzzer a press chirps, under the buttons it answers for (ESP32 only).
+ * A GPIO like the battery pins next door: empty leaves the board's own
+ * (its preset's), -1 turns the beep off.
+ */
+function ButtonBeepField(): JSX.Element | null {
+  const { buttonBeep, setButtonBeepPin } = useFrameSettings()
+  if (!buttonBeep) {
+    return null
+  }
+  const { pin, reportedPin, disabledReason } = buttonBeep
+  const placeholder =
+    reportedPin === undefined
+      ? 'Board default, -1 = off'
+      : reportedPin < 0
+      ? 'Off on the frame'
+      : `${reportedPin} on the frame`
+  return (
+    <div className="space-y-1 @md:flex @md:gap-2">
+      <Label className="@md:w-1/3">
+        Button beep GPIO
+        <Tooltip
+          title={
+            disabledReason ?? (
+              <>
+                The frame beeps when it registers a button press, and when a press wakes it from deep sleep, so you know
+                the press arrived before the screen changes. This is the GPIO of the board's buzzer: GPIO 45 on the
+                Seeed reTerminal E1001, E1002 and E1004. Set -1 to turn the beep off. Applies without a restart.
+              </>
+            )
+          }
+        />
+      </Label>
+      <fieldset disabled={disabledReason !== undefined} className="w-full min-w-0">
+        <NumberTextInput value={pin} onChange={setButtonBeepPin} placeholder={placeholder} />
+      </fieldset>
+    </div>
   )
 }
 

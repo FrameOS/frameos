@@ -473,10 +473,11 @@ def embedded_frame_settings(frame: Frame) -> dict:
                 return value
         return False
 
-    # Present-only power keys: battery wiring and check-in cadence are often
-    # provisioned on the device itself (USB console hardware presets), so the
-    # poll must stay silent about them unless the backend actually holds a
-    # value — a default sent every poll would clobber the device's own copy.
+    # Present-only power keys: battery wiring, the buzzer and check-in cadence
+    # are often provisioned on the device itself (USB console hardware
+    # presets), so the poll must stay silent about them unless the backend
+    # actually holds a value — a default sent every poll would clobber the
+    # device's own copy.
     def _optional_power_settings() -> dict:
         extra: dict[str, object] = {}
         for out_key, keys, kind in (
@@ -485,6 +486,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("batteryPin", ("batteryPin", "battery_pin"), "int"),
             ("batteryDivider", ("batteryDivider", "battery_divider"), "float"),
             ("batteryEnablePin", ("batteryEnablePin", "battery_enable_pin"), "int"),
+            ("buzzerPin", ("buzzerPin", "buzzer_pin"), "int"),
         ):
             for key in keys:
                 value = device_config.get(key)

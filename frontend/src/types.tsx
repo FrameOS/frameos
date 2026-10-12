@@ -118,6 +118,8 @@ export interface FrameType {
      * role), from 2026.10.7 firmware and the Linux runtime of the same
      * release. Absent on older firmware; `[]` is a frame with no buttons. */
     gpioButtons?: { pin: number; label: string }[] | null
+    /** ESP32 only: the buzzer a button press chirps, -1 = none (2026.10.12+). */
+    buzzerPin?: number | null
     mac?: string | null
     /** major*100 + minor, as esp_chip_info reports it */
     chipRevision?: number | null
@@ -257,6 +259,9 @@ export interface FrameType {
     /** GPIO held high to switch the battery divider on while sampling; -1 = none. */
     batteryEnablePin?: number
     battery_enable_pin?: number
+    /** GPIO of the buzzer a button press chirps; -1 = none / silent. */
+    buzzerPin?: number
+    buzzer_pin?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
@@ -308,6 +313,8 @@ export interface FrameType {
   battery_pin?: number
   battery_divider?: number
   battery_enable_pin?: number
+  /** ESP32: the buzzer a button press chirps; -1 = silent. */
+  buzzer_pin?: number
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]

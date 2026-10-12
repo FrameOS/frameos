@@ -408,6 +408,11 @@ export const esp32BatteryEnablePinFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32BatteryEnablePinFrameSettingsMinVersion),
 );
 
+// 2026.10.12: `buzzer_pin`, the buzzer a GPIO button press chirps (-1 =
+// silent). Live, no reboot.
+export const esp32BuzzerFrameSettingsMinVersion = "2026.10.12";
+export const esp32BuzzerFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32BuzzerFrameSettingsMinVersion));
+
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
 // slice lookup is what rejects unknown-but-well-formed names later.

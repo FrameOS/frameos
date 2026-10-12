@@ -693,6 +693,22 @@ a map) and the cloud's `set_settings` carries `gpio_buttons`; the device
 rebinds its buttons with a restart. Before that, a provisioned board's map
 could only be changed over the console.
 
+### Button beep
+
+A press the button task registers chirps the board's buzzer (`fos_buzzer.c`:
+2 kHz for 60 ms through an LEDC PWM channel), right away and from the button
+task, so the feedback does not wait for a render that may be 30 s into a
+panel refresh. A press that wakes the chip from deep sleep chirps as soon as
+it boots. A dropped press (queue full) stays silent. The pin is `buzzer_pin`
+(`-1` = none): the reTerminal E-series presets set GPIO 45, and a board whose
+NVS predates the key takes its preset's (`fos_board_buzzer_pin`), so an
+E-series frame beeps after the update without being reprovisioned. The
+firmware leaves a pin alone that is a display, button, battery or SD pin.
+Console: `set buzzer_pin <gpio|-1>` and `beep [hz] [ms]` to test it. Applied
+live on every plane: the backend's settings pull carries `buzzerPin`, the
+cloud's `set_settings` carries `buzzer_pin` (firmware 2026.10.12+), and both
+show it as "Button beep GPIO" under the frame's GPIO buttons.
+
 ## Scene storage and memory (2026.8.13)
 
 Scenes arrive as one combined `scenes.json` — from the USB upload, the

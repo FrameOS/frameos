@@ -13,6 +13,7 @@
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
+#include "fos_board.h"
 #include "fos_defaults.h"
 
 /* The pure parsers/normalisers (`set pins`, `set rotate`, GPIO buttons …)
@@ -72,6 +73,7 @@ static void load_defaults(void)
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
     s_config.battery_divider = FRAMEOS_DEFAULT_BATTERY_DIVIDER;
     s_config.battery_enable_pin = FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN;
+    s_config.buzzer_pin = FRAMEOS_DEFAULT_BUZZER_PIN;
     fos_config_parse_gpio_buttons(FRAMEOS_DEFAULT_GPIO_BUTTONS, &s_config);
     s_config.pins.rst = FRAMEOS_DEFAULT_PIN_RST;
     s_config.pins.dc = FRAMEOS_DEFAULT_PIN_DC;
@@ -217,6 +219,11 @@ esp_err_t fos_config_init(void)
     if (nvs_get_i8(nvs, "batt_pin", &i8) == ESP_OK) s_config.battery_pin = i8;
     if (nvs_get_u32(nvs, "batt_div_m", &u32) == ESP_OK) s_config.battery_divider = (float)u32 / 1000.0f;
     if (nvs_get_i8(nvs, "batt_en", &i8) == ESP_OK) s_config.battery_enable_pin = i8;
+    /* No stored value: the board's own buzzer. A frame provisioned with its
+     * preset before this key existed chirps after the update, and every
+     * save from then on stores what it runs with. */
+    if (nvs_get_i8(nvs, "buzzer", &i8) == ESP_OK) s_config.buzzer_pin = i8;
+    else s_config.buzzer_pin = (int8_t)fos_board_buzzer_pin(s_config.hardware_preset);
     char pins[FOS_STR_LEN] = "";
     nvs_get_string(nvs, "pins", pins, sizeof(pins));
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
@@ -316,6 +323,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_i8(nvs, "batt_pin", s_config.battery_pin), "batt_pin");
     FOS_NVS_SET(nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f)), "batt_div_m");
     FOS_NVS_SET(nvs_set_i8(nvs, "batt_en", s_config.battery_enable_pin), "batt_en");
+    FOS_NVS_SET(nvs_set_i8(nvs, "buzzer", s_config.buzzer_pin), "buzzer");
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN];
     fos_config_format_gpio_buttons(&s_config, gpio_buttons, sizeof(gpio_buttons));
     FOS_NVS_SET(nvs_set_str(nvs, "gpio_buttons", gpio_buttons), "gpio_buttons");

@@ -98,4 +98,6 @@ def test_single_plane_settings_carry_a_parity_reason():
     # 10 since `input_settings` (2026.9.23: keyboards and pointers are the
     # Linux runtime's, docs/convergence-todo.md §6).
     assert by_plane.get("linux", 0) <= 10, by_plane
-    assert by_plane.get("esp32", 0) <= 7, by_plane
+    # 8 since `buzzer_pin` (2026.10.12: the button chirp is the ESP32 button
+    # task's; no Pi preset has a buzzer).
+    assert by_plane.get("esp32", 0) <= 8, by_plane

@@ -117,11 +117,26 @@ static void test_reservation_policy(void)
           "a headless board has no panel buffer to reserve");
 }
 
+static void test_buzzer_pins(void)
+{
+    /* Every reTerminal E-series model has the buzzer on GPIO45. */
+    CHECK(fos_board_buzzer_pin("seeed_reterminal_e1001") == 45, "e1001 buzzer");
+    CHECK(fos_board_buzzer_pin("seeed_reterminal_e1002") == 45, "e1002 buzzer");
+    CHECK(fos_board_buzzer_pin("seeed_reterminal_e1004") == 45, "e1004 buzzer");
+    /* The Elecrow CrowPanel drives its EPD chip-select on GPIO45: a board
+     * without a buzzer must never get one, or a press would toggle the CS. */
+    CHECK(fos_board_buzzer_pin("elecrow_crowpanel_5in79") == -1, "crowpanel has no buzzer");
+    CHECK(fos_board_buzzer_pin("seeed_reterminal_sticky") == -1, "sticky has no buzzer");
+    CHECK(fos_board_buzzer_pin("") == -1, "no preset, no buzzer");
+    CHECK(fos_board_buzzer_pin(NULL) == -1, "NULL preset, no buzzer");
+}
+
 int main(void)
 {
     test_target_names();
     test_module_label();
     test_reservation_policy();
+    test_buzzer_pins();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

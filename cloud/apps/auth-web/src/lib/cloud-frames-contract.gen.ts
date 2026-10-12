@@ -722,6 +722,18 @@ export const cloudFramesContract = {
           "restart": true
         }
       }
+    },
+    "buzzer_pin": {
+      "rule": {
+        "type": "int",
+        "min": -1,
+        "max": 48
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.12"
+        }
+      }
     }
   },
   "formats": {

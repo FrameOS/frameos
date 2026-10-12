@@ -129,6 +129,9 @@ export const cloudFramesContractSettings = {
     "battery_enable_pin": {
       "since": "2026.8.39",
       "restart": true
+    },
+    "buzzer_pin": {
+      "since": "2026.10.12"
     }
   }
 } as const

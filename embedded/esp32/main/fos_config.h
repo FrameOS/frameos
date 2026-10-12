@@ -145,6 +145,9 @@ typedef struct {
     int8_t battery_enable_pin;     /* GPIO driven high to enable the battery
                                     * divider (Seeed reTerminal E10xx: GPIO21),
                                     * -1 = always-on divider */
+    int8_t buzzer_pin;             /* passive buzzer, PWM-driven (Seeed reTerminal
+                                    * E-series: GPIO45): chirps when a button press
+                                    * registers. -1 = none / silent */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;

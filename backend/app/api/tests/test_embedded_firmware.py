@@ -679,6 +679,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
         assert frame.device_config["batteryPin"] == 1
         assert frame.device_config["batteryDivider"] == 2.0
         assert frame.device_config["batteryEnablePin"] == 21
+        # The E-series buzzer the button press chirps.
+        assert frame.device_config["buzzerPin"] == 45
         assert "deepSleepOnBattery" not in frame.device_config
         assert "wakeCheckSeconds" not in frame.device_config
         assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
@@ -717,6 +719,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert frame.device_config["batteryEnablePin"] == 21
     assert frame.device_config["deepSleepOnBattery"] is True
     assert frame.device_config["wakeCheckSeconds"] == 900
+    # A passive buzzer on GPIO45 chirps when a button press registers.
+    assert frame.device_config["buzzerPin"] == 45
     assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
     plan = embedded_provisioning_plan(frame)
     settings = _provisioned(plan)
@@ -732,6 +736,7 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert settings["battery_enable_pin"] == "21"
     assert settings["deep_sleep_on_battery"] == "1"
     assert settings["wake_check"] == "900"
+    assert settings["buzzer_pin"] == "45"
     assert embedded_flash_size_for_frame(frame) == "32MB"
 
 
@@ -753,9 +758,11 @@ def test_embedded_hardware_preset_only_seeds_user_editable_power_settings():
         "batteryPin": -1,
         "batteryDivider": 3.0,
         "batteryEnablePin": -1,
+        "buzzerPin": -1,
     }
     ensure_embedded_frame_defaults(frame)
 
+    assert frame.device_config["buzzerPin"] == -1
     assert frame.device_config["deepSleepOnBattery"] is False
     assert frame.device_config["wakeCheckSeconds"] == 300
     assert frame.device_config["batteryPin"] == -1
@@ -849,6 +856,16 @@ def test_embedded_hardware_preset_for_trmnl_diy_kits():
 
 
 _FOS_CONSOLE_C = Path(__file__).resolve().parents[4] / "embedded" / "esp32" / "main" / "fos_console.c"
+_FOS_BOARD_C = _FOS_CONSOLE_C.with_name("fos_board.c")
+
+
+def _board_buzzer_pins() -> dict[str, str]:
+    """fos_board.c's k_buzzers table: `set hardware` takes a board's buzzer
+    from it, and so does a frame whose NVS predates the `buzzer` key."""
+    source = _FOS_BOARD_C.read_text(encoding="utf-8")
+    table = re.search(r"\} k_buzzers\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert table, "k_buzzers[] table not found in fos_board.c"
+    return dict(re.findall(r'\{"([a-z0-9_]+)",\s*(-?\d+)\}', table.group(1)))
 
 
 def _console_hardware_presets() -> dict[str, dict]:
@@ -889,6 +906,8 @@ def test_console_hardware_preset_table_matches_backend_presets():
     cloud flasher provisions differently from the backend — the E1001/E1002
     shipped for weeks with battery sensing in one table and not the other."""
     console = _console_hardware_presets()
+    buzzers = _board_buzzer_pins()
+    assert buzzers, "no buzzer rows parsed from fos_board.c"
     for preset_key, preset in embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS.items():
         platform = preset.get("platform", embedded_firmware_module.SUPPORTED_EMBEDDED_PLATFORM)
         if not str(platform).startswith("esp32"):
@@ -905,6 +924,7 @@ def test_console_hardware_preset_table_matches_backend_presets():
         assert row["battery_pin"] == settings.get("battery_pin", "-1"), preset_key
         assert row["battery_divider"] == float(settings.get("battery_divider", "2.0")), preset_key
         assert row["battery_enable_pin"] == settings.get("battery_enable_pin", "-1"), preset_key
+        assert buzzers.get(preset_key, "-1") == settings.get("buzzer_pin", "-1"), preset_key
         assert row["deep_sleep_on_battery"] == (settings.get("deep_sleep_on_battery") == "1"), preset_key
         if row["deep_sleep_on_battery"]:
             assert row["wake_check"] == settings["wake_check"], preset_key

@@ -23,4 +23,12 @@ const char *fos_board_target(void);
  * fallback. Never NULL. */
 const char *fos_board_module(const char *hardware_preset);
 
+/* The GPIO of the board's buzzer for a hardware preset key, -1 when the
+ * preset names a board without one (or no preset at all). The console's
+ * `set hardware` applies it, and it is the stored-config default when NVS
+ * has no `buzzer` key: a board provisioned before the key existed gets its
+ * buzzer with the update. Keep in step with `buzzerPin` in
+ * EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py). */
+int fos_board_buzzer_pin(const char *hardware_preset);
+
 #endif /* FOS_BOARD_H */

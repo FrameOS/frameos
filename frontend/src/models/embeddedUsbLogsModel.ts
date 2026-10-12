@@ -1315,6 +1315,7 @@ export type EmbeddedUsbConfigKey =
   | 'battery_pin'
   | 'battery_divider'
   | 'battery_enable_pin'
+  | 'buzzer_pin'
   | 'pins'
   | 'gpio_buttons'
 

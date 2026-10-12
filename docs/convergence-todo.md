@@ -166,13 +166,15 @@ scene-execution rule is pinned the same way
 (`docs/scene-execution-fixtures.json`; new cases go in the JSON first), and
 so is the settings-key split: every single-plane key in
 `docs/cloud-frames-contract.json` carries `parity: {only, why}`, and the
-tests cap the count at 10 linux-only / 7 esp32-only — the cap can only go
-down (it went up twice: 8 → 9 for the Linux display-driver key `device`,
+tests cap the count at 10 linux-only / 8 esp32-only — the cap can only go
+down (it went up three times: 8 → 9 for the Linux display-driver key `device`,
 2026.9.22, so cloud Pi frames could switch drivers at all; 9 → 10 for
 `input_settings`, 2026.9.23, keyboard layout + grab, which is not a gap to
 close — the chip has no keyboard or pointer, every `key*`/`pointer*` event
-in `docs/events-contract.json` is `hosts.esp32: false`). Standing rule
-rather than a task:
+in `docs/events-contract.json` is `hosts.esp32: false`; esp32 7 → 8 for
+`buzzer_pin`, 2026.10.12, the button-press chirp of the reTerminal
+E-series, which no Pi preset has a buzzer for). Standing rule rather than a
+task:
 
 - [ ] ESP32 `device`: the firmware already switches panels at runtime
   (`set panel <key>`, fos_console.c), but a panel key pushed without the

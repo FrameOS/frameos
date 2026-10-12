@@ -239,6 +239,10 @@ const CloudContractSettings* = @[
     Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.8.39", restart: true)]),
+  SettingSpec(key: "buzzer_pin", rule:
+    Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.10.12")]),
 ]
 
 const CloudContractVerbs* = @[
