@@ -181,3 +181,36 @@ async def queue_embedded_command(
     if nudged and wait_seconds > 0:
         command = await wait_for_frame_command(db, frame, command.id, wait_seconds) or command
     return command_outcome(command)
+
+
+async def queue_embedded_scene_preview(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    scenes: list[Any],
+    scene_id: str | None,
+    *,
+    wait_seconds: float = 0.0,
+) -> dict[str, Any]:
+    """"Preview on frame": what the device's own /uploadScenes does with
+    {scenes, sceneId}, in two queued halves. The scenes become a set_scenes
+    row the frame pulls like a deploy (`/embedded/scenes` serves them,
+    frame_commands.previewed_scenes), and a set_current_scene after it
+    switches to the previewed scene. A sleeping frame shows the preview on
+    its next wake. The outcome is the scenes row's, acked once the frame
+    reports holding them; set_scenes rows never fail, so neither does this."""
+    shown = next((s for s in scenes if isinstance(s, dict) and s.get("id") == scene_id), None) if scene_id else None
+    if shown is not None:
+        name = shown.get("name") if isinstance(shown.get("name"), str) and shown.get("name") else scene_id
+    else:
+        name = f"{len(scenes)} scene{'' if len(scenes) == 1 else 's'}"
+    command = enqueue_frame_command(
+        db, frame, "set_scenes", {"_preview": {"scenes": scenes, "scene_id": scene_id}}, detail=f"preview of {name}"
+    )
+    if scene_id:
+        enqueue_frame_command(db, frame, "set_current_scene", {"scene_id": scene_id}, detail=name)
+    await new_log(db, redis, int(frame.id), "stdinfo", f"Queued for the frame: {command_label(command)}")
+    nudged = await nudge_embedded_frame(frame, redis)
+    if nudged and wait_seconds > 0:
+        command = await wait_for_frame_command(db, frame, command.id, wait_seconds) or command
+    return command_outcome(command)

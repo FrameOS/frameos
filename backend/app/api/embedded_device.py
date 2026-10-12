@@ -52,6 +52,7 @@ from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
 from app.redis import get_redis
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba
+from app.utils.frame_commands import previewed_scenes
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
     FOS_PIXEL_1BPP,
@@ -363,19 +364,25 @@ async def api_embedded_device_render(
                     media_type="application/octet-stream")
 
 
-def embedded_scenes_payload(frame: Frame) -> bytes:
+def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
     """The frame's scenes as the JSON array the on-device interpreter loads.
 
     Embedded frames run every scene interpreted (there is no on-device
     compiler), so unlike Linux fast-deploy this does not filter on
     ``settings.execution``.
 
+    A "Preview on frame" queued since the last deploy is served in place of
+    the saved scenes until the next deploy (frame_commands.previewed_scenes).
+
     Firmware older than a retired Nim app's replacement gets its keyword back
     (utils/retired_apps.py). The payload — and so the ETag — follows the
     version the board reported at boot, which is what moves it onto the
     JavaScript app on its first pull after the OTA that removed the Nim one.
     """
-    scenes = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
+    source = previewed_scenes(db, frame)
+    if source is None:
+        source = frame.scenes or []
+    scenes = [scene for scene in source if isinstance(scene, dict)]
     scenes = scenes_for_runtime(scenes, frame_runtime_version(frame))
     return json.dumps(scenes, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
@@ -405,7 +412,7 @@ async def api_embedded_device_scenes(
     if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    payload = embedded_scenes_payload(frame)
+    payload = embedded_scenes_payload(db, frame)
     etag = embedded_payload_etag(payload)
     if if_none_match and if_none_match.strip() == etag:
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
@@ -421,8 +428,8 @@ def embedded_payload_etag(payload: bytes) -> str:
     return f'"{hashlib.sha256(payload).hexdigest()}"'
 
 
-def embedded_scenes_etag(frame: Frame) -> str:
-    return embedded_payload_etag(embedded_scenes_payload(frame))
+def embedded_scenes_etag(db: Session, frame: Frame) -> str:
+    return embedded_payload_etag(embedded_scenes_payload(db, frame))
 
 
 def embedded_settings_document(db: Session, frame: Frame) -> tuple[bytes, str]:

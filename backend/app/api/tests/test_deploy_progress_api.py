@@ -201,7 +201,7 @@ async def test_esp32_queue_acks_move_a_full_deploy_to_its_first_render(async_cli
     assert db.get(Frame, frame.id).deploy_progress["stage"] == "receiving"
 
     frame = db.get(Frame, frame.id)
-    body = {"scenes_checksum": embedded_scenes_etag(frame), "settings_etag": embedded_settings_etag(db, frame)}
+    body = {"scenes_checksum": embedded_scenes_etag(db, frame), "settings_etag": embedded_settings_etag(db, frame)}
     pulled = await no_auth_client.post(f"/api/frames/{frame.id}/embedded/commands", json=body, headers=headers)
     assert pulled.status_code == 200
     db.expire_all()

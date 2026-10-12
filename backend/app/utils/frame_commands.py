@@ -472,6 +472,33 @@ def deploy_snapshot_for(db: Session, frame: Frame, deploy_id: str) -> Optional[d
     return None
 
 
+def previewed_scenes(db: Session, frame: Frame) -> list[Any] | None:
+    """The scenes a "Preview on frame" sent, while the preview is the newest
+    scene set this frame was sent; None when it is not.
+
+    A preview is a set_scenes row carrying `_preview` (the editor's unsaved
+    scenes, app/utils/embedded_commands.py queue_embedded_scene_preview).
+    `/embedded/scenes` serves it in place of the saved scenes, so the frame
+    pulls it like a deploy, and it holds until a deploy queues a newer
+    set_scenes row: the rule a preview pushed straight to an awake frame
+    already follows (its "local" store, fos_scenes.c). A cancelled or
+    superseded preview is not served."""
+    row = (
+        db.query(FrameCommand)
+        .filter(
+            FrameCommand.frame_id == int(frame.id),
+            FrameCommand.type == "set_scenes",
+            FrameCommand.status.in_(("pending", "sent", "acked")),
+        )
+        .order_by(FrameCommand.created_at.desc(), FrameCommand.id.desc())
+        .first()
+    )
+    payload = row.payload if row is not None and isinstance(row.payload, dict) else {}
+    preview = payload.get("_preview")
+    scenes = preview.get("scenes") if isinstance(preview, dict) else None
+    return scenes if isinstance(scenes, list) else None
+
+
 def _deploy_of(command: FrameCommand) -> dict[str, Any] | None:
     payload = command.payload if isinstance(command.payload, dict) else {}
     deploy = payload.get("_deploy")

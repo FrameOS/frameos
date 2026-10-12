@@ -150,7 +150,7 @@ async def test_pull_acks_a_deploy_when_the_device_holds_the_current_pulls(async_
     # The scenes pull landed, the settings pull did not yet.
     response = await no_auth_client.post(
         f'/api/frames/{frame.id}/embedded/commands',
-        json={'scenes_etag': embedded_scenes_etag(frame), 'settings_etag': '"old"'},
+        json={'scenes_etag': embedded_scenes_etag(db, frame), 'settings_etag': '"old"'},
         headers=headers,
     )
     assert response.json()['pending'] == 1
@@ -159,7 +159,7 @@ async def test_pull_acks_a_deploy_when_the_device_holds_the_current_pulls(async_
 
     response = await no_auth_client.post(
         f'/api/frames/{frame.id}/embedded/commands',
-        json={'scenes_checksum': embedded_scenes_etag(frame), 'settings_etag': embedded_settings_etag(db, frame)},
+        json={'scenes_checksum': embedded_scenes_etag(db, frame), 'settings_etag': embedded_settings_etag(db, frame)},
         headers=headers,
     )
     assert response.json()['pending'] == 0
@@ -170,6 +170,78 @@ async def test_pull_acks_a_deploy_when_the_device_holds_the_current_pulls(async_
     assert frame.last_successful_deploy_at is not None
     rows = db.query(FrameCommand).filter_by(frame_id=frame.id).all()
     assert {row.status for row in rows} == {'acked'}
+
+
+@pytest.mark.asyncio
+async def test_a_preview_is_pulled_like_a_deploy_and_holds_until_the_next_one(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    headers = _device_headers(frame)
+    saved = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=headers)
+    saved_etag = saved.headers['etag']
+    preview = {'id': 'p', 'name': 'Preview me', 'nodes': [], 'edges': []}
+    with _no_nudge():
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [preview], 'sceneId': 'p'}
+        )
+    assert response.status_code == 200, response.text
+    preview_row_id = response.json()['command']['id']
+
+    # The wake's scenes pull gets the preview, not the saved scenes.
+    pulled = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': saved_etag}
+    )
+    assert pulled.status_code == 200
+    assert pulled.json() == [preview]
+    preview_etag = pulled.headers['etag']
+    assert preview_etag != saved_etag
+
+    # A device that still holds the old set is told to pull, and gets the
+    # switch; the scenes row is never handed over as a verb.
+    response = await no_auth_client.post(
+        f'/api/frames/{frame.id}/embedded/commands', json={'scenes_checksum': saved_etag}, headers=headers
+    )
+    body = response.json()
+    assert body['sync'] is True
+    assert [(c['type'], c.get('scene_id')) for c in body['commands']] == [('set_current_scene', 'p')]
+
+    # Holding the preview acks it, and it is not recorded as a deploy.
+    response = await no_auth_client.post(
+        f'/api/frames/{frame.id}/embedded/commands', json={'scenes_checksum': preview_etag}, headers=headers
+    )
+    assert response.json()['sync'] is False
+    assert db.get(FrameCommand, preview_row_id).status == 'acked'
+    db.refresh(frame)
+    assert frame.last_successful_deploy is None
+
+    # Acked, it stays what the frame pulls: the next wake keeps the preview.
+    again = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
+    )
+    assert again.status_code == 304
+
+    # A deploy is a newer scene set: the saved scenes again.
+    enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd1', 'snapshot': {}}}, detail='1 scene')
+    deployed = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
+    )
+    assert deployed.status_code == 200
+    assert deployed.headers['etag'] == saved_etag
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_preview_is_not_served(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    headers = _device_headers(frame)
+    saved_etag = (await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=headers)).headers['etag']
+    with _no_nudge():
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes',
+            json={'scenes': [{'id': 'p', 'nodes': [], 'edges': []}], 'sceneId': 'p'},
+        )
+    preview_row_id = response.json()['command']['id']
+    assert (await async_client.delete(f'/api/frames/{frame.id}/commands/{preview_row_id}')).status_code == 200
+    pulled = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=headers)
+    assert pulled.headers['etag'] == saved_etag
 
 
 # ------------------------------------------------------------- owner routes
@@ -223,20 +295,32 @@ async def test_event_route_queues_for_an_embedded_frame(async_client, db):
         assert response.status_code == 200, response.text
         assert response.json()['command']['type'] == 'render'
 
-        assert nudge.await_count == 4
-        forward.assert_not_awaited()
-
-        # A preview on the frame is still a push: it must reach the device now
-        # or fail now, and the queue does not carry a scene bundle.
-        forward.return_value = 'OK'
+        # A preview on the frame waits for a sleeping frame too: the scenes
+        # as a pulled set_scenes row, the switch to the previewed scene after it.
+        preview = {'id': 'p', 'name': 'Preview me', 'nodes': [], 'edges': []}
         response = await async_client.post(
-            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [{'id': 'p', 'nodes': [], 'edges': []}]}
+            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [preview], 'sceneId': 'p'}
         )
         assert response.status_code == 200, response.text
-        forward.assert_awaited_once()
+        body = response.json()
+        assert body['status'] == 'queued' and body['applied'] is False
+        assert body['command']['type'] == 'set_scenes'
+        assert body['command']['detail'] == 'preview of Preview me'
+
+        assert nudge.await_count == 5
+        forward.assert_not_awaited()
 
     rows = db.query(FrameCommand).filter_by(frame_id=frame.id).order_by(FrameCommand.created_at).all()
-    assert [row.type for row in rows] == ['set_current_scene', 'scene_event', 'scene_event', 'render']
+    assert [(row.type, row.status) for row in rows] == [
+        ('set_current_scene', 'expired'),  # superseded by the preview's switch
+        ('scene_event', 'pending'),
+        ('scene_event', 'pending'),
+        ('render', 'pending'),
+        ('set_scenes', 'pending'),
+        ('set_current_scene', 'pending'),
+    ]
+    assert rows[4].payload == {'_preview': {'scenes': [preview], 'scene_id': 'p'}}
+    assert rows[5].payload == {'scene_id': 'p'}
     assert rows[0].payload == {'scene_id': 'clock', 'state': {'size': 2}}
     assert rows[1].payload == {'name': 'setSceneState', 'payload': {'state': {'size': 4}, 'render': True}}
     assert rows[2].payload == {'name': 'nextPage', 'payload': {}}

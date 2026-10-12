@@ -11,7 +11,7 @@ import copy from 'copy-to-clipboard'
 import { duplicateScenes } from '../../../../utils/duplicateScenes'
 import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
-import { controlLogic } from './controlLogic'
+import { ACTIVATION_QUEUED_DETAIL, activationWasQueued, controlLogic } from './controlLogic'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isCloudMode } from '../../../../utils/cloudMode'
@@ -1193,6 +1193,16 @@ export const scenesLogic = kea<scenesLogicType>([
               kind: taskKind,
               sceneId,
               detail: 'Queued — the frame is offline; it shows this when it reconnects.',
+            })
+          } else if (!isCloudMode() && activationWasQueued(await response.text())) {
+            // The backend queues a preview for an ESP32 and answers "queued"
+            // when the frame did not take it during the request (asleep): its
+            // render is a wake away, so the task settles now.
+            longRunningTasksModel.actions.finishTask({
+              frameId: props.frameId,
+              kind: taskKind,
+              sceneId,
+              detail: `${scene.name || scene.id}: ${ACTIVATION_QUEUED_DETAIL}`,
             })
           }
         }

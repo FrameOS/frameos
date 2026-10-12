@@ -49,7 +49,7 @@ Where each path learns the runtime:
 |---|---|
 | backend Pi full deploy, SD image, bootstrap | the release the backend installs |
 | backend Pi fast deploy, preview upload, frame sync push | the frame's last reported version |
-| backend ESP32 pull (`/embedded/scenes`, the commands ETag) | the version in the board's last bootup line |
+| backend ESP32 pull (`/embedded/scenes`: the saved scenes or a queued preview, the commands ETag) | the version in the board's last bootup line |
 | cloud `set_scenes` (assignments, preview pushes) | `frames.frameos_version` from the hello |
 
 A development build reports the version of the release before it, so it is

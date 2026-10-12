@@ -1532,16 +1532,19 @@ async def api_frame_ping(
 # How long an event route waits for an awake frame's ack, so the workspace
 # can say "applied" rather than "queued" when it was.
 EMBEDDED_EVENT_WAIT_SECONDS = 4.0
+# A preview on an awake frame takes a nudge, the scenes pull and a second
+# commands pull that reports holding them: a deploy's wait, not a switch's.
+EMBEDDED_PREVIEW_WAIT_SECONDS = 20.0
 
 
 def _embedded_event_command(frame: Frame, event: str, body: Any) -> tuple[str, dict[str, Any], str | None] | None:
     """The queue verb an event becomes for an ESP32, from the contract's
     `cloud` column (events_contract_gen.CLOUD_EVENT_ROUTE_VERBS — the same
     table the cloud's event route reads), or None for an event the queue
-    does not carry (pushed straight to the device as before: a preview's
-    uploadScenes, a metrics request, turnOn/turnOff on a panel without
-    power control). A name the contract does not know is a custom scene
-    event."""
+    does not carry (pushed straight to the device as before: a metrics
+    request, turnOn/turnOff on a panel without power control). A name the
+    contract does not know is a custom scene event. uploadScenes is not
+    asked here: a preview is two rows (queue_embedded_scene_preview)."""
     payload = body if isinstance(body, dict) else {}
     route = CLOUD_EVENT_ROUTE_VERBS.get(event)
     if route is None:
@@ -1644,6 +1647,18 @@ async def api_frame_event(
     # it sleeps: the event goes on its command queue, the cloud way, and the
     # answer says whether the frame has already taken it or still will.
     if is_queued_embedded_frame(frame):
+        if event == "uploadScenes":
+            from app.utils.embedded_commands import queue_embedded_scene_preview
+
+            preview_scene_id = body.get("sceneId") if isinstance(body, dict) else None
+            return await queue_embedded_scene_preview(
+                db,
+                redis,
+                frame,
+                scenes or [],
+                preview_scene_id if isinstance(preview_scene_id, str) and preview_scene_id else None,
+                wait_seconds=EMBEDDED_PREVIEW_WAIT_SECONDS,
+            )
         queued = _embedded_event_command(frame, event, body)
         if queued is not None:
             command_type, payload, detail = queued

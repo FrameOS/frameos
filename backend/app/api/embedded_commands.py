@@ -182,7 +182,7 @@ async def api_embedded_device_commands(
     acked = ack_pull_backed_commands(
         db,
         frame,
-        scenes_current=None if scenes_etag is None else scenes_etag == embedded_scenes_etag(frame),
+        scenes_current=None if scenes_etag is None else scenes_etag == embedded_scenes_etag(db, frame),
         settings_current=None if settings_etag is None else settings_etag == embedded_settings_etag(db, frame),
         now=now,
     )
