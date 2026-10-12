@@ -5,7 +5,7 @@
 ## Set IMMICH_LIVE_URL and IMMICH_LIVE_API_KEY (optionally IMMICH_LIVE_ALBUM_ID)
 ## to also run the app against a real Immich server; skipped otherwise.
 
-import std/[json, net, os, strutils, tables, unittest]
+import std/[json, net, os, strutils, tables, times, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
@@ -219,6 +219,7 @@ suite "immich code app":
     let memory = h.render(%*{"mode": "memories", "metadataStateKey": "photo"})
     check memory.kind == fkImage
     check h.scene.state["photo"]["id"].getStr() == "mem-img"
+    check h.logged("Immich memories for " & now().format("yyyy-MM-dd") & ": HTTP 200, 1 image candidate(s)")
 
     let fallback = newHarness(mockBase() & "/nomemories")
     let value = fallback.render(%*{"mode": "memories", "metadataStateKey": "photo"})

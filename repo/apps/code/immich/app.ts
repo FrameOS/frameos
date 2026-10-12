@@ -205,10 +205,14 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   if (mode === 'album') {
     picked = fetchRandomAsset(serverUrl, apiKey, albumId, '', false, "This album contains no images. Double-check the album ID. It's the UUID in the album's URL.")
   } else if (mode === 'memories') {
-    const r = request(apiKey, `${serverUrl}/api/memories?for=${todayIso()}`)
+    const date = todayIso()
+    const r = request(apiKey, `${serverUrl}/api/memories?for=${date}`)
     let asset: Asset | null = null
-    if (r.status === 200) asset = pickRandomAsset(memoriesImageAssets(parse(r.body)))
-    else frameos.log(`No Immich memories for today (${httpErrorMessage(r)}), showing a random image instead.`)
+    if (r.status === 200) {
+      const assets = memoriesImageAssets(parse(r.body))
+      frameos.log(`Immich memories for ${date}: HTTP 200, ${assets.length} image candidate(s)`)
+      asset = pickRandomAsset(assets)
+    } else frameos.log(`No Immich memories for today (${httpErrorMessage(r)}), showing a random image instead.`)
     picked = asset ? { asset, message: '' } : fetchRandomAsset(serverUrl, apiKey)
   } else if (mode === 'favorites') {
     picked = fetchRandomAsset(serverUrl, apiKey, '', '', true, 'No favorite images found in Immich.')
