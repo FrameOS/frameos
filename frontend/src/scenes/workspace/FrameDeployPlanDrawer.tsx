@@ -9,7 +9,6 @@ import {
   ArrowPathIcon,
   ArrowsRightLeftIcon,
   CheckCircleIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   CloudArrowDownIcon,
   CloudArrowUpIcon,
@@ -2254,16 +2253,57 @@ function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX
 
 /**
  * The deploy actions of a backend-managed ESP32 that has checked in, offered
- * from the over-the-air card: fast (scenes & settings over Wi-Fi), full (the
- * latest release over the air first, then the scenes) and the firmware alone.
- * They used to sit in the drawer's footer next to a card whose own button did
- * only the firmware half — three overlapping buttons in two places.
+ * from the over-the-air card as three plain buttons: scenes & settings, the
+ * firmware alone (the latest signed release over the air) and both (the
+ * firmware first, then the scenes). The recommended one is primary, the rest
+ * stay secondary. The words on the buttons are the explanation; the
+ * paragraph that spelled out "fast" and "full" is gone.
  */
 interface EmbeddedDeployActions {
   recommendedMode: 'fast' | 'full' | null
+  /** Every pending change is the FrameOS version: the firmware alone is the thing to click. */
+  firmwareOnly: boolean
   onFastDeploy: () => void
-  /** Absent on a board with a single app slot (no OTA): fast deploy is all there is over the air. */
+  /** Absent on a board with a single app slot (no OTA): scenes & settings is all there is over the air. */
   onFullDeploy?: () => void
+}
+
+/** A full-width deploy button with its one-line meaning under the label; primary only when it is the thing to click. */
+function DeployChoiceButton({
+  primary,
+  disabled,
+  title,
+  onClick,
+  icon,
+  label,
+  detail,
+}: {
+  primary: boolean
+  disabled?: boolean
+  title?: string
+  onClick: () => void
+  icon: ReactNode
+  label: string
+  detail: string
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={clsx(
+        primary ? 'frameos-primary-action' : 'frameos-secondary-button',
+        'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+      )}
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold">{label}</span>
+        <span className={clsx('block text-xs leading-4', primary ? 'opacity-80' : 'frame-tool-muted')}>{detail}</span>
+      </span>
+    </button>
+  )
 }
 
 function OtaUpdateCard({
@@ -2283,15 +2323,14 @@ function OtaUpdateCard({
 }): JSX.Element {
   // The request only reboots the board into its updater; what follows
   // arrives as ota:backend log lines the backend folds into the row. The
-  // card shows that progress and holds its button, so the click that
+  // card shows that progress and holds its buttons, so the click that
   // started the update is not mistaken for one that was lost.
   const updateState = firmwareUpdateState(frame)
   const { progress, queued, inFlight } = updateState
-  // A deploy this backend is running (fast: the scenes; full: the OTA, then
-  // the scenes) holds the card's buttons too, since the drawer stays open.
+  // A deploy this backend is running (the scenes; or the OTA, then the
+  // scenes) holds the card's buttons too, since the drawer stays open.
   const deploying = frame.status === 'deploying'
-  const busyLabel =
-    progress?.kind === 'running' ? 'Updating firmware' : queued ? 'Update queued' : deploying ? 'Deploying' : null
+  const firmwareBusyLabel = progress?.kind === 'running' ? 'Updating firmware' : queued ? 'Update queued' : null
   const busyTitle =
     progress?.kind === 'running'
       ? progress.title
@@ -2300,97 +2339,76 @@ function OtaUpdateCard({
       : undefined
   const busyIcon =
     progress?.kind === 'running' || deploying ? (
-      <ArrowPathIcon className="h-4 w-4 animate-spin" />
+      <ArrowPathIcon className="h-5 w-5 animate-spin" />
     ) : queued ? (
-      <HourglassIcon className="h-4 w-4" />
+      <HourglassIcon className="h-5 w-5" />
     ) : null
   const fastBusy = progress?.kind === 'running' || deploying
   const fullBusy = inFlight || deploying
   const fullDeploy = deploy?.onFullDeploy && otaSupported ? deploy.onFullDeploy : null
-  // The primary half of the two-stage button: the recommended kind when the
-  // frame can do it, else full when it can (it includes the fast half).
-  const primaryMode: 'fast' | 'full' = deploy?.recommendedMode === 'fast' || !fullDeploy ? 'fast' : 'full'
-  const deployTitles = {
-    fast: 'Save, then send this frame’s scenes and settings over Wi-Fi',
-    full: 'Save, update FrameOS over the air, then send this frame’s scenes and settings',
-  }
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
       <div>
         <div className="text-sm font-semibold text-[color:var(--tool-strong)]">
           {deploy ? 'Deploy over the air' : 'Over-the-air update'}
         </div>
-        <div className="frame-tool-muted mt-1 text-sm leading-5">
-          {deploy ? (
-            <>
-              Fast deploy sends this frame’s scenes and settings over Wi-Fi.{' '}
-              {otaSupported
-                ? 'Full deploy first installs the latest FrameOS release (the frame downloads it, checks the signature and restarts), then sends the scenes.'
-                : 'This board has room for only one firmware copy, so the firmware itself updates over USB.'}
-              {online ? '' : ' The frame has to be online.'}
-            </>
-          ) : otaSupported ? (
-            <>
-              Install the latest FrameOS release over Wi-Fi. The frame downloads it, checks the signature and restarts.
-              {online ? '' : ' The frame has to be online.'}
-            </>
-          ) : (
-            'This board has room for only one firmware copy, so update it over USB.'
-          )}
-        </div>
+        {deploy ? (
+          !otaSupported || !online ? (
+            <div className="frame-tool-muted mt-1 text-sm leading-5">
+              {!otaSupported
+                ? 'This board has room for only one firmware copy, so its firmware updates over USB.'
+                : null}
+              {!online ? ' The frame has to be online.' : null}
+            </div>
+          ) : null
+        ) : (
+          <div className="frame-tool-muted mt-1 text-sm leading-5">
+            {otaSupported ? (
+              <>
+                Install the latest FrameOS release over Wi-Fi. The frame downloads it, checks the signature and
+                restarts.
+                {online ? '' : ' The frame has to be online.'}
+              </>
+            ) : (
+              'This board has room for only one firmware copy, so update it over USB.'
+            )}
+          </div>
+        )}
       </div>
       {otaSupported ? <FirmwareUpdateState state={updateState} noun="firmware" /> : null}
       {deploy ? (
-        <div className="inline-flex items-stretch">
-          <button
-            type="button"
-            onClick={primaryMode === 'full' && fullDeploy ? fullDeploy : deploy.onFastDeploy}
-            disabled={disabled || (primaryMode === 'full' ? fullBusy : fastBusy)}
-            title={primaryMode === 'full' ? busyTitle ?? deployTitles.full : deployTitles.fast}
-            className="frameos-primary-action inline-flex items-center gap-2 rounded-l-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            {(primaryMode === 'full' ? fullBusy : fastBusy) && busyIcon ? (
-              busyIcon
-            ) : (
-              <CloudArrowUpIcon className="h-4 w-4" />
-            )}
-            {primaryMode === 'full' ? busyLabel ?? 'Full deploy' : deploying ? 'Deploying' : 'Fast deploy'}
-          </button>
-          <DropdownMenu
-            buttonColor="none"
-            buttonTitle="Other ways to deploy"
-            buttonContent={<ChevronDownIcon className="h-4 w-4" aria-hidden="true" />}
-            className="frameos-primary-action !rounded-l-none !rounded-r-lg border-l border-white/30 !px-2 !py-2 !shadow-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            menuClassName="w-72"
-            items={[
-              {
-                label: 'Fast deploy',
-                title: deployTitles.fast,
-                disabled: disabled || fastBusy,
-                onClick: deploy.onFastDeploy,
-                icon: <CloudArrowUpIcon className="h-5 w-5" />,
-              },
-              ...(fullDeploy
-                ? [
-                    {
-                      label: 'Full deploy',
-                      title: busyTitle ?? deployTitles.full,
-                      disabled: disabled || fullBusy,
-                      onClick: fullDeploy,
-                      icon: <ArrowPathIcon className="h-5 w-5" />,
-                    },
-                    {
-                      label: 'Update firmware only',
-                      title:
-                        busyTitle ?? 'Install the latest FrameOS release over the air; the scenes stay as they are',
-                      disabled: disabled || fullBusy,
-                      onClick: onOtaUpdate,
-                      icon: busyIcon ?? <ArrowDownTrayIcon className="h-5 w-5" />,
-                    },
-                  ]
-                : []),
-            ]}
+        <div className="space-y-2">
+          <DeployChoiceButton
+            primary={deploy.recommendedMode === 'fast'}
+            disabled={disabled || fastBusy}
+            title="Save, then send this frame’s scenes and settings over Wi-Fi"
+            onClick={deploy.onFastDeploy}
+            icon={deploying && busyIcon ? busyIcon : <CloudArrowUpIcon className="h-5 w-5" />}
+            label={deploying ? 'Deploying' : 'Deploy scenes & settings'}
+            detail="Over Wi-Fi; the firmware stays as it is"
           />
+          {fullDeploy ? (
+            <>
+              <DeployChoiceButton
+                primary={deploy.recommendedMode === 'full' && deploy.firmwareOnly}
+                disabled={disabled || fullBusy}
+                title={busyTitle ?? 'Install the latest FrameOS release over the air; the scenes stay as they are'}
+                onClick={onOtaUpdate}
+                icon={fullBusy && busyIcon ? busyIcon : <ArrowDownTrayIcon className="h-5 w-5" />}
+                label={firmwareBusyLabel ?? 'Deploy new firmware'}
+                detail="The latest FrameOS release over the air; the frame restarts"
+              />
+              <DeployChoiceButton
+                primary={deploy.recommendedMode === 'full' && !deploy.firmwareOnly}
+                disabled={disabled || fullBusy}
+                title={busyTitle ?? 'Save, update FrameOS over the air, then send this frame’s scenes and settings'}
+                onClick={fullDeploy}
+                icon={<ArrowPathIcon className={clsx('h-5 w-5', deploying ? 'animate-spin' : null)} />}
+                label="Deploy both"
+                detail="The new firmware first, then scenes & settings"
+              />
+            </>
+          ) : null}
         </div>
       ) : (
         <button
@@ -2401,7 +2419,7 @@ function OtaUpdateCard({
           className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
         >
           {busyIcon ?? <CloudArrowUpIcon className="h-4 w-4" />}
-          {busyLabel ?? 'Update over the air'}
+          {firmwareBusyLabel ?? 'Update over the air'}
         </button>
       )}
     </div>
@@ -3849,17 +3867,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     openFrameChangeDrawer(frame.id, 'deploy', view)
   }
   // Mirrors the footer's branches below: the cloud, a close-only view, and
-  // a shell-less or ESP32 main view with no stuck deploy would hold nothing
-  // but "Close", which the drawer's top-right control already is.
+  // a main view with no stuck deploy would hold nothing but "Close", which
+  // the drawer's top-right control already is.
   const isVirtualFrame = (frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual'
   const footerHidden =
     isCloud ||
     (!isVirtualFrame && activeDeployDrawerView !== 'main' && closeOnlyDrawerView) ||
-    (!isVirtualFrame &&
-      activeDeployDrawerView === 'main' &&
-      !hasFrameSyncChanges &&
-      (shellLess || isEmbeddedFrame) &&
-      !cancelStuckDeployButton)
+    (!isVirtualFrame && activeDeployDrawerView === 'main' && !hasFrameSyncChanges && !cancelStuckDeployButton)
   const showMainDeployView = (): void => showDeployDrawerView('main')
   const deploySummaryWithoutBuildOptions = fullDeployPlanSummary.filter(
     (item) => item.label !== 'Build strategy' && item.label !== 'Compilation'
@@ -4079,7 +4093,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                       </div>
                     </section>
                   ) : null}
-                  {deployRecommendation ? (
+                  {/* An ESP32's card highlights the thing to click; the
+                      suggestion paragraph (written for the Pi's rebuild)
+                      would only explain it at length. */}
+                  {deployRecommendation && !isEmbeddedFrame ? (
                     <section className="space-y-2">
                       <DrawerHeading
                         action={
@@ -4112,6 +4129,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                       deploy={{
                         recommendedMode:
                           deployRecommendation?.mode === 'none' ? null : deployRecommendation?.mode ?? null,
+                        firmwareOnly:
+                          deployChangeDetails.length > 0 &&
+                          deployChangeDetails.every((change) => Boolean(change.frameosVersionChange)),
                         onFastDeploy: () => saveAndFastDeployFrame(),
                         onFullDeploy: embeddedFullDeploySupported ? () => saveAndFullDeployFrame() : undefined,
                       }}
@@ -4123,6 +4143,27 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     </section>
                   ) : null}
                   <DeployBuildOptionsSection frame={frame} frameForm={frameForm} />
+                  {!isEmbeddedFrame ? (
+                    // The deploy buttons close the form, below everything
+                    // they act on; the one the suggestion above named is
+                    // primary. The footer no longer repeats them.
+                    <div className="space-y-2 pt-2">
+                      <DeployChoiceButton
+                        primary={deployRecommendation?.mode === 'fast'}
+                        onClick={() => closeAndRun(saveAndFastDeployFrame)}
+                        icon={<CloudArrowUpIcon className="h-5 w-5" />}
+                        label="Fast deploy"
+                        detail="Scenes & settings; FrameOS stays as it is"
+                      />
+                      <DeployChoiceButton
+                        primary={deployRecommendation?.mode === 'full'}
+                        onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                        icon={<ArrowPathIcon className="h-5 w-5" />}
+                        label="Full deploy"
+                        detail="Reinstall FrameOS, then scenes & settings"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               )}
             </>
@@ -4202,45 +4243,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     : 'Choose changes'}
                 </button>
               </>
-            ) : shellLess || isEmbeddedFrame ? (
-              // The deploy actions sit in the body next to what they change
-              // (an ESP32's in its over-the-air card); only a stuck deploy
-              // leaves the footer anything to say.
-              cancelStuckDeployButton
             ) : (
-              <>
-                {cancelStuckDeployButton}
-                <button
-                  type="button"
-                  onClick={closeDrawer}
-                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={() => closeAndRun(saveAndFastDeployFrame)}
-                  className={clsx(
-                    'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                  )}
-                >
-                  Fast deploy
-                </button>
-                {!isEmbeddedFrame || embeddedFullDeploySupported ? (
-                  <button
-                    type="button"
-                    title={isEmbeddedFrame ? 'Update FrameOS over the air (OTA), then deploy the scenes' : undefined}
-                    onClick={() => closeAndRun(saveAndFullDeployFrame)}
-                    className={clsx(
-                      'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                      deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                    )}
-                  >
-                    Full deploy
-                  </button>
-                ) : null}
-              </>
+              // The deploy actions sit in the body next to what they change
+              // (an ESP32's in its over-the-air card, a Pi's at the bottom of
+              // the form); only a stuck deploy leaves the footer anything to
+              // say.
+              cancelStuckDeployButton
             )}
           </div>
         )}
