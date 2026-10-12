@@ -674,7 +674,12 @@ The backend can bake them in per-frame via `device_config`: `deepSleep`,
 `batteryDivider`, `batteryEnablePin` — and the cloud can set the same live
 over `set_settings` (`deep_sleep`, `deep_sleep_on_battery`,
 `wake_check_seconds`, `battery_pin`, `battery_divider`, `battery_enable_pin`),
-surfaced as the frame's "Power" settings section.
+surfaced as the frame's "Power" settings section. The GPIO button map
+travels the same two ways since 2026-10-12: the backend's settings pull
+carries `gpioButtons` (`[{pin, label}]`, present only when the backend holds
+a map) and the cloud's `set_settings` carries `gpio_buttons`; the device
+rebinds its buttons with a restart. Before that, a provisioned board's map
+could only be changed over the console.
 
 ## Scene storage and memory (2026.8.13)
 

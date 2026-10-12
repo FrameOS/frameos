@@ -978,3 +978,30 @@ def test_spectra6_packer_skips_the_missing_palette_index():
         pack_image_for_panel(image, FOS_PIXEL_4BPP_SPECTRA6), width, height, 4)
     assert 4 not in levels
     assert set(levels) == {0, 1, 2, 3, 5, 6}
+
+
+@pytest.mark.asyncio
+async def test_settings_carry_the_gpio_button_map_when_the_backend_holds_one(async_client, no_auth_client, db):
+    """The Settings panel's GPIO buttons used to change nothing on a
+    provisioned board: the pull left the map to the USB console. The cloud
+    pushes the same list through set_settings; the pull now carries it as
+    `gpioButtons`, present only when the backend holds a map (an E1004
+    whose map was corrected in Settings, 2026-10-12)."""
+    frame = await device_frame(async_client, db)
+    frame.gpio_buttons = None
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert 'gpioButtons' not in response.json()['frame']
+
+    frame.gpio_buttons = [{'pin': 3, 'label': 'RIGHT'}, {'pin': 4, 'label': 'LEFT'}, {'pin': 5, 'label': 'REFRESH'}]
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert response.json()['frame']['gpioButtons'] == [
+        {'pin': 3, 'label': 'RIGHT'},
+        {'pin': 4, 'label': 'LEFT'},
+        {'pin': 5, 'label': 'REFRESH'},
+    ]
