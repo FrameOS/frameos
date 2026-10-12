@@ -4,6 +4,7 @@
 from datetime import datetime, timezone
 
 from app.utils.firmware_update import (
+    firmware_update_already_applied,
     firmware_update_from_log,
     firmware_update_is_over,
     is_firmware_update_log,
@@ -101,3 +102,20 @@ def test_the_boot_after_the_update_closes_the_row():
     assert firmware_update_is_over(error, None, "2026.10.5") is False
     assert firmware_update_is_over(error, "2026.10.5", None) is True
     assert firmware_update_is_over(None, "2026.10.6", "2026.10.5") is False
+
+
+def test_a_verified_line_for_the_version_the_frame_already_runs_is_over_on_arrival():
+    # The Pi's watcher reports `success` from the new runtime, after the
+    # bootup that cleared the row; folded as-is the row said "rebooting
+    # into 2026.10.6" for a frame already running it.
+    verified = firmware_update_from_log(
+        {"event": "cloud:upgrade", "status": "success", "latest_version": "2026.10.6"}, None, NOW
+    )
+    assert firmware_update_already_applied(verified, "2026.10.6") is True
+    assert firmware_update_already_applied(verified, "2026.10.5") is False
+    assert firmware_update_already_applied(verified, None) is False
+    running = firmware_update_from_log(
+        {"event": "cloud:upgrade", "status": "running", "latest_version": "2026.10.6"}, None, NOW
+    )
+    assert firmware_update_already_applied(running, "2026.10.6") is False
+    assert firmware_update_already_applied(None, "2026.10.6") is False

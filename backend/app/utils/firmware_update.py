@@ -136,3 +136,16 @@ def firmware_update_is_over(firmware_update: Any, reported_version: Any, known_v
         and len(reported_version) > 0
         and reported_version != (known_version or "")
     )
+
+
+def firmware_update_already_applied(firmware_update: Any, running_version: Any) -> bool:
+    """A "verified" line that lands AFTER the frame came back on the release
+    it names has nothing left to narrate: the Pi's upgrade watcher reports
+    `success` from the new runtime, after the bootup that cleared the row.
+    Folded as-is the row said "rebooting into" a version the frame already
+    ran, until the next boot (the cloud hub's firmwareUpdateAlreadyApplied
+    is the sibling)."""
+    if not isinstance(firmware_update, dict) or firmware_update.get("status") != "verified":
+        return False
+    version = firmware_update.get("version")
+    return isinstance(version, str) and len(version) > 0 and version == running_version

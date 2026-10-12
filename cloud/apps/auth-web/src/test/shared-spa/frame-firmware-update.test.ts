@@ -34,6 +34,20 @@ describe("frameFirmwareUpdateProgress", () => {
     ).toMatchObject({ kind: "running", label: "rebooting into 2026.10.3", percent: 100 });
   });
 
+  it("stops saying rebooting once the frame reports the verified version", () => {
+    // The Pi's watcher forwards its success line from the NEW runtime,
+    // after the hello that already carried 2026.10.6; the row folded it
+    // into a fresh "verified" that nothing cleared until the next reconnect.
+    const back = {
+      id: "f1",
+      frameos_version: "2026.10.6",
+      firmware_update: { status: "verified", detail: "Restarting services.", version: "2026.10.6", at: at(60) },
+    } as unknown as FrameType;
+    expect(frameFirmwareUpdateProgress(back, now)).toBeNull();
+    const notYet = { ...back, frameos_version: "2026.10.5" } as FrameType;
+    expect(frameFirmwareUpdateProgress(notYet, now)).toMatchObject({ label: "rebooting into 2026.10.6" });
+  });
+
   it("forgets a download that stopped reporting, but keeps a failure for a while", () => {
     expect(
       frameFirmwareUpdateProgress(frame({ status: "progress", detail: "1/2", at: at(20 * 60) }), now),

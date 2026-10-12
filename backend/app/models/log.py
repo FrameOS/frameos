@@ -8,7 +8,11 @@ from typing import Any, Optional
 from arq import ArqRedis as Redis
 
 from .frame import Frame, record_successful_deploy, remember_device_reported_frameos_version, update_frame
-from app.utils.firmware_update import firmware_update_from_log, firmware_update_is_over
+from app.utils.firmware_update import (
+    firmware_update_already_applied,
+    firmware_update_from_log,
+    firmware_update_is_over,
+)
 from .metrics import new_metrics
 from app.database import Base
 from app.utils.events_contract_gen import SCENE_CHANGED_LOG_EVENTS
@@ -374,7 +378,11 @@ async def process_log(
     # "ready" with an OTA button inviting a second click.
     firmware_update = firmware_update_from_log(log, frame.firmware_update, timestamp)
     if firmware_update is not None:
-        changes['firmware_update'] = firmware_update
+        # A verified install the frame already runs (its bootup said so) is
+        # over on arrival; the row goes back to nothing.
+        changes['firmware_update'] = (
+            None if firmware_update_already_applied(firmware_update, _known_frameos_version(frame)) else firmware_update
+        )
     if event == 'render':
         changes['status'] = 'preparing'
     if event == 'render:device':

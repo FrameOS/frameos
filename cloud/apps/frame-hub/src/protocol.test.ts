@@ -19,6 +19,7 @@ import {
   stateWithActiveScene,
   withinJsonByteLimit,
   type FrameRow,
+  firmwareUpdateAlreadyApplied,
   firmwareUpdateFromLogEntries,
   firmwareUpdateIsOver,
 } from "./protocol";
@@ -483,6 +484,25 @@ describe("firmwareUpdateIsOver", () => {
   it("has nothing to clear without a line", () => {
     expect(firmwareUpdateIsOver(null, "2026.10.3", "2026.10.1")).toBe(false);
     expect(firmwareUpdateIsOver(undefined, "2026.10.3", "2026.10.1")).toBe(false);
+  });
+});
+
+describe("firmwareUpdateAlreadyApplied", () => {
+  // The Pi's watcher forwards `success` from the NEW runtime's session,
+  // after the hello that reported the new version and cleared the row.
+  it("is over on arrival when the device already reports the verified version", () => {
+    expect(
+      firmwareUpdateAlreadyApplied({ status: "verified", version: "2026.10.6" }, "2026.10.6"),
+    ).toBe(true);
+  });
+  it("still narrates a verified install the device has not restarted into", () => {
+    expect(
+      firmwareUpdateAlreadyApplied({ status: "verified", version: "2026.10.6" }, "2026.10.5"),
+    ).toBe(false);
+    expect(firmwareUpdateAlreadyApplied({ status: "verified", version: null }, "2026.10.6")).toBe(false);
+    expect(firmwareUpdateAlreadyApplied({ status: "downloading", version: "2026.10.6" }, "2026.10.6")).toBe(
+      false,
+    );
   });
 });
 
