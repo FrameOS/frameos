@@ -49,6 +49,9 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
  * ERROR"`. The HTTP range by name; everything else as esp_err_to_name(). */
 const char *fos_http_err_name(esp_err_t err);
 
+/* How many connects this boot failed fast and were retried (metrics). */
+uint32_t fos_http_connect_retries(void);
+
 void fos_http_response_free(fos_http_response_t *res);
 
 /* `{backend_url}/api/frames/{frame_id}{suffix}`; false when no backend is

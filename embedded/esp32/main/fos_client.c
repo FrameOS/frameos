@@ -23,6 +23,7 @@
 #include "esp_timer.h"
 #include "mbedtls/sha256.h"
 
+#include "fos_backend_http.h"
 #include "fos_battery.h"
 #include "fos_buttons.h"
 #include "fos_cloud.h"
@@ -237,7 +238,7 @@ static void log_metrics_sample(void)
         "\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
         "\"renderStackFreeBytes\":%u,\"cloudStackFreeBytes\":%u,"
         "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,"
-        "\"loadedScenes\":%d",
+        "\"loadedScenes\":%d,\"httpConnectRetries\":%lu",
         wake_cause_name(),
         (long long)(esp_timer_get_time() / 1000000),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
@@ -261,7 +262,7 @@ static void log_metrics_sample(void)
         (unsigned)uxTaskGetStackHighWaterMark(NULL),
         (unsigned)fos_cloud_task_stack_free(),
         fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
-        fos_scenes_loaded());
+        fos_scenes_loaded(), (unsigned long)fos_http_connect_retries());
     if (battery_pct >= 0 && used < sizeof(json) - 128) {
         /* onBattery is the same "cell present" test the deep-sleep decision
          * uses, so a provider can tell whether deep_sleep_on_battery is in

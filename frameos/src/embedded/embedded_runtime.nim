@@ -132,6 +132,17 @@ proc sceneInfoJson*(): string =
 var lastSavedStateId = ""
 var lastSavedStateJson = ""
 
+# Firmware up to 2026.10.5 wrote every persisted field to the file, defaults
+# included, and the file seeds the scene before its declared defaults do: a
+# scene installed with mode "random" ignored every later "album" the editor
+# deployed (#531 stopped writing defaults, but a file already written kept
+# pinning). The file now carries a format marker; one without it predates the
+# rule and is dropped the first time it is read, so the scene seeds from the
+# defaults the control plane just sent. The loss is one-time and bounded:
+# a value somebody set on the device itself between 2026.10.5 and this.
+const SceneStateFormatKey = "__persist"
+const SceneStateFormat = 2
+
 proc loadPersistedSceneState(sceneId: string): JsonNode =
   ## nil when nothing is persisted or the file is not an object.
   let raw = sceneStateLoad(sceneId.cstring)
@@ -145,8 +156,22 @@ proc loadPersistedSceneState(sceneId: string): JsonNode =
       result = nil
   except CatchableError:
     result = nil
+  if result.isNil:
+    return nil
+  if result{SceneStateFormatKey}.getInt(0) != SceneStateFormat:
+    log("scene state: dropping a file written before the off-default rule for " &
+      sceneId & " (it pinned every field's default over the deployed values)")
+    discard sceneStateSave(sceneId.cstring, "{}".cstring)
+    return nil
+  result.delete(SceneStateFormatKey)
 
-proc saveSceneStateText(sceneId, text: string) =
+proc saveSceneState(sceneId: string, state: JsonNode) =
+  ## An empty state removes the file; anything else is written with the
+  ## format marker.
+  var text = "{}"
+  if not state.isNil and state.kind == JObject and state.len > 0:
+    state[SceneStateFormatKey] = %SceneStateFormat
+    text = $state
   if sceneId == lastSavedStateId and text == lastSavedStateJson:
     return
   if sceneStateSave(sceneId.cstring, text.cstring):
@@ -180,7 +205,7 @@ proc persistSceneState*() =
   ## Write the resident scene's state when it differs from what was written.
   if host.scene.isNil or host.sceneId.isNone:
     return
-  saveSceneStateText(host.sceneId.get().string, $persistableSceneState())
+  saveSceneState(host.sceneId.get().string, persistableSceneState())
 
 proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
   ## State for a scene that is not resident — a `setSceneState` on a
@@ -193,7 +218,7 @@ proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
     current = newJObject()
   for key, value in state:
     current[key] = value
-  saveSceneStateText(sceneId, $current)
+  saveSceneState(sceneId, current)
 
 proc sceneStateJson*(): string =
   ## The current scene's public state: what `/state`, the cloud hello and the

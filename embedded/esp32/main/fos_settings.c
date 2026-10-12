@@ -16,6 +16,7 @@
 #include "esp_timer.h"
 #include "nvs.h"
 #include "fos_backend_http.h"
+#include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_mem.h"
@@ -93,6 +94,7 @@ static char s_etag[SETTINGS_ETAG_LEN] = "";
 #define SETTINGS_CACHE_AT_KEY "svc_at"
 #define SETTINGS_CACHE_SOURCE_KEY "svc_src"
 static bool s_cache_applied = false;   /* this boot started from the cache */
+static bool s_boot_had_cache = false;  /* any source's cache applied at boot */
 static void cache_store(const char *printed, const char *etag, const char *origin);
 /* frame.json's `palette` object → the colour list as compact JSON, or ""
  * for an empty list. false when the list is not an array of #rrggbb strings
@@ -181,6 +183,16 @@ void fos_settings_cloud_scope_granted(bool granted)
     /* One conditional pull per session that reaches `ready`, before the first
      * render this session drives. */
     s_sync_requested = true;
+    if (!s_boot_had_cache) {
+        /* Nothing to apply at boot and no scope until now: the first pass
+         * already rendered (or is rendering) without the account's keys —
+         * an Immich scene painted "Please provide an Immich server URL" and
+         * kept it until the next interval. Ask for a pass: it pulls first
+         * (the request above), then renders; the panel skips its refresh
+         * when the picture comes out the same. Every later boot applies
+         * the cache this pull writes and does not come through here. */
+        fos_client_render_now();
+    }
 }
 
 /* Group NAMES only, never a value: device logs are uploaded to the provider
@@ -364,6 +376,7 @@ bool fos_settings_boot_apply_cache(void)
         s_cache_stored_at = at;
     }
     log_service_settings_event("cache", "applied", names);
+    s_boot_had_cache = true;
     return true;
 }
 

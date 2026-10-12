@@ -9,6 +9,9 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "fos_config.h"
 #include "fos_mem.h"
@@ -95,6 +98,19 @@ static void read_body(esp_http_client_handle_t client, size_t max_body, fos_http
     res->body_len = total;
 }
 
+/* A connect that fails within this long never waited on the network: the
+ * peer refused or the route was not there. A connect that spent timeout_ms
+ * is not retried, it would only double the wait on an unreachable host. */
+#define FOS_HTTP_FAST_CONNECT_FAIL_US (2 * 1000 * 1000)
+#define FOS_HTTP_CONNECT_RETRY_DELAY_MS 1000
+
+static uint32_t s_connect_retries = 0;
+
+uint32_t fos_http_connect_retries(void)
+{
+    return s_connect_retries;
+}
+
 const char *fos_http_err_name(esp_err_t err)
 {
     switch (err) {
@@ -138,7 +154,21 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
     if (req->body) esp_http_client_set_header(client, "Content-Type", "application/json");
 
     int body_len = req->body ? (int)strlen(req->body) : 0;
+    int64_t open_started_us = esp_timer_get_time();
     esp_err_t err = esp_http_client_open(client, body_len);
+    if (err == ESP_ERR_HTTP_CONNECT &&
+        esp_timer_get_time() - open_started_us < FOS_HTTP_FAST_CONNECT_FAIL_US) {
+        /* The first request after a deep-sleep wake did this twice in one
+         * day on an E1004: scenes and settings both refused within the same
+         * millisecond, the log upload 0.7 s later went through, and the
+         * pass rendered without the account's keys. One retry, one second
+         * on; the metrics line counts them (httpConnectRetries). */
+        s_connect_retries++;
+        ESP_LOGW(TAG, "%s: connect refused, retrying once", req->url);
+        esp_http_client_close(client);
+        vTaskDelay(pdMS_TO_TICKS(FOS_HTTP_CONNECT_RETRY_DELAY_MS));
+        err = esp_http_client_open(client, body_len);
+    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s: connect failed: %s", req->url, fos_http_err_name(err));
         esp_http_client_cleanup(client);
