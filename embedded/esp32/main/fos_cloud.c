@@ -2879,6 +2879,12 @@ static void ws_handle_message(const char *data, size_t len)
     if (strcmp(type, "challenge") == 0) {
         ws_send_auth(root);
     } else if (strcmp(type, "ready") == 0) {
+        /* How many queued verbs follow this frame (the hub drains them in
+         * order right after it): what the first render of a boot waits for. */
+        const cJSON *pending = cJSON_GetObjectItem(root, "pending_commands");
+        s_initial_dispatched = 0;
+        s_initial_pending = cJSON_IsNumber(pending) && pending->valuedouble >= 0
+                                ? (int)pending->valuedouble : 0;
         /* The ready message is authoritative for what this session may do:
          * its scopes array reflects the provider's current grant, including
          * revocations since enrollment. */
@@ -2906,12 +2912,6 @@ static void ws_handle_message(const char *data, size_t len)
          * this one is additive and outlives the session — the provider's
          * `403 insufficient_scope` is what removes the keys again. */
         fos_settings_cloud_scope_granted(service_settings_granted);
-        /* How many queued verbs follow this frame (the hub drains them in
-         * order right after it): what the first render of a boot waits for. */
-        const cJSON *pending = cJSON_GetObjectItem(root, "pending_commands");
-        s_initial_dispatched = 0;
-        s_initial_pending = cJSON_IsNumber(pending) && pending->valuedouble >= 0
-                                ? (int)pending->valuedouble : 0;
         s_ws_ready = true;
         s_ws_auth_failures = 0; /* a completed handshake clears the streak */
         ws_backoff_reset();
