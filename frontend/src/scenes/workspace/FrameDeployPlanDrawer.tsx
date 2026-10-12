@@ -2346,6 +2346,19 @@ function OtaUpdateCard({
   const fastBusy = progress?.kind === 'running' || deploying
   const fullBusy = inFlight || deploying
   const fullDeploy = deploy?.onFullDeploy && otaSupported ? deploy.onFullDeploy : null
+  // One primary button, or none: the suggested next action. Nothing is
+  // suggested while an update is queued or running or a deploy is under
+  // way (the next action is to wait), nor when the frame is up to date.
+  const highlight: 'scenes' | 'firmware' | 'both' | null =
+    !deploy || fullBusy
+      ? null
+      : deploy.recommendedMode === 'fast'
+      ? 'scenes'
+      : deploy.recommendedMode === 'full' && fullDeploy
+      ? deploy.firmwareOnly
+        ? 'firmware'
+        : 'both'
+      : null
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
       <div>
@@ -2379,7 +2392,7 @@ function OtaUpdateCard({
       {deploy ? (
         <div className="space-y-2">
           <DeployChoiceButton
-            primary={deploy.recommendedMode === 'fast'}
+            primary={highlight === 'scenes'}
             disabled={disabled || fastBusy}
             title="Save, then send this frame’s scenes and settings over Wi-Fi"
             onClick={deploy.onFastDeploy}
@@ -2390,7 +2403,7 @@ function OtaUpdateCard({
           {fullDeploy ? (
             <>
               <DeployChoiceButton
-                primary={deploy.recommendedMode === 'full' && deploy.firmwareOnly}
+                primary={highlight === 'firmware'}
                 disabled={disabled || fullBusy}
                 title={busyTitle ?? 'Install the latest FrameOS release over the air; the scenes stay as they are'}
                 onClick={onOtaUpdate}
@@ -2399,7 +2412,7 @@ function OtaUpdateCard({
                 detail="The latest FrameOS release over the air; the frame restarts"
               />
               <DeployChoiceButton
-                primary={deploy.recommendedMode === 'full' && !deploy.firmwareOnly}
+                primary={highlight === 'both'}
                 disabled={disabled || fullBusy}
                 title={busyTitle ?? 'Save, update FrameOS over the air, then send this frame’s scenes and settings'}
                 onClick={fullDeploy}
@@ -4146,17 +4159,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   {!isEmbeddedFrame ? (
                     // The deploy buttons close the form, below everything
                     // they act on; the one the suggestion above named is
-                    // primary. The footer no longer repeats them.
+                    // primary — one or none, and none while a deploy runs.
+                    // The footer no longer repeats them.
                     <div className="space-y-2 pt-2">
                       <DeployChoiceButton
-                        primary={deployRecommendation?.mode === 'fast'}
+                        primary={frame.status !== 'deploying' && deployRecommendation?.mode === 'fast'}
                         onClick={() => closeAndRun(saveAndFastDeployFrame)}
                         icon={<CloudArrowUpIcon className="h-5 w-5" />}
                         label="Deploy scenes & settings"
                         detail="FrameOS stays as it is"
                       />
                       <DeployChoiceButton
-                        primary={deployRecommendation?.mode === 'full'}
+                        primary={frame.status !== 'deploying' && deployRecommendation?.mode === 'full'}
                         onClick={() => closeAndRun(saveAndFullDeployFrame)}
                         icon={<ArrowPathIcon className="h-5 w-5" />}
                         label="Deploy FrameOS, scenes & settings"
