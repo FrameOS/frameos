@@ -119,3 +119,41 @@ def test_a_verified_line_for_the_version_the_frame_already_runs_is_over_on_arriv
     )
     assert firmware_update_already_applied(running, "2026.10.6") is False
     assert firmware_update_already_applied(None, "2026.10.6") is False
+
+
+def test_a_boot_on_the_old_version_mid_download_is_the_failure_the_device_could_not_report():
+    # E1004, 2026-10-12: the download died while the frame's socket was down,
+    # so its `ota:cloud error` never arrived; the next boot (a deep-sleep wake)
+    # reported the old version and the row still said "progress".
+    progress = {"status": "progress", "detail": "1048576/3233648", "plane": "cloud", "version": "2026.10.8"}
+    boot = {"event": "bootup", "source": "esp32", "version": "2026.10.6", "mode": "embedded"}
+    folded = firmware_update_from_log(boot, progress, NOW)
+    assert folded is not None
+    assert folded["status"] == "error"
+    assert folded["plane"] == "cloud"
+    assert folded["version"] == "2026.10.8"
+    assert folded["detail"] == "interrupted: the frame restarted on 2026.10.6 before the update finished"
+    # The boot that follows a success is the hello's/bootup branch's business
+    # (firmware_update_is_over), not an interruption.
+    assert firmware_update_from_log({"event": "bootup", "version": "v2026.10.8"}, progress, NOW) is None
+    # A download still waiting for the frame's render pass is interruptible too.
+    waiting = {"status": "waiting", "detail": "render", "plane": "cloud", "version": "2026.10.8"}
+    assert firmware_update_from_log(boot, waiting, NOW)["status"] == "error"
+    # Only a running download is interruptible: a failure, a verified
+    # install or an empty row stay as they are.
+    for row in (
+        {"status": "error", "detail": "signature-rejected", "version": "2026.10.8"},
+        {"status": "verified", "version": "2026.10.8"},
+        {"status": "up-to-date"},
+        None,
+    ):
+        assert firmware_update_from_log(boot, row, NOW) is None
+    # A Pi row from the "scheduled" line names no version yet: a boot on
+    # any version while it says downloading is still an interruption.
+    scheduled = {"status": "downloading", "detail": "", "plane": "cloud", "version": None}
+    pi_boot = firmware_update_from_log({"event": "bootup", "version": "2026.10.6"}, scheduled, NOW)
+    assert pi_boot is not None
+    assert pi_boot["status"] == "error"
+    assert pi_boot["version"] is None
+    assert firmware_update_from_log({"event": "bootup"}, progress, NOW) is None
+    assert is_firmware_update_log(boot) is False

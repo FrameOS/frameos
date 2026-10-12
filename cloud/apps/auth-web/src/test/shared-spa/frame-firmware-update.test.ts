@@ -29,6 +29,14 @@ describe("frameFirmwareUpdateProgress", () => {
     expect(
       frameFirmwareUpdateProgress(frame({ status: "downloading", detail: "2026.10.3", version: "2026.10.3", at: at(1) }), now),
     ).toMatchObject({ label: "updating firmware", percent: null });
+    // The ESP32 waits out a render pass that was already under way before
+    // it downloads (`ota:cloud waiting render`): still the update, running.
+    const waiting = frameFirmwareUpdateProgress(
+      frame({ status: "waiting", detail: "render", version: "2026.10.3", at: at(1) }),
+      now,
+    );
+    expect(waiting).toMatchObject({ kind: "running", label: "updating firmware", percent: null });
+    expect(waiting?.title).toBe("Waiting for the frame's render to finish before downloading FrameOS 2026.10.3");
     expect(
       frameFirmwareUpdateProgress(frame({ status: "verified", detail: "rebooting", version: "2026.10.3", at: at(1) }), now),
     ).toMatchObject({ kind: "running", label: "rebooting into 2026.10.3", percent: 100 });
@@ -48,9 +56,20 @@ describe("frameFirmwareUpdateProgress", () => {
     expect(frameFirmwareUpdateProgress(notYet, now)).toMatchObject({ label: "rebooting into 2026.10.6" });
   });
 
-  it("forgets a download that stopped reporting, but keeps a failure for a while", () => {
+  it("calls a download that stopped reporting stalled, and keeps a failure for a while", () => {
+    // E1004, 2026-10-12: the download died in a socket gap, its error line
+    // never arrived, and the row went from "updating firmware 32%" straight
+    // back to "upgrade" as if nothing had been asked.
+    const stalled = frameFirmwareUpdateProgress(
+      frame({ status: "progress", detail: "1048576/3233648", version: "2026.10.8", at: at(20 * 60) }),
+      now,
+    );
+    expect(stalled).toMatchObject({ kind: "failed", label: "update stalled", percent: 32, version: "2026.10.8" });
+    expect(stalled?.title).toBe(
+      "The firmware update 2026.10.8 stopped reporting at 32%; the frame may have lost its connection or restarted. See the ota or cloud:upgrade lines in Logs.",
+    );
     expect(
-      frameFirmwareUpdateProgress(frame({ status: "progress", detail: "1/2", at: at(20 * 60) }), now),
+      frameFirmwareUpdateProgress(frame({ status: "progress", detail: "1/2", at: at(7 * 60 * 60) }), now),
     ).toBeNull();
     expect(
       frameFirmwareUpdateProgress(frame({ status: "error", detail: "signature-rejected", at: at(60 * 60) }), now),
@@ -80,11 +99,11 @@ describe("frameFirmwareUpdateProgress (Pi lines, folded by the hub into the same
     expect(progress?.title).toBe("Downloading FrameOS 2026.10.5: FrameOS upgrade is running.");
     expect(
       frameFirmwareUpdateProgress(frame({ status: "downloading", detail: "x", at: at(50 * 60) }), now),
-    ).toBeNull();
+    ).toMatchObject({ kind: "failed", label: "update stalled", percent: null });
     // Byte counts come every few seconds, so their silence is believed sooner.
     expect(
       frameFirmwareUpdateProgress(frame({ status: "progress", detail: "1/2", at: at(20 * 60) }), now),
-    ).toBeNull();
+    ).toMatchObject({ kind: "failed", label: "update stalled" });
   });
 
   it("does not repeat the version as the detail, and names the release it restarts into", () => {
@@ -103,6 +122,9 @@ describe("frameFirmwareUpdateProgress (Pi lines, folded by the hub into the same
   it("exposes a running flag for the surfaces that only need yes or no", () => {
     expect(frameFirmwareUpdateIsRunning(frame({ status: "progress", detail: "1/2", at: at(1) }), now)).toBe(true);
     expect(frameFirmwareUpdateIsRunning(frame({ status: "error", detail: "x", at: at(1) }), now)).toBe(false);
+    // A stalled download is not running either: "Update all" and the
+    // drawer's button may ask again.
+    expect(frameFirmwareUpdateIsRunning(frame({ status: "progress", detail: "1/2", at: at(20 * 60) }), now)).toBe(false);
     expect(frameFirmwareUpdateIsRunning(frame(null), now)).toBe(false);
   });
 });

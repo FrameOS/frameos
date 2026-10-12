@@ -9,7 +9,6 @@ import {
   ArrowPathIcon,
   ArrowsRightLeftIcon,
   ChevronRightIcon,
-  ClockIcon,
   CloudArrowDownIcon,
   CloudArrowUpIcon,
   ClipboardDocumentIcon,
@@ -17,6 +16,7 @@ import {
   CpuChipIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
+import { HourglassIcon } from '../../components/HourglassIcon'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Checkbox } from '../../components/Checkbox'
@@ -2299,7 +2299,7 @@ function OtaUpdateCard({
         {progress?.kind === 'running' ? (
           <ArrowPathIcon className="h-4 w-4 animate-spin" />
         ) : queued ? (
-          <ClockIcon className="h-4 w-4" />
+          <HourglassIcon className="h-4 w-4" />
         ) : (
           <CloudArrowUpIcon className="h-4 w-4" />
         )}
@@ -2617,7 +2617,7 @@ function FirmwareUpdateState({
   if (queued) {
     return (
       <div className="frame-tool-muted flex items-center gap-2 text-xs leading-4" role="status">
-        <ClockIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <HourglassIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span>An update request is already queued; it applies when the frame next wakes.</span>
       </div>
     )
@@ -3049,7 +3049,7 @@ function CloudOtaDeployView({
                   {updateState.progress?.kind === 'running' ? (
                     <ArrowPathIcon className="h-4 w-4 animate-spin" />
                   ) : updateState.queued ? (
-                    <ClockIcon className="h-4 w-4" />
+                    <HourglassIcon className="h-4 w-4" />
                   ) : (
                     <CloudArrowDownIcon className="h-4 w-4" />
                   )}
@@ -3490,7 +3490,7 @@ function CloudPiUpdateCard({
             {updateState.progress?.kind === 'running' ? (
               <ArrowPathIcon className="h-4 w-4 animate-spin" />
             ) : updateState.queued ? (
-              <ClockIcon className="h-4 w-4" />
+              <HourglassIcon className="h-4 w-4" />
             ) : (
               <CloudArrowDownIcon className="h-4 w-4" />
             )}

@@ -101,7 +101,7 @@ size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
     (void)out; (void)max;
     return 0;
 }
-void frameos_nim_set_log_tap(void (*tap)(const char *line)) { (void)tap; }
+void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq)) { (void)tap; }
 void frameos_nim_set_log_upload_enabled(bool enabled) { (void)enabled; }
 void frameos_nim_flush_logs(void) {}
 uint8_t *fos_nim_http_request(const char *method, const char *url,

@@ -582,6 +582,72 @@ describe("firmwareUpdateFromLogEntries", () => {
     ).toMatchObject({ status: "up-to-date" });
   });
 
+  it("folds a boot on the old version mid-download as the failure the device could not report", () => {
+    // E1004, 2026-10-12: the ESP32's socket flapped while its download died,
+    // the `ota:cloud error` lines were dropped on the device, and the next
+    // wake's boot replay opened with `bootup` on the old version while the
+    // row still said "progress".
+    const progress = { status: "progress", detail: "1048576/3233648", plane: "cloud", version: "2026.10.8" };
+    const boot = { event: "bootup", source: "esp32", version: "2026.10.6", mode: "embedded" };
+    expect(firmwareUpdateFromLogEntries([entry(boot), entry({ event: "wake", cause: "button" })], progress, now)).toEqual({
+      at: now.toISOString(),
+      detail: "interrupted: the frame restarted on 2026.10.6 before the update finished",
+      plane: "cloud",
+      status: "error",
+      version: "2026.10.8",
+    });
+    // Within one batch the download's own lines come first (the early-boot
+    // backend updater runs before the runtime logs bootup): a download that
+    // started this boot is not interrupted by this boot.
+    expect(
+      firmwareUpdateFromLogEntries(
+        [entry({ event: "ota:backend", status: "downloading", detail: "2026.10.8" }), entry(boot)],
+        null,
+        now,
+      ),
+    ).toMatchObject({ status: "error", version: "2026.10.8" });
+    expect(
+      firmwareUpdateFromLogEntries(
+        [entry({ event: "ota:backend", status: "error", detail: "download-failed:ESP_FAIL@1048576/3233648" }), entry(boot)],
+        progress,
+        now,
+      ),
+    ).toMatchObject({ status: "error", detail: "download-failed:ESP_FAIL@1048576/3233648" });
+    // A boot on the target version is the success the hello handler closes.
+    expect(firmwareUpdateFromLogEntries([entry({ ...boot, version: "v2026.10.8" })], progress, now)).toBeNull();
+    // A download still waiting for the frame's render pass is interruptible too.
+    expect(
+      firmwareUpdateFromLogEntries([entry(boot)], { status: "waiting", detail: "render", plane: "cloud", version: "2026.10.8" }, now),
+    ).toMatchObject({ status: "error", version: "2026.10.8" });
+    // Only a running download is interruptible.
+    for (const row of [
+      { status: "error", detail: "signature-rejected", version: "2026.10.8" },
+      { status: "verified", version: "2026.10.8" },
+      { status: "up-to-date" },
+      null,
+    ]) {
+      expect(firmwareUpdateFromLogEntries([entry(boot)], row, now)).toBeNull();
+    }
+    // A Pi runtime that restarts while its detached upgrade still runs
+    // replays the status file right after its bootup line, which wins.
+    const scheduled = { status: "downloading", detail: "", plane: "cloud", version: null };
+    expect(
+      firmwareUpdateFromLogEntries(
+        [
+          entry({ event: "bootup", version: "2026.10.6" }),
+          entry({ event: "cloud:upgrade", status: "running", message: "FrameOS upgrade is running.", latest_version: "2026.10.8" }),
+        ],
+        scheduled,
+        now,
+      ),
+    ).toMatchObject({ status: "downloading", version: "2026.10.8" });
+    expect(firmwareUpdateFromLogEntries([entry({ event: "bootup", version: "2026.10.6" })], scheduled, now)).toMatchObject({
+      status: "error",
+      version: null,
+    });
+    expect(firmwareUpdateFromLogEntries([entry({ event: "bootup" })], progress, now)).toBeNull();
+  });
+
   it("leaves the row alone for batches without an update line, and for the Pi's idle word", () => {
     expect(firmwareUpdateFromLogEntries([entry({ event: "render:done" })], null, now)).toBeNull();
     expect(firmwareUpdateFromLogEntries([entry({ event: "cloud:upgrade", status: "idle" })], null, now)).toBeNull();

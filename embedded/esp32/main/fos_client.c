@@ -527,6 +527,17 @@ RTC_NOINIT_ATTR static uint32_t s_render_recovery_magic;
 #define FOS_RENDER_RECOVERY_MAGIC 0x5245434fu /* "RECO" */
 
 static bool s_render_paused_for_memory = false;
+/* True from the moment a pass decides to render until render_once returns
+ * (image fetches, the scene, dither, the panel refresh). Read by fos_ota.c:
+ * an OTA that starts next to a render shares one Wi-Fi link and ~80 KB of
+ * internal heap with a TLS image stream — E1004 2026-10-12 died at 1 MB of
+ * 3.2 MB that way — so the download waits for the pass to finish first. */
+static volatile bool s_render_in_flight = false;
+
+bool fos_client_render_in_flight(void)
+{
+    return s_render_in_flight;
+}
 
 static void json_escape_value(const char *src, char *out, size_t out_len)
 {
@@ -1617,10 +1628,15 @@ static void client_task(void *arg)
             log_render_skipped("wake_check", -1);
         } else {
             if (fos_ota_busy()) {
+                /* The OTA task waits for a render that is already under way
+                 * (fos_client_render_in_flight); a pass that starts while it
+                 * is busy yields instead, so the two never share the link. */
                 ESP_LOGW(TAG, "OTA in progress; skipping render cycle");
                 log_render_skipped("ota", -1);
             } else {
+                s_render_in_flight = true;
                 render_once();
+                s_render_in_flight = false;
                 rendered = true;
             }
         }

@@ -74,3 +74,6 @@ void fos_client_snapshot_release(void);
  * or a render signal is queued. An image_get arriving now waits for it
  * instead of answering "no image" seconds before there is one. */
 bool fos_client_render_pending(void);
+/* True while a render pass is rendering (fetches, scene, dither, panel
+ * refresh); the OTA waits it out before it downloads (fos_ota.c). */
+bool fos_client_render_in_flight(void);

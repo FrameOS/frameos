@@ -185,12 +185,16 @@ void frameos_nim_log_hook(const char *msg);
 typedef struct {
     double timestamp;
     char *line;
+    /* Per-boot ring sequence, 1 for the first line logged; the cloud client
+     * replays the lines its socket missed by it (fos_cloud.c). */
+    uint32_t seq;
 } frameos_log_entry_t;
 size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max);
 /* Optional tap invoked with every structured log line (on the logging
- * task!). Used by the cloud client to forward logs over its WebSocket; the
- * tap must be cheap and never block. Pass NULL to remove. */
-void frameos_nim_set_log_tap(void (*tap)(const char *line));
+ * task!) and its ring sequence. Used by the cloud client to forward logs
+ * over its WebSocket; the tap must be cheap and never block. Pass NULL to
+ * remove. */
+void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq));
 /* Enable/disable backend log upload after network state changes. The baked
  * config still gates this; passing true has no effect when logs are disabled. */
 void frameos_nim_set_log_upload_enabled(bool enabled);

@@ -513,8 +513,11 @@ those controls for a frame whose `hardware.platform` is `esp32`, rather than
 enqueueing commands that will come back refused. Logs still flow: `get_logs`
 stays unsupported (nothing buffered to replay), but the firmware pushes
 `log_batch` messages while the session is live and `telemetry:logs` is in
-the ready scopes — a tick coalescer only (up to one batch per second, ≤60
-lines), nothing retained across disconnects, and error acks are ignored.
+the ready scopes — a tick coalescer (up to one batch per second, ≤60
+lines), error acks ignored — and, right after each `session_ready`, one
+batch replaying the lines of the device's 128-line ring that no session
+forwarded yet (the boot's first seconds; whatever was logged while the
+socket was down).
 
 ### Frame → provider messages
 

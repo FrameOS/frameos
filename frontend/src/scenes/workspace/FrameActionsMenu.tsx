@@ -5,7 +5,6 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUturnLeftIcon,
-  ClockIcon,
   CloudArrowDownIcon,
   CommandLineIcon,
   LightBulbIcon,
@@ -18,6 +17,7 @@ import {
   StopCircleIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
+import { HourglassIcon } from '../../components/HourglassIcon'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu, type DropdownMenuProps } from '../../components/DropdownMenu'
 import { Modal } from '../../components/Modal'
@@ -242,7 +242,7 @@ export function FrameActionsMenu({
                     label: 'Update queued',
                     title: 'The update request is queued and applies when the frame next wakes',
                     disabled: true,
-                    icon: <ClockIcon className="h-5 w-5" />,
+                    icon: <HourglassIcon className="h-5 w-5" />,
                   }
                 : {
                     label: 'Update firmware',

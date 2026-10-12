@@ -228,6 +228,7 @@ export function frameFirmwareUpdateProgress(
   const versionSuffix = version ? ` ${version}` : ''
   const detail = update.detail || ''
   switch (update.status) {
+    case 'waiting':
     case 'downloading':
     case 'progress': {
       const match = /^(\d+)\/(\d+)$/.exec(detail)
@@ -235,15 +236,38 @@ export function frameFirmwareUpdateProgress(
       const total = match ? Number(match[2]) : NaN
       const percent = total > 0 && written >= 0 ? Math.min(100, Math.round((written / total) * 100)) : null
       if (age > (percent === null ? firmwareUpdateNoProgressStaleMs : firmwareUpdateStaleMs)) {
-        return null
+        // Silence past the window: the download died without a word (the
+        // ESP32 forwards nothing while its hub socket is down, and E1004's
+        // 2026-10-12 download died in exactly such a gap). Say so, for as
+        // long as a reported failure is shown, instead of going back to
+        // "upgrade" as if nothing had been asked.
+        if (age > firmwareUpdateFailureShownMs) {
+          return null
+        }
+        return {
+          kind: 'failed',
+          label: 'update stalled',
+          title: `The firmware update${versionSuffix} stopped reporting${
+            percent === null ? '' : ` at ${percent}%`
+          }; the frame may have lost its connection or restarted. See the ota or cloud:upgrade lines in Logs.`,
+          percent,
+          version,
+        }
       }
       // The Pi's lines carry its own sentence ("FrameOS upgrade is running.");
       // the ESP32's downloading line only repeats the version.
       const phrase = detail && !match && detail !== version ? `: ${detail}` : ''
+      // The ESP32 lets a render pass that is already under way finish before
+      // it downloads (fos_ota.c): the one thing happening on the frame is
+      // still the update, so the word stays the same.
+      const title =
+        update.status === 'waiting'
+          ? `Waiting for the frame's render to finish before downloading FrameOS${versionSuffix}`
+          : `Downloading FrameOS${versionSuffix}${percent === null ? '' : ` (${percent}%)`}${phrase}`
       return {
         kind: 'running',
         label: percent === null ? 'updating firmware' : `updating firmware ${percent}%`,
-        title: `Downloading FrameOS${versionSuffix}${percent === null ? '' : ` (${percent}%)`}${phrase}`,
+        title,
         percent,
         version,
       }

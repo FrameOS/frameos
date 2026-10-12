@@ -344,11 +344,13 @@ handful of slots, `event:deferred` in the log), delivered by the render task
 at the start of its next pass (`event:deferred:delivered`), rendered on that
 pass, and counted as work that holds the deep sleep.
 
-The cloud log tap only runs once the session is up, so the first ~15 s of a
-wake (the wake cause, the scene load, the replayed button press) used to
-stay on the device. The first session_ready of a boot that carries logs now
-replays the boot's lines from the device ring as one `log_batch` with their
-own timestamps (`ws_replay_boot_log`).
+The cloud log tap only runs while the session is up, so the first ~15 s of a
+wake (the wake cause, the scene load, the replayed button press) and
+anything logged while the socket was down (the `ota:cloud error` of a
+download that died in a socket flap, E1004 2026-10-12) used to stay on the
+device. Every session_ready that carries logs now replays the lines the hub
+has not had from the device ring as one `log_batch` with their own
+timestamps (`ws_replay_missed_log`, by the ring sequence each line carries).
 
 Every panel driver is compiled into every image and each frame value has a
 `set` key here, so the command list — the backend's
@@ -609,7 +611,13 @@ The sleep also **holds for a running OTA** (up to 15 min): the
 `notify_update_available` verb only keeps the frame awake 15 s while the
 download takes minutes, so a battery frame used to halt mid-download every
 wake, boot the old image, be told again, and loop — with nothing in the log
-but `ota:cloud downloading`. The cloud OTA now logs `progress` every 512 KB,
+but `ota:cloud downloading`. The OTA and the render pass take turns: a pass
+that starts while the OTA is busy skips its render (`render:skipped
+reason=ota`), and an OTA that arrives while a pass is rendering waits it out
+(`ota:cloud waiting render`, up to 10 min) before touching the network — the
+two shared one Wi-Fi link and three TLS contexts on ~80 KB of internal heap,
+which is how E1004's download died at 1 MB of 3.2 MB (2026-10-12). The cloud
+OTA logs `progress` every 512 KB,
 names its failure (`download-failed:<err>@<bytes>/<expected>`,
 `image-rejected:<err>`, `signature-rejected`), and after 3 consecutive
 failures of one offered version stops re-downloading it (`gave-up`, kept in

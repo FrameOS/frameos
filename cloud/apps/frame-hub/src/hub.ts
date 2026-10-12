@@ -1640,9 +1640,9 @@ export async function startFrameHub(
   }
 
   // The device narrates its firmware update as structured log lines: the
-  // ESP32 as `ota:<plane>` (embedded/esp32/main/fos_ota.c: downloading
-  // <version>, progress <written>/<total> every 512 KB, verified, error <why>,
-  // up-to-date, downgrade-refused, skipped), the Pi as `cloud:upgrade`
+  // ESP32 as `ota:<plane>` (embedded/esp32/main/fos_ota.c: waiting render,
+  // downloading <version>, progress <written>/<total> every 512 KB, verified,
+  // error <why>, up-to-date, downgrade-refused, skipped), the Pi as `cloud:upgrade`
   // (frameos/upgrade.nim: scheduled, starting, running, success,
   // reboot_required, failed, stalled, up_to_date). Until these landed on the
   // row, a frame half-way through a download still read "waiting to sync" in
