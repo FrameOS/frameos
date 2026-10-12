@@ -275,11 +275,16 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS = [
     {"pin": 4, "label": "LEFT"},
     {"pin": 5, "label": "RIGHT"},
 ]
-# The E1004's front panel is wired like the E1001/E1002's: GPIO3 refresh, GPIO4
-# the left arrow, GPIO5 the right arrow. #527 swapped GPIO3 and GPIO5 on the
-# strength of Seeed's Arduino cookbook; the hardware (2026-10-12, an E1004 on
-# the bench) says the cookbook column is the one that is reversed.
-EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS = EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS
+# The E1004's front panel has GPIO3 and GPIO5 the other way round from the
+# E1001/E1002: GPIO3 is the right arrow, GPIO5 refresh (Seeed's Arduino
+# cookbook, #527). The 2026-10-12 revert to the E10XX order was wrong for
+# this board: with it, the wake line of an E1004 on the bench (frame 70)
+# reported `pin 3 / REFRESH` for a press of the right arrow.
+EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS = [
+    {"pin": 3, "label": "RIGHT"},
+    {"pin": 4, "label": "LEFT"},
+    {"pin": 5, "label": "REFRESH"},
+]
 # Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
 # (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
 # enable"; trmnl-firmware PIN_BATTERY 1 / PIN_VBAT_SWITCH 21 for the

@@ -640,11 +640,12 @@ static int cmd_set(int argc, char **argv)
              * on by GPIO21 — Seeed's ESPHome cookbook for the E-series. */
             { "seeed_reterminal_e1004", "EPD_13in3e",
               "rst=38,dc=11,cs=10,cs2=2,busy=13,sck=7,mosi=9,pwr=12",
-              /* Same keys as the E1001/E1002: GPIO3 refresh, GPIO4 the left
-               * arrow, GPIO5 the right arrow, active low. Seeed's Arduino
-               * cookbook has GPIO3 and GPIO5 the other way round for the
-               * E1004; the board does not (#527 followed the cookbook). */
-              "3:REFRESH\n4:LEFT\n5:RIGHT",
+              /* GPIO3 the right arrow, GPIO4 the left arrow, GPIO5 refresh,
+               * active low: the E1004 has GPIO3 and GPIO5 the other way
+               * round from the E1001/E1002 (Seeed's Arduino cookbook, #527;
+               * the 2026-10-12 revert to the E10XX order made a right-arrow
+               * press on an E1004 read as REFRESH). */
+              "3:RIGHT\n4:LEFT\n5:REFRESH",
               "", 1, 2.0f, 21,
               /* A 5000 mAh frame: sleep between renders while on battery and
                * wake every 15 min for cloud commands (renders still follow the

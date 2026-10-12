@@ -42,6 +42,7 @@ static bool s_started = false;
 /* This boot's wake, when a button caused it (fos_buttons_wake_boot). */
 static int s_wake_pin = -1;
 static char s_wake_label[FOS_GPIO_BUTTON_LABEL_LEN] = "";
+static uint64_t s_wake_mask = 0;
 static int s_last_level[FOS_GPIO_BUTTONS_MAX];
 static int64_t s_last_change_ms[FOS_GPIO_BUTTONS_MAX];
 static bool s_press_sent[FOS_GPIO_BUTTONS_MAX];
@@ -321,6 +322,7 @@ void fos_buttons_wake_boot(void)
     if (cause == ESP_SLEEP_WAKEUP_GPIO) status = esp_sleep_get_gpio_wakeup_status();
 #endif
     if (status == 0) return;
+    s_wake_mask = status;
 
     fos_config_t *config = fos_config();
     int pins[FOS_GPIO_BUTTONS_MAX];
@@ -337,6 +339,11 @@ void fos_buttons_wake_boot(void)
     /* printf: INFO is compiled out, and this is the one line that explains an
      * off-schedule boot on the USB console. */
     printf("woke from deep sleep: button GPIO %d (%s)\n", s_wake_pin, s_wake_label);
+}
+
+uint64_t fos_buttons_wake_mask(void)
+{
+    return s_wake_mask;
 }
 
 bool fos_buttons_woke_by_button(int *pin, char *label, size_t label_len)

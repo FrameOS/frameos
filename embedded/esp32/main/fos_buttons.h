@@ -29,6 +29,10 @@ void fos_buttons_wake_boot(void);
  * may be NULL). Stays true for the whole boot — the render loop reads it once
  * to turn its first pass into a render instead of a command check-in. */
 bool fos_buttons_woke_by_button(int *pin, char *label, size_t label_len);
+/* The raw GPIO mask the deep-sleep wake reported (0 when no button woke the
+ * chip). Logged with the wake so a label dispute can be settled from the
+ * log: the mask says which pad went low, the preset says what it is called. */
+uint64_t fos_buttons_wake_mask(void);
 /* Arm the registered buttons as deep-sleep wake sources. `*armed_mask`
  * (may be NULL) receives the GPIO bit mask actually armed — 0 when no
  * button can wake this chip, or every key is currently held. Call right

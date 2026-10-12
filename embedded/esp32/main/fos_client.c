@@ -1422,9 +1422,13 @@ static void client_task(void *arg)
         json_escape_value(wake_label, label_esc, sizeof(label_esc));
         char line[192];
         if (button_wake) {
+            /* `mask`: every pad the wake reported low. One bit, and the pin
+             * is beyond dispute; a label dispute (E1004, 2026-10-12: "I
+             * pressed right, it says refresh") is then about the preset. */
             snprintf(line, sizeof(line),
                      "{\"event\":\"wake\",\"source\":\"esp32\",\"cause\":\"button\","
-                     "\"pin\":%d,\"label\":\"%s\"}", wake_pin, label_esc);
+                     "\"pin\":%d,\"label\":\"%s\",\"mask\":\"0x%llx\"}", wake_pin, label_esc,
+                     (unsigned long long)fos_buttons_wake_mask());
         } else {
             snprintf(line, sizeof(line),
                      "{\"event\":\"wake\",\"source\":\"esp32\",\"cause\":\"%s\"}",
