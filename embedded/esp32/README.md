@@ -711,10 +711,13 @@ sees a key that stays down. A press with no room is dropped, logged as
 tone, 50 ms): it was not received.
 
 The pitch is `buzzer_tone_hz` (100-10000, default 2000). The pin is
-`buzzer_pin` (`-1` = none): the reTerminal E-series presets set
-GPIO 45, and a board whose NVS predates the key takes its preset's
-(`fos_board_buzzer_pin`), so an E-series frame beeps after the update without
-being reprovisioned. The firmware leaves a pin alone that is a display,
+`buzzer_pin` (`-1` = none): the reTerminal E-series presets set GPIO 45 at
+2000 Hz, the reTerminal Sticky GPIO 48 at 4000 Hz (its electromagnetic
+buzzer's resonance). A board whose NVS predates the keys takes its preset's
+(`fos_board_buzzer_pin` / `_tone_hz`), so these frames beep after the update
+without being reprovisioned. The Waveshare PhotoPainter and 13.3E6 have a
+speaker behind an ES8311 codec instead, which needs an I2S driver: not
+supported yet. The firmware leaves a pin alone that is a display,
 button, battery or SD pin. Console: `set buzzer_pin <gpio|-1>`,
 `set buzzer_tone_hz <hz>` and `beep [hz] [ms]` to test it. Applied live on
 every plane: the backend's settings pull carries `buzzerPin` /

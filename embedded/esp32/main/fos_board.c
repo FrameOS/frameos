@@ -57,22 +57,40 @@ const char *fos_board_module(const char *hardware_preset)
     return fos_board_target();
 }
 
-/* Seeed's reTerminal E-series puts a passive buzzer on GPIO45 on every model
- * (Seeed's Arduino and ESPHome cookbooks drive it with PWM at 1-2 kHz). */
+/* Boards with a passive buzzer FrameOS drives with PWM, and the pitch it
+ * sounds best at. Seeed's reTerminal E-series puts one on GPIO45 on every
+ * model (Seeed's Arduino and ESPHome cookbooks drive it at 1-2 kHz). The
+ * reTerminal Sticky has a 4 kHz electromagnetic one (FUET-5018) on GPIO48
+ * behind a MOSFET with a gate pulldown (Seeed's hardware overview and
+ * schematic; its own demo drives it at 4000 Hz). */
 static const struct {
     const char *preset;
     int pin;
+    int tone_hz;
 } k_buzzers[] = {
-    {"seeed_reterminal_e1001", 45},
-    {"seeed_reterminal_e1002", 45},
-    {"seeed_reterminal_e1004", 45},
+    {"seeed_reterminal_e1001", 45, 2000},
+    {"seeed_reterminal_e1002", 45, 2000},
+    {"seeed_reterminal_e1004", 45, 2000},
+    {"seeed_reterminal_sticky", 48, 4000},
 };
 
-int fos_board_buzzer_pin(const char *hardware_preset)
+static int buzzer_index(const char *hardware_preset)
 {
     if (!hardware_preset || !hardware_preset[0]) return -1;
     for (size_t i = 0; i < sizeof(k_buzzers) / sizeof(k_buzzers[0]); i++) {
-        if (strcmp(hardware_preset, k_buzzers[i].preset) == 0) return k_buzzers[i].pin;
+        if (strcmp(hardware_preset, k_buzzers[i].preset) == 0) return (int)i;
     }
     return -1;
+}
+
+int fos_board_buzzer_pin(const char *hardware_preset)
+{
+    int index = buzzer_index(hardware_preset);
+    return index < 0 ? -1 : k_buzzers[index].pin;
+}
+
+int fos_board_buzzer_tone_hz(const char *hardware_preset)
+{
+    int index = buzzer_index(hardware_preset);
+    return index < 0 ? 0 : k_buzzers[index].tone_hz;
 }

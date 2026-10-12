@@ -648,6 +648,12 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
         "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
         "busy": 18, "sck": 13, "mosi": 14, "pwr": -1,
     }
+    # The 4 kHz electromagnetic buzzer on GPIO48, at its own pitch.
+    assert frame.device_config["buzzerPin"] == 48
+    assert frame.device_config["buzzerToneHz"] == 4000
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["buzzer_pin"] == "48"
+    assert settings["buzzer_tone_hz"] == "4000"
     assert embedded_flash_size_for_frame(frame) == "32MB"
     assert embedded_firmware_module.embedded_platform_spec_for_frame(frame)["idfTarget"] == "esp32s3"
 
@@ -737,9 +743,10 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert settings["deep_sleep_on_battery"] == "1"
     assert settings["wake_check"] == "900"
     assert settings["buzzer_pin"] == "45"
-    # The pitch is the firmware's default until someone picks one.
-    assert "buzzer_tone_hz" not in settings
+    assert settings["buzzer_tone_hz"] == "2000"
+    # A pitch the user picked survives the preset (seed-only).
     frame.device_config = {**frame.device_config, "buzzerToneHz": 2700}
+    ensure_embedded_frame_defaults(frame)
     assert _provisioned(embedded_provisioning_plan(frame))["buzzer_tone_hz"] == "2700"
     assert embedded_flash_size_for_frame(frame) == "32MB"
 
@@ -865,11 +872,16 @@ _FOS_BOARD_C = _FOS_CONSOLE_C.with_name("fos_board.c")
 
 def _board_buzzer_pins() -> dict[str, str]:
     """fos_board.c's k_buzzers table: `set hardware` takes a board's buzzer
-    from it, and so does a frame whose NVS predates the `buzzer` key."""
+    pin and pitch from it, and so does a frame whose NVS predates the keys."""
     source = _FOS_BOARD_C.read_text(encoding="utf-8")
     table = re.search(r"\} k_buzzers\[\] = \{(.*?)\n\};", source, re.DOTALL)
     assert table, "k_buzzers[] table not found in fos_board.c"
-    return dict(re.findall(r'\{"([a-z0-9_]+)",\s*(-?\d+)\}', table.group(1)))
+    return {
+        preset: {"pin": pin, "tone_hz": tone_hz}
+        for preset, pin, tone_hz in re.findall(
+            r'\{"([a-z0-9_]+)",\s*(-?\d+),\s*(\d+)\}', table.group(1)
+        )
+    }
 
 
 def _console_hardware_presets() -> dict[str, dict]:
@@ -928,7 +940,10 @@ def test_console_hardware_preset_table_matches_backend_presets():
         assert row["battery_pin"] == settings.get("battery_pin", "-1"), preset_key
         assert row["battery_divider"] == float(settings.get("battery_divider", "2.0")), preset_key
         assert row["battery_enable_pin"] == settings.get("battery_enable_pin", "-1"), preset_key
-        assert buzzers.get(preset_key, "-1") == settings.get("buzzer_pin", "-1"), preset_key
+        buzzer = buzzers.get(preset_key)
+        assert (buzzer["pin"] if buzzer else "-1") == settings.get("buzzer_pin", "-1"), preset_key
+        if buzzer:
+            assert buzzer["tone_hz"] == settings.get("buzzer_tone_hz"), preset_key
         assert row["deep_sleep_on_battery"] == (settings.get("deep_sleep_on_battery") == "1"), preset_key
         if row["deep_sleep_on_battery"]:
             assert row["wake_check"] == settings["wake_check"], preset_key

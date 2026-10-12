@@ -621,7 +621,8 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=6,mosi=5,pwr=-1",
               "9:BOOT",
               "", -1, 2.0f, -1, 0, 0 },
-            /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). */
+            /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). Its 4 kHz
+             * buzzer on GPIO48 comes from fos_board_buzzer_pin/_tone_hz. */
             { "seeed_reterminal_sticky", "EPD_3in97",
               "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
               "4:POWER",
@@ -680,6 +681,9 @@ static int cmd_set(int argc, char **argv)
             config->battery_divider = presets[i].battery_divider;
             config->battery_enable_pin = presets[i].battery_enable_pin;
             config->buzzer_pin = (int8_t)fos_board_buzzer_pin(presets[i].name);
+            if (fos_board_buzzer_tone_hz(presets[i].name) > 0) {
+                config->buzzer_tone_hz = (uint16_t)fos_board_buzzer_tone_hz(presets[i].name);
+            }
             if (presets[i].deep_sleep_on_battery) {
                 config->deep_sleep_on_battery = true;
                 config->wake_check_sec = presets[i].wake_check_sec;

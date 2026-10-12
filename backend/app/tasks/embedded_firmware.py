@@ -244,7 +244,10 @@ EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS = {
     "pwr": -1,
 }
 # Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): 3.97" 800x480 e-paper on
-# SCK13/MOSI14, CS15, DC16, RST17, BUSY18; power button GPIO4.
+# SCK13/MOSI14, CS15, DC16, RST17, BUSY18; power button GPIO4. A 4 kHz
+# electromagnetic buzzer (FUET-5018) on GPIO48 through a MOSFET (Seeed's
+# hardware overview "Buzzer | PWM: GPIO48" and schematic; Seeed's demo drives
+# it at 4000 Hz).
 EMBEDDED_SEEED_STICKY_PINS = {
     "rst": 17,
     "dc": 16,
@@ -296,10 +299,12 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY = {
     "batteryEnablePin": 21,
 }
 # A passive buzzer on GPIO45 on every E-series model (Seeed's Arduino and
-# ESPHome cookbooks drive it with PWM at 1-2 kHz). The firmware chirps it when
-# a button press registers; fos_board.c's k_buzzers table is the device copy.
+# ESPHome cookbooks drive it with PWM at 1-2 kHz). The firmware sounds it
+# while a registered button press is held; fos_board.c's k_buzzers table is
+# the device copy (pin and pitch).
 EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER = {
     "buzzerPin": 45,
+    "buzzerToneHz": 2000,
 }
 # Seeed reTerminal E1004 (ESP32-S3, 32MB flash, 8MB PSRAM): 13.3" 1200x1600
 # Spectra 6 (T133A01) on the E-series SPI bus — SCK7/MOSI9, CS10, DC11,
@@ -452,6 +457,8 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_STICKY_PINS,
         "gpioButtons": [{"pin": 4, "label": "POWER"}],
+        "buzzerPin": 48,
+        "buzzerToneHz": 4000,
     },
     "seeed_reterminal_e1001": {
         "device": "waveshare.EPD_7in5_V2",
@@ -896,6 +903,7 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("batteryDivider", "battery_divider"),
     ("batteryEnablePin", "battery_enable_pin"),
     ("buzzerPin", "buzzer_pin"),
+    ("buzzerToneHz", "buzzer_tone_hz"),
     ("deepSleepOnBattery", "deep_sleep_on_battery"),
     ("wakeCheckSeconds", "wake_check_seconds"),
 )

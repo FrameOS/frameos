@@ -225,10 +225,15 @@ esp_err_t fos_config_init(void)
      * save from then on stores what it runs with. */
     if (nvs_get_i8(nvs, "buzzer", &i8) == ESP_OK) s_config.buzzer_pin = i8;
     else s_config.buzzer_pin = (int8_t)fos_board_buzzer_pin(s_config.hardware_preset);
+    /* The pitch the same way: stored, else the board's own (the Sticky's
+     * buzzer resonates at 4 kHz), else the default. */
     uint16_t u16;
+    int board_tone_hz = fos_board_buzzer_tone_hz(s_config.hardware_preset);
     if (nvs_get_u16(nvs, "buzzer_hz", &u16) == ESP_OK && u16 >= FOS_BUZZER_TONE_HZ_MIN &&
         u16 <= FOS_BUZZER_TONE_HZ_MAX) {
         s_config.buzzer_tone_hz = u16;
+    } else if (board_tone_hz > 0) {
+        s_config.buzzer_tone_hz = (uint16_t)board_tone_hz;
     }
     char pins[FOS_STR_LEN] = "";
     nvs_get_string(nvs, "pins", pins, sizeof(pins));

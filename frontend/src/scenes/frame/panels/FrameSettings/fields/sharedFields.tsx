@@ -279,8 +279,8 @@ function ButtonBeepField(): JSX.Element | null {
                   The frame beeps for as long as you hold a button it registered (up to a second), and briefly when a
                   press wakes it from deep sleep, so you know the press arrived before the screen changes. A press it
                   could not take, like the 33rd during one render, gets a lower buzz instead. This is the GPIO of the
-                  board's buzzer: GPIO 45 on the Seeed reTerminal E1001, E1002 and E1004. Set -1 to turn the beep off.
-                  Applies without a restart.
+                  board's buzzer: GPIO 45 on the Seeed reTerminal E1001, E1002 and E1004, GPIO 48 on the reTerminal
+                  Sticky. Set -1 to turn the beep off. Applies without a restart.
                 </>
               )
             }
@@ -301,8 +301,8 @@ function ButtonBeepField(): JSX.Element | null {
             title={
               disabledReason ?? (
                 <>
-                  The pitch of the beep, 100 to 10000 Hz. 2000 is the default; small piezo buzzers are loudest around
-                  2000 to 4000. The lower buzz for a press the frame could not take is a quarter of this.
+                  The pitch of the beep, 100 to 10000 Hz. 2000 is the default, 4000 on the reTerminal Sticky, whose
+                  buzzer is tuned there. The lower buzz for a press the frame could not take is a quarter of this.
                 </>
               )
             }

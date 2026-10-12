@@ -123,12 +123,18 @@ static void test_buzzer_pins(void)
     CHECK(fos_board_buzzer_pin("seeed_reterminal_e1001") == 45, "e1001 buzzer");
     CHECK(fos_board_buzzer_pin("seeed_reterminal_e1002") == 45, "e1002 buzzer");
     CHECK(fos_board_buzzer_pin("seeed_reterminal_e1004") == 45, "e1004 buzzer");
-    /* The Elecrow CrowPanel drives its EPD chip-select on GPIO45: a board
-     * without a buzzer must never get one, or a press would toggle the CS. */
+    CHECK(fos_board_buzzer_tone_hz("seeed_reterminal_e1004") == 2000, "e1004 tone");
+    /* The Sticky's 4 kHz electromagnetic buzzer, on GPIO48. */
+    CHECK(fos_board_buzzer_pin("seeed_reterminal_sticky") == 48, "sticky buzzer");
+    CHECK(fos_board_buzzer_tone_hz("seeed_reterminal_sticky") == 4000, "sticky tone");
+    /* The Elecrow CrowPanel drives its EPD chip-select on GPIO45 and BUSY on
+     * GPIO48: a board without a buzzer must never get one, or a press would
+     * toggle a panel line. */
     CHECK(fos_board_buzzer_pin("elecrow_crowpanel_5in79") == -1, "crowpanel has no buzzer");
-    CHECK(fos_board_buzzer_pin("seeed_reterminal_sticky") == -1, "sticky has no buzzer");
+    CHECK(fos_board_buzzer_tone_hz("elecrow_crowpanel_5in79") == 0, "crowpanel has no tone");
     CHECK(fos_board_buzzer_pin("") == -1, "no preset, no buzzer");
     CHECK(fos_board_buzzer_pin(NULL) == -1, "NULL preset, no buzzer");
+    CHECK(fos_board_buzzer_tone_hz(NULL) == 0, "NULL preset, no tone");
 }
 
 int main(void)
