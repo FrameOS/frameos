@@ -68,6 +68,15 @@ const char *fos_cloud_last_error(void);
 const char *fos_cloud_frame_id(void);
 /* True while the management WebSocket is connected and past `ready`. */
 bool fos_cloud_ws_connected(void);
+
+/* Block until the management session is up and has dispatched every verb
+ * the hub's ready frame announced as queued (`pending_commands`), or until
+ * timeout_ms. True when nothing is left to wait for — a frame without a
+ * cloud counts — false on timeout or a Wi-Fi drop. `pending_out` receives
+ * the announced count once known (-1 before). The render loop's first pass
+ * calls this so a scene switch queued while the frame slept lands in that
+ * pass's render instead of after a wasted one. */
+bool fos_cloud_wait_initial_commands(uint32_t timeout_ms, int *pending_out);
 /* Lowest-ever free bytes on the cloud task's own stack (FreeRTOS high-water
  * mark), 0 before the task exists. Internal RAM pays for every task stack,
  * so this is how oversized stacks get found without a debugger. */

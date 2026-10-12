@@ -350,7 +350,14 @@ profile they target rather than relying on the cap.
    the link's currently granted scope list; a device should treat it as
    additive truth and enable the matching push loops (telemetry above all) —
    it is how a frame whose enrollment response under-reported the grant
-   learns it may send logs and metrics without re-enrolling.
+   learns it may send logs and metrics without re-enrolling. `pending_commands`
+   is a promise about what follows: the ESP32 firmware (2026.10.7+) holds the
+   first render of a boot until that many verbs have been dispatched, up to
+   20 s, so a scene switch that waited out a deep sleep lands in that render
+   instead of after a wasted one (`cloud:boot_commands` in the device log says
+   `drained`, `timeout` or `no_session`). A provider that announces fewer than
+   it then sends merely loses that optimisation; one that announces more
+   costs the frame the timeout on every wake.
 
 The hello's `hardware` object is the same shape enrollment sends; a provider
 should persist it on each successful session start so its copy tracks the
