@@ -273,9 +273,11 @@ function ButtonBeepField(): JSX.Element | null {
           title={
             disabledReason ?? (
               <>
-                The frame beeps when it registers a button press, and when a press wakes it from deep sleep, so you know
-                the press arrived before the screen changes. This is the GPIO of the board's buzzer: GPIO 45 on the
-                Seeed reTerminal E1001, E1002 and E1004. Set -1 to turn the beep off. Applies without a restart.
+                The frame beeps for as long as you hold a button it registered (up to a second), and briefly when a
+                press wakes it from deep sleep, so you know the press arrived before the screen changes. A press it
+                could not take, like the 33rd during one render, stays silent. This is the GPIO of the board's buzzer:
+                GPIO 45 on the Seeed reTerminal E1001, E1002 and E1004. Set -1 to turn the beep off. Applies without a
+                restart.
               </>
             )
           }

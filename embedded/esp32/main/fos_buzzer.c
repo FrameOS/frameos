@@ -24,9 +24,8 @@ static const char *TAG = "fos_buzzer";
 #define BUZZER_RESOLUTION LEDC_TIMER_10_BIT
 #define BUZZER_HALF_DUTY (1u << (BUZZER_RESOLUTION - 1))
 
-/* Short and in the range Seeed's own examples use (1-2 kHz): a tick that
- * says "got it" without competing with whatever the scene does next. */
-#define CHIRP_FREQ_HZ 2000
+/* In the range Seeed's own examples use (1-2 kHz). */
+#define TONE_FREQ_HZ 2000
 #define CHIRP_MS 60
 
 static SemaphoreHandle_t s_lock = NULL;
@@ -90,7 +89,7 @@ static bool attach(int pin)
             .speed_mode = BUZZER_MODE,
             .duty_resolution = BUZZER_RESOLUTION,
             .timer_num = BUZZER_TIMER,
-            .freq_hz = CHIRP_FREQ_HZ,
+            .freq_hz = TONE_FREQ_HZ,
             .clk_cfg = LEDC_AUTO_CLK,
         };
         esp_err_t err = ledc_timer_config(&timer);
@@ -99,7 +98,7 @@ static bool attach(int pin)
             return false;
         }
         s_timer_ready = true;
-        s_freq_hz = CHIRP_FREQ_HZ;
+        s_freq_hz = TONE_FREQ_HZ;
     }
     ledc_channel_config_t channel = {
         .gpio_num = pin,
@@ -167,7 +166,21 @@ void fos_buzzer_tone(uint32_t freq_hz, uint32_t duration_ms)
     xSemaphoreGive(s_lock);
 }
 
+void fos_buzzer_press_start(void)
+{
+    fos_buzzer_tone(TONE_FREQ_HZ, FOS_BUZZER_PRESS_MAX_MS);
+}
+
+void fos_buzzer_press_end(void)
+{
+    if (!s_lock) return;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    esp_timer_stop(s_stop_timer);
+    if (s_pin >= 0) ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+    xSemaphoreGive(s_lock);
+}
+
 void fos_buzzer_chirp(void)
 {
-    fos_buzzer_tone(CHIRP_FREQ_HZ, CHIRP_MS);
+    fos_buzzer_tone(TONE_FREQ_HZ, CHIRP_MS);
 }

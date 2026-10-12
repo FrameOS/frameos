@@ -271,7 +271,7 @@
       "parity": {"only": "esp32", "why": "ESP32 ADC battery sense; a Pi has no ADC."}
     },
     "buzzer_pin": {
-      "$comment": "The board's passive buzzer (reTerminal E-series: 45), PWM-driven: a short chirp when a GPIO button press registers, and when a press wakes the chip. -1 = none / silent. Applied live (the next chirp reads it). Same reserved-pin refusal as battery_pin; the firmware also leaves a pin alone that is a display, button, battery or SD pin.",
+      "$comment": "The board's passive buzzer (reTerminal E-series: 45), PWM-driven: it sounds while a registered GPIO button press is held (a second at most), and chirps when a press wakes the chip. -1 = none / silent. Applied live (the next chirp reads it). Same reserved-pin refusal as battery_pin; the firmware also leaves a pin alone that is a display, button, battery or SD pin.",
       "rule": {"type": "int", "min": -1, "max": 48},
       "profiles": {"esp32": {"since": "2026.10.12"}},
       "parity": {"only": "esp32", "why": "The press chirp lives in the ESP32 firmware's button task (fos_buzzer.c); no Pi frame preset has a buzzer and the Linux gpioButton driver drives no outputs."}

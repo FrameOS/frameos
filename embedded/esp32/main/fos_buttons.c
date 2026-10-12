@@ -27,15 +27,19 @@
 
 static const char *TAG = "fos_buttons";
 
-#define BUTTON_QUEUE_LEN 16
+/* Edges, not presses: a press and its release take two. The render task
+ * drains the queue only between passes, so this is how many edges a render
+ * can sit on — an E1004 refresh is ~30 s. At 16 the ninth press of a burst
+ * was dropped; 64 keeps 32 presses. Items are 3 bytes (the label is read
+ * from the config when the event is delivered). */
+#define BUTTON_QUEUE_LEN 64
 #define BUTTON_POLL_MS 20
 #define BUTTON_DEBOUNCE_MS 80
 
 typedef struct {
-    int pin;
-    int level; /* 0: pressed (the line is pulled up), 1: released */
-    bool wake; /* the press that woke the chip from deep sleep, replayed */
-    char label[FOS_GPIO_BUTTON_LABEL_LEN];
+    uint8_t index; /* into config->gpio_buttons, which only a restart rebinds */
+    uint8_t level; /* 0: pressed (the line is pulled up), 1: released */
+    bool wake;     /* the press that woke the chip from deep sleep, replayed */
 } fos_button_event_t;
 
 static QueueHandle_t s_queue = NULL;
@@ -47,6 +51,12 @@ static uint64_t s_wake_mask = 0;
 static int s_last_level[FOS_GPIO_BUTTONS_MAX];
 static int64_t s_last_change_ms[FOS_GPIO_BUTTONS_MAX];
 static bool s_press_sent[FOS_GPIO_BUTTONS_MAX];
+/* The press is in the queue (or the key was held at boot): its release has a
+ * slot reserved and must follow, or the dispatcher would hold the key forever
+ * and make `longPress` / `repeat` out of it. */
+static bool s_release_owed[FOS_GPIO_BUTTONS_MAX];
+/* This key's press started the buzzer; its release ends it. */
+static bool s_beeping[FOS_GPIO_BUTTONS_MAX];
 static bool s_enabled[FOS_GPIO_BUTTONS_MAX];
 
 static void json_escape(const char *src, char *dst, size_t dst_len)
@@ -65,22 +75,26 @@ static void json_escape(const char *src, char *dst, size_t dst_len)
     dst[out] = '\0';
 }
 
-static bool enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
+static void log_dropped(int pin)
+{
+    ESP_LOGW(TAG, "button event queue full, dropping GPIO %d", pin);
+    char dropped[160];
+    snprintf(dropped, sizeof(dropped),
+             "{\"event\":\"button:dropped\",\"source\":\"esp32\",\"pin\":%d,"
+             "\"reason\":\"queue-full\"}", pin);
+    frameos_nim_log_hook(dropped);
+}
+
+static bool enqueue_event(size_t index, int level, bool wake)
 {
     if (!s_queue) return false;
     fos_button_event_t event = {
-        .pin = button->pin,
-        .level = level,
+        .index = (uint8_t)index,
+        .level = (uint8_t)(level != 0),
         .wake = wake,
     };
-    strlcpy(event.label, button->label, sizeof(event.label));
     if (xQueueSend(s_queue, &event, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "button event queue full, dropping GPIO %d", button->pin);
-        char dropped[160];
-        snprintf(dropped, sizeof(dropped),
-                 "{\"event\":\"button:dropped\",\"source\":\"esp32\",\"pin\":%d,"
-                 "\"reason\":\"queue-full\"}", button->pin);
-        frameos_nim_log_hook(dropped);
+        log_dropped(fos_config()->gpio_buttons[index].pin);
         return false;
     }
     /* A live press wakes the render task so the scene hears it now, not at the
@@ -94,12 +108,49 @@ static bool enqueue_event(const fos_gpio_button_t *button, int level, bool wake)
     return true;
 }
 
-static void enqueue_edge(const fos_gpio_button_t *button, int level)
+/* Releases this task still owes the queue: each has a slot reserved. */
+static size_t releases_owed(size_t count)
 {
-    /* The press is in the queue: chirp now, from this task, so the feedback
-     * does not wait for the render task (which may be 30 s into a panel
-     * refresh). A dropped press stays silent — it was not received. */
-    if (enqueue_event(button, level, false) && level == 0) fos_buzzer_chirp();
+    size_t owed = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (s_release_owed[i]) owed++;
+    }
+    return owed;
+}
+
+static void press_edge(size_t index, size_t count)
+{
+    /* Room for the press AND its release, on top of the releases already
+     * owed: an accepted press is always followed by its release. Only this
+     * task sends (the render task only takes), so the reservation holds. */
+    if (uxQueueSpacesAvailable(s_queue) < releases_owed(count) + 2) {
+        /* Not received, so not acknowledged: no beep. */
+        log_dropped(fos_config()->gpio_buttons[index].pin);
+        return;
+    }
+    if (!enqueue_event(index, 0, false)) return;
+    s_release_owed[index] = true;
+    /* Registered: sound the buzzer now, from this task, so the feedback does
+     * not wait for the render task (which may be 30 s into a panel
+     * refresh). It sounds until the release, at most a second. */
+    s_beeping[index] = true;
+    fos_buzzer_press_start();
+}
+
+static void release_edge(size_t index, size_t count)
+{
+    if (s_release_owed[index]) {
+        enqueue_event(index, 1, false); /* its slot was reserved */
+        s_release_owed[index] = false;
+    }
+    if (s_beeping[index]) {
+        s_beeping[index] = false;
+        bool other_held = false;
+        for (size_t i = 0; i < count; i++) {
+            if (s_beeping[i]) other_held = true;
+        }
+        if (!other_held) fos_buzzer_press_end();
+    }
 }
 
 static void buttons_task(void *arg)
@@ -110,6 +161,8 @@ static void buttons_task(void *arg)
         s_last_level[i] = gpio_get_level(config->gpio_buttons[i].pin);
         s_last_change_ms[i] = esp_timer_get_time() / 1000;
         s_press_sent[i] = s_last_level[i] == 0;
+        /* Held at boot: no press was queued, but its release is real. */
+        s_release_owed[i] = s_press_sent[i];
     }
 
     while (true) {
@@ -131,10 +184,10 @@ static void buttons_task(void *arg)
              * key held at boot was "sent" already; its release is real. */
             if (level == 0 && !s_press_sent[i]) {
                 s_press_sent[i] = true;
-                enqueue_edge(button, level);
+                press_edge(i, config->gpio_button_count);
             } else if (level != 0 && s_press_sent[i]) {
                 s_press_sent[i] = false;
-                enqueue_edge(button, level);
+                release_edge(i, config->gpio_button_count);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
@@ -221,7 +274,7 @@ esp_err_t fos_buttons_start(void)
     if (s_wake_pin >= 0) {
         for (size_t i = 0; i < config->gpio_button_count; i++) {
             if (!s_enabled[i] || config->gpio_buttons[i].pin != s_wake_pin) continue;
-            enqueue_event(&config->gpio_buttons[i], 0, true);
+            enqueue_event(i, 0, true);
             break;
         }
     }
@@ -240,17 +293,20 @@ void fos_buttons_process_events(void)
 {
     if (!s_queue) return;
 
+    const fos_config_t *config = fos_config();
     fos_button_event_t event;
     while (xQueueReceive(s_queue, &event, 0) == pdTRUE) {
-        char label[sizeof(event.label) * 2];
-        json_escape(event.label, label, sizeof(label));
+        if (event.index >= config->gpio_button_count) continue;
+        const fos_gpio_button_t *button = &config->gpio_buttons[event.index];
+        char label[FOS_GPIO_BUTTON_LABEL_LEN * 2];
+        json_escape(button->label, label, sizeof(label));
         /* An edge and nothing more: `action` is which one, `wake` whether it
          * booted the chip. The role, the hold's `longPress` / `repeat` and the
          * release's `durationMs` are the Nim dispatcher's (input_state.nim). */
         char payload[160];
         snprintf(payload, sizeof(payload),
                  "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s}",
-                 event.pin, label, event.level,
+                 button->pin, label, event.level,
                  event.level == 0 ? FOS_BUTTON_ACTION_PRESS : FOS_BUTTON_ACTION_RELEASE,
                  event.wake ? ",\"wake\":true" : "");
         /* `driver`: a press is hardware talking, and the contract lets it say
@@ -266,7 +322,7 @@ void fos_buttons_process_events(void)
         snprintf(line, sizeof(line),
                  "{\"event\":\"button\",\"source\":\"esp32\",\"pin\":%d,"
                  "\"label\":\"%s\",\"level\":%d,\"action\":\"%s\",\"dispatched\":%s,\"wake\":%s}",
-                 event.pin, label, event.level,
+                 button->pin, label, event.level,
                  event.level == 0 ? FOS_BUTTON_ACTION_PRESS : FOS_BUTTON_ACTION_RELEASE,
                  dispatched ? "true" : "false", event.wake ? "true" : "false");
         frameos_nim_log_hook(line);

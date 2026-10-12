@@ -146,8 +146,8 @@ typedef struct {
                                     * divider (Seeed reTerminal E10xx: GPIO21),
                                     * -1 = always-on divider */
     int8_t buzzer_pin;             /* passive buzzer, PWM-driven (Seeed reTerminal
-                                    * E-series: GPIO45): chirps when a button press
-                                    * registers. -1 = none / silent */
+                                    * E-series: GPIO45): sounds while a registered
+                                    * button press is held. -1 = none / silent */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;

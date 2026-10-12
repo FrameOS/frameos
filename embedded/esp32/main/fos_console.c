@@ -261,7 +261,7 @@ static int cmd_status(int argc, char **argv)
     } else {
         printf("battery:     not configured\n");
     }
-    if (config->buzzer_pin >= 0) printf("buzzer:      GPIO %d (chirps on a button press)\n", (int)config->buzzer_pin);
+    if (config->buzzer_pin >= 0) printf("buzzer:      GPIO %d (sounds while a button is held)\n", (int)config->buzzer_pin);
     else printf("buzzer:      none\n");
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
