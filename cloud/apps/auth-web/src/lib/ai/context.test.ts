@@ -86,6 +86,7 @@ describe("bundled AI context", () => {
     // fetches or touches assets fails the type check without these.
     for (const name of [
       "httpRequest(",
+      "fetchImage(",
       "listAssets(",
       "readAsset(",
       "writeAsset(",

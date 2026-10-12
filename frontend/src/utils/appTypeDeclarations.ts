@@ -147,6 +147,13 @@ declare const frameos: {
       timeoutMs?: number;
     }
   ): { status: number; body?: string; bodyBase64?: string; error?: string };
+  fetchImage(
+    url: string,
+    options?: {
+      headers?: Record<string, string>;
+      saveAsset?: { name: string; extension?: string; mode?: "auto" | "always" };
+    }
+  ): { image: FrameOSImageRef | null; width?: number; height?: number; error?: string; savedAs?: string };
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

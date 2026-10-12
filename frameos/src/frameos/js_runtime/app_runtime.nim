@@ -124,6 +124,18 @@ proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
   discard JS_SetPropertyStr(ctx, obj, "__frameosUndef", nimBoolToJS(ctx, true))
   return obj
 
+proc jsAppLogMessage(payload: JsonNode): string =
+  ## `frameos.log(...args)` / `app.log(...args)` arrive as the JSON array of
+  ## their arguments. Join them the way console.log does: strings as they are,
+  ## anything else as compact JSON. The array itself used to be the message,
+  ## so every line read `["Showing Immich asset ..."]`.
+  if payload.kind != JArray:
+    return $payload
+  var parts: seq[string] = @[]
+  for arg in payload:
+    parts.add(if arg.kind == JString: arg.getStr() else: $arg)
+  parts.join(" ")
+
 proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil:
@@ -143,9 +155,9 @@ proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue
       e.owner.scene.logger.log(logPayload)
     else:
       if lvl == "error":
-        frameos_apps.logError(e.owner, $payload)
+        frameos_apps.logError(e.owner, jsAppLogMessage(payload))
       else:
-        frameos_apps.log(e.owner, $payload)
+        frameos_apps.log(e.owner, jsAppLogMessage(payload))
   except CatchableError:
     if lvl == "error":
       frameos_apps.logError(e.owner, payloadStr)
@@ -244,6 +256,101 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     response["error"] = %*err.msg
     if e != nil:
       frameos_apps.logError(e.owner, "JS app httpRequest failed: " & err.msg)
+  return nimStringToJS(ctx, $response)
+
+const DecoderFits = ["cover", "contain", "stretch"]
+  ## The placements a decode can honour while it streams into a target. The
+  ## planner offers a JS node the consumer's target under EVERY placement
+  ## (`NaturalFit`: a generator's output is target-sized whatever the
+  ## placement says), and that promise does not hold for a photo.
+
+proc sanitizedAssetExtension(extension: string): string =
+  ## `saveAsset` appends the extension verbatim to a path under the assets
+  ## folder, and here it comes from scene JS. Accept only a short alphanumeric
+  ## suffix: no separators, no dots.
+  var ext = extension.strip().toLowerAscii()
+  if ext.startsWith("."):
+    ext = ext[1..^1]
+  if ext.len == 0 or ext.len > 5 or not ext.allCharsInSet({'a'..'z', '0'..'9'}):
+    return ".jpg"
+  "." & ext
+
+proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
+  ## Downloads and decodes an image natively, so the bytes never enter the JS
+  ## heap: a JS app gets back an image reference it returns as its output,
+  ## never the pixels. Options JSON: {headers: {name: value},
+  ## saveAsset: {name, extension, mode: "auto" | "always"}}. Returns JSON
+  ## {image: imageRef | null, width, height, savedAs?} or {image: null, error}.
+  ##
+  ## This is the producer's half of the `intoTarget` handshake for a JS app
+  ## (docs/value-pipeline.md). The planner offers a JS node the consumer's
+  ## target with a natural fit — every placement, since a natural-size
+  ## producer draws 1:1 — but a decode fits, so the target is claimed only
+  ## under a fit a decoder honours (cover/contain/stretch). Under any other
+  ## placement the download decodes bounded by the target's size and the
+  ## offer stays unclaimed for the interpreter to discard; the consumer then
+  ## places the natural-size result itself. On the ESP32 the claimed path is
+  ## the socket-streaming decode straight into the canvas, the same one the
+  ## built-in Nim photo apps use; hosts decode at native resolution and let
+  ## the consumer scale.
+  ##
+  ## `saveAsset` keeps the downloaded bytes as a frame asset the way the Nim
+  ## photo apps do (`saved/<app>/<name>.<md5><ext>`; "auto" honours the
+  ## frame's own save-assets setting). The bytes exist only on hosts: the
+  ## embedded streaming path keeps no copy, and reports no `savedAs`.
+  let e = env(ctx)
+  var response = %*{"image": newJNull()}
+  if e == nil:
+    response["error"] = %*"no app context"
+    return nimStringToJS(ctx, $response)
+
+  let urlStr = toNimString(ctx, url)
+  var options = %*{}
+  try:
+    options = parseJson(toNimString(ctx, optionsJson))
+  except CatchableError:
+    discard
+  if options.isNil or options.kind != JObject:
+    options = %*{}
+
+  try:
+    var headers: seq[SimpleHttpHeader] = @[]
+    let headersNode = options{"headers"}
+    if not headersNode.isNil and headersNode.kind == JObject:
+      for name, value in headersNode.pairs:
+        headers.add((name, value.getStr($value)))
+
+    let owner = e.owner
+    let context = e.context
+    let maxBytes = frameos_apps.maxImageResponseBytes(owner)
+    let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
+    let offeredFit = if context.isNil: "" else: context.decodeTargetScalingMode
+    var downloaded: tuple[image: Image, data: string]
+    if offeredWidth > 0 and offeredHeight > 0 and offeredFit notin DecoderFits:
+      downloaded = downloadImageWithDataBounded(urlStr, offeredWidth, offeredHeight,
+        maxBytes = maxBytes, headers = headers)
+    else:
+      downloaded = owner.downloadImageWithDataForContext(context, urlStr,
+        maxBytes = maxBytes, headers = headers)
+    if downloaded.image.isNil:
+      response["error"] = %*"the response was not an image this frame can decode"
+      return nimStringToJS(ctx, $response)
+
+    response["image"] = e.runtime.storeTransientImageJson(downloaded.image)
+    response["width"] = %*downloaded.image.width
+    response["height"] = %*downloaded.image.height
+
+    let save = options{"saveAsset"}
+    if not save.isNil and save.kind == JObject and downloaded.data.len > 0:
+      let mode = save{"mode"}.getStr("auto")
+      if mode == "auto" or mode == "always":
+        let saved = owner.saveAsset(save{"name"}.getStr("image"),
+          sanitizedAssetExtension(save{"extension"}.getStr("")), downloaded.data, mode == "auto")
+        if saved.len > 0:
+          response["savedAs"] = %*saved
+  except CatchableError as err:
+    response["error"] = %*err.msg
+    frameos_apps.logError(e.owner, "JS app fetchImage failed: " & err.msg)
   return nimStringToJS(ctx, $response)
 
 proc assetsRoot(e: JsAppEvalEnv): string =
@@ -1154,6 +1261,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsSetState", jsSetState)
   runtime.js.registerFunction("jsFetchText", jsFetchText)
   runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
+  runtime.js.registerFunction("jsFetchImage", jsFetchImage)
   runtime.js.registerFunction("jsAssets", jsAssets)
   runtime.js.registerFunction("jsStreams", jsStreams)
   runtime.js.registerFunction("jsGetSetting", jsGetSetting)
@@ -1196,6 +1304,9 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
       jsHttpRequest(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || "{}"
+    ),
+    fetchImage: (url, options) => JSON.parse(
+      jsFetchImage(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || '{"image":null}'
     ),
     listAssets: (dir) => __frameosUnwrap(jsAssets("list", String(dir || ""), "")) || [],
     assetExists: (path) => __frameosUnwrap(jsAssets("exists", String(path || ""), "")) === true,

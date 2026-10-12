@@ -87,7 +87,9 @@ type declarations (`frontend/src/utils/appTypeDeclarations.ts`,
 `cloud/apps/auth-web/scripts/generate-ai-context.mjs`) list it:
 `frameos.fetchJson(url)`, `frameos.fetchText(url)`,
 `frameos.httpRequest(url, {method, headers, body, bodyBase64, base64,
-timeoutMs})`, `frameos.svg(svg, spec)`, `frameos.image(spec)`,
+timeoutMs})`, `frameos.fetchImage(url, {headers, saveAsset})` (see
+[Photos from the network](#photos-from-the-network)), `frameos.svg(svg,
+spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
 `frameos.setNextSleep()`, `frameos.getSetting("namespace", "key")` (only
 namespaces the app's `config.json` declares under `settings`), the asset
@@ -106,6 +108,42 @@ JavaScript is the format apps are written in. The Nim apps under
 binary (`render/text`, `data/clock`, …) — not something a scene carries or a
 user edits. A scene that still holds Nim sources or Nim code nodes is a
 legacy *compiled* scene; `docs/nim-to-js-conversion.md` is the way out.
+
+### Photos from the network
+
+A JS app that shows a photo from an API (the Immich app,
+`repo/apps/code/immich`, is the worked example) does the JSON half with
+`httpRequest` and the picture with **`frameos.fetchImage(url, options)`**.
+The runtime downloads and decodes the image natively and hands JS an image
+reference; the bytes never enter the JS heap. The app returns that reference
+as its output:
+
+```ts
+const photo = frameos.fetchImage(`${server}/api/assets/${id}/thumbnail?size=preview`, {
+  headers: { 'x-api-key': apiKey },
+  saveAsset: { name: 'IMG_001', extension: 'jpg', mode: 'auto' },
+})
+if (!photo.image) {
+  return frameos.svg(errorPanel(photo.error))
+}
+return photo.image
+```
+
+- `options.headers` go on the request, like `httpRequest`.
+- The result is `{ image, width, height }` or `{ image: null, error }`
+  (an HTTP status, a transport failure, a body that is not an image). It
+  never throws, so the app can paint the message.
+- `options.saveAsset` keeps the downloaded file as a frame asset, the way
+  the built-in photo apps do (`saved/<app>/<name>.<md5>.<ext>`; `mode:
+  "auto"` honours the frame's save-assets setting, `"always"` saves
+  regardless). The extension is reduced to a short alphanumeric suffix.
+  Frames without storage (ESP32) never save and report no `savedAs`.
+- On an ESP32 the decode streams straight into the canvas the `render/image`
+  node offered, with the node's `placement` (cover, contain or stretch), so a
+  1440 px Immich preview needs its compressed body plus a few rows, not a
+  full-resolution RGBA buffer. Any other placement decodes bounded by the
+  target's size and lets `render/image` place the result. On a Pi the decode
+  is at native resolution and the consumer scales.
 
 ### More than one file
 

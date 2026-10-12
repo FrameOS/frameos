@@ -1,6 +1,6 @@
 {
-  "name": "Immich",
-  "description": "Show images from a self-hosted Immich server",
+  "name": "Immich (built-in, legacy)",
+  "description": "Superseded by the Immich code app (repo/apps/code/immich), which ships with the scene and updates without a firmware release. Kept so scenes that already use this node keep rendering.",
   "category": "data",
   "version": "1.0.0",
   "settings": ["immich"],

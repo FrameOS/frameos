@@ -140,7 +140,7 @@ direction only — preview = last release, frame = whatever it runs:
 
 ## 5. Grow the loadable catalog toward the built-in one
 
-40 apps exist only as Nim in the firmware; 7 as loadable JS. The
+40 apps exist only as Nim in the firmware; 8 as loadable JS. The
 converter's misses are the roadmap, not a porting program:
 
 - [ ] Instrument: `scene_convert` telemetry carries only a
@@ -149,7 +149,17 @@ converter's misses are the roadmap, not a porting program:
   primitive (drawing, text metrics, dither, shell, EXIF, …).
 - [ ] Each primitive that clears a real cluster gets a bridge call or a
   JS port of the built-ins it unblocks — demand-ordered, one at a time,
-  never a bulk port.
+  never a bulk port. Done so far: the network photo
+  (`frameos.fetchImage`, 2026-10-12), which carried the Immich app across
+  as `repo/apps/code/immich` with the ESP32's decode-into-canvas path
+  intact.
+- [ ] Retire `data/immich` (the Nim app, now "Immich (built-in, legacy)")
+  once a release carrying `fetchImage` has been out long enough for
+  installed frames to have it: a scene migration like
+  `app/utils/legacy_app_migration.py` (#338) rewrites `data/immich` nodes
+  into the scene-local JS app on both control planes, then the Nim source,
+  its loader row and the `preview-settings.ts` keyword go. Not before: a
+  migrated scene on firmware without `fetchImage` shows no photo.
 - [ ] Exit is directional, not total: the next ten scenes people actually
   convert or build need zero Nim changes.
 
