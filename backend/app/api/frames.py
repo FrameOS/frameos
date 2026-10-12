@@ -1548,6 +1548,23 @@ def _scene_name(frame: Frame, scene_id: str) -> str | None:
     return None
 
 
+async def _log_virtual_scene_event(
+    db: Session, redis: Redis, frame: Frame, event: str, scene_id: str | None, payload: Any
+) -> None:
+    """The `event:<name>` log line a device's dispatcher writes when it takes
+    a scene event, for a virtual frame (which has no dispatcher): the log
+    shows the switch and its state next to the render it caused, and the
+    workspace reloads the Control panel's state on it
+    (`sceneStateChangedLogEvents`). Origin `http:admin` is the backend's own
+    (docs/events-contract.json)."""
+    line: dict[str, Any] = {"event": f"event:{event}", "origin": "http:admin"}
+    if scene_id:
+        line["sceneId"] = scene_id
+    if isinstance(payload, dict):
+        line["payload"] = payload
+    await log(db, redis, int(frame.id), "webhook", json.dumps(line, separators=(",", ":")))
+
+
 @api_project.post("/frames/{id:int}/event/{event}")
 async def api_frame_event(
     id: int,
@@ -1583,6 +1600,7 @@ async def api_frame_event(
             if isinstance(state, dict) and state:
                 target_scene = await resolve_virtual_scene_id(redis, frame, scene_id)
                 await apply_virtual_scene_state(redis, frame, target_scene, state)
+            await _log_virtual_scene_event(db, redis, frame, event, scene_id, body)
         if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
             await _mark_frame_states_cache_stale(redis, frame, scene_id=scene_id)
         # uploadScenes = preview-on-frame: render the posted (possibly
@@ -4253,6 +4271,33 @@ async def api_frame_set_next_scene(
 
     if data.state is not None and not isinstance(data.state, dict):
         _bad_request("State must be an object")
+
+    if is_virtual_frame(frame):
+        # No device and no boot-scene files: a virtual frame's deploy IS a
+        # render (deploy_frame_task), and its switch is what the event route
+        # does for setCurrentScene — keep the state and the active scene,
+        # render that scene, record the deploy. Until 2026-10-12 this fell
+        # through to the SSH branch below and died with "No SSH private keys
+        # available for this frame": the workspace routes an activation here
+        # for any scene it counts as unsaved or undeployed — a store scene
+        # just installed on a virtual frame is — so the Control panel's
+        # "Apply to active scene" lost its album and interval on the spot.
+        from .virtual_frame import (
+            apply_virtual_scene_state,
+            mark_virtual_frame_deployed,
+            refresh_virtual_frame_image,
+        )
+
+        state = data.state if isinstance(data.state, dict) else {}
+        if state:
+            await apply_virtual_scene_state(redis, frame, data.sceneId, state)
+        await _log_virtual_scene_event(
+            db, redis, frame, "setCurrentScene", data.sceneId, {"sceneId": data.sceneId, "state": state}
+        )
+        await _mark_frame_states_cache_stale(redis, frame, scene_id=data.sceneId)
+        await refresh_virtual_frame_image(db, redis, frame, scene_id=data.sceneId)
+        await mark_virtual_frame_deployed(db, redis, frame)
+        return {"message": "Scene applied"}
 
     if is_queued_embedded_frame(frame):
         # The scenes and settings the frame pulls are already the saved

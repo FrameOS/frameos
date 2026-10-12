@@ -3,8 +3,22 @@ set -e  # exit as soon as a command fails
 
 # 1. Conditionally start local Redis only if REDIS_URL is not set.
 if [ -z "$REDIS_URL" ]; then
-  echo "🥕 Starting local Redis (no REDIS_URL detected)."
-  redis-server --daemonize yes
+  # Redis holds state the SQLite database does not: a virtual frame's scene
+  # state and active scene, every frame's last known scene, the deploy and
+  # task queues. Until 2026-10-12 it ran with no persistence at all, so a
+  # container restart emptied it and virtual frames came back on their scene
+  # defaults. Append-only, fsynced every second, on the data volume next to
+  # the database (/data on a Home Assistant add-on). REDIS_DATA_DIR overrides.
+  if [ -z "$REDIS_DATA_DIR" ]; then
+    if [ -n "$HASSIO_TOKEN" ] && [ -d /data ]; then
+      REDIS_DATA_DIR=/data/redis
+    else
+      REDIS_DATA_DIR=/app/db/redis
+    fi
+  fi
+  mkdir -p "$REDIS_DATA_DIR"
+  echo "🥕 Starting local Redis (no REDIS_URL detected), data in $REDIS_DATA_DIR."
+  redis-server --daemonize yes --dir "$REDIS_DATA_DIR" --appendonly yes --appendfsync everysec
 else
   echo "REDIS_URL is set ($REDIS_URL). Skipping local Redis."
 fi

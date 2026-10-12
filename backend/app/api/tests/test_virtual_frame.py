@@ -490,3 +490,87 @@ async def test_virtual_render_passes_save_assets_and_budget(
     assert response.status_code == 200
     paths = [a['path'] for a in response.json()['assets']]
     assert '/srv/assets/wikicommons/img.abc123.jpg' in paths
+
+
+@pytest.mark.asyncio
+async def test_virtual_set_next_scene_applies_state_and_renders(async_client, db, redis):
+    # The workspace's "Apply to active scene" / "Deploy & activate" for a scene
+    # it counts as unsaved or undeployed posts here, not to the event route.
+    # Until 2026-10-12 a virtual frame fell through to the SSH branch and
+    # failed with "No SSH private keys available for this frame", losing the
+    # state; now it is the same switch the event route makes, plus the deploy
+    # record.
+    frame = await create_virtual_frame(async_client, db)
+    frame.scenes = [_stateful_scene('scene-a'), _stateful_scene('scene-b')]
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/set_next_scene',
+        json={'sceneId': 'scene-b', 'state': {'word': 'switched', 'secret': 'nope'}, 'fastDeploy': True})
+    assert response.status_code == 200, response.text
+    assert response.json() == {'message': 'Scene applied'}
+
+    response = await async_client.get(f'/api/frames/{frame.id}/states')
+    payload = response.json()
+    assert payload['sceneId'] == 'scene-b'
+    # A checkout with a wasm bundle renders for real and the readback adds
+    # the implicit refreshInterval; CI has no bundle. Either way the public
+    # field is kept and the private one filtered.
+    stored = payload['states']['scene-b']
+    assert stored['word'] == 'switched'
+    assert 'secret' not in stored
+    assert await redis.get(f'frame:{frame.id}:active_scene') in (b'scene-b', 'scene-b')
+
+    db.refresh(frame)
+    assert frame.last_successful_deploy is not None
+    assert [s['id'] for s in frame.last_successful_deploy['scenes']] == ['scene-a', 'scene-b']
+
+    response = await async_client.get(f'/api/frames/{frame.id}/logs')
+    events = []
+    for entry in response.json()['logs']:
+        try:
+            events.append(__import__('json').loads(entry['line']))
+        except ValueError:
+            continue
+    switch = next(e for e in events if e.get('event') == 'event:setCurrentScene')
+    assert switch['origin'] == 'http:admin'
+    assert switch['sceneId'] == 'scene-b'
+    assert switch['payload'] == {'sceneId': 'scene-b', 'state': {'word': 'switched', 'secret': 'nope'}}
+    rendered = [e for e in events if e.get('event') == 'render:done']
+    assert rendered and rendered[-1]['sceneId'] == 'scene-b'
+
+
+@pytest.mark.asyncio
+async def test_virtual_set_next_scene_without_state_keeps_the_stored_state(async_client, db, redis):
+    frame = await create_virtual_frame(async_client, db)
+    frame.scenes = [_stateful_scene('scene-a')]
+    db.add(frame)
+    db.commit()
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/event/setSceneState',
+        json={'sceneId': 'scene-a', 'state': {'word': 'kept'}},
+        headers={'content-type': 'application/json'})
+    assert response.status_code == 200, response.text
+
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/set_next_scene', json={'sceneId': 'scene-a'})
+    assert response.status_code == 200, response.text
+    response = await async_client.get(f'/api/frames/{frame.id}/states')
+    assert response.json()['states']['scene-a']['word'] == 'kept'
+
+
+@pytest.mark.asyncio
+async def test_virtual_scene_events_are_logged_like_a_device(async_client, db, redis):
+    frame = await create_virtual_frame(async_client, db)
+    frame.scenes = [_stateful_scene('scene-a')]
+    db.add(frame)
+    db.commit()
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/event/setSceneState',
+        json={'sceneId': 'scene-a', 'state': {'word': 'logged'}},
+        headers={'content-type': 'application/json'})
+    assert response.status_code == 200, response.text
+    response = await async_client.get(f'/api/frames/{frame.id}/logs')
+    lines = [entry['line'] for entry in response.json()['logs']]
+    assert any('"event":"event:setSceneState"' in line and '"origin":"http:admin"' in line for line in lines)
