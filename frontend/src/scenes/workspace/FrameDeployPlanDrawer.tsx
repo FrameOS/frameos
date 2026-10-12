@@ -4159,7 +4159,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                         primary={deployRecommendation?.mode === 'full'}
                         onClick={() => closeAndRun(saveAndFullDeployFrame)}
                         icon={<ArrowPathIcon className="h-5 w-5" />}
-                        label="Deploy FrameOS & scenes"
+                        label="Deploy FrameOS, scenes & settings"
                         detail="Reinstall FrameOS first, then scenes & settings"
                       />
                     </div>

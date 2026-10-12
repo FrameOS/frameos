@@ -679,7 +679,7 @@ export function buildDeployRecommendation(
   if (!hasPreviousDeploy) {
     return {
       mode: 'full',
-      title: 'Suggested: deploy FrameOS & scenes',
+      title: 'Suggested: deploy FrameOS, scenes & settings',
       description:
         'This frame has not been deployed yet: FrameOS, its dependencies and the system settings go first, then the scenes.',
     }
@@ -706,7 +706,7 @@ export function buildDeployRecommendation(
     }
     return {
       mode: 'full',
-      title: 'Suggested: deploy FrameOS & scenes',
+      title: 'Suggested: deploy FrameOS, scenes & settings',
       description: usesPrecompiledFrameos
         ? 'You have changes that require reinstalling FrameOS.'
         : 'You have changes that require rebuilding FrameOS (legacy path).',
@@ -717,7 +717,7 @@ export function buildDeployRecommendation(
   if (versionChanged) {
     return {
       mode: 'full',
-      title: 'Suggested: deploy FrameOS & scenes',
+      title: 'Suggested: deploy FrameOS, scenes & settings',
       description: `Updating FrameOS from ${
         previousVersion ?? 'unknown'
       } to ${CURRENT_FRAMEOS_VERSION} reinstalls FrameOS; the scenes and settings follow.`,

@@ -266,7 +266,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     const drawer = page.locator('.workspace-drawer').filter({ has: page.getByRole('heading', { name: 'Deploy' }) })
     await expect(drawer).toBeVisible()
     await expect(drawer.getByRole('button', { name: 'Deploy scenes & settings' })).toBeVisible()
-    await expect(drawer.getByRole('button', { name: 'Deploy FrameOS & scenes' })).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Deploy FrameOS, scenes & settings' })).toBeVisible()
     await expect(drawer).not.toContainText(/\b(Push|Pushes|Pushing|Upgrade|Upgrades)\b/)
 
     expectNoFrontendErrors(readErrors)
