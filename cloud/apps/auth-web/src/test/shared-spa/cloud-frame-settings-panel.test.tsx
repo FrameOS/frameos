@@ -364,6 +364,22 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("Panel")).toBeNull();
   });
 
+  it("knows a Spectra PhotoPainter fits by default, from the panel in its hardware report", () => {
+    // The cloud fills no `device` for an ESP32: the panel name lives in the
+    // enrollment report alone, as the bare waveshare key. Read from
+    // `frame.device` the section found no palette and told the owner of a
+    // six-ink panel that "this display shows full color".
+    renderPanel(cloudFrame("esp32-s3", "2026.10.2", "EPD_7in3e"));
+    expect(screen.getAllByText("Default (on for this panel)").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Default (off for this display)")).toBeNull();
+    cleanup();
+
+    // A grayscale panel dithers too, but the device leaves the fit off there.
+    renderPanel(cloudFrame("esp32-s3", "2026.10.2", "EPD_4in26"));
+    expect(screen.getAllByText("Default (off for this display)").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Default (on for this panel)")).toBeNull();
+  });
+
   it("enables the time zone field from firmware 2026.8.34", () => {
     renderPanel(cloudFrame("esp32-s3", "2026.8.34"));
     expect(document.querySelector('[name="timezone"]')?.matches(":disabled")).toBe(false);

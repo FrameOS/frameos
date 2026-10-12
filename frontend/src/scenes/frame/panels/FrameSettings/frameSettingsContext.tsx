@@ -6,6 +6,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { DEFAULT_FRAME_ERROR_BEHAVIOR, frameLogic, normalizeFrameErrorBehavior } from '../../frameLogic'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
 import { EMBEDDED_VIRTUAL, withCustomPalette } from '../../../../devices'
+import { paletteDeviceOf } from '../../../../utils/assetColors/devicePalette'
 import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32ExtendedSettings,
@@ -328,13 +329,10 @@ export function FrameSettingsProvider({
     setFrameFormValues(nextValues)
   }
 
-  // An ESP32 reports its panel as the bare waveshare key (`EPD_7in3e`), the
-  // palette table is keyed by driver name (`waveshare.EPD_7in3e`).
-  const paletteDevice = cloudProfile
-    ? esp32CloudProfile && cloudDevice && !cloudDevice.includes('.')
-      ? `waveshare.${cloudDevice}`
-      : cloudDevice
-    : frame.device || ''
+  // The hardware report first (an ESP32 reports its panel as the bare
+  // waveshare key, `EPD_7in3e`, the palette table is keyed by driver name),
+  // the frame's own `device` on backend-managed frames.
+  const paletteDevice = paletteDeviceOf(frame)
   const normalizeKeyIds = (keys: string[]): string[] => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
     (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? []
