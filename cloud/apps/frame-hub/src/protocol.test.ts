@@ -521,7 +521,20 @@ describe("firmwareUpdateAfterBoot", () => {
     // on the same version stays.
     expect(firmwareUpdateAfterBoot({ status: "up-to-date" }, "2026.10.8", "2026.10.6", now)).toBeNull();
     expect(firmwareUpdateAfterBoot({ status: "done", version: "2026.10.8" }, "2026.10.8", "2026.10.8", now)).toBeUndefined();
-    expect(firmwareUpdateAfterBoot(null, "2026.10.8", "2026.10.6", now)).toBeUndefined();
+    // No row and a new version: an update happened unseen (frame 70,
+    // 2026-10-12: the early-boot updater's lines never reach a plane, and
+    // the frame simply boots on 2026.10.9). Same version, or a version the
+    // hub never knew: nothing to say.
+    expect(firmwareUpdateAfterBoot(null, "2026.10.8", "2026.10.6", now)).toEqual({
+      at: now.toISOString(),
+      detail: "",
+      plane: "cloud",
+      status: "done",
+      version: "2026.10.8",
+    });
+    expect(firmwareUpdateAfterBoot(null, "2026.10.8", "2026.10.8", now)).toBeUndefined();
+    expect(firmwareUpdateAfterBoot(null, "2026.10.8", null, now)).toBeUndefined();
+    expect(firmwareUpdateAfterBoot(undefined, undefined, "2026.10.6", now)).toBeUndefined();
     expect(firmwareUpdateDone({ at: "x", detail: "d", plane: "cloud", status: "verified", version: "2026.10.8" })).toEqual({
       at: "x",
       detail: "d",
