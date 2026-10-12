@@ -28,7 +28,7 @@ export const appMappings: Mapping[] = [
   { js: "context.hasImage, context.imageWidth/imageHeight, frameos.setNextSleep(s)", nim: "context.hasImage, context.image.width/height, context.nextSleep = s" },
   { js: "frameos.httpRequest(url, {method, headers, body, timeoutMs, base64}), frameos.fetchJson/fetchText", nim: "boundedRequestWithHeaders, utils/http_client" },
   { js: "frameos.writeAsset, frameos.readAsset", nim: "self.saveAsset, readFile/writeFile under assets" },
-  { js: "a data/downloadImage node wired in / frameos.loadAssetImage", nim: "downloadImage (remote) / (local)" },
+  { js: "frameos.fetchImage(url, {headers, saveAsset}).image (decoded natively, never through the JS heap) / frameos.loadAssetImage", nim: "downloadImage, downloadImageWithDataForContext, saveAsset (remote) / (local)" },
   { js: "Math.random() / undefined + ?. / throw new Error / template literal", nim: "rand() / Option[T] / raise newException / strformat" },
   { js: "an SVG string via frameos.svg(): <rect>, <path>, <text> with font-family/font-size, #rrggbb", nim: "pixie newImage, fill, draw, fillPath, strokePath, drawText, typeset, newFont, rgb()" },
   { js: "return an SVG with the message, or frameos.error()", nim: "renderError(...)" },

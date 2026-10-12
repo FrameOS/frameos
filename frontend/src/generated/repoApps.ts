@@ -2,6 +2,107 @@
 import type { AppConfig } from '../types'
 
 export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
+  "repo/apps/code/immich": {
+    "name": "Immich",
+    "description": "Show photos from a self-hosted Immich server: a random image from the whole library, one album, one person, your favorites, or today's memories. The photo is decoded straight into the canvas, so it runs on an ESP32 too.",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "immich"
+    ],
+    "fields": [
+      {
+        "name": "mode",
+        "type": "select",
+        "value": "random",
+        "options": [
+          "random",
+          "album",
+          "favorites",
+          "memories"
+        ],
+        "required": false,
+        "label": "Mode",
+        "hint": "Which images to show: a random image from the whole library, a random image from one album, a random favorite, or today's memories."
+      },
+      {
+        "name": "albumId",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Album ID",
+        "hint": "UUID of the album, visible in the album URL.",
+        "placeholder": "e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6",
+        "showIf": [
+          {
+            "field": "mode",
+            "operator": "eq",
+            "value": "album"
+          }
+        ]
+      },
+      {
+        "name": "personId",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Person ID",
+        "hint": "Optional. UUID of a person to limit random images to, visible in the person's URL.",
+        "placeholder": "e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+        "showIf": [
+          {
+            "field": "mode",
+            "operator": "eq",
+            "value": "random"
+          }
+        ]
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Metadata state key",
+        "hint": "Enter a state key to persist metadata about the image. Stores: {source, id, originalFileName, camera EXIF fields, people, ...}."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Save the downloaded image to disk as an asset in the frame's assets folder. You can later use the 'Local image' app to view saved assets. 'auto' saves when the frame is set to save assets, 'always' always saves, 'never' never saves. Frames without storage (ESP32) never save."
+      },
+      {
+        "name": "previewSize",
+        "type": "select",
+        "value": "preview",
+        "options": [
+          "preview",
+          "fullsize"
+        ],
+        "label": "Image size",
+        "hint": "'preview' is resized server-side and much lighter on frame memory. 'fullsize' downloads the original file."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    },
+    "origin": "repo/apps/code/immich"
+  },
   "repo/apps/code/jsImage": {
     "name": "New image data app (JS)",
     "category": "data",
@@ -353,6 +454,10 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
 }
 
 export const embeddedRepoAppSources: Record<string, Record<string, string>> = {
+  "repo/apps/code/immich": {
+    "app.ts": "// Immich photo app.\n//\n// Picks one image from a self-hosted Immich server (the whole library, one\n// person, one album, the favorites, or today's memories) and returns it.\n// The API calls are plain JSON over frameos.httpRequest; the photo itself\n// never crosses the JS heap: frameos.fetchImage downloads and decodes it\n// natively, and on an ESP32 streams it straight into the canvas the\n// render/image node offered. This is the same path the frame's built-in\n// photo apps take, so a 1440 px Immich preview fits a frame with a few MB\n// of PSRAM.\n//\n// Firmware older than frameos.fetchImage falls back to pulling the bytes\n// through httpRequest as base64 (fine for preview-sized photos on a Pi).\n\nconst REQUEST_TIMEOUT_MS = 30000\n\ntype ImmichAsset = {\n  id: string\n  type?: string\n  originalFileName?: string\n  isFavorite?: boolean\n  exifInfo?: Record<string, unknown> | null\n  people?: { name?: string }[] | null\n}\n\ntype Candidates = { asset: ImmichAsset | null; message: string }\n\ntype FetchedPhoto = {\n  image: unknown\n  width?: number\n  height?: number\n  error?: string\n  savedAs?: string\n}\n\n// ---------------------------------------------------------------------------\n// URL and request helpers\n// ---------------------------------------------------------------------------\n\nexport function normalizeServerUrl(url: unknown): string {\n  let result = String(url ?? '').trim()\n  while (result.endsWith('/')) {\n    result = result.slice(0, -1)\n  }\n  return result\n}\n\nexport function searchRandomUrl(serverUrl: string): string {\n  return `${serverUrl}/api/search/random`\n}\n\n// Older servers without POST /api/search/random cannot filter server-side;\n// ask for a batch so client-side filtering has image candidates.\nexport function legacyRandomUrl(serverUrl: string): string {\n  return `${serverUrl}/api/assets/random?count=20`\n}\n\nexport function memoriesUrl(serverUrl: string, isoDate: string): string {\n  return `${serverUrl}/api/memories?for=${encodeURIComponent(isoDate)}`\n}\n\nexport function assetDownloadUrl(serverUrl: string, assetId: string, previewSize: string): string {\n  if (previewSize === 'fullsize') {\n    return `${serverUrl}/api/assets/${encodeURIComponent(assetId)}/original`\n  }\n  return `${serverUrl}/api/assets/${encodeURIComponent(assetId)}/thumbnail?size=preview`\n}\n\n// The calendar date, as `GET /api/memories?for=` wants it. Immich 3\n// validates `for` as a plain YYYY-MM-DD; 1.x and 2.x accept it too. The\n// getters are local where the runtime has a zone (an ESP32 with its time\n// zone set, a Pi through the system zone, the browser preview) and UTC\n// otherwise; a bare date either way.\nexport function todayIso(now: Date = new Date()): string {\n  const pad = (n: number): string => String(n).padStart(2, '0')\n  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`\n}\n\nexport function randomSearchBody(albumId = '', personId = '', isFavorite = false): Record<string, unknown> {\n  const body: Record<string, unknown> = { size: 1, type: 'IMAGE', withExif: true, withPeople: true }\n  if (albumId) {\n    body.albumIds = [albumId]\n  }\n  if (personId) {\n    body.personIds = [personId]\n  }\n  if (isFavorite) {\n    body.isFavorite = true\n  }\n  return body\n}\n\n// Keep only what the render needs: a parsed Immich response costs many\n// times its JSON size on the heap, and memories can list dozens of assets.\nfunction slimAsset(asset: Record<string, any>): ImmichAsset {\n  const slim: ImmichAsset = { id: String(asset.id ?? ''), type: asset.type }\n  if (asset.originalFileName) {\n    slim.originalFileName = String(asset.originalFileName)\n  }\n  if (asset.isFavorite) {\n    slim.isFavorite = true\n  }\n  if (asset.exifInfo && typeof asset.exifInfo === 'object') {\n    slim.exifInfo = asset.exifInfo\n  }\n  if (Array.isArray(asset.people)) {\n    slim.people = asset.people.map((person: any) => ({ name: person?.name }))\n  }\n  return slim\n}\n\nexport function imageAssets(assets: unknown): ImmichAsset[] {\n  if (!Array.isArray(assets)) {\n    return []\n  }\n  const result: ImmichAsset[] = []\n  for (const asset of assets) {\n    if (asset && typeof asset === 'object' && asset.type === 'IMAGE') {\n      result.push(slimAsset(asset))\n    }\n  }\n  return result\n}\n\nexport function memoriesImageAssets(memories: unknown): ImmichAsset[] {\n  if (!Array.isArray(memories)) {\n    return []\n  }\n  const result: ImmichAsset[] = []\n  for (const memory of memories) {\n    if (memory && typeof memory === 'object') {\n      for (const asset of imageAssets(memory.assets)) {\n        result.push(asset)\n      }\n    }\n  }\n  return result\n}\n\nexport function pickRandomAsset(assets: ImmichAsset[]): ImmichAsset | null {\n  if (assets.length === 0) {\n    return null\n  }\n  return assets[Math.floor(Math.random() * assets.length)]\n}\n\nconst EXIF_KEYS = ['make', 'model', 'fNumber', 'exposureTime', 'iso', 'focalLength', 'dateTimeOriginal']\n\nexport function assetMetadata(asset: ImmichAsset): Record<string, unknown> {\n  const metadata: Record<string, unknown> = {\n    source: 'immich',\n    id: asset.id ?? '',\n    originalFileName: asset.originalFileName ?? '',\n  }\n  const exif = asset.exifInfo\n  if (exif && typeof exif === 'object') {\n    for (const key of EXIF_KEYS) {\n      if (exif[key] !== undefined && exif[key] !== null) {\n        metadata[key] = exif[key]\n      }\n    }\n  }\n  if (Array.isArray(asset.people)) {\n    const names = asset.people.map((person) => person?.name ?? '').filter((name) => name !== '')\n    if (names.length > 0) {\n      metadata.people = names\n    }\n  }\n  return metadata\n}\n\n// The extension ends up in a path under the assets folder, and\n// originalFileName is whatever the Immich server sends. Only a short\n// alphanumeric suffix is accepted: no separators, no dots.\nexport function assetFileExtension(asset: ImmichAsset, previewSize: string): string {\n  if (previewSize === 'fullsize') {\n    const name = asset.originalFileName ?? ''\n    const dot = name.lastIndexOf('.')\n    if (dot > 0 && dot < name.length - 1) {\n      const ext = name.slice(dot + 1).toLowerCase()\n      if (ext.length <= 5 && /^[a-z0-9]+$/.test(ext)) {\n        return `.${ext}`\n      }\n    }\n  }\n  return '.jpg'\n}\n\nexport function assetBaseName(asset: ImmichAsset): string {\n  let name = asset.originalFileName ?? ''\n  const dot = name.lastIndexOf('.')\n  if (dot > 0) {\n    name = name.slice(0, dot)\n  }\n  return name !== '' ? name : asset.id || 'immich'\n}\n\nexport function httpErrorMessage(response: { status: number; body?: string; error?: string }): string {\n  if (response.status === 0) {\n    return response.error ? `request failed: ${response.error}` : 'request failed'\n  }\n  let message = `HTTP ${response.status}`\n  const body = response.body ?? ''\n  try {\n    const json = JSON.parse(body)\n    const detail = json?.message\n    if (typeof detail === 'string' && detail !== '') {\n      message += `: ${detail}`\n    } else if (Array.isArray(detail) && detail.length > 0) {\n      message += `: ${typeof detail[0] === 'string' ? detail[0] : JSON.stringify(detail[0])}`\n    } else if (typeof json?.error === 'string' && json.error !== '') {\n      message += `: ${json.error}`\n    }\n  } catch {\n    if (body.length > 0 && body.length < 300) {\n      message += `: ${body}`\n    }\n  }\n  return message\n}\n\nfunction requestJson(\n  apiKey: string,\n  url: string,\n  method = 'GET',\n  body = ''\n): { status: number; body?: string; error?: string } {\n  return frameos.httpRequest(url, {\n    method,\n    headers: { 'x-api-key': apiKey, Accept: 'application/json', 'Content-Type': 'application/json' },\n    body,\n    timeoutMs: REQUEST_TIMEOUT_MS,\n  })\n}\n\nfunction parseBody(body: string | undefined): unknown {\n  try {\n    return JSON.parse(body ?? '')\n  } catch {\n    return null\n  }\n}\n\nfunction describeSearch(albumId: string, personId: string, isFavorite: boolean): string {\n  if (albumId) {\n    return `album ${albumId}`\n  }\n  if (personId) {\n    return `person ${personId}`\n  }\n  if (isFavorite) {\n    return 'favorites'\n  }\n  return 'whole library'\n}\n\nfunction fetchRandomAsset(\n  serverUrl: string,\n  apiKey: string,\n  albumId = '',\n  personId = '',\n  isFavorite = false,\n  emptyMessage = 'Immich returned no image assets.'\n): Candidates {\n  let response = requestJson(\n    apiKey,\n    searchRandomUrl(serverUrl),\n    'POST',\n    JSON.stringify(randomSearchBody(albumId, personId, isFavorite))\n  )\n  let usedLegacyFallback = false\n  if (response.status === 404) {\n    frameos.log(\n      'This Immich server lacks POST /api/search/random; falling back to /api/assets/random where album/person/favorite filters cannot be applied.'\n    )\n    response = requestJson(apiKey, legacyRandomUrl(serverUrl))\n    usedLegacyFallback = true\n  }\n  if (response.status !== 200) {\n    return { asset: null, message: `Error fetching a random image from Immich: ${httpErrorMessage(response)}` }\n  }\n  let assets = imageAssets(parseBody(response.body))\n  if (usedLegacyFallback && isFavorite) {\n    assets = assets.filter((asset) => asset.isFavorite)\n  }\n  frameos.log(\n    `Immich random search (${describeSearch(albumId, personId, isFavorite)}): HTTP ${response.status}, ${assets.length} image candidate(s)`\n  )\n  if (assets.length === 0) {\n    if (usedLegacyFallback) {\n      return { asset: null, message: 'This Immich server returned no matching images from /api/assets/random.' }\n    }\n    return { asset: null, message: emptyMessage }\n  }\n  return { asset: pickRandomAsset(assets), message: '' }\n}\n\n// ---------------------------------------------------------------------------\n// The photo: native download, with a base64 fallback for older firmware\n// ---------------------------------------------------------------------------\n\nfunction downloadPhoto(url: string, apiKey: string, saveAsset: { name: string; extension: string; mode: string } | null): FetchedPhoto {\n  const headers = { 'x-api-key': apiKey }\n  if (typeof frameos.fetchImage === 'function') {\n    return frameos.fetchImage(url, saveAsset ? { headers, saveAsset } : { headers })\n  }\n  // Firmware before fetchImage (2026.10): the bytes cross the heap as base64,\n  // about three times the photo's size. The native path above is the one an\n  // ESP32 needs; here a Pi gets the picture, with no asset saved.\n  const response = frameos.httpRequest(url, { headers, base64: true, timeoutMs: REQUEST_TIMEOUT_MS })\n  if (response.status !== 200 || !response.bodyBase64) {\n    return { image: null, error: httpErrorMessage(response) }\n  }\n  return { image: frameos.image({ base64: response.bodyBase64 }) }\n}\n\n// ---------------------------------------------------------------------------\n// Error panel: the message on the frame, the way the built-in apps paint it\n// ---------------------------------------------------------------------------\n\nfunction escapeXml(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nfunction wrapWords(text: string, maxChars: number): string[] {\n  const lines: string[] = []\n  let line = ''\n  for (const word of text.split(/\\s+/).filter((part) => part !== '')) {\n    if (line !== '' && line.length + 1 + word.length > maxChars) {\n      lines.push(line)\n      line = word\n    } else {\n      line = line === '' ? word : `${line} ${word}`\n    }\n  }\n  if (line !== '') {\n    lines.push(line)\n  }\n  return lines\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const fontSize = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const margin = fontSize\n  const lines = wrapWords(message, Math.max(10, Math.floor((width - 2 * margin) / (fontSize * 0.55))))\n  const lineHeight = Math.round(fontSize * 1.35)\n  const text = lines\n    .map(\n      (line, index) =>\n        `<text x=\"${margin}\" y=\"${margin + fontSize + index * lineHeight}\" font-family=\"Ubuntu\" font-size=\"${fontSize}\" fill=\"#111111\">${escapeXml(line)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\n// ---------------------------------------------------------------------------\n// The app\n// ---------------------------------------------------------------------------\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const width = context.imageWidth || app.frame.width\n  const height = context.imageHeight || app.frame.height\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n\n  let mode = String(app.config.mode ?? '').trim()\n  if (mode === '') {\n    mode = 'random'\n  }\n  const albumId = String(app.config.albumId ?? '').trim()\n  const personId = String(app.config.personId ?? '').trim()\n  const metadataStateKey = String(app.config.metadataStateKey ?? '').trim()\n  const saveAssets = String(app.config.saveAssets ?? 'auto')\n  const previewSize = app.config.previewSize === 'fullsize' ? 'fullsize' : 'preview'\n\n  const serverUrl = normalizeServerUrl(frameos.getSetting('immich', 'url'))\n  if (serverUrl === '') {\n    return fail('Please provide an Immich server URL in the settings.')\n  }\n  const apiKey = String(frameos.getSetting('immich', 'apiKey') ?? '')\n  if (apiKey === '') {\n    return fail('Please provide an Immich API key in the settings.')\n  }\n  if (mode === 'album' && albumId === '') {\n    return fail(\"Please provide an album ID. It's the UUID visible in the album's URL.\")\n  }\n\n  let picked: Candidates\n  if (mode === 'album') {\n    // Server-side random pick: albums can be huge and the full asset list\n    // would blow the response cap (and ESP32 memory).\n    picked = fetchRandomAsset(\n      serverUrl,\n      apiKey,\n      albumId,\n      '',\n      false,\n      \"This album contains no images. Double-check the album ID. It's the UUID in the album's URL.\"\n    )\n  } else if (mode === 'memories') {\n    const response = requestJson(apiKey, memoriesUrl(serverUrl, todayIso()))\n    let asset: ImmichAsset | null = null\n    if (response.status === 200) {\n      asset = pickRandomAsset(memoriesImageAssets(parseBody(response.body)))\n    } else {\n      frameos.log(`No Immich memories for today (${httpErrorMessage(response)}), showing a random image instead.`)\n    }\n    picked = asset ? { asset, message: '' } : fetchRandomAsset(serverUrl, apiKey)\n  } else if (mode === 'favorites') {\n    picked = fetchRandomAsset(serverUrl, apiKey, '', '', true, 'No favorite images found in Immich.')\n  } else {\n    picked = fetchRandomAsset(serverUrl, apiKey, '', personId)\n  }\n  if (!picked.asset) {\n    return fail(picked.message)\n  }\n\n  const asset = picked.asset\n  if (!asset.id) {\n    return fail('Immich returned an asset without an ID.')\n  }\n\n  const saveAsset =\n    saveAssets === 'auto' || saveAssets === 'always'\n      ? { name: assetBaseName(asset), extension: assetFileExtension(asset, previewSize), mode: saveAssets }\n      : null\n  frameos.log(`Showing Immich asset ${asset.id} (${asset.originalFileName ?? 'unnamed'}, ${previewSize})`)\n  const photo = downloadPhoto(assetDownloadUrl(serverUrl, asset.id, previewSize), apiKey, saveAsset)\n  if (!photo.image) {\n    return fail(`Error fetching image from Immich: ${photo.error ?? 'no image'}`)\n  }\n\n  if (metadataStateKey !== '') {\n    frameos.setState(metadataStateKey, assetMetadata(asset))\n  }\n  return photo.image\n}\n",
+    "config.json": "{\n  \"name\": \"Immich\",\n  \"description\": \"Show photos from a self-hosted Immich server: a random image from the whole library, one album, one person, your favorites, or today's memories. The photo is decoded straight into the canvas, so it runs on an ESP32 too.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"immich\"],\n  \"fields\": [\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"value\": \"random\",\n      \"options\": [\"random\", \"album\", \"favorites\", \"memories\"],\n      \"required\": false,\n      \"label\": \"Mode\",\n      \"hint\": \"Which images to show: a random image from the whole library, a random image from one album, a random favorite, or today's memories.\"\n    },\n    {\n      \"name\": \"albumId\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Album ID\",\n      \"hint\": \"UUID of the album, visible in the album URL.\",\n      \"placeholder\": \"e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"album\" }]\n    },\n    {\n      \"name\": \"personId\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Person ID\",\n      \"hint\": \"Optional. UUID of a person to limit random images to, visible in the person's URL.\",\n      \"placeholder\": \"e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"random\" }]\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {source, id, originalFileName, camera EXIF fields, people, ...}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the downloaded image to disk as an asset in the frame's assets folder. You can later use the 'Local image' app to view saved assets. 'auto' saves when the frame is set to save assets, 'always' always saves, 'never' never saves. Frames without storage (ESP32) never save.\"\n    },\n    {\n      \"name\": \"previewSize\",\n      \"type\": \"select\",\n      \"value\": \"preview\",\n      \"options\": [\"preview\", \"fullsize\"],\n      \"label\": \"Image size\",\n      \"hint\": \"'preview' is resized server-side and much lighter on frame memory. 'fullsize' downloads the original file.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+  },
   "repo/apps/code/jsImage": {
     "app.ts": "export function get(app: FrameOSApp): FrameOSImageSpec {\n  return frameos.image({\n    width: app.config.width,\n    height: app.config.height,\n    color: app.config.color,\n    opacity: app.config.opacity,\n  })\n}\n",
     "config.json": "{\n  \"name\": \"New image data app (JS)\",\n  \"category\": \"data\",\n  \"description\": \"JavaScript data app template that returns an image object.\",\n  \"fields\": [\n    {\n      \"name\": \"width\",\n      \"label\": \"Width\",\n      \"type\": \"integer\",\n      \"value\": 320\n    },\n    {\n      \"name\": \"height\",\n      \"label\": \"Height\",\n      \"type\": \"integer\",\n      \"value\": 180\n    },\n    {\n      \"name\": \"color\",\n      \"label\": \"Fill Color\",\n      \"type\": \"color\",\n      \"value\": \"#dde7f0\"\n    },\n    {\n      \"name\": \"opacity\",\n      \"label\": \"Opacity\",\n      \"type\": \"float\",\n      \"value\": 1\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n"

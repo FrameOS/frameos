@@ -40,6 +40,7 @@ proc echoServerLoop() {.thread.} =
     server.accept(client)
     var requestLine = ""
     var authHeader = ""
+    var apiKeyHeader = ""
     var contentLength = 0
     try:
       requestLine = client.recvLine(timeout = 5000)
@@ -50,6 +51,8 @@ proc echoServerLoop() {.thread.} =
         let lowered = line.toLowerAscii()
         if lowered.startsWith("authorization:"):
           authHeader = line.split(":", maxsplit = 1)[1].strip()
+        elif lowered.startsWith("x-api-key:"):
+          apiKeyHeader = line.split(":", maxsplit = 1)[1].strip()
         elif lowered.startsWith("content-length:"):
           contentLength = parseInt(line.split(":", maxsplit = 1)[1].strip())
     except CatchableError:
@@ -78,12 +81,39 @@ proc echoServerLoop() {.thread.} =
         payload[i] = chr(i)
       client.send("HTTP/1.1 200 OK\r\nContent-Length: 256\r\n\r\n" & payload)
       client.close()
+    of "/photo.png":
+      # An Immich-shaped endpoint: the image is only served to the API key.
+      if apiKeyHeader != "secret":
+        let reply = """{"message":"Invalid API key"}"""
+        client.send("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: " &
+          $reply.len & "\r\n\r\n" & reply)
+      else:
+        let photo = newImage(5, 3)
+        photo.fill(rgba(20, 120, 220, 255))
+        let png = encodeImage(photo, PngFormat)
+        client.send("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: " &
+          $png.len & "\r\n\r\n" & png)
+      client.close()
     else:
       let reply = $(%*{"method": httpMethod, "auth": authHeader, "body": body})
       client.send("HTTP/1.1 200 OK\r\nContent-Length: " & $reply.len & "\r\n\r\n" & reply)
       client.close()
 
   server.close()
+
+var echoServerStarted = false
+
+proc echoServerBase(): string =
+  ## Starts the echo server on first use; the last HTTP test stops it with /quit.
+  if not echoServerStarted:
+    echoServerStarted = true
+    createThread(echoServerThread, echoServerLoop)
+    for _ in 0 ..< 100:
+      if int(echoServerPort) != 0:
+        break
+      sleep(20)
+  doAssert int(echoServerPort) != 0
+  "http://127.0.0.1:" & $int(echoServerPort)
 
 proc testLogger(config: FrameConfig): Logger =
   var logger = Logger(frameConfig: config, enabled: true)
@@ -633,14 +663,157 @@ suite "js app runtime":
     check payload["badRead"].kind == JNull
     check readFile(assetsDir / "streams" / "out.txt") == "streamed"
 
+  test "fetchImage decodes natively and hands JS an image ref the output resolves":
+    let base = echoServerBase()
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-fetch-image".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 31.NodeId, nodeName: "jsFetchImage", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "image",
+      source = """export function get(app, context) {
+          const photo = frameos.fetchImage(`${app.config.base}/photo.png`, { headers: { "x-api-key": "secret" } })
+          frameos.setState("fetched", { width: photo.width, height: photo.height, error: photo.error ?? null,
+            ref: photo.image && photo.image.__frameosType })
+          return photo.image
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"base": base}, context)
+    check value.kind == fkImage
+    check value.asImage().width == 5
+    check value.asImage().height == 3
+    let pixel = value.asImage().data[value.asImage().dataIndex(2, 1)]
+    check pixel.b == 220
+    check scene.state["fetched"]["width"].getInt() == 5
+    check scene.state["fetched"]["height"].getInt() == 3
+    check scene.state["fetched"]["error"].kind == JNull
+    check scene.state["fetched"]["ref"].getStr() == "imageRef"
+    # Transient: nothing outlives the get() that fetched it.
+    check runtime.images.len == 0
+
+  test "fetchImage claims an offered target under a decoder fit, not under a placement":
+    # The planner offers a JS node the consumer's target under every placement
+    # (a natural-size producer draws 1:1). A download is a decode, which fits
+    # — so it takes the target for cover/contain/stretch and leaves "center"
+    # alone, decoding bounded by the target's size instead.
+    let base = echoServerBase()
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-fetch-image-target".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 32.NodeId, nodeName: "jsFetchImageTarget", scene: scene, frameConfig: config)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "image",
+      source = """export function get(app, context) {
+          return frameos.fetchImage(`${app.config.base}/photo.png`, { headers: { "x-api-key": "secret" } }).image
+        }"""
+    )
+
+    let cell = newImage(6, 4)
+    let covered = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0,
+      loopKey: ".", nextSleep: -1, decodeTargetImage: cell, decodeTargetNodeId: 32.NodeId,
+      decodeTargetScalingMode: "cover")
+    let coveredValue = runtime.get(owner, %*{"base": base}, covered)
+    check coveredValue.kind == fkImage
+    # Claimed: the offer is consumed and addressed to this node. (A host
+    # decodes at native resolution and lets the consumer scale; the ESP32
+    # streams into the cell itself.)
+    check covered.decodeTargetImage.isNil
+    check covered.decodeTargetClaimedBy == 32.NodeId
+    check coveredValue.asImage().width == 5
+
+    let centered = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0,
+      loopKey: ".", nextSleep: -1, decodeTargetImage: cell, decodeTargetNodeId: 32.NodeId,
+      decodeTargetScalingMode: "center")
+    let centeredValue = runtime.get(owner, %*{"base": base}, centered)
+    check centeredValue.kind == fkImage
+    # Unclaimed: the interpreter discards the offer and render/image places
+    # the natural-size photo itself.
+    check centered.decodeTargetImage == cell
+    check centered.decodeTargetClaimedBy == 0.NodeId
+    check centeredValue.asImage().width == 5
+    check centeredValue.asImage().height == 3
+
+  test "fetchImage reports HTTP failures and non-image bodies instead of throwing":
+    let base = echoServerBase()
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-fetch-image-errors".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 33.NodeId, nodeName: "jsFetchImageErrors", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          const denied = frameos.fetchImage(`${app.config.base}/photo.png`, { headers: { "x-api-key": "wrong" } })
+          const notImage = frameos.fetchImage(`${app.config.base}/echo`)
+          const unreachable = frameos.fetchImage("http://127.0.0.1:1/photo.png")
+          return { denied, notImage, unreachable }
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"base": base}, context)
+    check value.kind == fkJson
+    let payload = value.asJson()
+    check payload["denied"]["image"].kind == JNull
+    check payload["denied"]["error"].getStr().contains("401")
+    check payload["notImage"]["image"].kind == JNull
+    check payload["notImage"]["error"].getStr().len > 0
+    check payload["unreachable"]["image"].kind == JNull
+    check payload["unreachable"]["error"].getStr().len > 0
+
+  test "fetchImage saves the downloaded bytes as a frame asset when asked":
+    let base = echoServerBase()
+    let assetsDir = getTempDir() / "frameos-js-fetch-image-save"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    config.saveAssets = %*true
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-fetch-image-save".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 34.NodeId, nodeName: "immich", appKeyword: "immich", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          const headers = { "x-api-key": "secret" }
+          const auto = frameos.fetchImage(`${app.config.base}/photo.png`, { headers,
+            saveAsset: { name: "IMG_001", extension: "png", mode: "auto" } })
+          const evil = frameos.fetchImage(`${app.config.base}/photo.png`, { headers,
+            saveAsset: { name: "../../etc/passwd", extension: ".png/../x", mode: "always" } })
+          const never = frameos.fetchImage(`${app.config.base}/photo.png`, { headers,
+            saveAsset: { name: "skipped", extension: "png", mode: "never" } })
+          return { auto: auto.savedAs ?? null, evil: evil.savedAs ?? null, never: never.savedAs ?? null }
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"base": base}, context)
+    check value.kind == fkJson
+    let payload = value.asJson()
+    let savedAuto = payload["auto"].getStr()
+    check savedAuto.startsWith(assetsDir / "saved" / "immich" / "IMG_001.")
+    check savedAuto.endsWith(".png")
+    check fileExists(savedAuto)
+    check readImage(savedAuto).width == 5
+    let savedEvil = payload["evil"].getStr()
+    check savedEvil.startsWith(assetsDir / "saved" / "immich" / "")
+    check savedEvil.endsWith(".jpg")
+    check not savedEvil.contains("..")
+    check fileExists(savedEvil)
+    check payload["never"].kind == JNull
+
   test "httpRequest posts with headers and fetches binary responses":
-    createThread(echoServerThread, echoServerLoop)
-    for _ in 0 ..< 100:
-      if int(echoServerPort) != 0:
-        break
-      sleep(20)
-    check int(echoServerPort) != 0
-    let base = "http://127.0.0.1:" & $int(echoServerPort)
+    let base = echoServerBase()
 
     let config = testConfig()
     let logger = testLogger(config)

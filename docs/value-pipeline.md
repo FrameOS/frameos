@@ -188,6 +188,15 @@ plan is not the claim; now one log field says which you have.
   the target only in the branch where it would have allocated one of exactly
   that size, and a plain-canvas spec with a semi-transparent `color` fill
   refuses the live canvas (a fill is a set, not a composite).
+- **A JS app's downloaded photo is a decode, not a generator.**
+  `frameos.fetchImage` (js_runtime/app_runtime.nim) is the one JS path that
+  fits rather than draws 1:1, so it claims the natural-fit offer only when
+  the consumer's placement is one a decoder honours (cover/contain/stretch)
+  and then takes the same decode-into-target path as the Nim photo apps;
+  under `center` or a corner it decodes bounded by the offered size and
+  leaves the target unclaimed. This is what lets the Immich code app
+  (`repo/apps/code/immich`) stream a photo into an ESP32 canvas without the
+  bytes ever crossing the JS heap.
 - **SVG rasterizes into the offered target** (`renderInto` in the pixie fork,
   `renderSvgIntoTarget` in `utils/image.nim`) — including the live canvas.
   That was a measured decision; see below.

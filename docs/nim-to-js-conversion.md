@@ -100,7 +100,7 @@ node) and feeds problems back for up to three attempts.
 | context.hasImage, context.image.width/height, context.nextSleep = s | context.hasImage, context.imageWidth/imageHeight, frameos.setNextSleep(s) |
 | boundedRequestWithHeaders, utils/http_client | frameos.httpRequest(url, {method, headers, body, timeoutMs, base64}), frameos.fetchJson/fetchText |
 | self.saveAsset, readFile/writeFile under assets | frameos.writeAsset, frameos.readAsset |
-| downloadImage (remote) / (local) | a data/downloadImage node wired in / frameos.loadAssetImage |
+| downloadImage, downloadImageWithDataForContext, saveAsset (remote) / (local) | frameos.fetchImage(url, {headers, saveAsset}).image (decoded natively, never through the JS heap) / frameos.loadAssetImage |
 | rand() / Option[T] / raise newException / strformat | Math.random() / undefined + ?. / throw new Error / template literal |
 | pixie newImage, fill, draw, fillPath, strokePath, drawText, typeset, newFont, rgb() | an SVG string via frameos.svg(): <rect>, <path>, <text> with font-family/font-size, #rrggbb |
 | renderError(...) | return an SVG with the message, or frameos.error() |
