@@ -199,9 +199,32 @@ def firmware_update_after_boot(
     minutes ago"; a row that never narrated an update (up-to-date, skipped,
     downgrade-refused) clears. The cloud hub's firmwareUpdateAfterBoot is
     the sibling."""
+    if not isinstance(firmware_update, dict):
+        # No narrative at all, yet the frame boots on a version the row did
+        # not know: an update happened unseen. The ESP32's early-boot updater
+        # writes its `ota:backend` lines before the log upload exists and
+        # restarts into the new image, so on this plane the whole update
+        # leaves no line (frame 70, 2026-10-12: 2026.10.8 -> 2026.10.9 in
+        # 100 s, nothing in the drawer). The boot itself is the evidence.
+        if (
+            isinstance(reported_version, str)
+            and reported_version
+            and isinstance(known_version, str)
+            and known_version
+            and reported_version != known_version
+        ):
+            at = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+            return {
+                "at": at.isoformat(),
+                "detail": "",
+                "plane": "backend",
+                "status": "done",
+                "version": reported_version[:VERSION_MAX_LENGTH],
+            }
+        return LEAVE
     if not firmware_update_is_over(firmware_update, reported_version, known_version):
         return LEAVE
-    row = firmware_update if isinstance(firmware_update, dict) else {}
+    row = firmware_update
     if row.get("status") not in FIRMWARE_UPDATE_NARRATED_STATUSES:
         return None
     row_version = row.get("version")

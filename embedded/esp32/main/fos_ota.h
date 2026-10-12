@@ -38,6 +38,10 @@ void fos_ota_mark_boot_valid(void);
  * slot when it differs, and reboot on success. */
 esp_err_t fos_ota_check_and_apply(void);
 bool fos_ota_busy(void);
+/* Log the last OTA verdict again (`replayed: true`) if the restart that
+ * followed it swallowed the original: called on the first pass after a boot,
+ * once the log uploads are live. A no-op when nothing is pending. */
+void fos_ota_replay_last_line(void);
 bool fos_ota_boot_request_pending(void);
 esp_err_t fos_ota_run_boot_request(void);
 /* Background task that checks every interval_hours (backend-managed). */

@@ -1435,6 +1435,11 @@ static void client_task(void *arg)
                      wake_cause_name());
         }
         frameos_nim_log_hook(line);
+        /* The verdict of an OTA that restarted the chip before its line
+         * could leave (the early-boot updater runs before the uploads
+         * exist): logged again now, so the control plane's row ends in
+         * `verified` → done, or in the error the device saw. */
+        fos_ota_replay_last_line();
         /* The RTC due date is only meaningful across a deep sleep: after an
          * OTA, an OOM restart or a power cycle the panel may show anything,
          * so the first pass renders whatever the old bookkeeping said. */

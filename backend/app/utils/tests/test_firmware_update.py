@@ -193,9 +193,28 @@ def test_the_boot_that_ends_an_update_leaves_a_done_row():
     # on the same version stays.
     assert firmware_update_after_boot({"status": "up-to-date"}, "2026.10.8", "2026.10.6", NOW) is None
     assert firmware_update_after_boot({"status": "done", "version": "2026.10.8"}, "2026.10.8", "2026.10.8", NOW) is LEAVE
-    assert firmware_update_after_boot(None, "2026.10.8", "2026.10.6", NOW) is LEAVE
+    # No row and a new version: the update happened unseen (its own test below).
+    assert firmware_update_after_boot(None, "2026.10.8", "2026.10.6", NOW)["status"] == "done"
     assert firmware_update_done({"status": "verified", "detail": "x", "version": "2026.10.8"}) == {
         "status": "done",
         "detail": "x",
         "version": "2026.10.8",
     }
+
+
+def test_a_boot_on_an_unknown_version_with_no_row_is_an_update_that_happened_unseen():
+    # Frame 70, 2026-10-12: the ESP32's early-boot updater logs before the
+    # backend upload exists, then restarts into the new image; the backend
+    # saw 2026.10.8 boot, then 2026.10.9 boot, and nothing between.
+    done = firmware_update_after_boot(None, "2026.10.9", "2026.10.8", NOW)
+    assert done == {
+        "at": "2026-10-12T09:30:00+00:00",
+        "detail": "",
+        "plane": "backend",
+        "status": "done",
+        "version": "2026.10.9",
+    }
+    # Same version, or a version the backend never knew: nothing to say.
+    assert firmware_update_after_boot(None, "2026.10.9", "2026.10.9", NOW) is LEAVE
+    assert firmware_update_after_boot(None, "2026.10.9", None, NOW) is LEAVE
+    assert firmware_update_after_boot(None, None, "2026.10.8", NOW) is LEAVE

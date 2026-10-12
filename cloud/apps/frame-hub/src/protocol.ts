@@ -291,6 +291,22 @@ export function firmwareUpdateAfterBoot(
   knownVersion: string | null | undefined,
   now: Date = new Date(),
 ): FirmwareUpdateRecord | null | undefined {
+  if (!firmwareUpdate || typeof firmwareUpdate !== "object") {
+    // No narrative at all, yet the frame comes back on a version the row did
+    // not know: an update happened unseen (the ESP32's early-boot updater
+    // writes its lines before any session exists and restarts into the new
+    // image; a USB reflash looks the same). The boot itself is the evidence.
+    if (
+      typeof reportedVersion === "string" &&
+      reportedVersion.length > 0 &&
+      typeof knownVersion === "string" &&
+      knownVersion.length > 0 &&
+      reportedVersion !== knownVersion
+    ) {
+      return { at: now.toISOString(), detail: "", plane: "cloud", status: "done", version: reportedVersion.slice(0, 64) };
+    }
+    return undefined;
+  }
   if (!firmwareUpdateIsOver(firmwareUpdate, reportedVersion, knownVersion)) {
     return undefined;
   }

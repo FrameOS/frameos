@@ -407,12 +407,13 @@ async def process_log(
         # a verified install, or any version the row did not know (a success
         # the backend missed) becomes "done" with the version now running. A
         # failure on the same version stays visible.
-        if frame.firmware_update is not None:
-            known_version = _known_frameos_version(frame)
-            boot_version = _frameos_version_from_boot(log.get("version"))
-            after = firmware_update_after_boot(frame.firmware_update, boot_version, known_version, timestamp)
-            if after is not FIRMWARE_UPDATE_LEAVE:
-                changes["firmware_update"] = after
+        # ...and a boot on a version the row never knew, with no narrative
+        # at all, is an update that happened unseen (firmware_update_after_boot).
+        known_version = _known_frameos_version(frame)
+        boot_version = _frameos_version_from_boot(log.get("version"))
+        after = firmware_update_after_boot(frame.firmware_update, boot_version, known_version, timestamp)
+        if after is not FIRMWARE_UPDATE_LEAVE:
+            changes["firmware_update"] = after
         if (frame.mode or "rpios") != "embedded":
             # The bootup line is where the backend learns which FrameOS the
             # frame now runs (the runtime sends `version` since 2026.9.13):

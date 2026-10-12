@@ -228,6 +228,18 @@ RTC_DATA_ATTR static uint8_t s_ota_failures;
  * fos_version_is_downgrade. */
 RTC_DATA_ATTR static uint8_t s_ota_allow_downgrade;
 
+/* The last `ota:<plane>` line, kept across the restart that follows it. The
+ * early-boot updater (fos_ota_run_boot_request) logs before the backend log
+ * upload exists and the cloud session is up, and a verified image restarts
+ * the chip right after — so on the backend plane an update left no line at
+ * all (frame 70, 2026-10-12: 2026.10.8 -> 2026.10.9 in 100 s, nothing in
+ * the drawer). The first pass after the boot logs it again, marked
+ * `replayed`, once the uploads are live (fos_ota_replay_last_line). */
+RTC_DATA_ATTR static char s_ota_last_plane[16];
+RTC_DATA_ATTR static char s_ota_last_status[24];
+RTC_DATA_ATTR static char s_ota_last_detail[96];
+RTC_DATA_ATTR static uint8_t s_ota_last_pending;
+
 void fos_ota_allow_downgrade_once(void)
 {
     s_ota_allow_downgrade = 1;
@@ -261,6 +273,26 @@ static void ota_log(const ota_source_t *src, const char *status, const char *det
              src->plane, status, detail ? detail : "");
     frameos_nim_log_hook(line);
     frameos_nim_flush_logs();
+    /* Progress is noise after a restart; every other line is the verdict. */
+    if (strcmp(status, "progress") != 0) {
+        strlcpy(s_ota_last_plane, src->plane, sizeof(s_ota_last_plane));
+        strlcpy(s_ota_last_status, status, sizeof(s_ota_last_status));
+        strlcpy(s_ota_last_detail, detail ? detail : "", sizeof(s_ota_last_detail));
+        s_ota_last_pending = 1;
+    }
+}
+
+void fos_ota_replay_last_line(void)
+{
+    if (!s_ota_last_pending) return;
+    s_ota_last_pending = 0;
+    if (s_ota_last_plane[0] == '\0' || s_ota_last_status[0] == '\0') return;
+    char line[256];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"ota:%s\",\"source\":\"esp32\",\"status\":\"%s\","
+             "\"detail\":\"%s\",\"replayed\":true}",
+             s_ota_last_plane, s_ota_last_status, s_ota_last_detail);
+    frameos_nim_log_hook(line);
 }
 
 /* Progress every 512 KB, as a structured line the Logs panel shows. */
