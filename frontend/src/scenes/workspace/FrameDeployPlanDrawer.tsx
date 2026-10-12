@@ -2287,7 +2287,11 @@ function OtaUpdateCard({
   // started the update is not mistaken for one that was lost.
   const updateState = firmwareUpdateState(frame)
   const { progress, queued, inFlight } = updateState
-  const busyLabel = progress?.kind === 'running' ? 'Updating firmware' : queued ? 'Update queued' : null
+  // A deploy this backend is running (fast: the scenes; full: the OTA, then
+  // the scenes) holds the card's buttons too, since the drawer stays open.
+  const deploying = frame.status === 'deploying'
+  const busyLabel =
+    progress?.kind === 'running' ? 'Updating firmware' : queued ? 'Update queued' : deploying ? 'Deploying' : null
   const busyTitle =
     progress?.kind === 'running'
       ? progress.title
@@ -2295,11 +2299,13 @@ function OtaUpdateCard({
       ? 'An update request is already queued for this frame'
       : undefined
   const busyIcon =
-    progress?.kind === 'running' ? (
+    progress?.kind === 'running' || deploying ? (
       <ArrowPathIcon className="h-4 w-4 animate-spin" />
     ) : queued ? (
       <HourglassIcon className="h-4 w-4" />
     ) : null
+  const fastBusy = progress?.kind === 'running' || deploying
+  const fullBusy = inFlight || deploying
   const fullDeploy = deploy?.onFullDeploy && otaSupported ? deploy.onFullDeploy : null
   // The primary half of the two-stage button: the recommended kind when the
   // frame can do it, else full when it can (it includes the fast half).
@@ -2339,12 +2345,16 @@ function OtaUpdateCard({
           <button
             type="button"
             onClick={primaryMode === 'full' && fullDeploy ? fullDeploy : deploy.onFastDeploy}
-            disabled={disabled || (primaryMode === 'full' ? inFlight : progress?.kind === 'running')}
+            disabled={disabled || (primaryMode === 'full' ? fullBusy : fastBusy)}
             title={primaryMode === 'full' ? busyTitle ?? deployTitles.full : deployTitles.fast}
             className="frameos-primary-action inline-flex items-center gap-2 rounded-l-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >
-            {primaryMode === 'full' && busyIcon ? busyIcon : <CloudArrowUpIcon className="h-4 w-4" />}
-            {primaryMode === 'full' ? busyLabel ?? 'Full deploy' : 'Fast deploy'}
+            {(primaryMode === 'full' ? fullBusy : fastBusy) && busyIcon ? (
+              busyIcon
+            ) : (
+              <CloudArrowUpIcon className="h-4 w-4" />
+            )}
+            {primaryMode === 'full' ? busyLabel ?? 'Full deploy' : deploying ? 'Deploying' : 'Fast deploy'}
           </button>
           <DropdownMenu
             buttonColor="none"
@@ -2356,7 +2366,7 @@ function OtaUpdateCard({
               {
                 label: 'Fast deploy',
                 title: deployTitles.fast,
-                disabled: disabled || progress?.kind === 'running',
+                disabled: disabled || fastBusy,
                 onClick: deploy.onFastDeploy,
                 icon: <CloudArrowUpIcon className="h-5 w-5" />,
               },
@@ -2365,7 +2375,7 @@ function OtaUpdateCard({
                     {
                       label: 'Full deploy',
                       title: busyTitle ?? deployTitles.full,
-                      disabled: disabled || inFlight,
+                      disabled: disabled || fullBusy,
                       onClick: fullDeploy,
                       icon: <ArrowPathIcon className="h-5 w-5" />,
                     },
@@ -2373,7 +2383,7 @@ function OtaUpdateCard({
                       label: 'Update firmware only',
                       title:
                         busyTitle ?? 'Install the latest FrameOS release over the air; the scenes stay as they are',
-                      disabled: disabled || inFlight,
+                      disabled: disabled || fullBusy,
                       onClick: onOtaUpdate,
                       icon: busyIcon ?? <ArrowDownTrayIcon className="h-5 w-5" />,
                     },
@@ -4016,7 +4026,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               ) : shellLess ? (
                 <ShellLessDeploySection
                   frame={frame}
-                  onDeploy={() => closeAndRun(saveAndFastDeployFrame)}
+                  // A body button: the drawer stays open to show what follows.
+                  onDeploy={() => saveAndFastDeployFrame()}
                   onSelectView={showDeployDrawerView}
                 />
               ) : deployPlansLoading ? (
@@ -4082,16 +4093,15 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   {isEmbeddedFrame ? (
                     <EmbeddedFirmwareSection
                       frame={frame}
-                      onOtaUpdate={() => closeAndRun(() => applyEmbeddedFirmwareOta(frame.id))}
-                      // The deploy actions live here, next to what they do;
-                      // the footer only closes (see the shell-less branch).
+                      // The deploy actions live here, next to what they do,
+                      // and the drawer stays open so the card can show what
+                      // follows; only a footer button closes on click.
+                      onOtaUpdate={() => applyEmbeddedFirmwareOta(frame.id)}
                       deploy={{
                         recommendedMode:
                           deployRecommendation?.mode === 'none' ? null : deployRecommendation?.mode ?? null,
-                        onFastDeploy: () => closeAndRun(saveAndFastDeployFrame),
-                        onFullDeploy: embeddedFullDeploySupported
-                          ? () => closeAndRun(saveAndFullDeployFrame)
-                          : undefined,
+                        onFastDeploy: () => saveAndFastDeployFrame(),
+                        onFullDeploy: embeddedFullDeploySupported ? () => saveAndFullDeployFrame() : undefined,
                       }}
                     />
                   ) : null}
