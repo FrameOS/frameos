@@ -1,7 +1,7 @@
 """Rewrite data/immich nodes into the Immich JavaScript app
 
 Revision ID: b4d8f2a6c1e9
-Revises: e7a1c9d3f5b2
+Revises: b3c7d9e1f2a4
 Create Date: 2026-10-12
 
 The built-in Nim app `data/immich` was deleted; its replacement is the repo
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "b4d8f2a6c1e9"
-down_revision = "e7a1c9d3f5b2"
+down_revision = "b3c7d9e1f2a4"
 branch_labels = None
 depends_on = None
 
