@@ -3960,6 +3960,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
+              {/* What this deploy changes comes first: it is the answer to
+                  the question the drawer was opened with, and it does not
+                  wait for the plan. The shell-less dialog has its own
+                  "What's on the frame" card instead. */}
+              {!shellLess && deployChangeDetails.length > 0 ? (
+                <section className="mb-4 space-y-2">
+                  <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Pending changes</DrawerHeading>
+                  <div className="frame-tool-card rounded-[22px] p-4">
+                    <ChangeRows changes={deployChangeDetails} />
+                  </div>
+                </section>
+              ) : null}
               {/* Backend frames push over SSH/HTTP the moment you click, so
                   this is normally empty. The exception is an ESP32 OTA
                   request recorded while its firmware is still building. */}
@@ -4104,14 +4116,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                         onFullDeploy: embeddedFullDeploySupported ? () => saveAndFullDeployFrame() : undefined,
                       }}
                     />
-                  ) : null}
-                  {deployChangeDetails.length > 0 ? (
-                    <section className="space-y-2">
-                      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Pending changes</DrawerHeading>
-                      <div className="frame-tool-card rounded-[22px] p-4">
-                        <ChangeRows changes={deployChangeDetails} />
-                      </div>
-                    </section>
                   ) : null}
                   {deploySummaryWithoutBuildOptions.length > 0 ? (
                     <section>
