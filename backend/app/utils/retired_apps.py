@@ -37,14 +37,6 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
     },
 }
 
-# The device side of the cut: an ESP32 that runs the replacements says so on
-# every backend request (fos_backend_http.c), so its first pull after an OTA —
-# before its bootup line has told the backend the new version — already gets
-# the JS app, and a development build (which reports the last release's
-# version) is not mistaken for that release.
-CAPABILITIES_HEADER = "X-FrameOS-Capabilities"
-FETCH_IMAGE_CAPABILITY = "fetchImage"
-
 
 def replacement_app_entry(origin: str) -> dict[str, Any]:
     """The scene-local app a repo JS app becomes: its config.json keys plus
@@ -146,7 +138,8 @@ def restore_apps_in_scene(scene: Any, keywords: Iterable[str] | None = None) -> 
     changed = False
     for key in list(apps):
         app = apps[key]
-        keyword = by_origin.get(app.get("origin")) if isinstance(app, dict) else None
+        origin = app.get("origin") if isinstance(app, dict) else None
+        keyword = by_origin.get(origin) if isinstance(origin, str) else None
         if keyword is None:
             continue
         for node in _app_nodes(scene):
@@ -185,37 +178,14 @@ def keywords_runtime_lacks(runtime_version: str | None) -> list[str]:
 
 
 def frame_runtime_version(frame: Any) -> str | None:
-    """The FrameOS to send a frame's scenes for, as far as this backend knows:
-    None (current) for an ESP32 whose last pull carried the capabilities
-    header (remember_device_capabilities), else its last bootup line, else
-    its deploy baseline (models/log.py keeps both current)."""
+    """The FrameOS a frame runs as far as this backend knows: its last bootup
+    line, else its deploy baseline (models/log.py keeps both current). An
+    ESP32 posts its bootup line, synchronously, before the first scenes pull
+    of a boot (main.c log_bootup_event), so the pull right after an OTA is
+    already judged by the new version."""
     from app.models.log import _known_frameos_version
 
-    embedded = getattr(frame, "embedded", None)
-    if isinstance(embedded, dict) and device_runs_replacements(embedded.get("capabilities")):
-        return None
     return _known_frameos_version(frame)
-
-
-def remember_device_capabilities(frame: Any, capabilities: str | None) -> bool:
-    """Record an ESP32's X-FrameOS-Capabilities header on the frame row, for
-    the paths that send it scenes without it asking (a queued preview, a
-    direct upload). Returns whether the row changed; the caller commits."""
-    embedded = getattr(frame, "embedded", None)
-    if not isinstance(embedded, dict):
-        if not capabilities:
-            return False
-        embedded = {}
-    value = capabilities.strip()[:200] if capabilities else None
-    if embedded.get("capabilities") == value:
-        return False
-    updated = dict(embedded)
-    if value:
-        updated["capabilities"] = value
-    else:
-        updated.pop("capabilities", None)
-    frame.embedded = updated
-    return True
 
 
 def scenes_for_runtime(scenes: Any, runtime_version: str | None) -> list:
@@ -225,19 +195,3 @@ def scenes_for_runtime(scenes: Any, runtime_version: str | None) -> list:
     restore_apps_in_scenes(result, lacking)
     retire_apps_in_scenes(result, [keyword for keyword in RETIRED_APPS if keyword not in lacking])
     return result
-
-
-def device_runs_replacements(capabilities: str | None) -> bool:
-    """Does an `X-FrameOS-Capabilities` header say the device runs the
-    replacements? Every firmware that dropped a retired Nim app sends it, so
-    a device that does not is one that still has every retired app."""
-    names = {part.strip() for part in (capabilities or "").split(",")}
-    return FETCH_IMAGE_CAPABILITY in names
-
-
-def scenes_for_embedded_device(scenes: Any, capabilities: str | None) -> list:
-    """What an ESP32 pulls from /embedded/scenes. Decided by its capabilities
-    header alone: its reported version cannot tell a development build from
-    the release before it, and arrives (in the bootup log line) after the
-    first pull of a fresh boot."""
-    return scenes_for_runtime(scenes, None if device_runs_replacements(capabilities) else "0")

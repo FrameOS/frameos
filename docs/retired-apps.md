@@ -49,17 +49,17 @@ Where each path learns the runtime:
 |---|---|
 | backend Pi full deploy, SD image, bootstrap | the release the backend installs |
 | backend Pi fast deploy, preview upload, frame sync push | the frame's last reported version |
-| backend ESP32 pull (`/embedded/scenes`, the commands ETag) | the `X-FrameOS-Capabilities: fetchImage` header, which only firmware with the replacement sends |
+| backend ESP32 pull (`/embedded/scenes`, the commands ETag) | the version in the board's last bootup line |
 | cloud `set_scenes` (assignments, preview pushes) | `frames.frameos_version` from the hello |
 
-The ESP32 decides by header, not version, because a development build reports
-the version of the release before it. The backend also remembers the header on
-the frame row (`embedded.capabilities`) for paths that send scenes unasked.
+A development build reports the version of the release before it, so it is
+judged as that release.
 
 **A frame that moves to a newer runtime moves its scenes too.**
 
-- **ESP32 on a backend:** it pulls on every wake, and the payload, and so the
-  ETag, changes with the header.
+- **ESP32 on a backend:** it pulls on every wake. A boot posts its bootup line
+  before the first pull, so the pull right after an OTA already gets the new
+  form, under a new ETag.
 - **Cloud frames:** the hub rebuilds the assigned set when a hello reports a
   new firmware version. If the checksum moved, it pushes the same assignments
   again, keeping the active scene.
@@ -82,10 +82,7 @@ the frame row (`embedded.capabilities`) for paths that send scenes unasked.
    table (`retired-apps.gen.ts`) and the Linux fallback
    (`retired_apps_gen.nim`).
 5. Add a backend alembic migration that calls `retire_apps_in_scenes`.
-6. If the replacement needs a new runtime capability, the ESP32 must announce
-   it in `X-FrameOS-Capabilities` (`fos_backend_http.c`). Teach
-   `device_runs_replacements` to read it.
-7. Delete the Nim app and regenerate the registries and catalogs (`make
+6. Delete the Nim app and regenerate the registries and catalogs (`make
    apploaders`, `generate_apps_asset_nim.py`, `generateBuiltinApps.mjs`).
 
 A change to a replacement's files needs the generator run again, since the

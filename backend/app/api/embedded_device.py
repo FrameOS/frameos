@@ -46,7 +46,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.utils.tz_slice import tz_slice
-from app.utils.retired_apps import remember_device_capabilities, scenes_for_embedded_device
+from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
 from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
@@ -363,21 +363,20 @@ async def api_embedded_device_render(
                     media_type="application/octet-stream")
 
 
-def embedded_scenes_payload(frame: Frame, capabilities: str | None = None) -> bytes:
+def embedded_scenes_payload(frame: Frame) -> bytes:
     """The frame's scenes as the JSON array the on-device interpreter loads.
 
     Embedded frames run every scene interpreted (there is no on-device
     compiler), so unlike Linux fast-deploy this does not filter on
     ``settings.execution``.
 
-    `capabilities` is the device's X-FrameOS-Capabilities header: firmware
-    without it still has the retired Nim apps and gets their keywords back
-    (utils/retired_apps.py). The payload — and so the ETag — differs by it,
-    which is what moves a board onto the JavaScript app on its first pull
-    after the OTA that removed the Nim one.
+    Firmware older than a retired Nim app's replacement gets its keyword back
+    (utils/retired_apps.py). The payload — and so the ETag — follows the
+    version the board reported at boot, which is what moves it onto the
+    JavaScript app on its first pull after the OTA that removed the Nim one.
     """
     scenes = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
-    scenes = scenes_for_embedded_device(scenes, capabilities)
+    scenes = scenes_for_runtime(scenes, frame_runtime_version(frame))
     return json.dumps(scenes, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
@@ -404,12 +403,9 @@ async def api_embedded_device_scenes(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
     if_none_match: str = Header(None),
-    x_frameos_capabilities: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    if remember_device_capabilities(frame, x_frameos_capabilities):
-        db.commit()
-    payload = embedded_scenes_payload(frame, x_frameos_capabilities)
+    payload = embedded_scenes_payload(frame)
     etag = embedded_payload_etag(payload)
     if if_none_match and if_none_match.strip() == etag:
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
@@ -425,8 +421,8 @@ def embedded_payload_etag(payload: bytes) -> str:
     return f'"{hashlib.sha256(payload).hexdigest()}"'
 
 
-def embedded_scenes_etag(frame: Frame, capabilities: str | None = None) -> str:
-    return embedded_payload_etag(embedded_scenes_payload(frame, capabilities))
+def embedded_scenes_etag(frame: Frame) -> str:
+    return embedded_payload_etag(embedded_scenes_payload(frame))
 
 
 def embedded_settings_document(db: Session, frame: Frame) -> tuple[bytes, str]:

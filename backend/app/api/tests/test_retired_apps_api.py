@@ -30,56 +30,53 @@ def immich_nim_scene() -> dict:
     }
 
 
-@pytest.mark.asyncio
-async def test_esp32_without_the_capability_gets_the_retired_keyword(async_client, no_auth_client, db):
-    """Firmware from before the Nim Immich app was retired still has it and
-    lacks frameos.fetchImage: it gets `data/immich`. Firmware that sends the
-    capabilities header gets the JS app — and a different ETag, which is what
-    moves a board over on its first pull after the OTA."""
-    frame = await device_frame(async_client, db)
-    frame.scenes = [immich_js_scene()]
+def report_boot(db, frame, version: str) -> None:
+    """What models/log.py records from the board's bootup line."""
+    frame.embedded = {**(frame.embedded or {}), 'lastBoot': {'frameosVersion': version}}
     db.add(frame)
     db.commit()
+
+
+@pytest.mark.asyncio
+async def test_esp32_on_older_firmware_gets_the_retired_keyword(async_client, no_auth_client, db):
+    """Firmware from before the Nim Immich app was retired still has it and
+    lacks frameos.fetchImage: it gets `data/immich`. Once the board boots a
+    release with the replacement it gets the JS app — and a different ETag,
+    which is what moves it over on its first pull after the OTA (the bootup
+    line is posted before that pull)."""
+    frame = await device_frame(async_client, db)
+    frame.scenes = [immich_js_scene()]
+    report_boot(db, frame, '2026.10.10')
     url = f'/api/frames/{frame.id}/embedded/scenes'
 
     older = await no_auth_client.get(url, headers=auth(frame))
     assert older.status_code == 200, older.text
     assert older.json()[0]['nodes'][0]['data'] == {'keyword': 'data/immich', 'config': {'mode': 'favorites'}}
     assert 'apps' not in older.json()[0]
-    db.refresh(frame)
-    assert 'capabilities' not in (frame.embedded or {})
 
-    current = await no_auth_client.get(url, headers={**auth(frame), 'X-FrameOS-Capabilities': 'fetchImage'})
+    report_boot(db, frame, '2026.10.11')
+    current = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': older.headers['etag']})
     assert current.status_code == 200, current.text
     assert current.json()[0]['nodes'][0]['data']['keyword'] == 'immich'
     assert current.json()[0]['apps']['immich']['origin'] == 'repo/apps/code/immich'
     assert current.headers['etag'] != older.headers['etag']
 
-    # Remembered for the paths that send it scenes unasked; the stored scenes
-    # are untouched.
+    # The stored scenes are untouched.
     db.refresh(frame)
-    assert frame.embedded['capabilities'] == 'fetchImage'
-    assert frame_runtime_version(frame) is None
     assert frame.scenes[0]['nodes'][0]['data']['keyword'] == 'immich'
+    assert frame_runtime_version(frame) == '2026.10.11'
 
 
 @pytest.mark.asyncio
-async def test_commands_pull_compares_the_etag_this_device_pulls(async_client, no_auth_client, db):
-    from app.api.embedded_device import embedded_scenes_etag
-
+async def test_esp32_that_never_reported_a_version_gets_the_js_app(async_client, no_auth_client, db):
+    """Unknown is a fresh flash of the release this backend carries."""
     frame = await device_frame(async_client, db)
     frame.scenes = [immich_js_scene()]
     db.add(frame)
     db.commit()
-    url = f'/api/frames/{frame.id}/embedded/commands'
-    headers = {**auth(frame), 'X-FrameOS-Capabilities': 'fetchImage'}
-    response = await no_auth_client.post(
-        url, headers=headers, json={'scenes_checksum': embedded_scenes_etag(frame, 'fetchImage')}
-    )
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
     assert response.status_code == 200, response.text
-    assert embedded_scenes_etag(frame) != embedded_scenes_etag(frame, 'fetchImage')
-    db.refresh(frame)
-    assert frame.embedded['capabilities'] == 'fetchImage'
+    assert response.json()[0]['nodes'][0]['data']['keyword'] == 'immich'
 
 
 @pytest.mark.asyncio

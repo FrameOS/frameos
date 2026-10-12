@@ -146,15 +146,7 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (client == NULL) return ESP_ERR_NO_MEM;
-    if (req->auth) {
-        esp_http_client_set_header(client, "Authorization", req->auth);
-        /* What this firmware runs that an older one did not: the backend sends
-         * a board without `fetchImage` the retired Nim keyword (data/immich)
-         * instead of the JavaScript app that replaced it, and decides by this
-         * header rather than the reported version, which a development build
-         * shares with the release before it (docs/retired-apps.md). */
-        esp_http_client_set_header(client, "X-FrameOS-Capabilities", "fetchImage");
-    }
+    if (req->auth) esp_http_client_set_header(client, "Authorization", req->auth);
     if (req->if_none_match && req->if_none_match[0]) {
         esp_http_client_set_header(client, "If-None-Match", req->if_none_match);
     }

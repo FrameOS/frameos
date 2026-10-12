@@ -6,12 +6,10 @@ import pytest
 from app.utils.retired_apps import (
     REPO_ROOT,
     RETIRED_APPS,
-    device_runs_replacements,
     keywords_runtime_lacks,
     replacement_app_entry,
     restore_apps_in_scenes,
     retire_apps_in_scenes,
-    scenes_for_embedded_device,
     scenes_for_runtime,
 )
 
@@ -82,17 +80,3 @@ def test_keywords_runtime_lacks():
     assert keywords_runtime_lacks("2026.10.11") == []
     assert keywords_runtime_lacks(None) == []
     assert keywords_runtime_lacks("not a version") == []
-
-
-def test_embedded_device_decides_by_its_capabilities_header():
-    stored = [{"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "immich", "config": {}}}],
-               "apps": {"immich": replacement_app_entry("repo/apps/code/immich")}}]
-    assert device_runs_replacements("fetchImage")
-    assert device_runs_replacements("other, fetchImage")
-    assert not device_runs_replacements(None)
-    assert not device_runs_replacements("")
-    current = scenes_for_embedded_device(stored, "fetchImage")
-    assert current[0]["nodes"][0]["data"]["keyword"] == "immich"
-    older = scenes_for_embedded_device(stored, None)
-    assert older[0]["nodes"][0]["data"]["keyword"] == "data/immich"
-    assert "apps" not in older[0]

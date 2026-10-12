@@ -115,7 +115,6 @@ from app.utils.upload_limits import (
     read_upload_limited,
     reject_oversized_content_length,
 )
-from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_runtime
 from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.remote_exec import (
     RemoteTransport,
@@ -1660,6 +1659,8 @@ async def api_frame_event(
     if event == "uploadScenes" and isinstance(body, dict):
         # Preview-on-frame: the editor's scenes as this frame's runtime reads
         # them (utils/retired_apps.py).
+        from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+
         body = {**body, "scenes": scenes_for_runtime(scenes, frame_runtime_version(frame))}
     try:
         await _forward_frame_request(
@@ -1760,6 +1761,8 @@ async def api_frame_upload_scenes(
     _validate_upload_scenes_payload(scenes, scene_id)
     # The editor's scenes, as this frame's runtime has to receive them (an
     # older one gets data/immich back: utils/retired_apps.py).
+    from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+
     body = {**body, "scenes": scenes_for_runtime(scenes, frame_runtime_version(frame))}
     try:
         await _forward_frame_request(
@@ -4520,6 +4523,8 @@ async def api_frame_update_endpoint(
     normalize_scenes_execution(update_data.get("scenes"))
     # An editor tab or a saved draft from before the upgrade still holds the
     # retired Nim keyword (data/immich); store it as the JS app it became.
+    from app.utils.retired_apps import retire_apps_in_scenes
+
     retire_apps_in_scenes(update_data.get("scenes"))
 
     if "server_host" in update_data:
