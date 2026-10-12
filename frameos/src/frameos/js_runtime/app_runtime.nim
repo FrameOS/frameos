@@ -124,6 +124,18 @@ proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
   discard JS_SetPropertyStr(ctx, obj, "__frameosUndef", nimBoolToJS(ctx, true))
   return obj
 
+proc jsAppLogMessage(payload: JsonNode): string =
+  ## `frameos.log(...args)` / `app.log(...args)` arrive as the JSON array of
+  ## their arguments. Join them the way console.log does: strings as they are,
+  ## anything else as compact JSON. The array itself used to be the message,
+  ## so every line read `["Showing Immich asset ..."]`.
+  if payload.kind != JArray:
+    return $payload
+  var parts: seq[string] = @[]
+  for arg in payload:
+    parts.add(if arg.kind == JString: arg.getStr() else: $arg)
+  parts.join(" ")
+
 proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil:
@@ -143,9 +155,9 @@ proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue
       e.owner.scene.logger.log(logPayload)
     else:
       if lvl == "error":
-        frameos_apps.logError(e.owner, $payload)
+        frameos_apps.logError(e.owner, jsAppLogMessage(payload))
       else:
-        frameos_apps.log(e.owner, $payload)
+        frameos_apps.log(e.owner, jsAppLogMessage(payload))
   except CatchableError:
     if lvl == "error":
       frameos_apps.logError(e.owner, payloadStr)

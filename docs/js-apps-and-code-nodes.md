@@ -144,10 +144,6 @@ return photo.image
   full-resolution RGBA buffer. Any other placement decodes bounded by the
   target's size and lets `render/image` place the result. On a Pi the decode
   is at native resolution and the consumer scales.
-- `fetchImage` exists from firmware 2026.10.11. On older firmware
-  `typeof frameos.fetchImage` is `"undefined"`; the Immich app falls back to
-  `httpRequest(url, { base64: true })` + `frameos.image({ base64 })`, which
-  pulls the bytes through the heap (fine for preview-sized photos on a Pi).
 
 ### More than one file
 

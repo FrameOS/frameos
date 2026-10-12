@@ -337,8 +337,39 @@ suite "js app runtime":
     runtime.run(owner, %*{"stateKey": "customState"}, context)
     check logged.len > 0
     check logged[^1]["event"].getStr() == "log:14:jsLogic"
-    check "JS logic app ran" in logged[^1]["message"].getStr()
-    check "customState" in logged[^1]["message"].getStr()
+    check logged[^1]["message"].getStr() ==
+      """JS logic app ran {"event":"render","stateKey":"customState"}"""
+
+  test "log lines read like console.log, not like the JSON array of the arguments":
+    let config = testConfig()
+    var logged: seq[JsonNode] = @[]
+    var logger = testLogger(config)
+    logger.log = proc(payload: JsonNode) =
+      logged.add(payload)
+    let scene = FrameScene(id: "tests/js-app-log-format".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 16.NodeId, nodeName: "jsLogFormat", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = """export function get(app) {
+          frameos.log("Showing Immich asset a-1 (IMG_001.jpg, preview)")
+          frameos.log("count", 3, true, null, [1, 2], { k: "v" })
+          frameos.error("Please provide an album ID.")
+          app.logError("failed:", 404)
+          return "ok"
+        }"""
+    )
+
+    check runtime.get(owner, %*{}, context).asString() == "ok"
+    check logged.len == 4
+    check logged[0]["event"].getStr() == "log:16:jsLogFormat"
+    check logged[0]["message"].getStr() == "Showing Immich asset a-1 (IMG_001.jpg, preview)"
+    check logged[1]["message"].getStr() == """count 3 true null [1,2] {"k":"v"}"""
+    check logged[2]["event"].getStr() == "error:16:jsLogFormat"
+    check logged[2]["error"].getStr() == "Please provide an album ID."
+    check logged[3]["error"].getStr() == "failed: 404"
 
   test "runs modern ES syntax supported by QuickJS":
     let config = testConfig()

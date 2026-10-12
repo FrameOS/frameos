@@ -1,6 +1,6 @@
 // Immich photo app. JSON over frameos.httpRequest; the photo itself goes
 // through frameos.fetchImage (native decode, straight into the canvas on an
-// ESP32). Older firmware without fetchImage gets the base64 fallback.
+// ESP32).
 
 const TIMEOUT = 30000
 
@@ -150,14 +150,6 @@ function fetchRandomAsset(
   return { asset: pickRandomAsset(assets), message: '' }
 }
 
-function downloadPhoto(url: string, apiKey: string, saveAsset: { name: string; extension: string; mode: string } | null) {
-  const headers = { 'x-api-key': apiKey }
-  if (typeof frameos.fetchImage === 'function') return frameos.fetchImage(url, saveAsset ? { headers, saveAsset } : { headers })
-  const r = frameos.httpRequest(url, { headers, base64: true, timeoutMs: TIMEOUT })
-  if (r.status !== 200 || !r.bodyBase64) return { image: null, error: httpErrorMessage(r) }
-  return { image: frameos.image({ base64: r.bodyBase64 }) }
-}
-
 function esc(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
@@ -226,9 +218,12 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   const saveAsset =
     saveAssets === 'auto' || saveAssets === 'always'
       ? { name: assetBaseName(asset), extension: assetFileExtension(asset, previewSize), mode: saveAssets }
-      : null
+      : undefined
   frameos.log(`Showing Immich asset ${asset.id} (${asset.originalFileName ?? 'unnamed'}, ${previewSize})`)
-  const photo = downloadPhoto(assetDownloadUrl(serverUrl, asset.id, previewSize), apiKey, saveAsset)
+  const photo = frameos.fetchImage(assetDownloadUrl(serverUrl, asset.id, previewSize), {
+    headers: { 'x-api-key': apiKey },
+    saveAsset,
+  })
   if (!photo.image) return fail(`Error fetching image from Immich: ${photo.error ?? 'no image'}`)
   if (metadataStateKey) frameos.setState(metadataStateKey, assetMetadata(asset))
   return photo.image

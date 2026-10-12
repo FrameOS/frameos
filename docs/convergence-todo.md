@@ -159,8 +159,7 @@ converter's misses are the roadmap, not a porting program:
   `app/utils/legacy_app_migration.py` (#338) rewrites `data/immich` nodes
   into the scene-local JS app on both control planes, then the Nim source,
   its loader row and the `preview-settings.ts` keyword go. Not before: a
-  migrated scene on firmware without `fetchImage` falls back to the base64
-  path, which is fine on a Pi and an OOM on an ESP32 at full size.
+  migrated scene on firmware without `fetchImage` shows no photo.
 - [ ] Exit is directional, not total: the next ten scenes people actually
   convert or build need zero Nim changes.
 
