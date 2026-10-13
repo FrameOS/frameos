@@ -329,6 +329,9 @@ declare const frameos: {
   streamClose(stream: FrameOSStreamRef | number): boolean;
   getSetting(...path: string[]): any;
   setState(key: string, value: FrameOSJson): void;
+  /** Keep a value for this node between renders (FrameOS 2026.10.13+). null forgets it. */
+  remember(key: string, value: FrameOSJson): boolean;
+  recall(key: string): FrameOSJson | undefined;
 };
 `
 

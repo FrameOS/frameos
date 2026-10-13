@@ -93,7 +93,8 @@ timeoutMs})`, `frameos.fetchImage(url, {headers, saveAsset})` (see
 spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
 `frameos.setNextSleep()`, `frameos.getSetting("namespace", "key")` (only
-namespaces the app's `config.json` declares under `settings`), the asset
+namespaces the app's `config.json` declares under `settings`),
+`frameos.remember(key, value)` / `frameos.recall(key)` (see below), the asset
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
@@ -155,6 +156,18 @@ return photo.image
   full-resolution RGBA buffer. Any other placement decodes bounded by the
   target's size and lets `render/image` place the result. On a Pi the decode
   is at native resolution and the consumer scales.
+
+### Keeping values between renders
+
+Module-level variables last only as long as the app's interpreter, and an
+ESP32 tears every idle interpreter down after each render (to give the next
+decode the memory). A value the app needs on the next render goes through
+`frameos.remember(key, value)` and comes back from `frameos.recall(key)`.
+The Google Photos app keeps its album's photo list and its position that
+way. Values are JSON, kept per node until the scene is unloaded (not across
+a restart), at most 512 KB per node on an ESP32. `remember` answers `false`
+when a value would not fit, and `null` forgets the key. FrameOS 2026.10.13
+and later.
 
 ### More than one file
 

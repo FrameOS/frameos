@@ -37,6 +37,12 @@ type
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
+    ## `frameos.remember` / `recall`: values the app keeps between renders, as
+    ## JSON text. Held here and not in the interpreter because an ESP32 tears
+    ## every idle interpreter down after a render (releaseIdleJsAppRuntimes),
+    ## and module state goes with it; this survives until the scene does.
+    memory*: Table[string, string]
+    memoryBytes*: int
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -190,6 +196,43 @@ proc jsSetState(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {
     e.owner.scene.state[stateKey] = %*valueStr
 
   return jsUndefSentinel(ctx)
+
+const JsAppMemoryMaxBytes* = when defined(frameosEmbedded): 512 * 1024 else: 16 * 1024 * 1024
+  ## What one node may keep with `frameos.remember`, all keys together.
+
+proc jsRemember(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {.nimcall.} =
+  ## Keep a JSON value for this node across renders and interpreter restarts.
+  ## null or undefined forgets the key. False when it would not fit.
+  let e = env(ctx)
+  if e == nil or e.runtime.isNil:
+    return nimBoolToJS(ctx, false)
+  let memoryKey = toNimString(ctx, key)
+  if memoryKey.len == 0:
+    return nimBoolToJS(ctx, false)
+  let valueStr = toNimString(ctx, valueJson)
+  let runtime = e.runtime
+  let previous = runtime.memory.getOrDefault(memoryKey, "")
+  if valueStr.len == 0 or valueStr == "null":
+    if runtime.memory.hasKey(memoryKey):
+      runtime.memoryBytes -= memoryKey.len + previous.len
+      runtime.memory.del(memoryKey)
+    return nimBoolToJS(ctx, true)
+  let replaced = if runtime.memory.hasKey(memoryKey): memoryKey.len + previous.len else: 0
+  let after = runtime.memoryBytes - replaced + memoryKey.len + valueStr.len
+  if after > JsAppMemoryMaxBytes:
+    frameos_apps.logError(e.owner, "frameos.remember(\"" & memoryKey & "\") refused: " & $after &
+      " bytes would exceed this node's " & $JsAppMemoryMaxBytes & " byte limit")
+    return nimBoolToJS(ctx, false)
+  runtime.memory[memoryKey] = valueStr
+  runtime.memoryBytes = after
+  nimBoolToJS(ctx, true)
+
+proc jsRecall(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  ## The JSON text `jsRemember` kept under the key, "" when there is none.
+  let e = env(ctx)
+  if e == nil or e.runtime.isNil:
+    return nimStringToJS(ctx, "")
+  nimStringToJS(ctx, e.runtime.memory.getOrDefault(toNimString(ctx, key), ""))
 
 proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -1301,6 +1344,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsSetState", jsSetState)
+  runtime.js.registerFunction("jsRemember", jsRemember)
+  runtime.js.registerFunction("jsRecall", jsRecall)
   runtime.js.registerFunction("jsFetchText", jsFetchText)
   runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
   runtime.js.registerFunction("jsFetchImage", jsFetchImage)
@@ -1381,6 +1426,14 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
       String(key || ""),
       JSON.stringify(value === undefined ? null : value, __jsReplacer)
     ),
+    remember: (key, value) => jsRemember(
+      String(key || ""),
+      JSON.stringify(value === undefined ? null : value, __jsReplacer)
+    ) === true,
+    recall: (key) => {
+      const kept = jsRecall(String(key || ""));
+      return kept ? JSON.parse(kept) : undefined;
+    },
   };
   globalThis.__frameosModule = {};
   const exports = globalThis.__frameosModule;

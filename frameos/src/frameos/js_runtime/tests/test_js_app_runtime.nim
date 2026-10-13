@@ -909,6 +909,53 @@ suite "js app runtime":
     check payload["plainExif"].kind == JNull
     check payload["plainSaved"].kind == JNull
 
+  test "remember outlives the interpreter, module state does not":
+    # An ESP32 tears every idle interpreter down after a render; what an app
+    # keeps with frameos.remember is still there when the next one starts.
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-remember".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """let renders = 0
+        export function get(app, context) {
+          renders += 1
+          const before = frameos.recall("count") ?? 0
+          const kept = frameos.remember("count", before + 1)
+          frameos.remember("list", ["a", { b: 2 }])
+          frameos.remember("list2", "temporary")
+          frameos.remember("list2", null)
+          const tooBig = frameos.remember("big", "x".repeat(app.config.big))
+          return { renders, before, kept, tooBig, list: frameos.recall("list"),
+            forgotten: frameos.recall("list2") ?? null, missing: frameos.recall("missing") ?? null }
+        }"""
+    )
+    let owner = DynamicJsApp(nodeId: 36.NodeId, nodeName: "jsRemember", scene: scene, frameConfig: config,
+      runtime: runtime, configJson: %*{"big": 1})
+
+    let first = runtime.get(owner, %*{"big": 1}, context).asJson()
+    check first["renders"].getInt() == 1
+    check first["before"].getInt() == 0
+    check first["kept"].getBool()
+    check first["tooBig"].getBool()
+    check first["list"] == %*["a", {"b": 2}]
+    check first["forgotten"].kind == JNull
+    check first["missing"].kind == JNull
+
+    let second = runtime.get(owner, %*{"big": 1}, context).asJson()
+    check second["renders"].getInt() == 2
+    check second["before"].getInt() == 1
+
+    releaseJsAppRuntime(owner)
+    let third = runtime.get(owner, %*{"big": JsAppMemoryMaxBytes}, context).asJson()
+    check third["renders"].getInt() == 1 # a fresh interpreter
+    check third["before"].getInt() == 2  # the kept value is not
+    # Over the node's limit: refused, logged, and the old value stays.
+    check not third["tooBig"].getBool()
+    check runtime.memory["big"] == "\"x\""
+
   test "httpRequest posts with headers and fetches binary responses":
     let base = echoServerBase()
 
