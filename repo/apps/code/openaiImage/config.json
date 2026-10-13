@@ -185,8 +185,6 @@
       "name": "outputCompression",
       "type": "integer",
       "value": 0,
-      "min": 0,
-      "max": 100,
       "label": "Output compression",
       "hint": "Compression for JPEG/WebP outputs. Use 0 for the runtime default.",
       "showIf": [
