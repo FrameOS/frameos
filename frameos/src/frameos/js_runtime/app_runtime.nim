@@ -11,6 +11,7 @@ import frameos/utils/http_client
 import frameos/utils/app_images
 import frameos/utils/asset_colors
 import frameos/utils/dither
+import frameos/utils/exif
 import frameos/utils/image
 import frameos/utils/paths
 import frameos/utils/system
@@ -207,6 +208,16 @@ proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
 
 const JsHttpMaxTimeoutMs = 600_000
 
+when defined(testing):
+  ## Test seam for `frameos.httpRequest`: when set, every request a JS app
+  ## makes is answered here instead of on the network, so an app whose API
+  ## host is fixed (OpenAI, Unsplash, Commons, …) runs against canned replies.
+  ## Images have their own seam (app_images.contextDownloadHook). Compiled out
+  ## of real builds.
+  type JsHttpRequestHook* = proc(url, httpMethod, body: string,
+    headers: seq[SimpleHttpHeader]): tuple[code: int, body: string]
+  var jsHttpRequestHook*: JsHttpRequestHook = nil
+
 proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Bounded HTTP request with method/headers/body. Options JSON:
   ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
@@ -238,20 +249,31 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     # thread until the systemd watchdog fired.
     let timeoutMs = capToRenderDeadline(clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs))
     let maxSeconds = capToRenderDeadline(int(max(DefaultFetchMaxSeconds, timeoutMs.float / 1000.0 + 30.0) * 1000)).float / 1000.0
-    let res = boundedRequestWithHeaders(
-      urlStr,
-      httpMethod = options{"method"}.getStr("GET").toUpperAscii(),
-      body = body,
-      headers = headers,
-      timeoutMs = timeoutMs,
-      maxBytes = jsFetchMaxBytes(e),
-      maxSeconds = maxSeconds
-    )
-    response["status"] = %*res.code
+    let httpMethod = options{"method"}.getStr("GET").toUpperAscii()
+    var code = 0
+    var resBody = ""
+    var answered = false
+    when defined(testing):
+      if jsHttpRequestHook != nil:
+        (code, resBody) = jsHttpRequestHook(urlStr, httpMethod, body, headers)
+        answered = true
+    if not answered:
+      let res = boundedRequestWithHeaders(
+        urlStr,
+        httpMethod = httpMethod,
+        body = body,
+        headers = headers,
+        timeoutMs = timeoutMs,
+        maxBytes = jsFetchMaxBytes(e),
+        maxSeconds = maxSeconds
+      )
+      code = res.code
+      resBody = res.body
+    response["status"] = %*code
     if options{"base64"}.getBool(false):
-      response["bodyBase64"] = %*encode(res.body)
+      response["bodyBase64"] = %*encode(resBody)
     else:
-      response["body"] = %*res.body
+      response["body"] = %*resBody
   except CatchableError as err:
     response["error"] = %*err.msg
     if e != nil:
@@ -279,8 +301,10 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ## Downloads and decodes an image natively, so the bytes never enter the JS
   ## heap: a JS app gets back an image reference it returns as its output,
   ## never the pixels. Options JSON: {headers: {name: value},
-  ## saveAsset: {name, extension, mode: "auto" | "always"}}. Returns JSON
-  ## {image: imageRef | null, width, height, savedAs?} or {image: null, error}.
+  ## saveAsset: {name, extension, mode: "auto" | "always"}, exif: bool}.
+  ## Returns JSON {image: imageRef | null, width, height, savedAs?, exif?,
+  ## exifSummary?} or {image: null, error}. A `data:` URL decodes the same
+  ## way, which is how an app shows an image an API returned as base64.
   ##
   ## This is the producer's half of the `intoTarget` handshake for a JS app
   ## (docs/value-pipeline.md). The planner offers a JS node the consumer's
@@ -296,8 +320,10 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ##
   ## `saveAsset` keeps the downloaded bytes as a frame asset the way the Nim
   ## photo apps do (`saved/<app>/<name>.<md5><ext>`; "auto" honours the
-  ## frame's own save-assets setting). The bytes exist only on hosts: the
-  ## embedded streaming path keeps no copy, and reports no `savedAs`.
+  ## frame's own save-assets setting). `exif` reads the EXIF block of those
+  ## bytes (exiftool where the host has it, then the built-in parser). The
+  ## bytes exist only on hosts: the embedded streaming path keeps no copy, and
+  ## reports no `savedAs` and no `exif`.
   let e = env(ctx)
   var response = %*{"image": newJNull()}
   if e == nil:
@@ -348,6 +374,16 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
           sanitizedAssetExtension(save{"extension"}.getStr("")), downloaded.data, mode == "auto")
         if saved.len > 0:
           response["savedAs"] = %*saved
+
+    if options{"exif"}.getBool(false) and downloaded.data.len > 0:
+      var metadata = %*{}
+      let exifTool = getExifMetadataFromData(downloaded.data)
+      if exifTool.isSome:
+        metadata["exif"] = exifTool.get()
+      mergeParsedExif(metadata, downloaded.data)
+      for key in ["exif", "exifSummary"]:
+        if metadata.hasKey(key):
+          response[key] = metadata[key]
   except CatchableError as err:
     response["error"] = %*err.msg
     frameos_apps.logError(e.owner, "JS app fetchImage failed: " & err.msg)

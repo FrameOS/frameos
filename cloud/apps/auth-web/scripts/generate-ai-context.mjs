@@ -301,8 +301,17 @@ declare const frameos: {
     options?: {
       headers?: Record<string, string>;
       saveAsset?: { name: string; extension?: string; mode?: "auto" | "always" };
+      exif?: boolean;
     }
-  ): { image: FrameOSImageRef | null; width?: number; height?: number; error?: string; savedAs?: string };
+  ): {
+    image: FrameOSImageRef | null;
+    width?: number;
+    height?: number;
+    error?: string;
+    savedAs?: string;
+    exif?: Record<string, any>;
+    exifSummary?: string;
+  };
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

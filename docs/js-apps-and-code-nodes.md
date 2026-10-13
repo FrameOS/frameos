@@ -138,6 +138,16 @@ return photo.image
   "auto"` honours the frame's save-assets setting, `"always"` saves
   regardless). The extension is reduced to a short alphanumeric suffix.
   Frames without storage (ESP32) never save and report no `savedAs`.
+- `options.exif: true` adds `exif` (an object: `make`, `model`, `iso`,
+  GPS, …, plus everything exiftool reports where the host has it) and
+  `exifSummary` (one line, e.g. "Canon EOS · f/2.8") read from the
+  downloaded bytes. Like `savedAs`, an ESP32 reports neither. FrameOS
+  2026.10.13 and later.
+- The URL may be a `data:` URL. That is how an app shows an image an API
+  returned as base64 (OpenAI's `b64_json`):
+  `frameos.fetchImage(`data:image/png;base64,${b64}`)`. It decodes into the
+  offered canvas like a download, and from 2026.10.13 `saveAsset` and `exif`
+  work on it on hosts too.
 - On an ESP32 the decode streams straight into the canvas the `render/image`
   node offered, with the node's `placement` (cover, contain or stretch), so a
   1440 px Immich preview needs its compressed body plus a few rows, not a

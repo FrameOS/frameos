@@ -748,7 +748,8 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
   discard decodeImageScaledInto(data, target, fit)
   true
 
-proc decodeDataUrl*(dataUrl: string): Image =
+proc dataUrlBytes*(dataUrl: string): string =
+  ## The bytes a `data:` URL carries, base64 or percent-encoded.
   if not dataUrl.startsWith("data:"):
     raise newException(ValueError, "Invalid data URL.")
   let commaIndex = dataUrl.find(',')
@@ -757,32 +758,33 @@ proc decodeDataUrl*(dataUrl: string): Image =
   let header = dataUrl[5 ..< commaIndex]
   let dataBody = dataUrl[commaIndex + 1 .. ^1]
   let headerParts = if header.len > 0: header.split(';') else: @[""]
-  let isBase64 = headerParts.anyIt(it == "base64")
-  var decodedData =
-    if isBase64:
-      dataBody.decode
-    else:
-      decodeUrl(dataBody)
+  if headerParts.anyIt(it == "base64"):
+    dataBody.decode
+  else:
+    decodeUrl(dataBody)
+
+proc decodeDataUrlBytes(decodedData: var string): Image =
   # SVG has no dimensions probe; everything else decodes bounded.
   if looksLikeSvg(decodedData):
     return decodeImageWithFallback(decodedData)
   return decodeImageWithDisplayBounds(decodedData)
 
+proc decodeDataUrl*(dataUrl: string): Image =
+  var decodedData = dataUrlBytes(dataUrl)
+  decodeDataUrlBytes(decodedData)
+
+when not defined(frameosEmbedded):
+  proc decodeDataUrlWithData(dataUrl: string): tuple[image: Image, data: string] =
+    ## A data URL decoded on a host, with the bytes it carried: the `data`
+    ## half of a download is what saveAsset writes, so an app that got its
+    ## image as base64 (OpenAI's b64_json) saves it like a downloaded one.
+    ## Embedded keeps returning no bytes, as its streaming downloads do.
+    let data = dataUrlBytes(dataUrl)
+    var decodeCopy = data
+    (decodeDataUrlBytes(decodeCopy), data)
+
 proc decodeDataUrlInto*(dataUrl: string, target: Image, fit = fitCover): Image =
-  if not dataUrl.startsWith("data:"):
-    raise newException(ValueError, "Invalid data URL.")
-  let commaIndex = dataUrl.find(',')
-  if commaIndex == -1:
-    raise newException(ValueError, "Invalid data URL.")
-  let header = dataUrl[5 ..< commaIndex]
-  var dataBody = dataUrl[commaIndex + 1 .. ^1]
-  let headerParts = if header.len > 0: header.split(';') else: @[""]
-  let isBase64 = headerParts.anyIt(it == "base64")
-  var decodedData =
-    if isBase64:
-      dataBody.decode
-    else:
-      decodeUrl(dataBody)
+  var decodedData = dataUrlBytes(dataUrl)
   if not target.isNil and decodedData.len > 0:
     return decodeImageWithFallback(decodedData, target, fit)
   return decodeImageWithFallback(decodedData)
@@ -1159,7 +1161,10 @@ proc downloadImageWithDataBounded*(url: string, boundWidth, boundHeight: int,
   ## The requestedBounds download: fetch, then decode bounded.
   if url.startsWith("data:"):
     # Data URLs are small by construction; decode them as-is.
-    return (decodeDataUrl(url), "")
+    when defined(frameosEmbedded):
+      return (decodeDataUrl(url), "")
+    else:
+      return decodeDataUrlWithData(url)
   when defined(frameosEmbedded):
     return downloadImageFromBufferBounded(url, boundWidth, boundHeight,
       maxBytes, headers)
@@ -1173,8 +1178,10 @@ proc downloadImageWithDataBounded*(url: string, boundWidth, boundHeight: int,
 proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
   if url.startsWith("data:"):
-    let image = decodeDataUrl(url)
-    return (image, "")
+    when defined(frameosEmbedded):
+      return (decodeDataUrl(url), "")
+    else:
+      return decodeDataUrlWithData(url)
   when defined(frameosEmbedded):
     return downloadImageFromBuffer(url, maxBytes, headers = headers)
   else:
@@ -1214,7 +1221,7 @@ proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageD
     return downloadImageFromBuffer(url, maxBytes, target, headers, fit)
   else:
     if url.startsWith("data:"):
-      return (decodeDataUrl(url), "")
+      return decodeDataUrlWithData(url)
     let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)

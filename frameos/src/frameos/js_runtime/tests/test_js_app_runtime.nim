@@ -843,6 +843,67 @@ suite "js app runtime":
     check fileExists(savedEvil)
     check payload["never"].kind == JNull
 
+  test "fetchImage decodes a data URL like a download: saved bytes and EXIF included":
+    # An API that answers with base64 (OpenAI's b64_json) hands the app a data
+    # URL; the photo apps save it and read its EXIF the same as a download.
+    let assetsDir = getTempDir() / "frameos-js-fetch-image-data-url"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+
+    # A little-endian TIFF with Make "Canon" (out of line) and Model "EOS",
+    # spliced into a real JPEG as its first APP1 segment.
+    const tiff =
+      "II\x2A\x00\x08\x00\x00\x00" &
+      "\x02\x00" &
+      "\x0F\x01\x02\x00\x06\x00\x00\x00\x26\x00\x00\x00" &
+      "\x10\x01\x02\x00\x04\x00\x00\x00EOS\x00" &
+      "\x00\x00\x00\x00" &
+      "Canon\x00"
+    let exifPayload = "Exif\x00\x00" & tiff
+    let segmentLen = exifPayload.len + 2
+    let app1 = "\xFF\xE1" & chr((segmentLen shr 8) and 0xFF) & chr(segmentLen and 0xFF) & exifPayload
+    let jpeg = readFile(currentSourcePath().parentDir() / ".." / ".." / "tests" / "fixtures" / "large-gradient.jpg")
+    let withExif = jpeg[0 .. 1] & app1 & jpeg[2 .. ^1]
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    config.saveAssets = %*true
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-fetch-image-data-url".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 35.NodeId, nodeName: "openaiImage", appKeyword: "openaiImage", scene: scene,
+      frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          const photo = frameos.fetchImage(app.config.url, { exif: true,
+            saveAsset: { name: "a red fox", extension: "jpg", mode: "auto" } })
+          const plain = frameos.fetchImage(app.config.url)
+          return { width: photo.width, error: photo.error ?? null, exif: photo.exif ?? null,
+            exifSummary: photo.exifSummary ?? null, savedAs: photo.savedAs ?? null,
+            plainExif: plain.exif ?? null, plainSaved: plain.savedAs ?? null }
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"url": "data:image/jpeg;base64," & encode(withExif)}, context)
+    check value.kind == fkJson
+    let payload = value.asJson()
+    check payload["error"].kind == JNull
+    check payload["width"].getInt() > 0
+    check payload["exif"]["make"].getStr() == "Canon"
+    check payload["exif"]["model"].getStr() == "EOS"
+    check payload["exifSummary"].getStr() == "Canon EOS"
+    let saved = payload["savedAs"].getStr()
+    check saved.startsWith(assetsDir / "saved" / "openaiImage" / "")
+    check saved.endsWith(".jpg")
+    check readFile(saved) == withExif
+    # Neither is read unless asked for.
+    check payload["plainExif"].kind == JNull
+    check payload["plainSaved"].kind == JNull
+
   test "httpRequest posts with headers and fetches binary responses":
     let base = echoServerBase()
 
