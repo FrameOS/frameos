@@ -147,6 +147,14 @@
   replacement for a scene still on disk. `docs/retired-apps.md` has the
   steps; run `python3 frameos/tools/generate_retired_apps.py` after touching
   the contract or a replacement's files (`test_retired_apps.py` checks it).
+- A port must behave like the Nim app on an ESP32 too: the runtime tears
+  every idle JS interpreter down after each render, so state that outlives a
+  render goes through `frameos.remember` / `recall`, not module variables; a
+  throw in `get()` fails the node like a raising Nim app (defaulted args, no
+  cache entry). Port the Nim tests to `js_runtime/tests/test_<app>_js_app.nim`
+  with `jsHttpRequestHook` / `contextDownloadHook`, and give the contract the
+  first runtime with every bridge call the port makes (2026.10.13 for
+  `remember`, `app.frame.embedded`, `fetchImage` `exif`).
 
 ## Per-photo colour profiles: `docs/asset-color-profiles.md` is the contract
 
