@@ -33,6 +33,8 @@ Every path is relative to the library root.
 - Names starting with `.` are never listed and cannot be created. On the
   backend, files a person copies into the folder by hand (`.DS_Store`) stay
   invisible.
+- Names ending in `.frameos.json` are kept for color profiles (see Colors):
+  they cannot be uploaded, created or renamed to.
 
 A path that breaks these rules is a 400.
 
@@ -50,7 +52,8 @@ The shape every listing returns:
   "content_type": "image/jpeg",
   "width": 4032,
   "height": 3024,
-  "status": "ready"
+  "status": "ready",
+  "colors": { "whites": -30, "saturation": 20 }
 }
 ```
 
@@ -60,6 +63,7 @@ The shape every listing returns:
   from the image header; the cloud stores what the browser measured.
 - `status`: `"ready"`, or `"blocked"` on the cloud when a scan matched (the
   bytes are gone; see Scanning).
+- `colors`: files only. The photo's color profile, or `null` (see Colors).
 - Folders also carry `items` (direct children), `files` (files anywhere below)
   and `cover` (the path of an image to show for the folder, or `null`: the
   first image among the direct children by name, else the first one a level
@@ -181,6 +185,19 @@ when the name is taken. Share links follow.
 `{"paths": ["a.jpg", "Old album"]}` → `{"deleted": 2}`. Folders go with
 everything in them, and so do the share links pointing at or below them.
 
+### `POST /api/photos/colors`
+
+`{"path": "Summer 2026/a.jpg", "colors": {"whites": -30}}` →
+`{"entry": Entry}`. Sets the photo's color profile (see Colors).
+`"colors": null`, or an empty object, removes it.
+
+- `path` must be a playable image (400 otherwise; 404 when it is missing).
+- `colors` must be a JSON object (400 otherwise) of at most 64 KB as JSON
+  (413 otherwise). It is stored as sent: the keys are the editor's business,
+  and the runtime clamps every value and ignores keys it does not know.
+- Moving or renaming the photo keeps its profile; deleting it deletes the
+  profile.
+
 ### Share links
 
 - `GET /api/photos/shares` → `{"shares": [Share, ...]}`
@@ -231,21 +248,23 @@ suspended account is a 404.
       "mtime": 1760000000,
       "width": 4032,
       "height": 3024,
-      "content_type": "image/jpeg"
+      "content_type": "image/jpeg",
+      "colors": null
     }
   ]
 }
 ```
 
 Every playable file below the shared folder, by path, at most 10000. `path`
-is relative to the shared folder.
+is relative to the shared folder. `colors` is the photo's color profile or
+`null`, as in an Entry.
 
 ### `GET /api/photos/shared/{token}/photo?order=<order>&index=<n>`
 
 One photo, so a frame never downloads the whole listing:
 
 ```json
-{"index": 41, "count": 120, "photo": {"path": "...", "name": "...", "url": "...", "...": "..."}}
+{"index": 41, "count": 120, "photo": {"path": "...", "name": "...", "url": "...", "colors": null, "...": "..."}}
 ```
 
 - `order`: `random` (default), `sequential` (by path), `newest`, `oldest` (by
@@ -282,6 +301,13 @@ The folder is a plain folder: files copied into it by hand show up in the
 library. Thumbnails and unfinished uploads live in `<photos dir>/.cache`.
 Share links are rows in the `photo_share` table.
 
+A photo's color profile is a sidecar next to it, `<photo>.frameos.json`, in
+the format of the frame assets' sidecars: `{"version": 1, "colors": {...}}`.
+It is never listed and does not count in `files` or `size`; it moves, is
+renamed and is deleted with its photo. A sidecar over 64 KB, or one that does
+not parse, reads as no profile. Photos copied in by hand with their sidecars
+keep their colors.
+
 The library is not ready (and the page says why) when the folder cannot be
 created or written, or when the backend runs in Docker and the folder is not
 on a mounted volume, which would lose every photo when the container is
@@ -296,7 +322,8 @@ Metadata is in Postgres (`photo_entries`, `photo_shares`), bytes in R2 under
 `photos/<account id>/<random id>`. The keys are random rather than content
 addressed: the CDN alias serves any key without authentication, and a content
 hash is a key anyone who has the same photo could compute. Moving or renaming
-only rewrites rows.
+only rewrites rows. A photo's color profile is the `colors` column (jsonb) of
+its row.
 
 Uploads accept JPEG, PNG, GIF and WebP only (every byte stored must pass the
 scan), at most 20 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
@@ -306,6 +333,23 @@ never in the bucket.
 
 Revoking a link stops new listings and redirects at once. A frame that already
 holds a CDN address keeps it working until the photo is deleted.
+
+## Colors
+
+A photo may have a color profile: the same adjustments a frame asset's
+`.frameos.json` sidecar holds (`docs/asset-color-profiles.md`: exposure,
+whites and blacks, contrast, tones, saturation, hue ranges and an optional
+dither palette), as its `colors` object. The Photos page edits it with the
+Assets panel's **Set colors** editor and previews it either at full fidelity
+or as a chosen panel shows it: scaled to the panel, with the frame's
+automatic fit and fine tuning, dithered to its palette.
+
+Frames get it with the photo. The share routes send `colors` with every file,
+and `repo/apps/code/photoAlbum` hands it to the runtime as
+`frameos.fetchImage(url, {colors})`, which grades the photo the way a local
+asset's sidecar is applied, palette override included, so the frame's
+automatic fit leaves it alone. A runtime older than 2026.10.13 ignores the
+option and shows the photo ungraded, with the automatic fit as before.
 
 ## Scanning (cloud)
 

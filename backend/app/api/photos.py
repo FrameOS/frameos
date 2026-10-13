@@ -13,6 +13,7 @@ import asyncio
 import secrets
 from http import HTTPStatus
 from pathlib import Path
+from typing import Any
 
 from arq import ArqRedis as Redis
 from fastapi import Depends, HTTPException, Query, Request
@@ -57,6 +58,13 @@ class PhotoRenameBody(BaseModel):
 
 class PhotoDeleteBody(BaseModel):
     paths: list[str] = Field(max_length=MAX_PATHS_PER_REQUEST)
+
+
+class PhotoColorsBody(BaseModel):
+    path: str
+    # Any JSON: the shape is checked by hand, so a wrong one is the
+    # contract's 400 rather than FastAPI's 422.
+    colors: Any = None
 
 
 async def _ready_root(project_id: int) -> Path:
@@ -199,6 +207,14 @@ async def photos_delete(data: PhotoDeleteBody, db: Session = Depends(get_db)):
     root = await _ready_root(project_id)
     deleted = await asyncio.to_thread(photos.delete_paths, db, project_id, root, paths)
     return {"deleted": deleted}
+
+
+@api_project.post("/photos/colors")
+async def photos_set_colors(data: PhotoColorsBody):
+    rel = photos.validate_path(data.path)
+    root = await _ready_root(current_project_id())
+    entry = await asyncio.to_thread(photos.set_colors, root, rel, data.colors)
+    return {"entry": entry}
 
 
 @api_project.get("/photos/shares")

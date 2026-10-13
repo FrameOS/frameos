@@ -624,7 +624,8 @@ multi-use SD-image code, which is capped at the frame limit.
 The photo library (`docs/photos.md` at the repo root is the contract) keeps
 its rows in Postgres and its bytes in the object store, under random keys
 (`photos/<account-id>/<random>`, thumbnails under
-`photos/<account-id>/thumbs/`). All optional:
+`photos/<account-id>/thumbs/`). A photo's color profile is the `colors`
+jsonb column of its `photo_entries` row, not an object. All optional:
 
 ```text
 FRAMEOS_CLOUD_MAX_PHOTO_MB=1024     # storage per account

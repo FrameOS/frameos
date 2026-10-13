@@ -269,11 +269,13 @@ export async function buildAccountExport(
       : [],
   ]);
 
-  // The photo library: every file and folder, and which folders have a share
-  // link (the token itself is a credential and stays out).
+  // The photo library: every file (with its color profile) and folder, and
+  // which folders have a share link (the token itself is a credential and
+  // stays out).
   const [photoRows, photoShareRows] = await Promise.all([
     db
       .select({
+        colors: photoEntries.colors,
         contentType: photoEntries.contentType,
         createdAt: photoEntries.createdAt,
         height: photoEntries.height,
@@ -311,10 +313,11 @@ export async function buildAccountExport(
     })),
     frames: accountFrames,
     photos: {
-      entries: photoRows.map((row) =>
+      entries: photoRows.map(({ colors, ...row }) =>
         row.kind === "file"
           ? {
               ...row,
+              colors,
               content: blobRef({
                 contentType: row.contentType,
                 downloadPath: `/api/photos/file?path=${encodeURIComponent(row.path)}`,

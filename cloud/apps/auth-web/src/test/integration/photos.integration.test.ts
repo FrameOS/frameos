@@ -20,6 +20,7 @@ import {
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { POST as postColors } from "../../../app/api/photos/colors/route";
 import { GET as getFile } from "../../../app/api/photos/file/route";
 import { GET as getFiles } from "../../../app/api/photos/files/route";
 import { POST as postDelete } from "../../../app/api/photos/delete/route";
@@ -557,6 +558,184 @@ describe("photo library: folders, moves, renames, deletes", () => {
       .where(eq(auditEvents.accountId, accountId));
     expect(audit.map((event) => event.eventType)).toContain("photos.folder_deleted");
     expect(audit.map((event) => event.eventType)).toContain("photos.share_created");
+  });
+});
+
+describe("photo library: color profiles", () => {
+  const graded = { saturation: 20, tones: { shadows: { amount: 10, hue: 200 } }, whites: -30 };
+
+  async function setColors(path: string, colors: unknown) {
+    return postColors(postJson("/api/photos/colors", { colors, path }));
+  }
+
+  async function sharedListing(token: string) {
+    const response = await getShared(get(`/api/photos/shared/${token}`), tokenParams(token));
+    expect(response.status).toBe(200);
+    return (await response.json()) as {
+      files: { colors: unknown; path: string }[];
+      updated_at: number;
+    };
+  }
+
+  async function sharedPick(token: string, index: number) {
+    const response = await getSharedPhoto(
+      get(`/api/photos/shared/${token}/photo?order=sequential&index=${index}`),
+      tokenParams(token),
+    );
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { photo: Record<string, unknown> }).photo;
+  }
+
+  it("stores a profile, lists it, and sends it to frames with the photo", async () => {
+    await signIn();
+    await upload("Album", "a.png", png(10, 10, "a"));
+    await upload("Album", "b.png", png(10, 10, "b"));
+    const album = await share("Album");
+
+    // Every file entry carries the key, folders do not.
+    expect((await listFolder("Album")).map((entry) => entry.colors)).toEqual([null, null]);
+    const [albumEntry] = await listFolder("");
+    expect(albumEntry).toMatchObject({ kind: "folder", path: "Album" });
+    expect(albumEntry).not.toHaveProperty("colors");
+
+    const before = await sharedListing(album.token);
+    expect(before.files.map((file) => file.colors)).toEqual([null, null]);
+    const response = await setColors("Album/a.png", graded);
+    expect(response.status).toBe(200);
+    const { entry } = (await response.json()) as { entry: Record<string, unknown> };
+    expect(entry).toMatchObject({ colors: graded, kind: "file", name: "a.png", path: "Album/a.png" });
+    expect((await listFolder("Album")).map((item) => [item.name, item.colors])).toEqual([
+      ["a.png", graded],
+      ["b.png", null],
+    ]);
+
+    signOut();
+    const listing = await sharedListing(album.token);
+    expect(listing.files.map((file) => [file.path, file.colors])).toEqual([
+      ["a.png", graded],
+      ["b.png", null],
+    ]);
+    expect(listing.updated_at).toBeGreaterThanOrEqual(before.updated_at);
+    expect(await sharedPick(album.token, 0)).toMatchObject({ colors: graded, path: "a.png" });
+    expect(await sharedPick(album.token, 1)).toMatchObject({ colors: null, path: "b.png" });
+  });
+
+  it("keeps the profile through moves and renames, and drops it with the photo", async () => {
+    const accountId = await signIn();
+    await upload("Album", "a.png", png(10, 10, "a"));
+    await postFolders(postJson("/api/photos/folders", { path: "Elsewhere" }));
+    expect((await setColors("Album/a.png", graded)).status).toBe(200);
+
+    const renamed = await postRename(postJson("/api/photos/rename", { name: "c.png", path: "Album/a.png" }));
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as { entry: Record<string, unknown> }).entry).toMatchObject({
+      colors: graded,
+      path: "Album/c.png",
+    });
+    const moved = await postMove(postJson("/api/photos/move", { paths: ["Album/c.png"], to: "Elsewhere" }));
+    expect(moved.status).toBe(200);
+    expect((await listFolder("Elsewhere")).map((entry) => [entry.path, entry.colors])).toEqual([
+      ["Elsewhere/c.png", graded],
+    ]);
+    // A folder rename rewrites the paths below it; the profile stays with the photo.
+    expect((await postRename(postJson("/api/photos/rename", { name: "Moved", path: "Elsewhere" }))).status).toBe(200);
+    expect((await listFolder("Moved"))[0]).toMatchObject({ colors: graded, path: "Moved/c.png" });
+
+    // A new photo at the old path starts without one.
+    expect((await upload("Album", "a.png", png(10, 10, "a2"))).status).toBe(200);
+    expect((await listFolder("Album"))[0]).toMatchObject({ colors: null, path: "Album/a.png" });
+
+    expect((await postDelete(postJson("/api/photos/delete", { paths: ["Moved/c.png"] }))).status).toBe(200);
+    const rows = await db
+      .select({ colors: photoEntries.colors, path: photoEntries.path })
+      .from(photoEntries)
+      .where(eq(photoEntries.accountId, accountId));
+    expect(rows.filter((row) => row.colors !== null)).toEqual([]);
+  });
+
+  it("removes the profile with null or an empty object", async () => {
+    await signIn();
+    await upload("", "a.png", png(10, 10, "a"));
+    for (const empty of [null, {}]) {
+      expect((await setColors("a.png", graded)).status).toBe(200);
+      expect((await listFolder(""))[0]).toMatchObject({ colors: graded, path: "a.png" });
+      const response = await setColors("a.png", empty);
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { entry: Record<string, unknown> }).entry.colors).toBeNull();
+      expect((await listFolder(""))[0]).toMatchObject({ colors: null, path: "a.png" });
+    }
+  });
+
+  it("refuses folders, files a frame cannot play, blocked and missing files, and bad profiles", async () => {
+    const accountId = await signIn();
+    await upload("Album", "a.png", png(10, 10, "a"));
+    // The cloud sniffs the bytes, not the name: a PNG can be stored as notes.txt.
+    expect((await upload("", "notes.txt", png(10, 10, "txt"))).status).toBe(200);
+
+    const attempt = async (path: string, colors: unknown) => {
+      const response = await setColors(path, colors);
+      return { body: (await response.json()) as Record<string, unknown>, status: response.status };
+    };
+    expect(await attempt("Album", graded)).toMatchObject({ status: 400 });
+    expect(await attempt("notes.txt", graded)).toMatchObject({ status: 400 });
+    expect(await attempt("Album/a.png", [graded])).toMatchObject({
+      body: { error: "invalid_colors" },
+      status: 400,
+    });
+    expect(await attempt("Album/a.png", "warm")).toMatchObject({ status: 400 });
+    expect(await attempt("Album/a.png", 3)).toMatchObject({ status: 400 });
+    expect(await attempt("Album/a.png", true)).toMatchObject({ status: 400 });
+    expect(await attempt("Album/a.png", undefined)).toMatchObject({ status: 400 });
+    expect(await attempt("", graded)).toMatchObject({ status: 400 });
+    expect(await attempt("../a.png", graded)).toMatchObject({ status: 400 });
+    expect(await attempt("Album/missing.png", graded)).toMatchObject({ status: 404 });
+    expect(await attempt("Nope/a.png", graded)).toMatchObject({ status: 404 });
+
+    // 64 KB as JSON is the limit; one byte more is a 413.
+    const atLimit = { k: "a".repeat(64 * 1024 - 8) };
+    expect((await setColors("Album/a.png", atLimit)).status).toBe(200);
+    expect(await attempt("Album/a.png", { k: "a".repeat(64 * 1024 - 7) })).toMatchObject({
+      body: { error: "colors_too_large", max_bytes: 64 * 1024 },
+      status: 413,
+    });
+    // Far past it: the body itself is refused before it is parsed.
+    expect((await setColors("Album/a.png", { k: "a".repeat(1024 * 1024) })).status).toBe(413);
+
+    // A file a scan blocked is not there as far as the owner's edits go.
+    await db
+      .update(photoEntries)
+      .set({ status: "blocked" })
+      .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, "Album/a.png")));
+    expect(await attempt("Album/a.png", graded)).toMatchObject({ status: 404 });
+
+    // None of the refusals touched the stored profile.
+    const [row] = await db
+      .select({ colors: photoEntries.colors })
+      .from(photoEntries)
+      .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, "Album/a.png")));
+    expect(row?.colors).toEqual(atLimit);
+
+    // A mutation like any other: the origin is checked.
+    const noOrigin = await postColors(
+      postJson("/api/photos/colors", { colors: graded, path: "notes.txt" }, null),
+    );
+    expect(noOrigin.status).toBe(403);
+  });
+
+  it("keeps names ending in .frameos.json for profiles", async () => {
+    await signIn();
+    await upload("Album", "a.png", png(10, 10, "a"));
+    for (const name of ["a.png.frameos.json", "X.FrameOS.JSON"]) {
+      const renameFile = await postRename(postJson("/api/photos/rename", { name, path: "Album/a.png" }));
+      expect(renameFile.status, name).toBe(400);
+      const renameFolder = await postRename(postJson("/api/photos/rename", { name, path: "Album" }));
+      expect(renameFolder.status, name).toBe(400);
+      expect((await upload("Album", name, png(10, 10, name))).status, name).toBe(400);
+      const folder = await postFolders(postJson("/api/photos/folders", { path: `Album/${name}` }));
+      expect(folder.status, name).toBe(400);
+    }
+    expect((await listFolder("")).map((entry) => entry.path)).toEqual(["Album"]);
+    expect((await listFolder("Album")).map((entry) => entry.path)).toEqual(["Album/a.png"]);
   });
 });
 

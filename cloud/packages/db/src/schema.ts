@@ -1863,6 +1863,9 @@ export const photoEntries = pgTable(
     height: integer("height"),
     // ready | blocked
     status: text("status").default("ready").notNull(),
+    // Files only: the photo's color profile (migration 0060, docs/photos.md
+    // "Colors"), a JSON object stored as the owner sent it, or null.
+    colors: jsonb("colors").$type<Record<string, unknown>>(),
     ...timestamps,
   },
   (table) => ({

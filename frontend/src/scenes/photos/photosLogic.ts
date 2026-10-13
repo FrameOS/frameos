@@ -308,6 +308,9 @@ export interface photosLogicActions {
   stepLightbox: (delta: number) => {
     delta: number
   }
+  updateEntry: (entry: PhotoEntry) => {
+    entry: PhotoEntry
+  }
   uploadDropped: (
     folder: string,
     files: DroppedPhotoFile[]
@@ -395,6 +398,8 @@ export const photosLogic = kea<photosLogicType>([
     loadFolder: (folder: string) => ({ folder }),
     loadFolderSuccess: (folder: string, entries: PhotoEntry[]) => ({ folder, entries }),
     loadFolderFailure: (folder: string, error: string) => ({ folder, error }),
+    /** One entry changed in place (its colors): no listing to reload. */
+    updateEntry: (entry: PhotoEntry) => ({ entry }),
     refreshFolders: (folders: string[]) => ({ folders }),
     refresh: true,
     setSearch: (search: string) => ({ search }),
@@ -491,6 +496,13 @@ export const photosLogic = kea<photosLogicType>([
       {} as Record<string, PhotoEntry[]>,
       {
         loadFolderSuccess: (state, { folder, entries }) => ({ ...state, [folder]: sortPhotoEntries(entries) }),
+        updateEntry: (state, { entry }) => {
+          const folder = parentPhotoPath(entry.path)
+          const current = state[folder]
+          return current
+            ? { ...state, [folder]: current.map((item) => (item.path === entry.path ? entry : item)) }
+            : state
+        },
         uploadFinished: (state, { entry }) => {
           const folder = parentPhotoPath(entry.path)
           const current = state[folder]
@@ -1101,7 +1113,18 @@ export const photosLogic = kea<photosLogicType>([
     },
   })),
   actionToUrl(() => ({
-    setFolder: ({ folder }) => [urls.photos(), folder ? { folder } : {}, router.values.hashParams],
+    // Another folder drops the other params (an open editor's `colors`); the
+    // same folder, as a load from the URL, keeps them.
+    setFolder: ({ folder }) => {
+      const search = router.values.searchParams
+      const current = typeof search.folder === 'string' ? search.folder : ''
+      const { folder: _folder, ...others } = search
+      return [
+        urls.photos(),
+        { ...(current === folder ? others : {}), ...(folder ? { folder } : {}) },
+        router.values.hashParams,
+      ]
+    },
   })),
   afterMount(({ actions, cache }) => {
     cache.uploadQueue = []

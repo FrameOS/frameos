@@ -67,6 +67,9 @@ export function photoNameProblem(name: string): string | null {
   if (/[\u0000-\u001f\u007f]/.test(name)) {
     return 'Names cannot contain control characters.'
   }
+  if (name.toLowerCase().endsWith('.frameos.json')) {
+    return 'Names ending in .frameos.json are kept for color profiles.'
+  }
   if (new TextEncoder().encode(name).length > MAX_SEGMENT_BYTES) {
     return 'That name is too long.'
   }

@@ -21,6 +21,7 @@ import {
   PhotoIcon,
   RectangleStackIcon,
   Squares2X2Icon,
+  SwatchIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
@@ -34,6 +35,10 @@ import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { photosLogic, type PhotoUpload } from './photosLogic'
+import { photoColorsLogic } from './photoColorsLogic'
+import { type PhotoPreviewTarget, renderPhotoPreview } from './photoColors'
+import { ColorEditorModal } from '../frame/panels/Assets/ColorEditorModal'
+import { Select } from '../../components/Select'
 import { photoFileUrl, photoThumbUrl, type PhotoEntry, type PhotosStatus } from './photosApi'
 import {
   dragHasFiles,
@@ -487,6 +492,7 @@ function entryMenuItems(
     deleteEntries: (paths: string[]) => void
     openShare: (path: string) => void
     openInstallPicker: (albums: string[]) => void
+    openColors: (path: string) => void
   }
 ): DropdownMenuItem[] {
   if (entry.kind === 'folder') {
@@ -509,6 +515,13 @@ function entryMenuItems(
   return [
     isBrowserImageName(entry.name) && entry.status !== 'blocked'
       ? { label: 'View', icon: <PhotoIcon className="h-5 w-5" />, onClick: () => actions.openEntry(entry) }
+      : null,
+    isBrowserImageName(entry.name) && entry.status !== 'blocked'
+      ? {
+          label: entry.colors ? 'Edit colors' : 'Set colors',
+          icon: <SwatchIcon className="h-5 w-5" />,
+          onClick: () => actions.openColors(entry.path),
+        }
       : null,
     entry.status !== 'blocked'
       ? {
@@ -572,13 +585,21 @@ function SelectToggle({ entry, selected }: { entry: PhotoEntry; selected: boolea
 
 function EntryMenu({ entry }: { entry: PhotoEntry }): JSX.Element {
   const { openEntry, openRename, deleteEntries, openShare, openInstallPicker } = useActions(photosLogic)
+  const { openEditor } = useActions(photoColorsLogic)
   return (
     <div onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
       <DropdownMenu
         horizontal
         className="w-fit"
         buttonColor="tertiary"
-        items={entryMenuItems(entry, { openEntry, openRename, deleteEntries, openShare, openInstallPicker })}
+        items={entryMenuItems(entry, {
+          openEntry,
+          openRename,
+          deleteEntries,
+          openShare,
+          openInstallPicker,
+          openColors: openEditor,
+        })}
       />
     </div>
   )
@@ -645,8 +666,11 @@ function FileTile({ entry, selected }: { entry: PhotoEntry; selected: boolean })
       </div>
       <div className="flex items-center gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
-          <div className="frameos-strong truncate text-sm font-semibold" title={entry.name}>
-            {entry.name}
+          <div className="frameos-strong flex items-center gap-1.5 text-sm font-semibold">
+            <span className="truncate" title={entry.name}>
+              {entry.name}
+            </span>
+            {entry.colors ? <ColorsMark /> : null}
           </div>
           <div className="frameos-muted truncate text-xs">
             {[humanFileSize(entry.size), entry.width && entry.height ? `${entry.width}×${entry.height}` : null]
@@ -692,6 +716,7 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
             {entry.name}
           </span>
           {shared ? <LinkIcon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-label="Shared" /> : null}
+          {entry.colors ? <ColorsMark /> : null}
           {entry.status === 'blocked' ? <span className="text-xs font-semibold text-red-600">Blocked</span> : null}
         </div>
         <div className="frameos-muted truncate text-xs @3xl:hidden">
@@ -880,9 +905,143 @@ function UploadPanel(): JSX.Element | null {
   )
 }
 
+function ColorsMark(): JSX.Element {
+  return (
+    <span title="Has colors" className="shrink-0">
+      <SwatchIcon className="h-3.5 w-3.5 opacity-60" aria-label="Has colors" />
+    </span>
+  )
+}
+
+function previewTargetOptions(targets: PhotoPreviewTarget[]): {
+  original: PhotoPreviewTarget[]
+  frames: PhotoPreviewTarget[]
+  panels: PhotoPreviewTarget[]
+} {
+  return {
+    original: targets.filter((target) => target.group === 'original'),
+    frames: targets.filter((target) => target.group === 'frames'),
+    panels: targets.filter((target) => target.group === 'panels'),
+  }
+}
+
+/** Full fidelity, a frame, or a panel family: what the photo is previewed as. */
+function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.Element {
+  const { previewTargets, previewTarget } = useValues(photoColorsLogic)
+  const { setPreviewTarget } = useActions(photoColorsLogic)
+  const { original, frames, panels } = previewTargetOptions(previewTargets)
+  const toOption = (target: PhotoPreviewTarget) => ({
+    value: target.key,
+    label: target.group === 'panels' ? `${target.label} panel` : target.label,
+  })
+  const options = [
+    ...original.map(toOption),
+    ...(frames.length ? [{ label: 'On a frame', options: frames.map(toOption) }] : []),
+    { label: 'On a panel, 800×480', options: panels.map(toOption) },
+  ]
+  if (!overlay) {
+    return (
+      <span className="flex items-center gap-2">
+        <span className="frame-tool-muted text-xs">Preview</span>
+        <Select value={previewTarget.key} onChange={setPreviewTarget} options={options} />
+      </span>
+    )
+  }
+  return (
+    <label className="flex items-center gap-2 text-xs text-white/70" onClick={(event) => event.stopPropagation()}>
+      <span className="max-sm:hidden">View</span>
+      <select
+        value={previewTarget.key}
+        onChange={(event) => setPreviewTarget(event.target.value)}
+        className="h-9 max-w-[14rem] rounded-xl border border-white/20 bg-white/10 px-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-400"
+      >
+        {options.map((option) =>
+          'options' in option ? (
+            <optgroup key={option.label} label={option.label}>
+              {option.options.map((child) => (
+                <option key={child.value} value={child.value}>
+                  {child.label}
+                </option>
+              ))}
+            </optgroup>
+          ) : (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          )
+        )}
+      </select>
+    </label>
+  )
+}
+
+function PhotoColorsModal(): JSX.Element | null {
+  const values = useValues(photoColorsLogic)
+  const actions = useActions(photoColorsLogic)
+  return (
+    <ColorEditorModal
+      values={values}
+      actions={actions}
+      previewControls={<PreviewTargetSelect />}
+      hint={
+        <>
+          Saved with the photo: every frame that plays it gets these colors. A panel's white is darker than a photo's;
+          pull Whites down, or use Auto, to keep texture in bright areas. On a frame with automatic colors, saving Auto
+          stores nothing, and each frame fits the photo to its own panel.
+        </>
+      }
+    />
+  )
+}
+
+/** The lightbox's photo as the chosen panel shows it, or graded at full fidelity. */
+function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
+  const { lightboxSource, lightboxSourceError, previewTarget, fit } = useValues(photoColorsLogic)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const workRef = useRef<HTMLCanvasElement | null>(null)
+  const source = lightboxSource?.path === entry.path ? lightboxSource : null
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !source) {
+      return
+    }
+    const handle = window.requestAnimationFrame(() => {
+      const work = (workRef.current ??= document.createElement('canvas'))
+      const imageData = renderPhotoPreview(work, source, { target: previewTarget, fit, colors: entry.colors })
+      if (imageData) {
+        canvas.width = imageData.width
+        canvas.height = imageData.height
+        canvas.getContext('2d')?.putImageData(imageData, 0, 0)
+      }
+    })
+    return () => window.cancelAnimationFrame(handle)
+  }, [source, previewTarget, fit, entry.colors])
+
+  if (lightboxSourceError) {
+    return <div className="text-sm text-red-300">{lightboxSourceError}</div>
+  }
+  if (!source) {
+    return <Spinner className="h-8 w-8" color="white" />
+  }
+  const panel = previewTarget.group !== 'original'
+  return (
+    <canvas
+      ref={canvasRef}
+      onClick={(event) => event.stopPropagation()}
+      // A panel is scaled up to the room there is, pixel for pixel, so the
+      // dither shows; a photo is never shown larger than it is.
+      className={clsx('object-contain shadow-2xl', panel ? 'h-full w-full' : 'max-h-full max-w-full')}
+      style={{ imageRendering: panel ? 'pixelated' : 'auto' }}
+    />
+  )
+}
+
 function Lightbox(): JSX.Element | null {
   const { lightboxEntry, lightboxEntries } = useValues(photosLogic)
   const { closeLightbox, stepLightbox, deleteEntries } = useActions(photosLogic)
+  const { lightboxPainted } = useValues(photoColorsLogic)
+  const { openEditor } = useActions(photoColorsLogic)
   if (!lightboxEntry) {
     return null
   }
@@ -907,6 +1066,22 @@ function Lightbox(): JSX.Element | null {
               .join(' · ')}
           </div>
         </div>
+        {isBrowserImageName(lightboxEntry.name) ? (
+          <>
+            <PreviewTargetSelect overlay />
+            <button
+              type="button"
+              title={lightboxEntry.colors ? 'Edit colors' : 'Set colors'}
+              onClick={() => openEditor(lightboxEntry.path)}
+              className={clsx(
+                'flex h-10 w-10 items-center justify-center rounded-xl hover:bg-white/10',
+                lightboxEntry.colors && 'text-emerald-300'
+              )}
+            >
+              <SwatchIcon className="h-5 w-5" />
+            </button>
+          </>
+        ) : null}
         <a
           href={photoFileUrl(lightboxEntry.path, true)}
           download={lightboxEntry.name}
@@ -933,13 +1108,17 @@ function Lightbox(): JSX.Element | null {
         </button>
       </div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-16 pb-8">
-        <img
-          key={lightboxEntry.path}
-          src={photoFileUrl(lightboxEntry.path)}
-          alt={lightboxEntry.name}
-          onClick={(event) => event.stopPropagation()}
-          className="max-h-full max-w-full object-contain shadow-2xl"
-        />
+        {lightboxPainted ? (
+          <LightboxPainted entry={lightboxEntry} />
+        ) : (
+          <img
+            key={lightboxEntry.path}
+            src={photoFileUrl(lightboxEntry.path)}
+            alt={lightboxEntry.name}
+            onClick={(event) => event.stopPropagation()}
+            className="max-h-full max-w-full object-contain shadow-2xl"
+          />
+        )}
         {lightboxEntries.length > 1 ? (
           <>
             <button
@@ -1185,6 +1364,7 @@ function PhotosDialogs(): JSX.Element {
       ) : null}
       <ShareDialog />
       <InstallPicker />
+      <PhotoColorsModal />
     </>
   )
 }

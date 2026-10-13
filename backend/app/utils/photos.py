@@ -5,7 +5,10 @@ this module is the disk side of it. Files live in a plain folder, one per
 project: `<photos dir>/project_<id>/<path>`, so files copied in by hand show
 up in the library. Thumbnails and unfinished uploads live in
 `<photos dir>/.cache`. Share links are rows in `photo_share`
-(app/models/photo_share.py).
+(app/models/photo_share.py). A photo's color profile is a sidecar next to
+it, `<photo>.frameos.json`, in the frame assets' format
+(docs/asset-color-profiles.md); the path rules refuse that suffix, so a
+sidecar is never listed and travels with its photo.
 
 Everything here is blocking disk work; the routes (app/api/photos.py) run it
 in a worker thread.
@@ -14,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import mimetypes
 import os
 import random
@@ -48,6 +52,8 @@ THUMB_MAX_SIDE = 512
 UPLOAD_PART_MAX_AGE_SECONDS = 3600
 SHARE_URL_PREFIX = "/api/photos/shared"
 SHARE_ORDERS = ("random", "sequential", "newest", "oldest")
+COLORS_SUFFIX = ".frameos.json"
+MAX_COLORS_BYTES = 64 * 1024
 
 _UPLOAD_ID_RE = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _SHARE_TOKEN_RE = re.compile(r"pk_[A-Za-z0-9_-]{32,124}")
@@ -276,6 +282,8 @@ def _segment_problem(name: str) -> Optional[str]:
         return f"Names must be 1 to {MAX_SEGMENT_BYTES} bytes long"
     if name.startswith("."):
         return "Names cannot start with a dot"
+    if name.casefold().endswith(COLORS_SUFFIX):
+        return "Names ending in .frameos.json are kept for color profiles"
     for ch in name:
         if ch in ("/", "\\") or ord(ch) < 0x20 or ord(ch) == 0x7F:
             return "Names cannot contain slashes or control characters"
@@ -386,6 +394,7 @@ class Child:
     path: Path  # on disk, unresolved
     is_dir: bool
     stat: os.stat_result  # of what it points at
+    has_colors: bool = False  # a file with a `<name>.frameos.json` next to it
 
 
 def children(directory: Path, rel: str, boundary: str) -> list[Child]:
@@ -396,6 +405,8 @@ def children(directory: Path, rel: str, boundary: str) -> list[Child]:
         entries = list(os.scandir(directory))
     except OSError:
         return []
+    # Sidecars fail the name rules, so they are seen here and nowhere else.
+    sidecars = {entry.name for entry in entries if entry.name.endswith(COLORS_SUFFIX)}
     found: list[Child] = []
     for entry in entries:
         name = entry.name
@@ -416,7 +427,16 @@ def children(directory: Path, rel: str, boundary: str) -> list[Child]:
             is_dir = False
         else:
             continue
-        found.append(Child(name=name, rel=child_rel, path=Path(entry.path), is_dir=is_dir, stat=entry_stat))
+        found.append(
+            Child(
+                name=name,
+                rel=child_rel,
+                path=Path(entry.path),
+                is_dir=is_dir,
+                stat=entry_stat,
+                has_colors=not is_dir and name + COLORS_SUFFIX in sidecars,
+            )
+        )
     return found
 
 
@@ -480,7 +500,30 @@ def image_size(path: Path, file_stat: os.stat_result) -> tuple[Optional[int], Op
     return width, height
 
 
-def file_entry(rel: str, path: Path, file_stat: os.stat_result) -> dict[str, Any]:
+def colors_file(path: Path) -> Path:
+    """Where a photo's color profile lives: next to it, as a frame asset's."""
+    return path.with_name(path.name + COLORS_SUFFIX)
+
+
+def read_colors(path: Path) -> Optional[dict[str, Any]]:
+    """The photo's color profile (the sidecar's `colors`), or None: no
+    sidecar, a link, one too big or one that does not parse."""
+    sidecar = colors_file(path)
+    try:
+        sidecar_stat = os.lstat(sidecar)
+        if not stat_module.S_ISREG(sidecar_stat.st_mode) or sidecar_stat.st_size > MAX_COLORS_BYTES + 1024:
+            return None
+        root = json.loads(sidecar.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    colors = root.get("colors") if isinstance(root, dict) else None
+    return colors if isinstance(colors, dict) and colors else None
+
+
+def file_entry(
+    rel: str, path: Path, file_stat: os.stat_result, has_colors: Optional[bool] = None
+) -> dict[str, Any]:
+    """`has_colors` is what the folder scan saw; None looks on disk."""
     name = base_name(rel)
     content_type = content_type_for(name)
     width, height = image_size(path, file_stat) if content_type.startswith("image/") else (None, None)
@@ -494,6 +537,7 @@ def file_entry(rel: str, path: Path, file_stat: os.stat_result) -> dict[str, Any
         "width": width,
         "height": height,
         "status": "ready",
+        "colors": read_colors(path) if has_colors is not False else None,
     }
 
 
@@ -553,7 +597,7 @@ def list_folder(root: Path, rel: str) -> dict[str, Any]:
     entries = [
         folder_entry(child.rel, child.path, child.stat, boundary)
         if child.is_dir
-        else file_entry(child.rel, child.path, child.stat)
+        else file_entry(child.rel, child.path, child.stat, child.has_colors)
         for child in sort_children(children(folder, rel, boundary))
     ]
     return {"path": rel, "entries": entries}
@@ -624,6 +668,42 @@ def _unlink_quietly(path: str | Path) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+def _carry_colors(source: Optional[Path], target: Path) -> None:
+    """A file arriving at `target` brings its own profile (from `source`) or
+    none: a sidecar left at the new name (its photo removed by hand) must not
+    color the newcomer."""
+    old = colors_file(source) if source is not None else None
+    if old is not None and os.path.lexists(old):
+        os.replace(old, colors_file(target))
+    else:
+        _unlink_quietly(colors_file(target))
+
+
+def set_colors(root: Path, rel: str, colors: Any) -> dict[str, Any]:
+    """Write or remove (None, {}) a photo's color profile."""
+    target = existing_file(root, rel)
+    if not is_playable(base_name(rel)):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Only images can have colors")
+    if colors is not None and not isinstance(colors, dict):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="colors must be an object or null")
+    sidecar = colors_file(target)
+    if not colors:
+        _unlink_quietly(sidecar)
+        return entry_for(root, rel)
+    encoded = json.dumps(colors, separators=(",", ":"), ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > MAX_COLORS_BYTES:
+        raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="colors is too large")
+    # Written aside and renamed over, so a frame never reads half a file. The
+    # dot keeps the temporary file out of the listing.
+    temporary = sidecar.with_name(f".{sidecar.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        temporary.write_text('{"version":1,"colors":' + encoded + "}\n", encoding="utf-8")
+        os.replace(temporary, sidecar)
+    finally:
+        _unlink_quietly(temporary)
+    return entry_for(root, rel)
 
 
 def candidate_names(name: str) -> Iterator[str]:
@@ -753,6 +833,7 @@ def finish_upload(
         except OSError:
             _unlink_quietly(target)
             raise
+        _carry_colors(None, target)
         return entry_for(root, rel)
     raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"The name {filename} is taken")
 
@@ -789,7 +870,10 @@ def move_paths(db: Session, project_id: int, root: Path, paths: list[str], to: s
             continue
         new_rel, target = next(_free_rel(destination, to, base_name(path)))
         delete_shares_at_or_below(db, project_id, new_rel)
+        is_file = not source.is_dir()
         os.rename(source, target)
+        if is_file:
+            _carry_colors(source, target)
         rewrite_share_paths(db, project_id, path, new_rel)
         # Per item: a later failure must not take the links of what already
         # moved back to where it was.
@@ -817,7 +901,10 @@ def rename_path(db: Session, project_id: int, root: Path, path: str, name: str) 
             raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"The name {name} is taken")
     else:
         delete_shares_at_or_below(db, project_id, new_rel)
+    is_file = not source.is_dir()
     os.rename(source, target)
+    if is_file:
+        _carry_colors(source, target)
     rewrite_share_paths(db, project_id, path, new_rel)
     db.commit()
     return entry_for(root, new_rel)
@@ -837,6 +924,7 @@ def delete_paths(db: Session, project_id: int, root: Path, paths: list[str]) -> 
             shutil.rmtree(target)
         else:
             target.unlink()
+            _unlink_quietly(colors_file(target))
         delete_shares_at_or_below(db, project_id, path)
         db.commit()
         deleted += 1
@@ -888,6 +976,7 @@ class SharedPhoto:
     name: str
     file: Path
     stat: os.stat_result
+    has_colors: bool = False
 
 
 @dataclass
@@ -925,7 +1014,9 @@ def share_index(shared: SharedFolder) -> tuple[list[SharedPhoto], int]:
         if not is_playable(child.name):
             continue
         updated_at = max(updated_at, int(child.stat.st_mtime))
-        photos.append(SharedPhoto(path=child.rel, name=child.name, file=child.path, stat=child.stat))
+        photos.append(
+            SharedPhoto(path=child.rel, name=child.name, file=child.path, stat=child.stat, has_colors=child.has_colors)
+        )
     photos.sort(key=lambda photo: photo.path)
     return photos[:MAX_SHARE_FILES], updated_at
 
@@ -941,6 +1032,7 @@ def shared_photo_json(token: str, photo: SharedPhoto) -> dict[str, Any]:
         "width": width,
         "height": height,
         "content_type": content_type_for(photo.name),
+        "colors": read_colors(photo.file) if photo.has_colors else None,
     }
 
 

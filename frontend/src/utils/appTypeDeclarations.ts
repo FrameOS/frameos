@@ -152,6 +152,8 @@ declare const frameos: {
     options?: {
       headers?: Record<string, string>;
       saveAsset?: { name: string; extension?: string; mode?: "auto" | "always" };
+      // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
+      colors?: { [key: string]: any } | null;
     }
   ): { image: FrameOSImageRef | null; width?: number; height?: number; error?: string; savedAs?: string };
   listAssets(dir?: string): string[];

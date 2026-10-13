@@ -3,6 +3,7 @@ and the share routes frames call without a login."""
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -226,6 +227,7 @@ async def test_a_chunked_upload_lands_in_the_folder(async_client):
         "width": 64,
         "height": 48,
         "status": "ready",
+        "colors": None,
     }
     assert (library(async_client) / "Summer 2026/Beach/beach.jpg").read_bytes() == data
     # The part is gone.
@@ -365,6 +367,7 @@ async def test_listing_shapes_and_order(async_client):
         "width": 30,
         "height": 40,
         "status": "ready",
+        "colors": None,
     }
     text = by_name["B.txt"]
     assert text["content_type"] == "text/plain"
@@ -711,6 +714,7 @@ async def test_share_listing_without_a_login(async_client, no_auth_client, redis
         "width": 8,
         "height": 6,
         "content_type": "image/jpeg",
+        "colors": None,
     }
     assert body["files"][0]["content_type"] == "image/png"
 
@@ -834,3 +838,167 @@ async def test_share_routes_are_rate_limited_per_address(async_client, no_auth_c
     assert (await no_auth_client.get(f"/api/photos/shared/{token}")).status_code == 200
     assert (await no_auth_client.get(f"/api/photos/shared/{token}/photo")).status_code == 200
     assert (await no_auth_client.get(f"/api/photos/shared/{token}/file?path=a.jpg")).status_code == 429
+
+
+# ---------------------------------------------------------------------------
+# Colors
+# ---------------------------------------------------------------------------
+
+
+async def set_colors(client, path: str, colors):
+    return await client.post("/api/photos/colors", json={"path": path, "colors": colors})
+
+
+@pytest.mark.asyncio
+async def test_colors_are_a_sidecar_next_to_the_photo(async_client):
+    root = library(async_client)
+    write(root, "Summer/a.jpg", jpeg_bytes())
+    profile = {"whites": -30, "hues": {"blue": {"saturation": 20}}, "palette": ["#000000", "#ffffff"]}
+
+    response = await set_colors(async_client, "Summer/a.jpg", profile)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["entry"]["colors"] == profile
+    assert json.loads((root / "Summer/a.jpg.frameos.json").read_text()) == {"version": 1, "colors": profile}
+    # Never listed, never counted.
+    listing = (await async_client.get("/api/photos/files", params={"path": "Summer"})).json()
+    assert [entry["name"] for entry in listing["entries"]] == ["a.jpg"]
+    assert listing["entries"][0]["colors"] == profile
+    album = (await async_client.get("/api/photos/files", params={"path": ""})).json()["entries"][0]
+    assert album["files"] == 1 and album["items"] == 1
+    assert album["size"] == len(jpeg_bytes())
+    assert "colors" not in album
+
+    for empty in (None, {}):
+        await set_colors(async_client, "Summer/a.jpg", profile)
+        response = await set_colors(async_client, "Summer/a.jpg", empty)
+        assert response.status_code == 200, response.text
+        assert response.json()["entry"]["colors"] is None
+        assert not (root / "Summer/a.jpg.frameos.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_colors_refuse_what_the_contract_refuses(async_client):
+    root = library(async_client)
+    write(root, "Summer/a.jpg", jpeg_bytes())
+    write(root, "Summer/notes.txt", b"text")
+
+    assert (await set_colors(async_client, "Summer/a.jpg", [1, 2])).status_code == 400
+    assert (await set_colors(async_client, "Summer/a.jpg", "bright")).status_code == 400
+    assert (await set_colors(async_client, "Summer/notes.txt", {"whites": 1})).status_code == 400
+    assert (await set_colors(async_client, "Summer", {"whites": 1})).status_code == 404
+    assert (await set_colors(async_client, "Summer/missing.jpg", {"whites": 1})).status_code == 404
+    assert (await set_colors(async_client, "../a.jpg", {"whites": 1})).status_code == 400
+    big = {"note": "x" * (64 * 1024)}
+    assert (await set_colors(async_client, "Summer/a.jpg", big)).status_code == 413
+    assert not (root / "Summer/a.jpg.frameos.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_colors_travel_with_the_photo(async_client):
+    root = library(async_client)
+    write(root, "Summer/a.jpg", jpeg_bytes())
+    (root / "Winter").mkdir()
+    await set_colors(async_client, "Summer/a.jpg", {"exposure": 0.5})
+
+    response = await async_client.post("/api/photos/rename", json={"path": "Summer/a.jpg", "name": "b.jpg"})
+    assert response.json()["entry"]["colors"] == {"exposure": 0.5}
+    assert not (root / "Summer/a.jpg.frameos.json").exists()
+
+    response = await async_client.post("/api/photos/move", json={"paths": ["Summer/b.jpg"], "to": "Winter"})
+    assert response.status_code == 200, response.text
+    moved = (await async_client.get("/api/photos/files", params={"path": "Winter"})).json()["entries"]
+    assert moved[0]["colors"] == {"exposure": 0.5}
+    assert os.listdir(root / "Summer") == []
+
+    # A folder takes its photos' sidecars along.
+    response = await async_client.post("/api/photos/move", json={"paths": ["Winter"], "to": "Summer"})
+    assert response.status_code == 200, response.text
+    assert (root / "Summer/Winter/b.jpg.frameos.json").exists()
+
+    response = await async_client.post("/api/photos/delete", json={"paths": ["Summer/Winter/b.jpg"]})
+    assert response.status_code == 200, response.text
+    assert os.listdir(root / "Summer/Winter") == []
+
+
+@pytest.mark.asyncio
+async def test_a_leftover_sidecar_does_not_color_a_newcomer(async_client):
+    root = library(async_client)
+    # The photo was deleted by hand; its sidecar stayed.
+    write(root, "Summer/new.jpg.frameos.json", b'{"version": 1, "colors": {"whites": -50}}')
+    write(root, "Other/new.jpg", jpeg_bytes())
+
+    response = await upload(async_client, "Summer", "new.jpg", jpeg_bytes())
+    assert response.status_code == 200, response.text
+    assert response.json()["entry"]["colors"] is None
+    assert not (root / "Summer/new.jpg.frameos.json").exists()
+
+    response = await async_client.post("/api/photos/move", json={"paths": ["Other/new.jpg"], "to": "Summer"})
+    assert response.json()["moved"] == [{"from": "Other/new.jpg", "to": "Summer/new (2).jpg"}]
+    write(root, "Summer/renamed.jpg.frameos.json", b'{"version": 1, "colors": {"whites": -50}}')
+    response = await async_client.post(
+        "/api/photos/rename", json={"path": "Summer/new (2).jpg", "name": "renamed.jpg"}
+    )
+    assert response.json()["entry"]["colors"] is None
+
+
+@pytest.mark.asyncio
+async def test_sidecars_copied_in_by_hand(async_client):
+    root = library(async_client)
+    write(root, "Summer/a.jpg", jpeg_bytes())
+    write(root, "Summer/a.jpg.frameos.json", b'{"version": 1, "colors": {"contrast": 25}}')
+    write(root, "Summer/b.jpg", jpeg_bytes())
+    write(root, "Summer/b.jpg.frameos.json", b"not json")
+    write(root, "Summer/c.jpg", jpeg_bytes())
+    write(root, "Summer/c.jpg.frameos.json", b'{"version": 1, "colors": []}')
+    write(root, "elsewhere.json", b'{"version": 1, "colors": {"whites": -100}}')
+    write(root, "Summer/d.jpg", jpeg_bytes())
+    os.symlink(root / "elsewhere.json", root / "Summer/d.jpg.frameos.json")
+    write(root, "Summer/orphan.jpg.frameos.json", b'{"version": 1, "colors": {"whites": 1}}')
+
+    entries = (await async_client.get("/api/photos/files", params={"path": "Summer"})).json()["entries"]
+
+    assert {entry["name"]: entry["colors"] for entry in entries} == {
+        "a.jpg": {"contrast": 25},
+        "b.jpg": None,
+        "c.jpg": None,
+        "d.jpg": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_names_ending_in_frameos_json_are_kept_for_colors(async_client):
+    root = library(async_client)
+    write(root, "Summer/a.jpg", jpeg_bytes())
+
+    response = await upload(async_client, "Summer", "x.frameos.json", b"{}")
+    assert response.status_code == 400, response.text
+    response = await async_client.post(
+        "/api/photos/rename", json={"path": "Summer/a.jpg", "name": "a.jpg.FrameOS.json"}
+    )
+    assert response.status_code == 400
+    response = await async_client.post("/api/photos/folders", json={"path": "Summer/x.frameos.json"})
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_share_routes_carry_the_colors(async_client, no_auth_client, redis):
+    root = library(async_client)
+    write(root, "Summer/a.jpg", jpeg_bytes())
+    write(root, "Summer/b.jpg", jpeg_bytes())
+    await set_colors(async_client, "Summer/a.jpg", {"whites": -30})
+    token = (await share(async_client, "Summer"))["token"]
+
+    listing = (await no_auth_client.get(f"/api/photos/shared/{token}")).json()
+    assert {photo["path"]: photo["colors"] for photo in listing["files"]} == {"a.jpg": {"whites": -30}, "b.jpg": None}
+    assert listing["count"] == 2
+
+    base = f"/api/photos/shared/{token}/photo"
+    picked = (await no_auth_client.get(base, params={"order": "sequential"})).json()
+    assert picked["photo"]["path"] == "a.jpg"
+    assert picked["photo"]["colors"] == {"whites": -30}
+    picked = (await no_auth_client.get(base, params={"order": "sequential", "index": 1})).json()
+    assert picked["photo"]["colors"] is None
+    # The sidecar itself is not a photo a link serves.
+    response = await no_auth_client.get(f"/api/photos/shared/{token}/file", params={"path": "a.jpg.frameos.json"})
+    assert response.status_code == 400

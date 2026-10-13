@@ -83,13 +83,14 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
     return show('This album has no photos yet.')
   }
 
-  // Move on before the download, so one broken photo can not stall the frame.
+  // Move on before the download, so one broken photo cannot stall the frame.
   if (key) frameos.setState(key, index + 1)
   const name = String(photo.name || photo.path || 'a photo')
   const url = photoUrl(link, photo.url)
   if (!url) return fail(`The album sent no address for ${name}.`)
   frameos.log(`Showing ${name} (${(index % count) + 1} of ${count})`)
-  const result = frameos.fetchImage(url)
+  // null, not undefined: no profile clears the last photo's palette
+  const result = frameos.fetchImage(url, { colors: photo.colors ?? null })
   if (!result.image) return fail(`Could not load ${name}: ${result.error ?? 'no image'}`)
   return result.image
 }

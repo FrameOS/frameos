@@ -180,6 +180,12 @@
   one photo per render (`/shared/{token}/photo?index=`), keeping its place in
   a disk-persisted state field. The share routes are on the backend's public
   router and are rate limited.
+- A photo's color profile (the asset sidecar's `colors`, docs "Colors") is a
+  `<photo>.frameos.json` sidecar on the backend (the path rules refuse the
+  suffix, so it is never listed and travels with its photo) and the `colors`
+  column on the cloud. Frames get it in the share JSON and hand it to
+  `frameos.fetchImage(url, {colors})`. The editor is the Assets panel's
+  (`ColorEditorModal`, preview math in `utils/assetColors/preview.ts`).
 - Cloud uploads are scanned before anything is stored (hash list,
   PhotoDNA), and a configured scanner that fails stores nothing. Not OpenAI
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into

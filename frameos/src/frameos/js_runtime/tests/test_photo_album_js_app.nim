@@ -1,14 +1,16 @@
 ## The Photo album code app (repo/apps/code/photoAlbum) run for real through
 ## the JS app runtime, against a mock of the Photos share routes
 ## (docs/photos.md, "Share routes") on a thread: the counter in scene state,
-## the order, root-relative and absolute photo addresses, a CDN redirect, an
-## empty album, a dead link and the setup mistakes.
+## the order, root-relative and absolute photo addresses, a CDN redirect, a
+## photo's color profile, an empty album, a dead link and the setup mistakes.
 
 import std/[json, net, os, strutils, tables, unittest, uri]
 import pixie
 
 import frameos/js_runtime/app_runtime
 import frameos/types
+import frameos/utils/asset_colors
+import frameos/utils/dither
 import frameos/utils/http_client
 import frameos/values
 
@@ -20,6 +22,8 @@ let appConfigJson = readFile(AppDir / "config.json")
 ##   pk_rel    three photos, root-relative urls
 ##   pk_abs    three photos, absolute urls
 ##   pk_cdn    three photos whose /file answers 302 to /cdn/...
+##   pk_colors three photos; a.jpg has a color profile (one stop up and a
+##             two-color palette), b.jpg `colors: null`, c.jpg no key at all
 ##   pk_empty  no photos
 ##   pk_broken one photo whose file is gone
 ## any other token is a 404, like a deleted link. Photo i is a PNG of
@@ -56,9 +60,11 @@ proc photoAt(token: string, order: string, index: int, base: string): JsonNode =
     i = (i + 1) mod Names.len
   let path = "beach/" & Names[i]
   let fileUrl = "/api/photos/shared/" & token & "/file?path=" & encodeUrl(path)
-  %*{"path": path, "name": Names[i], "url": (if token == "pk_abs": base & fileUrl else: fileUrl),
+  result = %*{"path": path, "name": Names[i], "url": (if token == "pk_abs": base & fileUrl else: fileUrl),
      "size": 1234, "mtime": 1760000000 + i, "width": 5 + i, "height": 3 + i,
      "content_type": "image/png"}
+  if token == "pk_colors" and i < 2:
+    result["colors"] = if i == 0: %*{"exposure": 1, "palette": ["#000000", "#ffffff"]} else: newJNull()
 
 proc mockPhotosLoop() {.thread.} =
   var server = newSocket()
@@ -108,7 +114,7 @@ proc mockPhotosLoop() {.thread.} =
       continue
     let token = segments[4]
     let route = segments[5]
-    if token notin ["pk_rel", "pk_abs", "pk_cdn", "pk_empty", "pk_broken"]:
+    if token notin ["pk_rel", "pk_abs", "pk_cdn", "pk_colors", "pk_empty", "pk_broken"]:
       client.reply("404 Not Found", "application/json", """{"detail":"Share link not found"}""")
       continue
 
@@ -247,6 +253,31 @@ suite "photo album code app":
     check cdn.scene.state["photoIndex"].getInt() == 3
     check not h.anyErrorLogged()
     check not cdn.anyErrorLogged()
+
+  test "a photo's color profile reaches the image, null clears the last one's palette":
+    let h = newHarness()
+    clearRenderPaletteOverride()
+    let config = %*{"album": shareLink("pk_colors"), "order": "sequential", "counterStateKey": "photoIndex"}
+    let graded = h.render(config)
+    check graded.size() == (5, 3)
+    # pngBytes is (40, 120, 200): one stop up doubles it, clipped at white.
+    let pixel = graded.asImage().data[graded.asImage().dataIndex(2, 1)]
+    check (pixel.r, pixel.g, pixel.b) == (80'u8, 240'u8, 255'u8)
+    check isImageGraded(graded.asImage())
+    check renderPaletteOverride == @[(0, 0, 0), (255, 255, 255)]
+
+    let plain = h.render(config)
+    check plain.size() == (6, 4)
+    check plain.asImage().data[plain.asImage().dataIndex(2, 1)].b == 200
+    check not isImageGraded(plain.asImage())
+    check renderPaletteOverride.len == 0
+    # A share route without the key (an older backend) is no profile too.
+    setRenderPaletteOverride(@[(0, 0, 0), (255, 255, 255)])
+    let older = h.render(config)
+    check older.size() == (7, 5)
+    check not isImageGraded(older.asImage())
+    check renderPaletteOverride.len == 0
+    check not h.anyErrorLogged()
 
   test "without a state field each render still shows a photo":
     let h = newHarness()

@@ -19,6 +19,15 @@ export const playablePhotoExtensions = [
   "webp",
 ] as const;
 
+// Kept for color profiles (docs/photos.md "Paths" and "Colors"): the backend
+// keeps a photo's profile in a `<photo>.frameos.json` sidecar next to it, so
+// no file or folder may have such a name on either plane, in any case.
+export const reservedPhotoNameSuffix = ".frameos.json";
+
+export function isReservedPhotoName(name: string): boolean {
+  return name.toLowerCase().endsWith(reservedPhotoNameSuffix);
+}
+
 function byteLength(value: string) {
   return Buffer.byteLength(value, "utf8");
 }
@@ -30,13 +39,19 @@ function isWellFormedUtf16(value: string) {
   return Buffer.from(value, "utf8").toString("utf8") === value;
 }
 
-/** One name: 1-255 bytes, not hidden, no separators or control characters. */
+/**
+ * One name: 1-255 bytes, not hidden, not a color profile's name, no
+ * separators or control characters.
+ */
 export function isValidPhotoSegment(segment: string): boolean {
   if (segment.length === 0 || byteLength(segment) > maxPhotoSegmentBytes) {
     return false;
   }
   if (segment.startsWith(".")) {
     // Also covers "." and "..".
+    return false;
+  }
+  if (isReservedPhotoName(segment)) {
     return false;
   }
   if (!isWellFormedUtf16(segment)) {

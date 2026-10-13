@@ -3,6 +3,7 @@ import {
   comparePhotoNames,
   comparePhotoPaths,
   isPlayablePhotoName,
+  isReservedPhotoName,
   isSameOrBelow,
   isValidPhotoSegment,
   joinPhotoPath,
@@ -52,6 +53,20 @@ describe("parsePhotoPath", () => {
       "del\u007f",
     ]) {
       expect(parsePhotoPath(path, { allowRoot: true }), JSON.stringify(path)).toBeUndefined();
+    }
+  });
+
+  it("keeps names ending in .frameos.json for color profiles, in any case", () => {
+    for (const name of ["a.jpg.frameos.json", "x.frameos.json", "A.JPG.FrameOS.JSON", "Album.frameos.json"]) {
+      expect(isReservedPhotoName(name), name).toBe(true);
+      expect(isValidPhotoSegment(name), name).toBe(false);
+      expect(parsePhotoPath(name, { allowRoot: false }), name).toBeUndefined();
+      expect(parsePhotoPath(`Album/${name}`, { allowRoot: false }), name).toBeUndefined();
+      expect(parsePhotoPath(`${name}/a.jpg`, { allowRoot: false }), name).toBeUndefined();
+    }
+    for (const name of ["frameos.json", "a.frameos.json.jpg", "a.frameos", "a.json", "a frameos.json"]) {
+      expect(isReservedPhotoName(name), name).toBe(false);
+      expect(isValidPhotoSegment(name), name).toBe(true);
     }
   });
 

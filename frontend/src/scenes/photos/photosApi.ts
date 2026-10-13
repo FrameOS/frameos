@@ -22,7 +22,12 @@ export interface PhotoEntry {
   files?: number
   /** Folders: an image to show for the folder. */
   cover?: string | null
+  /** Files: the photo's color profile, a frame asset sidecar's `colors` (docs/photos.md, "Colors"). */
+  colors?: PhotoColors | null
 }
+
+/** The `colors` object of a `.frameos.json` sidecar (docs/asset-color-profiles.md). */
+export type PhotoColors = Record<string, unknown>
 
 export type PhotosProblem = 'not_writable' | 'not_persistent' | 'storage_unavailable' | 'suspended'
 
@@ -121,6 +126,11 @@ export async function movePhotos(paths: string[], to: string): Promise<{ from: s
 
 export async function renamePhoto(path: string, name: string): Promise<PhotoEntry> {
   return (await jsonPost<{ entry: PhotoEntry }>('/api/photos/rename', { path, name })).entry
+}
+
+/** Sets a photo's color profile; `null` removes it. */
+export async function setPhotoColors(path: string, colors: PhotoColors | null): Promise<PhotoEntry> {
+  return (await jsonPost<{ entry: PhotoEntry }>('/api/photos/colors', { path, colors })).entry
 }
 
 export async function deletePhotos(paths: string[]): Promise<number> {

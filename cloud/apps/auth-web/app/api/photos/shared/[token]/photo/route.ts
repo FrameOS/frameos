@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
-import { sharedPhotoContext, sharedPhotoFileUrl } from "../../../../../../src/lib/photos/http";
+import { sharedPhotoContext, sharedPhotoJson } from "../../../../../../src/lib/photos/http";
 import { sharedPhotos } from "../../../../../../src/lib/photos/library";
 import { parsePhotoOrder, pickPhoto } from "../../../../../../src/lib/photos/pick";
 
@@ -37,18 +37,7 @@ export async function GET(
     {
       count: picked.count,
       index: picked.index,
-      photo: photo
-        ? {
-            content_type: photo.contentType,
-            height: photo.height,
-            mtime: photo.mtime,
-            name: photo.name,
-            path: photo.path,
-            size: photo.size,
-            url: sharedPhotoFileUrl(origin, token, photo.path),
-            width: photo.width,
-          }
-        : null,
+      photo: photo ? sharedPhotoJson(origin, token, photo) : null,
     },
     { headers: { "cache-control": "no-store" } },
   );

@@ -16,6 +16,7 @@ import {
   PhotoError,
   resolvePhotoShare,
   type ResolvedPhotoShare,
+  type SharedPhoto,
 } from "./library";
 
 const fifteenMinutes = 15 * 60 * 1000;
@@ -121,6 +122,25 @@ export async function sharedPhotoContext(
 /** The address a frame fetches one shared file from (absolute). */
 export function sharedPhotoFileUrl(origin: string, token: string, relative: string) {
   return `${origin}/api/photos/shared/${token}/file?path=${encodeURIComponent(relative)}`;
+}
+
+/**
+ * One file as the share routes send it (the listing's `files` and the
+ * `photo` of /photo), color profile included: the frame grades the photo
+ * with it (docs/photos.md "Colors").
+ */
+export function sharedPhotoJson(origin: string, token: string, photo: SharedPhoto) {
+  return {
+    colors: photo.colors,
+    content_type: photo.contentType,
+    height: photo.height,
+    mtime: photo.mtime,
+    name: photo.name,
+    path: photo.path,
+    size: photo.size,
+    url: sharedPhotoFileUrl(origin, token, photo.path),
+    width: photo.width,
+  };
 }
 
 /** A PhotoError as its JSON answer; anything else is rethrown (a real 500). */

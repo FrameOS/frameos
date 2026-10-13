@@ -6,6 +6,7 @@ const at = new Date("2026-10-01T12:00:00Z");
 
 function folder(path: string) {
   return {
+    colors: null,
     contentType: null,
     createdAt: at,
     height: null,
@@ -17,8 +18,15 @@ function folder(path: string) {
   };
 }
 
-function file(path: string, sizeBytes = 100, contentType = "image/jpeg", status = "ready") {
+function file(
+  path: string,
+  sizeBytes = 100,
+  contentType = "image/jpeg",
+  status = "ready",
+  colors: Record<string, unknown> | null = null,
+) {
   return {
+    colors,
     contentType,
     createdAt: at,
     height: 30,
@@ -45,6 +53,7 @@ describe("describePhotoChildren", () => {
     file("Nested/z/1.jpg", 1),
     file("Nested/a/2.jpg", 2),
     file("root.jpg", 7),
+    file("graded.jpg", 8, "image/jpeg", "ready", { saturation: 20, whites: -30 }),
   ];
 
   it("lists folders first, then files, by name", () => {
@@ -52,6 +61,7 @@ describe("describePhotoChildren", () => {
       "Empty",
       "Nested",
       "Summer",
+      "graded.jpg",
       "root.jpg",
     ]);
   });
@@ -85,6 +95,7 @@ describe("describePhotoChildren", () => {
   it("describes files in the contract's shape", () => {
     const rootFile = describePhotoChildren("", rows).find((entry) => entry.path === "root.jpg");
     expect(rootFile).toEqual({
+      colors: null,
       content_type: "image/jpeg",
       height: 30,
       kind: "file",
@@ -95,6 +106,17 @@ describe("describePhotoChildren", () => {
       status: "ready",
       width: 40,
     });
+  });
+
+  it("gives files their color profile and folders none", () => {
+    const entries = describePhotoChildren("", rows);
+    expect(entries.find((entry) => entry.path === "graded.jpg")?.colors).toEqual({
+      saturation: 20,
+      whites: -30,
+    });
+    for (const entry of entries.filter((item) => item.kind === "folder")) {
+      expect(entry, entry.path).not.toHaveProperty("colors");
+    }
   });
 
   it("lists a subfolder's children with natural order", () => {

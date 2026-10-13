@@ -25,6 +25,7 @@ import { logWarn } from "../log";
 import { isValidObjectKey, objectStore } from "../object-store";
 import { capturePostHogEvent } from "../posthog-capture";
 import { maxPhotoBytesPerAccount } from "../usage";
+import type { PhotoColors } from "./colors";
 import {
   comparePhotoNames,
   comparePhotoPaths,
@@ -75,6 +76,8 @@ export class PhotoError extends Error {
 }
 
 export type PhotoEntry = {
+  // Files only: the color profile, or null (docs/photos.md "Colors").
+  colors?: PhotoColors | null;
   content_type: string | null;
   cover?: string | null;
   files?: number;
@@ -90,6 +93,7 @@ export type PhotoEntry = {
 };
 
 type EntryRow = {
+  colors: PhotoColors | null;
   contentType: string | null;
   createdAt: Date;
   height: number | null;
@@ -101,6 +105,7 @@ type EntryRow = {
 };
 
 const entryColumns = {
+  colors: photoEntries.colors,
   contentType: photoEntries.contentType,
   createdAt: photoEntries.createdAt,
   height: photoEntries.height,
@@ -238,6 +243,7 @@ export function describePhotoChildren(parent: string, rows: EntryRow[]): PhotoEn
       }
       return {
         ...base,
+        colors: row.colors ?? null,
         content_type: row.contentType,
         height: row.height,
         kind: "file" as const,
@@ -766,6 +772,46 @@ export async function renamePhotoEntry(
 }
 
 /**
+ * POST /api/photos/colors: set a photo's color profile, or remove it with
+ * null. 404 for nothing there (or a file a scan blocked), 400 for a folder
+ * or a file a frame cannot play. Only the row changes: the profile follows
+ * the photo through moves and renames and goes with it on delete.
+ */
+export async function setPhotoColors(
+  db: FramesDatabase,
+  accountId: string,
+  path: string,
+  colors: PhotoColors | null,
+): Promise<PhotoEntry> {
+  await db.transaction(async (tx) => {
+    await lockPhotoLibrary(tx, accountId);
+    await assertPhotosAvailable(tx, accountId);
+    const [row] = await tx
+      .select({ kind: photoEntries.kind, status: photoEntries.status })
+      .from(photoEntries)
+      .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, path)))
+      .limit(1);
+    if (!row || (row.kind === "file" && row.status !== "ready")) {
+      throw new PhotoError("not_found", 404);
+    }
+    if (row.kind !== "file") {
+      throw new PhotoError("not_a_file", 400);
+    }
+    if (!isPlayablePhotoName(photoBasename(path))) {
+      throw new PhotoError("not_playable", 400);
+    }
+    // updated_at, not created_at: `mtime` stays the file's, while a share
+    // link's `updated_at` says the album changed.
+    await tx
+      .update(photoEntries)
+      .set({ colors, updatedAt: new Date() })
+      .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, path)));
+    await touchPhotoFolder(tx, accountId, photoParent(path));
+  });
+  return (await loadPhotoEntry(db, accountId, path)) as PhotoEntry;
+}
+
+/**
  * Delete files and folders (with everything in them, and the share links at
  * or below them). Paths that are not there are skipped. Returns how many of
  * the requested paths were deleted and the folders among them.
@@ -943,6 +989,7 @@ export async function resolvePhotoShare(
 }
 
 export type SharedPhoto = {
+  colors: PhotoColors | null;
   contentType: string | null;
   height: number | null;
   mtime: number;
@@ -963,6 +1010,7 @@ export async function sharedPhotos(
 ): Promise<{ photos: SharedPhoto[]; updatedAt: number }> {
   const rows = await db
     .select({
+      colors: photoEntries.colors,
       contentType: photoEntries.contentType,
       createdAt: photoEntries.createdAt,
       height: photoEntries.height,
@@ -987,6 +1035,7 @@ export async function sharedPhotos(
       continue;
     }
     photos.push({
+      colors: row.colors ?? null,
       contentType: row.contentType,
       height: row.height,
       mtime: seconds(row.createdAt),
