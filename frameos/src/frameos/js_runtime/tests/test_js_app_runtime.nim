@@ -1028,6 +1028,59 @@ suite "js app runtime":
     check payload["failed"]["status"].getInt() == 0
     check payload["failed"]["error"].getStr().len > 0
 
+  test "httpRequest find hands back the text at each occurrence, not the body":
+    # A page bigger than an ESP32's JS heap (Google Photos: 1.2 MB) reaches
+    # the app as a few KB of snippets; the body never becomes a JS string.
+    let needle = "https://lh3.googleusercontent.com/"
+    var page = "<html>" & repeat("x", 5000)
+    for i in 0 ..< 5:
+      page.add(needle & "pw/photo" & $i & "=w1-h1\"" & repeat("y", 50))
+    page.add(needle & "é" & repeat("z", 50))  # "é" is 2 bytes, at the cut
+    page.add("</html>")
+    let errorPage = repeat("e", 3000)
+    jsHttpRequestHook = proc(url, httpMethod, body: string,
+        headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      if url.endsWith("/missing"): (404, errorPage) else: (200, page)
+    defer: jsHttpRequestHook = nil
+
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-http-find".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 24.NodeId, nodeName: "jsHttpFind", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app) {
+          const needle = 'https://lh3.googleusercontent.com/'
+          return {
+            all: frameos.httpRequest('https://photos.example/album', { find: needle, findLength: needle.length + 1 }),
+            some: frameos.httpRequest('https://photos.example/album', { find: needle, findLimit: 2 }),
+            missing: frameos.httpRequest('https://photos.example/missing', { find: needle }),
+          }
+        }"""
+    )
+    let payload = runtime.get(owner, %*{}, context).asJson()
+
+    let all = payload["all"]
+    check all["status"].getInt() == 200
+    check not all.hasKey("body")
+    check all["found"].len == 6
+    for snippet in all["found"]:
+      check snippet.getStr().startsWith(needle)
+    check all["found"][0].getStr() == needle & "p"
+    # One byte short of the 2-byte "é": the cut moves back, never splits it.
+    check all["found"][5].getStr() == needle
+
+    let some = payload["some"]
+    check some["found"].len == 2
+    check some["found"][1].getStr().startsWith(needle & "pw/photo1=w1-h1")
+
+    let missing = payload["missing"]
+    check missing["status"].getInt() == 404
+    check missing["found"].len == 0
+    check missing["body"].getStr().len == 1024
+
   test "getSetting honors declared settings namespaces":
     let config = testConfig()
     config.settings = %*{"openAI": {"apiKey": "sk-test"}, "unsplash": {"accessKey": "u-test"}}

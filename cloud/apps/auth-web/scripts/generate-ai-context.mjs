@@ -294,8 +294,11 @@ declare const frameos: {
       bodyBase64?: string;
       base64?: boolean;
       timeoutMs?: number;
+      find?: string;
+      findLength?: number;
+      findLimit?: number;
     }
-  ): { status: number; body?: string; bodyBase64?: string; error?: string };
+  ): { status: number; body?: string; bodyBase64?: string; found?: string[]; error?: string };
   fetchImage(
     url: string,
     options?: {

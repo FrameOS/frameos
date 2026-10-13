@@ -88,7 +88,7 @@ type declarations (`frontend/src/utils/appTypeDeclarations.ts`,
 `cloud/apps/auth-web/scripts/generate-ai-context.mjs`) list it:
 `frameos.fetchJson(url)`, `frameos.fetchText(url)`,
 `frameos.httpRequest(url, {method, headers, body, bodyBase64, base64,
-timeoutMs})`, `frameos.fetchImage(url, {headers, saveAsset})` (see
+timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages)), `frameos.fetchImage(url, {headers, saveAsset})` (see
 [Photos from the network](#photos-from-the-network)), `frameos.svg(svg,
 spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
@@ -184,6 +184,19 @@ way. Values are JSON, kept per node until the scene is unloaded (not across
 a restart), at most 512 KB per node on an ESP32. `remember` answers `false`
 when a value would not fit, and `null` forgets the key. FrameOS 2026.10.13
 and later.
+
+### Big pages
+
+A response body becomes a JS string, and on an ESP32 a 1 MB page with one
+non-Latin-1 character is 2 MB of JS heap, twice over while the reply is
+parsed: over the 4 MB an ESP32 app runtime gets. When the app only needs
+what follows some marker, pass `find`: `frameos.httpRequest(url, {find:
+'https://lh3.googleusercontent.com/', findLength: 400})` keeps the body
+native and answers `{status, found}`, the text at each occurrence (marker
+included, `findLength` bytes, default 512; `findLimit` occurrences, default
+1000). On a non-2xx status `body` holds the first KB, so the error stays
+readable. The Google Photos app reads its 1.2 MB share page this way.
+FrameOS 2026.10.13 and later.
 
 ### More than one file
 

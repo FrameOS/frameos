@@ -261,11 +261,43 @@ when defined(testing):
     headers: seq[SimpleHttpHeader]): tuple[code: int, body: string]
   var jsHttpRequestHook*: JsHttpRequestHook = nil
 
+const
+  JsHttpFindDefaultLength = 512
+  JsHttpFindMaxLength = 16_384
+  JsHttpFindDefaultLimit = 1000
+  JsHttpFindMaxLimit = 10_000
+  JsHttpFindErrorBodyBytes = 1024
+
+proc utf8Boundary(s: string, index: int): int =
+  ## `index` moved back to the start of the UTF-8 sequence it falls in, so a
+  ## slice ending there never splits a character.
+  result = min(index, s.len)
+  while result > 0 and result < s.len and (s[result].uint8 and 0xC0) == 0x80:
+    dec result
+
+proc findSnippets*(body, needle: string, length, limit: int): JsonNode =
+  ## The text at each occurrence of `needle` (needle included), `length`
+  ## bytes at most, for `httpRequest`'s `find`. Lets a JS app scrape a page
+  ## bigger than its heap: a Google Photos share page is 1.2 MB, which as a
+  ## JS string (and the JSON it rides in) is over an ESP32 runtime's 4 MB,
+  ## while the photo links in it are a few KB.
+  result = newJArray()
+  if needle.len == 0:
+    return
+  var i = body.find(needle)
+  while i >= 0 and result.len < limit:
+    result.add(%*body[i ..< utf8Boundary(body, i + max(length, needle.len))])
+    i = body.find(needle, i + needle.len)
+
 proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Bounded HTTP request with method/headers/body. Options JSON:
   ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
-  ## base64-encoded, required for binary responses), timeoutMs}.
-  ## Returns JSON: {status, body | bodyBase64} or {status: 0, error}.
+  ## base64-encoded, required for binary responses), timeoutMs, find,
+  ## findLength, findLimit}.
+  ## Returns JSON: {status, body | bodyBase64} or {status: 0, error}. With
+  ## `find` the body stays native: the response carries `found` (the text
+  ## at each occurrence, findLimit of them, findLength bytes each) and, for a
+  ## non-2xx status, the first KB of the body so the error stays readable.
   let e = env(ctx)
   var response = %*{"status": 0}
 
@@ -313,7 +345,14 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
       code = res.code
       resBody = res.body
     response["status"] = %*code
-    if options{"base64"}.getBool(false):
+    let find = options{"find"}.getStr("")
+    if find.len > 0:
+      let length = clamp(options{"findLength"}.getInt(JsHttpFindDefaultLength), 1, JsHttpFindMaxLength)
+      let limit = clamp(options{"findLimit"}.getInt(JsHttpFindDefaultLimit), 1, JsHttpFindMaxLimit)
+      response["found"] = findSnippets(resBody, find, length, limit)
+      if code < 200 or code >= 300:
+        response["body"] = %*resBody[0 ..< utf8Boundary(resBody, JsHttpFindErrorBodyBytes)]
+    elif options{"base64"}.getBool(false):
       response["bodyBase64"] = %*encode(resBody)
     else:
       response["body"] = %*resBody

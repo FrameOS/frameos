@@ -96,6 +96,10 @@ uses QuickJS only to execute the resulting JavaScript.
     `{status, bodyBase64}` when `base64: true` (required for binary responses,
     since raw bytes cannot cross the JS boundary as strings), or
     `{status: 0, error}` on transport failure.
+    With `find: "<text>"` the body stays native and the reply carries
+    `found`, the text at each occurrence (`findLength` bytes, default 512;
+    `findLimit` of them, default 1000), plus the first KB of `body` on a
+    non-2xx status: how an app scrapes a page bigger than an ESP32's JS heap.
   - `fetchImage(url, {headers, saveAsset: {name, extension, mode}})`: download
     and decode an image natively — the bytes never enter the JS heap — and
     return `{image: imageRef, width, height, savedAs?}` or `{image: null,

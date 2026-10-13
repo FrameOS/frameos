@@ -2,19 +2,22 @@
 const HOST = 'https://lh3.googleusercontent.com/'
 const PATH = /[\w\-\/=.\\]*/y
 
-export function extractPhotoPaths(html) {
+// The page as one string, or the snippets httpRequest's `find` returns.
+export function extractPhotoPaths(texts) {
   const paths = new Set()
-  for (let i = html.indexOf(HOST); i >= 0; i = html.indexOf(HOST, i)) {
-    PATH.lastIndex = i += HOST.length
-    const raw = PATH.exec(html)[0]
-    i += raw.length
-    const path = raw
-      .replace(/\\+$/, '')
-      .replace(/\\u003d/g, '=')
-      .replace(/\\u0026/g, '&')
-      .replace(/\\\//g, '/')
-      .split('=')[0]
-    if (path.length > 60 && (path.startsWith('pw/') || path.includes('AF1Qip'))) paths.add(path)
+  for (const text of [].concat(texts)) {
+    for (let i = text.indexOf(HOST); i >= 0; i = text.indexOf(HOST, i)) {
+      PATH.lastIndex = i += HOST.length
+      const raw = PATH.exec(text)[0]
+      i += raw.length
+      const path = raw
+        .replace(/\\+$/, '')
+        .replace(/\\u003d/g, '=')
+        .replace(/\\u0026/g, '&')
+        .replace(/\\\//g, '/')
+        .split('=')[0]
+      if (path.length > 60 && (path.startsWith('pw/') || path.includes('AF1Qip'))) paths.add(path)
+    }
   }
   return [...paths]
 }
@@ -32,9 +35,12 @@ function albumPaths(url, debug) {
       Accept: 'text/html',
     },
     timeoutMs: 60000,
+    // Just the text at each photo link: a 1.2 MB page does not fit an ESP32's JS heap.
+    find: HOST,
+    findLength: 400,
   })
   if (r.status !== 200) throw new Error(r.status ? `Error ${r.status} while fetching the shared album page.` : r.error)
-  const paths = extractPhotoPaths(r.body)
+  const paths = extractPhotoPaths(r.found)
   if (!paths.length) {
     throw new Error(
       'No photos found on the shared album page. Make sure the link is a public share link and the album is not empty.'
