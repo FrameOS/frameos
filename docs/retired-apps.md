@@ -8,6 +8,14 @@ noticing. `docs/retired-apps.json` lists them:
 |---|---|---|---|
 | `data/immich` | `repo/apps/code/immich` | 2026.10.11 | `frameos.fetchImage` |
 | `data/frameOSGallery` | `repo/apps/code/frameOSGallery` | 2026.10.11 | `frameos.fetchImage` |
+| `data/unsplash` | `repo/apps/code/unsplash` | 2026.10.11 | `frameos.fetchImage` |
+| `data/wikicommons` | `repo/apps/code/wikicommons` | 2026.10.13 | `app.frame.embedded` (the ESP32's 900 px thumbnails) |
+| `data/googlePhotos` | `repo/apps/code/googlePhotos` | 2026.10.13 | `frameos.remember` (the album list outlives an ESP32 render) |
+| `data/openaiImage` | `repo/apps/code/openaiImage` | 2026.10.13 | `app.frame.embedded`, and saving a `data:` URL (the `b64_json` reply) |
+| `data/openaiText` | `repo/apps/code/openaiText` | 2026.10.11 | `frameos.httpRequest` |
+| `data/haSensor` | `repo/apps/code/haSensor` | 2026.10.11 | `frameos.httpRequest` |
+| `data/weather` | `repo/apps/code/weather` | 2026.10.11 | `frameos.httpRequest` |
+| `data/beRecycle` | `repo/apps/code/beRecycle` | 2026.10.13 | a throw in `get()` fails the node |
 
 The replacement runs only on a runtime that has what it `needs`. Firmware
 older than `runtime` still has the Nim app, so it is sent the Nim keyword.

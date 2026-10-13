@@ -78,10 +78,9 @@ export const previewSettingsGroups: Readonly<
 };
 
 // App keyword → settings groups, from the apps' config.json `settings` lists.
-// `data/immich` and `data/frameOSGallery` are retired Nim apps
-// (retired-apps.ts) that stay listed: store versions saved before they were
-// retired still name them, and a frame on firmware older than their
-// JavaScript replacements is sent them.
+// Retired Nim apps (retired-apps.ts: data/immich, data/unsplash, …) stay
+// listed: store versions saved before they were retired still name them, and
+// a frame on firmware older than their JavaScript replacements is sent them.
 const appSettings: Record<string, string[]> = {
   "data/frameOSGallery": ["frameOS"],
   "data/haSensor": ["homeAssistant"],

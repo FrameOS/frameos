@@ -359,7 +359,7 @@ suite "unsplash code app":
     check not h.logged("API request:")
     check not h.logged("Downloading image:")
 
-  test "saved assets: named after the search and size, .jpg, honouring auto/always/never":
+  test "saved assets: named after the search and size, .jpg, honoring auto/always/never":
     let assetsDir = getTempDir() / "frameos-unsplash-js-app-save"
     removeDir(assetsDir)
     createDir(assetsDir)

@@ -14,7 +14,14 @@
         "value": "Generate ideas for a smart e-ink display around the house."
       },
       { "access": "private", "label": "Reply", "name": "reply", "persist": "disk", "type": "text" },
-      { "name": "model", "label": "Model", "type": "string", "value": "gpt-5.5", "persist": "disk", "access": "public" },
+      {
+        "name": "model",
+        "label": "Model",
+        "type": "string",
+        "value": "gpt-5.5",
+        "persist": "disk",
+        "access": "public"
+      },
       {
         "name": "seconds",
         "role": "refreshInterval",
@@ -82,7 +89,7 @@
         "data": {
           "cache": { "duration": "3600", "durationEnabled": true, "enabled": false, "inputEnabled": true },
           "config": {},
-          "keyword": "data/openaiText"
+          "keyword": "openaiText"
         },
         "dragging": false,
         "height": 288,
@@ -215,6 +222,59 @@
         "targetHandle": "fieldInput/model",
         "type": "codeNodeEdge"
       }
-    ]
+    ],
+    "apps": {
+      "openaiText": {
+        "name": "OpenAI Text",
+        "description": "Text response from ChatGPT and friends",
+        "category": "data",
+        "version": "1.0.0",
+        "settings": ["openAI"],
+        "fields": [
+          {
+            "name": "system",
+            "type": "text",
+            "rows": 6,
+            "value": "You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.",
+            "required": true,
+            "label": "System Prompt",
+            "placeholder": ""
+          },
+          {
+            "name": "user",
+            "type": "text",
+            "rows": 6,
+            "value": "",
+            "required": true,
+            "label": "User Prompt",
+            "placeholder": "Write your prompt here. Keep it short and clear."
+          },
+          {
+            "name": "model",
+            "type": "string",
+            "value": "gpt-5.5",
+            "required": true,
+            "label": "Model"
+          }
+        ],
+        "output": [
+          {
+            "name": "reply",
+            "type": "string"
+          }
+        ],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "600"
+        },
+        "origin": "repo/apps/code/openaiText",
+        "sources": {
+          "app.ts": "// OpenAI text app: one chat completion over frameos.httpRequest, the reply as\n// the app's string output.\n\nconst API_URL = 'https://api.openai.com/v1/chat/completions'\nconst TIMEOUT = 60000\nconst DEFAULT_SYSTEM = \"You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.\"\n\ntype Response = { status: number; body?: string; error?: string }\n\n// A string field keeps its default unless the config holds a string, the way\n// the Nim app read its config.\nfunction str(value: unknown, fallback: string): string {\n  return typeof value === 'string' ? value : fallback\n}\n\nfunction isObject(value: unknown): value is Record<string, any> {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n}\n\n// Sizes are logged in UTF-8 bytes, as the Nim app counted them.\nexport function utf8Length(text: string): number {\n  let bytes = 0\n  for (let i = 0; i < text.length; i++) {\n    const code = text.charCodeAt(i)\n    if (code < 0x80) bytes += 1\n    else if (code < 0x800) bytes += 2\n    else if (code >= 0xd800 && code <= 0xdbff && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {\n      bytes += 4\n      i++\n    } else bytes += 3\n  }\n  return bytes\n}\n\n// What a request logs. Prompts can carry personal data and logs ship to the\n// control plane, so only their sizes are recorded.\nexport function requestLogPayload(model: string, system: string, user: string): Record<string, unknown> {\n  return { model, systemPromptChars: utf8Length(system), userPromptChars: utf8Length(user) }\n}\n\nexport function requestBody(model: string, system: string, user: string): Record<string, unknown> {\n  return {\n    model,\n    messages: [\n      { role: 'system', content: system },\n      { role: 'user', content: user },\n    ],\n  }\n}\n\n// `error.message`, else a string `error`, else the whole reply as JSON; the raw\n// body when it is not JSON.\nexport function apiErrorDetail(body: string): string {\n  let json: unknown\n  try {\n    json = JSON.parse(body)\n  } catch {\n    return body\n  }\n  const error = isObject(json) ? json.error : undefined\n  const message = isObject(error) ? error.message : undefined\n  if (typeof message === 'string') return message\n  if (typeof error === 'string') return error\n  return JSON.stringify(json)\n}\n\n// The first choice's message, \"\" when there is none. Throws on a body that is\n// not JSON.\nexport function replyContent(body: string): string {\n  const json: unknown = JSON.parse(body)\n  const choices = isObject(json) ? json.choices : undefined\n  const first = Array.isArray(choices) && isObject(choices[0]) ? choices[0] : {}\n  const message = isObject(first.message) ? first.message : {}\n  return str(message.content, '')\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): string {\n  const c = app.config\n  const system = str(c.system, DEFAULT_SYSTEM)\n  const user = str(c.user, '')\n  const model = str(c.model, 'gpt-5.5')\n  // Errors are logged only; the output is then \"\".\n  if (user === '' && system === '') {\n    frameos.error('No system or user prompt provided in app config.')\n    return ''\n  }\n  const apiKey = str(frameos.getSetting('openAI', 'apiKey'), '')\n  if (apiKey === '') {\n    frameos.error('Please provide an OpenAI API key in the settings.')\n    return ''\n  }\n\n  frameos.log(requestLogPayload(model, system, user))\n  const response: Response = frameos.httpRequest(API_URL, {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify(requestBody(model, system, user)),\n    timeoutMs: TIMEOUT,\n  })\n  // A request that never got an answer, or a reply that is not JSON, is the\n  // one error that also becomes the output.\n  const failure = (message: string): string => {\n    frameos.error(`OpenAI API error: ${message}`)\n    return `OpenAI API error: ${message}`\n  }\n  if (response.status === 0) return failure(response.error ?? 'request failed')\n  if (response.status !== 200) {\n    frameos.error(`Error making request ${response.status}: ${apiErrorDetail(response.body ?? '')}`)\n    return ''\n  }\n  let reply: string\n  try {\n    reply = replyContent(response.body ?? '')\n  } catch (error) {\n    return failure(error instanceof Error ? error.message : String(error))\n  }\n  frameos.log({ replyChars: utf8Length(reply) })\n  return reply\n}\n",
+          "config.json": "{\n  \"name\": \"OpenAI Text\",\n  \"description\": \"Text response from ChatGPT and friends\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"openAI\"],\n  \"fields\": [\n    {\n      \"name\": \"system\",\n      \"type\": \"text\",\n      \"rows\": 6,\n      \"value\": \"You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.\",\n      \"required\": true,\n      \"label\": \"System Prompt\",\n      \"placeholder\": \"\"\n    },\n    {\n      \"name\": \"user\",\n      \"type\": \"text\",\n      \"rows\": 6,\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"User Prompt\",\n      \"placeholder\": \"Write your prompt here. Keep it short and clear.\"\n    },\n    {\n      \"name\": \"model\",\n      \"type\": \"string\",\n      \"value\": \"gpt-5.5\",\n      \"required\": true,\n      \"label\": \"Model\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"reply\",\n      \"type\": \"string\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"600\"\n  }\n}\n"
+        }
+      }
+    }
   }
 ]

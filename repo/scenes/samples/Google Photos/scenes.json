@@ -24,10 +24,7 @@
         "value": "random",
         "persist": "disk",
         "access": "public",
-        "options": [
-          "random",
-          "sequential"
-        ]
+        "options": ["random", "sequential"]
       },
       {
         "name": "seconds",
@@ -75,7 +72,7 @@
           "y": -80
         },
         "data": {
-          "keyword": "data/googlePhotos",
+          "keyword": "googlePhotos",
           "config": {},
           "cache": {
             "enabled": false
@@ -181,6 +178,99 @@
         "target": "d9e1828f-2167-5245-8922-b531d01a933a",
         "targetHandle": "fieldInput/duration"
       }
-    ]
+    ],
+    "apps": {
+      "googlePhotos": {
+        "name": "Google Photos",
+        "description": "Show images from a shared Google Photos album. Reads the public share page directly since Google offers no API for shared albums - this may stop working if Google changes the page format.",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "shareUrl",
+            "type": "text",
+            "value": "",
+            "required": true,
+            "label": "Shared album link",
+            "placeholder": "https://photos.app.goo.gl/...",
+            "hint": "In Google Photos, open an album, tap Share and create a link that anyone can view. Paste the resulting https://photos.app.goo.gl/... or https://photos.google.com/share/... link here. The album must stay shared via link for the frame to read it."
+          },
+          {
+            "name": "mode",
+            "type": "select",
+            "options": ["random", "sequential"],
+            "value": "random",
+            "required": true,
+            "label": "Order of images"
+          },
+          {
+            "name": "counterStateKey",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Optional state key for persistence",
+            "hint": "Enter a state key to persist the current image index between restarts.",
+            "showIf": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "sequential"
+              }
+            ]
+          },
+          {
+            "name": "fitMode",
+            "type": "select",
+            "options": ["cover", "contain"],
+            "value": "cover",
+            "required": true,
+            "label": "Fit mode",
+            "hint": "How Google Photos sizes the downloaded image. 'cover' crops the photo to exactly fill the frame, 'contain' keeps the whole photo visible within the frame's dimensions."
+          },
+          {
+            "name": "metadataStateKey",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Metadata state key",
+            "hint": "Enter a state key to persist metadata about the image. Stores: {source, index, count, imageUrl}."
+          },
+          {
+            "name": "saveAssets",
+            "type": "select",
+            "value": "auto",
+            "options": ["auto", "always", "never"],
+            "label": "Save asset",
+            "hint": "Save the downloaded image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+          },
+          {
+            "name": "cacheAlbumSeconds",
+            "type": "integer",
+            "value": "3600",
+            "required": false,
+            "label": "Album cache duration (seconds)",
+            "placeholder": "3600",
+            "hint": "How long to reuse the scraped list of photos before fetching the album page again. New photos added to the album show up after this many seconds at the latest."
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "900"
+        },
+        "origin": "repo/apps/code/googlePhotos",
+        "sources": {
+          "app.ts": "// Google Photos shared album app. Google offers no API for shared albums, so\n// the public share page is fetched with frameos.httpRequest and scraped for\n// photo URLs; the photo itself goes through frameos.fetchImage (native decode,\n// straight into the canvas on an ESP32). Only the URL list outlives a fetch:\n// the page itself is dropped as soon as it has been parsed.\n\nexport const PHOTO_URL_HOST = 'https://lh3.googleusercontent.com/'\nconst MIN_PHOTO_PATH_LENGTH = 60\nconst ALBUM_USER_AGENT =\n  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'\nconst ALBUM_TIMEOUT = 60000\nconst DEFAULT_CACHE_SECONDS = 3600\n// The characters a photo path may hold, raw or JSON-escaped (\\u003d, \\/).\nconst PHOTO_PATH = /[A-Za-z0-9_\\-\\/=.\\\\]*/y\n\n// What must outlive a render is kept with frameos.remember, never in module\n// variables: an ESP32 tears this interpreter down after every render. The\n// node keeps it until its scene is unloaded, as the Nim app object did.\nconst ALBUM_KEY = 'album'\nconst ALBUM_NOT_KEPT_KEY = 'albumNotKept'\nconst COUNTER_KEY = 'counter'\n\ntype Album = { shareUrl: string; urls: string[]; fetchedAt: number }\n\n// Pull googleusercontent photo base URLs out of a shared album page. URLs\n// appear both raw and JSON-escaped (\\u003d for '='); size suffixes after '='\n// are stripped so callers can append their own.\nexport function extractPhotoUrls(html: string): string[] {\n  const seen = new Set<string>()\n  const urls: string[] = []\n  let searchFrom = 0\n  while (true) {\n    const start = html.indexOf(PHOTO_URL_HOST, searchFrom)\n    if (start < 0) break\n    PHOTO_PATH.lastIndex = start + PHOTO_URL_HOST.length\n    let path = PHOTO_PATH.exec(html)?.[0] ?? ''\n    searchFrom = start + PHOTO_URL_HOST.length + path.length\n    path = path\n      .replace(/\\\\+$/, '')\n      .replace(/\\\\u003d/g, '=')\n      .replace(/\\\\u0026/g, '&')\n      .replace(/\\\\\\//g, '/')\n    const suffixStart = path.indexOf('=')\n    if (suffixStart >= 0) path = path.slice(0, suffixStart)\n    if (path.length <= MIN_PHOTO_PATH_LENGTH) continue\n    if (!(path.startsWith('pw/') || path.includes('AF1Qip'))) continue\n    const url = PHOTO_URL_HOST + path\n    if (!seen.has(url)) {\n      seen.add(url)\n      urls.push(url)\n    }\n  }\n  return urls\n}\n\nexport function sizedPhotoUrl(baseUrl: string, width: number, height: number, fitMode: string): string {\n  const suffix = fitMode === 'contain' ? '-no' : '-c'\n  return `${baseUrl}=w${width}-h${height}${suffix}`\n}\n\nexport function wrapIndex(counter: number, count: number): number {\n  if (count <= 0) return 0\n  return ((counter % count) + count) % count\n}\n\nexport function cacheSeconds(value: unknown): number {\n  const seconds = Math.trunc(Number(value))\n  return Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_CACHE_SECONDS\n}\n\n// A saved counter that is not an integer counts as 0.\nexport function stateCounter(value: unknown): number {\n  return typeof value === 'number' && Number.isInteger(value) ? value : 0\n}\n\n// The context image when there is one, else the frame's size after rotation.\nexport function renderSize(app: FrameOSApp, context: FrameOSContext): { width: number; height: number } {\n  if (context.imageWidth && context.imageHeight) return { width: context.imageWidth, height: context.imageHeight }\n  const { width, height, rotate } = app.frame\n  return rotate === 90 || rotate === 270 ? { width: height, height: width } : { width, height }\n}\n\nfunction errorMessage(error: unknown): string {\n  return error instanceof Error ? error.message : String(error)\n}\n\nfunction fetchAlbum(shareUrl: string, debug: boolean): string[] {\n  if (debug) frameos.log(`Fetching shared album: ${shareUrl}`)\n  const response = frameos.httpRequest(shareUrl, {\n    headers: { 'User-Agent': ALBUM_USER_AGENT, Accept: 'text/html' },\n    timeoutMs: ALBUM_TIMEOUT,\n  })\n  if (response.status === 0) throw new Error(response.error || 'request failed')\n  if (response.status !== 200) throw new Error(`Error ${response.status} while fetching the shared album page.`)\n  const urls = extractPhotoUrls(response.body ?? '')\n  if (!urls.length) {\n    throw new Error(\n      'No photos found on the shared album page. Make sure the link is a public share link and the album is not empty.'\n    )\n  }\n  if (debug) frameos.log(`Found ${urls.length} photos in the shared album`)\n  return urls\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${\n          size * 2 + i * Math.round(size * 1.35)\n        }\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\n// The album this node kept on an earlier render, if any.\nexport function keptAlbum(value: unknown): Album | null {\n  if (!value || typeof value !== 'object') return null\n  const kept = value as Record<string, unknown>\n  if (typeof kept.shareUrl !== 'string' || !Array.isArray(kept.urls) || typeof kept.fetchedAt !== 'number') return null\n  return { shareUrl: kept.shareUrl, urls: kept.urls as string[], fetchedAt: kept.fetchedAt }\n}\n\n// Keep a fetched album for the next renders. One too big for the node's\n// memory serves this render only, and is said once per link and size: the\n// next fetch of the same album does not ask (and get refused) again.\nfunction keepAlbum(album: Album): void {\n  const notKept = frameos.recall(ALBUM_NOT_KEPT_KEY) as { shareUrl?: string; count?: number } | undefined\n  const count = album.urls.length\n  if (notKept && notKept.shareUrl === album.shareUrl && notKept.count === count) return\n  if (frameos.remember(ALBUM_KEY, album)) {\n    if (notKept) frameos.remember(ALBUM_NOT_KEPT_KEY, null)\n    return\n  }\n  frameos.remember(ALBUM_KEY, null)\n  frameos.remember(ALBUM_NOT_KEPT_KEY, { shareUrl: album.shareUrl, count })\n  frameos.log(\n    `The shared album's ${count} photos are too many to keep between renders: the album page is fetched again on every render.`\n  )\n}\n\n// The album to show from: the kept one while it is fresh, else a new fetch;\n// a failed refresh falls back to the kept list of the same link.\nfunction loadAlbum(shareUrl: string, maxAgeSeconds: number, debug: boolean): Album | string {\n  const kept = keptAlbum(frameos.recall(ALBUM_KEY))\n  const fresh =\n    kept && kept.urls.length > 0 && kept.shareUrl === shareUrl && Date.now() / 1000 - kept.fetchedAt < maxAgeSeconds\n  if (kept && fresh) return kept\n  try {\n    const album = { shareUrl, urls: fetchAlbum(shareUrl, debug), fetchedAt: Date.now() / 1000 }\n    keepAlbum(album)\n    return album\n  } catch (error) {\n    if (kept && kept.urls.length > 0 && kept.shareUrl === shareUrl) {\n      frameos.error(`Error refreshing the shared album, reusing the cached photo list: ${errorMessage(error)}`)\n      return kept\n    }\n    return `Error loading the shared album: ${errorMessage(error)}`\n  }\n}\n\n// The sequential position: the node's own, or on its first render since the\n// scene loaded, the counter state key's (the Nim app restored it in init).\nfunction sequentialCounter(app: FrameOSApp, counterStateKey: string): number {\n  const kept = frameos.recall(COUNTER_KEY)\n  if (typeof kept === 'number' && Number.isInteger(kept)) return kept\n  return counterStateKey ? stateCounter(app.state[counterStateKey]) : 0\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const { width, height } = renderSize(app, context)\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const shareUrl = String(c.shareUrl ?? '').trim()\n  const mode = String(c.mode ?? 'random')\n  const counterStateKey = String(c.counterStateKey ?? '').trim()\n  const metadataStateKey = String(c.metadataStateKey ?? '').trim()\n  const fitMode = String(c.fitMode ?? 'cover')\n  const saveAssets = String(c.saveAssets ?? 'auto')\n  const debug = app.frame.debug === true\n\n  if (!shareUrl) return fail('Please provide a Google Photos shared album link.')\n  if (!shareUrl.startsWith('http://') && !shareUrl.startsWith('https://')) {\n    return fail(`Invalid shared album link: ${shareUrl}`)\n  }\n\n  try {\n    const album = loadAlbum(shareUrl, cacheSeconds(c.cacheAlbumSeconds), debug)\n    if (typeof album === 'string') return fail(album)\n\n    const count = album.urls.length\n    let index = 0\n    if (mode === 'sequential') {\n      index = wrapIndex(sequentialCounter(app, counterStateKey), count)\n      const next = wrapIndex(index + 1, count)\n      frameos.remember(COUNTER_KEY, next)\n      if (counterStateKey) frameos.setState(counterStateKey, next)\n    } else {\n      index = Math.floor(Math.random() * count)\n    }\n\n    const imageUrl = sizedPhotoUrl(album.urls[index], width, height, fitMode)\n    if (debug) frameos.log(`Downloading image: ${imageUrl}`)\n    const saveAsset =\n      saveAssets === 'auto' || saveAssets === 'always'\n        ? { name: `google-photos ${index} ${width}x${height}`, extension: 'jpg', mode: saveAssets }\n        : undefined\n    const photo = frameos.fetchImage(imageUrl, { saveAsset })\n    if (!photo.image) return fail(`Error fetching image from Google Photos: ${photo.error ?? 'no image'}`)\n\n    if (metadataStateKey) {\n      frameos.setState(metadataStateKey, { source: 'googlePhotos', index, count, imageUrl })\n    }\n    return photo.image\n  } catch (error) {\n    return fail(`Error fetching image from Google Photos: ${errorMessage(error)}`)\n  }\n}\n",
+          "config.json": "{\n  \"name\": \"Google Photos\",\n  \"description\": \"Show images from a shared Google Photos album. Reads the public share page directly since Google offers no API for shared albums - this may stop working if Google changes the page format.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"shareUrl\",\n      \"type\": \"text\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Shared album link\",\n      \"placeholder\": \"https://photos.app.goo.gl/...\",\n      \"hint\": \"In Google Photos, open an album, tap Share and create a link that anyone can view. Paste the resulting https://photos.app.goo.gl/... or https://photos.google.com/share/... link here. The album must stay shared via link for the frame to read it.\"\n    },\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"options\": [\n        \"random\",\n        \"sequential\"\n      ],\n      \"value\": \"random\",\n      \"required\": true,\n      \"label\": \"Order of images\"\n    },\n    {\n      \"name\": \"counterStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Optional state key for persistence\",\n      \"hint\": \"Enter a state key to persist the current image index between restarts.\",\n      \"showIf\": [\n        {\n          \"field\": \"mode\",\n          \"operator\": \"eq\",\n          \"value\": \"sequential\"\n        }\n      ]\n    },\n    {\n      \"name\": \"fitMode\",\n      \"type\": \"select\",\n      \"options\": [\n        \"cover\",\n        \"contain\"\n      ],\n      \"value\": \"cover\",\n      \"required\": true,\n      \"label\": \"Fit mode\",\n      \"hint\": \"How Google Photos sizes the downloaded image. 'cover' crops the photo to exactly fill the frame, 'contain' keeps the whole photo visible within the frame's dimensions.\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {source, index, count, imageUrl}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\n        \"auto\",\n        \"always\",\n        \"never\"\n      ],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the downloaded image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved.\"\n    },\n    {\n      \"name\": \"cacheAlbumSeconds\",\n      \"type\": \"integer\",\n      \"value\": \"3600\",\n      \"required\": false,\n      \"label\": \"Album cache duration (seconds)\",\n      \"placeholder\": \"3600\",\n      \"hint\": \"How long to reuse the scraped list of photos before fetching the album page again. New photos added to the album show up after this many seconds at the latest.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+        }
+      }
+    }
   }
 ]

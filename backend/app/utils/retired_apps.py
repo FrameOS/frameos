@@ -1,8 +1,8 @@
 """Built-in Nim apps retired in favour of a repo JavaScript app.
 
-`data/immich` and `data/frameOSGallery` became the scene-local JS apps from
-`repo/apps/code/immich` and `repo/apps/code/frameOSGallery`, which need
-`frameos.fetchImage` and so a runtime from 2026.10.11 on.
+Ten of them so far (data/immich, data/frameOSGallery, data/unsplash, …): each
+became the scene-local JS app of the same name from `repo/apps/code/`, which
+runs on the runtime its `runtime` names and later.
 `docs/retired-apps.json` is the contract (RETIRED_APPS below is its copy,
 pinned by test_retired_apps.py), docs/retired-apps.md the prose, and
 docs/retired-apps-fixtures.json the corpus this module and the cloud's
@@ -41,6 +41,53 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
         "sceneAppKey": "frameOSGallery",
         "runtime": "2026.10.11",
         "needs": "frameos.fetchImage",
+    },    "data/unsplash": {
+        "replacement": "repo/apps/code/unsplash",
+        "sceneAppKey": "unsplash",
+        "runtime": "2026.10.11",
+        "needs": "frameos.fetchImage",
+    },
+    "data/wikicommons": {
+        "replacement": "repo/apps/code/wikicommons",
+        "sceneAppKey": "wikicommons",
+        "runtime": "2026.10.13",
+        "needs": "app.frame.embedded (the ESP32's 900 px thumbnails)",
+    },
+    "data/googlePhotos": {
+        "replacement": "repo/apps/code/googlePhotos",
+        "sceneAppKey": "googlePhotos",
+        "runtime": "2026.10.13",
+        "needs": "frameos.remember (the album list outlives an ESP32 render)",
+    },
+    "data/openaiImage": {
+        "replacement": "repo/apps/code/openaiImage",
+        "sceneAppKey": "openaiImage",
+        "runtime": "2026.10.13",
+        "needs": "app.frame.embedded and saving a data: URL (the b64_json reply)",
+    },
+    "data/openaiText": {
+        "replacement": "repo/apps/code/openaiText",
+        "sceneAppKey": "openaiText",
+        "runtime": "2026.10.11",
+        "needs": "frameos.httpRequest",
+    },
+    "data/haSensor": {
+        "replacement": "repo/apps/code/haSensor",
+        "sceneAppKey": "haSensor",
+        "runtime": "2026.10.11",
+        "needs": "frameos.httpRequest",
+    },
+    "data/weather": {
+        "replacement": "repo/apps/code/weather",
+        "sceneAppKey": "weather",
+        "runtime": "2026.10.11",
+        "needs": "frameos.httpRequest",
+    },
+    "data/beRecycle": {
+        "replacement": "repo/apps/code/beRecycle",
+        "sceneAppKey": "beRecycle",
+        "runtime": "2026.10.13",
+        "needs": "a throw in get() failing the node",
     },
 }
 
@@ -62,6 +109,17 @@ def _replacement_app_entry(origin: str) -> dict[str, Any]:
         if path.is_file() and not path.name.endswith(".nim")
     }
     return {**config, "origin": origin, "sources": sources}
+
+
+def retired_app_config(keyword: str | None) -> dict[str, Any] | None:
+    """The replacement's config.json for a retired keyword, for readers that
+    look an app up by keyword (the settings it declares, its fields) and meet
+    a scene that was not converted yet. None for any other keyword."""
+    spec = RETIRED_APPS.get(keyword or "")
+    if spec is None:
+        return None
+    entry = _replacement_app_entry(spec["replacement"])
+    return {key: value for key, value in entry.items() if key not in ("origin", "sources")}
 
 
 def _app_nodes(scene: dict) -> list[dict]:

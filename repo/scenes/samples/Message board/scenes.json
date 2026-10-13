@@ -78,7 +78,7 @@
         "data": {
           "cache": { "duration": "900", "durationEnabled": true, "enabled": false, "inputEnabled": true },
           "config": {},
-          "keyword": "data/unsplash"
+          "keyword": "unsplash"
         },
         "dragging": false,
         "height": 168,
@@ -270,6 +270,67 @@
         "targetHandle": "fieldInput/duration",
         "type": "codeNodeEdge"
       }
-    ]
+    ],
+    "apps": {
+      "unsplash": {
+        "name": "Unsplash",
+        "description": "Random unsplash image",
+        "category": "data",
+        "version": "1.0.0",
+        "settings": ["unsplash"],
+        "fields": [
+          {
+            "name": "search",
+            "type": "string",
+            "value": "nature",
+            "required": false,
+            "label": "Search",
+            "placeholder": "e.g. pineapple, nature, birds, power"
+          },
+          {
+            "name": "orientation",
+            "type": "select",
+            "value": "auto",
+            "options": ["auto", "any", "landscape", "portrait", "squarish"],
+            "required": false,
+            "label": "Orientation",
+            "placeholder": "landscape, portrait, square"
+          },
+          {
+            "name": "metadataStateKey",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Metadata state key",
+            "hint": "Enter a state key to persist metadata about the image. Stores: {search, title, description, location, author, links, ...}."
+          },
+          {
+            "name": "saveAssets",
+            "type": "select",
+            "value": "auto",
+            "options": ["auto", "always", "never"],
+            "label": "Save asset",
+            "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "900"
+        },
+        "origin": "repo/apps/code/unsplash",
+        "sources": {
+          "app.ts": "// A random Unsplash photo for a search. The API call goes through\n// frameos.httpRequest; the photo itself through frameos.fetchImage (native\n// decode, straight into the canvas on an ESP32).\n\nconst API_URL = 'https://api.unsplash.com/photos/random/'\nconst TIMEOUT = 60000\n\ntype Json = Record<string, any>\n\n// Nim's strutils.strip: ASCII whitespace only.\nexport function strip(value: string): string {\n  return value.replace(/^[ \\t\\v\\r\\n\\f]+|[ \\t\\v\\r\\n\\f]+$/g, '')\n}\n\n// Nim's uri.encodeUrl: everything but A-Z a-z 0-9 - . _ ~ is %XX, a space is '+'.\nexport function encodeUrl(value: string): string {\n  return encodeURIComponent(value)\n    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)\n    .replace(/%20/g, '+')\n}\n\n// JsonNode.getStr(default): the value when it is a string, the default otherwise.\nexport function str(value: unknown, fallback = ''): string {\n  return typeof value === 'string' ? value : fallback\n}\n\nfunction text(value: unknown, fallback: string): string {\n  return value === undefined || value === null ? fallback : String(value)\n}\n\n// The size the image is for: the context image, else the frame as rendered.\nexport function contextSize(app: FrameOSApp, context: FrameOSContext): [number, number] {\n  if (context.imageWidth && context.imageHeight) return [context.imageWidth, context.imageHeight]\n  const { width, height, rotate } = app.frame\n  return rotate === 90 || rotate === 270 ? [height, width] : [width, height]\n}\n\nexport function resolvedOrientation(orientation: string, width: number, height: number): string {\n  if (orientation === 'auto') return height > width ? 'portrait' : width > height ? 'landscape' : 'squarish'\n  if (orientation === 'any') return ''\n  return orientation\n}\n\nexport function apiUrl(orientation: string, search: string): string {\n  return `${API_URL}?orientation=${encodeUrl(orientation)}&query=${encodeUrl(search)}`\n}\n\n// Unsplash's raw URL already carries a query string (?ixid=...).\nexport function photoUrl(rawUrl: string, width: number, height: number): string {\n  return `${rawUrl}&w=${width}&h=${height}&fit=crop&crop=faces,edges`\n}\n\n// \"Error making request <status>: <error.message | error | the body>\".\nexport function requestErrorMessage(status: number, body: string): string {\n  let detail: string\n  try {\n    const json = JSON.parse(body)\n    const error = json && typeof json === 'object' && !Array.isArray(json) ? json.error : undefined\n    const nested = error && typeof error === 'object' && !Array.isArray(error) ? error.message : undefined\n    detail = str(nested, str(error, JSON.stringify(json)))\n  } catch {\n    detail = body\n  }\n  return `Error making request ${status}: ${detail}`\n}\n\nfunction field(json: Json, ...path: string[]): unknown {\n  let node: any = json\n  for (const key of path) {\n    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined\n    node = node[key]\n  }\n  return node\n}\n\nexport function photoMetadata(\n  json: Json,\n  search: string,\n  orientation: string,\n  imageUrl: string\n): Record<string, string> {\n  const description = str(json.description, str(json.alt_description, ''))\n  return {\n    source: 'unsplash',\n    search,\n    orientation,\n    imageUrl,\n    id: str(json.id),\n    title: str(json.slug, description),\n    description,\n    altDescription: str(json.alt_description),\n    location: str(field(json, 'location', 'name')),\n    createdAt: str(json.created_at),\n    photoUrl: str(field(json, 'links', 'html')),\n    author: str(field(json, 'user', 'name')),\n    authorUsername: str(field(json, 'user', 'username')),\n    authorUrl: str(field(json, 'user', 'links', 'html')),\n  }\n}\n\nfunction esc(value: string): string {\n  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const body = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${\n          size * 2 + i * Math.round(size * 1.35)\n        }\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${body}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const [width, height] = contextSize(app, context)\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const search = strip(text(c.search, 'nature'))\n  const metadataStateKey = strip(text(c.metadataStateKey, ''))\n  const saveAssets = text(c.saveAssets, 'auto')\n\n  const apiKey = str(frameos.getSetting('unsplash', 'accessKey'))\n  if (apiKey === '') return fail('Please provide an Unsplash API key in the settings.')\n\n  const orientation = resolvedOrientation(text(c.orientation, 'auto'), width, height)\n  const url = apiUrl(orientation, search)\n  if (app.frame.debug) frameos.log(`API request: ${url}`)\n  const response = frameos.httpRequest(url, {\n    headers: { Authorization: `Client-ID ${apiKey}`, 'Accept-Version': 'v1', 'Content-Type': 'application/json' },\n    timeoutMs: TIMEOUT,\n  })\n  if (response.status === 0) return fail(`Error fetching image from Unsplash: ${response.error ?? 'request failed'}`)\n  if (response.status !== 200) return fail(requestErrorMessage(response.status, response.body ?? ''))\n\n  let json: Json\n  try {\n    const parsed = JSON.parse(response.body ?? '')\n    json = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}\n  } catch (e) {\n    return fail(`Error fetching image from Unsplash: ${e instanceof Error ? e.message : String(e)}`)\n  }\n  const rawUrl = str(field(json, 'urls', 'raw'))\n  if (rawUrl === '') return fail('No image URL returned from Unsplash.')\n  const imageUrl = photoUrl(rawUrl, width, height)\n  // Keep only what the metadata needs; the parsed response can go.\n  const metadata = metadataStateKey ? photoMetadata(json, search, orientation, imageUrl) : null\n  json = {}\n\n  if (app.frame.debug) frameos.log(`Downloading image: ${imageUrl}`)\n  const photo = frameos.fetchImage(imageUrl, {\n    saveAsset:\n      saveAssets === 'auto' || saveAssets === 'always'\n        ? { name: `${search} ${width}x${height}`, extension: '.jpg', mode: saveAssets }\n        : undefined,\n  })\n  if (!photo.image) return fail(`Error fetching image from Unsplash: ${photo.error ?? 'no image'}`)\n  if (metadata) frameos.setState(metadataStateKey, metadata)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"Unsplash\",\n  \"description\": \"Random unsplash image\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"unsplash\"],\n  \"fields\": [\n    {\n      \"name\": \"search\",\n      \"type\": \"string\",\n      \"value\": \"nature\",\n      \"required\": false,\n      \"label\": \"Search\",\n      \"placeholder\": \"e.g. pineapple, nature, birds, power\"\n    },\n    {\n      \"name\": \"orientation\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"any\", \"landscape\", \"portrait\", \"squarish\"],\n      \"required\": false,\n      \"label\": \"Orientation\",\n      \"placeholder\": \"landscape, portrait, square\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {search, title, description, location, author, links, ...}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+        }
+      }
+    }
   }
 ]

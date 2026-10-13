@@ -8,6 +8,7 @@ from app.utils.retired_apps import (
     RETIRED_APPS,
     keywords_runtime_lacks,
     replacement_app_entry,
+    retired_app_config,
     restore_apps_in_scenes,
     retire_apps_in_scenes,
     scenes_for_runtime,
@@ -76,7 +77,23 @@ def test_replacement_entry_is_the_repo_app():
 
 
 def test_keywords_runtime_lacks():
-    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery"]
-    assert keywords_runtime_lacks("2026.10.11") == []
+    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle"]
+    # 2026.10.11 has fetchImage; 2026.10.13 has app.frame.embedded,
+    # frameos.remember and the failing throw the later four need.
+    assert keywords_runtime_lacks("2026.10.11") == ["data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
+    assert keywords_runtime_lacks("2026.10.12") == ["data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
+    assert keywords_runtime_lacks("2026.10.13") == []
     assert keywords_runtime_lacks(None) == []
     assert keywords_runtime_lacks("not a version") == []
+
+
+def test_retired_app_config_is_the_replacements_config():
+    """What a keyword lookup (the settings walk) reads for a scene that still
+    names a retired keyword: the JS replacement's declarations."""
+    config = retired_app_config("data/unsplash")
+    assert config is not None
+    assert config["settings"] == ["unsplash"]
+    assert "sources" not in config and "origin" not in config
+    assert retired_app_config("data/frameOSGallery").get("settings") is None
+    assert retired_app_config("data/clock") is None
+    assert retired_app_config(None) is None

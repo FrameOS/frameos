@@ -159,6 +159,16 @@ return photo.image
   target's size and lets `render/image` place the result. On a Pi the decode
   is at native resolution and the consumer scales.
 
+### When something goes wrong
+
+A photo app paints its own message (`frameos.svg(errorPanel(...))`) so the
+frame shows what to fix. Anything an app does not handle and throws out of
+`get()` fails the node, the way a raising built-in app does: the error is
+logged with its source line, a code node that reads the value gets the zero
+value of its arg's type, an image field gets the error painted, and the node
+cache keeps nothing, so the next render tries again. (Before 2026.10.13 the
+consumer got `null` instead, and a cached node kept it.)
+
 ### Keeping values between renders
 
 Module-level variables last only as long as the app's interpreter, and an

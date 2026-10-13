@@ -1,27 +1,19 @@
 import frameos/types
 import frameos/app_capabilities
 export app_capabilities
-import apps/data/beRecycle/app_loader as data_beRecycle_loader
 import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
 import apps/data/eventsToAgenda/app_loader as data_eventsToAgenda_loader
-import apps/data/googlePhotos/app_loader as data_googlePhotos_loader
-import apps/data/haSensor/app_loader as data_haSensor_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
 import apps/data/newImage/app_loader as data_newImage_loader
-import apps/data/openaiImage/app_loader as data_openaiImage_loader
-import apps/data/openaiText/app_loader as data_openaiText_loader
 import apps/data/parseJson/app_loader as data_parseJson_loader
 import apps/data/prettyJson/app_loader as data_prettyJson_loader
 import apps/data/qr/app_loader as data_qr_loader
 import apps/data/resizeImage/app_loader as data_resizeImage_loader
 import apps/data/rotateImage/app_loader as data_rotateImage_loader
-import apps/data/unsplash/app_loader as data_unsplash_loader
-import apps/data/weather/app_loader as data_weather_loader
-import apps/data/wikicommons/app_loader as data_wikicommons_loader
 import apps/data/xmlToJson/app_loader as data_xmlToJson_loader
 import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
@@ -54,27 +46,19 @@ type AppEntry = object
 
 when defined(frameosEmbedded) or defined(frameosWasm):
   const appEntries = [
-    AppEntry(keyword: "data/beRecycle", initProc: data_beRecycle_loader.init, setFieldProc: data_beRecycle_loader.setField, getProc: data_beRecycle_loader.get, runProc: nil),
     AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
     AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
-    AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
-    AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
-    AppEntry(keyword: "data/openaiImage", initProc: data_openaiImage_loader.init, setFieldProc: data_openaiImage_loader.setField, getProc: data_openaiImage_loader.get, runProc: nil),
-    AppEntry(keyword: "data/openaiText", initProc: data_openaiText_loader.init, setFieldProc: data_openaiText_loader.setField, getProc: data_openaiText_loader.get, runProc: nil),
     AppEntry(keyword: "data/parseJson", initProc: data_parseJson_loader.init, setFieldProc: data_parseJson_loader.setField, getProc: data_parseJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/prettyJson", initProc: data_prettyJson_loader.init, setFieldProc: data_prettyJson_loader.setField, getProc: data_prettyJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/qr", initProc: data_qr_loader.init, setFieldProc: data_qr_loader.setField, getProc: data_qr_loader.get, runProc: nil),
     AppEntry(keyword: "data/resizeImage", initProc: data_resizeImage_loader.init, setFieldProc: data_resizeImage_loader.setField, getProc: data_resizeImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/rotateImage", initProc: data_rotateImage_loader.init, setFieldProc: data_rotateImage_loader.setField, getProc: data_rotateImage_loader.get, runProc: nil),
-    AppEntry(keyword: "data/unsplash", initProc: data_unsplash_loader.init, setFieldProc: data_unsplash_loader.setField, getProc: data_unsplash_loader.get, runProc: nil),
-    AppEntry(keyword: "data/weather", initProc: data_weather_loader.init, setFieldProc: data_weather_loader.setField, getProc: data_weather_loader.get, runProc: nil),
-    AppEntry(keyword: "data/wikicommons", initProc: data_wikicommons_loader.init, setFieldProc: data_wikicommons_loader.setField, getProc: data_wikicommons_loader.get, runProc: nil),
     AppEntry(keyword: "data/xmlToJson", initProc: data_xmlToJson_loader.init, setFieldProc: data_xmlToJson_loader.setField, getProc: data_xmlToJson_loader.get, runProc: nil),
     AppEntry(keyword: "logic/breakIfRendering", initProc: logic_breakIfRendering_loader.init, setFieldProc: logic_breakIfRendering_loader.setField, getProc: nil, runProc: logic_breakIfRendering_loader.run),
     AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
@@ -93,29 +77,21 @@ when defined(frameosEmbedded) or defined(frameosWasm):
   ]
 else:
   const appEntries = [
-    AppEntry(keyword: "data/beRecycle", initProc: data_beRecycle_loader.init, setFieldProc: data_beRecycle_loader.setField, getProc: data_beRecycle_loader.get, runProc: nil),
     AppEntry(keyword: "data/chromiumScreenshot", initProc: data_chromiumScreenshot_loader.init, setFieldProc: data_chromiumScreenshot_loader.setField, getProc: data_chromiumScreenshot_loader.get, runProc: nil),
     AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
     AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
-    AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
-    AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
-    AppEntry(keyword: "data/openaiImage", initProc: data_openaiImage_loader.init, setFieldProc: data_openaiImage_loader.setField, getProc: data_openaiImage_loader.get, runProc: nil),
-    AppEntry(keyword: "data/openaiText", initProc: data_openaiText_loader.init, setFieldProc: data_openaiText_loader.setField, getProc: data_openaiText_loader.get, runProc: nil),
     AppEntry(keyword: "data/parseJson", initProc: data_parseJson_loader.init, setFieldProc: data_parseJson_loader.setField, getProc: data_parseJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/prettyJson", initProc: data_prettyJson_loader.init, setFieldProc: data_prettyJson_loader.setField, getProc: data_prettyJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/qr", initProc: data_qr_loader.init, setFieldProc: data_qr_loader.setField, getProc: data_qr_loader.get, runProc: nil),
     AppEntry(keyword: "data/resizeImage", initProc: data_resizeImage_loader.init, setFieldProc: data_resizeImage_loader.setField, getProc: data_resizeImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/rotateImage", initProc: data_rotateImage_loader.init, setFieldProc: data_rotateImage_loader.setField, getProc: data_rotateImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/rstpSnapshot", initProc: data_rstpSnapshot_loader.init, setFieldProc: data_rstpSnapshot_loader.setField, getProc: data_rstpSnapshot_loader.get, runProc: nil),
-    AppEntry(keyword: "data/unsplash", initProc: data_unsplash_loader.init, setFieldProc: data_unsplash_loader.setField, getProc: data_unsplash_loader.get, runProc: nil),
-    AppEntry(keyword: "data/weather", initProc: data_weather_loader.init, setFieldProc: data_weather_loader.setField, getProc: data_weather_loader.get, runProc: nil),
-    AppEntry(keyword: "data/wikicommons", initProc: data_wikicommons_loader.init, setFieldProc: data_wikicommons_loader.setField, getProc: data_wikicommons_loader.get, runProc: nil),
     AppEntry(keyword: "data/xmlToJson", initProc: data_xmlToJson_loader.init, setFieldProc: data_xmlToJson_loader.setField, getProc: data_xmlToJson_loader.get, runProc: nil),
     AppEntry(keyword: "logic/breakIfRendering", initProc: logic_breakIfRendering_loader.init, setFieldProc: logic_breakIfRendering_loader.setField, getProc: nil, runProc: logic_breakIfRendering_loader.run),
     AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
@@ -190,23 +166,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[])
-  of "data/googlePhotos":
-    AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[])
   of "data/localImage":
-    AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[])
-  of "data/openaiImage":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
@@ -230,22 +190,6 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "rotationDegree", swapValues: @["90", "90.0", "270", "270.0", "-90", "-90.0", "-270", "-270.0", "450", "450.0"], keepValues: @["0", "0.0", "180", "180.0", "-180", "-180.0", "360", "360.0", "540", "540.0"], widthFrom: "", heightFrom: "", multiplyFrom: @[])],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
-  of "data/unsplash":
-    AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[])
-  of "data/wikicommons":
-    AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[])
   of "render/calendar":
     AppCapabilities(
       providesTarget: @[],

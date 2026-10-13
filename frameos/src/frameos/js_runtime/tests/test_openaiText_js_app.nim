@@ -1,6 +1,6 @@
 ## The OpenAI Text code app (repo/apps/code/openaiText) run for real through
 ## the JS app runtime, its chat completion answered at `jsHttpRequestHook`:
-## the request, the reply, the size-only request log, and the error behaviour
+## the request, the reply, the size-only request log, and the error behavior
 ## (most errors log and return "", a failed request or a reply that is not JSON
 ## also returns "OpenAI API error: <message>").
 

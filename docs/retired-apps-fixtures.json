@@ -299,6 +299,31 @@
           ]
         }
       ]
+    },
+    {
+      "name": "forRuntime: a runtime between two replacements' floors gets one of each",
+      "op": "forRuntime",
+      "runtimeVersion": "2026.10.12",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "data/unsplash", "config": { "search": "fox" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "googlePhotos", "config": {} } }
+          ],
+          "apps": { "googlePhotos": "@repo/apps/code/googlePhotos" }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "unsplash", "config": { "search": "fox" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "data/googlePhotos", "config": {} } }
+          ],
+          "apps": { "unsplash": "@repo/apps/code/unsplash" }
+        }
+      ]
     }
   ]
 }

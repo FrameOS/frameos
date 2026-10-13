@@ -1,9 +1,10 @@
-import std/[json, tables, strutils, unittest]
+import std/[json, os, tables, strutils, unittest]
 import pixie
 import ../interpreter
+import ../js_runtime/app_runtime
 import ../types
+import ../utils/http_client
 import ../values
-import ../../apps/data/beRecycle/app as beRecycleApp
 
 # A code node that merges two data sources ([...cal, ...recycle]) must keep
 # rendering when ONE of the sources dies. Before this, a failing producer left
@@ -86,13 +87,22 @@ proc withUploadedScene(sceneId: SceneId, exported: ExportedInterpretedScene,
 # --- The real scene's shape ------------------------------------------------
 # 20: "cal"     -> a healthy producer of a JSON event array (stands in for
 #                  data/icalJson)
-# 30: "recycle" -> data/beRecycle, which raises IOError("HTTP 401 ...") when
-#                  the third-party secret is rotated
+# 30: "recycle" -> the beRecycle JS app (repo/apps/code/beRecycle), which
+#                  throws "HTTP 401: ..." when the third-party API refuses
 # 40: merge     -> [...cal, ...recycle], args declared "string" even though
 #                  both producers emit JSON arrays (exactly as in the wild)
 # 50: a node that cannot survive the substituted zero value, used to check the
 #     error is attributed back to the arg that failed
 # 60: same merge as 40, but with input+duration caching enabled
+
+const RecycleAppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "beRecycle"
+
+proc recycleApps(): JsonNode =
+  ## The scene carries the beRecycle JS app the way a converted scene does.
+  %*{"beRecycle": {"sources": {
+    "app.ts": readFile(RecycleAppDir / "app.ts"),
+    "config.json": readFile(RecycleAppDir / "config.json")
+  }}}
 
 const calSnippet = """JSON.parse('[{"summary":"Standup"}]')"""
 
@@ -109,7 +119,7 @@ proc calendarScene(): ExportedInterpretedScene =
         "codeJS": calSnippet
       }),
       node(30, "app", %*{
-        "keyword": "data/beRecycle",
+        "keyword": "beRecycle",
         "config": {
           "streetName": "Teststraat",
           "number": 1,
@@ -152,7 +162,7 @@ proc calendarScene(): ExportedInterpretedScene =
       edge(103, 20, "fieldOutput", 60, "codeField/cal"),
       edge(104, 30, "fieldOutput", 60, "codeField/recycle")
     ],
-    apps: %*{}
+    apps: recycleApps()
   )
 
 proc inlineArgScene(): ExportedInterpretedScene =
@@ -184,26 +194,25 @@ proc inlineArgScene(): ExportedInterpretedScene =
     apps: %*{}
   )
 
-const unauthorized = """HTTP 401 Unauthorized: {"message":"Access denied"}"""
+const unauthorized = """HTTP 401: {"message":"Access denied"}"""
 
 proc failRecycle() =
-  beRecycleApp.beRecycleAuthenticateHook = proc(self: beRecycleApp.App) =
-    raise newException(IOError, unauthorized)
-  beRecycleApp.beRecycleFetchCollectionsHook = nil
+  jsHttpRequestHook = proc(url, httpMethod, body: string,
+      headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+    (401, """{"message":"Access denied"}""")
 
 proc healRecycle() =
-  beRecycleApp.beRecycleAuthenticateHook = proc(self: beRecycleApp.App) =
-    discard
-  beRecycleApp.beRecycleFetchCollectionsHook =
-    proc(self: beRecycleApp.App, fromDate: string, toDate: string): JsonNode =
-      %*{"items": [{
-        "timestamp": "2026-08-11T08:00:00.000Z",
-        "fraction": {"name": {"en": "Paper"}}
-      }]}
+  jsHttpRequestHook = proc(url, httpMethod, body: string,
+      headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+    if "/zipcodes" in url:
+      (200, """{"items": [{"code": "9000", "id": "zip-9000"}]}""")
+    elif "/streets" in url:
+      (200, """{"items": [{"name": "Teststraat", "id": "street-1"}]}""")
+    else:
+      (200, """{"items": [{"timestamp": "2026-08-11T08:00:00.000Z", "fraction": {"name": {"en": "Paper"}}}]}""")
 
 proc restoreRecycle() =
-  beRecycleApp.beRecycleAuthenticateHook = nil
-  beRecycleApp.beRecycleFetchCollectionsHook = nil
+  jsHttpRequestHook = nil
 
 suite "code node args survive a failing producer":
   test "a failing data source no longer takes down the whole merge":

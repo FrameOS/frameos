@@ -19,6 +19,54 @@ export const RETIRED_APPS: Record<string, RetiredAppSpec> = {
     "sceneAppKey": "frameOSGallery",
     "runtime": "2026.10.11",
     "needs": "frameos.fetchImage"
+  },
+  "data/unsplash": {
+    "replacement": "repo/apps/code/unsplash",
+    "sceneAppKey": "unsplash",
+    "runtime": "2026.10.11",
+    "needs": "frameos.fetchImage"
+  },
+  "data/wikicommons": {
+    "replacement": "repo/apps/code/wikicommons",
+    "sceneAppKey": "wikicommons",
+    "runtime": "2026.10.13",
+    "needs": "app.frame.embedded (the ESP32's 900 px thumbnails)"
+  },
+  "data/googlePhotos": {
+    "replacement": "repo/apps/code/googlePhotos",
+    "sceneAppKey": "googlePhotos",
+    "runtime": "2026.10.13",
+    "needs": "frameos.remember (the album list outlives an ESP32 render)"
+  },
+  "data/openaiImage": {
+    "replacement": "repo/apps/code/openaiImage",
+    "sceneAppKey": "openaiImage",
+    "runtime": "2026.10.13",
+    "needs": "app.frame.embedded and saving a data: URL (the b64_json reply)"
+  },
+  "data/openaiText": {
+    "replacement": "repo/apps/code/openaiText",
+    "sceneAppKey": "openaiText",
+    "runtime": "2026.10.11",
+    "needs": "frameos.httpRequest"
+  },
+  "data/haSensor": {
+    "replacement": "repo/apps/code/haSensor",
+    "sceneAppKey": "haSensor",
+    "runtime": "2026.10.11",
+    "needs": "frameos.httpRequest"
+  },
+  "data/weather": {
+    "replacement": "repo/apps/code/weather",
+    "sceneAppKey": "weather",
+    "runtime": "2026.10.11",
+    "needs": "frameos.httpRequest"
+  },
+  "data/beRecycle": {
+    "replacement": "repo/apps/code/beRecycle",
+    "sceneAppKey": "beRecycle",
+    "runtime": "2026.10.13",
+    "needs": "a throw in get() failing the node"
   }
 };
 
@@ -174,6 +222,812 @@ export const REPLACEMENT_APPS: Record<string, Record<string, unknown>> = {
     "sources": {
       "app.ts": "// A random image from one of the galleries on gallery.frameos.net. The image\n// goes through frameos.fetchImage (native decode, straight into the canvas on\n// an ESP32).\n\nconst BASE_URL = 'https://gallery.frameos.net/image'\n\nexport function resolvedCategory(category: unknown, categoryOther: unknown): string {\n  const picked = String(category ?? '').trim() || 'cute'\n  return picked === 'other' ? String(categoryOther ?? '').trim() : picked\n}\n\n// categoryOther is free text: a space or `&` must not break the URL.\nexport function galleryUrl(category: string): string {\n  return `${BASE_URL}?category=${encodeURIComponent(category)}`\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map((l, i) => `<text x=\"${size}\" y=\"${size * 2 + i * Math.round(size * 1.35)}\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`)\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const width = context.imageWidth || app.frame.width\n  const height = context.imageHeight || app.frame.height\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const category = resolvedCategory(app.config.category, app.config.categoryOther)\n  if (!category) return fail('Please enter the name of a gallery under \"Category (if other)\".')\n\n  frameos.log(`FrameOS Gallery category: ${category}`)\n  const photo = frameos.fetchImage(galleryUrl(category))\n  if (!photo.image) return fail(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
       "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\"\n    },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"placeholder\": \"\",\n      \"showIf\": [\n        {\n          \"field\": \"category\",\n          \"operator\": \"eq\",\n          \"value\": \"other\"\n        }\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+    }
+  },
+  "repo/apps/code/unsplash": {
+    "name": "Unsplash",
+    "description": "Random unsplash image",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "unsplash"
+    ],
+    "fields": [
+      {
+        "name": "search",
+        "type": "string",
+        "value": "nature",
+        "required": false,
+        "label": "Search",
+        "placeholder": "e.g. pineapple, nature, birds, power"
+      },
+      {
+        "name": "orientation",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "any",
+          "landscape",
+          "portrait",
+          "squarish"
+        ],
+        "required": false,
+        "label": "Orientation",
+        "placeholder": "landscape, portrait, square"
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Metadata state key",
+        "hint": "Enter a state key to persist metadata about the image. Stores: {search, title, description, location, author, links, ...}."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    },
+    "origin": "repo/apps/code/unsplash",
+    "sources": {
+      "app.ts": "// A random Unsplash photo for a search. The API call goes through\n// frameos.httpRequest; the photo itself through frameos.fetchImage (native\n// decode, straight into the canvas on an ESP32).\n\nconst API_URL = 'https://api.unsplash.com/photos/random/'\nconst TIMEOUT = 60000\n\ntype Json = Record<string, any>\n\n// Nim's strutils.strip: ASCII whitespace only.\nexport function strip(value: string): string {\n  return value.replace(/^[ \\t\\v\\r\\n\\f]+|[ \\t\\v\\r\\n\\f]+$/g, '')\n}\n\n// Nim's uri.encodeUrl: everything but A-Z a-z 0-9 - . _ ~ is %XX, a space is '+'.\nexport function encodeUrl(value: string): string {\n  return encodeURIComponent(value)\n    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)\n    .replace(/%20/g, '+')\n}\n\n// JsonNode.getStr(default): the value when it is a string, the default otherwise.\nexport function str(value: unknown, fallback = ''): string {\n  return typeof value === 'string' ? value : fallback\n}\n\nfunction text(value: unknown, fallback: string): string {\n  return value === undefined || value === null ? fallback : String(value)\n}\n\n// The size the image is for: the context image, else the frame as rendered.\nexport function contextSize(app: FrameOSApp, context: FrameOSContext): [number, number] {\n  if (context.imageWidth && context.imageHeight) return [context.imageWidth, context.imageHeight]\n  const { width, height, rotate } = app.frame\n  return rotate === 90 || rotate === 270 ? [height, width] : [width, height]\n}\n\nexport function resolvedOrientation(orientation: string, width: number, height: number): string {\n  if (orientation === 'auto') return height > width ? 'portrait' : width > height ? 'landscape' : 'squarish'\n  if (orientation === 'any') return ''\n  return orientation\n}\n\nexport function apiUrl(orientation: string, search: string): string {\n  return `${API_URL}?orientation=${encodeUrl(orientation)}&query=${encodeUrl(search)}`\n}\n\n// Unsplash's raw URL already carries a query string (?ixid=...).\nexport function photoUrl(rawUrl: string, width: number, height: number): string {\n  return `${rawUrl}&w=${width}&h=${height}&fit=crop&crop=faces,edges`\n}\n\n// \"Error making request <status>: <error.message | error | the body>\".\nexport function requestErrorMessage(status: number, body: string): string {\n  let detail: string\n  try {\n    const json = JSON.parse(body)\n    const error = json && typeof json === 'object' && !Array.isArray(json) ? json.error : undefined\n    const nested = error && typeof error === 'object' && !Array.isArray(error) ? error.message : undefined\n    detail = str(nested, str(error, JSON.stringify(json)))\n  } catch {\n    detail = body\n  }\n  return `Error making request ${status}: ${detail}`\n}\n\nfunction field(json: Json, ...path: string[]): unknown {\n  let node: any = json\n  for (const key of path) {\n    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined\n    node = node[key]\n  }\n  return node\n}\n\nexport function photoMetadata(\n  json: Json,\n  search: string,\n  orientation: string,\n  imageUrl: string\n): Record<string, string> {\n  const description = str(json.description, str(json.alt_description, ''))\n  return {\n    source: 'unsplash',\n    search,\n    orientation,\n    imageUrl,\n    id: str(json.id),\n    title: str(json.slug, description),\n    description,\n    altDescription: str(json.alt_description),\n    location: str(field(json, 'location', 'name')),\n    createdAt: str(json.created_at),\n    photoUrl: str(field(json, 'links', 'html')),\n    author: str(field(json, 'user', 'name')),\n    authorUsername: str(field(json, 'user', 'username')),\n    authorUrl: str(field(json, 'user', 'links', 'html')),\n  }\n}\n\nfunction esc(value: string): string {\n  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const body = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${\n          size * 2 + i * Math.round(size * 1.35)\n        }\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${body}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const [width, height] = contextSize(app, context)\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const search = strip(text(c.search, 'nature'))\n  const metadataStateKey = strip(text(c.metadataStateKey, ''))\n  const saveAssets = text(c.saveAssets, 'auto')\n\n  const apiKey = str(frameos.getSetting('unsplash', 'accessKey'))\n  if (apiKey === '') return fail('Please provide an Unsplash API key in the settings.')\n\n  const orientation = resolvedOrientation(text(c.orientation, 'auto'), width, height)\n  const url = apiUrl(orientation, search)\n  if (app.frame.debug) frameos.log(`API request: ${url}`)\n  const response = frameos.httpRequest(url, {\n    headers: { Authorization: `Client-ID ${apiKey}`, 'Accept-Version': 'v1', 'Content-Type': 'application/json' },\n    timeoutMs: TIMEOUT,\n  })\n  if (response.status === 0) return fail(`Error fetching image from Unsplash: ${response.error ?? 'request failed'}`)\n  if (response.status !== 200) return fail(requestErrorMessage(response.status, response.body ?? ''))\n\n  let json: Json\n  try {\n    const parsed = JSON.parse(response.body ?? '')\n    json = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}\n  } catch (e) {\n    return fail(`Error fetching image from Unsplash: ${e instanceof Error ? e.message : String(e)}`)\n  }\n  const rawUrl = str(field(json, 'urls', 'raw'))\n  if (rawUrl === '') return fail('No image URL returned from Unsplash.')\n  const imageUrl = photoUrl(rawUrl, width, height)\n  // Keep only what the metadata needs; the parsed response can go.\n  const metadata = metadataStateKey ? photoMetadata(json, search, orientation, imageUrl) : null\n  json = {}\n\n  if (app.frame.debug) frameos.log(`Downloading image: ${imageUrl}`)\n  const photo = frameos.fetchImage(imageUrl, {\n    saveAsset:\n      saveAssets === 'auto' || saveAssets === 'always'\n        ? { name: `${search} ${width}x${height}`, extension: '.jpg', mode: saveAssets }\n        : undefined,\n  })\n  if (!photo.image) return fail(`Error fetching image from Unsplash: ${photo.error ?? 'no image'}`)\n  if (metadata) frameos.setState(metadataStateKey, metadata)\n  return photo.image\n}\n",
+      "config.json": "{\n  \"name\": \"Unsplash\",\n  \"description\": \"Random unsplash image\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"unsplash\"],\n  \"fields\": [\n    {\n      \"name\": \"search\",\n      \"type\": \"string\",\n      \"value\": \"nature\",\n      \"required\": false,\n      \"label\": \"Search\",\n      \"placeholder\": \"e.g. pineapple, nature, birds, power\"\n    },\n    {\n      \"name\": \"orientation\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"any\", \"landscape\", \"portrait\", \"squarish\"],\n      \"required\": false,\n      \"label\": \"Orientation\",\n      \"placeholder\": \"landscape, portrait, square\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {search, title, description, location, author, links, ...}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+    }
+  },
+  "repo/apps/code/wikicommons": {
+    "name": "Wikimedia Commons",
+    "description": "Images from Wikimedia Commons",
+    "category": "data",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "name": "mode",
+        "type": "select",
+        "value": "pictureOfTheDay",
+        "options": [
+          "pictureOfTheDay",
+          "onThisDay",
+          "randomPictureOfTheDay",
+          "randomImage"
+        ],
+        "required": false,
+        "label": "Mode",
+        "hint": "Choose today's Picture of the Day, the Picture of the Day from this date in a previous year, a random previous Picture of the Day, or a random Commons image."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Metadata state key",
+        "placeholder": "e.g. wikimediaMetadata",
+        "hint": "Enter a state key to persist metadata about the image. Stores: {title, description, author, license, pageUrl, imageUrl, mime}."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "3600"
+    },
+    "origin": "repo/apps/code/wikicommons",
+    "sources": {
+      "app.ts": "// Wikimedia Commons: today's Picture of the Day, the Picture of the Day from\n// this date in an earlier year, a random earlier Picture of the Day, or a\n// random Commons file. The API calls go through frameos.httpRequest; the\n// image itself through frameos.fetchImage (native decode, straight into the\n// canvas on an ESP32).\n\nconst API_URL = 'https://commons.wikimedia.org/w/api.php'\nconst USER_AGENT = 'FrameOS Wikimedia Commons app (https://github.com/FrameOS/frameos)'\nconst FIRST_POTD_YEAR = 2008\nconst EMBEDDED_THUMBNAIL_WIDTH = 900\nconst RANDOM_ATTEMPTS = 10\nconst TIMEOUT = 60000\n\nexport type CommonsDate = { year: number; month: number; day: number }\nexport type CommonsImage = {\n  title: string\n  imageUrl: string\n  pageUrl: string\n  description: string\n  author: string\n  license: string\n  mime: string\n}\n\n// Nim's strutils.strip: ASCII whitespace only.\nexport function strip(value: string): string {\n  return value.replace(/^[ \\t\\v\\r\\n\\f]+|[ \\t\\v\\r\\n\\f]+$/g, '')\n}\n\n// Nim's uri.encodeUrl: everything but A-Z a-z 0-9 - . _ ~ is %XX, a space is '+'.\nexport function encodeUrl(value: string): string {\n  return encodeURIComponent(value)\n    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)\n    .replace(/%20/g, '+')\n}\n\nexport function queryString(params: [string, string][]): string {\n  return params.map(([key, value]) => `${encodeUrl(key)}=${encodeUrl(value)}`).join('&')\n}\n\n// JsonNode.getStr(default): the value when it is a string, the default otherwise.\nfunction str(value: unknown, fallback = ''): string {\n  return typeof value === 'string' ? value : fallback\n}\n\nfunction text(value: unknown, fallback: string): string {\n  return value === undefined || value === null ? fallback : String(value)\n}\n\nfunction isObject(value: unknown): value is Record<string, any> {\n  return !!value && typeof value === 'object' && !Array.isArray(value)\n}\n\nfunction replaceAll(value: string, search: string, replacement: string): string {\n  return value.split(search).join(replacement)\n}\n\nexport function isLeapYear(year: number): boolean {\n  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0\n}\n\nexport function daysInMonth(year: number, month: number): number {\n  if ([1, 3, 5, 7, 8, 10, 12].includes(month)) return 31\n  if ([4, 6, 9, 11].includes(month)) return 30\n  if (month === 2) return isLeapYear(year) ? 29 : 28\n  return 0\n}\n\n// Local where the frame has a time zone, UTC otherwise.\nexport function todayDate(now: Date = new Date()): CommonsDate {\n  return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() }\n}\n\nexport function dateString(date: CommonsDate): string {\n  const pad = (n: number): string => String(n).padStart(2, '0')\n  return `${date.year}-${pad(date.month)}-${pad(date.day)}`\n}\n\n// Nim's rand(lo..hi): both ends included.\nexport function randomInt(lo: number, hi: number): number {\n  return lo + Math.floor(Math.random() * (hi - lo + 1))\n}\n\nexport function randomPreviousDate(today: CommonsDate): CommonsDate {\n  const year = randomInt(FIRST_POTD_YEAR, today.year)\n  const month = randomInt(1, year === today.year ? today.month : 12)\n  let maxDay = daysInMonth(year, month)\n  if (year === today.year && month === today.month) maxDay = Math.min(maxDay, today.day)\n  return { year, month, day: randomInt(1, maxDay) }\n}\n\nexport function randomOnThisDay(today: CommonsDate): CommonsDate {\n  const maxYear = Math.max(FIRST_POTD_YEAR, today.year - 1)\n  for (let i = 0; i < 100; i++) {\n    const year = randomInt(FIRST_POTD_YEAR, maxYear)\n    if (today.day <= daysInMonth(year, today.month)) return { year, month: today.month, day: today.day }\n  }\n  throw new Error('No previous Wikimedia Commons picture of the day exists for this date.')\n}\n\nexport function stripHtml(value: string): string {\n  let inTag = false\n  let out = ''\n  for (const ch of value) {\n    if (ch === '<') inTag = true\n    else if (ch === '>') inTag = false\n    else if (!inTag) out += ch\n  }\n  out = replaceAll(out, '&quot;', '\"')\n  out = replaceAll(out, '&amp;', '&')\n  out = replaceAll(out, '&#039;', \"'\")\n  out = replaceAll(out, '&apos;', \"'\")\n  out = replaceAll(out, '&lt;', '<')\n  out = replaceAll(out, '&gt;', '>')\n  return strip(out)\n}\n\nfunction metadataValue(info: Record<string, any>, key: string): string {\n  const metadata = info.extmetadata\n  if (isObject(metadata) && key in metadata)\n    return stripHtml(str(isObject(metadata[key]) ? metadata[key].value : undefined))\n  return ''\n}\n\nexport function imageExtension(image: { imageUrl: string; mime: string }): string {\n  const urlPath = image.imageUrl.split('?')[0].replace(/[A-Z]/g, (c) => c.toLowerCase())\n  for (const ext of ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg']) {\n    if (urlPath.endsWith(ext)) return ext === '.jpeg' ? '.jpg' : ext\n  }\n  const byMime: Record<string, string> = {\n    'image/jpeg': '.jpg',\n    'image/png': '.png',\n    'image/gif': '.gif',\n    'image/webp': '.webp',\n    'image/svg+xml': '.svg',\n  }\n  return byMime[image.mime] ?? '.img'\n}\n\n// One page of a query, slimmed to what the render keeps: a parsed response\n// costs many times its JSON size on the heap.\nexport function imageFromPage(page: unknown): CommonsImage | null {\n  if (!isObject(page)) return null\n  const info = Array.isArray(page.imageinfo) ? page.imageinfo[0] : undefined\n  if (!isObject(info)) return null\n  const mime = str(info.mime)\n  if (!mime.startsWith('image/')) return null\n  const imageUrl = str(info.thumburl, str(info.url, ''))\n  if (imageUrl === '') return null\n  const description = metadataValue(info, 'ImageDescription')\n  return {\n    title: str(page.title),\n    imageUrl,\n    pageUrl: str(info.descriptionurl),\n    description: description !== '' ? description : metadataValue(info, 'ObjectName'),\n    author: metadataValue(info, 'Artist'),\n    license: metadataValue(info, 'LicenseShortName'),\n    mime,\n  }\n}\n\nexport function firstImageFromQuery(json: unknown): CommonsImage {\n  const pages = isObject(json) && isObject(json.query) ? json.query.pages : undefined\n  if (Array.isArray(pages)) {\n    for (const page of pages) {\n      const image = imageFromPage(page)\n      if (image) return image\n    }\n  }\n  throw new Error('No supported image returned from Wikimedia Commons.')\n}\n\n// The four modes, plus the aliases older configs used (mode \"potd\" with a\n// submode, mode \"random\").\nexport function normalizedMode(mode: string, submode: string): string {\n  if (mode === '' || mode === 'potd' || mode === 'pictureOfTheDay') {\n    if (submode === '' || submode === 'day') return 'pictureOfTheDay'\n    if (submode === 'onthisday' || submode === 'onThisDay') return 'onThisDay'\n    if (['month', 'random', 'randomPotd', 'randomPictureOfTheDay'].includes(submode)) return 'randomPictureOfTheDay'\n    return mode\n  }\n  if (mode === 'random') return 'randomImage'\n  return mode\n}\n\n// Thumbnails as wide as the longer side; an ESP32 asks for at most 900 px.\nexport function thumbnailWidth(width: number, height: number, embedded: boolean): number {\n  const result = Math.max(width, height, 1)\n  return embedded ? Math.min(result, EMBEDDED_THUMBNAIL_WIDTH) : result\n}\n\nexport function potdParams(date: CommonsDate, thumbWidth: number): [string, string][] {\n  return [\n    ['action', 'query'],\n    ['generator', 'images'],\n    ['titles', `Template:Potd/${dateString(date)}`],\n    ['gimlimit', '20'],\n    ['prop', 'imageinfo'],\n    ['iiprop', 'url|mime|size|extmetadata'],\n    ['iiurlwidth', String(thumbWidth)],\n  ]\n}\n\nexport function randomParams(thumbWidth: number): [string, string][] {\n  return [\n    ['action', 'query'],\n    ['generator', 'random'],\n    ['grnnamespace', '6'],\n    ['grnlimit', '20'],\n    ['prop', 'imageinfo'],\n    ['iiprop', 'url|mime|size|extmetadata'],\n    ['iiurlwidth', String(thumbWidth)],\n  ]\n}\n\nexport function apiUrl(params: [string, string][]): string {\n  return `${API_URL}?${queryString([['format', 'json'], ['formatversion', '2'], ...params])}`\n}\n\n// Throws on a transport failure, an HTTP error, a body that is not JSON or\n// an API error object, like the Nim app's fetchCommonsJson.\nfunction fetchCommonsImage(params: [string, string][]): CommonsImage {\n  const r = frameos.httpRequest(apiUrl(params), {\n    headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },\n    timeoutMs: TIMEOUT,\n  })\n  if (r.status === 0) throw new Error(r.error ?? 'request failed')\n  if (r.status >= 400) throw new Error(`Wikimedia Commons API HTTP ${r.status}`)\n  const json = JSON.parse(r.body ?? '')\n  if (isObject(json) && 'error' in json) {\n    const error = json.error\n    throw new Error(\n      `Wikimedia Commons API error: ${str(isObject(error) ? error.info : undefined, JSON.stringify(error))}`\n    )\n  }\n  return firstImageFromQuery(json)\n}\n\nfunction retried(what: string, attempt: () => CommonsImage): CommonsImage {\n  let lastError = ''\n  for (let i = 0; i < RANDOM_ATTEMPTS; i++) {\n    try {\n      return attempt()\n    } catch (e) {\n      lastError = e instanceof Error ? e.message : String(e)\n    }\n  }\n  throw new Error(`Could not find a random Wikimedia Commons ${what}: ${lastError}`)\n}\n\nexport function fetchImageForMode(mode: string, submode: string, thumbWidth: number): CommonsImage {\n  const today = todayDate()\n  switch (normalizedMode(mode, submode)) {\n    case 'pictureOfTheDay':\n      return fetchCommonsImage(potdParams(today, thumbWidth))\n    case 'onThisDay':\n      return fetchCommonsImage(potdParams(randomOnThisDay(today), thumbWidth))\n    case 'randomPictureOfTheDay':\n      return retried('picture of the day', () => fetchCommonsImage(potdParams(randomPreviousDate(today), thumbWidth)))\n    case 'randomImage':\n      return retried('image', () => fetchCommonsImage(randomParams(thumbWidth)))\n    default:\n      throw new Error(`Invalid Wikimedia Commons mode: ${mode}`)\n  }\n}\n\n// The size the image is for: the context image, else the frame as rendered.\nexport function contextSize(app: FrameOSApp, context: FrameOSContext): [number, number] {\n  if (context.imageWidth && context.imageHeight) return [context.imageWidth, context.imageHeight]\n  const { width, height, rotate } = app.frame\n  return rotate === 90 || rotate === 270 ? [height, width] : [width, height]\n}\n\nfunction esc(value: string): string {\n  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const body = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${\n          size * 2 + i * Math.round(size * 1.35)\n        }\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${body}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const [width, height] = contextSize(app, context)\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const mode = strip(text(c.mode, 'pictureOfTheDay'))\n  const submode = strip(text(c.submode, ''))\n  const metadataStateKey = strip(text(c.metadataStateKey, ''))\n  const saveAssets = text(c.saveAssets, 'auto')\n\n  let image: CommonsImage\n  try {\n    image = fetchImageForMode(mode, submode, thumbnailWidth(width, height, !!app.frame.embedded))\n  } catch (e) {\n    return fail(`Error fetching image from Wikimedia Commons: ${e instanceof Error ? e.message : String(e)}`)\n  }\n\n  if (app.frame.debug) frameos.log(`Downloading Wikimedia Commons image: ${image.imageUrl}`)\n  const photo = frameos.fetchImage(image.imageUrl, {\n    headers: { 'User-Agent': USER_AGENT },\n    saveAsset:\n      saveAssets === 'auto' || saveAssets === 'always'\n        ? { name: replaceAll(image.title, 'File:', ''), extension: imageExtension(image), mode: saveAssets }\n        : undefined,\n  })\n  if (!photo.image) return fail(`Error fetching image from Wikimedia Commons: ${photo.error ?? 'no image'}`)\n\n  if (metadataStateKey) {\n    frameos.setState(metadataStateKey, {\n      source: 'wikimedia-commons',\n      mode: normalizedMode(mode, submode),\n      title: image.title,\n      description: image.description,\n      author: image.author,\n      license: image.license,\n      pageUrl: image.pageUrl,\n      imageUrl: image.imageUrl,\n      mime: image.mime,\n    })\n  }\n  return photo.image\n}\n",
+      "config.json": "{\n  \"name\": \"Wikimedia Commons\",\n  \"description\": \"Images from Wikimedia Commons\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"value\": \"pictureOfTheDay\",\n      \"options\": [\"pictureOfTheDay\", \"onThisDay\", \"randomPictureOfTheDay\", \"randomImage\"],\n      \"required\": false,\n      \"label\": \"Mode\",\n      \"hint\": \"Choose today's Picture of the Day, the Picture of the Day from this date in a previous year, a random previous Picture of the Day, or a random Commons image.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved.\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"placeholder\": \"e.g. wikimediaMetadata\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {title, description, author, license, pageUrl, imageUrl, mime}.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"3600\"\n  }\n}\n"
+    }
+  },
+  "repo/apps/code/googlePhotos": {
+    "name": "Google Photos",
+    "description": "Show images from a shared Google Photos album. Reads the public share page directly since Google offers no API for shared albums - this may stop working if Google changes the page format.",
+    "category": "data",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "name": "shareUrl",
+        "type": "text",
+        "value": "",
+        "required": true,
+        "label": "Shared album link",
+        "placeholder": "https://photos.app.goo.gl/...",
+        "hint": "In Google Photos, open an album, tap Share and create a link that anyone can view. Paste the resulting https://photos.app.goo.gl/... or https://photos.google.com/share/... link here. The album must stay shared via link for the frame to read it."
+      },
+      {
+        "name": "mode",
+        "type": "select",
+        "options": [
+          "random",
+          "sequential"
+        ],
+        "value": "random",
+        "required": true,
+        "label": "Order of images"
+      },
+      {
+        "name": "counterStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Optional state key for persistence",
+        "hint": "Enter a state key to persist the current image index between restarts.",
+        "showIf": [
+          {
+            "field": "mode",
+            "operator": "eq",
+            "value": "sequential"
+          }
+        ]
+      },
+      {
+        "name": "fitMode",
+        "type": "select",
+        "options": [
+          "cover",
+          "contain"
+        ],
+        "value": "cover",
+        "required": true,
+        "label": "Fit mode",
+        "hint": "How Google Photos sizes the downloaded image. 'cover' crops the photo to exactly fill the frame, 'contain' keeps the whole photo visible within the frame's dimensions."
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Metadata state key",
+        "hint": "Enter a state key to persist metadata about the image. Stores: {source, index, count, imageUrl}."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Save the downloaded image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+      },
+      {
+        "name": "cacheAlbumSeconds",
+        "type": "integer",
+        "value": "3600",
+        "required": false,
+        "label": "Album cache duration (seconds)",
+        "placeholder": "3600",
+        "hint": "How long to reuse the scraped list of photos before fetching the album page again. New photos added to the album show up after this many seconds at the latest."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    },
+    "origin": "repo/apps/code/googlePhotos",
+    "sources": {
+      "app.ts": "// Google Photos shared album app. Google offers no API for shared albums, so\n// the public share page is fetched with frameos.httpRequest and scraped for\n// photo URLs; the photo itself goes through frameos.fetchImage (native decode,\n// straight into the canvas on an ESP32). Only the URL list outlives a fetch:\n// the page itself is dropped as soon as it has been parsed.\n\nexport const PHOTO_URL_HOST = 'https://lh3.googleusercontent.com/'\nconst MIN_PHOTO_PATH_LENGTH = 60\nconst ALBUM_USER_AGENT =\n  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'\nconst ALBUM_TIMEOUT = 60000\nconst DEFAULT_CACHE_SECONDS = 3600\n// The characters a photo path may hold, raw or JSON-escaped (\\u003d, \\/).\nconst PHOTO_PATH = /[A-Za-z0-9_\\-\\/=.\\\\]*/y\n\n// What must outlive a render is kept with frameos.remember, never in module\n// variables: an ESP32 tears this interpreter down after every render. The\n// node keeps it until its scene is unloaded, as the Nim app object did.\nconst ALBUM_KEY = 'album'\nconst ALBUM_NOT_KEPT_KEY = 'albumNotKept'\nconst COUNTER_KEY = 'counter'\n\ntype Album = { shareUrl: string; urls: string[]; fetchedAt: number }\n\n// Pull googleusercontent photo base URLs out of a shared album page. URLs\n// appear both raw and JSON-escaped (\\u003d for '='); size suffixes after '='\n// are stripped so callers can append their own.\nexport function extractPhotoUrls(html: string): string[] {\n  const seen = new Set<string>()\n  const urls: string[] = []\n  let searchFrom = 0\n  while (true) {\n    const start = html.indexOf(PHOTO_URL_HOST, searchFrom)\n    if (start < 0) break\n    PHOTO_PATH.lastIndex = start + PHOTO_URL_HOST.length\n    let path = PHOTO_PATH.exec(html)?.[0] ?? ''\n    searchFrom = start + PHOTO_URL_HOST.length + path.length\n    path = path\n      .replace(/\\\\+$/, '')\n      .replace(/\\\\u003d/g, '=')\n      .replace(/\\\\u0026/g, '&')\n      .replace(/\\\\\\//g, '/')\n    const suffixStart = path.indexOf('=')\n    if (suffixStart >= 0) path = path.slice(0, suffixStart)\n    if (path.length <= MIN_PHOTO_PATH_LENGTH) continue\n    if (!(path.startsWith('pw/') || path.includes('AF1Qip'))) continue\n    const url = PHOTO_URL_HOST + path\n    if (!seen.has(url)) {\n      seen.add(url)\n      urls.push(url)\n    }\n  }\n  return urls\n}\n\nexport function sizedPhotoUrl(baseUrl: string, width: number, height: number, fitMode: string): string {\n  const suffix = fitMode === 'contain' ? '-no' : '-c'\n  return `${baseUrl}=w${width}-h${height}${suffix}`\n}\n\nexport function wrapIndex(counter: number, count: number): number {\n  if (count <= 0) return 0\n  return ((counter % count) + count) % count\n}\n\nexport function cacheSeconds(value: unknown): number {\n  const seconds = Math.trunc(Number(value))\n  return Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_CACHE_SECONDS\n}\n\n// A saved counter that is not an integer counts as 0.\nexport function stateCounter(value: unknown): number {\n  return typeof value === 'number' && Number.isInteger(value) ? value : 0\n}\n\n// The context image when there is one, else the frame's size after rotation.\nexport function renderSize(app: FrameOSApp, context: FrameOSContext): { width: number; height: number } {\n  if (context.imageWidth && context.imageHeight) return { width: context.imageWidth, height: context.imageHeight }\n  const { width, height, rotate } = app.frame\n  return rotate === 90 || rotate === 270 ? { width: height, height: width } : { width, height }\n}\n\nfunction errorMessage(error: unknown): string {\n  return error instanceof Error ? error.message : String(error)\n}\n\nfunction fetchAlbum(shareUrl: string, debug: boolean): string[] {\n  if (debug) frameos.log(`Fetching shared album: ${shareUrl}`)\n  const response = frameos.httpRequest(shareUrl, {\n    headers: { 'User-Agent': ALBUM_USER_AGENT, Accept: 'text/html' },\n    timeoutMs: ALBUM_TIMEOUT,\n  })\n  if (response.status === 0) throw new Error(response.error || 'request failed')\n  if (response.status !== 200) throw new Error(`Error ${response.status} while fetching the shared album page.`)\n  const urls = extractPhotoUrls(response.body ?? '')\n  if (!urls.length) {\n    throw new Error(\n      'No photos found on the shared album page. Make sure the link is a public share link and the album is not empty.'\n    )\n  }\n  if (debug) frameos.log(`Found ${urls.length} photos in the shared album`)\n  return urls\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${\n          size * 2 + i * Math.round(size * 1.35)\n        }\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\n// The album this node kept on an earlier render, if any.\nexport function keptAlbum(value: unknown): Album | null {\n  if (!value || typeof value !== 'object') return null\n  const kept = value as Record<string, unknown>\n  if (typeof kept.shareUrl !== 'string' || !Array.isArray(kept.urls) || typeof kept.fetchedAt !== 'number') return null\n  return { shareUrl: kept.shareUrl, urls: kept.urls as string[], fetchedAt: kept.fetchedAt }\n}\n\n// Keep a fetched album for the next renders. One too big for the node's\n// memory serves this render only, and is said once per link and size: the\n// next fetch of the same album does not ask (and get refused) again.\nfunction keepAlbum(album: Album): void {\n  const notKept = frameos.recall(ALBUM_NOT_KEPT_KEY) as { shareUrl?: string; count?: number } | undefined\n  const count = album.urls.length\n  if (notKept && notKept.shareUrl === album.shareUrl && notKept.count === count) return\n  if (frameos.remember(ALBUM_KEY, album)) {\n    if (notKept) frameos.remember(ALBUM_NOT_KEPT_KEY, null)\n    return\n  }\n  frameos.remember(ALBUM_KEY, null)\n  frameos.remember(ALBUM_NOT_KEPT_KEY, { shareUrl: album.shareUrl, count })\n  frameos.log(\n    `The shared album's ${count} photos are too many to keep between renders: the album page is fetched again on every render.`\n  )\n}\n\n// The album to show from: the kept one while it is fresh, else a new fetch;\n// a failed refresh falls back to the kept list of the same link.\nfunction loadAlbum(shareUrl: string, maxAgeSeconds: number, debug: boolean): Album | string {\n  const kept = keptAlbum(frameos.recall(ALBUM_KEY))\n  const fresh =\n    kept && kept.urls.length > 0 && kept.shareUrl === shareUrl && Date.now() / 1000 - kept.fetchedAt < maxAgeSeconds\n  if (kept && fresh) return kept\n  try {\n    const album = { shareUrl, urls: fetchAlbum(shareUrl, debug), fetchedAt: Date.now() / 1000 }\n    keepAlbum(album)\n    return album\n  } catch (error) {\n    if (kept && kept.urls.length > 0 && kept.shareUrl === shareUrl) {\n      frameos.error(`Error refreshing the shared album, reusing the cached photo list: ${errorMessage(error)}`)\n      return kept\n    }\n    return `Error loading the shared album: ${errorMessage(error)}`\n  }\n}\n\n// The sequential position: the node's own, or on its first render since the\n// scene loaded, the counter state key's (the Nim app restored it in init).\nfunction sequentialCounter(app: FrameOSApp, counterStateKey: string): number {\n  const kept = frameos.recall(COUNTER_KEY)\n  if (typeof kept === 'number' && Number.isInteger(kept)) return kept\n  return counterStateKey ? stateCounter(app.state[counterStateKey]) : 0\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const { width, height } = renderSize(app, context)\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const shareUrl = String(c.shareUrl ?? '').trim()\n  const mode = String(c.mode ?? 'random')\n  const counterStateKey = String(c.counterStateKey ?? '').trim()\n  const metadataStateKey = String(c.metadataStateKey ?? '').trim()\n  const fitMode = String(c.fitMode ?? 'cover')\n  const saveAssets = String(c.saveAssets ?? 'auto')\n  const debug = app.frame.debug === true\n\n  if (!shareUrl) return fail('Please provide a Google Photos shared album link.')\n  if (!shareUrl.startsWith('http://') && !shareUrl.startsWith('https://')) {\n    return fail(`Invalid shared album link: ${shareUrl}`)\n  }\n\n  try {\n    const album = loadAlbum(shareUrl, cacheSeconds(c.cacheAlbumSeconds), debug)\n    if (typeof album === 'string') return fail(album)\n\n    const count = album.urls.length\n    let index = 0\n    if (mode === 'sequential') {\n      index = wrapIndex(sequentialCounter(app, counterStateKey), count)\n      const next = wrapIndex(index + 1, count)\n      frameos.remember(COUNTER_KEY, next)\n      if (counterStateKey) frameos.setState(counterStateKey, next)\n    } else {\n      index = Math.floor(Math.random() * count)\n    }\n\n    const imageUrl = sizedPhotoUrl(album.urls[index], width, height, fitMode)\n    if (debug) frameos.log(`Downloading image: ${imageUrl}`)\n    const saveAsset =\n      saveAssets === 'auto' || saveAssets === 'always'\n        ? { name: `google-photos ${index} ${width}x${height}`, extension: 'jpg', mode: saveAssets }\n        : undefined\n    const photo = frameos.fetchImage(imageUrl, { saveAsset })\n    if (!photo.image) return fail(`Error fetching image from Google Photos: ${photo.error ?? 'no image'}`)\n\n    if (metadataStateKey) {\n      frameos.setState(metadataStateKey, { source: 'googlePhotos', index, count, imageUrl })\n    }\n    return photo.image\n  } catch (error) {\n    return fail(`Error fetching image from Google Photos: ${errorMessage(error)}`)\n  }\n}\n",
+      "config.json": "{\n  \"name\": \"Google Photos\",\n  \"description\": \"Show images from a shared Google Photos album. Reads the public share page directly since Google offers no API for shared albums - this may stop working if Google changes the page format.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"shareUrl\",\n      \"type\": \"text\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Shared album link\",\n      \"placeholder\": \"https://photos.app.goo.gl/...\",\n      \"hint\": \"In Google Photos, open an album, tap Share and create a link that anyone can view. Paste the resulting https://photos.app.goo.gl/... or https://photos.google.com/share/... link here. The album must stay shared via link for the frame to read it.\"\n    },\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"options\": [\n        \"random\",\n        \"sequential\"\n      ],\n      \"value\": \"random\",\n      \"required\": true,\n      \"label\": \"Order of images\"\n    },\n    {\n      \"name\": \"counterStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Optional state key for persistence\",\n      \"hint\": \"Enter a state key to persist the current image index between restarts.\",\n      \"showIf\": [\n        {\n          \"field\": \"mode\",\n          \"operator\": \"eq\",\n          \"value\": \"sequential\"\n        }\n      ]\n    },\n    {\n      \"name\": \"fitMode\",\n      \"type\": \"select\",\n      \"options\": [\n        \"cover\",\n        \"contain\"\n      ],\n      \"value\": \"cover\",\n      \"required\": true,\n      \"label\": \"Fit mode\",\n      \"hint\": \"How Google Photos sizes the downloaded image. 'cover' crops the photo to exactly fill the frame, 'contain' keeps the whole photo visible within the frame's dimensions.\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {source, index, count, imageUrl}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\n        \"auto\",\n        \"always\",\n        \"never\"\n      ],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the downloaded image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved.\"\n    },\n    {\n      \"name\": \"cacheAlbumSeconds\",\n      \"type\": \"integer\",\n      \"value\": \"3600\",\n      \"required\": false,\n      \"label\": \"Album cache duration (seconds)\",\n      \"placeholder\": \"3600\",\n      \"hint\": \"How long to reuse the scraped list of photos before fetching the album page again. New photos added to the album show up after this many seconds at the latest.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+    }
+  },
+  "repo/apps/code/openaiImage": {
+    "name": "OpenAI Image",
+    "description": "Random AI generated art from OpenAI's image models",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "openAI"
+    ],
+    "fields": [
+      {
+        "name": "prompt",
+        "type": "text",
+        "rows": 4,
+        "value": "",
+        "required": true,
+        "label": "Prompt",
+        "placeholder": "e.g. pumpkin pyjama party, digital art"
+      },
+      {
+        "name": "model",
+        "type": "select",
+        "options": [
+          "gpt-image-2",
+          "gpt-image-1.5",
+          "gpt-image-1",
+          "dall-e-3",
+          "dall-e-2"
+        ],
+        "value": "gpt-image-2",
+        "required": true,
+        "label": "Model"
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x640",
+          "640x1024",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-2"
+          }
+        ]
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-1"
+          },
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-1.5"
+          }
+        ]
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x1024",
+          "1792x1024",
+          "1024x1792"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-3"
+          }
+        ]
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x1024",
+          "512x512",
+          "256x256"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-2"
+          }
+        ]
+      },
+      {
+        "name": "style",
+        "type": "select",
+        "options": [
+          "vivid",
+          "natural",
+          ""
+        ],
+        "value": "vivid",
+        "label": "Style",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-3"
+          }
+        ]
+      },
+      {
+        "name": "quality",
+        "type": "select",
+        "options": [
+          "standard",
+          "hd",
+          ""
+        ],
+        "value": "standard",
+        "label": "Quality",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-3"
+          }
+        ]
+      },
+      {
+        "name": "quality",
+        "type": "select",
+        "options": [
+          "auto",
+          "low",
+          "medium",
+          "high",
+          ""
+        ],
+        "value": "auto",
+        "label": "Quality",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-2"
+          },
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-1"
+          },
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-1.5"
+          }
+        ]
+      },
+      {
+        "name": "outputFormat",
+        "type": "select",
+        "options": [
+          "auto",
+          "png",
+          "jpeg",
+          "webp"
+        ],
+        "value": "auto",
+        "label": "Output format",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-2"
+          },
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-1"
+          },
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-1.5"
+          }
+        ]
+      },
+      {
+        "name": "outputCompression",
+        "type": "integer",
+        "value": 0,
+        "min": 0,
+        "max": 100,
+        "label": "Output compression",
+        "hint": "Compression for JPEG/WebP outputs. Use 0 for the runtime default.",
+        "showIf": [
+          {
+            "and": [
+              {
+                "field": "outputFormat",
+                "operator": "ne",
+                "value": "png"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-2"
+              }
+            ]
+          },
+          {
+            "and": [
+              {
+                "field": "outputFormat",
+                "operator": "ne",
+                "value": "png"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1"
+              }
+            ]
+          },
+          {
+            "and": [
+              {
+                "field": "outputFormat",
+                "operator": "ne",
+                "value": "png"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1.5"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Metadata state key",
+        "hint": "Enter a state key to persist metadata about the image. Stores: {prompt, generatedPrompt, model, size}."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "3600"
+    },
+    "origin": "repo/apps/code/openaiImage",
+    "sources": {
+      "app.ts": "// OpenAI image app. The generation request goes through frameos.httpRequest;\n// the image it returns (base64 for the gpt-image models, a URL for dall-e)\n// through frameos.fetchImage (native decode, straight into the canvas on an\n// ESP32).\n\nconst API_URL = 'https://api.openai.com/v1/images/generations'\n// Image generation is slow: up to a few minutes at high quality.\nconst TIMEOUT = 300000\nconst DEFAULT_SIZE = '1024x1024'\nconst GPT_IMAGE_QUALITIES = ['low', 'medium', 'high', 'auto']\nconst OUTPUT_FORMATS = ['jpeg', 'png', 'webp']\n\ntype Response = { status: number; body?: string; error?: string }\nexport type ImageOptions = {\n  prompt: string\n  model: string\n  style: string\n  quality: string\n  outputFormat: string\n  outputCompression: number\n}\nexport type ImageReply = { b64: string; url: string; revisedPrompt: string }\n\n// Config values the way the Nim app read them: a string field keeps its\n// default unless the config holds a string; an integer field takes a number\n// (truncated) or a string of digits.\nfunction str(value: unknown, fallback: string): string {\n  return typeof value === 'string' ? value : fallback\n}\n\nfunction int(value: unknown, fallback: number): number {\n  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)\n  if (typeof value === 'string' && /^[+-]?\\d+$/.test(value.trim())) return parseInt(value.trim(), 10)\n  return fallback\n}\n\nexport function isGptImageModel(model: string): boolean {\n  return model.startsWith('gpt-image-')\n}\n\n// The sizes each model accepts, as an explicit `size` is checked against.\nexport function modelSizes(model: string): string[] {\n  switch (model) {\n    case 'dall-e-3':\n      return ['1024x1024', '1792x1024', '1024x1792']\n    case 'dall-e-2':\n      return ['256x256', '512x512', '1024x1024']\n    case 'gpt-image-2':\n      return ['1024x640', '640x1024', '1024x1024', '1536x1024', '1024x1536']\n    case 'gpt-image-1':\n    case 'gpt-image-1.5':\n      return ['1024x1024', '1536x1024', '1024x1536']\n    default:\n      return []\n  }\n}\n\nfunction byOrientation(width: number, height: number, landscape: string, portrait: string): string {\n  return width > height ? landscape : width < height ? portrait : DEFAULT_SIZE\n}\n\n// The size to ask for. \"best for orientation\" follows the shape being drawn\n// into; an ESP32 asks gpt-image-2 for its smallest sizes. An explicit size the\n// model does not offer falls back to 1024x1024.\nexport function imageSize(model: string, size: string, width: number, height: number, embedded = false): string {\n  if (size === 'best for orientation') {\n    switch (model) {\n      case 'dall-e-3':\n        return byOrientation(width, height, '1792x1024', '1024x1792')\n      case 'gpt-image-2':\n        return embedded\n          ? byOrientation(width, height, '1024x640', '640x1024')\n          : byOrientation(width, height, '1536x1024', '1024x1536')\n      case 'gpt-image-1':\n      case 'gpt-image-1.5':\n        return byOrientation(width, height, '1536x1024', '1024x1536')\n      default:\n        return DEFAULT_SIZE\n    }\n  }\n  if (size !== '') return modelSizes(model).includes(size) ? size : DEFAULT_SIZE\n  return DEFAULT_SIZE\n}\n\n// The generation request. An ESP32 always asks the gpt-image models for low\n// quality and a compressed JPEG unless told otherwise: the base64 reply lands\n// in a few MB of heap.\nexport function requestBody(options: ImageOptions, size: string, embedded = false): Record<string, unknown> {\n  const { prompt, model, style, quality, outputFormat, outputCompression } = options\n  const body: Record<string, unknown> = { prompt, n: 1, size, model }\n  if (model === 'dall-e-3') {\n    if (style !== '') body.style = style\n    if (quality !== '') body.quality = quality\n  } else if (isGptImageModel(model)) {\n    if (GPT_IMAGE_QUALITIES.includes(quality)) body.quality = quality\n    if (embedded) {\n      body.quality = 'low'\n      const format = outputFormat === '' || outputFormat === 'auto' ? 'jpeg' : outputFormat\n      if (OUTPUT_FORMATS.includes(format)) body.output_format = format\n      if (format === 'jpeg' || format === 'webp') {\n        const compression = outputCompression > 0 ? outputCompression : 50\n        body.output_compression = Math.min(Math.max(compression, 0), 100)\n      }\n    } else {\n      if (OUTPUT_FORMATS.includes(outputFormat)) body.output_format = outputFormat\n      if ((outputFormat === 'jpeg' || outputFormat === 'webp') && outputCompression > 0) {\n        body.output_compression = Math.min(Math.max(outputCompression, 0), 100)\n      }\n    }\n  }\n  return body\n}\n\nfunction isObject(value: unknown): value is Record<string, any> {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n}\n\n// `error.message`, else a string `error`, else the whole reply as JSON; the raw\n// body when it is not JSON.\nexport function apiErrorDetail(body: string): string {\n  let json: unknown\n  try {\n    json = JSON.parse(body)\n  } catch {\n    return body\n  }\n  const error = isObject(json) ? json.error : undefined\n  const message = isObject(error) ? error.message : undefined\n  if (typeof message === 'string') return message\n  if (typeof error === 'string') return error\n  return JSON.stringify(json)\n}\n\n// The first generated image. Throws on a body that is not JSON. Only the\n// strings are kept: the parsed reply is freed as soon as this returns.\nexport function parseImageReply(body: string): ImageReply {\n  const json: unknown = JSON.parse(body)\n  const data = isObject(json) ? json.data : undefined\n  const node = Array.isArray(data) && isObject(data[0]) ? data[0] : {}\n  return { b64: str(node.b64_json, ''), url: str(node.url, ''), revisedPrompt: str(node.revised_prompt, '') }\n}\n\nexport function imageMetadata(\n  prompt: string,\n  revisedPrompt: string,\n  model: string,\n  size: string\n): Record<string, string> {\n  const metadata: Record<string, string> = {\n    source: 'openai',\n    prompt,\n    generatedPrompt: revisedPrompt !== '' ? revisedPrompt : prompt,\n    model,\n    size,\n  }\n  if (revisedPrompt !== '') metadata.revisedPrompt = revisedPrompt\n  return metadata\n}\n\n// What is being drawn into: the incoming image, else the frame as rendered\n// (a 90/270 rotation swaps its sides).\nexport function renderSize(\n  frame: { width: number; height: number; rotate?: number },\n  context: FrameOSContext\n): [number, number] {\n  if (context.imageWidth && context.imageHeight) return [context.imageWidth, context.imageHeight]\n  const rotated = frame.rotate === 90 || frame.rotate === 270\n  return rotated ? [frame.height, frame.width] : [frame.width, frame.height]\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${\n          size * 2 + i * Math.round(size * 1.35)\n        }\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const [width, height] = renderSize(app.frame, context)\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const prompt = str(c.prompt, '')\n  const model = str(c.model, 'gpt-image-2')\n  const metadataStateKey = str(c.metadataStateKey, '')\n  const saveAssets = str(c.saveAssets, 'auto')\n  if (prompt === '') return fail('No prompt provided in app config.')\n  const apiKey = str(frameos.getSetting('openAI', 'apiKey'), '')\n  if (apiKey === '') return fail('Please provide an OpenAI API key in the settings.')\n\n  const embedded = app.frame.embedded === true\n  const size = imageSize(model, str(c.size, 'best for orientation'), width, height, embedded)\n  const body = requestBody(\n    {\n      prompt,\n      model,\n      style: str(c.style, 'vivid'),\n      quality: str(c.quality, 'standard'),\n      outputFormat: str(c.outputFormat, 'auto'),\n      outputCompression: int(c.outputCompression, 0),\n    },\n    size,\n    embedded\n  )\n  const format = str(body.output_format, 'png')\n\n  let response: Response | null = frameos.httpRequest(API_URL, {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify(body),\n    timeoutMs: TIMEOUT,\n  })\n  if (response.status === 0) return fail(`Error fetching image from OpenAI: ${response.error ?? 'request failed'}`)\n  if (response.status !== 200) {\n    return fail(`Error making request ${response.status}: ${apiErrorDetail(response.body ?? '')}`)\n  }\n  let reply: ImageReply\n  try {\n    reply = parseImageReply(response.body ?? '')\n  } catch (error) {\n    return fail(`Error fetching image from OpenAI: ${error instanceof Error ? error.message : String(error)}`)\n  }\n  // The body holds the whole base64 image: let it go before the decode.\n  response = null\n  const revisedPrompt = reply.revisedPrompt\n\n  let source = ''\n  if (reply.b64 !== '') {\n    source = `data:image/${format};base64,${reply.b64}`\n    reply.b64 = ''\n  } else if (reply.url !== '') {\n    source = reply.url\n  } else {\n    return fail('No image data returned from OpenAI.')\n  }\n  // Named after the prompt with a .jpg extension, whatever the format, as the\n  // Nim app saved it.\n  const photo = frameos.fetchImage(source, {\n    saveAsset:\n      saveAssets === 'auto' || saveAssets === 'always'\n        ? { name: prompt, extension: 'jpg', mode: saveAssets }\n        : undefined,\n  })\n  source = ''\n  if (!photo.image) return fail(`Error fetching image from OpenAI: ${photo.error ?? 'no image'}`)\n  if (metadataStateKey !== '') frameos.setState(metadataStateKey, imageMetadata(prompt, revisedPrompt, model, size))\n  return photo.image\n}\n",
+      "config.json": "{\n  \"name\": \"OpenAI Image\",\n  \"description\": \"Random AI generated art from OpenAI's image models\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"openAI\"],\n  \"fields\": [\n    {\n      \"name\": \"prompt\",\n      \"type\": \"text\",\n      \"rows\": 4,\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Prompt\",\n      \"placeholder\": \"e.g. pumpkin pyjama party, digital art\"\n    },\n    {\n      \"name\": \"model\",\n      \"type\": \"select\",\n      \"options\": [\"gpt-image-2\", \"gpt-image-1.5\", \"gpt-image-1\", \"dall-e-3\", \"dall-e-2\"],\n      \"value\": \"gpt-image-2\",\n      \"required\": true,\n      \"label\": \"Model\"\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x640\",\n        \"640x1024\",\n        \"1024x1024\",\n        \"1536x1024\",\n        \"1024x1536\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-2\"\n        }\n      ]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x1024\",\n        \"1536x1024\",\n        \"1024x1536\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1.5\"\n        }\n      ]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x1024\",\n        \"1792x1024\",\n        \"1024x1792\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-3\"\n        }\n      ]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x1024\",\n        \"512x512\",\n        \"256x256\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-2\"\n        }\n      ]\n    },\n    {\n      \"name\": \"style\",\n      \"type\": \"select\",\n      \"options\": [\"vivid\", \"natural\", \"\"],\n      \"value\": \"vivid\",\n      \"label\": \"Style\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-3\"\n        }\n      ]\n    },\n    {\n      \"name\": \"quality\",\n      \"type\": \"select\",\n      \"options\": [\"standard\", \"hd\", \"\"],\n      \"value\": \"standard\",\n      \"label\": \"Quality\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-3\"\n        }\n      ]\n    },\n    {\n      \"name\": \"quality\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"low\", \"medium\", \"high\", \"\"],\n      \"value\": \"auto\",\n      \"label\": \"Quality\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-2\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1.5\"\n        }\n      ]\n    },\n    {\n      \"name\": \"outputFormat\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"png\", \"jpeg\", \"webp\"],\n      \"value\": \"auto\",\n      \"label\": \"Output format\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-2\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1.5\"\n        }\n      ]\n    },\n    {\n      \"name\": \"outputCompression\",\n      \"type\": \"integer\",\n      \"value\": 0,\n      \"min\": 0,\n      \"max\": 100,\n      \"label\": \"Output compression\",\n      \"hint\": \"Compression for JPEG/WebP outputs. Use 0 for the runtime default.\",\n      \"showIf\": [\n        {\n          \"and\": [\n            {\n              \"field\": \"outputFormat\",\n              \"operator\": \"ne\",\n              \"value\": \"png\"\n            },\n            {\n              \"field\": \"model\",\n              \"operator\": \"eq\",\n              \"value\": \"gpt-image-2\"\n            }\n          ]\n        },\n        {\n          \"and\": [\n            {\n              \"field\": \"outputFormat\",\n              \"operator\": \"ne\",\n              \"value\": \"png\"\n            },\n            {\n              \"field\": \"model\",\n              \"operator\": \"eq\",\n              \"value\": \"gpt-image-1\"\n            }\n          ]\n        },\n        {\n          \"and\": [\n            {\n              \"field\": \"outputFormat\",\n              \"operator\": \"ne\",\n              \"value\": \"png\"\n            },\n            {\n              \"field\": \"model\",\n              \"operator\": \"eq\",\n              \"value\": \"gpt-image-1.5\"\n            }\n          ]\n        }\n      ]\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {prompt, generatedPrompt, model, size}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"3600\"\n  }\n}\n"
+    }
+  },
+  "repo/apps/code/openaiText": {
+    "name": "OpenAI Text",
+    "description": "Text response from ChatGPT and friends",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "openAI"
+    ],
+    "fields": [
+      {
+        "name": "system",
+        "type": "text",
+        "rows": 6,
+        "value": "You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.",
+        "required": true,
+        "label": "System Prompt",
+        "placeholder": ""
+      },
+      {
+        "name": "user",
+        "type": "text",
+        "rows": 6,
+        "value": "",
+        "required": true,
+        "label": "User Prompt",
+        "placeholder": "Write your prompt here. Keep it short and clear."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "value": "gpt-5.5",
+        "required": true,
+        "label": "Model"
+      }
+    ],
+    "output": [
+      {
+        "name": "reply",
+        "type": "string"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "600"
+    },
+    "origin": "repo/apps/code/openaiText",
+    "sources": {
+      "app.ts": "// OpenAI text app: one chat completion over frameos.httpRequest, the reply as\n// the app's string output.\n\nconst API_URL = 'https://api.openai.com/v1/chat/completions'\nconst TIMEOUT = 60000\nconst DEFAULT_SYSTEM = \"You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.\"\n\ntype Response = { status: number; body?: string; error?: string }\n\n// A string field keeps its default unless the config holds a string, the way\n// the Nim app read its config.\nfunction str(value: unknown, fallback: string): string {\n  return typeof value === 'string' ? value : fallback\n}\n\nfunction isObject(value: unknown): value is Record<string, any> {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n}\n\n// Sizes are logged in UTF-8 bytes, as the Nim app counted them.\nexport function utf8Length(text: string): number {\n  let bytes = 0\n  for (let i = 0; i < text.length; i++) {\n    const code = text.charCodeAt(i)\n    if (code < 0x80) bytes += 1\n    else if (code < 0x800) bytes += 2\n    else if (code >= 0xd800 && code <= 0xdbff && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {\n      bytes += 4\n      i++\n    } else bytes += 3\n  }\n  return bytes\n}\n\n// What a request logs. Prompts can carry personal data and logs ship to the\n// control plane, so only their sizes are recorded.\nexport function requestLogPayload(model: string, system: string, user: string): Record<string, unknown> {\n  return { model, systemPromptChars: utf8Length(system), userPromptChars: utf8Length(user) }\n}\n\nexport function requestBody(model: string, system: string, user: string): Record<string, unknown> {\n  return {\n    model,\n    messages: [\n      { role: 'system', content: system },\n      { role: 'user', content: user },\n    ],\n  }\n}\n\n// `error.message`, else a string `error`, else the whole reply as JSON; the raw\n// body when it is not JSON.\nexport function apiErrorDetail(body: string): string {\n  let json: unknown\n  try {\n    json = JSON.parse(body)\n  } catch {\n    return body\n  }\n  const error = isObject(json) ? json.error : undefined\n  const message = isObject(error) ? error.message : undefined\n  if (typeof message === 'string') return message\n  if (typeof error === 'string') return error\n  return JSON.stringify(json)\n}\n\n// The first choice's message, \"\" when there is none. Throws on a body that is\n// not JSON.\nexport function replyContent(body: string): string {\n  const json: unknown = JSON.parse(body)\n  const choices = isObject(json) ? json.choices : undefined\n  const first = Array.isArray(choices) && isObject(choices[0]) ? choices[0] : {}\n  const message = isObject(first.message) ? first.message : {}\n  return str(message.content, '')\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): string {\n  const c = app.config\n  const system = str(c.system, DEFAULT_SYSTEM)\n  const user = str(c.user, '')\n  const model = str(c.model, 'gpt-5.5')\n  // Errors are logged only; the output is then \"\".\n  if (user === '' && system === '') {\n    frameos.error('No system or user prompt provided in app config.')\n    return ''\n  }\n  const apiKey = str(frameos.getSetting('openAI', 'apiKey'), '')\n  if (apiKey === '') {\n    frameos.error('Please provide an OpenAI API key in the settings.')\n    return ''\n  }\n\n  frameos.log(requestLogPayload(model, system, user))\n  const response: Response = frameos.httpRequest(API_URL, {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify(requestBody(model, system, user)),\n    timeoutMs: TIMEOUT,\n  })\n  // A request that never got an answer, or a reply that is not JSON, is the\n  // one error that also becomes the output.\n  const failure = (message: string): string => {\n    frameos.error(`OpenAI API error: ${message}`)\n    return `OpenAI API error: ${message}`\n  }\n  if (response.status === 0) return failure(response.error ?? 'request failed')\n  if (response.status !== 200) {\n    frameos.error(`Error making request ${response.status}: ${apiErrorDetail(response.body ?? '')}`)\n    return ''\n  }\n  let reply: string\n  try {\n    reply = replyContent(response.body ?? '')\n  } catch (error) {\n    return failure(error instanceof Error ? error.message : String(error))\n  }\n  frameos.log({ replyChars: utf8Length(reply) })\n  return reply\n}\n",
+      "config.json": "{\n  \"name\": \"OpenAI Text\",\n  \"description\": \"Text response from ChatGPT and friends\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"openAI\"],\n  \"fields\": [\n    {\n      \"name\": \"system\",\n      \"type\": \"text\",\n      \"rows\": 6,\n      \"value\": \"You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.\",\n      \"required\": true,\n      \"label\": \"System Prompt\",\n      \"placeholder\": \"\"\n    },\n    {\n      \"name\": \"user\",\n      \"type\": \"text\",\n      \"rows\": 6,\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"User Prompt\",\n      \"placeholder\": \"Write your prompt here. Keep it short and clear.\"\n    },\n    {\n      \"name\": \"model\",\n      \"type\": \"string\",\n      \"value\": \"gpt-5.5\",\n      \"required\": true,\n      \"label\": \"Model\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"reply\",\n      \"type\": \"string\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"600\"\n  }\n}\n"
+    }
+  },
+  "repo/apps/code/haSensor": {
+    "name": "Home Assistant Sensor",
+    "description": "Get the state of a Home Assistant entity",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "homeAssistant"
+    ],
+    "fields": [
+      {
+        "markdown": "Find the [entity id here](http://homeassistant.local:8123/config/entities)"
+      },
+      {
+        "name": "entityId",
+        "type": "text",
+        "required": true,
+        "label": "Entity ID",
+        "placeholder": "Home Assistant entity name. Example: sensor.home_solar_percentage or water_heater.hot_water"
+      },
+      {
+        "name": "debug",
+        "type": "boolean",
+        "value": "false",
+        "required": false,
+        "label": "Debug logging"
+      }
+    ],
+    "output": [
+      {
+        "name": "state",
+        "type": "json"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "60"
+    },
+    "origin": "repo/apps/code/haSensor",
+    "sources": {
+      "app.ts": "// The state of one Home Assistant entity, as Home Assistant's REST API\n// returns it (GET /api/states/<entity_id>). JSON over frameos.httpRequest.\n\nconst REQUEST_TIMEOUT_MS = 10000\nconst MINIMUM_FETCH_INTERVAL_MS = 1000\n\n// The last good reply, reused for a second so a render that reads this node\n// more than once asks Home Assistant once. Module state lives as long as the\n// node's interpreter: a Pi keeps it between renders, an ESP32 rebuilds the\n// interpreter after every render. Kept as text, which costs about its size;\n// a parsed object costs many times that.\nexport const lastReply = { at: 0, body: '' }\n\nfunction text(value: unknown): string {\n  return typeof value === 'string' ? value : ''\n}\n\nfunction errorMessage(error: unknown): string {\n  return error instanceof Error ? error.message : String(error)\n}\n\nexport function errorReply(message: string): { error: string } {\n  frameos.error(message)\n  return { error: message }\n}\n\n// Home Assistant entity ids are `<domain>.<object_id>`, both halves\n// `[a-z0-9_]+`. Anything else (a `/`, a `?`, a `..`) would be spliced into the\n// request path and could steer the frame's HA token at a different endpoint,\n// so the shape is enforced before the URL is built.\nexport function isHaEntityId(value: string): boolean {\n  return /^[a-z0-9_]+\\.[a-z0-9_]+$/.test(value)\n}\n\nexport function haStateUrl(haUrl: string, entityId: string): string {\n  const base = haUrl.endsWith('/') ? haUrl.slice(0, -1) : haUrl\n  return `${base}/api/states/${encodeURIComponent(entityId)}`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const haUrl = text(frameos.getSetting('homeAssistant', 'url'))\n  if (!haUrl) return errorReply('Please provide a Home Assistant URL in the settings.')\n  const accessToken = text(frameos.getSetting('homeAssistant', 'accessToken'))\n  if (!accessToken) return errorReply('Please provide a Home Assistant access token in the settings.')\n\n  if (lastReply.body && lastReply.at + MINIMUM_FETCH_INTERVAL_MS > Date.now()) return JSON.parse(lastReply.body)\n\n  const entityId = String(app.config.entityId ?? '').trim()\n  if (!isHaEntityId(entityId)) {\n    return errorReply(\n      `Invalid Home Assistant entity id \"${entityId}\": expected <domain>.<object_id> using only a-z, 0-9 and _.`\n    )\n  }\n  const debug = app.config.debug === true || String(app.config.debug) === 'true'\n  const url = haStateUrl(haUrl, entityId)\n  if (debug) frameos.log(`Fetching Home Assistant status from ${url}`)\n\n  const response = frameos.httpRequest(url, {\n    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'Accept-Encoding': 'identity' },\n    timeoutMs: REQUEST_TIMEOUT_MS,\n  })\n  if (response.status === 0) {\n    return errorReply(`Error fetching Home Assistant status: ${response.error ?? 'request failed'}`)\n  }\n  const body = response.body ?? ''\n  if (response.status >= 400) {\n    return errorReply(`Error fetching Home Assistant status: HTTP ${response.status}: ${body}`)\n  }\n  let state: unknown\n  try {\n    state = JSON.parse(body)\n  } catch (error) {\n    return errorReply(`Error fetching Home Assistant status: ${errorMessage(error)}`)\n  }\n  lastReply.at = Date.now()\n  lastReply.body = body\n  if (debug) frameos.log(JSON.stringify(state))\n  return state\n}\n",
+      "config.json": "{\n  \"name\": \"Home Assistant Sensor\",\n  \"description\": \"Get the state of a Home Assistant entity\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"homeAssistant\"],\n  \"fields\": [\n    {\n      \"markdown\": \"Find the [entity id here](http://homeassistant.local:8123/config/entities)\"\n    },\n    {\n      \"name\": \"entityId\",\n      \"type\": \"text\",\n      \"required\": true,\n      \"label\": \"Entity ID\",\n      \"placeholder\": \"Home Assistant entity name. Example: sensor.home_solar_percentage or water_heater.hot_water\"\n    },\n    {\n      \"name\": \"debug\",\n      \"type\": \"boolean\",\n      \"value\": \"false\",\n      \"required\": false,\n      \"label\": \"Debug logging\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"state\",\n      \"type\": \"json\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"60\"\n  }\n}\n"
+    }
+  },
+  "repo/apps/code/weather": {
+    "name": "Weather (Open-Meteo)",
+    "description": "Fetch current, hourly, and daily forecasts from Open-Meteo for a location and date.",
+    "category": "data",
+    "version": "1.1.0",
+    "fields": [
+      {
+        "name": "location",
+        "type": "string",
+        "value": "",
+        "required": true,
+        "label": "Location",
+        "placeholder": "City, state, or country"
+      },
+      {
+        "name": "date",
+        "type": "date",
+        "value": "",
+        "required": false,
+        "label": "Date",
+        "placeholder": "2024-01-30"
+      },
+      {
+        "name": "forecastDays",
+        "type": "integer",
+        "value": "1",
+        "required": false,
+        "label": "Forecast days (1-16)",
+        "hint": "How many days of hourly and daily forecast to fetch. Ignored when a specific date is set.",
+        "showIf": [
+          {
+            "field": "date",
+            "operator": "empty"
+          }
+        ]
+      },
+      {
+        "name": "temperatureUnit",
+        "type": "select",
+        "options": [
+          "celsius",
+          "fahrenheit"
+        ],
+        "value": "celsius",
+        "required": true,
+        "label": "Temperature unit"
+      },
+      {
+        "name": "windSpeedUnit",
+        "type": "select",
+        "options": [
+          "kmh",
+          "ms",
+          "mph",
+          "kn"
+        ],
+        "value": "kmh",
+        "required": true,
+        "label": "Wind speed unit"
+      },
+      {
+        "name": "precipitationUnit",
+        "type": "select",
+        "options": [
+          "mm",
+          "inch"
+        ],
+        "value": "mm",
+        "required": true,
+        "label": "Precipitation unit"
+      }
+    ],
+    "output": [
+      {
+        "name": "weather",
+        "type": "json",
+        "example": "{\n  \"provider\": \"open-meteo\",\n  \"forecastModes\": [\n    \"current\",\n    \"hourly\",\n    \"daily\"\n  ],\n  \"date\": \"2026-01-18\",\n  \"location\": {\n    \"name\": \"Brussels\",\n    \"latitude\": 50.85045,\n    \"longitude\": 4.34878,\n    \"timezone\": \"auto\",\n    \"country\": \"Belgium\",\n    \"countryCode\": \"BE\",\n    \"admin1\": \"Brussels Capital\",\n    \"admin2\": \"Bruxelles-Capitale\"\n  },\n  \"forecast\": {\n    \"latitude\": 50.854,\n    \"longitude\": 4.35,\n    \"generationtime_ms\": 0.3679990768432617,\n    \"utc_offset_seconds\": 3600,\n    \"timezone\": \"Europe/Brussels\",\n    \"timezone_abbreviation\": \"GMT+1\",\n    \"elevation\": 27,\n    \"current_weather_units\": {\n      \"time\": \"iso8601\",\n      \"interval\": \"seconds\",\n      \"temperature\": \"\\u00b0C\",\n      \"windspeed\": \"km/h\",\n      \"winddirection\": \"\\u00b0\",\n      \"is_day\": \"\",\n      \"weathercode\": \"wmo code\"\n    },\n    \"current_weather\": {\n      \"time\": \"2026-01-18T22:15\",\n      \"interval\": 900,\n      \"temperature\": 5.7,\n      \"windspeed\": 5.4,\n      \"winddirection\": 132,\n      \"is_day\": 0,\n      \"weathercode\": 0\n    },\n    \"hourly_units\": {\n      \"time\": \"iso8601\",\n      \"temperature_2m\": \"\\u00b0C\",\n      \"apparent_temperature\": \"\\u00b0C\",\n      \"precipitation\": \"mm\",\n      \"weathercode\": \"wmo code\",\n      \"windspeed_10m\": \"km/h\",\n      \"winddirection_10m\": \"\\u00b0\"\n    },\n    \"hourly\": {\n      \"time\": [\n        \"2026-01-18T00:00\",\n        \"2026-01-18T01:00\",\n        \"2026-01-18T02:00\",\n        \"2026-01-18T03:00\",\n        \"2026-01-18T04:00\",\n        \"2026-01-18T05:00\",\n        \"2026-01-18T06:00\",\n        \"2026-01-18T07:00\",\n        \"2026-01-18T08:00\",\n        \"2026-01-18T09:00\",\n        \"2026-01-18T10:00\",\n        \"2026-01-18T11:00\",\n        \"2026-01-18T12:00\",\n        \"2026-01-18T13:00\",\n        \"2026-01-18T14:00\",\n        \"2026-01-18T15:00\",\n        \"2026-01-18T16:00\",\n        \"2026-01-18T17:00\",\n        \"2026-01-18T18:00\",\n        \"2026-01-18T19:00\",\n        \"2026-01-18T20:00\",\n        \"2026-01-18T21:00\",\n        \"2026-01-18T22:00\",\n        \"2026-01-18T23:00\"\n      ],\n      \"temperature_2m\": [\n        9.2,\n        8.2,\n        8.3,\n        8.1,\n        7.2,\n        7.1,\n        7.3,\n        7.1,\n        6.7,\n        7.3,\n        8.5,\n        8.5,\n        9.7,\n        10.9,\n        11.1,\n        11.3,\n        11.1,\n        9.7,\n        8.7,\n        8,\n        6.8,\n        6.2,\n        5.8,\n        5.5\n      ],\n      \"apparent_temperature\": [\n        7.5,\n        6.3,\n        6.5,\n        6.2,\n        5.1,\n        4.8,\n        4.9,\n        4.8,\n        3.7,\n        4.4,\n        5.6,\n        5.6,\n        6.9,\n        8.7,\n        8,\n        8.6,\n        8.3,\n        6.7,\n        5.9,\n        5,\n        3.6,\n        3.5,\n        3.3,\n        2.4\n      ],\n      \"precipitation\": [\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0\n      ],\n      \"weathercode\": [\n        0,\n        1,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        0,\n        0,\n        1,\n        2,\n        2,\n        0,\n        3,\n        3,\n        2,\n        0,\n        0,\n        0,\n        0\n      ],\n      \"windspeed_10m\": [\n        4,\n        3.6,\n        2.9,\n        3.6,\n        5.8,\n        5,\n        6.5,\n        5,\n        9.4,\n        9,\n        8.6,\n        9,\n        9.4,\n        5.8,\n        9.7,\n        7.9,\n        8.6,\n        9.4,\n        10.4,\n        8.6,\n        9.7,\n        5.8,\n        5,\n        7.2\n      ],\n      \"winddirection_10m\": [\n        166,\n        59,\n        353,\n        67,\n        78,\n        52,\n        71,\n        68,\n        101,\n        54,\n        87,\n        80,\n        62,\n        66,\n        69,\n        74,\n        92,\n        73,\n        77,\n        110,\n        117,\n        202,\n        132,\n        168\n      ]\n    },\n    \"daily_units\": {\n      \"time\": \"iso8601\",\n      \"temperature_2m_max\": \"\\u00b0C\",\n      \"temperature_2m_min\": \"\\u00b0C\",\n      \"precipitation_sum\": \"mm\",\n      \"weathercode\": \"wmo code\",\n      \"sunrise\": \"iso8601\",\n      \"sunset\": \"iso8601\",\n      \"windspeed_10m_max\": \"km/h\"\n    },\n    \"daily\": {\n      \"time\": [\n        \"2026-01-18\"\n      ],\n      \"temperature_2m_max\": [\n        11.3\n      ],\n      \"temperature_2m_min\": [\n        5.5\n      ],\n      \"precipitation_sum\": [\n        0\n      ],\n      \"weathercode\": [\n        3\n      ],\n      \"sunrise\": [\n        \"2026-01-18T08:35\"\n      ],\n      \"sunset\": [\n        \"2026-01-18T17:10\"\n      ],\n      \"windspeed_10m_max\": [\n        10.4\n      ]\n    }\n  }\n}"
+      }
+    ],
+    "origin": "repo/apps/code/weather",
+    "sources": {
+      "app.ts": "// Weather from Open-Meteo: geocode the location, then fetch the current,\n// hourly and daily forecast for it. JSON over frameos.httpRequest.\n\nconst GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search'\nconst FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'\nconst HOURLY = 'temperature_2m,apparent_temperature,precipitation,weathercode,windspeed_10m,winddirection_10m'\nconst DAILY = 'temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,sunrise,sunset,windspeed_10m_max'\n\nexport type ForecastConfig = {\n  date: string\n  forecastDays: number\n  temperatureUnit: string\n  windSpeedUnit: string\n  precipitationUnit: string\n}\n\ntype Json = Record<string, any>\n\nfunction text(value: unknown): string {\n  return typeof value === 'string' ? value : ''\n}\n\nfunction integer(value: unknown, fallback: number): number {\n  if (value === undefined || value === null || value === '') return fallback\n  const number = Math.trunc(Number(value))\n  return Number.isFinite(number) ? number : 0\n}\n\nfunction errorMessage(error: unknown): string {\n  return error instanceof Error ? error.message : String(error)\n}\n\n// Percent-encodes one query value the way the Nim app did (std/uri\n// encodeUrl): everything but A-Z a-z 0-9 - . _ ~ becomes %XX, a space '+'.\nexport function encodeQueryValue(value: string): string {\n  return encodeURIComponent(value)\n    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)\n    .replace(/%20/g, '+')\n}\n\n// A coordinate as Nim printed a float: 52.0, not 52.\nexport function floatParam(value: number): string {\n  if (Object.is(value, -0)) return '-0.0'\n  const printed = String(value)\n  return Number.isInteger(value) && !/e/i.test(printed) ? `${printed}.0` : printed\n}\n\n// Bare YYYY-MM-DD in the frame's local time (the zone the runtime runs in).\nexport function todayIso(now: Date = new Date()): string {\n  const pad = (n: number): string => String(n).padStart(2, '0')\n  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`\n}\n\n// The unit and date fields are selects in the editor but free strings in a\n// scene's JSON, so every value is encoded like the location is.\nexport function forecastUrl(\n  config: ForecastConfig,\n  latitude: number,\n  longitude: number,\n  timezone: string,\n  requestedDate: string\n): string {\n  const params = [\n    `latitude=${floatParam(latitude)}`,\n    `longitude=${floatParam(longitude)}`,\n    'current_weather=true',\n    `hourly=${HOURLY}`,\n    `daily=${DAILY}`,\n    `timezone=${encodeQueryValue(timezone)}`,\n    `temperature_unit=${encodeQueryValue(config.temperatureUnit)}`,\n    `windspeed_unit=${encodeQueryValue(config.windSpeedUnit)}`,\n    `precipitation_unit=${encodeQueryValue(config.precipitationUnit)}`,\n  ]\n  if (config.date) {\n    params.push(`start_date=${encodeQueryValue(requestedDate)}`)\n    params.push(`end_date=${encodeQueryValue(requestedDate)}`)\n  } else {\n    params.push(`forecast_days=${Math.max(1, Math.min(16, config.forecastDays))}`)\n  }\n  return `${FORECAST_URL}?${params.join('&')}`\n}\n\nexport function buildError(location: string, message: string): { location: string; error: string } {\n  return { location, error: message }\n}\n\nfunction fetchJson(url: string): unknown {\n  const response = frameos.httpRequest(url)\n  if (response.status === 0) throw new Error(response.error ?? 'request failed')\n  const body = response.body ?? ''\n  if (response.status >= 400) throw new Error(`HTTP ${response.status}${body ? `: ${body}` : ''}`)\n  return JSON.parse(body)\n}\n\nfunction has(node: Json, key: string): boolean {\n  return Object.prototype.hasOwnProperty.call(node, key)\n}\n\n// A key the reply must carry, failing with the message the Nim app gave.\nfunction required(node: Json, key: string): unknown {\n  if (!has(node, key)) throw new Error(`key not found: ${key}`)\n  return node[key]\n}\n\nfunction float(value: unknown): number {\n  return typeof value === 'number' ? value : 0\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const c = app.config\n  const location = String(c.location ?? '')\n  const config: ForecastConfig = {\n    date: String(c.date ?? ''),\n    forecastDays: integer(c.forecastDays, 1),\n    temperatureUnit: String(c.temperatureUnit ?? 'celsius'),\n    windSpeedUnit: String(c.windSpeedUnit ?? 'kmh'),\n    precipitationUnit: String(c.precipitationUnit ?? 'mm'),\n  }\n  if (!location) return buildError('', 'Location is required.')\n\n  const requestedDate = config.date || todayIso()\n  try {\n    const geocode = fetchJson(\n      `${GEOCODE_URL}?name=${encodeQueryValue(location)}&count=1&language=en&format=json`\n    ) as Json | null\n    const results = geocode && typeof geocode === 'object' ? geocode.results : undefined\n    if (!Array.isArray(results) || results.length === 0) return buildError(location, 'No matching locations found.')\n\n    const result: Json = results[0] && typeof results[0] === 'object' ? results[0] : {}\n    const latitude = float(required(result, 'latitude'))\n    const longitude = float(required(result, 'longitude'))\n    const geocodedTimezone = has(result, 'timezone') ? text(result.timezone) : 'auto'\n    const timezone = text(app.frame.timeZone) || geocodedTimezone\n\n    const forecast = fetchJson(forecastUrl(config, latitude, longitude, timezone, requestedDate))\n\n    const place: Json = { name: text(required(result, 'name')), latitude, longitude, timezone }\n    if (has(result, 'country')) place.country = text(result.country)\n    if (has(result, 'country_code')) place.countryCode = text(result.country_code)\n    if (has(result, 'admin1')) place.admin1 = text(result.admin1)\n    if (has(result, 'admin2')) place.admin2 = text(result.admin2)\n\n    return {\n      provider: 'open-meteo',\n      forecastModes: ['current', 'hourly', 'daily'],\n      date: requestedDate,\n      location: place,\n      forecast,\n    }\n  } catch (error) {\n    return buildError(location, errorMessage(error))\n  }\n}\n",
+      "config.json": "{\n  \"name\": \"Weather (Open-Meteo)\",\n  \"description\": \"Fetch current, hourly, and daily forecasts from Open-Meteo for a location and date.\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"name\": \"location\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Location\",\n      \"placeholder\": \"City, state, or country\"\n    },\n    {\n      \"name\": \"date\",\n      \"type\": \"date\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Date\",\n      \"placeholder\": \"2024-01-30\"\n    },\n    {\n      \"name\": \"forecastDays\",\n      \"type\": \"integer\",\n      \"value\": \"1\",\n      \"required\": false,\n      \"label\": \"Forecast days (1-16)\",\n      \"hint\": \"How many days of hourly and daily forecast to fetch. Ignored when a specific date is set.\",\n      \"showIf\": [{ \"field\": \"date\", \"operator\": \"empty\" }]\n    },\n    {\n      \"name\": \"temperatureUnit\",\n      \"type\": \"select\",\n      \"options\": [\"celsius\", \"fahrenheit\"],\n      \"value\": \"celsius\",\n      \"required\": true,\n      \"label\": \"Temperature unit\"\n    },\n    {\n      \"name\": \"windSpeedUnit\",\n      \"type\": \"select\",\n      \"options\": [\"kmh\", \"ms\", \"mph\", \"kn\"],\n      \"value\": \"kmh\",\n      \"required\": true,\n      \"label\": \"Wind speed unit\"\n    },\n    {\n      \"name\": \"precipitationUnit\",\n      \"type\": \"select\",\n      \"options\": [\"mm\", \"inch\"],\n      \"value\": \"mm\",\n      \"required\": true,\n      \"label\": \"Precipitation unit\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"weather\",\n      \"type\": \"json\",\n      \"example\": \"{\\n  \\\"provider\\\": \\\"open-meteo\\\",\\n  \\\"forecastModes\\\": [\\n    \\\"current\\\",\\n    \\\"hourly\\\",\\n    \\\"daily\\\"\\n  ],\\n  \\\"date\\\": \\\"2026-01-18\\\",\\n  \\\"location\\\": {\\n    \\\"name\\\": \\\"Brussels\\\",\\n    \\\"latitude\\\": 50.85045,\\n    \\\"longitude\\\": 4.34878,\\n    \\\"timezone\\\": \\\"auto\\\",\\n    \\\"country\\\": \\\"Belgium\\\",\\n    \\\"countryCode\\\": \\\"BE\\\",\\n    \\\"admin1\\\": \\\"Brussels Capital\\\",\\n    \\\"admin2\\\": \\\"Bruxelles-Capitale\\\"\\n  },\\n  \\\"forecast\\\": {\\n    \\\"latitude\\\": 50.854,\\n    \\\"longitude\\\": 4.35,\\n    \\\"generationtime_ms\\\": 0.3679990768432617,\\n    \\\"utc_offset_seconds\\\": 3600,\\n    \\\"timezone\\\": \\\"Europe/Brussels\\\",\\n    \\\"timezone_abbreviation\\\": \\\"GMT+1\\\",\\n    \\\"elevation\\\": 27,\\n    \\\"current_weather_units\\\": {\\n      \\\"time\\\": \\\"iso8601\\\",\\n      \\\"interval\\\": \\\"seconds\\\",\\n      \\\"temperature\\\": \\\"\\\\u00b0C\\\",\\n      \\\"windspeed\\\": \\\"km/h\\\",\\n      \\\"winddirection\\\": \\\"\\\\u00b0\\\",\\n      \\\"is_day\\\": \\\"\\\",\\n      \\\"weathercode\\\": \\\"wmo code\\\"\\n    },\\n    \\\"current_weather\\\": {\\n      \\\"time\\\": \\\"2026-01-18T22:15\\\",\\n      \\\"interval\\\": 900,\\n      \\\"temperature\\\": 5.7,\\n      \\\"windspeed\\\": 5.4,\\n      \\\"winddirection\\\": 132,\\n      \\\"is_day\\\": 0,\\n      \\\"weathercode\\\": 0\\n    },\\n    \\\"hourly_units\\\": {\\n      \\\"time\\\": \\\"iso8601\\\",\\n      \\\"temperature_2m\\\": \\\"\\\\u00b0C\\\",\\n      \\\"apparent_temperature\\\": \\\"\\\\u00b0C\\\",\\n      \\\"precipitation\\\": \\\"mm\\\",\\n      \\\"weathercode\\\": \\\"wmo code\\\",\\n      \\\"windspeed_10m\\\": \\\"km/h\\\",\\n      \\\"winddirection_10m\\\": \\\"\\\\u00b0\\\"\\n    },\\n    \\\"hourly\\\": {\\n      \\\"time\\\": [\\n        \\\"2026-01-18T00:00\\\",\\n        \\\"2026-01-18T01:00\\\",\\n        \\\"2026-01-18T02:00\\\",\\n        \\\"2026-01-18T03:00\\\",\\n        \\\"2026-01-18T04:00\\\",\\n        \\\"2026-01-18T05:00\\\",\\n        \\\"2026-01-18T06:00\\\",\\n        \\\"2026-01-18T07:00\\\",\\n        \\\"2026-01-18T08:00\\\",\\n        \\\"2026-01-18T09:00\\\",\\n        \\\"2026-01-18T10:00\\\",\\n        \\\"2026-01-18T11:00\\\",\\n        \\\"2026-01-18T12:00\\\",\\n        \\\"2026-01-18T13:00\\\",\\n        \\\"2026-01-18T14:00\\\",\\n        \\\"2026-01-18T15:00\\\",\\n        \\\"2026-01-18T16:00\\\",\\n        \\\"2026-01-18T17:00\\\",\\n        \\\"2026-01-18T18:00\\\",\\n        \\\"2026-01-18T19:00\\\",\\n        \\\"2026-01-18T20:00\\\",\\n        \\\"2026-01-18T21:00\\\",\\n        \\\"2026-01-18T22:00\\\",\\n        \\\"2026-01-18T23:00\\\"\\n      ],\\n      \\\"temperature_2m\\\": [\\n        9.2,\\n        8.2,\\n        8.3,\\n        8.1,\\n        7.2,\\n        7.1,\\n        7.3,\\n        7.1,\\n        6.7,\\n        7.3,\\n        8.5,\\n        8.5,\\n        9.7,\\n        10.9,\\n        11.1,\\n        11.3,\\n        11.1,\\n        9.7,\\n        8.7,\\n        8,\\n        6.8,\\n        6.2,\\n        5.8,\\n        5.5\\n      ],\\n      \\\"apparent_temperature\\\": [\\n        7.5,\\n        6.3,\\n        6.5,\\n        6.2,\\n        5.1,\\n        4.8,\\n        4.9,\\n        4.8,\\n        3.7,\\n        4.4,\\n        5.6,\\n        5.6,\\n        6.9,\\n        8.7,\\n        8,\\n        8.6,\\n        8.3,\\n        6.7,\\n        5.9,\\n        5,\\n        3.6,\\n        3.5,\\n        3.3,\\n        2.4\\n      ],\\n      \\\"precipitation\\\": [\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0,\\n        0\\n      ],\\n      \\\"weathercode\\\": [\\n        0,\\n        1,\\n        3,\\n        3,\\n        3,\\n        3,\\n        3,\\n        3,\\n        3,\\n        3,\\n        3,\\n        0,\\n        0,\\n        1,\\n        2,\\n        2,\\n        0,\\n        3,\\n        3,\\n        2,\\n        0,\\n        0,\\n        0,\\n        0\\n      ],\\n      \\\"windspeed_10m\\\": [\\n        4,\\n        3.6,\\n        2.9,\\n        3.6,\\n        5.8,\\n        5,\\n        6.5,\\n        5,\\n        9.4,\\n        9,\\n        8.6,\\n        9,\\n        9.4,\\n        5.8,\\n        9.7,\\n        7.9,\\n        8.6,\\n        9.4,\\n        10.4,\\n        8.6,\\n        9.7,\\n        5.8,\\n        5,\\n        7.2\\n      ],\\n      \\\"winddirection_10m\\\": [\\n        166,\\n        59,\\n        353,\\n        67,\\n        78,\\n        52,\\n        71,\\n        68,\\n        101,\\n        54,\\n        87,\\n        80,\\n        62,\\n        66,\\n        69,\\n        74,\\n        92,\\n        73,\\n        77,\\n        110,\\n        117,\\n        202,\\n        132,\\n        168\\n      ]\\n    },\\n    \\\"daily_units\\\": {\\n      \\\"time\\\": \\\"iso8601\\\",\\n      \\\"temperature_2m_max\\\": \\\"\\\\u00b0C\\\",\\n      \\\"temperature_2m_min\\\": \\\"\\\\u00b0C\\\",\\n      \\\"precipitation_sum\\\": \\\"mm\\\",\\n      \\\"weathercode\\\": \\\"wmo code\\\",\\n      \\\"sunrise\\\": \\\"iso8601\\\",\\n      \\\"sunset\\\": \\\"iso8601\\\",\\n      \\\"windspeed_10m_max\\\": \\\"km/h\\\"\\n    },\\n    \\\"daily\\\": {\\n      \\\"time\\\": [\\n        \\\"2026-01-18\\\"\\n      ],\\n      \\\"temperature_2m_max\\\": [\\n        11.3\\n      ],\\n      \\\"temperature_2m_min\\\": [\\n        5.5\\n      ],\\n      \\\"precipitation_sum\\\": [\\n        0\\n      ],\\n      \\\"weathercode\\\": [\\n        3\\n      ],\\n      \\\"sunrise\\\": [\\n        \\\"2026-01-18T08:35\\\"\\n      ],\\n      \\\"sunset\\\": [\\n        \\\"2026-01-18T17:10\\\"\\n      ],\\n      \\\"windspeed_10m_max\\\": [\\n        10.4\\n      ]\\n    }\\n  }\\n}\"\n    }\n  ]\n}\n"
+    }
+  },
+  "repo/apps/code/beRecycle": {
+    "name": "Recycling Calendar for Belgium",
+    "description": "Return a JSON event list of trash pickup dates",
+    "category": "data",
+    "version": "1.1.0",
+    "fields": [
+      {
+        "label": "Street name",
+        "name": "streetName",
+        "type": "string",
+        "value": "",
+        "placeholder": "",
+        "required": true
+      },
+      {
+        "label": "Number",
+        "name": "number",
+        "type": "integer",
+        "value": "",
+        "placeholder": "",
+        "required": true
+      },
+      {
+        "label": "Postal code",
+        "name": "postalCode",
+        "type": "integer",
+        "value": "",
+        "placeholder": "",
+        "required": true
+      },
+      {
+        "label": "Export events from (YYYY-MM-DD)",
+        "name": "exportFrom",
+        "type": "string",
+        "value": "",
+        "placeholder": "now",
+        "required": false
+      },
+      {
+        "label": "Export events until (YYYY-MM-DD)",
+        "name": "exportUntil",
+        "type": "string",
+        "value": "",
+        "placeholder": "1 year later",
+        "required": false
+      },
+      {
+        "label": "Maximum number of events to export",
+        "name": "exportCount",
+        "type": "integer",
+        "value": "50",
+        "placeholder": "50",
+        "required": false
+      },
+      {
+        "label": "Language",
+        "name": "language",
+        "type": "select",
+        "options": [
+          "en",
+          "fr",
+          "nl"
+        ],
+        "value": "en",
+        "placeholder": "",
+        "required": true
+      },
+      {
+        "markdown": "[{ summary, startTime, endTime, timezone }]"
+      }
+    ],
+    "output": [
+      {
+        "name": "events",
+        "type": "json"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "14400"
+    },
+    "origin": "repo/apps/code/beRecycle",
+    "sources": {
+      "app.ts": "// Waste collection days for a Belgian address, from the recyclecms public API\n// behind RecycleApp.be. That API needs no token exchange: one `x-consumer`\n// header authorises every call. JSON over frameos.httpRequest.\n//\n// A failed lookup THROWS, as the Nim app raised, so the failure stays the\n// node's error instead of looking like an empty calendar.\n\nconst API_ENDPOINT = 'https://api.fostplus.be/recyclecms/public/v1'\nconst HEADERS = { 'User-Agent': 'Mozilla/5.0', 'x-consumer': 'recycleapp.be' }\nconst DAY_MS = 24 * 60 * 60 * 1000\n\nexport type AddressIds = { zip: string; street: string; housenumber: number }\nexport type CollectionEvent = { summary: string; startTime: string; endTime: string; timezone: string }\n\nfunction text(value: unknown): string {\n  return typeof value === 'string' ? value : ''\n}\n\nfunction integer(value: unknown): number {\n  const number = Math.trunc(Number(value ?? 0))\n  return Number.isFinite(number) ? number : 0\n}\n\nfunction list(value: unknown): any[] {\n  return Array.isArray(value) ? value : []\n}\n\n// Percent-encodes one query value. Street names carry spaces and accents; the\n// runtime's HTTP client refuses a request line with either in it.\nexport function queryParam(value: string): string {\n  return encodeURIComponent(value).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)\n}\n\nexport function zipcodesUrl(postalCode: number): string {\n  return `${API_ENDPOINT}/zipcodes?q=${queryParam(String(postalCode))}`\n}\n\nexport function streetsUrl(streetName: string, zipId: string): string {\n  return `${API_ENDPOINT}/streets?q=${queryParam(streetName)}&zipcodes=${queryParam(zipId)}`\n}\n\nexport function collectionsUrl(\n  zipId: string,\n  streetId: string,\n  houseNumber: number,\n  fromDate: string,\n  toDate: string\n): string {\n  return (\n    `${API_ENDPOINT}/collections?zipcodeId=${queryParam(zipId)}` +\n    `&streetId=${queryParam(streetId)}` +\n    `&houseNumber=${queryParam(String(houseNumber))}` +\n    `&fromDate=${queryParam(fromDate)}` +\n    `&untilDate=${queryParam(toDate)}&size=100`\n  )\n}\n\n// YYYY-MM-DD of a moment: UTC fields for a frame in UTC (or with no zone),\n// local fields otherwise (the zone the runtime runs in).\nexport function dayIso(date: Date, utc: boolean): string {\n  const pad = (n: number): string => String(n).padStart(2, '0')\n  const year = utc ? date.getUTCFullYear() : date.getFullYear()\n  const month = (utc ? date.getUTCMonth() : date.getMonth()) + 1\n  const day = utc ? date.getUTCDate() : date.getDate()\n  return `${String(year).padStart(4, '0')}-${pad(month)}-${pad(day)}`\n}\n\n// A configured YYYY-MM-DD, normalised the way chrono did: 2026-02-30 is\n// 2026-03-02, 2026-13-01 is 2027-01-01. Anything else is an error.\nexport function normalizeDay(value: string, field: string): string {\n  const match = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(value)\n  if (!match) throw new Error(`Invalid ${field} \"${value}\": expected YYYY-MM-DD.`)\n  const date = new Date(0)\n  date.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]))\n  return dayIso(date, true)\n}\n\n// The default range is today .. a year and a day later, in the frame's zone.\nexport function exportRange(\n  exportFrom: string,\n  exportUntil: string,\n  timezone: string,\n  now: number = Date.now()\n): { fromDay: string; untilDay: string } {\n  const utc = timezone === 'UTC'\n  return {\n    fromDay: exportFrom ? normalizeDay(exportFrom, 'exportFrom') : dayIso(new Date(now), utc),\n    untilDay: exportUntil ? normalizeDay(exportUntil, 'exportUntil') : dayIso(new Date(now + 366 * DAY_MS), utc),\n  }\n}\n\nfunction fetchBody(url: string): string {\n  const response = frameos.httpRequest(url, { headers: HEADERS })\n  if (response.status === 0) throw new Error(response.error ?? 'request failed')\n  if (response.status >= 400) throw new Error(`HTTP ${response.status}: ${response.body ?? ''}`)\n  return response.body ?? ''\n}\n\nfunction codeMatches(code: unknown, postalCode: number): boolean {\n  return typeof code === 'string' && /^[+-]?\\d+$/.test(code) && Number(code) === postalCode\n}\n\nexport function fetchAddressIds(streetName: string, number: number, postalCode: number): AddressIds {\n  const zipJson = JSON.parse(fetchBody(zipcodesUrl(postalCode)))\n  let zipId = ''\n  for (const item of list(zipJson?.items)) {\n    if (codeMatches(item?.code, postalCode)) {\n      zipId = text(item?.id)\n      break\n    }\n  }\n  if (!zipId) throw new Error('Could not find the right zip code.')\n\n  const streetJson = JSON.parse(fetchBody(streetsUrl(streetName, zipId)))\n  let streetId = ''\n  for (const item of list(streetJson?.items)) {\n    if (streetName === text(item?.name)) {\n      streetId = text(item?.id)\n      break\n    }\n  }\n  if (!streetId) throw new Error('Could not find the right street name.')\n  return { zip: zipId, street: streetId, housenumber: number }\n}\n\nexport function fetchCollections(addressIds: AddressIds, fromDate: string, toDate: string): Record<string, any> {\n  const url = collectionsUrl(addressIds.zip, addressIds.street, addressIds.housenumber, fromDate, toDate)\n  const collections = JSON.parse(fetchBody(url))\n  if (collections && typeof collections === 'object' && !Array.isArray(collections) && 'items' in collections) {\n    return collections\n  }\n  throw new Error('Something went wrong while fetching collections.')\n}\n\nexport function collectionsToEvents(collections: unknown, language: string, timezone: string): CollectionEvent[] {\n  const items = list((collections as Record<string, any> | null)?.items)\n  return items.map((item) => {\n    const date = text(item?.timestamp).split('T')[0]\n    return {\n      summary: `Trash: ${text(item?.fraction?.name?.[language])}`,\n      startTime: `${date}T08:00:00`,\n      endTime: `${date}T08:15:00`,\n      timezone,\n    }\n  })\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const c = app.config\n  const timezone = text(app.frame.timeZone) || 'UTC'\n  const language = String(c.language ?? 'en')\n  const { fromDay, untilDay } = exportRange(String(c.exportFrom ?? ''), String(c.exportUntil ?? ''), timezone)\n\n  frameos.log('Preparing request headers...')\n  frameos.log('Fetching collections...')\n  frameos.log('Fetching address IDs...')\n  const addressIds = fetchAddressIds(String(c.streetName ?? ''), integer(c.number), integer(c.postalCode))\n  const collections = fetchCollections(addressIds, fromDay, untilDay)\n\n  frameos.log({ event: 'reply', eventsInRange: list(collections.items).length })\n  frameos.log('Converting collections to events...')\n  return collectionsToEvents(collections, language, timezone)\n}\n",
+      "config.json": "{\n  \"name\": \"Recycling Calendar for Belgium\",\n  \"description\": \"Return a JSON event list of trash pickup dates\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"label\": \"Street name\",\n      \"name\": \"streetName\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"\",\n      \"required\": true\n    },\n    {\n      \"label\": \"Number\",\n      \"name\": \"number\",\n      \"type\": \"integer\",\n      \"value\": \"\",\n      \"placeholder\": \"\",\n      \"required\": true\n    },\n    {\n      \"label\": \"Postal code\",\n      \"name\": \"postalCode\",\n      \"type\": \"integer\",\n      \"value\": \"\",\n      \"placeholder\": \"\",\n      \"required\": true\n    },\n    {\n      \"label\": \"Export events from (YYYY-MM-DD)\",\n      \"name\": \"exportFrom\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"now\",\n      \"required\": false\n    },\n    {\n      \"label\": \"Export events until (YYYY-MM-DD)\",\n      \"name\": \"exportUntil\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"1 year later\",\n      \"required\": false\n    },\n    {\n      \"label\": \"Maximum number of events to export\",\n      \"name\": \"exportCount\",\n      \"type\": \"integer\",\n      \"value\": \"50\",\n      \"placeholder\": \"50\",\n      \"required\": false\n    },\n    {\n      \"label\": \"Language\",\n      \"name\": \"language\",\n      \"type\": \"select\",\n      \"options\": [\n        \"en\",\n        \"fr\",\n        \"nl\"\n      ],\n      \"value\": \"en\",\n      \"placeholder\": \"\",\n      \"required\": true\n    },\n    {\n      \"markdown\": \"[{ summary, startTime, endTime, timezone }]\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"events\",\n      \"type\": \"json\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"14400\"\n  }\n}\n"
     }
   }
 };

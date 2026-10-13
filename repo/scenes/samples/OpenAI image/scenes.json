@@ -101,7 +101,7 @@
           "config": {
             "metadataStateKey": "openaiImageMetadata"
           },
-          "keyword": "data/openaiImage"
+          "keyword": "openaiImage"
         },
         "dragging": false,
         "height": 252,
@@ -441,6 +441,257 @@
         "targetHandle": "fieldInput/text",
         "type": "codeNodeEdge"
       }
-    ]
+    ],
+    "apps": {
+      "openaiImage": {
+        "name": "OpenAI Image",
+        "description": "Random AI generated art from OpenAI's image models",
+        "category": "data",
+        "version": "1.0.0",
+        "settings": ["openAI"],
+        "fields": [
+          {
+            "name": "prompt",
+            "type": "text",
+            "rows": 4,
+            "value": "",
+            "required": true,
+            "label": "Prompt",
+            "placeholder": "e.g. pumpkin pyjama party, digital art"
+          },
+          {
+            "name": "model",
+            "type": "select",
+            "options": ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "dall-e-3", "dall-e-2"],
+            "value": "gpt-image-2",
+            "required": true,
+            "label": "Model"
+          },
+          {
+            "name": "size",
+            "type": "select",
+            "options": ["best for orientation", "1024x640", "640x1024", "1024x1024", "1536x1024", "1024x1536"],
+            "value": "best for orientation",
+            "label": "Size",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-2"
+              }
+            ]
+          },
+          {
+            "name": "size",
+            "type": "select",
+            "options": ["best for orientation", "1024x1024", "1536x1024", "1024x1536"],
+            "value": "best for orientation",
+            "label": "Size",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1.5"
+              }
+            ]
+          },
+          {
+            "name": "size",
+            "type": "select",
+            "options": ["best for orientation", "1024x1024", "1792x1024", "1024x1792"],
+            "value": "best for orientation",
+            "label": "Size",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "dall-e-3"
+              }
+            ]
+          },
+          {
+            "name": "size",
+            "type": "select",
+            "options": ["best for orientation", "1024x1024", "512x512", "256x256"],
+            "value": "best for orientation",
+            "label": "Size",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "dall-e-2"
+              }
+            ]
+          },
+          {
+            "name": "style",
+            "type": "select",
+            "options": ["vivid", "natural", ""],
+            "value": "vivid",
+            "label": "Style",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "dall-e-3"
+              }
+            ]
+          },
+          {
+            "name": "quality",
+            "type": "select",
+            "options": ["standard", "hd", ""],
+            "value": "standard",
+            "label": "Quality",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "dall-e-3"
+              }
+            ]
+          },
+          {
+            "name": "quality",
+            "type": "select",
+            "options": ["auto", "low", "medium", "high", ""],
+            "value": "auto",
+            "label": "Quality",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-2"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1.5"
+              }
+            ]
+          },
+          {
+            "name": "outputFormat",
+            "type": "select",
+            "options": ["auto", "png", "jpeg", "webp"],
+            "value": "auto",
+            "label": "Output format",
+            "showIf": [
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-2"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1"
+              },
+              {
+                "field": "model",
+                "operator": "eq",
+                "value": "gpt-image-1.5"
+              }
+            ]
+          },
+          {
+            "name": "outputCompression",
+            "type": "integer",
+            "value": 0,
+            "min": 0,
+            "max": 100,
+            "label": "Output compression",
+            "hint": "Compression for JPEG/WebP outputs. Use 0 for the runtime default.",
+            "showIf": [
+              {
+                "and": [
+                  {
+                    "field": "outputFormat",
+                    "operator": "ne",
+                    "value": "png"
+                  },
+                  {
+                    "field": "model",
+                    "operator": "eq",
+                    "value": "gpt-image-2"
+                  }
+                ]
+              },
+              {
+                "and": [
+                  {
+                    "field": "outputFormat",
+                    "operator": "ne",
+                    "value": "png"
+                  },
+                  {
+                    "field": "model",
+                    "operator": "eq",
+                    "value": "gpt-image-1"
+                  }
+                ]
+              },
+              {
+                "and": [
+                  {
+                    "field": "outputFormat",
+                    "operator": "ne",
+                    "value": "png"
+                  },
+                  {
+                    "field": "model",
+                    "operator": "eq",
+                    "value": "gpt-image-1.5"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "metadataStateKey",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Metadata state key",
+            "hint": "Enter a state key to persist metadata about the image. Stores: {prompt, generatedPrompt, model, size}."
+          },
+          {
+            "name": "saveAssets",
+            "type": "select",
+            "value": "auto",
+            "options": ["auto", "always", "never"],
+            "label": "Save asset",
+            "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "3600"
+        },
+        "origin": "repo/apps/code/openaiImage",
+        "sources": {
+          "app.ts": "// OpenAI image app. The generation request goes through frameos.httpRequest;\n// the image it returns (base64 for the gpt-image models, a URL for dall-e)\n// through frameos.fetchImage (native decode, straight into the canvas on an\n// ESP32).\n\nconst API_URL = 'https://api.openai.com/v1/images/generations'\n// Image generation is slow: up to a few minutes at high quality.\nconst TIMEOUT = 300000\nconst DEFAULT_SIZE = '1024x1024'\nconst GPT_IMAGE_QUALITIES = ['low', 'medium', 'high', 'auto']\nconst OUTPUT_FORMATS = ['jpeg', 'png', 'webp']\n\ntype Response = { status: number; body?: string; error?: string }\nexport type ImageOptions = {\n  prompt: string\n  model: string\n  style: string\n  quality: string\n  outputFormat: string\n  outputCompression: number\n}\nexport type ImageReply = { b64: string; url: string; revisedPrompt: string }\n\n// Config values the way the Nim app read them: a string field keeps its\n// default unless the config holds a string; an integer field takes a number\n// (truncated) or a string of digits.\nfunction str(value: unknown, fallback: string): string {\n  return typeof value === 'string' ? value : fallback\n}\n\nfunction int(value: unknown, fallback: number): number {\n  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)\n  if (typeof value === 'string' && /^[+-]?\\d+$/.test(value.trim())) return parseInt(value.trim(), 10)\n  return fallback\n}\n\nexport function isGptImageModel(model: string): boolean {\n  return model.startsWith('gpt-image-')\n}\n\n// The sizes each model accepts, as an explicit `size` is checked against.\nexport function modelSizes(model: string): string[] {\n  switch (model) {\n    case 'dall-e-3':\n      return ['1024x1024', '1792x1024', '1024x1792']\n    case 'dall-e-2':\n      return ['256x256', '512x512', '1024x1024']\n    case 'gpt-image-2':\n      return ['1024x640', '640x1024', '1024x1024', '1536x1024', '1024x1536']\n    case 'gpt-image-1':\n    case 'gpt-image-1.5':\n      return ['1024x1024', '1536x1024', '1024x1536']\n    default:\n      return []\n  }\n}\n\nfunction byOrientation(width: number, height: number, landscape: string, portrait: string): string {\n  return width > height ? landscape : width < height ? portrait : DEFAULT_SIZE\n}\n\n// The size to ask for. \"best for orientation\" follows the shape being drawn\n// into; an ESP32 asks gpt-image-2 for its smallest sizes. An explicit size the\n// model does not offer falls back to 1024x1024.\nexport function imageSize(model: string, size: string, width: number, height: number, embedded = false): string {\n  if (size === 'best for orientation') {\n    switch (model) {\n      case 'dall-e-3':\n        return byOrientation(width, height, '1792x1024', '1024x1792')\n      case 'gpt-image-2':\n        return embedded\n          ? byOrientation(width, height, '1024x640', '640x1024')\n          : byOrientation(width, height, '1536x1024', '1024x1536')\n      case 'gpt-image-1':\n      case 'gpt-image-1.5':\n        return byOrientation(width, height, '1536x1024', '1024x1536')\n      default:\n        return DEFAULT_SIZE\n    }\n  }\n  if (size !== '') return modelSizes(model).includes(size) ? size : DEFAULT_SIZE\n  return DEFAULT_SIZE\n}\n\n// The generation request. An ESP32 always asks the gpt-image models for low\n// quality and a compressed JPEG unless told otherwise: the base64 reply lands\n// in a few MB of heap.\nexport function requestBody(options: ImageOptions, size: string, embedded = false): Record<string, unknown> {\n  const { prompt, model, style, quality, outputFormat, outputCompression } = options\n  const body: Record<string, unknown> = { prompt, n: 1, size, model }\n  if (model === 'dall-e-3') {\n    if (style !== '') body.style = style\n    if (quality !== '') body.quality = quality\n  } else if (isGptImageModel(model)) {\n    if (GPT_IMAGE_QUALITIES.includes(quality)) body.quality = quality\n    if (embedded) {\n      body.quality = 'low'\n      const format = outputFormat === '' || outputFormat === 'auto' ? 'jpeg' : outputFormat\n      if (OUTPUT_FORMATS.includes(format)) body.output_format = format\n      if (format === 'jpeg' || format === 'webp') {\n        const compression = outputCompression > 0 ? outputCompression : 50\n        body.output_compression = Math.min(Math.max(compression, 0), 100)\n      }\n    } else {\n      if (OUTPUT_FORMATS.includes(outputFormat)) body.output_format = outputFormat\n      if ((outputFormat === 'jpeg' || outputFormat === 'webp') && outputCompression > 0) {\n        body.output_compression = Math.min(Math.max(outputCompression, 0), 100)\n      }\n    }\n  }\n  return body\n}\n\nfunction isObject(value: unknown): value is Record<string, any> {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n}\n\n// `error.message`, else a string `error`, else the whole reply as JSON; the raw\n// body when it is not JSON.\nexport function apiErrorDetail(body: string): string {\n  let json: unknown\n  try {\n    json = JSON.parse(body)\n  } catch {\n    return body\n  }\n  const error = isObject(json) ? json.error : undefined\n  const message = isObject(error) ? error.message : undefined\n  if (typeof message === 'string') return message\n  if (typeof error === 'string') return error\n  return JSON.stringify(json)\n}\n\n// The first generated image. Throws on a body that is not JSON. Only the\n// strings are kept: the parsed reply is freed as soon as this returns.\nexport function parseImageReply(body: string): ImageReply {\n  const json: unknown = JSON.parse(body)\n  const data = isObject(json) ? json.data : undefined\n  const node = Array.isArray(data) && isObject(data[0]) ? data[0] : {}\n  return { b64: str(node.b64_json, ''), url: str(node.url, ''), revisedPrompt: str(node.revised_prompt, '') }\n}\n\nexport function imageMetadata(\n  prompt: string,\n  revisedPrompt: string,\n  model: string,\n  size: string\n): Record<string, string> {\n  const metadata: Record<string, string> = {\n    source: 'openai',\n    prompt,\n    generatedPrompt: revisedPrompt !== '' ? revisedPrompt : prompt,\n    model,\n    size,\n  }\n  if (revisedPrompt !== '') metadata.revisedPrompt = revisedPrompt\n  return metadata\n}\n\n// What is being drawn into: the incoming image, else the frame as rendered\n// (a 90/270 rotation swaps its sides).\nexport function renderSize(\n  frame: { width: number; height: number; rotate?: number },\n  context: FrameOSContext\n): [number, number] {\n  if (context.imageWidth && context.imageHeight) return [context.imageWidth, context.imageHeight]\n  const rotated = frame.rotate === 90 || frame.rotate === 270\n  return rotated ? [frame.height, frame.width] : [frame.width, frame.height]\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${\n          size * 2 + i * Math.round(size * 1.35)\n        }\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const [width, height] = renderSize(app.frame, context)\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const prompt = str(c.prompt, '')\n  const model = str(c.model, 'gpt-image-2')\n  const metadataStateKey = str(c.metadataStateKey, '')\n  const saveAssets = str(c.saveAssets, 'auto')\n  if (prompt === '') return fail('No prompt provided in app config.')\n  const apiKey = str(frameos.getSetting('openAI', 'apiKey'), '')\n  if (apiKey === '') return fail('Please provide an OpenAI API key in the settings.')\n\n  const embedded = app.frame.embedded === true\n  const size = imageSize(model, str(c.size, 'best for orientation'), width, height, embedded)\n  const body = requestBody(\n    {\n      prompt,\n      model,\n      style: str(c.style, 'vivid'),\n      quality: str(c.quality, 'standard'),\n      outputFormat: str(c.outputFormat, 'auto'),\n      outputCompression: int(c.outputCompression, 0),\n    },\n    size,\n    embedded\n  )\n  const format = str(body.output_format, 'png')\n\n  let response: Response | null = frameos.httpRequest(API_URL, {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify(body),\n    timeoutMs: TIMEOUT,\n  })\n  if (response.status === 0) return fail(`Error fetching image from OpenAI: ${response.error ?? 'request failed'}`)\n  if (response.status !== 200) {\n    return fail(`Error making request ${response.status}: ${apiErrorDetail(response.body ?? '')}`)\n  }\n  let reply: ImageReply\n  try {\n    reply = parseImageReply(response.body ?? '')\n  } catch (error) {\n    return fail(`Error fetching image from OpenAI: ${error instanceof Error ? error.message : String(error)}`)\n  }\n  // The body holds the whole base64 image: let it go before the decode.\n  response = null\n  const revisedPrompt = reply.revisedPrompt\n\n  let source = ''\n  if (reply.b64 !== '') {\n    source = `data:image/${format};base64,${reply.b64}`\n    reply.b64 = ''\n  } else if (reply.url !== '') {\n    source = reply.url\n  } else {\n    return fail('No image data returned from OpenAI.')\n  }\n  // Named after the prompt with a .jpg extension, whatever the format, as the\n  // Nim app saved it.\n  const photo = frameos.fetchImage(source, {\n    saveAsset:\n      saveAssets === 'auto' || saveAssets === 'always'\n        ? { name: prompt, extension: 'jpg', mode: saveAssets }\n        : undefined,\n  })\n  source = ''\n  if (!photo.image) return fail(`Error fetching image from OpenAI: ${photo.error ?? 'no image'}`)\n  if (metadataStateKey !== '') frameos.setState(metadataStateKey, imageMetadata(prompt, revisedPrompt, model, size))\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"OpenAI Image\",\n  \"description\": \"Random AI generated art from OpenAI's image models\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"openAI\"],\n  \"fields\": [\n    {\n      \"name\": \"prompt\",\n      \"type\": \"text\",\n      \"rows\": 4,\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Prompt\",\n      \"placeholder\": \"e.g. pumpkin pyjama party, digital art\"\n    },\n    {\n      \"name\": \"model\",\n      \"type\": \"select\",\n      \"options\": [\"gpt-image-2\", \"gpt-image-1.5\", \"gpt-image-1\", \"dall-e-3\", \"dall-e-2\"],\n      \"value\": \"gpt-image-2\",\n      \"required\": true,\n      \"label\": \"Model\"\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x640\",\n        \"640x1024\",\n        \"1024x1024\",\n        \"1536x1024\",\n        \"1024x1536\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-2\"\n        }\n      ]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x1024\",\n        \"1536x1024\",\n        \"1024x1536\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1.5\"\n        }\n      ]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x1024\",\n        \"1792x1024\",\n        \"1024x1792\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-3\"\n        }\n      ]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\n        \"best for orientation\",\n        \"1024x1024\",\n        \"512x512\",\n        \"256x256\"\n      ],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-2\"\n        }\n      ]\n    },\n    {\n      \"name\": \"style\",\n      \"type\": \"select\",\n      \"options\": [\"vivid\", \"natural\", \"\"],\n      \"value\": \"vivid\",\n      \"label\": \"Style\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-3\"\n        }\n      ]\n    },\n    {\n      \"name\": \"quality\",\n      \"type\": \"select\",\n      \"options\": [\"standard\", \"hd\", \"\"],\n      \"value\": \"standard\",\n      \"label\": \"Quality\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"dall-e-3\"\n        }\n      ]\n    },\n    {\n      \"name\": \"quality\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"low\", \"medium\", \"high\", \"\"],\n      \"value\": \"auto\",\n      \"label\": \"Quality\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-2\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1.5\"\n        }\n      ]\n    },\n    {\n      \"name\": \"outputFormat\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"png\", \"jpeg\", \"webp\"],\n      \"value\": \"auto\",\n      \"label\": \"Output format\",\n      \"showIf\": [\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-2\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1\"\n        },\n        {\n          \"field\": \"model\",\n          \"operator\": \"eq\",\n          \"value\": \"gpt-image-1.5\"\n        }\n      ]\n    },\n    {\n      \"name\": \"outputCompression\",\n      \"type\": \"integer\",\n      \"value\": 0,\n      \"min\": 0,\n      \"max\": 100,\n      \"label\": \"Output compression\",\n      \"hint\": \"Compression for JPEG/WebP outputs. Use 0 for the runtime default.\",\n      \"showIf\": [\n        {\n          \"and\": [\n            {\n              \"field\": \"outputFormat\",\n              \"operator\": \"ne\",\n              \"value\": \"png\"\n            },\n            {\n              \"field\": \"model\",\n              \"operator\": \"eq\",\n              \"value\": \"gpt-image-2\"\n            }\n          ]\n        },\n        {\n          \"and\": [\n            {\n              \"field\": \"outputFormat\",\n              \"operator\": \"ne\",\n              \"value\": \"png\"\n            },\n            {\n              \"field\": \"model\",\n              \"operator\": \"eq\",\n              \"value\": \"gpt-image-1\"\n            }\n          ]\n        },\n        {\n          \"and\": [\n            {\n              \"field\": \"outputFormat\",\n              \"operator\": \"ne\",\n              \"value\": \"png\"\n            },\n            {\n              \"field\": \"model\",\n              \"operator\": \"eq\",\n              \"value\": \"gpt-image-1.5\"\n            }\n          ]\n        }\n      ]\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {prompt, generatedPrompt, model, size}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"3600\"\n  }\n}\n"
+        }
+      }
+    }
   }
 ]
