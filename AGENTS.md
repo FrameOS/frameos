@@ -166,6 +166,25 @@
   (`docs/cloud-frames-contract.json` + generator), the backend column, the SPA
   key lists AND the settings nav list in `FrameWorkspace.tsx`.
 
+## Photos: `docs/photos.md` is the contract
+
+- Photos (the rail button after Apps) is a library of albums on the control
+  plane, played by frames through share links. One HTTP contract
+  (`/api/photos/...`, `docs/photos.md`) for both planes: the backend keeps
+  files on disk (`backend/app/utils/photos.py`, `FRAMEOS_PHOTOS_DIR`), the
+  cloud keeps rows in Postgres and bytes in R2 under random keys
+  (`cloud/apps/auth-web/src/lib/photos/`). A change to a route, shape or
+  status code lands on both and in the doc.
+- Frames never get the owner's credentials: a scene carries a share link
+  (`pk_...`) in the `repo/apps/code/photoAlbum` node's config and asks for
+  one photo per render (`/shared/{token}/photo?index=`), keeping its place in
+  a disk-persisted state field. The share routes are on the backend's public
+  router and are rate limited.
+- Cloud uploads are scanned before anything is stored (hash list,
+  PhotoDNA), and a configured scanner that fails stores nothing. Not OpenAI
+  moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into
+  `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】

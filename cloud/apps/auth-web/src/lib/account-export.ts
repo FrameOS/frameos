@@ -10,6 +10,8 @@ import {
   createDb,
   frames,
   linkedClients,
+  photoEntries,
+  photoShares,
   sessions,
   storeImages,
   storeSceneVersionImages,
@@ -267,6 +269,30 @@ export async function buildAccountExport(
       : [],
   ]);
 
+  // The photo library: every file and folder, and which folders have a share
+  // link (the token itself is a credential and stays out).
+  const [photoRows, photoShareRows] = await Promise.all([
+    db
+      .select({
+        contentType: photoEntries.contentType,
+        createdAt: photoEntries.createdAt,
+        height: photoEntries.height,
+        kind: photoEntries.kind,
+        path: photoEntries.path,
+        sha256: photoEntries.sha256,
+        sizeBytes: photoEntries.sizeBytes,
+        width: photoEntries.width,
+      })
+      .from(photoEntries)
+      .where(eq(photoEntries.accountId, accountId))
+      .orderBy(photoEntries.path),
+    db
+      .select({ createdAt: photoShares.createdAt, path: photoShares.path })
+      .from(photoShares)
+      .where(eq(photoShares.accountId, accountId))
+      .orderBy(photoShares.path),
+  ]);
+
   return {
     account,
     aiChats: chats.map((chat) => ({
@@ -284,6 +310,22 @@ export async function buildAccountExport(
       }),
     })),
     frames: accountFrames,
+    photos: {
+      entries: photoRows.map((row) =>
+        row.kind === "file"
+          ? {
+              ...row,
+              content: blobRef({
+                contentType: row.contentType,
+                downloadPath: `/api/photos/file?path=${encodeURIComponent(row.path)}`,
+                sha256: row.sha256 ?? undefined,
+                sizeBytes: row.sizeBytes,
+              }),
+            }
+          : row,
+      ),
+      sharedFolders: photoShareRows,
+    },
     identities,
     linkedClients: clients,
     exportedAt: new Date().toISOString(),

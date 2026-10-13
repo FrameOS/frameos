@@ -11,6 +11,7 @@ const sections = [
   { href: "/admin/scenes", key: "scenes", label: "Store scenes" },
   { href: "/admin/storage", key: "storage", label: "Storage" },
   { href: "/admin/reports", key: "reports", label: "Reports" },
+  { href: "/admin/photos", key: "photos", label: "Photo scans" },
   { href: "/admin/billing", key: "billing", label: "Billing" },
 ] as const;
 

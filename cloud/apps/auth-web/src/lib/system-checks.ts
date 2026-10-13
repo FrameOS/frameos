@@ -16,6 +16,7 @@ import { createDb, frameAssetFiles } from "@frameos-cloud/db";
 import { checkEmailDelivery } from "./email";
 import { hasDatabaseUrl } from "./env";
 import { objectStore } from "./object-store";
+import { activePhotoScanners } from "./photos/scan";
 import { getTurnstileSiteKey } from "./turnstile";
 
 export type SystemCheck = {
@@ -141,6 +142,13 @@ export function runSystemChecks(): SystemCheck[] {
       detail:
         "Moderation of store names, descriptions, and images; unmoderated when unset.",
       name: "OPENAI_API_KEY",
+      required: false,
+    },
+    {
+      configured: isSet("PHOTODNA_SUBSCRIPTION_KEY"),
+      detail:
+        "PhotoDNA hash matching of every photo upload against known abuse material. Without it uploads pass the hash list only.",
+      name: "PHOTODNA_SUBSCRIPTION_KEY",
       required: false,
     },
     {
@@ -347,6 +355,29 @@ async function checkHubObjectStoreLive(): Promise<LiveCheck> {
   }
 }
 
+// Which scanners every photo upload passes (docs/photos.md "Scanning"). The
+// hash list alone only catches what an admin already listed, so a deployment
+// that takes photos without PhotoDNA is flagged.
+export function checkPhotoScanning(
+  env: Record<string, string | undefined> = process.env,
+): LiveCheck {
+  const scanners = activePhotoScanners(env);
+  const name = "Photo scanning";
+  if (scanners.length === 1) {
+    return {
+      detail:
+        "Only the hash list checks photo uploads. Set PHOTODNA_SUBSCRIPTION_KEY so uploads are matched against known abuse material.",
+      name,
+      state: "warning",
+    };
+  }
+  return {
+    detail: `Every photo upload passes: ${scanners.join(", ")}.`,
+    name,
+    state: "ok",
+  };
+}
+
 // Every remote probe in parallel; each already resolves to a result rather
 // than throwing, so one failing service cannot blank the whole panel.
 export async function runLiveChecks(): Promise<LiveCheck[]> {
@@ -362,5 +393,6 @@ export async function runLiveChecks(): Promise<LiveCheck[]> {
     objects,
     hubObjects,
     checkTurnstileLive(),
+    checkPhotoScanning(),
   ];
 }

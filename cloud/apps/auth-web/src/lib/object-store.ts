@@ -23,6 +23,11 @@
 //   store/scene-images/<sha256>
 //   frames/<frameId>/cache/<sha256>
 //
+// except photos (src/lib/photos/library.ts), which are deliberately NOT
+// content-addressed: `photos/<accountId>/<random>` and
+// `photos/<accountId>/thumbs/<random>`, because the public alias serves any
+// key and a photo's hash is a key anyone holding the same photo could compute.
+//
 // Nothing here knows about the database; nothing here decides what a key
 // means. It moves bytes.
 

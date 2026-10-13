@@ -113,7 +113,13 @@ describe("cloud SPA route helpers", () => {
     const paths = Object.keys(routes);
     const frameIndex = paths.indexOf("/frames/:id");
     expect(frameIndex).toBeGreaterThan(-1);
-    for (const literal of ["/frames/apps", "/frames/apps/:frameId", "/frames/scenes", "/frames/:frameId/scenes"]) {
+    for (const literal of [
+      "/frames/apps",
+      "/frames/apps/:frameId",
+      "/frames/scenes",
+      "/frames/:frameId/scenes",
+      "/frames/photos",
+    ]) {
       expect(paths.indexOf(literal)).toBeGreaterThan(-1);
       expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
     }
@@ -144,7 +150,7 @@ describe("cloud SPA route helpers", () => {
     const paths = Object.keys(withCloudSpaConfig(() => getRoutes()));
     const frameIndex = paths.indexOf("/frames/:id");
     expect(frameIndex).toBeGreaterThan(-1);
-    for (const literal of ["/frames/apps", "/frames/apps/:frameId", "/frames/scenes"]) {
+    for (const literal of ["/frames/apps", "/frames/apps/:frameId", "/frames/scenes", "/frames/photos"]) {
       expect(paths.indexOf(literal)).toBeGreaterThan(-1);
       expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
     }

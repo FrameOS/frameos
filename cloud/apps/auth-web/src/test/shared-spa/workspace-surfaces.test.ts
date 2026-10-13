@@ -27,6 +27,7 @@ import {
   isEmbeddedHardwareFrame,
   isEsp32CloudFrame,
   isVirtualFrame,
+  photosLibraryIsAvailable,
   sceneToolPanelDisabledReason,
   sceneToolPanelIsAllowed,
   sceneUtilityPanelIsAllowed,
@@ -768,6 +769,22 @@ describe("allow-list hygiene", () => {
         expect(new Set(entries).size).toBe(entries.length);
       }
     }
+  });
+});
+
+describe("Photos", () => {
+  // The library lives on a control plane (docs/photos.md); the on-device
+  // panel is one frame with nothing to browse.
+  it("is a section of the backend and the cloud, not of the on-device panel", () => {
+    expect(photosLibraryIsAvailable("backend")).toBe(true);
+    expect(photosLibraryIsAvailable("cloud")).toBe(true);
+    expect(photosLibraryIsAvailable("frameAdmin")).toBe(false);
+  });
+
+  it("offers Install photo scenes in the Add scene drawer where the library exists", () => {
+    expect(addSceneActionIsAllowed("backend", "photos")).toBe(true);
+    expect(addSceneActionIsAllowed("cloud", "photos")).toBe(true);
+    expect(addSceneActionIsAllowed("frameAdmin", "photos")).toBe(false);
   });
 });
 

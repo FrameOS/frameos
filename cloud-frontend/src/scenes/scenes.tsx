@@ -9,6 +9,7 @@ export const scenes = {
   frame: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudFrame }))),
   sceneWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSceneWorkspace }))),
   appsWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudAppsWorkspace }))),
+  photosWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudPhotosWorkspace }))),
 }
 
 // Routes come from the shared urls module so they always match the links
@@ -30,6 +31,7 @@ export const getRoutes = () =>
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId', ':nodeId')]: 'appsWorkspace',
+    [urls.photos()]: 'photosWorkspace',
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.frame(':id')]: 'frame',

@@ -17,6 +17,7 @@ import {
   createDb,
   frames,
   linkedClients,
+  photoScanHits,
   sessions,
   storeSceneReports,
   storeScenes,
@@ -224,6 +225,44 @@ export async function listOpenReportsForAdmin(
     .leftJoin(accounts, eq(accounts.id, storeSceneReports.reporterAccountId))
     .where(eq(storeSceneReports.status, "open"))
     .orderBy(storeSceneReports.createdAt)
+    .limit(200);
+}
+
+export type AdminPhotoScanHitRow = {
+  accountEmail: string | null;
+  accountId: string | null;
+  clientIp: string | null;
+  createdAt: Date;
+  currentEmail: string | null;
+  details: unknown;
+  id: number;
+  photosSuspendedAt: Date | null;
+  scanner: string;
+  sha256: string;
+};
+
+// Photo scan matches (docs/photos.md "Scanning"), newest first. The email is
+// the account's current one when the account still exists, else the one
+// recorded with the hit.
+export async function listPhotoScanHitsForAdmin(
+  db: ReturnType<typeof createDb>,
+): Promise<AdminPhotoScanHitRow[]> {
+  return db
+    .select({
+      accountEmail: photoScanHits.accountEmail,
+      accountId: photoScanHits.accountId,
+      clientIp: photoScanHits.clientIp,
+      createdAt: photoScanHits.createdAt,
+      currentEmail: accounts.primaryEmail,
+      details: photoScanHits.details,
+      id: photoScanHits.id,
+      photosSuspendedAt: accounts.photosSuspendedAt,
+      scanner: photoScanHits.scanner,
+      sha256: photoScanHits.sha256,
+    })
+    .from(photoScanHits)
+    .leftJoin(accounts, eq(accounts.id, photoScanHits.accountId))
+    .orderBy(desc(photoScanHits.createdAt), desc(photoScanHits.id))
     .limit(200);
 }
 

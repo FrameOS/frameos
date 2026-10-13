@@ -12,10 +12,12 @@ from fastapi import APIRouter
 # - api_user: accessible via Home Assistant ingress after Home Assistant authenticates the user
 # - api_project: accessible via Home Assistant ingress with project context
 
-api_public = APIRouter()
-api_open = APIRouter()
-api_user = APIRouter()
-api_project = APIRouter()
+# Annotated so mypy knows their type while it works through the import cycle
+# below (every module imports its router back from this package).
+api_public: APIRouter = APIRouter()
+api_open: APIRouter = APIRouter()
+api_user: APIRouter = APIRouter()
+api_project: APIRouter = APIRouter()
 
 from .auth import *  # noqa: E402, F403
 from .ai_apps import *  # noqa: E402, F403
@@ -36,6 +38,7 @@ from .frame_bootstrap import *  # noqa: E402, F403
 from .frames import *  # noqa: E402, F403
 from .fonts import *  # noqa: E402, F403
 from .log import *  # noqa: E402, F403
+from .photos import *  # noqa: E402, F403
 from .projects import *  # noqa: E402, F403
 from .repositories import *  # noqa: E402, F403
 from .scene_images import *  # noqa: E402, F403

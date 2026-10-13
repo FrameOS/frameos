@@ -63,6 +63,9 @@ export const accounts = pgTable("accounts", {
   isSuperadmin: boolean("is_superadmin").default(false).notNull(),
   // Null for accounts that only sign in through an external provider.
   passwordHash: text("password_hash"),
+  // Photos scan match (migration 0059, docs/photos.md "Scanning"): uploads are
+  // refused and every share link answers 404 until a superadmin clears it.
+  photosSuspendedAt: timestamp("photos_suspended_at", { withTimezone: true }),
   // Store publish ban: the account keeps working, but
   // any new store publish is rejected until a superadmin lifts the ban.
   storeBanReason: text("store_ban_reason"),
@@ -1836,3 +1839,98 @@ export const subscriptionPeriods = pgTable(
       .where(sql`${table.recognizedAt} is null`),
   }),
 );
+
+// Photos (migration 0059, docs/photos.md): one library per account. Files and
+// folders are both rows (folders explicit, so an empty album exists); the
+// bytes are in the object store under random keys.
+export const photoEntries = pgTable(
+  "photo_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    // Relative to the library root, `/`-separated (src/lib/photos/paths.ts).
+    path: text("path").notNull(),
+    // file | folder
+    kind: text("kind").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).default(0).notNull(),
+    contentType: text("content_type"),
+    sha256: text("sha256"),
+    objectKey: text("object_key"),
+    thumbObjectKey: text("thumb_object_key"),
+    width: integer("width"),
+    height: integer("height"),
+    // ready | blocked
+    status: text("status").default("ready").notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    accountPathUnique: uniqueIndex("photo_entries_account_path_unique").on(
+      table.accountId,
+      table.path,
+    ),
+  }),
+);
+
+// Share links (migration 0059): a token that reads one folder and everything
+// below it. At most one per folder; paths follow moves and renames.
+export const photoShares = pgTable(
+  "photo_shares",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    path: text("path").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    tokenUnique: uniqueIndex("photo_shares_token_unique").on(table.token),
+    accountPathUnique: uniqueIndex("photo_shares_account_path_unique").on(
+      table.accountId,
+      table.path,
+    ),
+  }),
+);
+
+// Every photo scan match (migration 0059). Evidence: it outlives the account
+// and keeps the email the account had at the time.
+export const photoScanHits = pgTable(
+  "photo_scan_hits",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    accountId: uuid("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    accountEmail: text("account_email"),
+    sha256: text("sha256").notNull(),
+    // hash_list | photodna | openai
+    scanner: text("scanner").notNull(),
+    details: jsonb("details"),
+    clientIp: text("client_ip"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    createdIdx: index("photo_scan_hits_created_idx").on(table.createdAt),
+    accountIdx: index("photo_scan_hits_account_idx")
+      .on(table.accountId)
+      .where(sql`${table.accountId} is not null`),
+  }),
+);
+
+// SHA-256 digests no photo upload may have (migration 0059). Admins add rows.
+export const photoBlockedHashes = pgTable("photo_blocked_hashes", {
+  sha256: text("sha256").primaryKey(),
+  reason: text("reason"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});

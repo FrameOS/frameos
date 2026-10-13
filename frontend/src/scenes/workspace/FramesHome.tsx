@@ -55,6 +55,7 @@ import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { isCloudMode } from '../../utils/cloudMode'
 import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
+import { InstallPhotoScenes } from '../photos/InstallPhotoScenes'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
@@ -649,6 +650,7 @@ const ADD_SCENE_PAGE_TITLES: Record<AddScenePage, string> = {
   actions: 'Add scene',
   store: 'Scene store',
   saved: 'Private scenes',
+  photos: 'Photos',
 }
 
 // A list fetched within the last minute is fresh enough to reuse when the
@@ -789,6 +791,8 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">
                 {page === 'actions' ? (
                   <AddSceneDrawerActions frame={frame} onOpenPage={setPage} />
+                ) : page === 'photos' ? (
+                  <InstallPhotoScenes frame={frame} />
                 ) : (
                   <Templates section={page} />
                 )}
@@ -983,6 +987,22 @@ function AddSceneDrawerActions({
             <span className="frameos-muted block text-xs">{savedSubtitle}</span>
           </span>
           <AddSceneCount count={savedSceneCount} loading={savedScenesLoading} />
+          <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
+        </button>
+      ) : null}
+      {addSceneActionIsAllowed(workspaceMode(), 'photos') ? (
+        <button
+          type="button"
+          onClick={() => onOpenPage('photos')}
+          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+            <PhotoIcon className="h-6 w-6" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="frameos-strong block truncate text-sm font-semibold">Photos</span>
+            <span className="frameos-muted block text-xs">Play albums from your photo library</span>
+          </span>
           <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
         </button>
       ) : null}

@@ -82,7 +82,13 @@ SELECT object_key FROM store_scene_images WHERE object_key IS NOT NULL
 UNION
 SELECT object_key FROM store_images
 UNION
-SELECT object_key FROM frame_asset_files WHERE object_key IS NOT NULL;
+SELECT object_key FROM frame_asset_files WHERE object_key IS NOT NULL
+UNION
+-- Photos (docs/photos.md): the file and its browser-made thumbnail. Leave
+-- these out and --apply deletes every photo in the library as an orphan.
+SELECT object_key FROM photo_entries WHERE object_key IS NOT NULL
+UNION
+SELECT thumb_object_key FROM photo_entries WHERE thumb_object_key IS NOT NULL;
 SQL
 LC_ALL=C sort -o "$work/referenced" "$work/referenced"
 
@@ -121,6 +127,8 @@ SELECT 1 WHERE EXISTS (
   UNION ALL SELECT 1 FROM store_scene_images WHERE object_key = :'key'
   UNION ALL SELECT 1 FROM store_images WHERE object_key = :'key'
   UNION ALL SELECT 1 FROM frame_asset_files WHERE object_key = :'key'
+  UNION ALL SELECT 1 FROM photo_entries WHERE object_key = :'key'
+  UNION ALL SELECT 1 FROM photo_entries WHERE thumb_object_key = :'key'
 );
 SQL
 )"

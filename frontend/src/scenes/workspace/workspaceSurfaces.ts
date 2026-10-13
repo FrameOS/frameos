@@ -81,16 +81,26 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
  * (GenerateElsewhereModal in FramesHome): hiding it left people hunting for a
  * button the other two surfaces have, which was the worse of the two answers.
  */
-export type AddSceneAction = 'blank' | 'splitScreen' | 'generate' | 'upload' | 'starred'
+export type AddSceneAction = 'blank' | 'splitScreen' | 'generate' | 'upload' | 'starred' | 'photos'
 
+// 'photos' installs scenes that play albums from the Photos library, which
+// only the two control planes keep.
 export const allowedAddSceneActions: Record<WorkspaceMode, readonly AddSceneAction[]> = {
-  backend: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
+  backend: ['blank', 'splitScreen', 'generate', 'upload', 'starred', 'photos'],
   frameAdmin: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
-  cloud: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
+  cloud: ['blank', 'splitScreen', 'generate', 'upload', 'starred', 'photos'],
 }
 
 export function addSceneActionIsAllowed(mode: WorkspaceMode, action: AddSceneAction): boolean {
   return allows(allowedAddSceneActions, mode, action)
+}
+
+/** The Photos section (docs/photos.md). The on-device panel is one frame with
+ * no library of its own. */
+export const photosLibraryModes: readonly WorkspaceMode[] = ['backend', 'cloud']
+
+export function photosLibraryIsAvailable(mode: WorkspaceMode = workspaceMode()): boolean {
+  return photosLibraryModes.includes(mode)
 }
 
 /** The scene-tool shortcut row on the frame dashboard. Same verbs, same rules. */
