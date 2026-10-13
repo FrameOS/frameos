@@ -127,16 +127,14 @@ const photo = frameos.fetchImage(`${server}/api/assets/${id}/thumbnail?size=prev
   headers: { 'x-api-key': apiKey },
   saveAsset: { name: 'IMG_001', extension: 'jpg', mode: 'auto' },
 })
-if (!photo.image) {
-  return frameos.svg(errorPanel(photo.error))
-}
+if (!photo.image) throw new Error(`Error fetching image from Immich: ${photo.error}`)
 return photo.image
 ```
 
 - `options.headers` go on the request, like `httpRequest`.
 - The result is `{ image, width, height }` or `{ image: null, error }`
   (an HTTP status, a transport failure, a body that is not an image). It
-  never throws, so the app can paint the message.
+  never throws, so the app decides what to say (and throws it, see below).
 - `options.saveAsset` keeps the downloaded file as a frame asset, the way
   the built-in photo apps do (`saved/<app>/<name>.<md5>.<ext>`; `mode:
   "auto"` honours the frame's save-assets setting, `"always"` saves
@@ -161,13 +159,19 @@ return photo.image
 
 ### When something goes wrong
 
-A photo app paints its own message (`frameos.svg(errorPanel(...))`) so the
-frame shows what to fix. Anything an app does not handle and throws out of
-`get()` fails the node, the way a raising built-in app does: the error is
-logged with its source line, a code node that reads the value gets the zero
-value of its arg's type, an image field gets the error painted, and the node
-cache keeps nothing, so the next render tries again. (Before 2026.10.13 the
-consumer got `null` instead, and a cached node kept it.)
+Throw. An error thrown out of `get()` fails the node the way a raising
+built-in app does: the message is logged with its source line, an image
+field gets the message painted (natively, into the canvas on an ESP32, so an
+app needs no error panel of its own), a code node that reads the value gets
+the zero value of its arg's type, and the node cache keeps nothing, so the
+next render tries again. That is what the photo apps do for a missing key or
+a failed download. (Before 2026.10.13 the consumer got `null` instead, and a
+cached node kept it.)
+
+Keep apps small: a scene carries a copy of every app it uses (its
+`config.json` twice: as keys and as a file), an ESP32 stores all its scenes
+in 512 KiB, and the active scene's sources are parsed on every render. No
+comment blocks, no helpers used once, short config hints.
 
 ### Keeping values between renders
 

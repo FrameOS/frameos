@@ -2,9 +2,14 @@
 ## through the JS app runtime. The shared album page is answered at the
 ## `frameos.httpRequest` seam (`jsHttpRequestHook`) and the photo at the
 ## download seam (`contextDownloadHook`), so this pins the page request, the
-## URLs scraped from it, the album cache, the photo URL the app asks for, the
-## order of photos, the metadata state, the saved asset and the error panels,
-## without reaching Google.
+## paths scraped from it, the album cache, the photo URL the app asks for, the
+## order of photos, the metadata state, the saved asset and the errors it
+## throws, without reaching Google. A render gets the node config a scene
+## would: every config.json default under the node's own values.
+##
+## Failures are thrown, as the Nim app raised: the runtime logs "JS app get
+## failed: <message>" and raises JsAppError, and the interpreter paints the
+## message into the consumer's image (tested with the interpreter, not here).
 ##
 ## Two small probe modules import the app next to it: `probe.ts` calls its
 ## pure helpers, and `clock.ts` sets `Date.now` from `state.testNow` before
@@ -29,10 +34,10 @@ let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 
 const probeSource = """
-import { extractPhotoUrls, sizedPhotoUrl, wrapIndex } from './app'
+import { extractPhotoPaths, sizedPhotoUrl, wrapIndex } from './app'
 export function get(app) {
   const c = app.config
-  if (c.fn === 'extract') return { urls: extractPhotoUrls(c.html) }
+  if (c.fn === 'extract') return { paths: extractPhotoPaths(c.html) }
   if (c.fn === 'sized') return { url: sizedPhotoUrl(c.base, c.width, c.height, c.fitMode) }
   return { index: wrapIndex(c.counter, c.count) }
 }
@@ -53,10 +58,14 @@ const
   tokenB = "AP1GczM" & repeat("xY7", 20)
   tokenC = "AF1QipP" & repeat("qW9", 20)
   tokenD = "AP1GczQ" & repeat("kL5", 20)
-  baseA = photoUrlHost & "pw/" & tokenA
-  baseB = photoUrlHost & "pw/" & tokenB
-  baseC = photoUrlHost & tokenC
-  baseD = photoUrlHost & "pw/" & tokenD
+  pathA = "pw/" & tokenA
+  pathB = "pw/" & tokenB
+  pathC = tokenC
+  pathD = "pw/" & tokenD
+  baseA = photoUrlHost & pathA
+  baseB = photoUrlHost & pathB
+  baseC = photoUrlHost & pathC
+  baseD = photoUrlHost & pathD
   shareUrl = "https://photos.app.goo.gl/AbCdEf"
   otherShareUrl = "https://photos.google.com/share/OtherAlbum"
   userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -83,7 +92,24 @@ let albumHtml = ("""
   .replace("{C}", baseC)
   .replace("{D}", baseD)
 
+let albumPaths = @[pathA, pathB, pathC, pathD]
 let albumUrls = @[baseA, baseB, baseC, baseD]
+let appFields = parseJson(appConfigJson)["fields"]
+
+proc withDefaults(config: JsonNode): JsonNode =
+  ## What the runtime hands a scene's node (runtimeConfigFromNode): every
+  ## field's typed default, then the node's own values, typed the same way.
+  result = %*{}
+  var types: seq[(string, string)] = @[]
+  for field in appFields:
+    if field.hasKey("name"):
+      types.add((field["name"].getStr(), field["type"].getStr()))
+      result[field["name"].getStr()] = valueToJson(valueFromJsonByType(field["value"], field["type"].getStr()))
+  for key, value in config:
+    result[key] = value
+    for (name, fieldType) in types:
+      if name == key:
+        result[key] = valueToJson(valueFromJsonByType(value, fieldType))
 
 ## The page seam: every frameos.httpRequest lands here.
 type PageRequest = tuple[url, httpMethod: string, headers: seq[SimpleHttpHeader]]
@@ -161,7 +187,14 @@ proc teardown(h: Harness) =
 proc render(h: Harness, config: JsonNode, width = 200, height = 120, hasImage = true): Value =
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: hasImage,
     image: (if hasImage: newImage(width, height) else: nil), loopIndex: 0, loopKey: ".", nextSleep: -1)
-  h.runtime.get(h.owner, config, context)
+  h.runtime.get(h.owner, withDefaults(config), context)
+
+proc failure(h: Harness, config: JsonNode, width = 200, height = 120, hasImage = true): string =
+  ## The message get() threw, "" when it returned.
+  try:
+    discard h.render(config, width, height, hasImage)
+  except JsAppError as e:
+    return e.msg
 
 proc probe(config: JsonNode): JsonNode =
   let h = newHarness(main = "probe.ts", outputType = "json")
@@ -200,9 +233,6 @@ proc headerValue(request: PageRequest, name: string): string =
       return header.value
   ""
 
-proc isPanel(value: Value, width = 200, height = 120): bool =
-  value.kind == fkImage and value.asImage().width == width and value.asImage().height == height
-
 proc isPhoto(value: Value): bool =
   value.kind == fkImage and value.asImage().width == 5 and value.asImage().height == 3
 
@@ -210,22 +240,22 @@ suite "Google Photos code app":
   setup:
     resetSeams()
 
-  test "extractPhotoUrls finds, unescapes, dedupes and filters urls":
-    check probe(%*{"fn": "extract", "html": albumHtml})["urls"] == %albumUrls
+  test "extractPhotoPaths finds, unescapes, dedupes and filters photo paths":
+    check probe(%*{"fn": "extract", "html": albumHtml})["paths"] == %albumPaths
 
-  test "extractPhotoUrls skips avatars and short paths":
+  test "extractPhotoPaths skips avatars and short paths":
     let html = """
 <img src="https://lh3.googleusercontent.com/a/ACg8ocJx5vN2mP8qR4sT0uW6yZ2aB8cD4eF0gH=s64-c">
 <img src="https://lh3.googleusercontent.com/pw/short=w32-h32">
 """
-    check probe(%*{"fn": "extract", "html": html})["urls"].len == 0
+    check probe(%*{"fn": "extract", "html": html})["paths"].len == 0
 
-  test "extractPhotoUrls returns empty for html without photos":
-    check probe(%*{"fn": "extract", "html": "<html><body>Nothing here</body></html>"})["urls"].len == 0
+  test "extractPhotoPaths returns empty for html without photos":
+    check probe(%*{"fn": "extract", "html": "<html><body>Nothing here</body></html>"})["paths"].len == 0
 
-  test "extractPhotoUrls unescapes \\u003d, \\u0026 and \\/ before cutting the size suffix":
+  test "extractPhotoPaths unescapes \\u003d, \\u0026 and \\/ before cutting the size suffix":
     let escaped = photoUrlHost & "pw\\/" & tokenA & "\\u0026x\\u003dw10-h10"
-    check probe(%*{"fn": "extract", "html": "[\"" & escaped & "\"]"})["urls"] == %[baseA & "&x"]
+    check probe(%*{"fn": "extract", "html": "[\"" & escaped & "\"]"})["paths"] == %[pathA & "&x"]
 
   test "sizedPhotoUrl maps fit modes to url suffixes":
     check probe(%*{"fn": "sized", "base": baseA, "width": 800, "height": 480, "fitMode": "cover"})["url"].getStr() ==
@@ -324,50 +354,47 @@ suite "Google Photos code app":
     let rotated = newHarness(rotate = 90)
     check rotated.render(%*{"shareUrl": shareUrl, "mode": "sequential"}, hasImage = false).isPhoto()
     check imageRequests[^1] == sized(baseA, 120, 200)
-    check rotated.render(%*{"shareUrl": ""}, hasImage = false).isPanel(120, 200)
 
-  test "missing share url returns error image with context dimensions":
+  test "missing share url fails the node without fetching":
     let h = newHarness(nodeId = 4)
-    let value = h.render(%*{"shareUrl": "", "mode": "random"}, width = 15, height = 9)
-    check value.isPanel(15, 9)
+    check h.failure(%*{"shareUrl": "  ", "mode": "random"}, width = 15, height = 9) ==
+      "Please provide a Google Photos shared album link."
     check pageRequests.len == 0
     check h.errorCount("") == 1
     check h.logs[][0]["event"].getStr() == "error:4:googlePhotos"
-    check h.logs[][0]["error"].getStr() == "Please provide a Google Photos shared album link."
+    check h.logs[][0]["error"].getStr() == "JS app get failed: Please provide a Google Photos shared album link."
 
-  test "invalid share url returns error image without fetching":
+  test "invalid share url fails the node without fetching":
     let h = newHarness(nodeId = 5)
-    let value = h.render(%*{"shareUrl": "photos.app.goo.gl/AbCdEf", "mode": "random"}, width = 12, height = 8)
-    check value.isPanel(12, 8)
+    check h.failure(%*{"shareUrl": "photos.app.goo.gl/AbCdEf", "mode": "random"}, width = 12, height = 8) ==
+      "Invalid shared album link: photos.app.goo.gl/AbCdEf"
     check pageRequests.len == 0
     check imageRequests.len == 0
     check h.errorCount("") == 1
-    check h.errorLogged("Invalid shared album link: photos.app.goo.gl/AbCdEf")
+    check h.errorLogged("JS app get failed: Invalid shared album link: photos.app.goo.gl/AbCdEf")
 
-  test "a failed album fetch paints the error and writes no state":
+  test "a failed album fetch fails the node and writes no state":
     let h = newHarness()
     pageCode = 404
     pageBody = "<html>Not found</html>"
     let config = %*{"shareUrl": shareUrl, "mode": "sequential", "counterStateKey": "counter", "metadataStateKey": "meta"}
-    check h.render(config).isPanel()
+    check h.failure(config) == "Error loading the shared album: Error 404 while fetching the shared album page."
     check imageRequests.len == 0
     check h.scene.state.len == 0
-    check h.errorLogged("Error loading the shared album: Error 404 while fetching the shared album page.")
+    check h.errorLogged("JS app get failed: Error loading the shared album: Error 404 while fetching the shared album page.")
 
-  test "an album page without photos paints the hint":
+  test "an album page without photos fails with the hint":
     let h = newHarness()
     pageBody = "<html><body>Nothing here</body></html>"
-    check h.render(%*{"shareUrl": shareUrl}).isPanel()
+    check h.failure(%*{"shareUrl": shareUrl}) == "Error loading the shared album: No photos found on the shared " &
+      "album page. Make sure the link is a public share link and the album is not empty."
     check imageRequests.len == 0
-    check h.errorLogged("Error loading the shared album: No photos found on the shared album page. " &
-      "Make sure the link is a public share link and the album is not empty.")
 
-  test "a transport failure paints the transport error":
+  test "a transport failure fails with the transport error":
     let h = newHarness()
     pageError = "Connection refused"
-    check h.render(%*{"shareUrl": shareUrl}).isPanel()
+    check h.failure(%*{"shareUrl": shareUrl}) == "Error loading the shared album: Connection refused"
     check imageRequests.len == 0
-    check h.errorLogged("Error loading the shared album: Connection refused")
 
   test "the album is cached for cacheAlbumSeconds, then fetched again":
     let h = newHarness(main = "clock.ts", state = %*{"testNow": 1000})
@@ -417,16 +444,15 @@ suite "Google Photos code app":
     check pageRequests.len == 3
 
     let other = %*{"shareUrl": otherShareUrl, "mode": "sequential", "metadataStateKey": "meta"}
-    check h.render(other).isPanel()
-    check h.errorLogged("Error loading the shared album: Error 500 while fetching the shared album page.")
+    check h.failure(other) == "Error loading the shared album: Error 500 while fetching the shared album page."
     check imageRequests.len == 3
     check h.scene.state["meta"]["index"] == %2
 
-  test "a failed photo download paints the error, writes no metadata, still advances the counter":
+  test "a failed photo download fails the node, writes no metadata, still advances the counter":
     let h = newHarness()
     imageError = "404 Not Found"
     let config = %*{"shareUrl": shareUrl, "mode": "sequential", "counterStateKey": "counter", "metadataStateKey": "meta"}
-    check h.render(config).isPanel()
+    check h.failure(config) == "Error fetching image from Google Photos: 404 Not Found"
     check imageRequests == @[sized(baseA)]
     check not h.scene.state.hasKey("meta")
     check h.scene.state["counter"] == %1
@@ -480,7 +506,8 @@ suite "Google Photos code app":
     let config = %*{"shareUrl": shareUrl, "mode": "sequential", "cacheAlbumSeconds": 900, "metadataStateKey": "meta"}
     check h.render(config).isPhoto()
     h.teardown()
-    check h.runtime.memory.hasKey("album")
+    # Kept without the fixed host: the paths only.
+    check parseJson(h.runtime.memory["album"])["paths"] == %albumPaths
     # Within cacheAlbumSeconds: no refetch, and the next photo in order.
     h.scene.state["testNow"] = %1500
     check h.render(config).isPhoto()
@@ -521,7 +548,6 @@ suite "Google Photos code app":
     check pageRequests.len == 3
     check imageRequests == @[sized(baseA), sized(baseB), sized(baseC)]
     check not h.runtime.memory.hasKey("album")
-    check h.logCount("too many to keep between renders") == 1
-    check h.logged("The shared album's 4 photos are too many to keep between renders: " &
-      "the album page is fetched again on every render.")
+    check h.logCount("too many to keep") == 1
+    check h.logged("The album's 4 photos are too many to keep: it is fetched on every render.")
     check h.errorCount("frameos.remember(\"album\") refused") == 1

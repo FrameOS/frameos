@@ -4,7 +4,7 @@
 ## point at a mock image server on a thread, so the download (with its
 ## User-Agent), the saved asset and its extension are the real thing. Ports
 ## data/wikicommons' own tests and covers every mode and alias, the dates each
-## one asks for, the retries, the error panels, the metadata state and the
+## one asks for, the retries, the failures, the metadata state and the
 ## saved asset.
 ##
 ## The random modes are made deterministic by answering every request the
@@ -21,6 +21,21 @@ import frameos/values
 const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "wikicommons"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
+let appFields = parseJson(appConfigJson)["fields"]
+
+proc withDefaults(config: JsonNode): JsonNode =
+  ## What the runtime hands a scene's node (runtimeConfigFromNode): every
+  ## field's typed default (the first declaration of a name wins), then the
+  ## node's own values, typed the same way. The app reads its fields as given.
+  result = %*{}
+  var types = initTable[string, string]()
+  for field in appFields:
+    let name = field{"name"}.getStr()
+    if name.len > 0 and not types.hasKey(name):
+      types[name] = field{"type"}.getStr()
+      result[name] = valueToJson(valueFromJsonByType(field["value"], types[name]))
+  for key, value in config:
+    result[key] = if types.hasKey(key): valueToJson(valueFromJsonByType(value, types[key])) else: value
 
 const CommonsUserAgent = "FrameOS Wikimedia Commons app (https://github.com/FrameOS/frameos)"
 const ApiUrl = "https://commons.wikimedia.org/w/api.php"
@@ -134,13 +149,18 @@ proc expectedUrl(params: openArray[(string, string)]): string =
     parts.add(encodeUrl(key) & "=" & encodeUrl(value))
   ApiUrl & "?" & parts.join("&")
 
+## Only the extmetadata the app reads: the full set is several KB per page,
+## held in the QuickJS heap while the reply is parsed.
+const MetadataFilter = ("iiextmetadatafilter", "ImageDescription|ObjectName|Artist|LicenseShortName")
+
 proc potdUrl(date: string, width: int): string =
   expectedUrl([("action", "query"), ("generator", "images"), ("titles", "Template:Potd/" & date),
-    ("gimlimit", "20"), ("prop", "imageinfo"), ("iiprop", "url|mime|size|extmetadata"), ("iiurlwidth", $width)])
+    ("gimlimit", "20"), ("prop", "imageinfo"), ("iiprop", "url|mime|extmetadata"), MetadataFilter,
+    ("iiurlwidth", $width)])
 
 proc randomUrl(width: int): string =
   expectedUrl([("action", "query"), ("generator", "random"), ("grnnamespace", "6"), ("grnlimit", "20"),
-    ("prop", "imageinfo"), ("iiprop", "url|mime|size|extmetadata"), ("iiurlwidth", $width)])
+    ("prop", "imageinfo"), ("iiprop", "url|mime|extmetadata"), MetadataFilter, ("iiurlwidth", $width)])
 
 proc page(title, imageUrl: string, mime = "image/jpeg", description = "",
     objectName = "", artist = "", license = "", urlKey = "thumburl"): JsonNode =
@@ -221,7 +241,7 @@ proc newHarness(width = 200, height = 120, rotate = 0, debug = true, assetsPath 
 proc render(h: Harness, config: JsonNode, width = 200, height = 120, hasImage = true): Value =
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: hasImage,
     image: (if hasImage: newImage(width, height) else: nil), loopIndex: 0, loopKey: ".", nextSleep: -1)
-  h.runtime.get(h.owner, config, context)
+  h.runtime.get(h.owner, withDefaults(config), context)
 
 proc logged(h: Harness, needle: string): bool =
   for entry in h.logs[]:
@@ -239,6 +259,16 @@ proc errorLogged(h: Harness, needle: string): bool =
     if error.contains(needle):
       return true
   false
+
+proc failure(h: Harness, config: JsonNode, width = 200, height = 120): string =
+  ## A failure is thrown, as the Nim app raised: the runtime logs "JS app get
+  ## failed: <message>" and raises it, and the interpreter paints the message
+  ## into the consumer's image. Returns the message ("" when nothing threw).
+  try:
+    discard h.render(config, width, height)
+  except JsAppError as e:
+    result = e.msg
+    doAssert h.errorLogged("JS app get failed: " & e.msg), e.msg
 
 proc potdDate(call: ApiCall): DateTime =
   let title = call.param("titles")
@@ -260,18 +290,17 @@ suite "wikicommons code app":
     check h.scene.state.hasKey("commons")
     check h.scene.state["commons"]["mode"].getStr() == "pictureOfTheDay"
 
-  test "invalid mode returns error image with context dimensions":
+  test "invalid mode fails the node":
     let h = newHarness(width = 10, height = 6, debug = false)
-    let value = h.render(%*{"mode": "not-a-mode", "metadataStateKey": "meta"}, width = 15, height = 9)
-    check value.kind == fkImage
-    check value.asImage().width == 15
-    check value.asImage().height == 9
+    check h.failure(%*{"mode": "not-a-mode", "metadataStateKey": "meta"}, width = 15, height = 9) ==
+      "Error fetching image from Wikimedia Commons: Invalid Wikimedia Commons mode: not-a-mode"
     check not h.scene.state.hasKey("meta")
     check apiCalls.len == 0
-    check h.logs[].len == 1
-    check h.logs[][0]["event"].getStr().contains("error:12:data/wikicommons")
-    check h.logs[][0]["error"].getStr() ==
-      "Error fetching image from Wikimedia Commons: Invalid Wikimedia Commons mode: not-a-mode"
+    var errorEvents: seq[string] = @[]
+    for entry in h.logs[]:
+      if entry{"event"}.getStr().startsWith("error:"):
+        errorEvents.add(entry["event"].getStr())
+    check errorEvents == @["error:12:data/wikicommons"]
 
   test "picture of the day: the request, the image download and the metadata":
     let h = newHarness()
@@ -283,7 +312,8 @@ suite "wikicommons code app":
     let call = apiCalls[0]
     check call.url == potdUrl(today(), 200)
     check call.url.contains("&titles=Template%3APotd%2F" & today() & "&")
-    check call.url.contains("&iiprop=url%7Cmime%7Csize%7Cextmetadata&")
+    check call.url.contains("&iiprop=url%7Cmime%7Cextmetadata&" &
+      "iiextmetadatafilter=ImageDescription%7CObjectName%7CArtist%7CLicenseShortName&iiurlwidth=200")
     check call.httpMethod == "GET"
     check call.header("Accept") == "application/json"
     check call.header("User-Agent") == CommonsUserAgent
@@ -332,16 +362,14 @@ suite "wikicommons code app":
     let current = now()
     let todayStart = dateTime(current.year, current.month, current.monthday, zone = utc())
     for _ in 0 ..< 3:
-      let value = h.render(%*{"mode": "randomPictureOfTheDay", "metadataStateKey": "commons"})
-      check value.kind == fkImage
-      check value.asImage().width == 200
+      check h.failure(%*{"mode": "randomPictureOfTheDay", "metadataStateKey": "commons"}) ==
+        "Error fetching image from Wikimedia Commons: Could not find a random Wikimedia Commons " &
+        "picture of the day: No supported image returned from Wikimedia Commons."
     check apiCalls.len == 30
     for call in apiCalls:
       let date = call.potdDate()
       check date.year >= 2008
       check dateTime(date.year, date.month, date.monthday, zone = utc()) <= todayStart
-    check h.errorLogged("Error fetching image from Wikimedia Commons: Could not find a random Wikimedia Commons " &
-      "picture of the day: No supported image returned from Wikimedia Commons.")
     check not h.scene.state.hasKey("commons")
     check imageRequests().len == 0
 
@@ -363,9 +391,8 @@ suite "wikicommons code app":
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (200, """{"error": {"code": "badvalue", "info": "Bad title"}}""")
-    check h.render(%*{"mode": "randomPictureOfTheDay"}).kind == fkImage
-    check h.errorLogged("Could not find a random Wikimedia Commons picture of the day: " &
-      "Wikimedia Commons API error: Bad title")
+    check h.failure(%*{"mode": "randomPictureOfTheDay"}) == "Error fetching image from Wikimedia Commons: " &
+      "Could not find a random Wikimedia Commons picture of the day: Wikimedia Commons API error: Bad title"
 
   test "random image: the random generator, ten attempts, then the last error":
     let h = newHarness()
@@ -378,10 +405,9 @@ suite "wikicommons code app":
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] = (503, "busy")
     apiCalls = @[]
-    check h.render(%*{"mode": "randomImage"}).kind == fkImage
+    check h.failure(%*{"mode": "randomImage"}) == "Error fetching image from Wikimedia Commons: " &
+      "Could not find a random Wikimedia Commons image: Wikimedia Commons API HTTP 503"
     check apiCalls.len == 10
-    check h.errorLogged("Error fetching image from Wikimedia Commons: Could not find a random Wikimedia Commons " &
-      "image: Wikimedia Commons API HTTP 503")
 
   test "mode and submode aliases":
     let cases = [
@@ -413,56 +439,49 @@ suite "wikicommons code app":
         check apiCalls[0].url == potdUrl(today(), 200)
 
     let unknown = newHarness()
-    check unknown.render(%*{"mode": "potd", "submode": "bogus"}).kind == fkImage
-    check unknown.errorLogged("Invalid Wikimedia Commons mode: potd")
+    check unknown.failure(%*{"mode": "potd", "submode": "bogus"}) ==
+      "Error fetching image from Wikimedia Commons: Invalid Wikimedia Commons mode: potd"
     check apiCalls.len == 0
 
-  test "API errors paint the message":
+  test "API errors fail the node with the message":
+    const Prefix = "Error fetching image from Wikimedia Commons: "
     let h = newHarness()
     apiAnswer = proc(url: string): tuple[code: int, body: string] = (500, "Internal error")
-    check h.render(%*{"metadataStateKey": "commons"}).kind == fkImage
+    check h.failure(%*{"metadataStateKey": "commons"}) == Prefix & "Wikimedia Commons API HTTP 500"
     check apiCalls.len == 1
-    check h.errorLogged("Error fetching image from Wikimedia Commons: Wikimedia Commons API HTTP 500")
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (200, """{"error": {"code": "badvalue", "info": "Unrecognized value for parameter \"generator\""}}""")
-    check h.render(%*{}).kind == fkImage
-    check h.errorLogged("Error fetching image from Wikimedia Commons: Wikimedia Commons API error: " &
-      "Unrecognized value for parameter \"generator\"")
+    check h.failure(%*{}) == Prefix & "Wikimedia Commons API error: Unrecognized value for parameter \"generator\""
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] = (200, """{"error": {"code": "x"}}""")
-    check h.render(%*{}).kind == fkImage
-    check h.errorLogged("""Wikimedia Commons API error: {"code":"x"}""")
+    check h.failure(%*{}) == Prefix & """Wikimedia Commons API error: {"code":"x"}"""
+
+    apiAnswer = proc(url: string): tuple[code: int, body: string] = (200, """{"error": null}""")
+    check h.failure(%*{}) == Prefix & "Wikimedia Commons API error: null"
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       raise newException(IOError, "connection refused")
-    check h.render(%*{}).kind == fkImage
-    check h.errorLogged("Error fetching image from Wikimedia Commons: connection refused")
+    check h.failure(%*{}) == Prefix & "connection refused"
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] = (200, "<html>not json</html>")
-    check h.render(%*{}).kind == fkImage
-    check h.errorLogged("Error fetching image from Wikimedia Commons: ")
+    check h.failure(%*{}).startsWith(Prefix)
+
+    apiAnswer = proc(url: string): tuple[code: int, body: string] = (200, """{"batchcomplete": true}""")
+    check h.failure(%*{}) == Prefix & "No supported image returned from Wikimedia Commons."
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (200, query(page("File:Clip.webm", mockBase() & "/img/clip.webm.jpg", mime = "video/webm"),
         page("File:Empty.jpg", "")))
-    let value = h.render(%*{"metadataStateKey": "commons"})
-    check value.kind == fkImage
-    check value.asImage().width == 200
-    check value.asImage().height == 120
-    check h.errorLogged("Error fetching image from Wikimedia Commons: No supported image returned from Wikimedia Commons.")
+    check h.failure(%*{"metadataStateKey": "commons"}) == Prefix & "No supported image returned from Wikimedia Commons."
     check not h.scene.state.hasKey("commons")
     check imageRequests().len == 0
 
-  test "a failed download paints the error and records no metadata":
+  test "a failed download fails the node and records no metadata":
     let h = newHarness()
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (200, query(page("File:Gone.jpg", mockBase() & "/gone/Gone.jpg")))
-    let value = h.render(%*{"metadataStateKey": "commons"})
-    check value.kind == fkImage
-    check value.asImage().width == 200
-    check h.errorLogged("Error fetching image from Wikimedia Commons: ")
-    check h.errorLogged("404")
+    check h.failure(%*{"metadataStateKey": "commons"}) == "Error fetching image from Wikimedia Commons: 404 Not Found"
     check not h.scene.state.hasKey("commons")
     check imageRequests() == @["/gone/Gone.jpg\t" & CommonsUserAgent]
 
@@ -478,6 +497,14 @@ suite "wikicommons code app":
     check meta["license"].getStr() == ""
     check meta["imageUrl"].getStr() == mockBase() & "/img/Tower.png"
     check meta["mime"].getStr() == "image/png"
+
+  test "HTML stripping as the Nim app did it: stray '>' dropped, an open tag runs to the end, &amp; decoded first":
+    let h = newHarness()
+    apiAnswer = proc(url: string): tuple[code: int, body: string] =
+      (200, query(page("File:Cat.jpg", mockBase() & "/img/Cat.jpg",
+        description = "Tom > Jerry <i>cat &amp;lt;3 &amp;quot;q&amp;quot; <unclosed")))
+    check h.render(%*{"metadataStateKey": "commons"}).kind == fkImage
+    check h.scene.state["commons"]["description"].getStr() == "Tom  Jerry cat <3 &quot;q&quot;"
 
   test "debug off: no download log":
     let h = newHarness(debug = false)

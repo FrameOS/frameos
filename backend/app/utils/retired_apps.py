@@ -39,13 +39,13 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
     "data/frameOSGallery": {
         "replacement": "repo/apps/code/frameOSGallery",
         "sceneAppKey": "frameOSGallery",
-        "runtime": "2026.10.11",
-        "needs": "frameos.fetchImage",
+        "runtime": "2026.10.13",
+        "needs": "a throw in get() failing the node (the painted error)",
     },    "data/unsplash": {
         "replacement": "repo/apps/code/unsplash",
         "sceneAppKey": "unsplash",
-        "runtime": "2026.10.11",
-        "needs": "frameos.fetchImage",
+        "runtime": "2026.10.13",
+        "needs": "a throw in get() failing the node (the painted error)",
     },
     "data/wikicommons": {
         "replacement": "repo/apps/code/wikicommons",

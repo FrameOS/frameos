@@ -9,9 +9,8 @@
       "type": "select",
       "value": "pictureOfTheDay",
       "options": ["pictureOfTheDay", "onThisDay", "randomPictureOfTheDay", "randomImage"],
-      "required": false,
       "label": "Mode",
-      "hint": "Choose today's Picture of the Day, the Picture of the Day from this date in a previous year, a random previous Picture of the Day, or a random Commons image."
+      "hint": "Today's Picture of the Day, this date's in an earlier year, a random earlier one, or a random Commons image."
     },
     {
       "name": "saveAssets",
@@ -19,28 +18,17 @@
       "value": "auto",
       "options": ["auto", "always", "never"],
       "label": "Save asset",
-      "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+      "hint": "Saves the image to the frame's assets folder. auto follows the frame's save-assets setting."
     },
     {
       "name": "metadataStateKey",
       "type": "string",
       "value": "",
-      "required": false,
       "label": "Metadata state key",
       "placeholder": "e.g. wikimediaMetadata",
-      "hint": "Enter a state key to persist metadata about the image. Stores: {title, description, author, license, pageUrl, imageUrl, mime}."
+      "hint": "Stores {title, description, author, license, pageUrl, imageUrl, mime} under this key."
     }
   ],
-  "output": [
-    {
-      "name": "image",
-      "type": "image"
-    }
-  ],
-  "cache": {
-    "enabled": true,
-    "inputEnabled": true,
-    "durationEnabled": true,
-    "duration": "3600"
-  }
+  "output": [{ "name": "image", "type": "image" }],
+  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "3600" }
 }

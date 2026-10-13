@@ -16,26 +16,6 @@ const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "..
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 
-## Runs the app's exported helpers.
-const probeSource = """
-import { collectionsToEvents, zipcodesUrl, streetsUrl, collectionsUrl, normalizeDay } from './app'
-export function get(app) {
-  const c = app.config
-  if (c.probe === 'events') return collectionsToEvents(c.collections, c.language, c.timezone)
-  if (c.probe === 'urls') {
-    return {
-      streets: streetsUrl('Rue de la Loi', 'zip-1'),
-      accented: streetsUrl('Sint-Jorisstraat & Co/é', 'z&1'),
-      subDelims: streetsUrl("Rue d'Arlon (x)!*", 'z'),
-      zipcodes: zipcodesUrl(1000),
-      collections: collectionsUrl('zip 1', 'street/2', 12, '2026-01-05', '2026-01-07'),
-    }
-  }
-  if (c.probe === 'normalizeDay') return c.values.map((value) => normalizeDay(value, 'exportFrom'))
-  return null
-}
-"""
-
 const Api = "https://api.fostplus.be/recyclecms/public/v1"
 const ZipcodesReply = """{"items": [{"id": "1020-24131", "code": "1020", "names": [{"nl": "Laken"}]},
   {"id": "1000-24129", "code": "1000", "names": [{"nl": "Brussel"}]}], "total": 2, "pages": 1, "page": 1}"""
@@ -88,7 +68,7 @@ type Harness = object
   runtime: JsAppRuntime
   logs: ref seq[JsonNode]
 
-proc newHarness(timeZone = "UTC", probe = false): Harness =
+proc newHarness(timeZone = "UTC"): Harness =
   requests = @[]
   zipcodesReply = (200, ZipcodesReply)
   streetsReply = (200, StreetsReply)
@@ -105,10 +85,8 @@ proc newHarness(timeZone = "UTC", probe = false): Harness =
   let scene = FrameScene(id: "tests/be-recycle-js-app".SceneId, frameConfig: config, state: %*{}, logger: logger)
   let owner = AppRoot(nodeId: 30.NodeId, nodeName: "beRecycle", appKeyword: "beRecycle", scene: scene,
     frameConfig: config)
-  let sources = %*{"app.ts": appSource, "config.json": appConfigJson, "probe.ts": probeSource}
-  let runtime = newJsAppRuntime(category = "data", outputType = "json",
-    source = (if probe: probeSource else: appSource), settingsKeys = @[],
-    sourceName = (if probe: "probe.ts" else: "app.ts"), sources = sources)
+  let runtime = newJsAppRuntime(category = "data", outputType = "json", source = appSource, settingsKeys = @[],
+    sourceName = "app.ts", sources = %*{"app.ts": appSource, "config.json": appConfigJson})
   Harness(scene: scene, owner: owner, runtime: runtime, logs: logs)
 
 proc call(h: Harness, config: JsonNode): Value =
@@ -152,11 +130,10 @@ proc checkThrew(h: Harness, config: JsonNode, message: string) =
   check h.errorLogged("JS app get failed: " & message)
 
 suite "Recycling Calendar for Belgium code app":
-  test "collectionsToEvents maps payload into event shape":
-    let h = newHarness(probe = true)
-    let collections = %*{"items": [{"timestamp": "2026-02-10T05:00:00Z", "fraction": {"name": {"en": "PMD"}}}]}
-    let events = h.events(%*{"probe": "events", "collections": collections, "language": "en",
-      "timezone": "Europe/Brussels"})
+  test "collections become events in the frame's zone":
+    let h = newHarness(timeZone = "Europe/Brussels")
+    collectionsReply = (200, """{"items": [{"timestamp": "2026-02-10T05:00:00Z", "fraction": {"name": {"en": "PMD"}}}]}""")
+    let events = h.events(address())
     check events.len == 1
     check events[0] == %*{"summary": "Trash: PMD", "startTime": "2026-02-10T08:00:00",
       "endTime": "2026-02-10T08:15:00", "timezone": "Europe/Brussels"}
@@ -166,16 +143,15 @@ suite "Recycling Calendar for Belgium code app":
     check keys == @["summary", "startTime", "endTime", "timezone"]
 
   test "the summary is in the configured language, empty when the reply lacks it":
-    let h = newHarness(probe = true)
-    let collections = parseJson(CollectionsReply)
-    let nl = h.events(%*{"probe": "events", "collections": collections, "language": "nl", "timezone": "UTC"})
+    let nl = newHarness().events(address(%*{"language": "nl"}))
     check nl[0]["summary"].getStr() == "Trash: Papier-karton"
     check nl[1]["summary"].getStr() == "Trash: PMD"
-    let fr = h.events(%*{"probe": "events", "collections": collections, "language": "fr", "timezone": "UTC"})
-    check fr[0]["summary"].getStr() == "Trash: Papier"
-    let de = h.events(%*{"probe": "events", "collections": collections, "language": "de", "timezone": "UTC"})
-    check de[0]["summary"].getStr() == "Trash: "
-    check h.events(%*{"probe": "events", "collections": {"items": []}, "language": "en", "timezone": "UTC"}) == %*[]
+    check newHarness().events(address(%*{"language": "fr"}))[0]["summary"].getStr() == "Trash: Papier"
+    check newHarness().events(address(%*{"language": "de"}))[0]["summary"].getStr() == "Trash: "
+    let none = newHarness()
+    collectionsReply = (200, """{"items": []}""")
+    check none.events(address()) == %*[]
+    check """{"event":"reply","eventsInRange":0}""" in none.logMessages()
 
   test "get forwards the configured day range and returns the events":
     let h = newHarness(timeZone = "UTC")
@@ -198,25 +174,31 @@ suite "Recycling Calendar for Belgium code app":
       """{"event":"reply","eventsInRange":2}""", "Converting collections to events..."]
 
   test "query parameters are percent-encoded so the runtime client accepts them":
-    let h = newHarness(probe = true)
-    let urls = h.events(%*{"probe": "urls"})
-    let streets = urls["streets"].getStr()
-    validateHttpRequestUrl(streets)
-    check streets.contains("/streets?q=Rue%20de%20la%20Loi&zipcodes=zip-1")
-    check not streets.contains(" ")
-    check not streets.contains("+")
+    # "Rue de la Loi" used to go out unencoded; validateHttpRequestUrl refuses a
+    # request line with a space, so every street with one failed to resolve.
+    let accented = newHarness()
+    zipcodesReply = (200, """{"items": [{"id": "z&1", "code": "1000"}]}""")
+    streetsReply = (200, """{"items": [{"id": "s", "name": "Sint-Jorisstraat & Co/é"}]}""")
+    discard accented.events(address(%*{"streetName": "Sint-Jorisstraat & Co/é"}))
+    check requests[0].url.endsWith("/zipcodes?q=1000")
+    check requests[1].url.endsWith("/streets?q=Sint-Jorisstraat%20%26%20Co%2F%C3%A9&zipcodes=z%261")
 
-    let accented = urls["accented"].getStr()
-    validateHttpRequestUrl(accented)
-    check accented.contains("q=Sint-Jorisstraat%20%26%20Co%2F%C3%A9&zipcodes=z%261")
     # encodeUrl encodes the sub-delims encodeURIComponent leaves alone.
-    check urls["subDelims"].getStr().contains("q=Rue%20d%27Arlon%20%28x%29%21%2A&zipcodes=z")
+    let subDelims = newHarness()
+    streetsReply = (200, """{"items": [{"id": "s", "name": "Rue d'Arlon (x)!*"}]}""")
+    discard subDelims.events(address(%*{"streetName": "Rue d'Arlon (x)!*"}))
+    check requests[1].url.endsWith("/streets?q=Rue%20d%27Arlon%20%28x%29%21%2A&zipcodes=1000-24129")
 
-    check urls["zipcodes"].getStr().endsWith("/zipcodes?q=1000")
-    let collections = urls["collections"].getStr()
-    validateHttpRequestUrl(collections)
-    check collections.contains("zipcodeId=zip%201&streetId=street%2F2&houseNumber=12" &
+    let ids = newHarness()
+    zipcodesReply = (200, """{"items": [{"id": "zip 1", "code": "1000"}]}""")
+    streetsReply = (200, """{"items": [{"id": "street/2", "name": "Main"}]}""")
+    discard ids.events(address(%*{"number": 12, "exportFrom": "2026-01-05", "exportUntil": "2026-01-07"}))
+    check requests[2].url.contains("zipcodeId=zip%201&streetId=street%2F2&houseNumber=12" &
       "&fromDate=2026-01-05&untilDate=2026-01-07&size=100")
+    for request in requests:
+      validateHttpRequestUrl(request.url)
+      check not request.url.contains(" ")
+      check not request.url.contains("+")
 
   test "a street name with spaces and accents reaches the streets call encoded":
     let h = newHarness()
@@ -260,9 +242,11 @@ suite "Recycling Calendar for Belgium code app":
       (before + 366 * 24 * 60 * 60).fromUnixFloat().local().format("yyyy-MM-dd")
 
   test "configured days are normalised the way chrono did":
-    let h = newHarness(probe = true)
-    check h.events(%*{"probe": "normalizeDay", "values": ["2026-01-05", "2026-02-30", "2026-13-01", "2026-00-00",
-      "2024-02-29"]}) == %*["2026-01-05", "2026-03-02", "2027-01-01", "2025-11-30", "2024-02-29"]
+    for (configured, sent) in [("2026-01-05", "2026-01-05"), ("2026-02-30", "2026-03-02"), ("2026-13-01", "2027-01-01"),
+        ("2026-00-00", "2025-11-30"), ("2024-02-29", "2024-02-29"), ("0099-01-01", "0099-01-01")]:
+      let h = newHarness()
+      discard h.events(address(%*{"exportFrom": configured}))
+      check query(requests[2].url, "fromDate") == sent
 
     let full = newHarness()
     discard full.events(address(%*{"exportFrom": "2026-02-30", "exportUntil": "2026-13-01"}))

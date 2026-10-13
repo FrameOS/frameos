@@ -1,7 +1,7 @@
 {
   "name": "Weather icon set (JS)",
   "category": "data",
-  "description": "Vector weather icons for WMO weather codes, returned as a JSON set of SVG fragments plus code-to-icon and code-to-label maps.",
+  "description": "SVG weather icons for WMO weather codes, with code-to-icon and code-to-label maps.",
   "version": "1.0.0",
   "fields": [
     {
@@ -10,38 +10,18 @@
       "type": "select",
       "options": ["auto", "vivid", "mono"],
       "value": "auto",
-      "hint": "auto picks vivid, or mono when low contrast is enabled"
+      "hint": "auto is mono with low contrast, vivid otherwise."
     },
-    {
-      "name": "lowContrast",
-      "label": "Low contrast",
-      "type": "boolean",
-      "value": "false"
-    },
-    {
-      "name": "lineWidth",
-      "label": "Line width",
-      "type": "float",
-      "value": "3"
-    },
-    {
-      "name": "ink",
-      "label": "Ink color (mono)",
-      "type": "color",
-      "value": "#222222"
-    },
-    {
-      "name": "paper",
-      "label": "Paper color (mono)",
-      "type": "color",
-      "value": "#ffffff"
-    }
+    { "name": "lowContrast", "label": "Low contrast", "type": "boolean", "value": "false" },
+    { "name": "lineWidth", "label": "Line width", "type": "float", "value": "3" },
+    { "name": "ink", "label": "Ink color (mono)", "type": "color", "value": "#222222" },
+    { "name": "paper", "label": "Paper color (mono)", "type": "color", "value": "#ffffff" }
   ],
   "output": [
     {
       "name": "icons",
       "type": "json",
-      "example": "{\n  \"viewBox\": 64,\n  \"map\": { \"0\": \"clear\", \"61\": \"rain\" },\n  \"labels\": { \"0\": \"Clear sky\", \"61\": \"Light rain\" },\n  \"icons\": { \"clear\": \"<g>...</g>\", \"rain\": \"<g>...</g>\" }\n}"
+      "example": "{\"viewBox\": 64, \"palette\": \"vivid\", \"map\": {\"61\": \"rain\"}, \"labels\": {\"61\": \"Light rain\"}, \"icons\": {\"rain\": \"<g>...</g>\"}}"
     }
   ]
 }

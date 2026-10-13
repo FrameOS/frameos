@@ -80,8 +80,8 @@ def test_keywords_runtime_lacks():
     assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle"]
     # 2026.10.11 has fetchImage; 2026.10.13 has app.frame.embedded,
     # frameos.remember and the failing throw the later four need.
-    assert keywords_runtime_lacks("2026.10.11") == ["data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
-    assert keywords_runtime_lacks("2026.10.12") == ["data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
+    assert keywords_runtime_lacks("2026.10.11") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
+    assert keywords_runtime_lacks("2026.10.12") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
     assert keywords_runtime_lacks("2026.10.13") == []
     assert keywords_runtime_lacks(None) == []
     assert keywords_runtime_lacks("not a version") == []

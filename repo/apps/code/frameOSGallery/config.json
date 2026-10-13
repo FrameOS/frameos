@@ -4,9 +4,7 @@
   "category": "data",
   "version": "1.0.0",
   "fields": [
-    {
-      "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
-    },
+    { "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries." },
     {
       "name": "category",
       "type": "select",
@@ -30,26 +28,9 @@
       "value": "",
       "required": false,
       "label": "Category (if other)",
-      "placeholder": "",
-      "showIf": [
-        {
-          "field": "category",
-          "operator": "eq",
-          "value": "other"
-        }
-      ]
+      "showIf": [{ "field": "category", "operator": "eq", "value": "other" }]
     }
   ],
-  "output": [
-    {
-      "name": "image",
-      "type": "image"
-    }
-  ],
-  "cache": {
-    "enabled": true,
-    "inputEnabled": true,
-    "durationEnabled": true,
-    "duration": "900"
-  }
+  "output": [{ "name": "image", "type": "image" }],
+  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" }
 }

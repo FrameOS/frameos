@@ -308,7 +308,7 @@
         {
           "id": "s1",
           "nodes": [
-            { "id": "a", "type": "app", "data": { "keyword": "data/unsplash", "config": { "search": "fox" } } },
+            { "id": "a", "type": "app", "data": { "keyword": "data/weather", "config": { "location": "Ghent" } } },
             { "id": "b", "type": "app", "data": { "keyword": "googlePhotos", "config": {} } }
           ],
           "apps": { "googlePhotos": "@repo/apps/code/googlePhotos" }
@@ -318,10 +318,10 @@
         {
           "id": "s1",
           "nodes": [
-            { "id": "a", "type": "app", "data": { "keyword": "unsplash", "config": { "search": "fox" } } },
+            { "id": "a", "type": "app", "data": { "keyword": "weather", "config": { "location": "Ghent" } } },
             { "id": "b", "type": "app", "data": { "keyword": "data/googlePhotos", "config": {} } }
           ],
-          "apps": { "unsplash": "@repo/apps/code/unsplash" }
+          "apps": { "weather": "@repo/apps/code/weather" }
         }
       ]
     }

@@ -1,84 +1,37 @@
 {
   "name": "Recycling Calendar for Belgium",
-  "description": "Return a JSON event list of trash pickup dates",
+  "description": "Trash pickup dates as a JSON event list",
   "category": "data",
   "version": "1.1.0",
   "fields": [
+    { "name": "streetName", "type": "string", "value": "", "required": true, "label": "Street name" },
+    { "name": "number", "type": "integer", "value": "", "required": true, "label": "Number" },
+    { "name": "postalCode", "type": "integer", "value": "", "required": true, "label": "Postal code" },
     {
-      "label": "Street name",
-      "name": "streetName",
-      "type": "string",
-      "value": "",
-      "placeholder": "",
-      "required": true
-    },
-    {
-      "label": "Number",
-      "name": "number",
-      "type": "integer",
-      "value": "",
-      "placeholder": "",
-      "required": true
-    },
-    {
-      "label": "Postal code",
-      "name": "postalCode",
-      "type": "integer",
-      "value": "",
-      "placeholder": "",
-      "required": true
-    },
-    {
-      "label": "Export events from (YYYY-MM-DD)",
       "name": "exportFrom",
       "type": "string",
       "value": "",
-      "placeholder": "now",
-      "required": false
+      "label": "Export events from (YYYY-MM-DD)",
+      "placeholder": "now"
     },
     {
-      "label": "Export events until (YYYY-MM-DD)",
       "name": "exportUntil",
       "type": "string",
       "value": "",
-      "placeholder": "1 year later",
-      "required": false
+      "label": "Export events until (YYYY-MM-DD)",
+      "placeholder": "1 year later"
     },
+    { "name": "exportCount", "type": "integer", "value": "50", "label": "Maximum number of events to export" },
     {
-      "label": "Maximum number of events to export",
-      "name": "exportCount",
-      "type": "integer",
-      "value": "50",
-      "placeholder": "50",
-      "required": false
-    },
-    {
-      "label": "Language",
       "name": "language",
       "type": "select",
-      "options": [
-        "en",
-        "fr",
-        "nl"
-      ],
+      "options": ["en", "fr", "nl"],
       "value": "en",
-      "placeholder": "",
-      "required": true
+      "required": true,
+      "label": "Language"
     },
-    {
-      "markdown": "[{ summary, startTime, endTime, timezone }]"
-    }
+    { "markdown": "[{ summary, startTime, endTime, timezone }]" }
   ],
-  "output": [
-    {
-      "name": "events",
-      "type": "json"
-    }
-  ],
-  "cache": {
-    "enabled": true,
-    "inputEnabled": true,
-    "durationEnabled": true,
-    "duration": "14400"
-  }
+  "output": [{ "name": "events", "type": "json" }],
+  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "14400" }
 }

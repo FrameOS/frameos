@@ -7,8 +7,8 @@ noticing. `docs/retired-apps.json` lists them:
 | retired keyword | replacement | first runtime | why that runtime |
 |---|---|---|---|
 | `data/immich` | `repo/apps/code/immich` | 2026.10.11 | `frameos.fetchImage` |
-| `data/frameOSGallery` | `repo/apps/code/frameOSGallery` | 2026.10.11 | `frameos.fetchImage` |
-| `data/unsplash` | `repo/apps/code/unsplash` | 2026.10.11 | `frameos.fetchImage` |
+| `data/frameOSGallery` | `repo/apps/code/frameOSGallery` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
+| `data/unsplash` | `repo/apps/code/unsplash` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
 | `data/wikicommons` | `repo/apps/code/wikicommons` | 2026.10.13 | `app.frame.embedded` (the ESP32's 900 px thumbnails) |
 | `data/googlePhotos` | `repo/apps/code/googlePhotos` | 2026.10.13 | `frameos.remember` (the album list outlives an ESP32 render) |
 | `data/openaiImage` | `repo/apps/code/openaiImage` | 2026.10.13 | `app.frame.embedded`, and saving a `data:` URL (the `b64_json` reply) |

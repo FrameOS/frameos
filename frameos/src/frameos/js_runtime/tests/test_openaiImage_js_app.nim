@@ -3,7 +3,16 @@
 ## `b64_json` reply decodes through the real `data:` URL path (and saves from
 ## it), a `url` reply's download is stubbed at `contextDownloadHook`. This pins
 ## the request (URL, headers, body per model, the embedded overrides), the size
-## table, the image, the metadata state, the saved asset and every error panel.
+## table, the image, the metadata state, the saved asset and every error.
+##
+## Each render gets the config a scene node arrives with: config.json's typed
+## defaults (the first declaration of a repeated name wins) under the node's
+## own values, built by initDynamicJsApp as the interpreter builds it. The app
+## reads its fields without fallbacks of its own.
+##
+## Errors are thrown, as the Nim app raised: the runtime logs "JS app get
+## failed: <message>" and raises JsAppError, and the interpreter paints the
+## message (test_interpreter_errors.nim).
 ##
 ## The ESP32 branches run through `embedded.ts`, a wrapper that hands the real
 ## `get` an `app.frame` with `embedded: true` — a host build reports false.
@@ -21,6 +30,7 @@ import frameos/values
 const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "openaiImage"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
+let appSources = %*{"app.ts": appSource, "config.json": appConfigJson}
 const embeddedWrapper = """
 import { get as appGet } from './app'
 export function get(app, context) {
@@ -108,25 +118,30 @@ proc newHarness(apiKey = "sk-test", width = 200, height = 120, rotate = 0, asset
         sources = %*{"embedded.ts": embeddedWrapper, "app.ts": appSource, "config.json": appConfigJson})
     else:
       newJsAppRuntime(category = "data", outputType = "image", source = appSource,
-        settingsKeys = @["openAI"], sourceName = "app.ts",
-        sources = %*{"app.ts": appSource, "config.json": appConfigJson})
+        settingsKeys = @["openAI"], sourceName = "app.ts", sources = appSources)
   Harness(scene: scene, owner: owner, runtime: runtime, logs: logs)
+
+proc nodeConfig(h: Harness, config: JsonNode): JsonNode =
+  let node = DiagramNode(id: h.owner.nodeId, nodeType: "app", data: %*{"keyword": "openaiImage", "config": config})
+  DynamicJsApp(initDynamicJsApp("openaiImage", node, h.scene, appSources)).configJson
 
 proc render(h: Harness, config: JsonNode, width = 200, height = 120, withImage = true): Value =
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: withImage,
     image: (if withImage: newImage(width, height) else: nil), loopIndex: 0, loopKey: ".", nextSleep: -1)
-  h.runtime.get(h.owner, config, context)
+  h.runtime.get(h.owner, h.nodeConfig(config), context)
+
+proc threw(h: Harness, config: JsonNode, width = 200, height = 120, withImage = true): string =
+  ## What get() threw, "" when it returned.
+  try:
+    discard h.render(config, width, height, withImage)
+  except JsAppError as e:
+    return e.msg
+  ""
 
 proc errors(h: Harness): seq[string] =
   for entry in h.logs[]:
     if entry{"event"}.getStr().startsWith("error:"):
       result.add(entry{"error"}.getStr())
-
-proc errorLogged(h: Harness, needle: string): bool =
-  for message in h.errors():
-    if message.contains(needle):
-      return true
-  false
 
 proc lastBody(): JsonNode =
   doAssert requests.len > 0
@@ -143,7 +158,7 @@ proc requestedSize(h: Harness, config: JsonNode, width, height: int): string =
   ## reply is an error: only the request matters here.
   replyCode = 400
   replyBody = """{"error": {"message": "stop"}}"""
-  discard h.render(config, width, height)
+  doAssert h.threw(config, width, height) == "Error making request 400: stop"
   lastBody()["size"].getStr()
 
 proc savedFiles(dir: string): seq[string] =
@@ -152,29 +167,23 @@ proc savedFiles(dir: string): seq[string] =
       result.add(file)
 
 suite "openaiImage code app":
-  test "missing prompt returns an error image the size of the context image":
+  test "missing prompt throws before any request":
     let h = newHarness()
-    let value = h.render(%*{"prompt": "", "model": "gpt-image-1", "metadataStateKey": "meta"}, 12, 8)
-    check value.kind == fkImage
-    check value.asImage().width == 12
-    check value.asImage().height == 8
+    check h.threw(%*{"prompt": "", "model": "gpt-image-1", "metadataStateKey": "meta"}, 12, 8) ==
+      "No prompt provided in app config."
     check not h.scene.state.hasKey("meta")
-    check h.errors() == @["No prompt provided in app config."]
-    check h.logs[].len == 1
-    check h.logs[][0]["event"].getStr().contains("error:5:openaiImage")
+    check h.errors() == @["JS app get failed: No prompt provided in app config."]
+    for entry in h.logs[]:
+      if entry{"event"}.getStr().startsWith("error:"):
+        check entry{"event"}.getStr().contains("error:5:openaiImage")
     check requests.len == 0
 
-  test "missing api key returns an error image the size the frame renders at":
+  test "missing api key throws before any request":
     let h = newHarness(width = 9, height = 6, rotate = 90, settings = %*{}, nodeId = 7)
-    let value = h.render(%*{"prompt": "frameos", "model": "gpt-image-1", "metadataStateKey": "meta"},
-      withImage = false)
-    check value.kind == fkImage
-    check value.asImage().width == 6
-    check value.asImage().height == 9
+    check h.threw(%*{"prompt": "frameos", "model": "gpt-image-1", "metadataStateKey": "meta"}, withImage = false) ==
+      "Please provide an OpenAI API key in the settings."
     check not h.scene.state.hasKey("meta")
-    check h.errors() == @["Please provide an OpenAI API key in the settings."]
-    check h.logs[].len == 1
-    check h.logs[][0]["event"].getStr().contains("error:7:openaiImage")
+    check h.errors() == @["JS app get failed: Please provide an OpenAI API key in the settings."]
     check requests.len == 0
 
   test "gpt-image-2 by default: the request, the decoded base64 image, the metadata":
@@ -197,7 +206,7 @@ suite "openaiImage code app":
       """"size":"1536x1024","revisedPrompt":"A pumpkin pyjama party, digital art, revised"}"""
     check h.errors().len == 0
     check h.runtime.images.len == 0
-    check "const TIMEOUT = 300000" in appSource
+    check "timeoutMs: 300000" in appSource
 
   test "without a revised prompt the metadata repeats the prompt and has no revisedPrompt":
     let h = newHarness()
@@ -223,11 +232,16 @@ suite "openaiImage code app":
     check h.requestedSize(%*{"prompt": "x", "model": "dall-e-3"}, 300, 200) == "1792x1024"
 
   test "with no image flowing in, orientation is the frame as rendered":
-    let h = newHarness(width = 800, height = 480, rotate = 270)
+    for (rotate, expected) in [(0, "1536x1024"), (90, "1024x1536"), (180, "1536x1024"), (270, "1024x1536")]:
+      let h = newHarness(width = 800, height = 480, rotate = rotate)
+      replyCode = 400
+      replyBody = "{}"
+      check h.threw(%*{"prompt": "x", "model": "gpt-image-1"}, withImage = false) == "Error making request 400: {}"
+      check lastBody()["size"].getStr() == expected
+    let square = newHarness(width = 480, height = 480, rotate = 90)
     replyCode = 400
-    replyBody = "{}"
-    discard h.render(%*{"prompt": "x", "model": "gpt-image-1"}, withImage = false)
-    check lastBody()["size"].getStr() == "1024x1536"
+    discard square.threw(%*{"prompt": "x", "model": "gpt-image-1"}, withImage = false)
+    check lastBody()["size"].getStr() == "1024x1024"
 
   test "an explicit size must be one the model offers":
     let h = newHarness()
@@ -251,7 +265,7 @@ suite "openaiImage code app":
     check $lastBody() == """{"prompt":"x","n":1,"size":"1792x1024","model":"dall-e-3","style":"natural","quality":"hd"}"""
     discard h.requestedSize(%*{"prompt": "x", "model": "dall-e-3", "style": "", "quality": ""}, 300, 200)
     check $lastBody() == """{"prompt":"x","n":1,"size":"1792x1024","model":"dall-e-3"}"""
-    # The Nim loader's defaults: style vivid, quality standard.
+    # The fields' defaults: style vivid, quality standard (the first `quality`).
     discard h.requestedSize(%*{"prompt": "x", "model": "dall-e-3"}, 300, 200)
     check $lastBody() == """{"prompt":"x","n":1,"size":"1792x1024","model":"dall-e-3","style":"vivid","quality":"standard"}"""
     discard h.requestedSize(%*{"prompt": "x", "model": "dall-e-2", "style": "natural", "quality": "hd",
@@ -273,7 +287,7 @@ suite "openaiImage code app":
       check body(%*{"model": "gpt-image-1", "quality": quality}) == expected("gpt-image-1", %*{"quality": quality})
     check body(%*{"model": "gpt-image-1", "quality": "standard"}) == expected("gpt-image-1")
     check body(%*{"model": "gpt-image-1", "quality": ""}) == expected("gpt-image-1")
-    # The Nim loader's quality default ("standard", the dall-e-3 field's) sends none.
+    # The quality default is the first declaration's ("standard", dall-e-3's): none is sent.
     check body(%*{"model": "gpt-image-1"}) == expected("gpt-image-1")
     check body(%*{"model": "gpt-image-1", "outputFormat": "auto", "outputCompression": 80}) == expected("gpt-image-1")
     check body(%*{"model": "gpt-image-1", "outputFormat": "png", "outputCompression": 80}) ==
@@ -283,6 +297,8 @@ suite "openaiImage code app":
       expected("gpt-image-1", %*{"output_format": "jpeg", "output_compression": 80})
     check body(%*{"model": "gpt-image-1", "outputFormat": "webp", "outputCompression": 150}) ==
       expected("gpt-image-1", %*{"output_format": "webp", "output_compression": 100})
+    check body(%*{"model": "gpt-image-1", "outputFormat": "webp", "outputCompression": -5}) ==
+      expected("gpt-image-1", %*{"output_format": "webp"})
     check body(%*{"model": "gpt-image-1", "outputFormat": "webp", "outputCompression": "30"}) ==
       expected("gpt-image-1", %*{"output_format": "webp", "output_compression": 30})
     check body(%*{"model": "gpt-image-1", "outputFormat": "webp", "outputCompression": 30.7}) ==
@@ -310,6 +326,8 @@ suite "openaiImage code app":
       """{"prompt":"x","n":1,"size":"1024x640","model":"gpt-image-2","quality":"low","output_format":"png"}"""
     check body(%*{"model": "gpt-image-1", "outputFormat": "webp", "outputCompression": 0}) ==
       """{"prompt":"x","n":1,"size":"1536x1024","model":"gpt-image-1","quality":"low","output_format":"webp","output_compression":50}"""
+    check body(%*{"model": "gpt-image-1", "outputFormat": "jpeg", "outputCompression": -5}) ==
+      """{"prompt":"x","n":1,"size":"1536x1024","model":"gpt-image-1","quality":"low","output_format":"jpeg","output_compression":50}"""
     check body(%*{"model": "gpt-image-1", "outputFormat": "gif"}) ==
       """{"prompt":"x","n":1,"size":"1536x1024","model":"gpt-image-1","quality":"low"}"""
     # An explicit gpt-image-2 size stands; the dall-e models are not overridden.
@@ -388,7 +406,7 @@ suite "openaiImage code app":
     check saved[0].endsWith(".jpg")
     check readFile(saved[0]) == "downloaded-image-bytes"
 
-  test "API errors paint the message from the error JSON":
+  test "API errors throw the message from the error JSON":
     for (code, body, expected) in [
         (401, """{"error": {"message": "Incorrect API key provided", "type": "invalid_request_error"}}""",
           "Error making request 401: Incorrect API key provided"),
@@ -399,50 +417,41 @@ suite "openaiImage code app":
       let h = newHarness()
       replyCode = code
       replyBody = body
-      let value = h.render(%*{"prompt": "x", "metadataStateKey": "meta"})
-      check value.kind == fkImage
-      check value.asImage().width == 200
-      check value.asImage().height == 120
-      check h.errors() == @[expected]
+      check h.threw(%*{"prompt": "x", "metadataStateKey": "meta"}) == expected
+      check h.errors() == @["JS app get failed: " & expected]
       check not h.scene.state.hasKey("meta")
 
-  test "a failed request, a bad reply and a bad image paint the error":
+  test "a failed request, a bad reply and a bad image throw":
     let transport = newHarness()
     transportError = "Connection refused"
-    check transport.render(%*{"prompt": "x", "metadataStateKey": "meta"}).kind == fkImage
-    check transport.errorLogged("JS app httpRequest failed: Connection refused")
-    check transport.errorLogged("Error fetching image from OpenAI: Connection refused")
+    check transport.threw(%*{"prompt": "x", "metadataStateKey": "meta"}) ==
+      "Error fetching image from OpenAI: Connection refused"
+    check transport.errors() == @["JS app httpRequest failed: Connection refused",
+      "JS app get failed: Error fetching image from OpenAI: Connection refused"]
     check not transport.scene.state.hasKey("meta")
 
     let notJson = newHarness()
     replyBody = "<html>oops</html>"
-    check notJson.render(%*{"prompt": "x", "metadataStateKey": "meta"}).kind == fkImage
-    check notJson.errorLogged("Error fetching image from OpenAI: ")
+    let parseError = notJson.threw(%*{"prompt": "x", "metadataStateKey": "meta"})
+    check parseError.startsWith("Error fetching image from OpenAI: ")
+    check parseError.len > "Error fetching image from OpenAI: ".len
     check not notJson.scene.state.hasKey("meta")
 
     for body in ["""{"data": []}""", """{"data": [{}]}""", """{"data": [{"b64_json": "", "url": ""}]}""",
-        """{"data": {"0": {"url": "https://x"}}}""", "[]", "null"]:
+        """{"data": [null]}""", "[]", "null"]:
       let empty = newHarness()
       replyBody = body
-      let value = empty.render(%*{"prompt": "x", "metadataStateKey": "meta"})
-      check value.kind == fkImage
-      check value.asImage().width == 200
-      check empty.errors() == @["No image data returned from OpenAI."]
+      check empty.threw(%*{"prompt": "x", "metadataStateKey": "meta"}) == "No image data returned from OpenAI."
       check not empty.scene.state.hasKey("meta")
 
     let badImage = newHarness()
     replyBody = $(%*{"data": [{"b64_json": encode("this is not an image")}]})
-    check badImage.render(%*{"prompt": "x", "metadataStateKey": "meta"}).kind == fkImage
-    check badImage.errorLogged("Error fetching image from OpenAI: ")
+    check badImage.threw(%*{"prompt": "x", "metadataStateKey": "meta"}).startsWith("Error fetching image from OpenAI: ")
     check not badImage.scene.state.hasKey("meta")
 
     let download = newHarness(stubDownloads = true)
     downloadError = "HTTP 403"
     replyBody = """{"data": [{"url": "https://images.example/expired.png"}]}"""
-    check download.render(%*{"prompt": "x", "model": "dall-e-3", "metadataStateKey": "meta"}).kind == fkImage
-    check download.errorLogged("Error fetching image from OpenAI: HTTP 403")
+    check download.threw(%*{"prompt": "x", "model": "dall-e-3", "metadataStateKey": "meta"}) ==
+      "Error fetching image from OpenAI: HTTP 403"
     check not download.scene.state.hasKey("meta")
-
-    for h in [transport, notJson, badImage, download]:
-      for message in h.errors():
-        check "JS app get failed" notin message

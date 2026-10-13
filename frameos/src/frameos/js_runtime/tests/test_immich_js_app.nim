@@ -1,6 +1,7 @@
 ## The Immich code app (repo/apps/code/immich) run for real through the JS app
 ## runtime, against a mock Immich server on a thread: every mode, the legacy
-## server fallback, the error panels, the metadata state and the saved asset.
+## server fallback, the errors (thrown: the interpreter paints them), the
+## metadata state and the saved asset.
 ##
 ## Set IMMICH_LIVE_URL and IMMICH_LIVE_API_KEY (optionally IMMICH_LIVE_ALBUM_ID)
 ## to also run the app against a real Immich server; skipped otherwise.
@@ -17,9 +18,24 @@ const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "..
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 
+proc withDefaults(config: JsonNode): JsonNode =
+  ## What a scene's node hands the app (runtimeConfigFromNode): each field's
+  ## typed default (first declaration wins), then the node's values, typed.
+  result = %*{}
+  var types = initTable[string, string]()
+  for field in parseJson(appConfigJson)["fields"]:
+    let name = field["name"].getStr()
+    if types.hasKey(name):
+      continue
+    types[name] = field["type"].getStr()
+    if field.hasKey("value"):
+      result[name] = valueToJson(valueFromJsonByType(field["value"], types[name]))
+  for key, value in config:
+    result[key] = if types.hasKey(key): valueToJson(valueFromJsonByType(value, types[key])) else: value
+
 ## Mock Immich on a thread. The URL prefix selects the server's shape:
 ## /legacy has no POST /api/search/random (older servers), /nomemories
-## answers 404 to /api/memories.
+## answers 404 to /api/memories, /noimage answers 404 to the photo itself.
 var mockPort: Port
 var mockThread: Thread[void]
 
@@ -84,12 +100,16 @@ proc mockImmichLoop() {.thread.} =
       break
     var legacy = false
     var noMemories = false
+    var noImage = false
     if path.startsWith("/legacy/"):
       legacy = true
       path = path[7..^1]
     elif path.startsWith("/nomemories/"):
       noMemories = true
       path = path[11..^1]
+    elif path.startsWith("/noimage/"):
+      noImage = true
+      path = path[8..^1]
     if apiKey != "secret":
       client.reply("401 Unauthorized", "application/json", """{"message":"Invalid API key"}""")
       continue
@@ -117,6 +137,8 @@ proc mockImmichLoop() {.thread.} =
         client.reply("200 OK", "application/json",
           """[{"id": "mem-1", "assets": [{"id": "mem-img", "type": "IMAGE", "originalFileName": "memory.jpg"}, """ &
           video & "]}, {\"id\": \"mem-2\", \"assets\": []}]")
+    elif noImage and path.startsWith("/api/assets/"):
+      client.reply("404 Not Found", "application/json", """{"message":"Not found"}""")
     elif path.endsWith("/thumbnail?size=preview"):
       client.reply("200 OK", "image/jpeg", pngBytes(5, 3))
     elif path.endsWith("/original"):
@@ -166,7 +188,7 @@ proc newHarness(serverUrl: string, apiKey = "secret", assetsPath = "/tmp", saveA
 proc render(h: Harness, config: JsonNode): Value =
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: true,
     image: newImage(200, 120), loopIndex: 0, loopKey: ".", nextSleep: -1)
-  h.runtime.get(h.owner, config, context)
+  h.runtime.get(h.owner, withDefaults(config), context)
 
 proc logged(h: Harness, needle: string): bool =
   for entry in h.logs[]:
@@ -236,34 +258,48 @@ suite "immich code app":
     # 3 assets in the batch, one of them a video, one a favorite.
     check h.logged("Immich random search (favorites): HTTP 200, 1 image candidate(s)")
 
-  test "setup mistakes paint the message instead of throwing":
+  # A failure is thrown; the interpreter paints the message into the consumer's image.
+  test "setup mistakes and server errors fail the node with the message":
     let noUrl = newHarness("")
-    let noUrlValue = noUrl.render(%*{"mode": "random", "metadataStateKey": "photo"})
-    check noUrlValue.kind == fkImage
-    check noUrlValue.asImage().width == 200
-    check noUrlValue.asImage().height == 120
+    expect(JsAppError):
+      discard noUrl.render(%*{"mode": "random", "metadataStateKey": "photo"})
     check not noUrl.scene.state.hasKey("photo")
-    check noUrl.errorLogged("server URL")
+    check noUrl.errorLogged("JS app get failed: Please provide an Immich server URL in the settings.")
 
     let noKey = newHarness(mockBase(), apiKey = "")
-    check noKey.render(%*{"mode": "random"}).kind == fkImage
-    check noKey.errorLogged("API key")
+    expect(JsAppError):
+      discard noKey.render(%*{"mode": "random"})
+    check noKey.errorLogged("Please provide an Immich API key in the settings.")
 
     let noAlbum = newHarness(mockBase())
-    check noAlbum.render(%*{"mode": "album", "albumId": ""}).kind == fkImage
-    check noAlbum.errorLogged("album ID")
+    expect(JsAppError):
+      discard noAlbum.render(%*{"mode": "album", "albumId": " "})
+    check noAlbum.errorLogged("Please provide an album ID.")
+    check not noAlbum.logged("Immich random search")
 
     let emptyAlbum = newHarness(mockBase())
-    check emptyAlbum.render(%*{"mode": "album", "albumId": "empty-album"}).kind == fkImage
+    expect(JsAppError):
+      discard emptyAlbum.render(%*{"mode": "album", "albumId": "empty-album"})
     check emptyAlbum.errorLogged("This album contains no images")
 
     let badAlbum = newHarness(mockBase())
-    check badAlbum.render(%*{"mode": "album", "albumId": "not-a-uuid"}).kind == fkImage
-    check badAlbum.errorLogged("HTTP 400: each value in albumIds must be a UUID")
+    expect(JsAppError):
+      discard badAlbum.render(%*{"mode": "album", "albumId": "not-a-uuid"})
+    check badAlbum.errorLogged(
+      "Error fetching a random image from Immich: HTTP 400: each value in albumIds must be a UUID")
 
     let wrongKey = newHarness(mockBase(), apiKey = "wrong")
-    check wrongKey.render(%*{"mode": "random"}).kind == fkImage
+    expect(JsAppError):
+      discard wrongKey.render(%*{"mode": "random", "metadataStateKey": "photo"})
     check wrongKey.errorLogged("HTTP 401: Invalid API key")
+    check not wrongKey.scene.state.hasKey("photo")
+
+    let noImage = newHarness(mockBase() & "/noimage")
+    expect(JsAppError):
+      discard noImage.render(%*{"mode": "random", "metadataStateKey": "photo"})
+    check noImage.logged("Showing Immich asset img-1")
+    check noImage.errorLogged("Error fetching image from Immich: ")
+    check not noImage.scene.state.hasKey("photo")
 
   test "fullsize downloads the original and saves it under its own extension":
     let assetsDir = getTempDir() / "frameos-immich-js-app-save"

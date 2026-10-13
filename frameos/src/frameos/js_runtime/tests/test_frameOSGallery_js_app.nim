@@ -55,9 +55,13 @@ proc newHarness(): Harness =
   Harness(scene: scene, owner: owner, runtime: runtime, logs: logs)
 
 proc render(h: Harness, config: JsonNode): Value =
+  ## The config a scene node hands the app: every field's default, then the node's own values.
+  var full = %*{"category": "cute", "categoryOther": ""}
+  for key, value in config.pairs:
+    full[key] = value
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: true,
     image: newImage(200, 120), loopIndex: 0, loopKey: ".", nextSleep: -1)
-  h.runtime.get(h.owner, config, context)
+  h.runtime.get(h.owner, full, context)
 
 proc logged(h: Harness, needle: string): bool =
   for entry in h.logs[]:
@@ -92,21 +96,18 @@ suite "FrameOS Gallery code app":
     check h.render(%*{"category": "other", "categoryOther": " my gallery&x=1 "}).kind == fkImage
     check requestedUrls == @["https://gallery.frameos.net/image?category=my%20gallery%26x%3D1"]
 
-  test "other without a name paints the message instead of downloading":
+  # A failure is thrown; the interpreter paints it into the consumer's image.
+  test "other without a name fails without downloading":
     let h = newHarness()
-    let value = h.render(%*{"category": "other", "categoryOther": ""})
-    check value.kind == fkImage
-    check value.asImage().width == 200
-    check value.asImage().height == 120
+    expect(JsAppError):
+      discard h.render(%*{"category": "other", "categoryOther": ""})
     check requestedUrls.len == 0
     check h.errorLogged("Category (if other)")
 
-  test "a failed download paints the error":
+  test "a failed download fails the node with the reason":
     let h = newHarness()
     downloadError = "HTTP 404"
-    let value = h.render(%*{"category": "no-such-gallery"})
-    check value.kind == fkImage
-    check value.asImage().width == 200
-    check value.asImage().height == 120
+    expect(JsAppError):
+      discard h.render(%*{"category": "no-such-gallery"})
     check requestedUrls == @["https://gallery.frameos.net/image?category=no-such-gallery"]
     check h.errorLogged("An error occurred while downloading the gallery image. HTTP 404")

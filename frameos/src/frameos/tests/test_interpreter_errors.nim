@@ -526,3 +526,41 @@ suite "interpreter error paths":
         if pixel.r.int + pixel.g.int + pixel.b.int > 96:
           inc nonBackground
       check nonBackground > rendered.dataLen div 2
+
+  test "a JS image app that throws gets its message painted, and nothing cached":
+    # The photo apps throw instead of drawing their own SVG error panel.
+    let sceneId = "tests/interpreter-errors/js-image-producer-throws".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "js image producer error",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(20, "app", %*{"keyword": "render/image", "config": {}}),
+        node(30, "app", %*{"keyword": "photo", "config": {},
+          "cache": {"enabled": true, "durationEnabled": true, "duration": "900"}})
+      ],
+      edges: @[
+        edge(100, 10, "next", 20, "prev"),
+        edge(101, 30, "fieldOutput", 20, "fieldInput/image")
+      ],
+      apps: %*{"photo": {"sources": {
+        "app.ts": "export function get() { throw new Error('Please provide an API key in the settings.') }",
+        "config.json": $(%*{"name": "Photo", "category": "data", "output": [{"name": "image", "type": "image"}]})
+      }}}
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      let rendered = render(scene, ctx(scene, "render"))
+      var sawMessage = false
+      for entry in store.entries:
+        if entry.kind == JObject and "Please provide an API key" in $entry:
+          sawMessage = true
+      check sawMessage
+      var nonBackground = 0
+      for pixel in rendered:
+        if pixel.r.int + pixel.g.int + pixel.b.int > 96:
+          inc nonBackground
+      check nonBackground > rendered.dataLen div 2
+      check not InterpretedFrameScene(scene).cacheValues.hasKey(30.NodeId)

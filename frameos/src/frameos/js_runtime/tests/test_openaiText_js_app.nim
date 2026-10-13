@@ -3,6 +3,10 @@
 ## the request, the reply, the size-only request log, and the error behavior
 ## (most errors log and return "", a failed request or a reply that is not JSON
 ## also returns "OpenAI API error: <message>").
+##
+## Each render gets the config a scene node arrives with: config.json's typed
+## defaults under the node's own values, built by initDynamicJsApp as the
+## interpreter builds it. The app reads its fields without fallbacks of its own.
 
 import std/[json, os, strutils, unittest]
 
@@ -14,6 +18,7 @@ import frameos/values
 const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "openaiText"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
+let appSources = %*{"app.ts": appSource, "config.json": appConfigJson}
 const DefaultSystem = "You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited."
 
 type Request = object
@@ -61,14 +66,15 @@ proc newHarness(apiKey = "sk-test", settings: JsonNode = nil, nodeId = 8): Harne
   let owner = AppRoot(nodeId: nodeId.NodeId, nodeName: "openaiText", appKeyword: "openaiText", scene: scene,
     frameConfig: config)
   let runtime = newJsAppRuntime(category = "data", outputType = "string", source = appSource,
-    settingsKeys = @["openAI"], sourceName = "app.ts",
-    sources = %*{"app.ts": appSource, "config.json": appConfigJson})
+    settingsKeys = @["openAI"], sourceName = "app.ts", sources = appSources)
   Harness(scene: scene, owner: owner, runtime: runtime, logs: logs)
 
 proc render(h: Harness, config: JsonNode): Value =
+  let node = DiagramNode(id: h.owner.nodeId, nodeType: "app", data: %*{"keyword": "openaiText", "config": config})
+  let configJson = DynamicJsApp(initDynamicJsApp("openaiText", node, h.scene, appSources)).configJson
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: false,
     loopIndex: 0, loopKey: ".", nextSleep: -1)
-  h.runtime.get(h.owner, config, context)
+  h.runtime.get(h.owner, configJson, context)
 
 proc errors(h: Harness): seq[string] =
   for entry in h.logs[]:
@@ -131,7 +137,7 @@ suite "openaiText code app":
       check "Secret" notin $entry
       check "private" notin $entry
     check h.errors().len == 0
-    check "const TIMEOUT = 60000" in appSource
+    check "timeoutMs: 60000" in appSource
 
   test "sizes are counted in UTF-8 bytes, as the Nim app did":
     let h = newHarness()
@@ -159,8 +165,8 @@ suite "openaiText code app":
     check body["messages"][0]["content"].getStr() == DefaultSystem
 
   test "a reply without a message is an empty string":
-    for reply in ["""{"choices": []}""", """{"choices": [{"message": {"content": null}}]}""", "{}", "[]", "null",
-        """{"choices": {"0": {"message": {"content": "x"}}}}"""]:
+    for reply in ["""{"choices": []}""", """{"choices": [{"message": {"content": null}}]}""",
+        """{"choices": [{"message": {}}]}""", """{"choices": [null]}""", "{}", "[]", "null"]:
       let h = newHarness()
       replyBody = reply
       let output = h.render(%*{"user": "hi"})

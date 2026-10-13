@@ -3,7 +3,7 @@
 ## `jsHttpRequestHook`; the photo URL the API returns points at a mock image
 ## server on a thread, so the download, the size suffix it gets and the saved
 ## asset are the real thing. Ports data/unsplash's own tests and covers every
-## orientation, the error panels, the metadata state and the saved asset.
+## orientation, the failures, the metadata state and the saved asset.
 
 import std/[json, net, os, strutils, tables, unittest, uri]
 import pixie
@@ -16,6 +16,21 @@ import frameos/values
 const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "unsplash"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
+let appFields = parseJson(appConfigJson)["fields"]
+
+proc withDefaults(config: JsonNode): JsonNode =
+  ## What the runtime hands a scene's node (runtimeConfigFromNode): every
+  ## field's typed default (the first declaration of a name wins), then the
+  ## node's own values, typed the same way. The app reads its fields as given.
+  result = %*{}
+  var types = initTable[string, string]()
+  for field in appFields:
+    let name = field{"name"}.getStr()
+    if name.len > 0 and not types.hasKey(name):
+      types[name] = field{"type"}.getStr()
+      result[name] = valueToJson(valueFromJsonByType(field["value"], types[name]))
+  for key, value in config:
+    result[key] = if types.hasKey(key): valueToJson(valueFromJsonByType(value, types[key])) else: value
 
 ## Mock image host on a thread: /img/... answers a 5x3 PNG, anything else 404.
 ## Every request it sees goes to `mockRequests` as its path.
@@ -155,7 +170,7 @@ proc newHarness(accessKey = "key-1", width = 200, height = 120, rotate = 0, debu
 proc render(h: Harness, config: JsonNode, width = 200, height = 120, hasImage = true): Value =
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: hasImage,
     image: (if hasImage: newImage(width, height) else: nil), loopIndex: 0, loopKey: ".", nextSleep: -1)
-  h.runtime.get(h.owner, config, context)
+  h.runtime.get(h.owner, withDefaults(config), context)
 
 proc logged(h: Harness, needle: string): bool =
   for entry in h.logs[]:
@@ -174,6 +189,16 @@ proc errorLogged(h: Harness, needle: string): bool =
       return true
   false
 
+proc failure(h: Harness, config: JsonNode, width = 200, height = 120): string =
+  ## A failure is thrown, as the Nim app raised: the runtime logs "JS app get
+  ## failed: <message>" and raises it, and the interpreter paints the message
+  ## into the consumer's image. Returns the message ("" when nothing threw).
+  try:
+    discard h.render(config, width, height)
+  except JsAppError as e:
+    result = e.msg
+    doAssert h.errorLogged("JS app get failed: " & e.msg), e.msg
+
 proc savedFiles(dir: string): seq[string] =
   if dirExists(dir):
     for file in walkDirRec(dir):
@@ -190,17 +215,17 @@ suite "unsplash code app":
     check h.scene.state.hasKey("meta")
     check h.scene.state["meta"]["search"].getStr() == "blue sky"
 
-  test "missing api key returns error image with context dimensions":
+  test "missing api key fails the node":
     let h = newHarness(accessKey = "", width = 10, height = 6, debug = false)
-    let value = h.render(%*{"search": "cats", "metadataStateKey": "meta"}, width = 15, height = 9)
-    check value.kind == fkImage
-    check value.asImage().width == 15
-    check value.asImage().height == 9
+    check h.failure(%*{"search": "cats", "metadataStateKey": "meta"}, width = 15, height = 9) ==
+      "Please provide an Unsplash API key in the settings."
     check not h.scene.state.hasKey("meta")
     check apiCalls.len == 0
-    check h.logs[].len == 1
-    check h.logs[][0]["event"].getStr().contains("error:6:data/unsplash")
-    check h.logs[][0]["error"].getStr() == "Please provide an Unsplash API key in the settings."
+    var errorEvents: seq[string] = @[]
+    for entry in h.logs[]:
+      if entry{"event"}.getStr().startsWith("error:"):
+        errorEvents.add(entry["event"].getStr())
+    check errorEvents == @["error:6:data/unsplash"]
 
   test "a random photo: the API call, the sized photo URL and the metadata":
     let h = newHarness()
@@ -297,59 +322,52 @@ suite "unsplash code app":
     check h.render(%*{"search": search}).kind == fkImage
     check apiCalls[0].url == expectedApiUrl("landscape", search)
 
-  test "an API error shows the error message, the error string or the body":
+  test "an API error fails with the error message, the error string or the body":
     let h = newHarness()
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (401, """{"errors": ["OAuth error: The access token is invalid"]}""")
-    check h.render(%*{"metadataStateKey": "photo"}).kind == fkImage
-    check h.errorLogged("""Error making request 401: {"errors":["OAuth error: The access token is invalid"]}""")
+    check h.failure(%*{"metadataStateKey": "photo"}) ==
+      """Error making request 401: {"errors":["OAuth error: The access token is invalid"]}"""
     check not h.scene.state.hasKey("photo")
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (403, """{"error": {"message": "Rate limit exceeded"}}""")
-    check h.render(%*{}).kind == fkImage
-    check h.errorLogged("Error making request 403: Rate limit exceeded")
+    check h.failure(%*{}) == "Error making request 403: Rate limit exceeded"
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (404, """{"error": "Not found"}""")
-    check h.render(%*{}).kind == fkImage
-    check h.errorLogged("Error making request 404: Not found")
+    check h.failure(%*{}) == "Error making request 404: Not found"
+
+    apiAnswer = proc(url: string): tuple[code: int, body: string] =
+      (500, """{"error": {"message": 42}}""")
+    check h.failure(%*{}) == """Error making request 500: {"error":{"message":42}}"""
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (503, "Service Unavailable")
-    let value = h.render(%*{})
-    check value.kind == fkImage
-    check value.asImage().width == 200
-    check value.asImage().height == 120
-    check h.errorLogged("Error making request 503: Service Unavailable")
+    check h.failure(%*{}) == "Error making request 503: Service Unavailable"
     check imageRequests().len == 0
 
-  test "a failed request, a body that is not JSON and a missing photo URL paint the error":
+  test "a failed request, a body that is not JSON and a missing photo URL fail the node":
     let h = newHarness()
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       raise newException(IOError, "connection refused")
-    check h.render(%*{"metadataStateKey": "photo"}).kind == fkImage
-    check h.errorLogged("Error fetching image from Unsplash: connection refused")
+    check h.failure(%*{"metadataStateKey": "photo"}) == "Error fetching image from Unsplash: connection refused"
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] = (200, "<html>oops</html>")
-    check h.render(%*{"metadataStateKey": "photo"}).kind == fkImage
-    check h.errorLogged("Error fetching image from Unsplash: ")
+    check h.failure(%*{"metadataStateKey": "photo"}).startsWith("Error fetching image from Unsplash: ")
 
     apiAnswer = proc(url: string): tuple[code: int, body: string] = (200, """{"id": "x", "urls": {}}""")
-    check h.render(%*{"metadataStateKey": "photo"}).kind == fkImage
-    check h.errorLogged("No image URL returned from Unsplash.")
+    check h.failure(%*{"metadataStateKey": "photo"}) == "No image URL returned from Unsplash."
+    apiAnswer = proc(url: string): tuple[code: int, body: string] = (200, "null")
+    check h.failure(%*{"metadataStateKey": "photo"}) == "No image URL returned from Unsplash."
     check not h.scene.state.hasKey("photo")
     check imageRequests().len == 0
 
-  test "a failed download paints the error and records no metadata":
+  test "a failed download fails the node and records no metadata":
     let h = newHarness()
     apiAnswer = proc(url: string): tuple[code: int, body: string] =
       (200, photoJson(mockBase() & "/gone/photo?ixid=1"))
-    let value = h.render(%*{"metadataStateKey": "photo"})
-    check value.kind == fkImage
-    check value.asImage().width == 200
-    check h.errorLogged("Error fetching image from Unsplash: ")
-    check h.errorLogged("404")
+    check h.failure(%*{"metadataStateKey": "photo"}) == "Error fetching image from Unsplash: 404 Not Found"
     check not h.scene.state.hasKey("photo")
     check imageRequests() == @["/gone/photo?ixid=1&w=200&h=120&fit=crop&crop=faces,edges"]
 

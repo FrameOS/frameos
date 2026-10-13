@@ -71,12 +71,12 @@ suite "retired Nim apps":
     let scene = init(sceneId, config, testLogger(config), %*{})
     check InterpretedFrameScene(scene).appsByNodeId[1.NodeId].isDynamicJsApp()
 
-    # No Immich settings on this frame: the JS app answers with its message
-    # panel, which proves it ran with the `immich` settings namespace it
-    # declares (getSetting would refuse an undeclared one).
-    let value = scene.getDataNode(1.NodeId, ExecutionContext(scene: scene, event: "render",
-      payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: 0.0))
-    check value.kind == fkImage
+    # No Immich settings on this frame: the JS app throws its message, which
+    # proves it ran with the `immich` settings namespace it declares
+    # (getSetting would refuse an undeclared one).
+    expect(JsAppError):
+      discard scene.getDataNode(1.NodeId, ExecutionContext(scene: scene, event: "render",
+        payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: 0.0))
     var sawMessage = false
     for entry in logged:
       if ($entry).contains("Please provide an Immich server URL"):

@@ -15,16 +15,12 @@ const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "..
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 
-## Runs the app's exported helpers, and its get() next to a way to age the
-## reused reply (the module state the app keeps between calls).
+## Runs the app's get() next to a way to age the reused reply (the module
+## state the app keeps between calls).
 const probeSource = """
-import { isHaEntityId, errorReply, lastReply, haStateUrl, get as appGet } from './app'
+import { lastReply, get as appGet } from './app'
 export function get(app, context) {
-  const probe = app.config.probe
-  if (probe === 'isHaEntityId') return app.config.values.map((value) => isHaEntityId(value))
-  if (probe === 'errorReply') return errorReply(app.config.message)
-  if (probe === 'haStateUrl') return haStateUrl(app.config.haUrl, app.config.entityId)
-  if (probe === 'age') lastReply.at -= 2000
+  if (app.config.probe === 'age') lastReply.at -= 2000
   return appGet(app, context)
 }
 """
@@ -120,12 +116,17 @@ suite "Home Assistant Sensor code app":
       %*{"error": "Please provide a Home Assistant URL in the settings."}
 
   test "entity ids must be <domain>.<object_id>":
-    let h = newHarness(goodSettings, probe = true)
-    let values = @["sensor.outdoor_temp", "binary_sensor.door_2", "", "sensor", "sensor.", ".temp",
-      "sensor.a.b", "Sensor.Temp", "sensor.temp/../../admin", "sensor.temp?x=1", "sensor.temp#frag",
-      "sensor.temp\n", "sensor .temp"]
-    let output = h.call(%*{"probe": "isHaEntityId", "values": values})
-    check output == %*[true, true, false, false, false, false, false, false, false, false, false, false, false]
+    for valid in ["sensor.outdoor_temp", "binary_sensor.door_2", " sensor.temp\n"]:
+      let h = newHarness(goodSettings)
+      check h.call(%*{"entityId": valid})["state"].getStr() == "21.5"
+      check requests.len == 1
+      check requests[0].url == "http://ha.local:8123/api/states/" & valid.strip()
+    for invalid in ["", "sensor", "sensor.", ".temp", "sensor.a.b", "Sensor.Temp", "sensor.temp/../../admin",
+        "sensor.temp?x=1", "sensor.temp#frag", "sensor .temp", "sensor.t\u00e9mp"]:
+      let h = newHarness(goodSettings)
+      check h.call(%*{"entityId": invalid}) == %*{"error": "Invalid Home Assistant entity id \"" & invalid &
+        "\": expected <domain>.<object_id> using only a-z, 0-9 and _."}
+      check requests.len == 0
 
   test "a malformed entity id never reaches the network":
     let h = newHarness(%*{"homeAssistant": {"url": "http://127.0.0.1:9", "accessToken": "token"}})
@@ -140,20 +141,15 @@ suite "Home Assistant Sensor code app":
     check missing["error"].getStr().startsWith("Invalid Home Assistant entity id \"\"")
     check requests.len == 0
 
-  test "error helper returns shaped payload":
-    let h = newHarness(goodSettings, probe = true)
-    check h.call(%*{"probe": "errorReply", "message": "boom"}) == %*{"error": "boom"}
-    check h.errorLogged("boom")
-
-  test "the state URL drops one trailing slash and the id is URL-encoded":
-    let h = newHarness(goodSettings, probe = true)
-    check h.call(%*{"probe": "haStateUrl", "haUrl": "http://ha.local:8123/", "entityId": "sensor.x"}).getStr() ==
-      "http://ha.local:8123/api/states/sensor.x"
-    check h.call(%*{"probe": "haStateUrl", "haUrl": "http://ha.local:8123", "entityId": "sensor.x"}).getStr() ==
-      "http://ha.local:8123/api/states/sensor.x"
-    # Only one slash, like Nim's removeSuffix("/").
-    check h.call(%*{"probe": "haStateUrl", "haUrl": "https://ha.example//", "entityId": "sensor.x"}).getStr() ==
-      "https://ha.example//api/states/sensor.x"
+  test "the state URL drops one trailing slash":
+    for (haUrl, expected) in [("http://ha.local:8123/", "http://ha.local:8123/api/states/sensor.x"),
+        ("http://ha.local:8123", "http://ha.local:8123/api/states/sensor.x"),
+        # Only one slash, like Nim's removeSuffix("/").
+        ("https://ha.example//", "https://ha.example//api/states/sensor.x")]:
+      let h = newHarness(%*{"homeAssistant": {"url": haUrl, "accessToken": "token"}})
+      discard h.call(%*{"entityId": "sensor.x"})
+      check requests.len == 1
+      check requests[0].url == expected
 
   test "a good reply is the entity's state, fetched with the token":
     let h = newHarness(goodSettings)
