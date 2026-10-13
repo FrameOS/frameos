@@ -8,12 +8,9 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
-#include "esp_log.h"
 #include "esp_timer.h"
 
 #include "fos_config.h"
-
-static const char *TAG = "fos_buzzer";
 
 /* Nothing else in the firmware uses LEDC. Take the last timer and channel
  * (the C3 has six channels, the S3 eight) so a future user counting from 0
@@ -39,28 +36,25 @@ static uint32_t s_freq_hz = 0;
 static int s_pin = -1;         /* the pin the channel drives, -1 = none */
 static int s_refused_pin = -1; /* said why once; quiet until the pin changes */
 
-/* A pin the board already uses for something else: a PWM on a button's
- * pull-up or the panel's SPI lines would break the thing it shares with.
- * The setters only check the chip's reserved pads; this catches the rest. */
-static const char *pin_conflict(const fos_config_t *config, int pin)
+/* A pin the chip reserves or the board already uses for something else: a
+ * PWM on a button's pull-up or the panel's SPI lines would break the thing it
+ * shares with. The setters only check the reserved pads; this catches the
+ * rest. */
+static bool pin_in_use(const fos_config_t *config, int pin)
 {
-    const char *reserved = fos_config_gpio_pin_reserved(pin);
-    if (reserved != NULL) return reserved;
+    if (fos_config_gpio_pin_reserved(pin) != NULL) return true;
     const fos_pins_t *p = &config->pins;
     if (pin == p->rst || pin == p->dc || pin == p->cs || pin == p->cs2 || pin == p->busy ||
-        pin == p->sck || pin == p->mosi || pin == p->pwr) {
-        return "a display pin";
+        pin == p->sck || pin == p->mosi || pin == p->pwr || pin == config->battery_pin ||
+        pin == config->battery_enable_pin) {
+        return true;
     }
     for (size_t i = 0; i < config->gpio_button_count; i++) {
-        if (config->gpio_buttons[i].pin == pin) return "a button";
+        if (config->gpio_buttons[i].pin == pin) return true;
     }
-    if (pin == config->battery_pin || pin == config->battery_enable_pin) return "a battery pin";
-    if (config->assets_sd.enabled &&
-        (pin == config->assets_sd.cs || pin == config->assets_sd.sck ||
-         pin == config->assets_sd.miso || pin == config->assets_sd.mosi)) {
-        return "an SD card pin";
-    }
-    return NULL;
+    return config->assets_sd.enabled &&
+           (pin == config->assets_sd.cs || pin == config->assets_sd.sck ||
+            pin == config->assets_sd.miso || pin == config->assets_sd.mosi);
 }
 
 /* Point the channel at `pin`, letting go of the previous one. Under s_lock.
@@ -78,12 +72,11 @@ static bool attach(int pin)
         return false;
     }
 
-    const char *conflict = pin_conflict(fos_config(), pin);
-    if (conflict != NULL) {
+    if (pin_in_use(fos_config(), pin)) {
         if (s_refused_pin != pin) {
             s_refused_pin = pin;
             /* printf: INFO and WARN-only builds alike show it on the console. */
-            printf("buzzer: GPIO %d not used, it is %s\n", pin, conflict);
+            printf("buzzer: GPIO %d is in use, not driving it\n", pin);
         }
         return false;
     }
@@ -96,11 +89,7 @@ static bool attach(int pin)
             .freq_hz = TIMER_START_HZ,
             .clk_cfg = LEDC_AUTO_CLK,
         };
-        esp_err_t err = ledc_timer_config(&timer);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "LEDC timer: %s", esp_err_to_name(err));
-            return false;
-        }
+        if (ledc_timer_config(&timer) != ESP_OK) return false;
         s_timer_ready = true;
         s_freq_hz = TIMER_START_HZ;
     }
@@ -113,11 +102,7 @@ static bool attach(int pin)
         .duty = 0,
         .hpoint = 0,
     };
-    esp_err_t err = ledc_channel_config(&channel);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "LEDC channel on GPIO %d: %s", pin, esp_err_to_name(err));
-        return false;
-    }
+    if (ledc_channel_config(&channel) != ESP_OK) return false;
     /* Idle low between tones: no DC through the transducer. */
     ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
     s_pin = pin;
@@ -146,7 +131,6 @@ void fos_buzzer_init(void)
         .name = "fos_buzzer",
     };
     if (!s_lock || esp_timer_create(&args, &s_stop_timer) != ESP_OK) {
-        ESP_LOGW(TAG, "buzzer unavailable: out of memory");
         if (s_lock) vSemaphoreDelete(s_lock);
         s_lock = NULL;
         s_stop_timer = NULL;

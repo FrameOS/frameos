@@ -262,8 +262,7 @@ static int cmd_status(int argc, char **argv)
         printf("battery:     not configured\n");
     }
     if (config->buzzer_pin >= 0) {
-        printf("buzzer:      GPIO %d, %u Hz (sounds while a button is held)\n", (int)config->buzzer_pin,
-               (unsigned)config->buzzer_tone_hz);
+        printf("buzzer:      GPIO %d, %u Hz\n", (int)config->buzzer_pin, (unsigned)config->buzzer_tone_hz);
     }
     else printf("buzzer:      none\n");
     printf("nim:         %s\n", frameos_nim_info());
@@ -806,29 +805,19 @@ static int cmd_set(int argc, char **argv)
         config->wake_check_sec = seconds;
     }
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
-    else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0) {
+    else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0 ||
+             strcmp(key, "buzzer_pin") == 0) {
         int pin = atoi(value);
         const char *why = pin >= 0 ? fos_config_gpio_pin_reserved(pin) : NULL;
         if (why != NULL) {
             printf("refusing %s GPIO %d: %s\n", key, pin, why);
             return 1;
         }
+        if (pin < -1) pin = -1;
         if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)pin;
-        else config->battery_enable_pin = (int8_t)pin;
-    }
-    else if (strcmp(key, "buzzer_pin") == 0) {
-        /* Live: the next chirp drives the new pin (fos_buzzer.c). */
-        int pin = atoi(value);
-        if (pin < -1 || pin > 48) {
-            printf("buzzer_pin must be -1 (none) to 48\n");
-            return 1;
-        }
-        const char *why = pin >= 0 ? fos_config_gpio_pin_reserved(pin) : NULL;
-        if (why != NULL) {
-            printf("refusing buzzer_pin GPIO %d: %s\n", pin, why);
-            return 1;
-        }
-        config->buzzer_pin = (int8_t)pin;
+        else if (strcmp(key, "battery_enable_pin") == 0) config->battery_enable_pin = (int8_t)pin;
+        /* Live: the next tone drives the new pin (fos_buzzer.c). */
+        else config->buzzer_pin = (int8_t)pin;
     }
     else if (strcmp(key, "buzzer_tone_hz") == 0) {
         long hz = strtol(value, NULL, 10);
@@ -1787,17 +1776,17 @@ static int cmd_beep(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
     if (config->buzzer_pin < 0) {
-        printf("no buzzer configured (set buzzer_pin <gpio>)\n");
+        printf("no buzzer_pin set\n");
         return 1;
     }
     long freq_hz = argc > 1 ? strtol(argv[1], NULL, 10) : (long)config->buzzer_tone_hz;
     long duration_ms = argc > 2 ? strtol(argv[2], NULL, 10) : 200;
-    if (freq_hz < 100 || freq_hz > 10000 || duration_ms < 1 || duration_ms > 5000) {
-        printf("usage: beep [100-10000 Hz] [1-5000 ms]\n");
+    if (freq_hz < FOS_BUZZER_TONE_HZ_MIN || freq_hz > FOS_BUZZER_TONE_HZ_MAX || duration_ms < 1 ||
+        duration_ms > 5000) {
+        printf("usage: beep [hz] [ms]\n");
         return 1;
     }
     fos_buzzer_tone((uint32_t)freq_hz, (uint32_t)duration_ms);
-    printf("beep on GPIO %d: %ld Hz, %ld ms\n", (int)config->buzzer_pin, freq_hz, duration_ms);
     return 0;
 }
 
@@ -1807,7 +1796,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "status", .help = "Show device status", .func = cmd_status},
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
-        {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer (buzzer_pin, buzzer_tone_hz)", .func = cmd_beep},
+        {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},

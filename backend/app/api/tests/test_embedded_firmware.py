@@ -870,7 +870,7 @@ _FOS_CONSOLE_C = Path(__file__).resolve().parents[4] / "embedded" / "esp32" / "m
 _FOS_BOARD_C = _FOS_CONSOLE_C.with_name("fos_board.c")
 
 
-def _board_buzzer_pins() -> dict[str, str]:
+def _board_buzzer_pins() -> dict[str, dict[str, str]]:
     """fos_board.c's k_buzzers table: `set hardware` takes a board's buzzer
     pin and pitch from it, and so does a frame whose NVS predates the keys."""
     source = _FOS_BOARD_C.read_text(encoding="utf-8")

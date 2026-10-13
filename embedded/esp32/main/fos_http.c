@@ -855,7 +855,6 @@ char *fos_http_status_json(void)
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d,"
         "\"pin\":%d,\"divider\":%.3f,\"enablePin\":%d},"
-        "\"buzzerPin\":%d,\"buzzerToneHz\":%u,"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
@@ -892,7 +891,6 @@ char *fos_http_status_json(void)
         battery_present ? "true" : "false", battery_mv, battery_pct,
         (int)config->battery_pin, (double)config->battery_divider,
         (int)config->battery_enable_pin,
-        (int)config->buzzer_pin, (unsigned)config->buzzer_tone_hz,
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,
