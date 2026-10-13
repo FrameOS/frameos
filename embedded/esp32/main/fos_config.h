@@ -22,6 +22,10 @@
 #define FOS_GPIO_BUTTONS_MAX 8
 #define FOS_GPIO_BUTTON_LABEL_LEN 32
 #define FOS_GPIO_BUTTONS_SPEC_LEN 384
+/* `buzzer_tone_hz` bounds, the contract's rule: a passive piezo is audible
+ * well inside them. */
+#define FOS_BUZZER_TONE_HZ_MIN 100
+#define FOS_BUZZER_TONE_HZ_MAX 10000
 #define FOS_ASSETS_PATH_LEN 128
 /* frame.json's `colors` block as compact JSON (docs/asset-color-profiles.md):
  * the automatic fit switch and the frame-wide correction. Big enough for
@@ -145,6 +149,11 @@ typedef struct {
     int8_t battery_enable_pin;     /* GPIO driven high to enable the battery
                                     * divider (Seeed reTerminal E10xx: GPIO21),
                                     * -1 = always-on divider */
+    int8_t buzzer_pin;             /* passive buzzer, PWM-driven (Seeed reTerminal
+                                    * E-series: GPIO45): sounds while a registered
+                                    * button press is held. -1 = none / silent */
+    uint16_t buzzer_tone_hz;       /* pitch of that tone (default 2000); a refused
+                                    * press buzzes a quarter of it */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;

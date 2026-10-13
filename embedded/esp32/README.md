@@ -693,6 +693,38 @@ a map) and the cloud's `set_settings` carries `gpio_buttons`; the device
 rebinds its buttons with a restart. Before that, a provisioned board's map
 could only be changed over the console.
 
+### Button beep
+
+A press the button task registers sounds the board's buzzer (`fos_buzzer.c`,
+2 kHz through an LEDC PWM channel) until the key is released, for a second at
+most: a tap clicks, a hold beeps. It starts from the button task the moment
+the press is queued, so the feedback does not wait for a render that may be
+30 s into a panel refresh. A press that wakes the chip from deep sleep gets a
+60 ms chirp as soon as it boots.
+
+Presses during a render are registered: the button task keeps polling, and
+the render task drains the queue in one go before its next pass (one render
+for the whole burst). The queue holds 64 edges, 32 press/release pairs, and a
+press is accepted only when its release also fits, so the dispatcher never
+sees a key that stays down. A press with no room is dropped, logged as
+`button:dropped`, and gets a short low buzz instead (a quarter of the press
+tone, 50 ms): it was not received.
+
+The pitch is `buzzer_tone_hz` (100-10000, default 2000). The pin is
+`buzzer_pin` (`-1` = none): the reTerminal E-series presets set GPIO 45 at
+2000 Hz, the reTerminal Sticky GPIO 48 at 4000 Hz (its electromagnetic
+buzzer's resonance). A board whose NVS predates the keys takes its preset's
+(`fos_board_buzzer_pin` / `_tone_hz`), so these frames beep after the update
+without being reprovisioned. The Waveshare PhotoPainter and 13.3E6 have a
+speaker behind an ES8311 codec instead, which needs an I2S driver: not
+supported yet. The firmware leaves a pin alone that is a display,
+button, battery or SD pin. Console: `set buzzer_pin <gpio|-1>`,
+`set buzzer_tone_hz <hz>` and `beep [hz] [ms]` to test it. Applied live on
+every plane: the backend's settings pull carries `buzzerPin` /
+`buzzerToneHz`, the cloud's `set_settings` carries `buzzer_pin` /
+`buzzer_tone_hz` (firmware 2026.10.12+), and both show them as "Button beep
+GPIO" and "Button beep tone" under the frame's GPIO buttons.
+
 ## Scene storage and memory (2026.8.13)
 
 Scenes arrive as one combined `scenes.json` — from the USB upload, the

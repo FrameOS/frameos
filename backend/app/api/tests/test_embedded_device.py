@@ -595,6 +595,45 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
 
 
 @pytest.mark.asyncio
+async def test_settings_carry_the_buzzer_pin_only_when_set(async_client, no_auth_client, db):
+    """The button chirp's buzzer is present-only like the battery wiring: a
+    frame whose console preset gave it GPIO45 keeps it until the backend holds
+    a value, and -1 (the GPIO section's way to silence it) travels as -1."""
+    frame = await device_frame(async_client, db)
+    base_config = {
+        key: value
+        for key, value in (frame.device_config or {}).items()
+        if key not in ('buzzerPin', 'buzzer_pin')
+    }
+    frame.device_config = base_config
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert 'buzzerPin' not in response.json()['frame']
+
+    assert 'buzzerToneHz' not in response.json()['frame']
+
+    # Either spelling: a USB-console provisioning writes snake_case.
+    for stored, sent in ({'buzzerPin': 45}, 45), ({'buzzer_pin': -1}, -1):
+        frame.device_config = {**base_config, **stored}
+        db.add(frame)
+        db.commit()
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+        assert response.json()['frame']['buzzerPin'] == sent
+
+    # The pitch travels the same way, only once the backend holds one.
+    frame.device_config = {**base_config, 'buzzerPin': 45, 'buzzerToneHz': 2700}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['buzzerToneHz'] == 2700
+
+
+@pytest.mark.asyncio
 async def test_settings_carry_what_a_console_line_cannot(async_client, no_auth_client, db):
     """The three settings a stock release image can only learn from this poll:
     the HTTP response cap (kilobyte-scale integer, but read once at boot), the

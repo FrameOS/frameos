@@ -153,6 +153,21 @@ export function cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion: string |
 }
 
 /**
+ * 2026.10.12: the buzzer a GPIO button press sounds (reTerminal E-series:
+ * GPIO 45; -1 silences it) and its pitch. Applied live. Older firmware refuses the whole
+ * push on it, so it has its own floor; the GPIO section renders the field
+ * disabled below it.
+ */
+export const esp32BuzzerCloudFrameSettingsMinVersion = '2026.10.12'
+export const esp32BuzzerCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32BuzzerCloudFrameSettingsMinVersion
+)
+
+export function cloudFrameSupportsEsp32Buzzer(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32BuzzerCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
  * What every ESP32 firmware with the cloud link applies: four of the base
  * six (no timezone before 2026.8.34, no debug before 2026.8.31) plus the
  * ungated power keys.
@@ -339,6 +354,8 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'battery_pin',
   'battery_divider',
   'battery_enable_pin',
+  'buzzer_pin',
+  'buzzer_tone_hz',
   'metrics_interval',
   'max_http_response_bytes',
 ]

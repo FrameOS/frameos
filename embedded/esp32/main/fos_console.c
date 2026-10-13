@@ -24,7 +24,9 @@
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
+#include "fos_board.h"
 #include "fos_buttons.h"
+#include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -259,6 +261,10 @@ static int cmd_status(int argc, char **argv)
     } else {
         printf("battery:     not configured\n");
     }
+    if (config->buzzer_pin >= 0) {
+        printf("buzzer:      GPIO %d, %u Hz\n", (int)config->buzzer_pin, (unsigned)config->buzzer_tone_hz);
+    }
+    else printf("buzzer:      none\n");
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
@@ -445,7 +451,8 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|pins|gpio_buttons|ap_psk> <value...>\n");
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|pins|gpio_buttons|ap_psk> "
+               "<value...>\n");
         return 1;
     }
     fos_config_t *config = fos_config();
@@ -613,7 +620,8 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=6,mosi=5,pwr=-1",
               "9:BOOT",
               "", -1, 2.0f, -1, 0, 0 },
-            /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). */
+            /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). Its 4 kHz
+             * buzzer on GPIO48 comes from fos_board_buzzer_pin/_tone_hz. */
             { "seeed_reterminal_sticky", "EPD_3in97",
               "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
               "4:POWER",
@@ -671,6 +679,10 @@ static int cmd_set(int argc, char **argv)
             config->battery_pin = presets[i].battery_pin;
             config->battery_divider = presets[i].battery_divider;
             config->battery_enable_pin = presets[i].battery_enable_pin;
+            config->buzzer_pin = (int8_t)fos_board_buzzer_pin(presets[i].name);
+            if (fos_board_buzzer_tone_hz(presets[i].name) > 0) {
+                config->buzzer_tone_hz = (uint16_t)fos_board_buzzer_tone_hz(presets[i].name);
+            }
             if (presets[i].deep_sleep_on_battery) {
                 config->deep_sleep_on_battery = true;
                 config->wake_check_sec = presets[i].wake_check_sec;
@@ -793,15 +805,27 @@ static int cmd_set(int argc, char **argv)
         config->wake_check_sec = seconds;
     }
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
-    else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0) {
+    else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0 ||
+             strcmp(key, "buzzer_pin") == 0) {
         int pin = atoi(value);
         const char *why = pin >= 0 ? fos_config_gpio_pin_reserved(pin) : NULL;
         if (why != NULL) {
             printf("refusing %s GPIO %d: %s\n", key, pin, why);
             return 1;
         }
+        if (pin < -1) pin = -1;
         if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)pin;
-        else config->battery_enable_pin = (int8_t)pin;
+        else if (strcmp(key, "battery_enable_pin") == 0) config->battery_enable_pin = (int8_t)pin;
+        /* Live: the next tone drives the new pin (fos_buzzer.c). */
+        else config->buzzer_pin = (int8_t)pin;
+    }
+    else if (strcmp(key, "buzzer_tone_hz") == 0) {
+        long hz = strtol(value, NULL, 10);
+        if (hz < FOS_BUZZER_TONE_HZ_MIN || hz > FOS_BUZZER_TONE_HZ_MAX) {
+            printf("buzzer_tone_hz must be %d-%d\n", FOS_BUZZER_TONE_HZ_MIN, FOS_BUZZER_TONE_HZ_MAX);
+            return 1;
+        }
+        config->buzzer_tone_hz = (uint16_t)hz;
     }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
@@ -1746,12 +1770,33 @@ static int cmd_factory_reset(int argc, char **argv)
     return 0;
 }
 
+/* `beep [hz] [ms]`: the buzzer on its own, to check the pin without
+ * pressing a button. */
+static int cmd_beep(int argc, char **argv)
+{
+    fos_config_t *config = fos_config();
+    if (config->buzzer_pin < 0) {
+        printf("no buzzer_pin set\n");
+        return 1;
+    }
+    long freq_hz = argc > 1 ? strtol(argv[1], NULL, 10) : (long)config->buzzer_tone_hz;
+    long duration_ms = argc > 2 ? strtol(argv[2], NULL, 10) : 200;
+    if (freq_hz < FOS_BUZZER_TONE_HZ_MIN || freq_hz > FOS_BUZZER_TONE_HZ_MAX || duration_ms < 1 ||
+        duration_ms > 5000) {
+        printf("usage: beep [hz] [ms]\n");
+        return 1;
+    }
+    fos_buzzer_tone((uint32_t)freq_hz, (uint32_t)duration_ms);
+    return 0;
+}
+
 static esp_err_t register_frameos_console_commands(void)
 {
     const esp_console_cmd_t commands[] = {
         {.command = "status", .help = "Show device status", .func = cmd_status},
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
+        {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},

@@ -9,12 +9,14 @@ import { EMBEDDED_VIRTUAL, withCustomPalette } from '../../../../devices'
 import { paletteDeviceOf } from '../../../../utils/assetColors/devicePalette'
 import {
   cloudFrameSupportsEsp32BatteryEnablePin,
+  cloudFrameSupportsEsp32Buzzer,
   cloudFrameSupportsEsp32ExtendedSettings,
   cloudFrameSupportsEsp32TimeZone,
   cloudFrameSupportsExtendedSettings,
   cloudFrameSupportsHardwareSettings,
   cloudFrameSupportsDisplayDriverSetting,
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
+  esp32BuzzerCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
 import { logsLogic } from '../Logs/logsLogic'
@@ -117,6 +119,22 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
    * so the section falls back to the editable list.
    */
   reportedGpioButtons: GPIOButton[] | null
+  /**
+   * ESP32 only, null elsewhere: the buzzer a GPIO button press sounds and
+   * its pitch (fos_buzzer.c). The cloud pushes `buzzer_pin` /
+   * `buzzer_tone_hz`; the backend keeps `buzzerPin` / `buzzerToneHz` in
+   * device_config for the device's settings poll. `reported*` is what a
+   * cloud frame said it runs with (`hardware.buzzerPin` / `buzzerToneHz`);
+   * `disabledReason` the cloud firmware floor.
+   */
+  buttonBeep: {
+    pin: number | undefined
+    toneHz: number | undefined
+    reportedPin: number | undefined
+    reportedToneHz: number | undefined
+    disabledReason: string | undefined
+  } | null
+  setButtonBeep: (patch: { pin?: number; toneHz?: number }) => void
 
   appsWithSaveAssets: Record<string, string>
   logs: unknown[]
@@ -443,6 +461,63 @@ export function FrameSettingsProvider({
     setFrameFormValues({ device_config: next })
   }
 
+  // The button-press chirp's buzzer, on the same two routes as the power
+  // keys above. Real ESP32 boards only: a virtual frame has no buttons to
+  // press, and the Pico firmware has no buzzer support.
+  const isPicoPlatform = (frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico')
+  const buttonBeep: FrameSettingsContextValue['buttonBeep'] = esp32CloudProfile
+    ? {
+        pin: frameForm.buzzer_pin,
+        toneHz: frameForm.buzzer_tone_hz,
+        reportedPin: typeof frame.hardware?.buzzerPin === 'number' ? frame.hardware.buzzerPin : undefined,
+        reportedToneHz: typeof frame.hardware?.buzzerToneHz === 'number' ? frame.hardware.buzzerToneHz : undefined,
+        disabledReason: cloudFrameSupportsEsp32Buzzer(frame.frameos_version)
+          ? undefined
+          : frame.frameos_version
+          ? `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+          : `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
+      }
+    : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
+    ? {
+        pin: powerDeviceConfig.buzzerPin ?? powerDeviceConfig.buzzer_pin,
+        toneHz: powerDeviceConfig.buzzerToneHz ?? powerDeviceConfig.buzzer_tone_hz,
+        reportedPin: undefined,
+        reportedToneHz: undefined,
+        disabledReason: undefined,
+      }
+    : null
+  const setButtonBeep = (patch: { pin?: number; toneHz?: number }): void => {
+    if (esp32CloudProfile) {
+      setFrameFormValues({
+        ...('pin' in patch ? { buzzer_pin: patch.pin } : {}),
+        ...('toneHz' in patch ? { buzzer_tone_hz: patch.toneHz } : {}),
+      })
+      return
+    }
+    // Same rule as the power keys: the camelCase key wins, so drop the
+    // snake_case copy a USB-console provisioning may have left behind.
+    const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
+    const write = (
+      key: 'buzzerPin' | 'buzzerToneHz',
+      snakeKey: 'buzzer_pin' | 'buzzer_tone_hz',
+      value: number | undefined
+    ): void => {
+      delete next[snakeKey]
+      if (value === undefined) {
+        delete next[key]
+      } else {
+        next[key] = value
+      }
+    }
+    if ('pin' in patch) {
+      write('buzzerPin', 'buzzer_pin', patch.pin)
+    }
+    if ('toneHz' in patch) {
+      write('buzzerToneHz', 'buzzer_tone_hz', patch.toneHz)
+    }
+    setFrameFormValues({ device_config: next })
+  }
+
   const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
   const timezoneUpdater = frameForm.timezone_updater ?? {}
   const setTimezoneUpdaterValue = (patch: Partial<NonNullable<FrameType['timezone_updater']>>): void => {
@@ -528,6 +603,8 @@ export function FrameSettingsProvider({
       ? configuredGpioButtonsForDevice(cloudProfile ? cloudDevice : frameForm.device)
       : null,
     reportedGpioButtons: cloudProfile ? reportedGpioButtonsOf(frame.hardware?.gpioButtons) : null,
+    buttonBeep,
+    setButtonBeep,
 
     appsWithSaveAssets,
     logs,
@@ -574,7 +651,7 @@ export function FrameSettingsProvider({
       !cloudProfile &&
       isEmbeddedMode &&
       !isVirtualPlatform &&
-      !(frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico') &&
+      !isPicoPlatform &&
       frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-power', frame),
 
     virtualViewToken,

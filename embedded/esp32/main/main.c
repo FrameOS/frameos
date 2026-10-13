@@ -30,6 +30,7 @@
 #include "fos_defaults.h"
 #include "fos_events.h"
 #include "fos_buttons.h"
+#include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -159,6 +160,8 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
+    /* Before the wake check below: a button wake chirps the buzzer. */
+    fos_buzzer_init();
     /* Before anything else reads the wake status: was this a button press? */
     fos_buttons_wake_boot();
 

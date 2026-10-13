@@ -244,7 +244,10 @@ EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS = {
     "pwr": -1,
 }
 # Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): 3.97" 800x480 e-paper on
-# SCK13/MOSI14, CS15, DC16, RST17, BUSY18; power button GPIO4.
+# SCK13/MOSI14, CS15, DC16, RST17, BUSY18; power button GPIO4. A 4 kHz
+# electromagnetic buzzer (FUET-5018) on GPIO48 through a MOSFET (Seeed's
+# hardware overview "Buzzer | PWM: GPIO48" and schematic; Seeed's demo drives
+# it at 4000 Hz).
 EMBEDDED_SEEED_STICKY_PINS = {
     "rst": 17,
     "dc": 16,
@@ -294,6 +297,14 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY = {
     "batteryPin": 1,
     "batteryDivider": 2.0,
     "batteryEnablePin": 21,
+}
+# A passive buzzer on GPIO45 on every E-series model (Seeed's Arduino and
+# ESPHome cookbooks drive it with PWM at 1-2 kHz). The firmware sounds it
+# while a registered button press is held; fos_board.c's k_buzzers table is
+# the device copy (pin and pitch).
+EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER = {
+    "buzzerPin": 45,
+    "buzzerToneHz": 2000,
 }
 # Seeed reTerminal E1004 (ESP32-S3, 32MB flash, 8MB PSRAM): 13.3" 1200x1600
 # Spectra 6 (T133A01) on the E-series SPI bus — SCK7/MOSI9, CS10, DC11,
@@ -446,6 +457,8 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_STICKY_PINS,
         "gpioButtons": [{"pin": 4, "label": "POWER"}],
+        "buzzerPin": 48,
+        "buzzerToneHz": 4000,
     },
     "seeed_reterminal_e1001": {
         "device": "waveshare.EPD_7in5_V2",
@@ -456,6 +469,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
     },
     "seeed_reterminal_e1002": {
         "device": "waveshare.EPD_7in3e",
@@ -466,6 +480,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
     },
     "seeed_reterminal_e1004": {
         # 1200x1600 on an 8MB module: the 16-bit render canvas is what makes
@@ -477,6 +492,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS,
         # 5000 mAh cell through the E-series divider (verified on hardware).
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
         # A 5000 mAh frame: deep sleep between renders while on battery, waking
         # every 15 min for control-plane commands; stays connected on USB.
         "deepSleepOnBattery": True,
@@ -878,14 +894,16 @@ def embedded_hardware_preset_for_frame(frame: Frame) -> str:
     return ""
 
 
-# Preset keys that are user-editable afterwards (the frame's Power section):
-# apply_embedded_hardware_preset fills them in only while they are unset under
-# either spelling (device_config carries camelCase or snake_case, see
-# _embedded_device_config_value).
+# Preset keys that are user-editable afterwards (the frame's Power and GPIO
+# sections): apply_embedded_hardware_preset fills them in only while they are
+# unset under either spelling (device_config carries camelCase or snake_case,
+# see _embedded_device_config_value).
 EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("batteryPin", "battery_pin"),
     ("batteryDivider", "battery_divider"),
     ("batteryEnablePin", "battery_enable_pin"),
+    ("buzzerPin", "buzzer_pin"),
+    ("buzzerToneHz", "buzzer_tone_hz"),
     ("deepSleepOnBattery", "deep_sleep_on_battery"),
     ("wakeCheckSeconds", "wake_check_seconds"),
 )
@@ -1473,6 +1491,12 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     battery_enable_pin = _embedded_device_config_value(frame, "batteryEnablePin", "battery_enable_pin")
     if isinstance(battery_enable_pin, int) and not isinstance(battery_enable_pin, bool):
         settings.append(_provisioning_setting("battery_enable_pin", battery_enable_pin))
+    buzzer_pin = _embedded_device_config_value(frame, "buzzerPin", "buzzer_pin")
+    if isinstance(buzzer_pin, int) and not isinstance(buzzer_pin, bool):
+        settings.append(_provisioning_setting("buzzer_pin", buzzer_pin))
+    buzzer_tone_hz = _embedded_device_config_value(frame, "buzzerToneHz", "buzzer_tone_hz")
+    if isinstance(buzzer_tone_hz, int) and not isinstance(buzzer_tone_hz, bool):
+        settings.append(_provisioning_setting("buzzer_tone_hz", buzzer_tone_hz))
 
     # The frame's own certificate is not a console value: it rides the first
     # settings pull once the board is on Wi-Fi and talking to this backend.

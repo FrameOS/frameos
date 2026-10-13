@@ -8,6 +8,12 @@
  * gets the press as a normal "button" event on the first pass and the panel
  * refreshes, instead of the frame waiting out its timer. The pure pin
  * arithmetic is in fos_wake.h; this module owns the esp_sleep calls.
+ *
+ * Feedback, when the config has a buzzer (fos_buzzer.h, `buzzer_pin`): a
+ * registered press sounds it until its release, at most a second, and a
+ * press that woke the chip chirps it at boot. A press the queue has no room
+ * for (it holds 32 press/release pairs while a render keeps the render task
+ * busy) is dropped, and gets a lower buzz instead.
  */
 #pragma once
 
