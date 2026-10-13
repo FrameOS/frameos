@@ -252,6 +252,53 @@
       "op": "retire",
       "input": [{ "id": "s1" }, "not a scene", { "id": "s2", "nodes": [] }],
       "output": [{ "id": "s1" }, "not a scene", { "id": "s2", "nodes": [] }]
+    },
+    {
+      "name": "retire: two retired apps in one scene get an entry each",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "data/frameOSGallery", "config": { "category": "low-poly-animals" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "data/immich", "config": {} } }
+          ]
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "frameOSGallery", "config": { "category": "low-poly-animals" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "immich", "config": {} } }
+          ],
+          "apps": { "immich": "@repo/apps/code/immich", "frameOSGallery": "@repo/apps/code/frameOSGallery" }
+        }
+      ]
+    },
+    {
+      "name": "forRuntime: a runtime older than both replacements gets both Nim keywords",
+      "op": "forRuntime",
+      "runtimeVersion": "2026.10.10",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "frameOSGallery", "config": { "category": "cute" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "immich", "config": {} } }
+          ],
+          "apps": { "immich": "@repo/apps/code/immich", "frameOSGallery": "@repo/apps/code/frameOSGallery" }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "a", "type": "app", "data": { "keyword": "data/frameOSGallery", "config": { "category": "cute" } } },
+            { "id": "b", "type": "app", "data": { "keyword": "data/immich", "config": {} } }
+          ]
+        }
+      ]
     }
   ]
 }

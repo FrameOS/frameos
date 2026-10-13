@@ -2,8 +2,8 @@ import std/[json, tables, strutils, unittest]
 import pixie
 import ../channels
 import ../interpreter
-import ../../apps/data/frameOSGallery/app as galleryApp
 import ../types
+import ../utils/app_images
 import ../values
 
 
@@ -480,11 +480,12 @@ suite "interpreter error paths":
       resetInterpretedScenes()
 
   test "failed image download paints the error instead of 'No image provided'":
-    let savedHook = galleryApp.galleryDownloadHook
-    galleryApp.galleryDownloadHook =
-      proc(url: string, maxBytes: int, target: Image, fit: ScaledDecodeFit): Image =
+    let savedHook = contextDownloadHook
+    contextDownloadHook =
+      proc(url: string, maxBytes: int, target: Image, fit: ScaledDecodeFit,
+          boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
         raise newException(ValueError, "response too large: 2601969 > 1409024 bytes")
-    defer: galleryApp.galleryDownloadHook = savedHook
+    defer: contextDownloadHook = savedHook
 
     let sceneId = "tests/interpreter-errors/image-producer-error".SceneId
     let exported = ExportedInterpretedScene(
@@ -496,8 +497,8 @@ suite "interpreter error paths":
         node(10, "event", %*{"keyword": "render"}),
         node(20, "app", %*{"keyword": "render/image", "config": {}}),
         node(30, "app", %*{
-          "keyword": "data/frameOSGallery",
-          "config": {"category": "random"}
+          "keyword": "data/downloadImage",
+          "config": {"url": "https://example.com/photo.jpg"}
         })
       ],
       edges: @[

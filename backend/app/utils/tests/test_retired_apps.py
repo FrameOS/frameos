@@ -76,7 +76,7 @@ def test_replacement_entry_is_the_repo_app():
 
 
 def test_keywords_runtime_lacks():
-    assert keywords_runtime_lacks("2026.10.10") == ["data/immich"]
+    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery"]
     assert keywords_runtime_lacks("2026.10.11") == []
     assert keywords_runtime_lacks(None) == []
     assert keywords_runtime_lacks("not a version") == []

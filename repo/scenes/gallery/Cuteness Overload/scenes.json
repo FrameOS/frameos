@@ -41,7 +41,7 @@
         "id": "9f106977-5929-4c9a-884e-35b0bc7b51d4",
         "position": { "x": 487, "y": 16 },
         "data": {
-          "keyword": "data/frameOSGallery",
+          "keyword": "frameOSGallery",
           "config": { "category": "cute" },
           "cache": { "duration": "60", "durationEnabled": true, "enabled": true, "inputEnabled": true }
         },
@@ -105,6 +105,68 @@
         "targetHandle": "fieldInput/duration",
         "type": "codeNodeEdge"
       }
-    ]
+    ],
+    "apps": {
+      "frameOSGallery": {
+        "name": "FrameOS Gallery",
+        "description": "Random image from the FrameOS gallery",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
+          },
+          {
+            "name": "category",
+            "type": "select",
+            "options": [
+              "building-art-styles",
+              "cute",
+              "cyberpunk-europe",
+              "low-poly-animals",
+              "masterpieces",
+              "space-gallery",
+              "space-odyssey",
+              "other"
+            ],
+            "value": "cute",
+            "required": false,
+            "label": "Category"
+          },
+          {
+            "name": "categoryOther",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Category (if other)",
+            "placeholder": "",
+            "showIf": [
+              {
+                "field": "category",
+                "operator": "eq",
+                "value": "other"
+              }
+            ]
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "900"
+        },
+        "origin": "repo/apps/code/frameOSGallery",
+        "sources": {
+          "app.ts": "// A random image from one of the galleries on gallery.frameos.net. The image\n// goes through frameos.fetchImage (native decode, straight into the canvas on\n// an ESP32).\n\nconst BASE_URL = 'https://gallery.frameos.net/image'\n\nexport function resolvedCategory(category: unknown, categoryOther: unknown): string {\n  const picked = String(category ?? '').trim() || 'cute'\n  return picked === 'other' ? String(categoryOther ?? '').trim() : picked\n}\n\n// categoryOther is free text: a space or `&` must not break the URL.\nexport function galleryUrl(category: string): string {\n  return `${BASE_URL}?category=${encodeURIComponent(category)}`\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map((l, i) => `<text x=\"${size}\" y=\"${size * 2 + i * Math.round(size * 1.35)}\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`)\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const width = context.imageWidth || app.frame.width\n  const height = context.imageHeight || app.frame.height\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const category = resolvedCategory(app.config.category, app.config.categoryOther)\n  if (!category) return fail('Please enter the name of a gallery under \"Category (if other)\".')\n\n  frameos.log(`FrameOS Gallery category: ${category}`)\n  const photo = frameos.fetchImage(galleryUrl(category))\n  if (!photo.image) return fail(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\"\n    },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"placeholder\": \"\",\n      \"showIf\": [\n        {\n          \"field\": \"category\",\n          \"operator\": \"eq\",\n          \"value\": \"other\"\n        }\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+        }
+      }
+    }
   }
 ]

@@ -1,6 +1,7 @@
 // Built-in Nim apps retired in favour of a repo JavaScript app
-// (docs/retired-apps.json; prose in docs/retired-apps.md). `data/immich`
-// became the scene-local JS app from repo/apps/code/immich, which needs
+// (docs/retired-apps.json; prose in docs/retired-apps.md). `data/immich` and
+// `data/frameOSGallery` became the scene-local JS apps from
+// repo/apps/code/immich and repo/apps/code/frameOSGallery, which need
 // `frameos.fetchImage` and so a runtime from 2026.10.11 on.
 //
 // The cloud never rewrites a stored version (zips are immutable), so the cut

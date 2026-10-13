@@ -1,6 +1,6 @@
-## A scene still on disk from before the runtime dropped the Nim Immich app
-## names `data/immich` with no scene-local app; the Linux runtime runs the
-## JavaScript app that replaced it (frameos/retired_apps.nim).
+## A scene still on disk from before the runtime dropped a Nim app names
+## `data/immich` (or `data/frameOSGallery`) with no scene-local app; the Linux
+## runtime runs the JavaScript app that replaced it (frameos/retired_apps.nim).
 
 import std/[json, strutils, tables, unittest]
 import pixie
@@ -37,8 +37,12 @@ suite "retired Nim apps":
     check not sources.isNil
     check sources{"app.ts"}.getStr().contains("frameos.fetchImage(")
     check parseJson(sources{"config.json"}.getStr())["settings"] == %*["immich"]
+    let gallery = retiredAppSources("data/frameOSGallery")
+    check not gallery.isNil
+    check gallery{"app.ts"}.getStr().contains("https://gallery.frameos.net/image")
     check retiredAppSources("data/clock").isNil
     check retiredAppSources("immich").isNil
+    check retiredAppSources("frameOSGallery").isNil
 
   test "a data/immich node runs the JavaScript app":
     let sceneId = "tests/retired-immich".SceneId

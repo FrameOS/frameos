@@ -6,7 +6,6 @@ import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
 import apps/data/eventsToAgenda/app_loader as data_eventsToAgenda_loader
-import apps/data/frameOSGallery/app_loader as data_frameOSGallery_loader
 import apps/data/googlePhotos/app_loader as data_googlePhotos_loader
 import apps/data/haSensor/app_loader as data_haSensor_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
@@ -60,7 +59,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
     AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
-    AppEntry(keyword: "data/frameOSGallery", initProc: data_frameOSGallery_loader.init, setFieldProc: data_frameOSGallery_loader.setField, getProc: data_frameOSGallery_loader.get, runProc: nil),
     AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
     AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
@@ -101,7 +99,6 @@ else:
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
     AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
-    AppEntry(keyword: "data/frameOSGallery", initProc: data_frameOSGallery_loader.init, setFieldProc: data_frameOSGallery_loader.setField, getProc: data_frameOSGallery_loader.get, runProc: nil),
     AppEntry(keyword: "data/googlePhotos", initProc: data_googlePhotos_loader.init, setFieldProc: data_googlePhotos_loader.setField, getProc: data_googlePhotos_loader.get, runProc: nil),
     AppEntry(keyword: "data/haSensor", initProc: data_haSensor_loader.init, setFieldProc: data_haSensor_loader.setField, getProc: data_haSensor_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
@@ -186,14 +183,6 @@ proc appCapabilities*(keyword: string): AppCapabilities =
   ## declare nothing are materialized-only, which every edge supports.
   case keyword:
   of "data/downloadImage":
-    AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[])
-  of "data/frameOSGallery":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],

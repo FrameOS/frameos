@@ -2,11 +2,12 @@
 
 A built-in Nim app that gets a repo JavaScript replacement is deleted from the
 runtime in the same change, without anyone redeploying, re-editing a scene or
-noticing. `docs/retired-apps.json` lists them; today that is one:
+noticing. `docs/retired-apps.json` lists them:
 
 | retired keyword | replacement | first runtime | why that runtime |
 |---|---|---|---|
 | `data/immich` | `repo/apps/code/immich` | 2026.10.11 | `frameos.fetchImage` |
+| `data/frameOSGallery` | `repo/apps/code/frameOSGallery` | 2026.10.11 | `frameos.fetchImage` |
 
 The replacement runs only on a runtime that has what it `needs`. Firmware
 older than `runtime` still has the Nim app, so it is sent the Nim keyword.

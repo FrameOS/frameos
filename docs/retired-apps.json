@@ -6,6 +6,12 @@
       "sceneAppKey": "immich",
       "runtime": "2026.10.11",
       "needs": "frameos.fetchImage"
+    },
+    "data/frameOSGallery": {
+      "replacement": "repo/apps/code/frameOSGallery",
+      "sceneAppKey": "frameOSGallery",
+      "runtime": "2026.10.11",
+      "needs": "frameos.fetchImage"
     }
   }
 }

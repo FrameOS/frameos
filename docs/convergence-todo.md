@@ -140,7 +140,7 @@ direction only — preview = last release, frame = whatever it runs:
 
 ## 5. Grow the loadable catalog toward the built-in one
 
-39 apps exist only as Nim in the firmware; 8 as loadable JS. The
+38 apps exist only as Nim in the firmware; 9 as loadable JS. The
 converter's misses are the roadmap, not a porting program. A built-in that
 gets a JS replacement is retired through `docs/retired-apps.json`
 (docs/retired-apps.md): stored scenes move to the JS app, older firmware is
@@ -154,7 +154,9 @@ still sent the Nim keyword, and the Nim app goes in the same change.
   JS port of the built-ins it unblocks — demand-ordered, one at a time,
   never a bulk port. Done so far: the network photo
   (`frameos.fetchImage`, 2026-10-12), which carried the Immich app across
-  as `repo/apps/code/immich` and retired `data/immich`.
+  as `repo/apps/code/immich` and retired `data/immich`, then the FrameOS
+  Gallery as `repo/apps/code/frameOSGallery` (retired
+  `data/frameOSGallery`, 2026-10-13).
 - [ ] Exit is directional, not total: the next ten scenes people actually
   convert or build need zero Nim changes.
 

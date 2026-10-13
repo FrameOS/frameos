@@ -4,7 +4,7 @@ import ../interpreter
 import ../types
 import ../spool
 from ../utils/memory import availableRenderBytesOverride
-import ../../apps/data/frameOSGallery/app as galleryApp
+import ../utils/app_images
 
 # The node cache's disk tier, from the interpreter's side
 # (docs/value-pipeline.md).
@@ -14,7 +14,7 @@ import ../../apps/data/frameOSGallery/app as galleryApp
 # setting silently meant nothing. Now the pixels spill to storage, the entry
 # becomes a file-backed value, and a hit reads it back — exactly the image the
 # memory cache would have held. These tests drive the tiers through a real
-# scene: a cached gallery producer feeding render/image, with the embedded
+# scene: a cached photo producer feeding render/image, with the embedded
 # in-memory limit forced down so an 8x4 canvas is already "frame-sized".
 #
 # The producer hook paints a different colour on every call, so "served from
@@ -39,16 +39,17 @@ var hookCalls = 0
 var hookTargets: seq[Image] = @[]
 
 proc paintingDownload(url: string, maxBytes: int, target: Image,
-    fit: ScaledDecodeFit): Image =
-  result = if target.isNil: newImage(1024, 1024) else: target
+    fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
+  let image = if target.isNil: newImage(1024, 1024) else: target
   let color = callColors[min(hookCalls, callColors.high)]
   hookCalls += 1
   hookTargets.add(target)
-  for y in 0 ..< result.height:
-    for x in 0 ..< result.width:
-      result.data[result.dataIndex(x, y)] = color
+  for y in 0 ..< image.height:
+    for x in 0 ..< image.width:
+      image.data[image.dataIndex(x, y)] = color
+  (image, "")
 
-galleryDownloadHook = paintingDownload
+contextDownloadHook = paintingDownload
 
 proc testConfig(): FrameConfig =
   FrameConfig(
@@ -79,7 +80,7 @@ proc edge(id, source: int, sourceHandle: string, target: int,
 
 const ProducerNodeId = 3.NodeId
 
-proc galleryScene(): ExportedInterpretedScene =
+proc photoScene(): ExportedInterpretedScene =
   ExportedInterpretedScene(
     name: "Cache spool test",
     backgroundColor: parseHtmlColor("#000000"),
@@ -89,8 +90,8 @@ proc galleryScene(): ExportedInterpretedScene =
       node(1, "event", %*{"keyword": "render"}),
       node(2, "app", %*{"keyword": "render/image", "config": %*{}}),
       node(3, "app", %*{
-        "keyword": "data/frameOSGallery",
-        "config": {"category": "nature"},
+        "keyword": "data/downloadImage",
+        "config": {"url": "https://example.com/photo.jpg"},
         "cache": {
           "enabled": true,
           "inputEnabled": false,
@@ -109,7 +110,7 @@ proc galleryScene(): ExportedInterpretedScene =
 proc freshScene(): FrameScene =
   let sceneId = "tests/cache-spool".SceneId
   var uploaded = initTable[SceneId, ExportedInterpretedScene]()
-  uploaded[sceneId] = galleryScene()
+  uploaded[sceneId] = photoScene()
   setUploadedInterpretedScenes(uploaded)
   resetInterpretedScenes()
   hookCalls = 0

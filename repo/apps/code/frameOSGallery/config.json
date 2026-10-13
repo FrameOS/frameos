@@ -3,7 +3,6 @@
   "description": "Random image from the FrameOS gallery",
   "category": "data",
   "version": "1.0.0",
-  "settings": ["frameOS"],
   "fields": [
     {
       "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
@@ -15,6 +14,7 @@
         "building-art-styles",
         "cute",
         "cyberpunk-europe",
+        "low-poly-animals",
         "masterpieces",
         "space-gallery",
         "space-odyssey",
@@ -43,8 +43,7 @@
   "output": [
     {
       "name": "image",
-      "type": "image",
-      "capabilities": { "intoTarget": {} }
+      "type": "image"
     }
   ],
   "cache": {

@@ -1,7 +1,8 @@
 """Built-in Nim apps retired in favour of a repo JavaScript app.
 
-`data/immich` became the scene-local JS app from `repo/apps/code/immich`,
-which needs `frameos.fetchImage` and so a runtime from 2026.10.11 on.
+`data/immich` and `data/frameOSGallery` became the scene-local JS apps from
+`repo/apps/code/immich` and `repo/apps/code/frameOSGallery`, which need
+`frameos.fetchImage` and so a runtime from 2026.10.11 on.
 `docs/retired-apps.json` is the contract (RETIRED_APPS below is its copy,
 pinned by test_retired_apps.py), docs/retired-apps.md the prose, and
 docs/retired-apps-fixtures.json the corpus this module and the cloud's
@@ -32,6 +33,12 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
     "data/immich": {
         "replacement": "repo/apps/code/immich",
         "sceneAppKey": "immich",
+        "runtime": "2026.10.11",
+        "needs": "frameos.fetchImage",
+    },
+    "data/frameOSGallery": {
+        "replacement": "repo/apps/code/frameOSGallery",
+        "sceneAppKey": "frameOSGallery",
         "runtime": "2026.10.11",
         "needs": "frameos.fetchImage",
     },

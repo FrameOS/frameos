@@ -72,8 +72,8 @@ describe("retired apps (docs/retired-apps-fixtures.json)", () => {
   });
 
   it("knows which runtimes lack the replacement", () => {
-    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich"]);
-    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich"]);
+    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery"]);
+    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery"]);
     expect(keywordsRuntimeLacks("2026.10.11")).toEqual([]);
     expect(keywordsRuntimeLacks(null)).toEqual([]);
     expect(keywordsRuntimeLacks("nightly")).toEqual([]);

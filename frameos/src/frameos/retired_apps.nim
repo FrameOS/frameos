@@ -6,9 +6,9 @@
 ## case they cannot reach: scenes already on disk when the runtime itself
 ## moved on. A Pi updates itself (auto_update, the admin UI) and carries its
 ## scenes.json forward without a redeploy, so a scene deployed while it ran an
-## older release still names `data/immich` after the update. Such a node gets
-## the replacement app from the generated copy (retired_apps_gen.nim) — the
-## same sources a converted scene would carry.
+## older release still names `data/immich` or `data/frameOSGallery` after
+## the update. Such a node gets the replacement app from the generated copy
+## (retired_apps_gen.nim) — the same sources a converted scene would carry.
 ##
 ## Not on the ESP32 or in the wasm preview: the ESP32 re-pulls its scenes on
 ## every wake and its control plane hands it the converted form, and every
