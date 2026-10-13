@@ -736,7 +736,7 @@ describe("photo library: scanning", () => {
     ).toBe(404);
   });
 
-  it("fails closed when a configured scanner can not be reached", async () => {
+  it("fails closed when a configured scanner cannot be reached", async () => {
     const accountId = await signIn();
     vi.stubEnv("PHOTODNA_SUBSCRIPTION_KEY", "key");
     vi.stubEnv("PHOTODNA_ENDPOINT", "http://127.0.0.1:9/photodna");

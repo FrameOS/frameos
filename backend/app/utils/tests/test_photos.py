@@ -159,7 +159,7 @@ def test_photos_are_ephemeral_only_in_docker_off_a_volume(monkeypatch):
     assert photos.photos_are_ephemeral(in_container, mountinfo=MOUNTINFO, in_docker=True) is True
     assert photos.photos_are_ephemeral(on_volume, mountinfo=MOUNTINFO, in_docker=True) is False
     assert photos.photos_are_ephemeral(in_container, mountinfo=MOUNTINFO, in_docker=False) is False
-    # Mounts that can not be read claim nothing.
+    # Mounts that cannot be read claim nothing.
     monkeypatch.setattr(photos, "_read_mountinfo", lambda: None)
     assert photos.photos_are_ephemeral(in_container, in_docker=True) is False
 

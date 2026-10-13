@@ -76,7 +76,7 @@ function useFolderDrop(target: string): {
 } {
   const { dropTarget, draggingPaths } = useValues(photosLogic)
   const { setDropTarget, moveEntries, uploadDroppedItems, endDrag } = useActions(photosLogic)
-  // A folder can not take itself or anything that contains it.
+  // A folder cannot take itself or anything that contains it.
   const refuses = draggingPaths.some((path) => isPhotoPathInside(target, path))
   return {
     isOver: dropTarget === target && !refuses,
@@ -370,103 +370,111 @@ function PhotosTopBar(): JSX.Element {
   const installAlbums = selectedFolders.length ? selectedFolders : folder ? [folder] : []
 
   return (
-    <div className="photos-topbar mb-4 flex flex-wrap items-center gap-2">
-      <nav className="flex min-w-0 flex-1 items-center gap-0.5 text-lg" aria-label="Folder">
-        {breadcrumbs.map((crumb, index) => (
-          <span key={crumb.path || 'root'} className="flex min-w-0 items-center gap-0.5">
-            {index > 0 ? <ChevronRightIcon className="frameos-muted h-4 w-4 shrink-0" /> : null}
-            <Breadcrumb name={crumb.name} path={crumb.path} last={index === breadcrumbs.length - 1} />
-          </span>
-        ))}
-        {currentFolderLoading ? <Spinner className="ml-2 h-4 w-4 shrink-0" /> : null}
-      </nav>
-      <div className="relative w-full max-w-[14rem] max-sm:max-w-none max-sm:flex-1">
-        <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Filter this folder"
-          className="frameos-input h-10 w-full rounded-xl border border-white/90 bg-white/90 pl-9 pr-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-blue-400"
-        />
-      </div>
-      <div className="frameos-segment-group flex h-10 shrink-0 items-center rounded-xl p-1">
-        {(
-          [
-            ['grid', Squares2X2Icon, 'Grid'],
-            ['list', ListBulletIcon, 'List'],
-          ] as const
-        ).map(([mode, Icon, label]) => (
+    // A container, so the labels drop by the room the sidebars leave, and the
+    // controls wrap below the breadcrumbs as one group before a name is cut.
+    <div className="photos-topbar @container mb-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <nav className="flex min-w-0 flex-[1_1_auto] items-center gap-0.5 text-lg" aria-label="Folder">
+          {breadcrumbs.map((crumb, index) => (
+            <span key={crumb.path || 'root'} className="flex min-w-0 items-center gap-0.5">
+              {index > 0 ? <ChevronRightIcon className="frameos-muted h-4 w-4 shrink-0" /> : null}
+              <Breadcrumb name={crumb.name} path={crumb.path} last={index === breadcrumbs.length - 1} />
+            </span>
+          ))}
+          {currentFolderLoading ? <Spinner className="ml-2 h-4 w-4 shrink-0" /> : null}
+        </nav>
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+          <div className="relative w-48 @5xl:w-56 max-sm:basis-full">
+            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Filter this folder"
+              className="frameos-input h-10 w-full rounded-xl border border-white/90 bg-white/90 pl-9 pr-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+          <div className="frameos-segment-group flex h-10 shrink-0 items-center rounded-xl p-1">
+            {(
+              [
+                ['grid', Squares2X2Icon, 'Grid'],
+                ['list', ListBulletIcon, 'List'],
+              ] as const
+            ).map(([mode, Icon, label]) => (
+              <button
+                key={mode}
+                type="button"
+                title={label}
+                aria-label={label}
+                aria-pressed={viewMode === mode}
+                onClick={() => setViewMode(mode)}
+                className={clsx(
+                  'frameos-segment flex h-8 w-8 items-center justify-center rounded-lg transition',
+                  viewMode === mode ? 'frameos-primary-soft-active' : 'text-slate-500'
+                )}
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="tertiary"
+            items={
+              [
+                { label: 'Refresh', icon: <ArrowPathIcon className="h-5 w-5" />, onClick: refresh },
+                folder
+                  ? {
+                      label: 'Share link',
+                      icon: <LinkIcon className="h-5 w-5" />,
+                      onClick: () => openShare(folder),
+                    }
+                  : null,
+              ].filter(Boolean) as DropdownMenuItem[]
+            }
+          />
           <button
-            key={mode}
             type="button"
-            title={label}
-            aria-label={label}
-            aria-pressed={viewMode === mode}
-            onClick={() => setViewMode(mode)}
-            className={clsx(
-              'frameos-segment flex h-8 w-8 items-center justify-center rounded-lg transition',
-              viewMode === mode ? 'frameos-primary-soft-active' : 'text-slate-500'
-            )}
+            onClick={() => openNewFolder(folder)}
+            title="New folder"
+            className={clsx(toolbarButtonClassName, 'frameos-secondary-button')}
           >
-            <Icon className="h-4 w-4" />
+            <FolderPlusIcon className="h-5 w-5" />
+            <span className="hidden @5xl:inline">New folder</span>
           </button>
-        ))}
+          <button
+            type="button"
+            onClick={() => openInstallPicker(installAlbums)}
+            title="Make scenes that play albums on a frame"
+            className={clsx(toolbarButtonClassName, 'frameos-secondary-button')}
+          >
+            <ComputerDesktopIcon className="h-5 w-5" />
+            <span className="hidden @3xl:inline">Install on frame</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            title="Upload files"
+            className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
+          >
+            <ArrowUpTrayIcon className="h-5 w-5" />
+            <span className="hidden @lg:inline">Upload</span>
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept={status?.accepts ? status.accepts.join(',') : undefined}
+            className="hidden"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? [])
+              event.target.value = ''
+              if (files.length) {
+                uploadFiles(folder, files)
+              }
+            }}
+          />
+        </div>
       </div>
-      <DropdownMenu
-        className="w-fit"
-        buttonColor="tertiary"
-        items={
-          [
-            { label: 'Refresh', icon: <ArrowPathIcon className="h-5 w-5" />, onClick: refresh },
-            folder
-              ? {
-                  label: 'Share link',
-                  icon: <LinkIcon className="h-5 w-5" />,
-                  onClick: () => openShare(folder),
-                }
-              : null,
-          ].filter(Boolean) as DropdownMenuItem[]
-        }
-      />
-      <button
-        type="button"
-        onClick={() => openNewFolder(folder)}
-        className={clsx(toolbarButtonClassName, 'frameos-secondary-button')}
-      >
-        <FolderPlusIcon className="h-5 w-5" />
-        <span className="max-md:hidden">New folder</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => openInstallPicker(installAlbums)}
-        title="Make scenes that play albums on a frame"
-        className={clsx(toolbarButtonClassName, 'frameos-secondary-button')}
-      >
-        <ComputerDesktopIcon className="h-5 w-5" />
-        <span className="max-md:hidden">Install on frame</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
-      >
-        <ArrowUpTrayIcon className="h-5 w-5" />
-        <span className="max-sm:hidden">Upload</span>
-      </button>
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        accept={status?.accepts ? status.accepts.join(',') : undefined}
-        className="hidden"
-        onChange={(event) => {
-          const files = Array.from(event.target.files ?? [])
-          event.target.value = ''
-          if (files.length) {
-            uploadFiles(folder, files)
-          }
-        }}
-      />
     </div>
   )
 }
@@ -1328,7 +1336,7 @@ function PhotosNotReady({ status }: { status: PhotosStatus }): JSX.Element {
       : status.problem === 'not_persistent'
       ? 'Photos needs a storage volume'
       : status.problem === 'not_writable'
-      ? 'Photos can not write its folder'
+      ? 'Photos cannot write its folder'
       : 'Photos is not available'
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-6">

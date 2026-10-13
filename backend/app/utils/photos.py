@@ -150,7 +150,7 @@ def photos_are_ephemeral(
     """True when the backend runs in Docker and `path` is not on a mounted
     volume: everything in it is gone when the container is recreated. A Home
     Assistant add-on's /data is persistent; FRAMEOS_PHOTOS_ALLOW_EPHEMERAL=1
-    skips the check. When the mounts can not be read, nothing is claimed."""
+    skips the check. When the mounts cannot be read, nothing is claimed."""
     if get_bool_env("FRAMEOS_PHOTOS_ALLOW_EPHEMERAL"):
         return False
     if os.environ.get("HASSIO_TOKEN"):
@@ -185,7 +185,7 @@ def check_ready(project_id: int) -> Readiness:
             ready=False,
             problem="not_writable",
             message=(
-                f"The photos folder {location} can not be created or written to ({reason}). "
+                f"The photos folder {location} cannot be created or written to ({reason}). "
                 "Check that the backend can write there, or set FRAMEOS_PHOTOS_DIR to a folder it can write to."
             ),
             location=location,
@@ -275,10 +275,10 @@ def _segment_problem(name: str) -> Optional[str]:
     if size < 1 or size > MAX_SEGMENT_BYTES:
         return f"Names must be 1 to {MAX_SEGMENT_BYTES} bytes long"
     if name.startswith("."):
-        return "Names can not start with a dot"
+        return "Names cannot start with a dot"
     for ch in name:
         if ch in ("/", "\\") or ord(ch) < 0x20 or ord(ch) == 0x7F:
-            return "Names can not contain slashes or control characters"
+            return "Names cannot contain slashes or control characters"
     return None
 
 
@@ -301,7 +301,7 @@ def _path_problem(value: str) -> Optional[str]:
     if size > MAX_PATH_BYTES:
         return f"Paths can be at most {MAX_PATH_BYTES} bytes long"
     if value.startswith("/") or value.endswith("/"):
-        return "Paths can not start or end with a slash"
+        return "Paths cannot start or end with a slash"
     segments = value.split("/")
     if len(segments) > MAX_DEPTH:
         return f"Paths can be at most {MAX_DEPTH} folders deep"
@@ -578,7 +578,7 @@ def thumbnail_key(project_id: int, rel: str, file_stat: os.stat_result) -> str:
 
 def thumbnail(project_id: int, root: Path, rel: str) -> Optional[tuple[Path, str]]:
     """(the cached JPEG, its key) for an image, made on first request; None
-    for anything Pillow can not read."""
+    for anything Pillow cannot read."""
     source = existing_file(root, rel)
     if not content_type_for(source.name).startswith("image/"):
         return None
@@ -769,7 +769,7 @@ def move_paths(db: Session, project_id: int, root: Path, paths: list[str], to: s
             continue
         if is_at_or_below(to, path):
             raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST, detail="A folder can not be moved into itself"
+                status_code=HTTPStatus.BAD_REQUEST, detail="A folder cannot be moved into itself"
             )
         source = disk_path(root, path)
         if not os.path.lexists(source):

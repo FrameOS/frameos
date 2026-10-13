@@ -8,7 +8,7 @@
 // Not OpenAI moderation: omni-moderation scores `sexual/minors` on text only,
 // so an image-only request can never flag it.
 //
-// A configured scanner that errors or can not be reached FAILS CLOSED: the
+// A configured scanner that errors or cannot be reached FAILS CLOSED: the
 // caller answers 503 and stores nothing. A match stops at the first scanner
 // that matched. This module only decides; recording the hit, suspending the
 // account and notifying admins is the caller's (library.ts recordScanMatch).

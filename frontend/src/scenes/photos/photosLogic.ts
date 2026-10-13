@@ -448,7 +448,7 @@ export const photosLogic = kea<photosLogicType>([
           try {
             return await fetchPhotosStatus()
           } catch (error) {
-            // A failed status call is a library the page can not use; say so
+            // A failed status call is a library the page cannot use; say so
             // instead of rendering an empty one.
             return {
               ready: false,

@@ -30,7 +30,7 @@ Every path is relative to the library root.
   and 0x7f).
 - A whole path is at most 1024 bytes and 32 segments deep.
 - Names are case sensitive.
-- Names starting with `.` are never listed and can not be created. On the
+- Names starting with `.` are never listed and cannot be created. On the
   backend, files a person copies into the folder by hand (`.DS_Store`) stay
   invisible.
 
@@ -282,7 +282,7 @@ The folder is a plain folder: files copied into it by hand show up in the
 library. Thumbnails and unfinished uploads live in `<photos dir>/.cache`.
 Share links are rows in the `photo_share` table.
 
-The library is not ready (and the page says why) when the folder can not be
+The library is not ready (and the page says why) when the folder cannot be
 created or written, or when the backend runs in Docker and the folder is not
 on a mounted volume, which would lose every photo when the container is
 recreated. `FRAMEOS_PHOTOS_ALLOW_EPHEMERAL=1` skips that last check.
@@ -322,7 +322,7 @@ anything is stored, by every scanner that is configured:
 OpenAI moderation is not a scanner here: `omni-moderation` scores
 `sexual/minors` on text only, so an image can never trip it.
 
-A configured scanner that can not be reached fails the upload (503) and
+A configured scanner that cannot be reached fails the upload (503) and
 stores nothing. A match stores nothing, records a `photo_scan_hits` row (the
 hash, the scanner and its answer, the account and the address), suspends the
 account's photos (`accounts.photos_suspended_at`: uploads refused, every share

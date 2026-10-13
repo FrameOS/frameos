@@ -59,8 +59,8 @@ const STATUS_MESSAGES: Record<number, string> = {
   404: 'Not found.',
   409: 'Something with that name already exists.',
   413: 'That file is too large.',
-  415: 'That type of file can not be stored here.',
-  422: 'That file can not be stored.',
+  415: 'That type of file cannot be stored here.',
+  422: 'That file cannot be stored.',
   503: 'Photos is not available right now.',
   507: 'Your photo storage is full.',
 }

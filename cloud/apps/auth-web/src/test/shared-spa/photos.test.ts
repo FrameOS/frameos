@@ -125,6 +125,10 @@ describe("buildPhotoAlbumScene", () => {
     const seconds = scene.fields?.find((field) => field.name === "seconds");
     expect(seconds).toMatchObject({ role: "refreshInterval", value: "600" });
     expect(scene.fields?.find((field) => field.name === "order")?.value).toBe("newest");
+    expect(scene.fields?.find((field) => field.name === "order")?.options).toContainEqual({
+      value: "random",
+      label: "Shuffle",
+    });
     expect(scene.fields?.find((field) => field.name === "fit")?.value).toBe("contain");
   });
 

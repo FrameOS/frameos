@@ -140,7 +140,7 @@ describe("imageDimensions", () => {
     expect(imageDimensions(bytes, "image/webp")).toEqual({ height: 768, width: 1024 });
   });
 
-  it("answers undefined for anything it can not read", () => {
+  it("answers undefined for anything it cannot read", () => {
     expect(imageDimensions(Buffer.from("not an image"), "image/png")).toBeUndefined();
     expect(imageDimensions(Buffer.from("not an image"), "image/bmp")).toBeUndefined();
     expect(imageDimensions(Buffer.alloc(0), "image/webp")).toBeUndefined();

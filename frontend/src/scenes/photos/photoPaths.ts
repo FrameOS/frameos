@@ -58,14 +58,14 @@ export function photoNameProblem(name: string): string | null {
     return 'Enter a name.'
   }
   if (name === '.' || name === '..' || name.startsWith('.')) {
-    return 'Names can not start with a dot.'
+    return 'Names cannot start with a dot.'
   }
   if (/[/\\]/.test(name)) {
-    return 'Names can not contain / or \\.'
+    return 'Names cannot contain / or \\.'
   }
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(name)) {
-    return 'Names can not contain control characters.'
+    return 'Names cannot contain control characters.'
   }
   if (new TextEncoder().encode(name).length > MAX_SEGMENT_BYTES) {
     return 'That name is too long.'

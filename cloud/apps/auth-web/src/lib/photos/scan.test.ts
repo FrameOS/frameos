@@ -71,7 +71,7 @@ describe("scanPhoto", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the hash list can not be read", async () => {
+  it("fails closed when the hash list cannot be read", async () => {
     const result = await scanPhoto(input, {
       blockedHash: async () => {
         throw new Error("db down");

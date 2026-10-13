@@ -1,6 +1,6 @@
 // The gate every incoming byte passes before the object store sees it
 // (uploads and browser-made thumbnails alike): scan, and on a match record
-// the hit and suspend the account; on a scanner that can not answer, refuse.
+// the hit and suspend the account; on a scanner that cannot answer, refuse.
 
 import { createHash } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
@@ -31,7 +31,7 @@ export async function scanIncomingPhoto(
     logWarn("photos.scan_unavailable", { error: result.error, scanner: result.scanner });
     return {
       response: jsonError("scan_unavailable", 503, {
-        message: "Photos can not be checked right now. Try again later.",
+        message: "Photos cannot be checked right now. Try again later.",
         scanner: result.scanner,
       }),
     };

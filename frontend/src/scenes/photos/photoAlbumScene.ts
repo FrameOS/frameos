@@ -86,7 +86,8 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
         name: 'order',
         label: 'Order',
         type: 'select',
-        options: PHOTO_ALBUM_ORDERS.map((option) => option.value),
+        // Labeled, so the scene's controls say "Shuffle", not "random".
+        options: PHOTO_ALBUM_ORDERS.map(({ value, label }) => ({ value, label })),
         persist: 'disk',
         access: 'public',
         value: options.order,
@@ -95,7 +96,7 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
         name: 'fit',
         label: 'Fit',
         type: 'select',
-        options: PHOTO_ALBUM_FITS.map((option) => option.value),
+        options: PHOTO_ALBUM_FITS.map(({ value, label }) => ({ value, label })),
         persist: 'disk',
         access: 'public',
         value: options.fit,
