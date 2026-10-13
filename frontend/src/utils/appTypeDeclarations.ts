@@ -113,6 +113,10 @@ interface FrameOSApp {
     rotate: number;
     assetsPath: string;
     timeZone: string;
+    /** The frame's debug setting (FrameOS 2026.10.13+; undefined before). */
+    debug?: boolean;
+    /** An ESP32-class runtime (FrameOS 2026.10.13+; undefined before). */
+    embedded?: boolean;
   };
   initialized?: boolean;
   log(...args: any[]): void;

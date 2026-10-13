@@ -428,6 +428,8 @@ suite "js app runtime":
             frameKeys: Object.keys(app.frame).sort(),
             contextKeys: Object.keys(context).sort(),
             spreadConfig: { ...app.config },
+            debug: app.frame.debug,
+            embedded: app.frame.embedded,
           }
         }"""
     )
@@ -439,8 +441,11 @@ suite "js app runtime":
     check payload["configKeys"][1].getStr() == "mode"
     check payload["stateKeys"][0].getStr() == "seen"
     check "width" in payload["frameKeys"].mapIt(it.getStr())
+    check "embedded" in payload["frameKeys"].mapIt(it.getStr())
     check "event" in payload["contextKeys"].mapIt(it.getStr())
     check payload["spreadConfig"]["message"].getStr() == "hello"
+    check payload["debug"].getBool() == true
+    check payload["embedded"].getBool() == false
 
   test "maps JS app runtime errors to original source lines":
     let config = testConfig()

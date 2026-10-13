@@ -254,7 +254,7 @@ interface FrameOSApp {
   category: string;
   config: FrameOSAppConfig;
   state: Record<string, any>;
-  frame: { width: number; height: number; rotate: number; assetsPath: string; timeZone: string; };
+  frame: { width: number; height: number; rotate: number; assetsPath: string; timeZone: string; debug?: boolean; embedded?: boolean; };
   initialized?: boolean;
   log(...args: any[]): void;
   logError(...args: any[]): void;

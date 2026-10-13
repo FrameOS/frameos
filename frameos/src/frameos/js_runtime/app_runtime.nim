@@ -811,6 +811,12 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
   of "timeZone":
     return nimStringToJS(ctx, e.owner.frameConfig.timeZone)
+  of "debug":
+    return nimBoolToJS(ctx, e.owner.frameConfig.debug)
+  of "embedded":
+    # An ESP32-class runtime: no storage for assets, a few MB of PSRAM. The
+    # photo apps ask for smaller and lighter images there.
+    return nimBoolToJS(ctx, defined(frameosEmbedded))
   else:
     return jsUndefSentinel(ctx)
 
@@ -869,7 +875,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone"]
+    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
