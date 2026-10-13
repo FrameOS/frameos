@@ -91,6 +91,14 @@ describe('fetchLatestRelease cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it("bypasses Next's fetch cache, which would hand back the previous release", async () => {
+    githubAnswers(ok(releaseA))
+    await fetchLatestRelease(1000)
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit & { next?: unknown }
+    expect(init.cache).toBe('no-store')
+    expect(init.next).toBeUndefined()
+  })
+
   it('sends the GitHub token when one is configured', async () => {
     vi.stubEnv('GITHUB_TOKEN', 'ghp_test')
     githubAnswers(ok(releaseA))

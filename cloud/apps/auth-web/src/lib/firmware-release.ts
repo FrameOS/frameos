@@ -149,8 +149,12 @@ export function findAsset(release: Release, suffix: string) {
 // call: unauthenticated api.github.com allows 60 requests/hour per IP, and a
 // cloud host shares ONE egress IP across all of its users and frames, so an
 // afternoon of flashing was enough to get the whole deployment 403'd. Next's
-// own fetch cache (`next: { revalidate }`) is kept as a second layer but is
-// not relied on — it caches nothing on failure and is opaque to tests.
+// own fetch cache is deliberately NOT used (`cache: "no-store"` below): past
+// its revalidate window it hands back the stale body and refreshes in the
+// background, so every refresh of this cache stored the answer from the
+// PREVIOUS refresh as fresh — a new release stayed invisible for two windows,
+// or for as long as the cloud had been idle plus one. Release 2026.10.12 was
+// still not offered six minutes after it was published.
 //
 // Fresh for `releaseFreshMs`; concurrent callers share one in-flight fetch;
 // and when GitHub errors (rate limit, outage, network) the last good release
@@ -194,8 +198,8 @@ function githubReleaseHeaders(): Record<string, string> {
 async function fetchLatestReleaseUncached(): Promise<Release | undefined> {
   try {
     const response = await fetch(releaseApiUrl, {
+      cache: "no-store",
       headers: githubReleaseHeaders(),
-      next: { revalidate: 300 },
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {
@@ -293,7 +297,9 @@ export async function streamReleaseAssetResponse(
   }
 
   const headers = new Headers({
-    "cache-control": "private, max-age=300",
+    // The URL names a platform, not a release: a cached copy would be the
+    // previous release's image once a new one ships.
+    "cache-control": "no-store",
     "content-type": "application/octet-stream",
     "x-frameos-image-name": asset.name,
     "x-frameos-release": releaseTag,
@@ -325,7 +331,8 @@ export async function fetchReleaseAssetText(
   }
   const upstream = await fetch(assetUrl, {
     redirect: "follow",
-    // Signatures are immutable per release and tiny; cache like the listing.
+    // Signatures are tiny and immutable: the asset URL names the release tag,
+    // so a stale entry here is still the right file (unlike the listing).
     next: { revalidate: 300 },
   });
   if (!upstream.ok) {

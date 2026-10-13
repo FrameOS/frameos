@@ -141,9 +141,12 @@ export async function GET(request: NextRequest) {
 
   const wantsSignature = request.nextUrl.searchParams.get("signature");
   if (wantsSignature === "1" || wantsSignature === "true") {
+    // The URL names a platform, not a release: a cached signature or image
+    // is the previous release's once a new one ships, and the builder then
+    // refuses a correct download because the two disagree.
     return new NextResponse(minisig, {
       headers: {
-        "cache-control": "private, max-age=300",
+        "cache-control": "no-store",
         "content-type": "text/plain; charset=utf-8",
         "x-frameos-image-name": asset.name,
         "x-frameos-release": release.tag_name ?? "",
@@ -182,7 +185,7 @@ export async function GET(request: NextRequest) {
   }
 
   const headers = new Headers({
-    "cache-control": "private, max-age=300",
+    "cache-control": "no-store",
     "content-type": "application/gzip",
     "content-length": String(verdict.byteLength),
     "x-frameos-image-name": asset.name,

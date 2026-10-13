@@ -116,9 +116,11 @@ export async function GET(request: NextRequest) {
         });
       }
     }
+    // Not cacheable by the browser: this IS the "latest release" answer, and
+    // the server-side cache above already bounds how stale it can be.
     return NextResponse.json(
       { assets, release: release.tag_name ?? "" },
-      { headers: { "cache-control": "private, max-age=300" } },
+      { headers: { "cache-control": "no-store" } },
     );
   }
 

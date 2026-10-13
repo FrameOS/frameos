@@ -127,6 +127,6 @@ export async function GET(
       minisig,
       downloadUrl: `/api/frames/${auth.frame.id}/firmware/download?platform=${platform}`,
     },
-    { headers: { "cache-control": "private, max-age=300" } },
+    { headers: { "cache-control": "no-store" } },
   );
 }
