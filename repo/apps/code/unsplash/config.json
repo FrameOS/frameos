@@ -1,0 +1,54 @@
+{
+  "name": "Unsplash",
+  "description": "Random unsplash image",
+  "category": "data",
+  "version": "1.0.0",
+  "settings": ["unsplash"],
+  "fields": [
+    {
+      "name": "search",
+      "type": "string",
+      "value": "nature",
+      "required": false,
+      "label": "Search",
+      "placeholder": "e.g. pineapple, nature, birds, power"
+    },
+    {
+      "name": "orientation",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "any", "landscape", "portrait", "squarish"],
+      "required": false,
+      "label": "Orientation",
+      "placeholder": "landscape, portrait, square"
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Metadata state key",
+      "hint": "Enter a state key to persist metadata about the image. Stores: {search, title, description, location, author, links, ...}."
+    },
+    {
+      "name": "saveAssets",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "always", "never"],
+      "label": "Save asset",
+      "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
+}
