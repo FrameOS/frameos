@@ -1757,7 +1757,12 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
 
   runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
 
-proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JSValue =
+type JsAppError* = object of CatchableError
+  ## A JS app's get() threw. The message is the JS error's; the mapped stack
+  ## is already logged.
+
+proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string,
+    raiseOnError = false): JSValue =
   ensureReady(runtime, owner.frameConfig, if owner.scene.isNil: "" else: owner.scene.id.string)
   let ctx = runtime.js.context
   let fnNameValue = nimStringToJS(ctx, fnName)
@@ -1790,6 +1795,8 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
         "stack": details.stack
       })
     JS_FreeValue(ctx, result)
+    if raiseOnError:
+      raise newException(JsAppError, details.message)
     return jsNull(ctx)
 
 proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
@@ -1811,7 +1818,11 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   runtime.init(owner, configJson)
   try:
-    let payload = runtime.invoke(owner, configJson, context, "get")
+    # A throw fails the node, as a raising Nim app does: the interpreter then
+    # defaults the consumer's arg or paints the error into its image, and the
+    # node cache keeps nothing. It used to hand the consumer null instead,
+    # which the cache then served until it expired.
+    let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
     defer: JS_FreeValue(runtime.js.context, payload)
     return toValue(runtime, owner, context, payload, runtime.outputType)
   finally:

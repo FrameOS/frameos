@@ -466,7 +466,8 @@ suite "js app runtime":
         }"""
     )
 
-    discard runtime.get(owner, %*{}, context)
+    expect(JsAppError):
+      discard runtime.get(owner, %*{}, context)
     let stackLogs = logged.filterIt("jsApp:error" in it{"event"}.getStr())
     check stackLogs.len == 1
     check "app.ts:3:" in stackLogs[0]{"stack"}.getStr()
@@ -1160,7 +1161,8 @@ const helper = () => {
 }
 export const get = () => helper()""",
       sourceName = "app.ts")
-    discard runtime.get(owner, %*{}, context)
+    expect(JsAppError):
+      discard runtime.get(owner, %*{}, context)
     var stack = ""
     for entry in logged:
       if entry{"stack"}.getStr().len > 0:
@@ -1408,7 +1410,8 @@ suite "js app imports":
     let runtime = newJsAppRuntime(
       category = "data", outputType = "text", source = sources["app.ts"].getStr(),
       sourceName = "app.ts", sources = sources)
-    discard runtime.get(owner, %*{}, context)
+    expect(JsAppError):
+      discard runtime.get(owner, %*{}, context)
     var stack = ""
     for entry in logged:
       if "jsApp:error" in entry{"event"}.getStr():
