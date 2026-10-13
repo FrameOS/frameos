@@ -235,6 +235,10 @@ proc sceneStateJson*(): string =
 proc takeRenderRequested*(): bool =
   host.takeRenderRequested()
 
+proc recoverFromOomAbort*(): tuple[jsDropped, jsBytes: int] =
+  ## single_scene_host.recoverAbortedRun, for the glue's abort handler.
+  host.recoverAbortedRun()
+
 proc tickInput*(): bool =
   ## Time passing with nothing sent (single_scene_host.tick).
   result = host.tick()

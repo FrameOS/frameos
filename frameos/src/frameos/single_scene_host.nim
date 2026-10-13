@@ -22,6 +22,7 @@ import ./types
 import ./utils/asset_colors
 import ./utils/dither
 import ./js_runtime/app_runtime
+import ./js_runtime/run_budget
 import ./js_runtime/runtime as jsRuntime
 when defined(memProbe): import ./utils/memory
 
@@ -102,6 +103,27 @@ proc cleanupScene*(scene: FrameScene) =
   when defined(memProbe): memProbe("  cleanupScene: tables cleared")
   cleanupSceneJs(interpreted)
   when defined(memProbe): memProbe("  cleanupScene: js closed")
+
+proc recoverAbortedRun*(host: SingleSceneHost): tuple[jsDropped, jsBytes: int] =
+  ## After an out-of-memory abort: the ESP32's allocator longjmps out of the
+  ## render, scene switch or event it was serving (frameos_nim_glue.c), and
+  ## every `finally` on the way out was skipped. What those would have put
+  ## back is put back here, or every later run inherits it until a reboot:
+  ## the run's wall-clock deadline (each later JS call failed at once with
+  ## "render exceeded its 90000ms wall-clock deadline"), the dispatcher's
+  ## flags (no event delivered again), the recursion guards (false "depends
+  ## on itself"), sceneJsLock (the next code node waits forever), and the JS
+  ## interpreters that were mid-call, which can be neither run nor freed and
+  ## are dropped. Returns how many were dropped and the bytes they still hold.
+  ## What the aborted run allocated stays leaked; the glue decides whether
+  ## that warrants a restart.
+  resetRunBudgets()
+  if not host.events.isNil:
+    host.events.resetAfterAbort()
+  clearRunNodeStacks(host.scene)
+  let apps = abandonMidCallJsAppRuntimes()
+  let scenes = abandonMidCallSceneJs()
+  (apps.count + scenes.count, apps.bytes + scenes.bytes)
 
 proc dropScene*(host: SingleSceneHost) =
   ## Let go of the resident instance; the current scene id stays.

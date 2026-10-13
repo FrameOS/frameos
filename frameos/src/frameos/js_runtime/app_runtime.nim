@@ -55,6 +55,21 @@ var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
 ## The runtime behind each live interpreter, for the module loader: QuickJS
 ## hands the loader a context, and the app's files live on the runtime.
 var jsAppRuntimeByCtx = initTable[ptr JSContext, JsAppRuntime]()
+## The runtimes with a call in progress, outermost first: a JS app can run
+## another node, which can be another JS app. A call lasts until the caller
+## has freed the last value it got back (`get` reads its payload after JS
+## returns). Eviction must never pull one out from under its call, and after
+## an out-of-memory abort what is still here is what the abort jumped out of
+## (abandonMidCallJsAppRuntimes).
+var jsRuntimeStack: seq[JsAppRuntime] = @[]
+
+template midCall(runtime: JsAppRuntime, body: untyped) =
+  jsRuntimeStack.add(runtime)
+  try:
+    body
+  finally:
+    if jsRuntimeStack.len > 0 and jsRuntimeStack[^1] == runtime:
+      discard jsRuntimeStack.pop()
 
 proc teardownJsRuntime(runtime: JsAppRuntime) =
   ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
@@ -88,7 +103,6 @@ when defined(frameosEmbedded):
   # this only happens when headroom is actually short: a Pi, the backend and a
   # roomy frame never evict and keep today's behaviour exactly.
   var liveJsRuntimes: seq[JsAppRuntime] = @[]
-  var jsRuntimeStack: seq[JsAppRuntime] = @[]
   const JsEvictHeadroomBytes = 2 * 1024 * 1024
 
   proc evictIdleJsRuntimes(keep: JsAppRuntime) =
@@ -116,6 +130,29 @@ proc releaseIdleJsAppRuntimes*() =
     for runtime in liveJsRuntimes:
       if runtime.ready and not jsRuntimeStack.contains(runtime):
         teardownJsRuntime(runtime)
+
+proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
+  ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): drop
+  ## the interpreters the abort jumped out of (QuickJS.abandon says why they
+  ## can be neither run nor freed). The `finally` in `invoke` that pops them
+  ## never ran, so left alone they stayed "mid-call" for good and were never
+  ## released. The next render builds the app a new one and runs its init()
+  ## again; `frameos.remember` values are Nim data and carry over.
+  for runtime in jsRuntimeStack:
+    if runtime.isNil or not runtime.ready:
+      continue  # already dropped: a runtime re-entered further up the chain
+    let ctx = runtime.js.context
+    if not ctx.isNil:
+      jsAppEnvByCtx.del(ctx)
+      jsAppRuntimeByCtx.del(ctx)
+      clearJsSourceMaps(ctx)
+    result.bytes += runtime.js.abandon()
+    inc result.count
+    runtime.ready = false
+    runtime.initialized = false
+    runtime.images.clear()
+    runtime.transientImageIds.setLen(0)
+  jsRuntimeStack.setLen(0)
 
 proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
   if e != nil:
@@ -1808,9 +1845,8 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
   defer: JS_FreeValue(ctx, fnNameValue)
 
   jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
-  # A JS app can run another node, which can be another JS app, so track the
-  # whole call chain — an ancestor mid-call must never be evicted underneath.
-  when defined(frameosEmbedded): jsRuntimeStack.add(runtime)
+  # Callers hold the runtime on jsRuntimeStack (midCall) for as long as they
+  # hold the value this returns.
   when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
   result =
     try:
@@ -1818,9 +1854,6 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
-      when defined(frameosEmbedded):
-        if jsRuntimeStack.len > 0 and jsRuntimeStack[^1] == runtime:
-          discard jsRuntimeStack.pop()
       when defined(memProbe): memProbe("    js invoke " & fnName & " AFTER")
 
   if JS_IsException(result) != 0:
@@ -1850,36 +1883,39 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
     loopKey: ".",
     nextSleep: -1
   )
-  let payload = runtime.invoke(owner, configJson, context, "init")
-  JS_FreeValue(runtime.js.context, payload)
+  runtime.midCall:
+    let payload = runtime.invoke(owner, configJson, context, "init")
+    JS_FreeValue(runtime.js.context, payload)
   runtime.initialized = true
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   runtime.init(owner, configJson)
   try:
-    # A throw fails the node, as a raising Nim app does: the interpreter then
-    # defaults the consumer's arg or paints the error into its image, and the
-    # node cache keeps nothing. It used to hand the consumer null instead,
-    # which the cache then served until it expired.
-    let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
-    defer: JS_FreeValue(runtime.js.context, payload)
-    return toValue(runtime, owner, context, payload, runtime.outputType)
+    runtime.midCall:
+      # A throw fails the node, as a raising Nim app does: the interpreter then
+      # defaults the consumer's arg or paints the error into its image, and the
+      # node cache keeps nothing. It used to hand the consumer null instead,
+      # which the cache then served until it expired.
+      let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
+      defer: JS_FreeValue(runtime.js.context, payload)
+      return toValue(runtime, owner, context, payload, runtime.outputType)
   finally:
     runtime.clearTransientImages()
 
 proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext) =
   runtime.init(owner, configJson)
   try:
-    let payload = runtime.invoke(owner, configJson, context, "run")
-    defer: JS_FreeValue(runtime.js.context, payload)
-    if runtime.category == "render":
-      let value = toValue(runtime, owner, context, payload, "image")
-      if value.kind == fkImage and not value.asImage().isNil:
-        let drawn = value.asImage()
-        context.image.draw(drawn)
-        # A render app's image lands at the origin, its own size.
-        applyAutoFitToDrawn(context.image, 0, 0, min(drawn.width, context.image.width),
-          min(drawn.height, context.image.height), drawn)
+    runtime.midCall:
+      let payload = runtime.invoke(owner, configJson, context, "run")
+      defer: JS_FreeValue(runtime.js.context, payload)
+      if runtime.category == "render":
+        let value = toValue(runtime, owner, context, payload, "image")
+        if value.kind == fkImage and not value.asImage().isNil:
+          let drawn = value.asImage()
+          context.image.draw(drawn)
+          # A render app's image lands at the origin, its own size.
+          applyAutoFitToDrawn(context.image, 0, 0, min(drawn.width, context.image.width),
+            min(drawn.height, context.image.height), drawn)
   finally:
     runtime.clearTransientImages()
 

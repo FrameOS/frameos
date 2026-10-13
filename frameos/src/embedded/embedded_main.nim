@@ -19,6 +19,7 @@ import embedded_runtime
 from frameos/apps import applyServiceSettings
 import frameos/utils/asset_colors
 import frameos/utils/dither
+from frameos/utils/http_client import releaseStrandedHttp
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 
@@ -599,6 +600,21 @@ proc fos_nim_render_alloc_impl(
 
 proc fos_nim_render_1bpp_impl(buf: ptr UncheckedArray[uint8]; bufLen: csize_t): cint {.exportc, cdecl.} =
   fos_nim_render_impl(buf, bufLen, 1)
+
+proc fos_nim_recover_oom_abort_impl(jsBytes: ptr csize_t; httpReleased: ptr cint): cint {.exportc, cdecl.} =
+  ## frameos_nim_glue.c calls this right after an out-of-memory abort, before
+  ## any other Nim runs. The HTTP the aborted call held goes back first, so
+  ## the free memory the glue then weighs a restart on includes it; then the
+  ## rest of what its skipped `finally`s owned (recoverAbortedRun). Returns
+  ## how many JS interpreters were dropped, `jsBytes` what they still hold.
+  try:
+    let http = releaseStrandedHttp()
+    let js = recoverFromOomAbort()
+    if jsBytes != nil: jsBytes[] = js.jsBytes.csize_t
+    if httpReleased != nil: httpReleased[] = http.cint
+    js.jsDropped.cint
+  except Defect, CatchableError:
+    -1
 
 proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
   ## Refresh interval requested by the active interpreted scene, in seconds;

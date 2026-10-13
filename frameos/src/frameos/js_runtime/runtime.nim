@@ -42,6 +42,20 @@ var currentEvalCtx: ptr JSContext
 var currentEvalEnv: EvalEnv
 var tzName = ""
 var sceneJsLock: Lock
+# Scenes with a JS frame on the stack right now, or a value of theirs in a Nim
+# frame. Freeing one of those contexts would pull it out from under a call in
+# progress, which nested scenes make reachable: a parent's code node can
+# render a child mid-call. After an out-of-memory abort, what is still here is
+# what the abort jumped out of (abandonMidCallSceneJs).
+var sceneJsStack: seq[InterpretedFrameScene] = @[]
+
+template onSceneJsStack(scene: InterpretedFrameScene, body: untyped) =
+  sceneJsStack.add(scene)
+  try:
+    body
+  finally:
+    if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:
+      discard sceneJsStack.pop()
 
 when defined(frameosEmbedded):
   # Scene-level interpreters, evicted under memory pressure — the same policy
@@ -61,10 +75,6 @@ when defined(frameosEmbedded):
   # re-parses each snippet — so this only fires when headroom is actually
   # short, and a roomy frame never evicts.
   var liveSceneJsScenes: seq[InterpretedFrameScene] = @[]
-  # Scenes with a JS frame on the stack right now. Freeing one of those
-  # contexts would pull it out from under a call in progress, which nested
-  # scenes make reachable: a parent's code node can render a child mid-call.
-  var sceneJsStack: seq[InterpretedFrameScene] = @[]
   const SceneJsEvictHeadroomBytes = 2 * 1024 * 1024
 initLock(sceneJsLock)
 
@@ -859,7 +869,8 @@ proc compileInlineFn(scene: InterpretedFrameScene,
   let envelope = buildEnvelopeFunctionWithMap(snippet, @[], fnName, filename)
   try:
     withLock sceneJsLock:
-      discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
+      scene.onSceneJsStack:
+        discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
       registerJsSourceMap(scene.js.context, envelope.sourceMap)
   except CatchableError as e:
     logCompileError(scene, nodeId, "inline", name, snippet, e, envelope.sourceMap)
@@ -901,7 +912,8 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
   let envelope = buildEnvelopeFunctionWithMap(codeSnippet, argNames, fnName, filename)
   try:
     withLock sceneJsLock:
-      discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
+      scene.onSceneJsStack:
+        discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
       registerJsSourceMap(scene.js.context, envelope.sourceMap)
   except CatchableError as e:
     logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e, envelope.sourceMap)
@@ -950,7 +962,7 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
   withLock sceneJsLock:
     currentEvalCtx = scene.js.context
     currentEvalEnv = e
-    when defined(frameosEmbedded): sceneJsStack.add(scene)
+    sceneJsStack.add(scene)
     try:
       envelopeJson = scene.js.eval(fnName & "()")
     except JSException as err:
@@ -962,9 +974,8 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
       # the render down.
       envelopeJson = $(%*{"k": "error", "v": {"message": err.msg, "stack": err.msg}})
     finally:
-      when defined(frameosEmbedded):
-        if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:
-          discard sceneJsStack.pop()
+      if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:
+        discard sceneJsStack.pop()
       if currentEvalCtx == scene.js.context:
         currentEvalCtx = nil
         currentEvalEnv = nil
@@ -1059,7 +1070,8 @@ proc evalSnippet*(
   let envelope = buildEnvelopeFunctionWithMap(code, argNames, fnName, filename)
   try:
     withLock sceneJsLock:
-      discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
+      scene.onSceneJsStack:
+        discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
       registerJsSourceMap(scene.js.context, envelope.sourceMap)
   except CatchableError as e:
     logCompileError(scene, nodeId, "eval", fnName, code, e, envelope.sourceMap)
@@ -1082,9 +1094,44 @@ proc jsQuoteForTest*(s: string): string =
 proc envelopeToValueForTest*(env: JsonNode, expectedType: string = ""): Value =
   envelopeToValue(env, expectedType)
 
+proc sceneJsLockFreeForTest*(): bool =
+  result = tryAcquire(sceneJsLock)
+  if result:
+    release(sceneJsLock)
+
 proc cleanupCompilerJs*() =
   discard
 
 proc cleanupSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:
     closeSceneJsLocked(scene)
+
+proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
+  ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): drop
+  ## the scene interpreters the abort jumped out of, as
+  ## app_runtime.abandonMidCallJsAppRuntimes does for JS apps, and let go of
+  ## sceneJsLock. Every eval holds that lock, so an abort inside one left it
+  ## taken for good and the next code node waited on it forever. The abort
+  ## jumped back into the call that took it, on this same task: tryAcquire
+  ## fails on a lock this task holds (it is not recursive) and takes a free
+  ## one, so either way it is held once here and released once.
+  discard tryAcquire(sceneJsLock)
+  release(sceneJsLock)
+  for scene in sceneJsStack:
+    if scene.isNil or not scene.jsReady:
+      continue
+    if scene.js.context != nil:
+      clearJsSourceMaps(scene.js.context)
+    result.bytes += scene.js.abandon()
+    inc result.count
+    scene.jsReady = false
+    scene.jsFuncNameByNode = initTable[NodeId, string]()
+    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    when defined(frameosEmbedded):
+      let live = liveSceneJsScenes.find(scene)
+      if live >= 0:
+        liveSceneJsScenes.delete(live)
+  sceneJsStack.setLen(0)
+  currentEvalCtx = nil
+  currentEvalEnv = nil

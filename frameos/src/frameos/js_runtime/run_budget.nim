@@ -60,6 +60,16 @@ proc armRenderDeadline*(budgetMs: int): bool =
 proc disarmRenderDeadline*() =
   renderDeadlineArmed = false
 
+proc resetRunBudgets*() =
+  ## After an out-of-memory abort (single_scene_host.recoverAbortedRun). The
+  ## abort is a longjmp, so the `finally` in interpreter.runEvent that disarms
+  ## these never ran, and an armed deadline is never re-armed: every later run
+  ## rode on the aborted run's clock and tripped as soon as it had passed.
+  disarmRenderDeadline()
+  dispatchBudgetTotal = 0
+  dispatchBudgetRemaining = 0
+  dispatchBudgetExhaustedLogged = false
+
 proc renderDeadlineArmedNow*(): bool = renderDeadlineArmed
 
 proc renderDeadlineBudgetMs*(): int =
