@@ -89,6 +89,11 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   runtime.images.clear()
   runtime.transientImageIds.setLen(0)
 
+var liveJsRuntimes: seq[JsAppRuntime] = @[]
+  ## Every interpreter built and not yet released, on every platform: the
+  ## single-scene host (an ESP32, the editor's preview) drops the idle ones
+  ## after each render, and an ESP32 also evicts them under memory pressure.
+
 when defined(frameosEmbedded):
   # Every JS app node builds its own QuickJS runtime, and each one costs about
   # 580 KB of PSRAM: ~151 KB for the runtime itself, the rest for the prelude
@@ -102,7 +107,6 @@ when defined(frameosEmbedded):
   # and rebuild the others on demand. Rebuilding re-runs the app's init(), so
   # this only happens when headroom is actually short: a Pi, the backend and a
   # roomy frame never evict and keep today's behaviour exactly.
-  var liveJsRuntimes: seq[JsAppRuntime] = @[]
   const JsEvictHeadroomBytes = 2 * 1024 * 1024
 
   proc evictIdleJsRuntimes(keep: JsAppRuntime) =
@@ -114,8 +118,13 @@ when defined(frameosEmbedded):
         teardownJsRuntime(other)
 
 proc releaseIdleJsAppRuntimes*() =
-  ## Drop every JS app interpreter that is not mid-call. Called when a render
-  ## finishes.
+  ## Drop every JS app interpreter that is not mid-call. The single-scene host
+  ## calls it after every render (single_scene_host.renderScene), on an ESP32
+  ## and in the editor's preview alike: there an app's module variables last
+  ## one render and its init() runs on every one, and what must last longer
+  ## goes through `frameos.remember`. The preview does it so that an app
+  ## leaning on module state shows it in the editor, not on the frame. A Pi
+  ## keeps its interpreters for the scene's life and never calls this.
   ##
   ## Eviction otherwise only ever runs from ensureReady — that is, when ANOTHER
   ## JS node is about to be built. Nothing on the image path triggers it, so a
@@ -126,10 +135,9 @@ proc releaseIdleJsAppRuntimes*() =
   ## Cheap to undo: rebuilding re-parses and re-evaluates the module, which
   ## is a few milliseconds even for the bundled 36 KB Weather app now that
   ## QuickJS parses the TypeScript itself.
-  when defined(frameosEmbedded):
-    for runtime in liveJsRuntimes:
-      if runtime.ready and not jsRuntimeStack.contains(runtime):
-        teardownJsRuntime(runtime)
+  for runtime in liveJsRuntimes:
+    if runtime.ready and not jsRuntimeStack.contains(runtime):
+      teardownJsRuntime(runtime)
 
 proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
   ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): drop
@@ -1374,8 +1382,8 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   ##
   ## Scene cleanup has to call this explicitly. Dropping the app object is not
   ## enough — JsAppRuntime owns raw QuickJS pointers and has no destructor —
-  ## and on embedded `liveJsRuntimes` holds a reference to every runtime it has
-  ## ever readied, so nothing about dropping the scene makes one collectable.
+  ## and `liveJsRuntimes` holds a reference to every runtime it has ever
+  ## readied, so nothing about dropping the scene makes one collectable.
   ## The cost is per NODE, not per scene: the bundled Weather scene builds four
   ## (~148 KB of PSRAM each, measured with -d:memProbe), so a frame cycling
   ## between two JS scenes used to shed a few hundred KB per switch and reboot
@@ -1385,14 +1393,13 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   let runtime = DynamicJsApp(app).runtime
   if runtime.isNil:
     return
-  when defined(frameosEmbedded):
-    # Never pull the rug from under a runtime that is mid-call; scene teardown
-    # runs between renders, so this is belt-and-braces.
-    if jsRuntimeStack.contains(runtime):
-      return
-    let live = liveJsRuntimes.find(runtime)
-    if live >= 0:
-      liveJsRuntimes.delete(live)
+  # Never pull the rug from under a runtime that is mid-call; scene teardown
+  # runs between renders, so this is belt-and-braces.
+  if jsRuntimeStack.contains(runtime):
+    return
+  let live = liveJsRuntimes.find(runtime)
+  if live >= 0:
+    liveJsRuntimes.delete(live)
   teardownJsRuntime(runtime)
 
 proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
@@ -1414,8 +1421,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   when defined(frameosEmbedded):
     # Reclaim the other nodes' interpreters before building this one.
     evictIdleJsRuntimes(runtime)
-    if not liveJsRuntimes.contains(runtime):
-      liveJsRuntimes.add(runtime)
+  if not liveJsRuntimes.contains(runtime):
+    liveJsRuntimes.add(runtime)
 
   when defined(memProbe): memProbe("    newQuickJS BEFORE")
   runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))

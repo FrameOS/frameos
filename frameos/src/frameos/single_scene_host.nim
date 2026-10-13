@@ -285,3 +285,9 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
     result = interpreter.render(host.scene, context)
   discard host.events.tick()
   discard host.events.drain()
+  # The scene is done with its JS apps until the next render. On an ESP32 that
+  # is minutes away, and the image packing and the next decode want the
+  # memory; the preview does the same so that an app keeping values in module
+  # variables, which do not survive this, misbehaves in the editor rather than
+  # only on the frame (releaseIdleJsAppRuntimes).
+  releaseIdleJsAppRuntimes()

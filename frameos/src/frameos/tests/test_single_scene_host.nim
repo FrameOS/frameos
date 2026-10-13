@@ -126,6 +126,30 @@ let abortScene = %*{
   }}}
 }
 scenes.add(abortScene)
+
+# Where a JS app's values live (docs/js-apps-and-code-nodes.md): module
+# variables last one render on this host, an ESP32 and the editor's preview
+# alike, init() runs on every render, and `frameos.remember` carries over.
+const valuesSceneId = "tests/single-scene-host/values"
+scenes.add(%*{
+  "id": valuesSceneId,
+  "name": "values",
+  "settings": {"execution": "interpreted", "refreshInterval": 300},
+  "fields": [],
+  "nodes": [
+    {"id": "render", "type": "event", "data": {"keyword": "render"}},
+    {"id": "counter", "type": "app", "data": {"keyword": "counter", "config": {}}}
+  ],
+  "edges": [
+    {"id": "v1", "source": "render", "sourceHandle": "next", "target": "counter", "targetHandle": "prev"}
+  ],
+  "apps": {"counter": {"name": "Counter", "category": "logic", "sources": {
+    "app.ts": "let renders = 0\nlet inits = 0\nexport function init() { inits++ }\n" &
+      "export function run() { renders++; const kept = (frameos.recall('kept') ?? 0) + 1; " &
+      "frameos.remember('kept', kept); frameos.log(`module ${renders} init ${inits} kept ${kept}`) }",
+    "config.json": $(%*{"name": "Counter", "category": "logic"})
+  }}}
+})
 replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))
 
 var abortIn = ""          # "http" or "code": where the next run jumps out
@@ -197,4 +221,17 @@ doAssert guarded(renderOnce) == 0
 doAssert count("fetched 200") == 1, $logLines
 doAssert count("deadline") == 0, $logLines
 jsHttpRequestHook = nil
+
+let valuesHost = SingleSceneHost(frameConfig: config, logger: abortLogger)
+valuesHost.requestSelect = proc (sceneId: string): bool = true
+valuesHost.start()
+valuesHost.makeCurrent(valuesSceneId.SceneId)
+logLines.setLen(0)
+for _ in 1..3:
+  discard valuesHost.ensureScene()
+  discard valuesHost.renderScene(ExecutionContext(scene: valuesHost.scene, event: "render",
+    payload: %*{}, loopIndex: 0, loopKey: "."))
+for kept in 1..3:
+  doAssert count("module 1 init 1 kept " & $kept) == 1,
+    "a fresh module and init() per render, remember carries over: " & $logLines
 echo "ok"

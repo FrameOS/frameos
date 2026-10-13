@@ -173,17 +173,35 @@ Keep apps small: a scene carries a copy of every app it uses (its
 in 512 KiB, and the active scene's sources are parsed on every render. No
 comment blocks, no helpers used once, short config hints.
 
-### Keeping values between renders
+### Where an app keeps its values
 
-Module-level variables last only as long as the app's interpreter, and an
-ESP32 tears every idle interpreter down after each render (to give the next
-decode the memory). A value the app needs on the next render goes through
-`frameos.remember(key, value)` and comes back from `frameos.recall(key)`.
-The Google Photos app keeps its album's photo list and its position that
-way. Values are JSON, kept per node until the scene is unloaded (not across
-a restart), at most 512 KB per node on an ESP32. `remember` answers `false`
-when a value would not fit, and `null` forgets the key. FrameOS 2026.10.13
-and later.
+Three places, the same rule on every device:
+
+| the value | goes in | lasts |
+|---|---|---|
+| what the rest of the scene should see: a position a button changes, the photo's metadata | `frameos.setState(key, value)`, read back as `app.state[key]` | the scene's state: every node reads it, state nodes see changes, declared fields can persist and show in the frame's controls |
+| the app's own, needed on the next render: a fetched photo list, a position | `frameos.remember(key, value)`, read back with `frameos.recall(key)` | until the scene unloads (not across a restart); private to the node |
+| scratch for this render: lookup tables built when the module loads, intermediate results | module-level variables | one render |
+
+Module-level variables last as long as the app's interpreter, and an ESP32
+drops every idle interpreter after each render to give the next decode the
+memory, so the next render starts with a fresh module and runs `init()`
+again. The editor's preview does the same, so an app that keeps a counter in
+a module variable shows its first photo forever in the editor too, not only
+on the frame. A Pi keeps its interpreters for the scene's life, to stay fast,
+but an app must not count on that.
+
+`remember` values are JSON, at most 512 KB per node on an ESP32. `remember`
+answers `false` when a value would not fit, and `null` forgets the key. The
+Google Photos app keeps its album's photo list and its position this way.
+Scene state is shared by the whole scene, so a private value kept there
+collides with a second copy of the app and sits where everything else reads
+it. FrameOS 2026.10.13 and later.
+
+An animation works out each frame from the clock (`Date.now()`) rather than
+adding to a position kept between frames: the store's DVD bounce scene
+computes where the logo is from the time, so a fresh module draws the same
+picture.
 
 ### Big pages
 
@@ -229,7 +247,10 @@ imports them with relative paths:
 |---|---|---|
 | `data` / `logic` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` for an image) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
 
-`export function init(app)` is optional and runs once. Do **not** give a
+`export function init(app)` is optional and runs each time the app's
+interpreter starts: once per scene on a Pi, before every render on an ESP32
+and in the preview (see [Where an app keeps its values](#where-an-app-keeps-its-values)).
+Do **not** give a
 scene-local app `category: "render"`: as of Aug 2026 such an app placed in the
 prev/next chain draws nothing and logs nothing. The pattern that works is a
 **data app whose `get()` returns `frameos.svg(...)`**, wired into a
@@ -369,10 +390,12 @@ render allocates — not terse code:
   round coordinates to one decimal, thin polylines to what the pixel grid can
   show, scale a shape with one `<g transform="translate(x y) scale(s)">`
   instead of recomputing its points, and stay in the hundreds of elements.
-- **Scenes that re-render every second or faster** set their state up once in
-  `init()` and update it in place: flat arrays of numbers and fixed-size
+- **Scenes that re-render every second or faster** set their buffers up in
+  `init()` and update them in place: flat arrays of numbers and fixed-size
   pools, no new objects, closures or big strings per frame, no fetch or
-  `JSON.parse` in the render path, and a hard cap on particle counts.
+  `JSON.parse` in the render path, and a hard cap on particle counts. Those
+  buffers are scratch (an ESP32 and the preview build them again every
+  render), so positions come from the clock, not from the previous frame.
 
 ## Checklist before shipping a scene
 
@@ -386,3 +409,4 @@ render allocates — not terse code:
 - Scene-local JS apps are data apps exporting `get`, wired into `render/image`.
 - SVG uses only the supported tags; gradients are top-level `linearGradient` with `userSpaceOnUse`.
 - Nothing big is embedded as an object literal or kept alive between renders (see "Write for the smallest frame").
+- A JS app keeps what must outlast a render with `frameos.remember` (private) or `frameos.setState` (shared), never in a module variable.
